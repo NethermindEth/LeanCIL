@@ -2,6 +2,7 @@ import CIL.Safety.LoopFrameFields
 import CIL.Safety.LoopCallerFacts
 import CIL.Safety.LoopContract
 import CIL.Safety.ObjectFields
+import CIL.TermAccess
 
 /-!
 # Loop tactics that carry frame facts
@@ -49,26 +50,31 @@ def loopFrameFacts (footprint : Expr) : TacticM (Array (Expr × Expr)) := withMa
 def loopFrameHome? (footprint memory home : Expr) :
     TacticM (Option (Expr × Expr × Nat)) := withMainContext do
   for (proof, type) in ← loopFrameFacts footprint do
-    unless ← withNewMCtxDepth (isDefEq type.getAppArgs[2]! memory) do continue
-    for (index, slot) in ← listEntries type.getAppArgs[4]! do
+    let #[_, _, current, _, slots, _] := type.getAppArgs | continue
+    unless ← withNewMCtxDepth (isDefEq current memory) do continue
+    for (index, slot) in ← listEntries slots do
       let slot ← whnf slot
       unless slot.isAppOfArity ``LocalSlot.bytes 2 do continue
-      if ← withNewMCtxDepth (isDefEq slot.appArg! home) then return some (proof, type, index)
+      let some slotHome := lastArgument? slot | continue
+      if ← withNewMCtxDepth (isDefEq slotHome home) then return some (proof, type, index)
   return none
 
 /-- The remembered value of slot `index` in a `LoopFrame` type over `knownLocals`. -/
 def loopFrameEntry? (type : Expr) (index : Nat) : MetaM (Option Expr) := do
-  let remembered := type.getAppArgs[5]!.consumeMData
+  let some remembered := argument? type 5 | return none
+  let remembered := remembered.consumeMData
   unless remembered.isAppOfArity ``knownLocals 1 do return none
-  return (← listEntries remembered.appArg!)[index]?.map (·.2)
+  let some entries := lastArgument? remembered | return none
+  return (← listEntries entries)[index]?.map (·.2)
 
 /-- The address a stack value refers to, `.reference (.address home)`. -/
 def loopAddressOf? (value : Expr) : MetaM (Option Expr) := do
   let value ← whnf value
   unless value.isAppOfArity ``Value.reference 1 do return none
-  let reference ← whnf value.appArg!
+  let some referenced := lastArgument? value | return none
+  let reference ← whnf referenced
   unless reference.isAppOfArity ``ManagedReference.address 1 do return none
-  return some reference.appArg!
+  return lastArgument? reference
 
 /-- The layout's `AggregateLayout.zeros` as literal values, one per field, in the form a proof
     writes them, such as `.i32 0`; none when a field's kind does not reduce to a value. -/
@@ -142,7 +148,8 @@ def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (O
       let some head := type.getAppFn.constName? | continue
       let some carried := loopCarriedHeads.find? fun carried =>
         carried.head == head && carried.arity == type.getAppNumArgs | continue
-      unless ← withNewMCtxDepth (isDefEq (type.getArg! carried.memory) memory) do continue
+      let some carriedMemory := argument? type carried.memory | continue
+      unless ← withNewMCtxDepth (isDefEq carriedMemory memory) do continue
       found := found.push (carried, declaration.userName)
     return found
   for (head, name) in carried do
@@ -195,8 +202,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   saved.restore
   let some { op, found, instruction, .. } := fetched | return false
   let op ← whnfR op
-  let memory := parts[3]!
-  let stack ← listEntries parts[2]!
+  let #[_, _, stackList, memory] := parts | return false
+  let stack ← listEntries stackList
   let after ← loopFreshName `stored
   let stepped ← loopFreshName `storing
   let framed ← loopFreshName `storedFrame
@@ -204,7 +211,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   -- A local store is a `storeLocal` fact the next step reads; a struct store is a whole step.
   let mut takesStep := true
   let store ← if op.isAppOfArity ``CIL.Op.setFieldAt 2 then do
-      let some offset ← literalNat? op.appFn!.appArg! | return false
+      let some offsetTerm := argument? op 0 | return false
+      let some offset ← literalNat? offsetTerm | return false
       let some (_, top) := stack[0]? | return false
       let some (_, address) := stack[1]? | return false
       let top ← whnf top
@@ -216,11 +224,13 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
       let some field ← loopFieldAt? layout offset | return false
       let valid ← layoutValidity layout
       let frame ← Term.exprToSyntax proof
-      let value ← Term.exprToSyntax top.appArg!
+      let some payload := lastArgument? top | return false
+      let value ← Term.exprToSyntax payload
       `(tactic| obtain ⟨$after, $stepped, $framed, $below⟩ := CIL.Safety.LoopFrame.store_field
         $frame $(quote index) $valid $(quote field) $value)
     else if op.isAppOfArity ``CIL.Op.initAggregate 1 then do
-      let some width ← literalNat? op.appArg! | return false
+      let some widthTerm := lastArgument? op | return false
+      let some width ← literalNat? widthTerm | return false
       let some (_, top) := stack[0]? | return false
       let some home ← loopAddressOf? top | return false
       let some (proof, _, index) ← loopFrameHome? footprint memory home | return false
@@ -235,20 +245,23 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
         $frame $(quote index) $layoutTerm [$zeros,*] (valid := $valid))
     else if op.isAppOfArity ``CIL.Op.setLocal 2 then do
       -- A narrowing store changes the value, which `LoopFrame.store` does not model.
-      unless (← whnf op.appArg!).isAppOf ``Option.none do return false
-      let some index ← literalNat? op.appFn!.appArg! | return false
+      let #[slotIndex, narrowing] := op.getAppArgs | return false
+      unless (← whnf narrowing).isAppOf ``Option.none do return false
+      let some index ← literalNat? slotIndex | return false
       let some (_, top) := stack[0]? | return false
       let top ← whnf top
       unless top.isAppOfArity ``Value.scalar 1 do return false
       let frames ← loopFrameFacts footprint
       let some (proof, _) ← frames.findM? fun (_, type) => do
-          unless ← withNewMCtxDepth (isDefEq type.getAppArgs[2]! memory) do return false
-          let some slot := (← listEntries type.getAppArgs[4]!)[index]? | return false
+          let #[_, _, current, _, slots, _] := type.getAppArgs | return false
+          unless ← withNewMCtxDepth (isDefEq current memory) do return false
+          let some slot := (← listEntries slots)[index]? | return false
           return (← whnf slot.2).isAppOfArity ``LocalSlot.bytes 2
         | return false
       takesStep := false
       let frame ← Term.exprToSyntax proof
-      let value ← Term.exprToSyntax top.appArg!
+      let some payload := lastArgument? top | return false
+      let value ← Term.exprToSyntax payload
       `(tactic| obtain ⟨$after, $stepped, $framed, $below⟩ := CIL.Safety.LoopFrame.store
         $frame $(quote index) $value rfl)
     else return false
@@ -279,9 +292,9 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
 
 /-- The layouts each `AggregateLayout.encode` in `expression` names. -/
 partial def encodedLayouts (expression : Expr) (found : Array Expr := #[]) : Array Expr :=
-  let found := if expression.isAppOfArity ``AggregateLayout.encode 2 &&
-      !found.contains expression.appFn!.appArg! then found.push expression.appFn!.appArg!
-    else found
+  let found := match argumentsOf? expression ``AggregateLayout.encode 2 with
+    | some #[layout, _] => if found.contains layout then found else found.push layout
+    | _ => found
   match expression with
   | .app function argument => encodedLayouts argument (encodedLayouts function found)
   | .lam _ domain body _ | .forallE _ domain body _ =>
@@ -304,8 +317,9 @@ def loopFrameAt? (memory : Expr) : TacticM (Option (Expr × Expr)) := withMainCo
   let footprint ← mkFreshExprMVar (some (← mkAppM ``List
     #[← mkAppM ``Prod #[mkConst ``Reference, mkConst ``Nat]]))
   let frames ← loopFrameFacts footprint
-  let found ← frames.findM? fun (_, type) =>
-    withNewMCtxDepth (isDefEq type.getAppArgs[2]! memory)
+  let found ← frames.findM? fun (_, type) => do
+    let some current := argument? type 2 | return false
+    withNewMCtxDepth (isDefEq current memory)
   found.mapM fun (proof, type) => return (← instantiateMVars proof, ← instantiateMVars type)
 
 /-- The entry's `setup` equation for frames entered from `caller`, in scope by any name or as a
@@ -317,7 +331,8 @@ def loopEntrySetup? (caller : Expr) : TacticM (Option Expr) := withMainContext d
     let fields ← entryEvidenceFields declaration.toExpr type
     for (proof, stated) in #[(declaration.toExpr, type)] ++ fields.map (·.2) do
       let some (_, entry, _) := stated.eq? | continue
-      if entry.isAppOfArity ``enterFrame 3 && entry.appArg! == caller then return some proof
+      if entry.isAppOfArity ``enterFrame 3 && lastArgument? entry == some caller then
+        return some proof
   return none
 
 /-- The conjuncts of `goal`, a conjunction split as its `And`s nest, in order. -/
@@ -385,15 +400,16 @@ def loopFinishReturn (fetched : LoopFetched) (reading : Array Term) : TacticM Un
     return
   catch _ => saved.restore
   evalTactic (← `(tactic| try dsimp only))
-  let memory := parts[3]!
+  let memory ← entryAt "cil_loop_finish" parts 3
   let mut extra : Array Term := #[]
   if let some (frame, frameType) ← loopFrameAt? memory then
-    if let some setup ← loopEntrySetup? frameType.getAppArgs[1]! then
+    if let some setup ← (argument? frameType 1).bindM loopEntrySetup? then
       let exitConfined ← loopFreshName `exitConfined
       let exitBelow ← loopFreshName `exitBelow
       let frameTerm ← Term.exprToSyntax frame
       let setupTerm ← Term.exprToSyntax setup
-      let exited ← Term.exprToSyntax parts[1]!
+      let exitedState ← entryAt "cil_loop_finish" parts 1
+      let exited ← Term.exprToSyntax exitedState
       let left ← saveState
       try
         Term.withoutErrToSorry <| withoutRecover <| evalTactic (← `(tactic|
@@ -427,7 +443,8 @@ partial def loopWalk (tactic : String) (mode : LoopStepping) (explicit : Array T
   let position ← withMainContext do
     let some (source, _) ← loopGoalStates (← getMainTarget) | return none
     let some parts ← loopStateParts? source | return none
-    literalNat? parts[0]!
+    let some pc := parts[0]? | return none
+    literalNat? pc
   -- A goal the walk hands back is not a loop path, or shows its pc as a literal.
   let some _ := position | return
   loopLiteralGoal
@@ -547,8 +564,9 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term)
       catch _ => pure [side]
     unless open_.isEmpty do
       let goal ← instantiateMVars (← side.getType)
+      let condition ← entryAt "cil_loop_call" names index
       throwError "cil_loop_call: the frame after the call needs each callee footprint entry \
-        {names[index]!}, which the facts do not prove:{indentExpr goal}\nState the arithmetic \
+        {condition}, which the facts do not prove:{indentExpr goal}\nState the arithmetic \
         it needs, or a `form` fact of the caller's memory for its reference, in the context or \
         the fact list."
   setGoals [continued]
@@ -569,7 +587,8 @@ syntax "cil_loop_call" (&" keeping")? term:max term:max (" at " ident)? (" [" te
     precondition (`preconditionTag`). -/
 def loopHeldContract (holds : Term) : TacticM (Expr × Name) := withMainContext do
   let type ← whnfR (← inferType (← Term.elabTerm holds none))
-  let contract := if type.isAppOf ``MethodContract.Holds then type.getAppArgs[2]! else type
+  let contract ← if type.isAppOf ``MethodContract.Holds then argumentAt "cil_loop_call" type 2
+    else pure type
   return (contract, preconditionTag type)
 
 /-- Fail for a call `cil_loop_call` could not cross at `position`: naming the missing fact when
@@ -628,7 +647,7 @@ elab_rules : tactic
       | none => `(by cil_lookup [$[$facts:term],*])
     let some (source, _) ← withMainContext do loopGoalStates (← getMainTarget)
       | throwError "cil_loop_call: expected a `LoopTerminates` goal{← obligationNote}"
-    let some parts ← withMainContext do loopStateParts? source
+    let some #[pc, _, stack, memory] ← withMainContext do loopStateParts? source
       | throwError "cil_loop_call: the source state does not reduce to a literal state"
     let saved ← saveState
     try
@@ -638,13 +657,13 @@ elab_rules : tactic
           (by cil_checked_step_normalized [$[$prepared:term],*]) (by rfl) ?_ ?_))
     catch error =>
       saved.restore
-      let some position ← withMainContext do literalNat? parts[0]! | throw error
-      loopCallFailure holds input groups.all position parts[2]!
+      let some position ← withMainContext do literalNat? pc | throw error
+      loopCallFailure holds input groups.all position stack
     let (contract, precondition) ← loopHeldContract holds
     let [permitted, continuation] ← getGoals
       | throwError "cil_loop_call: expected the precondition and the continuation"
     setGoals [continuation]
-    loopCallContinue contract parts[3]! explicit keeping.isSome
+    loopCallContinue contract memory explicit keeping.isSome
     let remaining ← getGoals
     let unfold : Array Ident := match contract.getAppFn.constName? with
       | some name => #[mkIdent (`_root_ ++ name)]
@@ -667,16 +686,16 @@ def loopCloseHeadFrame (goal : MVarId) : TacticM Bool := goal.withContext do
       goal.assign proof
       return true
     attempt.restore
-  let wantedSlots := (← listEntries wanted.consumeMData.getAppArgs[4]!).map (·.2)
+  let some wantedList := argument? wanted.consumeMData 4 | return false
+  let wantedSlots := (← listEntries wantedList).map (·.2)
   if wantedSlots.isEmpty then return false
   for (proof, type) in frames do
-    let haveSlots := (← listEntries type.getAppArgs[4]!).map (·.2)
+    let some haveList := argument? type 4 | continue
+    let haveSlots := (← listEntries haveList).map (·.2)
     unless haveSlots.size == wantedSlots.size do continue
     let mut term ← Term.exprToSyntax proof
     let mut usable := true
-    for index in [:wantedSlots.size] do
-      let slot := wantedSlots[index]!
-      let other := haveSlots[index]!
+    for ((slot, other), index) in (wantedSlots.zip haveSlots).zipIdx do
       if ← withNewMCtxDepth (isDefEq slot other) then continue
       if (← whnf slot).isAppOf ``LocalSlot.bytes || (← whnf other).isAppOf ``LocalSlot.bytes then
         usable := false
@@ -713,12 +732,13 @@ elab_rules : tactic
         | throwError "cil_loop_recurse: {hypothesis} does not conclude `LoopTerminates`"
       let some parts ← loopStateParts? state
         | throwError "cil_loop_recurse: the head state of {hypothesis} is not a literal state"
-      let some target ← literalNat? parts[0]!
+      let headPc ← entryAt "cil_loop_recurse" parts 0
+      let some target ← literalNat? headPc
         | throwError "cil_loop_recurse: the head pc of {hypothesis} is not a literal"
       let some head := premises[0]? | throwError "cil_loop_recurse: {hypothesis} takes no state"
       let stateType ← whnf (← inferType head)
       let footprint ← if stateType.isAppOfArity ``FrameState 6 then
-          pure stateType.getAppArgs[0]!
+          argumentAt "cil_loop_recurse" stateType 0
         else mkAppOptM ``List.nil #[← mkAppM ``Prod #[mkConst ``Reference, mkConst ``Nat]]
       let layouts := encodedLayouts (← instantiateMVars (← whnfR stateType)) ++
         encodedLayouts type
@@ -735,7 +755,7 @@ elab_rules : tactic
         | throwError "cil_loop_recurse: expected a `LoopTerminates` goal{← obligationNote}"
       let some parts ← loopStateParts? source
         | throwError "cil_loop_recurse: the reached state is not a literal state"
-      return (reached, parts[3]!)
+      return (reached, ← entryAt "cil_loop_recurse" parts 3)
     -- The reached state names memories the walk introduced, so it is printed in the goal's context.
     let mismatch (error : Exception) : TacticM Unit := withMainContext do
       throwError "cil_loop_recurse: the reached state is not the head of {hypothesis} at \
@@ -757,6 +777,7 @@ elab_rules : tactic
         {indentExpr (loopLiteralSums wanted)}"
     setGoals (goals.filter (· != frameGoal))
     for goal in goals do
-      if let some index := holeNames.idxOf? (← goal.getTag) then goal.setTag tags[index]!
+      if let some tag := (holeNames.idxOf? (← goal.getTag)).bind fun index => tags[index]? then
+        goal.setTag tag
 
 end CIL.Safety

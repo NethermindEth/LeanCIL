@@ -1,6 +1,7 @@
 import CIL.Safety.LocalSnapshots
 import CIL.Safety.LoopFrameSteps
 import CIL.Safety.CallingTransport
+import CIL.TermAccess
 
 /-!
 # Checked stepping with remembered locals
@@ -100,6 +101,9 @@ open Lean Elab Tactic Meta
 
 initialize Lean.registerTraceClass `CIL.snapshots
 
+/-- The reader the snapshot forms name when a term does not have the shape they read. -/
+private def snapshotReader : String := "snapshot stepping (cil_checked_steps, cil_contract_steps)"
+
 /-- Close an existing snapshot obligation using checked facts and concrete local encodings. -/
 private def solveSnapshotPremise (goal : MVarId) (facts : Array Term) : TacticM Unit := do
   let remaining ← Tactic.run goal <| evalTactic (← `(tactic| cil_strict
@@ -169,7 +173,8 @@ private def preserveSnapshotFacts (written below : Term) : TacticM Unit := withM
         else if type.isAppOfArity ``MemoryBelow 3 then
           mkAppM ``MemoryBelow.trans #[declaration.toExpr, belowProof]
         else if type.isAppOfArity ``AccessBelow 3 then do
-          let next ← mkAppM ``write_preserves_access_below #[writeProof, type.getArg! 0]
+          let watermark ← argumentAt snapshotReader type 0
+          let next ← mkAppM ``write_preserves_access_below #[writeProof, watermark]
           mkAppM ``AccessBelow.trans #[declaration.toExpr, next]
         else continue
       discard <| assertSnapshotFact declaration.userName proof
@@ -185,7 +190,8 @@ private def snapshotCarried? (memory : Expr) (below : Ident) (fact : Term) (type
   let some (_, operation, _) := type.consumeMData.eq? | return none
   let reads := operation.isAppOfArity ``read 4
   unless reads || operation.isAppOfArity ``form 2 do return none
-  unless ← withNewMCtxDepth (isDefEq operation.getAppArgs[0]! memory) do return none
+  let some stated := argument? operation 0 | return none
+  unless ← withNewMCtxDepth (isDefEq stated memory) do return none
   if reads then
     return some (← `((MemoryBelow.read $below _ (by cil_caller_allocation) _ _).trans $fact))
   return some (← `((MemoryBelow.form $below _ (by cil_caller_allocation)).trans $fact))
@@ -221,9 +227,9 @@ private def snapshotLeadingSlots (locals slots : Expr) :
     for _ in [:64] do
       if ← withNewMCtxDepth (isDefEq rest slots) then return some skipped
       let exposed ← whnf rest
-      unless exposed.isAppOfArity ``List.cons 3 do return none
-      skipped := skipped.push exposed.getAppArgs[1]!
-      rest := exposed.getAppArgs[2]!
+      let some #[_, slot, following] := argumentsOf? exposed ``List.cons 3 | return none
+      skipped := skipped.push slot
+      rest := following
     return none
   if let some skipped ← leading locals then return (skipped, none)
   for declaration in ← getLCtx do
@@ -240,9 +246,9 @@ private def snapshotRetainedAccess (entered current : Expr) : TacticM Term := wi
   let linked (head : Name) : MetaM (Option Expr) := do
     for declaration in declarations.reverse do
       let type := (← instantiateMVars declaration.type).consumeMData
-      unless type.isAppOfArity head 3 do continue
-      unless ← withNewMCtxDepth (isDefEq type.getAppArgs[1]! entered) do continue
-      unless ← withNewMCtxDepth (isDefEq type.getAppArgs[2]! current) do continue
+      let some #[_, source, target] := argumentsOf? type head 3 | continue
+      unless ← withNewMCtxDepth (isDefEq source entered) do continue
+      unless ← withNewMCtxDepth (isDefEq target current) do continue
       return some declaration.toExpr
     return none
   if let some retained ← linked ``AccessBelow then return ← Term.exprToSyntax retained
@@ -284,9 +290,11 @@ private def prepareSnapshotHome (memory frame index : Expr) (facts : Array Term)
           mkAppM ``NumericHomes.complete #[declaration.toExpr]
         else if type.isAppOfArity ``CompleteWritableHomes 4 then pure declaration.toExpr
         else continue
-      let type ← inferType proof
-      let entered := type.getAppArgs[0]!
-      let slots := type.getAppArgs[3]!
+      -- An untyped `have` declares its fact at an assigned metavariable, which has no arguments.
+      let type := (← instantiateMVars (← inferType proof)).consumeMData
+      let some #[entered, _, _, slots] := argumentsOf? type ``CompleteWritableHomes 4
+        | throwError "{snapshotReader}: expected complete writable homes, but found\
+            {indentExpr type}"
       let home := mkIdent (← mkFreshUserName `snapshotHome)
       let slot := mkIdent (← mkFreshUserName `snapshotSlot)
       let bound := mkIdent (← mkFreshUserName `snapshotBound)
@@ -338,7 +346,9 @@ private def prepareSnapshotHome (memory frame index : Expr) (facts : Array Term)
       let kind ← withMainContext do
         let found ← instantiateMVars (← inferType (← Term.elabTerm raw none))
         let some (_, _, selected) := found.eq? | throwError "Unexpected home lookup"
-        Term.exprToSyntax (← whnf selected.appArg!.getAppArgs[0]!)
+        let some kind := (lastArgument? selected).bind (argument? · 0)
+          | throwError "{snapshotReader}: expected a byte slot, but found{indentExpr selected}"
+        Term.exprToSyntax (← whnf kind)
       evalTactic (← `(tactic| cil_strict have $slot :
           ($localsTerm)[$outer]? = some (LocalSlot.bytes $kind $home) := by
             $(← restate raw):tactic))
@@ -393,31 +403,32 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
     TacticM SnapshotStored := withMainContext do
   let some runTerm := (← getMainTarget).find? (·.isAppOf ``run)
     | throwError "Expected a checked run equality"
-  let arguments := runTerm.getAppArgs
-  unless runTerm.isAppOf ``run && arguments.size == 8 do
-    throwError "Expected a checked run"
+  let some #[_, _, _, runPc, runArgs, runFrame, runStack, memory] := argumentsOf? runTerm ``run 8
+    | throwError "Expected a checked run"
   let methodProof ← Term.elabTerm methodFound none
   let some (_, _, found) := (← instantiateMVars (← inferType methodProof)).eq?
     | throwError "Expected a method lookup"
-  let body ← Term.exprToSyntax found.appArg!
-  let pc ← Term.exprToSyntax arguments[3]!
-  let args ← Term.exprToSyntax arguments[4]!
-  let frame ← Term.exprToSyntax arguments[5]!
-  let stack ← whnf arguments[6]!
-  unless stack.isAppOfArity ``List.cons 3 do throwError "The local store has no operand"
-  let value ← whnf stack.getAppArgs[1]!
-  unless value.isAppOfArity ``Value.scalar 1 do throwError "The local store is not numeric"
-  let value ← Term.exprToSyntax value.appArg!
-  let rest ← Term.exprToSyntax stack.appArg!
+  let body ← Term.exprToSyntax (← lastArgument snapshotReader found)
+  let pc ← Term.exprToSyntax runPc
+  let args ← Term.exprToSyntax runArgs
+  let frame ← Term.exprToSyntax runFrame
+  let stack ← whnf runStack
+  let some #[_, operand, remaining] := argumentsOf? stack ``List.cons 3
+    | throwError "The local store has no operand"
+  let value ← whnf operand
+  let some #[scalar] := argumentsOf? value ``Value.scalar 1
+    | throwError "The local store is not numeric"
+  let value ← Term.exprToSyntax scalar
+  let rest ← Term.exprToSyntax remaining
   let instructionProof ← Term.elabTerm instructionFound none
   let some (_, _, instruction) := (← instantiateMVars (← inferType instructionProof)).eq?
     | throwError "Expected an instruction lookup"
-  let some operation ← cilReducedOp? instruction.appArg!
+  let some operation ← cilReducedOp? (← lastArgument snapshotReader instruction)
     | throwError "The local store instruction is not concrete"
-  let memory := arguments[7]!
+  let storedIndex ← argumentAt snapshotReader operation 0
   let known ← if supplied then
       let operationTerm ← Term.exprToSyntax operation
-      let stackTerm ← Term.exprToSyntax arguments[6]!
+      let stackTerm ← Term.exprToSyntax runStack
       let memoryTerm ← Term.exprToSyntax memory
       let known ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm (← `(term|
         (by cil_strict cil_checked_step_normalized [$facts,*] :
@@ -427,8 +438,8 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
       if known.hasMVar then throwError "The supplied store does not determine its result"
       pure (some (← Term.exprToSyntax known))
     else pure none
-  if automatic then prepareSnapshotHome memory arguments[5]! operation.getAppArgs[0]! facts
-  let index ← Term.exprToSyntax operation.getAppArgs[0]!
+  if automatic then prepareSnapshotHome memory runFrame storedIndex facts
+  let index ← Term.exprToSyntax storedIndex
   let evidence ← match known with
     | some known => `(term| LocalSnapshots.store_at
         (body := $body) (pc := $pc) (args := $args) (frame := $frame)
@@ -453,19 +464,14 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
   if proof.hasMVar then throwError "The local store has unresolved snapshot premises"
   let proofTerm ← Term.exprToSyntax proof
   let names ← snapshotStoreNames
-  let after := names[0]!
-  let updated := names[2]!
-  let formed := names[3]!
-  let below := names[4]!
-  let retained := names[5]!
-  let written := names[6]!
+  let #[after, taken, updated, formed, below, retained, written] := names
+    | throwError "{snapshotReader}: expected seven store names, but there are {names.size}"
   let stepped ← match known with
     | some known =>
       evalTactic (← `(tactic| obtain
         ⟨$updated, $formed, $below, $retained, $written⟩ := $proofTerm))
       pure known
     | none =>
-      let taken := names[1]!
       evalTactic (← `(tactic| obtain
         ⟨$after, $taken, $updated, $formed, $below, $retained, $written⟩ := $proofTerm))
       pure (taken : Term)
@@ -489,25 +495,27 @@ private def snapshotLoad (snapshot methodFound instructionFound : Term)
     (facts : Array Term) : TacticM Term := withMainContext do
   let some runTerm := (← getMainTarget).find? (·.isAppOf ``run)
     | throwError "Expected a checked run"
-  let arguments := runTerm.getAppArgs
+  let some #[_, _, _, runPc, runArgs, runFrame, runStack, _] := argumentsOf? runTerm ``run 8
+    | throwError "Expected a checked run"
   let methodProof ← Term.elabTerm methodFound none
   let some (_, _, found) := (← instantiateMVars (← inferType methodProof)).eq?
     | throwError "Expected a method lookup"
-  let body ← Term.exprToSyntax found.appArg!
-  let pc ← Term.exprToSyntax arguments[3]!
-  let args ← Term.exprToSyntax arguments[4]!
-  let frame ← Term.exprToSyntax arguments[5]!
-  let stack ← Term.exprToSyntax arguments[6]!
+  let body ← Term.exprToSyntax (← lastArgument snapshotReader found)
+  let pc ← Term.exprToSyntax runPc
+  let args ← Term.exprToSyntax runArgs
+  let frame ← Term.exprToSyntax runFrame
+  let stack ← Term.exprToSyntax runStack
   let instructionProof ← Term.elabTerm instructionFound none
   let some (_, _, instruction) := (← instantiateMVars (← inferType instructionProof)).eq?
     | throwError "Expected an instruction lookup"
-  let some operation ← cilReducedOp? instruction.appArg!
+  let some operation ← cilReducedOp? (← lastArgument snapshotReader instruction)
     | throwError "The local load instruction is not concrete"
+  let loadedIndex ← argumentAt snapshotReader operation 0
   let snapshotProof ← Term.withoutErrToSorry <| Term.elabTerm snapshot none
   let snapshotType ← instantiateMVars (← inferType snapshotProof)
-  unless snapshotType.isAppOfArity ``LocalSnapshots 3 do
-    throwError "Expected local snapshots at the current memory"
-  let selected := mkApp snapshotType.getAppArgs[2]! operation.getAppArgs[0]!
+  let some #[_, _, known] := argumentsOf? snapshotType ``LocalSnapshots 3
+    | throwError "Expected local snapshots at the current memory"
+  let selected := mkApp known loadedIndex
   if (← whnfD selected).isAppOf ``Option.none then
     throwError "The snapshots do not establish a value at this local index"
   let { ctx, simprocs, .. } ← mkSimpContext (← `(tactic| simp only
@@ -519,11 +527,11 @@ private def snapshotLoad (snapshot methodFound instructionFound : Term)
       $[$facts:term],*])) (eraseLocal := false)
   let (remembered, _) ← simp selected ctx simprocs
   let result ← whnfD remembered.expr
-  unless result.isAppOfArity ``Option.some 2 do
-    throwError "The snapshots do not establish a value at this local index"
-  let value ← Term.exprToSyntax result.appArg!
+  let some #[_, loaded] := argumentsOf? result ``Option.some 2
+    | throwError "The snapshots do not establish a value at this local index"
+  let value ← Term.exprToSyntax loaded
   let checked ← Term.exprToSyntax (← remembered.getProof)
-  let index ← Term.exprToSyntax operation.getAppArgs[0]!
+  let index ← Term.exprToSyntax loadedIndex
   `(term| LocalSnapshots.load (body := $body) (pc := $pc) (args := $args) (frame := $frame)
       (stack := $stack) (index := $index) $snapshot $value $checked)
 
@@ -532,7 +540,7 @@ private def snapshotRunMemory : TacticM (Option Expr) := do
   if (← getGoals).isEmpty then return none
   withMainContext do
     let target ← instantiateMVars (← getMainTarget)
-    return (target.find? (·.isAppOfArity ``run 8)).map (·.getAppArgs[7]!)
+    return (target.find? (·.isAppOfArity ``run 8)).bind (argument? · 7)
 
 /-- State the program counter of the goal's run as a numeral when it is closed arithmetic,
     such as the `22 + 1` a snapshot load leaves, so the next lookup meets a numeral. -/
@@ -542,7 +550,7 @@ private def foldRunPc : TacticM Unit := do
     let goal ← getMainGoal
     let target ← instantiateMVars (← goal.getType)
     let some execution := target.find? (·.isAppOfArity ``run 8) | return
-    let counter := execution.getAppArgs[3]!
+    let some counter := argument? execution 3 | return
     if counter.hasLooseBVars || (← getNatValue? counter).isSome then return
     let some value ← (Lean.Meta.evalNat counter).run | return
     let folded := mkAppN execution.getAppFn (execution.getAppArgs.set! 3 (mkNatLit value))

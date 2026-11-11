@@ -11,6 +11,7 @@ import CIL.Safety.WordFootprint
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.FrameInvariants
 import CIL.Safety.WeakestPrecondition
+import CIL.TermAccess
 
 /-!
 # Method contracts
@@ -762,8 +763,8 @@ def cilInvocationEvidence (type : Expr) : Bool :=
     statement.eq?.any fun (_, left, _) => left.isAppOf ``CIL.Safety.invoke
   type.isAppOf `CIL.Safety.InvocationCertificate || type.isAppOf ``CIL.Safety.CallResult ||
     invocation type ||
-    (type.isAppOfArity ``Exists 2 && match type.appArg! with
-      | .lam _ _ body _ => invocation body
+    (type.isAppOfArity ``Exists 2 && match lastArgument? type with
+      | some (.lam _ _ body _) => invocation body
       | _ => false)
 
 open Lean Elab Tactic Meta in
@@ -813,13 +814,13 @@ partial def cilContractInput (inputType : Expr) : MetaM Expr := do
   let fresh ← mkFreshExprMVar inputType
   let some name := (← whnf inputType).getAppFn.constName? | return fresh
   let .inductInfo info ← getConstInfo name | return fresh
-  unless info.ctors.length == 1 do return fresh
-  let constructor ← mkConstWithFreshMVarLevels info.ctors.head!
+  let [constructorName] := info.ctors | return fresh
+  let constructor ← mkConstWithFreshMVarLevels constructorName
   let (arguments, _, result) ← forallMetaTelescopeReducing (← inferType constructor)
   unless ← isDefEq result inputType do return fresh
   let mut fields := #[]
-  for index in [:arguments.size] do
-    let argument := arguments[index]!
+  for h : index in [:arguments.size] do
+    let argument := arguments[index]
     let type ← instantiateMVars (← inferType argument)
     if index ≥ info.numParams && (← whnf type).isAppOfArity ``Prod 2 then
       fields := fields.push (← cilContractInput type)
@@ -861,30 +862,32 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
         let type ← instantiateMVars type
         unless type.isAppOfArity ``CIL.Safety.MethodContract.Holds 5 do
           throwError "Not a method contract"
-        let inputType := type.getAppArgs[0]!
+        let some inputType := argument? type 0 | throwError "Not a method contract"
         let (structured, thenStructured) ← cilContractInputForms inputType
         fieldwise.set (!retry && thenStructured)
         let input ← if structured || retry then cilContractInput inputType
           else mkFreshExprMVar inputType
         let inputSyntax ← Term.exprToSyntax input
         let proofSyntax ← Term.exprToSyntax (mkAppN proof parameters)
-        let siblings := (← getGoals).tail!
+        let siblings := (← getGoals).tail
         let tag ← (← getMainGoal).getTag
         evalTactic (← `(tactic| (
           cil_strict refine CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
             $methodFound $instructionFound
             (by cil_checked_step_normalized [$facts,*]) (by rfl) ?_ ?_)))
         for parameter in parameters do
-          unless ← parameter.mvarId!.isAssigned do
-            let remaining ← Tactic.run parameter.mvarId! (evalTactic (← `(tactic|
+          let .mvar binding := parameter
+            | throwError "The contract binding is not a metavariable:{indentExpr parameter}"
+          unless ← binding.isAssigned do
+            let remaining ← Tactic.run binding (evalTactic (← `(tactic|
               first | assumption | cil_lookup [$facts,*])))
             unless remaining.isEmpty do
               throwError "The contract binding could not be established"
         let pending ← getGoals
         unless pending.length == siblings.length + 2 do
           throwError "The contract input could not be inferred from the call arguments"
-        let permitted := pending[0]!
-        let continuation := pending[1]!
+        let permitted :: continuation :: _ := pending
+          | throwError "The contract input could not be inferred from the call arguments"
         permitted.setTag (preconditionTag type)
         continuation.setTag tag
         let beforePrecondition ← saveState

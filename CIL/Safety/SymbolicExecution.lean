@@ -12,6 +12,7 @@ import CIL.Safety.CheckedSide
 import CIL.Safety.CheckedMemoryFacts
 import CIL.Safety.AggregateMemorySteps
 import CIL.Safety.LoopFacts
+import CIL.TermAccess
 
 /-!
 # Checked symbolic execution
@@ -85,7 +86,8 @@ def unfoldContractProjections (term : Expr) : MetaM Expr := do
     let some contract := arguments[2]? | return .continue
     let defined ← whnf contract
     unless defined.isAppOf `CIL.Safety.MethodContract.mk do return .continue
-    let some info ← getProjectionFnInfo? e.getAppFn.constName! | return .continue
+    let some projection := e.getAppFn.constName? | return .continue
+    let some info ← getProjectionFnInfo? projection | return .continue
     let some field := defined.getAppArgs[info.numParams + info.i]? | return .continue
     return .visit (← whnfCore (mkAppN field (arguments.extract 3 arguments.size)).headBeta))
 
@@ -108,10 +110,12 @@ elab "cil_frame_exit" : tactic => withMainContext do
   if (target.find? leaves).isNone then return
   let exited ← Meta.transform target (pre := fun e => do
     unless leaves e do return .continue
-    let frame ← whnfR e.appFn!.appArg!
-    unless frame.isAppOfArity `CIL.Safety.Frame.mk 5 do return .continue
-    unless (← whnfR frame.getAppArgs[2]!).isAppOfArity ``List.nil 1 do return .continue
-    return .visit e.appArg!)
+    let #[frame, memory] := e.getAppArgs | return .continue
+    let frame ← whnfR frame
+    let some #[_, _, owned, _, _] := argumentsOf? frame `CIL.Safety.Frame.mk 5
+      | return .continue
+    unless (← whnfR owned).isAppOfArity ``List.nil 1 do return .continue
+    return .visit memory)
   unless exited == target do replaceMainGoal [← goal.replaceTargetDefEq exited]
 
 open Lean Elab Tactic Meta in
@@ -121,38 +125,34 @@ open Lean Elab Tactic Meta in
 elab "cil_supply_fuel" : tactic => withMainContext do
   let target := (← instantiateMVars (← getMainTarget)).consumeMData
   unless target.isAppOfArity ``Exists 2 do return
-  let .lam _ _ body _ := target.appArg! | return
+  let some (.lam _ _ body _) := lastArgument? target | return
   let some (_, invocation, _) := body.consumeMData.eq? | return
-  if invocation.isAppOfArity `CIL.Safety.run 8 && invocation.getArg! 1 == .bvar 0 then
-    let program := invocation.getArg! 0
-    let method := invocation.getArg! 2
-    let pc := invocation.getArg! 3
+  if let some #[program, .bvar 0, method, pc, _, _, _, _] :=
+      argumentsOf? invocation `CIL.Safety.run 8 then
     if program.hasLooseBVars || method.hasLooseBVars || pc.hasLooseBVars then return
     let programTerm ← Term.exprToSyntax program
     let methodTerm ← Term.exprToSyntax method
     let lookup ← Term.elabTerm (← `(term| $programTerm[$methodTerm]?)) none
     for declaration in ← getLCtx do
       let some (_, found, result) := declaration.type.consumeMData.eq? | continue
-      unless result.isAppOfArity ``Option.some 2 do continue
+      let some #[_, definition] := argumentsOf? result ``Option.some 2 | continue
       unless ← withNewMCtxDepth <| isDefEq lookup found do continue
       for placement in ← getLCtx do
         let placed := placement.type.consumeMData
-        unless placed.isAppOfArity ``CodeAt 3 do continue
-        unless ← withNewMCtxDepth <| isDefEq placed.getAppArgs[0]! result.appArg! do continue
-        unless ← withNewMCtxDepth <| isDefEq placed.getAppArgs[1]! pc do continue
-        let segment ← Term.exprToSyntax placed.getAppArgs[2]!
+        let some #[placedBody, start, code] := argumentsOf? placed ``CodeAt 3 | continue
+        unless ← withNewMCtxDepth <| isDefEq placedBody definition do continue
+        unless ← withNewMCtxDepth <| isDefEq start pc do continue
+        let segment ← Term.exprToSyntax code
         evalTactic (← `(tactic| refine ⟨(List.length $segment) + 1, ?_⟩))
         return
-      let methodBody ← Term.exprToSyntax result.appArg!
+      let methodBody ← Term.exprToSyntax definition
       let position ← Term.exprToSyntax pc
       evalTactic (← `(tactic| refine ⟨(CIL.Method.code $methodBody).length - $position + 1, ?_⟩))
       return
     return
-  unless invocation.isAppOfArity `CIL.Safety.invoke 5 do return
-  let arguments := invocation.getAppArgs
-  let program := arguments[0]!
-  let method := arguments[2]!
-  unless arguments[1]! == .bvar 0 && !program.hasLooseBVars && !method.hasLooseBVars do return
+  let some #[program, fuel, method, _, _] := argumentsOf? invocation `CIL.Safety.invoke 5
+    | return
+  unless fuel == .bvar 0 && !program.hasLooseBVars && !method.hasLooseBVars do return
   let bound := mkApp2 (mkConst ``CIL.executionBound) program method
   let witness ← Term.exprToSyntax bound
   evalTactic (← `(tactic| refine ⟨$witness, ?_⟩))
@@ -167,19 +167,18 @@ initialize Lean.registerTraceClass `CIL.factNormalize
 open Lean in
 /-- Whether an expression contains a literal operand the checked state normalizer evaluates. -/
 private def hasClosedLiteralOperand (expression : Expr) : Bool :=
-  let numeral (value : Expr) := value.isRawNatLit || value.isAppOfArity ``OfNat.ofNat 3 ||
-    (value.isAppOfArity ``BitVec.ofNat 2 &&
-      (value.appArg!.isRawNatLit || value.appArg!.isAppOfArity ``OfNat.ofNat 3)) ||
-    (value.isAppOfArity ``BitVec.ofFin 2 && value.appArg!.isAppOfArity ``Fin.ofNat 3 &&
-      (value.appArg!.appArg!.isRawNatLit ||
-        value.appArg!.appArg!.isAppOfArity ``OfNat.ofNat 3))
+  let literal (value : Expr) := value.isRawNatLit || value.isAppOfArity ``OfNat.ofNat 3
+  let numeral (value : Expr) := literal value ||
+    (value.isAppOfArity ``BitVec.ofNat 2 && (lastArgument? value).any literal) ||
+    (value.isAppOfArity ``BitVec.ofFin 2 && (lastArgument? value).any fun finite =>
+      finite.isAppOfArity ``Fin.ofNat 3 && (lastArgument? finite).any literal)
   (expression.find? fun value =>
     (value.isAppOfArity ``BitVec.ofFin 2 && numeral value) ||
     ((value.isAppOfArity ``BitVec.signExtend 3 || value.isAppOfArity ``BitVec.setWidth 3 ||
       value.isAppOfArity ``BitVec.zeroExtend 3 || value.isAppOfArity ``BitVec.toNat 2) &&
-      numeral value.appArg!) ||
-    (value.isAppOfArity ``HMod.hMod 6 && numeral value.appArg! &&
-      numeral value.appFn!.appArg!)).isSome
+      (lastArgument? value).any numeral) ||
+    (value.isAppOfArity ``HMod.hMod 6 && (argument? value 5).any numeral &&
+      (argument? value 4).any numeral)).isSome
 
 open Lean Meta in
 /-- `type` with each closed natural-number argument of a `step` opcode evaluated to a numeral,
@@ -191,14 +190,14 @@ def evaluateOpcodeIndices (type : Expr) : MetaM Expr := do
   if (type.find? (·.isConstOf ``CIL.Safety.step)).isNone then return type
   Meta.transform type (pre := fun term => do
     unless term.isAppOfArity ``CIL.Safety.step 7 do return .continue
-    let opcode := term.getAppArgs[1]!
+    let some opcode := argument? term 1 | return .continue
     unless opcode.getAppFn.isConst do return .continue
     let mut arguments := opcode.getAppArgs
     for position in [:arguments.size] do
-      let argument := arguments[position]!
+      let some argument := arguments[position]? | continue
       if argument.hasLooseBVars || argument.hasFVar || argument.hasMVar then continue
       if argument.isRawNatLit || (argument.isAppOfArity ``OfNat.ofNat 3 &&
-          argument.appFn!.appArg!.isRawNatLit) then continue
+          (argument? argument 1).any Expr.isRawNatLit) then continue
       unless ← isDefEq (← inferType argument) natType do continue
       let some value ← (Lean.Meta.evalNat (← reduce argument)).run | continue
       arguments := arguments.set! position (mkNatLit value)
@@ -217,7 +216,7 @@ def reduceLocalResults (term : Expr) : MetaM Expr := do
     unless candidate.isAppOfArity ``CIL.Safety.localResult 2 do return .continue
     let some unfolded ← unfoldDefinition? candidate | return .continue
     let reduced ← whnfCore unfolded
-    if reduced == candidate.appArg! || reduced.isAppOfArity ``CIL.Value.i32 1 then
+    if lastArgument? candidate == some reduced || reduced.isAppOfArity ``CIL.Value.i32 1 then
       return .visit reduced
     return .continue)
 
@@ -229,8 +228,8 @@ def factInstances (proof : Expr) : TermElabM (Array Expr) := do
   let mut instances := #[proof]
   if let .forallE _ domain _ _ := ← whnf (← instantiateMVars (← inferType proof)) then
     let domain ← whnf domain
-    if domain.isAppOfArity ``Fin 1 then
-      if let some size ← (Lean.Meta.evalNat (← reduce domain.appArg!)).run then
+    if let some #[limit] := argumentsOf? domain ``Fin 1 then
+      if let some size ← (Lean.Meta.evalNat (← reduce limit)).run then
         if size <= 64 then
           -- Concrete instances avoid simplifying dependent finite binders a second time.
           instances := #[]
@@ -286,7 +285,7 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
             results := results.push literalResult
         -- Explicit value definitions can expose an operation's symbolic payload without
         -- applying unrelated arithmetic simp lemmas to that payload.
-        if (type.find? fun term => term.isConst && unfoldNames.contains term.constName!).isSome then
+        if (type.find? fun term => term.constName?.any unfoldNames.contains).isSome then
           let { ctx := explicitContext, simprocs := explicitProcs, .. } ←
             mkSimpContext (← `(tactic| simp only [cil_literal, $[$unfolds:term],*]))
               (eraseLocal := false)
@@ -368,26 +367,35 @@ macro "cil_steps_from " message:str tactic:tacticSeq : tactic =>
     facts. -/
 syntax "cil_lookup" "[" term,* "]" : tactic
 
+open Lean in
+/-- The collection and position of the indexed lookup `collection[position]?`; `none` when
+    `lookup` is no `GetElem?.getElem?` application with both. -/
+private def indexedLookup? (lookup : Expr) : Option (Expr × Expr) :=
+  if lookup.isAppOf ``GetElem?.getElem? then
+    let arguments := lookup.getAppArgs
+    match arguments[arguments.size - 2]?, arguments.back? with
+    | some collection, some position => some (collection, position)
+    | _, _ => none
+  else none
+
 open Lean Elab Tactic Meta in
 /-- Reuse a generated equation directly for a named body and a closed instruction position. -/
 elab "cil_lookup_equation" : tactic => withMainContext do
   let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
     | throwError "Expected an instruction lookup"
-  unless lookup.isAppOf ``GetElem?.getElem? do throwError "Expected an indexed lookup"
-  let arguments := lookup.getAppArgs
-  let code := arguments[arguments.size - 2]!
+  let some (code, index) := indexedLookup? lookup | throwError "Expected an indexed lookup"
   unless code.isAppOfArity ``CIL.Method.code 1 do throwError "Expected a named method body"
-  let body := code.appArg!
+  let body ← lastArgument "cil_lookup_equation" code
   let some name := body.getAppFn.constName? | throwError "Expected a named method body"
-  let some position ← getNatValue? arguments.back! | throwError "Expected a closed position"
+  let some position ← getNatValue? index | throwError "Expected a closed position"
   let equation := name.appendAfter s!"_instruction{position}"
   unless (← getEnv).contains equation do throwError "No generated equation at this position"
   let proof := mkAppN (← mkConstWithFreshMVarLevels equation) body.getAppArgs
   let type ← inferType proof
   let some (_, _, found) := type.eq? | throwError "Expected an instruction equation"
   unless found.isAppOfArity ``Option.some 2 do throwError "Expected a successful lookup"
-  let operation ← whnfD found.appArg!
-  let some (.ctorInfo constructor) := (← getEnv).find? operation.getAppFn.constName!
+  let operation ← whnfD (← lastArgument "cil_lookup_equation" found)
+  let some (.ctorInfo constructor) := operation.getAppFn.constName?.bind (← getEnv).find?
     | throwError "Instruction needs profile facts"
   unless constructor.induct == ``CIL.Op do throwError "Expected an instruction constructor"
   let some (_, _, pending) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
@@ -453,8 +461,8 @@ elab_rules : tactic
     let saved ← saveState
     evalTactic (← `(tactic| rfl))
     let some (_, lookup, found) := (← instantiateMVars (← goal.getType)).eq? | return
-    unless found.isAppOfArity ``Option.some 2 do return
-    let op ← whnfR found.appArg!
+    let some #[_, instruction] := argumentsOf? found ``Option.some 2 | return
+    let op ← whnfR instruction
     let isFeatureTest (e : Expr) := e.isAppOf ``ite || e.isAppOf ``dite || e.isAppOf ``cond
     unless isFeatureTest op do return
     let fetched ← saveState
@@ -489,8 +497,10 @@ private partial def placementOffset (start position : Expr) : MetaM Nat := do
     if let some startValue ← getNatValue? start then
       if startValue ≤ positionValue then return positionValue - startValue
   if position.isAppOf ``HAdd.hAdd || position.isAppOfArity ``Nat.add 2 then
-    if let some amount ← getNatValue? position.appArg! then
-      return (← placementOffset start position.getAppArgs[position.getAppArgs.size - 2]!) + amount
+    let arguments := position.getAppArgs
+    if let (some base, some offset) := (arguments[arguments.size - 2]?, arguments.back?) then
+      if let some amount ← getNatValue? offset then
+        return (← placementOffset start base) + amount
   throwError "The position is not a literal offset from this placement"
 
 open Lean Elab Tactic Meta in
@@ -512,11 +522,12 @@ elab_rules : tactic
     for placement in placements do
       let saved ← saveState
       try
-        let type ← inferType placement
-        let start := type.getAppArgs[1]!
+        -- A fact from an untyped `have` states its type through an assigned metavariable.
+        let type ← instantiateMVars (← inferType placement)
+        let start ← argumentAt "cil_lookup_placed" type 1
         let some (_, lookup, _) := (← getMainTarget).consumeMData.eq?
           | throwError "Expected an instruction lookup"
-        let position := lookup.getAppArgs.back!
+        let position ← lastArgument "cil_lookup_placed" lookup
         let index ← placementOffset start position
         let placedTerm ← Term.exprToSyntax placement
         let indexTerm : Term := ⟨Syntax.mkNumLit (toString index)⟩
@@ -536,13 +547,12 @@ elab_rules : tactic
   | `(tactic| cil_lookup_finite [$facts:term,*]) => withMainContext do
     let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
       | throwError "Expected a lookup equation"
-    unless lookup.isAppOf ``GetElem?.getElem? do throwError "Expected an indexed lookup"
-    let position := lookup.getAppArgs.back!
+    let some (_, position) := indexedLookup? lookup | throwError "Expected an indexed lookup"
     for declaration in ← getLCtx do
       unless (position.find? (· == declaration.toExpr)).isSome do continue
       let type ← whnf declaration.type
-      unless type.isAppOfArity ``Fin 1 do continue
-      let some size ← (Lean.Meta.evalNat (← reduce type.appArg!)).run | continue
+      let some #[limit] := argumentsOf? type ``Fin 1 | continue
+      let some size ← (Lean.Meta.evalNat (← reduce limit)).run | continue
       unless size > 0 && size <= 64 do continue
       let index ← Term.exprToSyntax declaration.toExpr
       let value ← `(term| ($index).val)
@@ -571,10 +581,9 @@ elab "cil_lookup_failure" : tactic => do
   if (← getGoals).isEmpty then return
   withMainContext do
   if let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
-    if lookup.isAppOf ``GetElem?.getElem? then
-      let arguments := lookup.getAppArgs
-      if let some position ← (Lean.Meta.evalNat (← reduce arguments.back!)).run then
-        let length ← mkAppM ``List.length #[arguments[arguments.size - 2]!]
+    if let some (collection, index) := indexedLookup? lookup then
+      if let some position ← (Lean.Meta.evalNat (← reduce index)).run then
+        let length ← mkAppM ``List.length #[collection]
         if let some count ← (Lean.Meta.evalNat (← reduce length)).run then
           if count <= position then
             throwError "cil_lookup: position {position} is outside body length {count}"
@@ -598,8 +607,7 @@ elab_rules : tactic
       if ← attempt (← `(tactic| cil_lookup_rfl [$facts:term,*])) then return
       evalTactic (← `(tactic| cil_lookup_failure))
       return
-    if lookup.isAppOf ``GetElem?.getElem? then
-      let position := lookup.getAppArgs.back!
+    if let some (_, position) := indexedLookup? lookup then
       let mut finite := false
       let mut placed := false
       for declaration in ← getLCtx do
@@ -616,10 +624,10 @@ elab_rules : tactic
     -- No instruction is fetched at a branch the facts left undecided; evaluating the lookup
     -- there would unfold the condition's decision procedure on symbolic operands.
     if let some (_, pending, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
-      if pending.isAppOf ``GetElem?.getElem? then
-        let position := pending.getAppArgs.back!.consumeMData
+      if let some (_, position) := indexedLookup? pending then
+        let position := position.consumeMData
         if (position.isAppOfArity ``ite 5 || position.isAppOfArity ``dite 5) &&
-            position.getAppArgs[1]!.hasFVar then
+            (argument? position 1).any Expr.hasFVar then
           throwError "cil_lookup: undecided branch {position}; split on its condition"
     if ← attempt (← `(tactic| cil_lookup_rfl [$facts:term,*])) then return
     evalTactic (← `(tactic| cil_lookup_failure))
@@ -629,10 +637,11 @@ elab_rules : tactic
 open Lean Meta in
 /-- Restore a closed bit-vector constructor to the numeral form used by Lean's simprocs. -/
 dsimproc_decl closedBitVecConstructor (BitVec.ofFin _) := fun expression => do
-  let some width ← getNatValue? expression.getAppArgs[0]! | return .continue
-  let finite := expression.appArg!
-  unless finite.isAppOfArity ``Fin.ofNat 3 do return .continue
-  let some value ← getNatValue? finite.appArg! | return .continue
+  let some widthTerm := argument? expression 0 | return .continue
+  let some width ← getNatValue? widthTerm | return .continue
+  let some finite := lastArgument? expression | return .continue
+  let some #[_, _, valueTerm] := argumentsOf? finite ``Fin.ofNat 3 | return .continue
+  let some value ← getNatValue? valueTerm | return .continue
   return .done (mkApp2 (mkConst ``BitVec.ofNat) (toExpr width) (toExpr value))
 
 attribute [cil_literal_proc] closedBitVecConstructor
@@ -762,8 +771,9 @@ def suppliedFactSatisfies (fact : Term) (test : Expr → MetaM Bool) : TacticM B
 open Lean Meta in
 /-- Whether `e` contains a numeral whose type reduces to `BitVec n`, such as `(27 : W32)`. -/
 partial def hasBitVecNumeral (e : Expr) : MetaM Bool := do
-  if e.isAppOfArity ``OfNat.ofNat 3 && !(e.getArg! 0).hasLooseBVars then
-    if (← whnfR (e.getArg! 0)).isAppOf ``BitVec then return true
+  if let some #[type, _, _] := argumentsOf? e ``OfNat.ofNat 3 then
+    if !type.hasLooseBVars then
+      if (← whnfR type).isAppOf ``BitVec then return true
   e.foldlM (fun found child => if found then pure true else hasBitVecNumeral child) false
 
 /-- Succeed only when a supplied fact concludes `evalIntrinsic ... = _` with a numeral `BitVec`
@@ -849,24 +859,26 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
   -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
   let target := (← instantiateMVars target).consumeMData
   let some (_, lhs, _) := target.eq? | return #[]
-  unless lhs.isAppOfArity ``CIL.Safety.step 7 do return #[]
-  let head := (← whnfR lhs.getAppArgs[1]!).getAppFn.constName?
+  let some #[body, opcode, _, _, _, _, _] := argumentsOf? lhs ``CIL.Safety.step 7 | return #[]
+  let head := (← whnfR opcode).getAppFn.constName?
   let states (type : Expr) : MetaM Bool := withNewMCtxDepth do
     let openParameters := type.hasMVar
     let (_, _, conclusion) ← forallMetaTelescopeReducing type
     let some (_, factLhs, _) := conclusion.eq? | return false
-    unless factLhs.isAppOfArity ``CIL.Safety.step 7 do return false
-    match (← whnfR factLhs.getAppArgs[1]!).getAppFn.constName?, head with
+    let some #[_, factOpcode, _, _, _, _, _] := argumentsOf? factLhs ``CIL.Safety.step 7
+      | return false
+    match (← whnfR factOpcode).getAppFn.constName?, head with
     | some factHead, some goalHead => unless factHead == goalHead do return false
     | _, _ => pure ()
     if openParameters then return true
     -- A named body may need its generated equation unfolded before application.
-    let mut arguments := factLhs.getAppArgs |>.set! 0 lhs.getAppArgs[0]!
-    let operation ← whnfR arguments[1]!
+    let mut arguments := factLhs.getAppArgs |>.set! 0 body
+    let operation ← whnfR factOpcode
     if operation.isAppOfArity ``CIL.Op.local 2 ||
         operation.isAppOfArity ``CIL.Op.setLocal 2 then
+      let some index := argument? operation 0 | return false
       arguments := arguments.set! 1
-        (mkApp2 operation.getAppFn operation.getAppArgs[0]!
+        (mkApp2 operation.getAppFn index
           (mkApp (mkConst ``Option.none [Level.zero]) (mkConst ``CIL.NarrowKind)))
     withTransparency .instances <| isDefEq (mkAppN factLhs.getAppFn arguments) lhs
   let mut matching := #[]
@@ -902,9 +914,9 @@ open Lean Elab Tactic Meta in
 private partial def dispatchFactMatches (wanted : Expr) (function : Name) (type : Expr) :
     MetaM Bool := withNewMCtxDepth do
   let (_, _, conclusion) ← forallMetaTelescopeReducing type
-  if conclusion.isAppOfArity ``And 2 then
-    return (← dispatchFactMatches wanted function conclusion.getAppArgs[0]!) ||
-      (← dispatchFactMatches wanted function conclusion.getAppArgs[1]!)
+  if let some #[left, right] := argumentsOf? conclusion ``And 2 then
+    return (← dispatchFactMatches wanted function left) ||
+      (← dispatchFactMatches wanted function right)
   let some (_, lhs, _) := conclusion.consumeMData.eq? | return false
   unless lhs.isAppOf function do return false
   withTransparency .instances <| isDefEq lhs wanted
@@ -915,13 +927,17 @@ open Lean Elab Tactic Meta in
 def dispatchFacts (step : Expr) (function : Name) (facts : Array Term) :
     TacticM (Array Term) := do
   let arguments := step.getAppArgs
-  let operation ← whnfR arguments[1]!
+  let (some body, some opcode, some pc, some stack, some memory) :=
+      (arguments[0]?, arguments[1]?, arguments[2]?, arguments[5]?, arguments[6]?)
+    | return #[]
+  let operation ← whnfR opcode
   let wanted ← if function == ``CIL.Safety.instruction then
-      mkAppM function #[operation, arguments[5]!, arguments[6]!]
-    else if function == ``CIL.Safety.staticInstruction then
-      mkAppM function #[arguments[0]!, arguments[2]!, operation.appArg!,
-        arguments[5]!, arguments[6]!]
-    else mkAppM function #[operation.appArg!, arguments[5]!, arguments[6]!]
+      mkAppM function #[operation, stack, memory]
+    else if let some operand := lastArgument? operation then
+      if function == ``CIL.Safety.staticInstruction then
+        mkAppM function #[body, pc, operand, stack, memory]
+      else mkAppM function #[operand, stack, memory]
+    else return #[]
   facts.filterM (suppliedFactSatisfies · (dispatchFactMatches wanted function))
 
 open Lean Meta in
@@ -930,7 +946,8 @@ private partial def exposeStackSpine (stack : Expr) : MetaM Expr := withIncRecDe
   let reduced ← whnfD stack
   if reduced.isAppOfArity ``List.nil 1 then return reduced
   unless reduced.isAppOfArity ``List.cons 3 do return stack
-  return mkApp reduced.appFn! (← exposeStackSpine reduced.appArg!)
+  let .app withHead tail := reduced | return stack
+  return mkApp withHead (← exposeStackSpine tail)
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
@@ -939,15 +956,16 @@ elab_rules : tactic
     let mut localOperation := false
     if let some (_, step, _) := initial.eq? then
       if step.isAppOfArity ``CIL.Safety.step 7 &&
-          step.getAppArgs[1]!.isConstOf ``CIL.Op.nop then
+          (argument? step 1).any (·.isConstOf ``CIL.Op.nop) then
         evalTactic (← `(tactic| exact step_nop_eq ..))
         return
-      if step.isAppOfArity ``CIL.Safety.step 7 then
-        let operation ← whnfR step.getAppArgs[1]!
+      if let some #[_, opcode, _, _, _, _, _] := argumentsOf? step ``CIL.Safety.step 7 then
+        let operation ← whnfR opcode
         localOperation := operation.isAppOfArity ``CIL.Op.local 2 ||
           operation.isAppOfArity ``CIL.Op.setLocal 2
         if localOperation then
-          unless (← whnfR operation.appArg!).isAppOf ``Option.none do
+          let narrow ← lastArgument "cil_checked_step_normalized" operation
+          unless (← whnfR narrow).isAppOf ``Option.none do
             evalTactic (← `(tactic| simp only [step_local_annotation, step_setLocal_annotation]))
             if (← getGoals).isEmpty then return
     -- A body reached through a lookup hypothesis stays named; one reached by unfolding a
@@ -972,20 +990,20 @@ elab_rules : tactic
           return
         catch _ => saved.restore
     if let some (_, pending, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq? then
+      let opcodeHead := (argument? pending 1).bind (·.getAppFn.constName?)
       if pending.isAppOfArity ``CIL.Safety.step 7 &&
-          pending.getAppArgs[1]!.getAppFn.constName?.any
+          opcodeHead.any
             ([``CIL.Op.brzero, ``CIL.Op.brnonzero, ``CIL.Op.beq, ``CIL.Op.bne,
               ``CIL.Op.blt, ``CIL.Op.bltu, ``CIL.Op.ble, ``CIL.Op.bleu, ``CIL.Op.bgt,
               ``CIL.Op.bgtu, ``CIL.Op.bge, ``CIL.Op.bgeu].contains ·) then
         -- A matching truth equation must rewrite before its definition can erase that head.
         let mut truthDefinitions : Array Term := #[← `(term| CIL.truth)]
-        if pending.getAppArgs[1]!.getAppFn.constName?.any
-            ([``CIL.Op.brzero, ``CIL.Op.brnonzero].contains ·) then
-          let stack ← whnfD pending.getAppArgs[5]!
-          if stack.isAppOfArity ``List.cons 3 then
-            let value := stack.getAppArgs[1]!
-            if value.isAppOfArity ``Value.scalar 1 then
-              let wanted ← mkAppM ``CIL.truth #[value.appArg!]
+        if opcodeHead.any ([``CIL.Op.brzero, ``CIL.Op.brnonzero].contains ·) then
+          let stackTerm ← argumentAt "cil_checked_step_normalized" pending 5
+          let stack ← whnfD stackTerm
+          if let some #[_, value, _] := argumentsOf? stack ``List.cons 3 then
+            if let some #[scalar] := argumentsOf? value ``Value.scalar 1 then
+              let wanted ← mkAppM ``CIL.truth #[scalar]
               for fact in facts.getElems do
                 if ← suppliedFactSatisfies fact (dispatchFactMatches wanted ``CIL.truth) then
                   truthDefinitions := #[]
@@ -1007,11 +1025,14 @@ elab_rules : tactic
     let some (_, lhs, rhs) := target.eq? | throwError "Expected a checked step equality"
     let mut args := lhs.getAppArgs
     let mut operation := Name.anonymous
-    if lhs.isAppOfArity ``CIL.Safety.step 7 then
+    if let some #[_, opcode, _, _, _, stack, _] := argumentsOf? lhs ``CIL.Safety.step 7 then
       -- Contract result projections may hide the stack constructor needed by a step equation.
-      args := args.set! 5 (← exposeStackSpine args[5]!)
-      if let some op ← cilReducedOp? args[1]! then
-        operation := op.getAppFn.constName!
+      args := args.set! 5 (← exposeStackSpine stack)
+      if let some op ← cilReducedOp? opcode then
+        let .const name _ := op.getAppFn
+          | throwError "cil_checked_step_normalized: expected an opcode constructor, but \
+              found{indentExpr op}"
+        operation := name
         args := args.set! 1 op
       unless args == lhs.getAppArgs do
         target ← mkEq (mkAppN lhs.getAppFn args) rhs
@@ -1043,20 +1064,21 @@ elab_rules : tactic
     if scalar && lhs.isAppOfArity ``CIL.Safety.step 7 then
       -- Reuse the selected value equation without rewriting its symbolic arithmetic result.
       let mut widths := #[]
-      let mut stack ← whnfR args[5]!
+      let stackTerm ← entryAt "cil_checked_step_normalized" args 5
+      let mut stack ← whnfR stackTerm
       for _ in [:2] do
-        unless stack.isAppOfArity ``List.cons 3 do break
-        let value := stack.getAppArgs[1]!
-        unless value.isAppOfArity ``Value.scalar 1 do break
-        let scalar := value.appArg!
+        let some #[_, value, rest] := argumentsOf? stack ``List.cons 3 | break
+        let some #[scalar] := argumentsOf? value ``Value.scalar 1 | break
         if scalar.isAppOfArity ``CIL.Value.i32 1 then widths := widths.push "_i32"
         else if scalar.isAppOfArity ``CIL.Value.i64 1 then widths := widths.push "_i64"
         else break
-        stack ← whnfR stack.getAppArgs[2]!
+        stack ← whnfR rest
+      let .str _ opcodeName := operation
+        | throwError "cil_checked_step_normalized: expected an opcode name, but found {operation}"
       for count in [0, 1, 2] do
         if count > widths.size then continue
         let suffix := String.join (widths.toList.take count)
-        let name := `CIL.Safety ++ Name.mkSimple s!"step_{operation.getString!}{suffix}_eq"
+        let name := `CIL.Safety ++ Name.mkSimple s!"step_{opcodeName}{suffix}_eq"
         unless (← getEnv).contains name do continue
         let saved ← saveState
         try
@@ -1104,8 +1126,8 @@ open Lean Meta in
 /-- The `numericValue value` a fact's conclusion tests, when `value` is no constructor. -/
 private def opaqueNumericTest? (conclusion : Expr) : MetaM (Option Expr) := do
   let some (_, tested, _) := conclusion.consumeMData.eq? | return none
-  unless tested.isAppOfArity ``CIL.Safety.numericValue 1 do return none
-  if ← isConstructorApp (← whnfR tested.appArg!) then return none
+  let some #[value] := argumentsOf? tested ``CIL.Safety.numericValue 1 | return none
+  if ← isConstructorApp (← whnfR value) then return none
   return some tested
 
 open Lean Elab Tactic Meta in
@@ -1163,7 +1185,7 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
           -- A read stated at a closed width such as `localWidth (.aggregate 32)` derives its
           -- load at the numeral an opcode carries.
           if reading || snapshot then
-            let width := operation.getAppArgs[2]!
+            let width ← argumentAt "prepareOperationFacts" operation 2
             unless width.hasFVar || width.hasMVar || (← getNatValue? width).isSome do
               if let some value ← (Lean.Meta.evalNat (← reduce width)).run then
                 let stated := mkAppN operation.getAppFn
@@ -1178,9 +1200,9 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
             candidates := candidates.push (``loadSnapshot_aggregate_of_readSnapshot, #[applied])
           if !snapshot then
             let arguments := operation.getAppArgs
-            let width := if reading then some arguments[2]! else
-              let bytes := arguments[2]!
-              if bytes.isAppOfArity ``numberBytes 2 then some bytes.appArg! else none
+            let width := if reading then arguments[2]? else
+              arguments[2]?.bind fun bytes =>
+                if bytes.isAppOfArity ``numberBytes 2 then lastArgument? bytes else none
             if let some width := width then
               if let some width ← (Lean.Meta.evalNat (← reduce width)).run then
                 if reading && [1, 2, 4].contains width then
@@ -1308,15 +1330,17 @@ elab_rules : tactic
         if let some (_, provided, _) := invocationType.eq? then
           if let some (_, requested, _) := target.eq? then
             if provided.isAppOf ``CIL.Safety.invoke && requested.isAppOf ``CIL.Safety.invoke then
-              let providedFuel ← getNatValue? provided.getAppArgs[1]!
-              let requestedFuel ← getNatValue? requested.getAppArgs[1]!
+              let providedBudget ← argumentAt "cil_checked_child" provided 1
+              let requestedBudget ← argumentAt "cil_checked_child" requested 1
+              let providedFuel ← getNatValue? providedBudget
+              let requestedFuel ← getNatValue? requestedBudget
               -- An abstract program cannot reduce to reconcile different concrete budgets.
-              let program := requested.getAppArgs[0]!
+              let program ← argumentAt "cil_checked_child" requested 0
               -- Only a local program has a declaration; a nested `←` would also run on a constant.
-              let abstract ← if program.isFVar then
-                  pure (← program.fvarId!.getDecl).value?.isNone
-                else pure false
-              if abstract && provided.getAppArgs[0]! == program then
+              let abstract ← match program with
+                | .fvar programVariable => pure (← programVariable.getDecl).value?.isNone
+                | _ => pure false
+              if abstract && argument? provided 0 == some program then
                 if let some supplied := providedFuel then
                   if let some needed := requestedFuel then
                     if supplied != needed then
@@ -1355,15 +1379,18 @@ def cilFetchedOp (lemma : Lean.Name) (select : Lean.Expr → Option Lean.Expr) (
   let some goalPart := select target | throwError "The goal does not have the shape of {lemma}"
   let some lemmaPart := select conclusion | throwError "Unexpected statement of {lemma}"
   unless ← isDefEq lemmaPart goalPart do throwError "The goal does not have the shape of {lemma}"
-  let methodFound := premises[premises.size - lookups]!
-  let instructionFound := premises[premises.size - lookups + 1]!
+  let methodFound ← entryAt "cilFetchedOp" premises (premises.size - lookups)
+  let instructionFound ← entryAt "cilFetchedOp" premises (premises.size - lookups + 1)
   for proof in [methodFound, instructionFound] do
-    let remaining ← Tactic.run proof.mvarId! (evalTactic (← `(tactic| cil_lookup [$facts,*])))
+    let .mvar lookupGoal := proof
+      | throwError "cilFetchedOp: expected a lookup premise, but found{indentExpr proof}"
+    let remaining ← Tactic.run lookupGoal (evalTactic (← `(tactic| cil_lookup [$facts,*])))
     unless remaining.isEmpty do throwError "The method or instruction lookup did not close"
   let fetched ← instantiateMVars (← inferType instructionFound)
   let some (_, _, found) := fetched.eq? | throwError "Unexpected instruction lookup"
+  let fetchedOp ← lastArgument "cilFetchedOp" found
   let operation :=
-    ((← cilReducedOp? found.appArg!).bind (·.getAppFn.constName?)).getD Name.anonymous
+    ((← cilReducedOp? fetchedOp).bind (·.getAppFn.constName?)).getD Name.anonymous
   let lookupSyntax (proof : Expr) : TacticM Term := do
     let expected ← instantiateMVars (← inferType proof)
     let proof ← instantiateMVars proof
@@ -1396,9 +1423,8 @@ def cilOutputFacts (operation : Name) : TacticM (Array Term) := withMainContext 
   if retained.isEmpty && calls.isEmpty then return #[]
   let some execution := (← instantiateMVars (← getMainTarget)).find?
       (·.isAppOfArity ``run 8) | return #[]
-  let arguments := execution.getAppArgs
-  if operation == ``CIL.Op.ret && (← whnfD arguments[6]!).isAppOf ``List.nil then return #[]
-  let memory := arguments[7]!
+  let #[_, _, _, _, _, _, stack, memory] := execution.getAppArgs | return #[]
+  if operation == ``CIL.Op.ret && (← whnfD stack).isAppOf ``List.nil then return #[]
   let currentFacts := withMainContext do
     let mut facts := #[]
     for declaration in ← getLCtx do
@@ -1410,7 +1436,7 @@ def cilOutputFacts (operation : Name) : TacticM (Array Term) := withMainContext 
   unless facts.isEmpty do return facts
   for declaration in calls do
     let type ← instantiateMVars declaration.type
-    if type.isAppOfArity `CIL.Safety.ValidCall 3 && type.getAppArgs[0]! == memory then
+    if type.isAppOfArity `CIL.Safety.ValidCall 3 && argument? type 0 == some memory then
       cilRememberOutputFacts (← Term.exprToSyntax declaration.toExpr)
       return ← currentFacts
   return #[]
@@ -1422,8 +1448,7 @@ def cilOnlyInputFacts (operation : Name) (facts : Array Term) : TacticM Bool :=
   facts.allM fun fact => suppliedFactSatisfies fact fun type => do
     let some (_, left, _) := type.getForallBody.consumeMData.eq? | return false
     if left.isAppOf ``form || left.isAppOf ``read then return true
-    unless left.isAppOfArity ``step 7 do return false
-    let op := left.getAppArgs[1]!
+    let some #[_, op, _, _, _, _, _] := argumentsOf? left ``step 7 | return false
     -- Only known reads are excluded; a generic or custom step retains its priority.
     return op.isAppOf ``CIL.Op.fieldAt && operation != ``CIL.Op.fieldAt
 
@@ -1437,38 +1462,40 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
   unless (← getEnv).contains `CIL.Safety.ValidCall.store_word do return facts
   let some execution := (← instantiateMVars (← getMainTarget)).find?
       (·.isAppOfArity ``run 8) | return facts
-  let arguments := execution.getAppArgs
-  let memory := arguments[7]!
-  let stack ← listEntries arguments[6]!
+  let #[_, _, _, _, _, _, stackTerm, memory] := execution.getAppArgs | return facts
+  let stack ← listEntries stackTerm
   let some (_, value) := stack[0]? | return facts
   let some (_, address) := stack[1]? | return facts
   let value ← whnf value
   let address ← whnf address
-  unless value.isAppOfArity ``Value.scalar 1 &&
-      value.appArg!.isAppOfArity ``CIL.Value.i64 1 do return facts
-  unless address.isAppOfArity ``Value.reference 1 &&
-      address.appArg!.isAppOfArity ``ManagedReference.address 1 do return facts
-  let reference := address.appArg!.appArg!
-  let word ← Term.exprToSyntax value.appArg!.appArg!
+  let some #[scalar] := argumentsOf? value ``Value.scalar 1 | return facts
+  let some #[wordValue] := argumentsOf? scalar ``CIL.Value.i64 1 | return facts
+  let some #[target] := argumentsOf? address ``Value.reference 1 | return facts
+  let some #[reference] := argumentsOf? target ``ManagedReference.address 1 | return facts
+  let word ← Term.exprToSyntax wordValue
   let instruction ← inferType (← Term.elabTerm instructionFound none)
   let some (_, _, found) := instruction.eq? | return facts
-  let opcode ← whnf found.appArg!
+  let some fetchedOp := lastArgument? found | return facts
+  let opcode ← whnf fetchedOp
   let mut offset := mkNatLit 0
   if operation == ``CIL.Op.storeScalar then
-    unless ← isDefEq opcode.appArg! (mkNatLit 8) do return facts
+    let some width := lastArgument? opcode | return facts
+    unless ← isDefEq width (mkNatLit 8) do return facts
   if operation == ``CIL.Op.setFieldAt then
-    unless ← isDefEq opcode.appArg! (mkNatLit 8) do return facts
-    offset := opcode.appFn!.appArg!
+    let some width := lastArgument? opcode | return facts
+    unless ← isDefEq width (mkNatLit 8) do return facts
+    let some fieldOffset := (appliedFunction? opcode).bind lastArgument? | return facts
+    offset := fieldOffset
   let offsetTerm ← Term.exprToSyntax offset
   let declarations := (← getLCtx).decls.toArray.filterMap id
   for declaration in declarations do
     let type ← instantiateMVars declaration.type
-    unless type.isAppOfArity `CIL.Safety.ValidCall 3 do continue
-    unless ← withNewMCtxDepth <| isDefEq type.getAppArgs[0]! memory do continue
-    for (position, view) in ← listEntries type.getAppArgs[2]! do
+    let some #[callMemory, _, outputs] := argumentsOf? type `CIL.Safety.ValidCall 3 | continue
+    unless ← withNewMCtxDepth <| isDefEq callMemory memory do continue
+    for (position, view) in ← listEntries outputs do
       let view ← whnf view
-      unless view.isAppOfArity `CIL.Safety.ArgumentView.mk 2 do continue
-      unless ← withNewMCtxDepth <| isDefEq view.getAppArgs[0]! reference do continue
+      let some #[viewed, _] := argumentsOf? view `CIL.Safety.ArgumentView.mk 2 | continue
+      unless ← withNewMCtxDepth <| isDefEq viewed reference do continue
       let saved ← saveState
       try
         let call ← Term.exprToSyntax declaration.toExpr
@@ -1481,11 +1508,8 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
         while bases.any (fun base => context.usesUserName (named index base)) do
           index := index + 1
         let names := bases.toArray.map (fun base => mkIdent (named index base))
-        let after := names[0]!
-        let addressed := names[1]!
-        let written := names[2]!
-        let readback := names[3]!
-        let retained := names[4]!
+        let #[after, addressed, written, readback, retained] := names
+          | throwError "cilPrepareOutputStore: expected a name for each of {bases}"
         let store := Syntax.mkApp (mkCIdent `CIL.Safety.ValidCall.store_word)
           #[call, view, ← `(List.mem_of_getElem? (i := $(quote position)) rfl), offsetTerm,
             ← `(by dsimp only; first | decide | omega), word]
@@ -1545,11 +1569,13 @@ def cilRunStep (facts : Array Term) : TacticM Unit := withMainContext do
     | some (_, current, result) =>
       if !result.isAppOf ``Except.error then pure false
       else
-        let located := result.appArg!.consumeMData
-        if located.isAppOfArity ``CIL.Safety.LocatedFault.mk 3 &&
-            current.isAppOfArity ``CIL.Safety.run 8 then
+        let some located := lastArgument? result | pure true
+        let located := located.consumeMData
+        if let (some #[_, faultPc, _], some #[_, _, _, pc, _, _, _, _]) :=
+            (argumentsOf? located ``CIL.Safety.LocatedFault.mk 3,
+              argumentsOf? current ``CIL.Safety.run 8) then
           withNewMCtxDepth <| withTransparency .instances <|
-            isDefEq located.getAppArgs[1]! current.getAppArgs[3]!
+            isDefEq faultPc pc
         else pure true
     | none => pure false
   let (methodSyntax, instructionSyntax, operation) ←

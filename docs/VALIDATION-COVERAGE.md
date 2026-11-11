@@ -346,6 +346,9 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
     `ValidCall` and loading two caller limbs, one named and one supplied as a projection, and
     stops when a limb is not shown below the boundary. A counted walk stops after its second step
     and a second walk resumes from the snapshots it named.
+  - One proof walks two bodies, with the body a variable until a case split and the homes
+    derived before it by an untyped `have`. Such homes also justify a store on their own. The
+    library build fails on an internal error printed while these proofs elaborate.
 - `Tests/PrimitiveArrays.cs` checks compiled loads and stores for twelve primitive integer element
   types against runtime results and certified checked execution. It also covers length, helper
   calls, aliases, returned arrays, named null/bounds faults and unsupported array forms. Generic
@@ -414,6 +417,23 @@ addition-to-subtraction source edit and rebuild, recovery using settings kept af
 proof, the invalid-memory-access theorem, the integer opcode, narrow-storage and
 primitive-operation matrices, `new-proof` rejecting an existing file, a stale extraction and a
 struct parameter, and an isolated installation of the packaged .NET tool.
+
+The runner, the tool and library preparation reject every run of Lean, Lake or the audit
+executable whose output holds an [internal error](CLI.md#diagnostics), so a panic while building
+any `CIL`, `Examples` or `Tests` module fails the suite that builds it.
+`scripts/TestLeanDiagnostics.cs` checks that rule on recorded output:
+
+- Each message form fails a run that exited with `0` and makes a failed run an
+  `internal-error`, whether it was written to stderr, logged by Lake, logged by Lean at a
+  position or printed in `--json` output.
+- The report names the proof module and file and quotes the message, an internal error leads the
+  Lean errors of its run, and another request's proof module is left out.
+- Ordinary information, warnings and recursion limits keep their results, as do a message that
+  quotes the runtime's text inside a sentence, a goal or a term and a program other than Lean
+  that prints it.
+
+The `failures` suite verifies a proof that holds and runs a tactic that reads past the end of an
+array. The run exits with `1`, reports kind `internal-error` and leaves no `verified.json`.
 
 ## Certified library preparation
 

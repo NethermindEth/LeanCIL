@@ -1441,6 +1441,23 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 CompleteTiming(i);
             }
         }
+        // A build that printed an internal error fails the request whose proof module printed it, whatever the
+        // build's exit code; one printed while building anything the requests share fails them all.
+        void FailInternalErrors(int[] members, string[] names, string[] command, int code, string output)
+        {
+            var errors = LeanOutput.InternalErrors(output);
+            if (errors.Count == 0) return;
+            if (LeanOutput.ByRequest(errors, names) is not { } requests)
+                throw LeanOutput.Failure(command, code, output, errors);
+            for (var k = 0; k < members.Length; k++)
+            {
+                var own = requests[k];
+                if (own.Length == 0) continue;
+                var failure = LeanOutput.Failure(command, code, output, own);
+                failure.Data[LeanDiagnostics.HiddenModulesKey] = names.Where((_, other) => other != k).ToArray();
+                Fail([members[k]], failure);
+            }
+        }
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var all = Enumerable.Range(0, requests.Count).ToArray();
         var identities = new string[requests.Count];
@@ -1953,9 +1970,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 Run(["lake", "build", .. importModules.Select(module => "+" + module + ":olean")], generatedPackage,
                     progress: "Checking consumer contract interfaces and import assumptions");
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
-            var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies");
+            var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies",
+                internalErrors: false);
             RequireExtractionArtifacts();
             RequireGeneratedArtifacts();
+            FailInternalErrors(members, names, command, build.Code, build.Output);
             var buildFailure = build.Code == 0 ? null
                 : new InvalidOperationException($"Command failed ({build.Code}): {string.Join(' ', command)}\n{build.Output}");
             string[] importDirectories = [];
@@ -2358,8 +2377,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     File.Copy(Within(support, file), destination, true);
                 }
             Stage(members, "compile check");
-            var build = Execute(["lake", "build", .. names.Select(name => "+" + name + ":olean")],
-                session, progress: "Compile checking consumer proofs and dependencies");
+            string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
+            var build = Execute(command, session, progress: "Compile checking consumer proofs and dependencies",
+                internalErrors: false);
+            FailInternalErrors(members, names, command, build.Code, build.Output);
             var (directories, _) = ConsumerImportDirectories(session);
             for (var index = 0; index < members.Length; index++)
             {
@@ -2367,6 +2388,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 var source = Path.Combine(session, names[index] + ".lean");
                 var artifact = directories.Select(directory => Path.Combine(directory, names[index]))
                     .FirstOrDefault(path => File.Exists(path + ".olean") && File.Exists(path + ".trace"));
+                if (!Live(member)) continue;
                 if (artifact is not null)
                 {
                     outcomes[member].Messages = LakeTraceMessages(artifact + ".trace", session, source);

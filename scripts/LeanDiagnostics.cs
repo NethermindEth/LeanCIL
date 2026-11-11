@@ -11,10 +11,6 @@ internal static partial class LeanDiagnostics
     // Exception.Data key naming the proof modules of other requests in a shared workspace.
     internal const string HiddenModulesKey = "LeanCIL.HiddenModules";
 
-    // Lake job headers: failed, warned, informational and built.
-    [GeneratedRegex(@"^(?:\u2716|\u26A0|\u2139|\u2714) \[\d+/\d+\] \S+ (?<module>\S+)")]
-    private static partial Regex Job();
-
     [GeneratedRegex(@"^(?<level>error|warning|info|trace): (?<message>.*)$")]
     private static partial Regex Entry();
 
@@ -44,7 +40,7 @@ internal static partial class LeanDiagnostics
         for (var i = 0; i < lines.Length; i++)
         {
             var line = lines[i];
-            var job = Job().Match(line);
+            var job = LeanOutput.Job().Match(line);
             if (job.Success) { module = job.Groups["module"].Value; continue; }
             if (FailureList().IsMatch(line)) { module = null; continue; }
             var match = LakeError().Match(line);
@@ -77,8 +73,9 @@ internal static partial class LeanDiagnostics
         }
     }
 
-    static bool IsBoundary(string line) => Job().IsMatch(line) || Entry().IsMatch(line) || LeanEntry().IsMatch(line) ||
-        FailureList().IsMatch(line) || line.StartsWith("Build completed", StringComparison.Ordinal);
+    static bool IsBoundary(string line) => LeanOutput.Job().IsMatch(line) || Entry().IsMatch(line) ||
+        LeanEntry().IsMatch(line) || FailureList().IsMatch(line) ||
+        line.StartsWith("Build completed", StringComparison.Ordinal);
 
     /// <summary>
     /// A bounded summary of the error diagnostics, and in full only the errors it cut or left out, so a report
@@ -87,13 +84,26 @@ internal static partial class LeanDiagnostics
     /// </summary>
     internal sealed record Report(string Text, string Shortened);
 
-    /// <summary>The <see cref="Report"/> of the error diagnostics in `output`, or null when it has none.</summary>
+    /// <summary>
+    /// The <see cref="Report"/> of the internal errors and the error diagnostics in `output`, internal errors
+    /// first, or null when it has neither.
+    /// </summary>
     internal static Report? Summarize(string output, IReadOnlyCollection<string>? hidden = null,
         Func<string, string>? locate = null, Func<string, string>? module = null)
     {
         var errors = Errors(output, hidden);
-        if (errors.Count == 0) return null;
-        var text = new StringBuilder($"Lean errors ({errors.Count}):\n");
+        var internalErrors = LeanOutput.InternalErrors(output, hidden).GroupBy(error => error).ToArray();
+        if (errors.Count == 0 && internalErrors.Length == 0) return null;
+        var text = new StringBuilder();
+        if (internalErrors.Length > 0) text.Append($"Internal errors ({internalErrors.Length}):\n");
+        foreach (var group in internalErrors)
+        {
+            var (count, error) = (group.Count(), group.Key);
+            text.Append("  ").Append(error.Location is { } location ? locate?.Invoke(location) ?? location : "output")
+                .Append(error.Module is { } name ? $" (building {module?.Invoke(name) ?? name})" : "").Append('\n')
+                .Append("    ").Append(error.Message).Append(count > 1 ? $" ({count} times)" : "").Append('\n');
+        }
+        if (errors.Count > 0) text.Append($"Lean errors ({errors.Count}):\n");
         var shortened = new StringBuilder();
         string Header(Diagnostic error) =>
             (error.Location is { } location ? locate?.Invoke(location) ?? location : "error") +

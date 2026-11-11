@@ -1,4 +1,5 @@
 import CIL.Safety.Execution
+import CIL.TermAccess
 
 /-!
 # Loop facts from the proof context
@@ -103,9 +104,9 @@ def objectEvidence : List ObjectEvidence := [
 partial def objectEvidenceIn (type : Lean.Expr) (path : Lean.Name := .anonymous) :
     Array (Lean.Name × ObjectEvidence × Lean.Expr) :=
   let type := type.consumeMData
-  if type.isAppOfArity ``And 2 then
-    objectEvidenceIn type.appFn!.appArg! (path ++ `left) ++
-      objectEvidenceIn type.appArg! (path ++ `right)
+  if let some #[left, right] := argumentsOf? type ``And 2 then
+    objectEvidenceIn left (path ++ `left) ++
+      objectEvidenceIn right (path ++ `right)
   else
     let stated := objectEvidence.find? fun evidence =>
       type.isAppOfArity evidence.head evidence.arity
@@ -126,7 +127,7 @@ def loopCallerFact? (type : Expr) : MetaM (Option (Lean.Name × Expr × Option E
     return (← instantiateMVars (← inferType argument)).isConstOf ``Memory
   let some memory := memory? | return none
   let rhs := rhs.consumeMData
-  let result := if rhs.isAppOfArity ``Except.ok 3 then some rhs.appArg! else none
+  let result := if rhs.isAppOfArity ``Except.ok 3 then lastArgument? rhs else none
   let formed := if [``CIL.Safety.form, ``CIL.Safety.add, ``CIL.Safety.SpanView.element].contains
     head then result else none
   return some (carry, memory, formed)
@@ -138,9 +139,9 @@ partial def loopFactSides? (type : Expr) : MetaM (Option (Array FVarId × Array 
   forallTelescope type fun bound body => do
     let outer (e : Expr) := (collectFVars {} e).fvarIds.filter fun id => !bound.contains (.fvar id)
     let body := body.consumeMData
-    if body.isAppOfArity ``And 2 then
-      let some (leftL, leftR) ← loopFactSides? body.appFn!.appArg! | return none
-      let some (rightL, rightR) ← loopFactSides? body.appArg! | return none
+    if let some #[left, right] := argumentsOf? body ``And 2 then
+      let some (leftL, leftR) ← loopFactSides? left | return none
+      let some (rightL, rightR) ← loopFactSides? right | return none
       return some (leftL ++ rightL, leftR ++ rightR)
     let some (_, lhs, rhs) := body.eq? | return none
     unless lhs.getAppFn.constName?.any loopFactHeads.contains do return none
@@ -151,9 +152,9 @@ open Lean Meta in
     tactics reach, and as a rewrite to `False` it cannot loop. -/
 def isCaseDisequality (type : Expr) : MetaM Bool := do
   let type := type.consumeMData
-  if type.isAppOfArity ``Ne 3 then return !(← isProp type.appFn!.appFn!.appArg!)
-  unless type.isAppOfArity ``Not 1 do return false
-  let some (carrier, _, _) := type.appArg!.consumeMData.eq? | return false
+  if let some #[carrier, _, _] := argumentsOf? type ``Ne 3 then return !(← isProp carrier)
+  let some #[negated] := argumentsOf? type ``Not 1 | return false
+  let some (carrier, _, _) := negated.consumeMData.eq? | return false
   return !(← isProp carrier)
 
 open Lean Meta in
@@ -162,8 +163,8 @@ open Lean Meta in
 partial def loopFactMemories (type : Expr) : MetaM (Array Expr) :=
   forallTelescope type fun bound body => do
     let body := body.consumeMData
-    if body.isAppOfArity ``And 2 then
-      return (← loopFactMemories body.appFn!.appArg!) ++ (← loopFactMemories body.appArg!)
+    if let some #[left, right] := argumentsOf? body ``And 2 then
+      return (← loopFactMemories left) ++ (← loopFactMemories right)
     let some (_, lhs, _) := body.eq? | return #[]
     lhs.getAppArgs.filterM fun argument => do
       if argument.hasAnyFVar (bound.contains <| .fvar ·) then return false
@@ -263,7 +264,7 @@ structure LoopGoalScope where
 partial def executionMemories (expression : Lean.Expr) : Array Lean.Expr :=
   let expression := expression.consumeMData
   if expression.isAppOfArity ``run 8 || expression.isAppOfArity ``invoke 5 ||
-      expression.isAppOfArity ``step 7 then #[expression.appArg!]
+      expression.isAppOfArity ``step 7 then (lastArgument? expression).toArray
   else match expression with
     | .app function argument => executionMemories function ++ executionMemories argument
     | .lam _ _ body _ | .forallE _ _ body _ => executionMemories body
@@ -277,37 +278,43 @@ open Lean Meta in
 def loopGoalScope (target : Expr) : MetaM LoopGoalScope := do
   let arguments := target.getAppArgs
   let (states, post) :=
-    if target.isAppOfArity `CIL.Safety.LoopReaches 5 then (#[arguments[3]!, arguments[4]!], #[])
-    else if target.isAppOfArity `CIL.Safety.LoopTerminates 5 then
-      (#[arguments[4]!], #[arguments[3]!])
+    if let some #[_, _, _, source, reached] := argumentsOf? target `CIL.Safety.LoopReaches 5 then
+      (#[source, reached], #[])
+    else if let some #[_, _, _, post, source] :=
+        argumentsOf? target `CIL.Safety.LoopTerminates 5 then
+      (#[source], #[post])
     else (#[], #[])
   if states.isEmpty then
     let memories := executionMemories target
     let memories := if memories.isEmpty then none else some memories
     return { parts := #[target], memories, returns := true }
-  let read := if ← readsArguments arguments[0]! then #[arguments[2]!] else #[]
+  -- Non-empty `states` means `target` is one of the two five-argument loop goals above.
+  let #[program, _, methodArguments, _, _] := arguments
+    | throwError "loopGoalScope: expected a loop goal, but found{indentExpr target}"
+  let read := if ← readsArguments program then #[methodArguments] else #[]
   let parts := states ++ post ++ read
   let returns := !post.isEmpty
   let mut memories := #[]
   for state in states do
     let state ← whnf state
-    unless state.isAppOfArity `CIL.Safety.LoopState.mk 4 do
-      return { parts, memories := none, returns }
-    memories := memories.push (← whnfR state.appArg!)
+    let some #[_, _, _, memory] := argumentsOf? state `CIL.Safety.LoopState.mk 4
+      | return { parts, memories := none, returns }
+    memories := memories.push (← whnfR memory)
   return { parts, memories := some memories, returns }
 
 /-- Whether `type` is a `LoopFrame` whose footprint is empty, so the caller's memory is kept. -/
 def confinedToNone (type : Lean.Expr) : Bool :=
-  type.isAppOfArity `CIL.Safety.LoopFrame 6 && (type.getArg! 0).isAppOfArity ``List.nil 1
+  type.isAppOfArity `CIL.Safety.LoopFrame 6 &&
+    (argument? type 0).any (·.isAppOfArity ``List.nil 1)
 
 open Lean Meta in
 /-- The positions of the `some` entries of `list` up to reduction, reading cons cells until one is
     not: the locals a `knownLocals` list remembers. -/
 partial def rememberedIndices (list : Lean.Expr) (index : Nat := 0) : MetaM (Array Nat) := do
   let cell ← whnf list
-  unless cell.isAppOfArity ``List.cons 3 do return #[]
-  let rest ← rememberedIndices cell.appArg! (index + 1)
-  if (← whnf (cell.getArg! 1)).isAppOfArity ``Option.some 2 then return #[index] ++ rest
+  let some #[_, head, tail] := argumentsOf? cell ``List.cons 3 | return #[]
+  let rest ← rememberedIndices tail (index + 1)
+  if (← whnf head).isAppOfArity ``Option.some 2 then return #[index] ++ rest
   return rest
 
 open Lean Meta in
@@ -316,24 +323,23 @@ open Lean Meta in
 partial def listEntries (list : Lean.Expr) (index : Nat := 0) :
     MetaM (Array (Nat × Lean.Expr)) := do
   let cell ← whnf list
-  unless cell.isAppOfArity ``List.cons 3 do return #[]
-  return #[(index, cell.getArg! 1)] ++ (← listEntries cell.appArg! (index + 1))
+  let some #[_, head, tail] := argumentsOf? cell ``List.cons 3 | return #[]
+  return #[(index, head)] ++ (← listEntries tail (index + 1))
 
 open Lean Elab Tactic Meta in
 /-- Checked argument facts with their source views, shared by entry gathering and write
     continuations. The caller retains memory and reachability filtering. -/
 def validCallArgumentFacts (call : Term) (type : Expr) :
     TacticM (Array (Name × Term × Expr)) := do
-  unless type.isAppOfArity `CIL.Safety.ValidCall 3 do return #[]
-  let arguments := type.getAppArgs
+  let some #[_, inputs, outputs] := argumentsOf? type `CIL.Safety.ValidCall 3 | return #[]
   let mut facts := #[]
-  for (position, view) in ← listEntries arguments[1]! do
+  for (position, view) in ← listEntries inputs do
     let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
     let member ← `(List.mem_of_getElem? (i := $(quote position)) rfl)
     for (base, name) in [(`argumentForm, `CIL.Safety.ValidCall.input_formed),
         (`argumentRead, `CIL.Safety.ValidCall.input_word_step)] do
       facts := facts.push (base, Syntax.mkApp (mkCIdent name) #[call, viewTerm, member], view)
-  for (position, view) in ← listEntries arguments[2]! do
+  for (position, view) in ← listEntries outputs do
     let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
     let member ← `(List.mem_of_getElem? (i := $(quote position)) rfl)
     facts := facts.push (`argumentForm,
@@ -345,12 +351,12 @@ open Lean Meta in
     values))`, reading the entry only through reducible definitions. -/
 def encodedStruct? (entry : Lean.Expr) : MetaM (Option (Lean.Expr × Lean.Expr)) := do
   let entry ← whnfR (← instantiateMVars entry)
-  unless entry.isAppOfArity ``Option.some 2 do return none
-  let value ← whnfR entry.appArg!
-  unless value.isAppOfArity ``CIL.Value.aggregate 1 do return none
-  let bytes := value.appArg!.headBeta.consumeMData
-  unless bytes.isAppOfArity `CIL.AggregateLayout.encode 2 do return none
-  return some (bytes.appFn!.appArg!, bytes.appArg!)
+  let some #[_, value] := argumentsOf? entry ``Option.some 2 | return none
+  let value ← whnfR value
+  let some #[encoded] := argumentsOf? value ``CIL.Value.aggregate 1 | return none
+  let bytes := encoded.headBeta.consumeMData
+  let some #[layout, values] := argumentsOf? bytes `CIL.AggregateLayout.encode 2 | return none
+  return some (layout, values)
 
 open Lean Elab Meta in
 /-- A proof of `layout.Valid`: the extraction's `<layout>_valid` theorem when `layout` is a
@@ -367,7 +373,7 @@ open Lean Meta in
 /-- Whether `type` mentions `numericOfWidth` at a literal width, which unfolds to one value. -/
 def loadsAtLiteralWidth (type : Expr) : Bool :=
   (type.find? fun e => e.isAppOfArity `CIL.Safety.numericOfWidth 2 &&
-    (e.appFn!.appArg!.nat? <|> e.appFn!.appArg!.rawNatLit?).isSome).isSome
+    (argument? e 0).any fun width => (width.nat? <|> width.rawNatLit?).isSome).isSome
 
 /-- The facts a loop tactic steps with: `core` at every instruction, and groups that speak only
     to some instructions, so each step's simp set holds only facts it can use. -/
@@ -512,25 +518,25 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
       candidates := candidates.push (.anonymous, fact, subject, memories, produced)
     else if ← isCaseDisequality type then
       candidates := candidates.push (`caseSplit, fact, variables #[type], #[], #[])
-    let arguments := type.getAppArgs
-    if type.isAppOfArity `CIL.Safety.ValidCall 3 then
-      let memory := arguments[0]!
+    if let some #[memory, _, _] := argumentsOf? type `CIL.Safety.ValidCall 3 then
       for (base, derived, view) in ← validCallArgumentFacts fact type do
         candidates := candidates.push (base, derived, variables #[view], #[memory], #[])
     for (side, evidence, stated) in objectEvidenceIn type do
       -- A straight-line goal names the object but not each memory its steps pass through.
-      let memory := stated.getArg! evidence.memory
-      let subject := variables #[stated.getArg! (evidence.memory + 1)]
+      let some memory := argument? stated evidence.memory | continue
+      let some object := argument? stated (evidence.memory + 1) | continue
+      let subject := variables #[object]
       for path in evidence.facts do
         let fact := named (name ++ side ++ path)
         candidates := candidates.push (`objectFact, fact, subject, #[memory], #[])
     if evidenceOnly then continue
-    if type.isAppOfArity `CIL.Safety.CheckedSpan 5 then
-      let subject := variables #[arguments[0]!, arguments[1]!]
-      if isLive arguments[0]! then
+    if let some #[spanMemory, view, _, _, values] :=
+        argumentsOf? type `CIL.Safety.CheckedSpan 5 then
+      let subject := variables #[spanMemory, view]
+      if isLive spanMemory then
         candidates := candidates.push
           (`spanFacts, applied `CheckedSpan.facts #[fact], subject, #[], #[])
-      let values := type.appArg!.consumeMData
+      let values := values.consumeMData
       if values.isAppOfArity ``List.nil 1 then
         candidates := candidates.push
           (`spanLength, applied `CheckedSpan.length_nil #[fact], subject, #[], #[])
@@ -539,38 +545,41 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
           (`spanLength, applied `CheckedSpan.length_cons #[fact], subject, #[], #[])
       -- A frame's memory may be one only a kept step produces, such as a local store's.
       for (frame, frameType) in typed do
-        unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 &&
-          frameType.getArg! 1 == arguments[0]! do continue
+        let some #[_, caller, framed, _, _, _] := argumentsOf? frameType `CIL.Safety.LoopFrame 6
+          | continue
+        unless caller == spanMemory do continue
         for (formed, formedType) in typed do
           unless formedType.isAppOfArity ``Memory.WellFormed 1 &&
-            formedType.appArg! == arguments[0]! do continue
+            lastArgument? formedType == some spanMemory do continue
           candidates := candidates.push (`spanFacts,
             applied `CheckedSpan.valid_within #[fact, named formed, named frame],
-            variables #[frameType.getArg! 2, arguments[1]!], #[frameType.getArg! 2], #[])
-    if type.isAppOfArity `CIL.Safety.WritableSpan 5 then
-      let subject := variables #[arguments[0]!, arguments[2]!]
-      if isLive arguments[0]! then
+            variables #[framed, view], #[framed], #[])
+    if let some #[spanMemory, _, view, _, count] :=
+        argumentsOf? type `CIL.Safety.WritableSpan 5 then
+      let subject := variables #[spanMemory, view]
+      if isLive spanMemory then
         candidates := candidates.push
           (`spanFacts, applied `WritableSpan.facts #[fact], subject, #[], #[])
-      let count := arguments[4]!.consumeMData
+      let count := count.consumeMData
       let literal (term : Expr) (value : Nat) : Bool := term.rawNatLit? == some value ||
-        (term.isAppOfArity ``OfNat.ofNat 3 && term.appFn!.appArg!.rawNatLit? == some value)
+        (term.isAppOfArity ``OfNat.ofNat 3 && (argument? term 1).bind (·.rawNatLit?) == some value)
       if count.isConstOf ``Nat.zero || literal count 0 then
         candidates := candidates.push
           (`spanLength, applied `WritableSpan.length_nil #[fact], subject, #[], #[])
       else if count.isAppOfArity ``Nat.succ 1 ||
-          (count.isAppOfArity ``HAdd.hAdd 6 && literal count.appArg! 1) then
+          (count.isAppOfArity ``HAdd.hAdd 6 && (lastArgument? count).any (literal · 1)) then
         candidates := candidates.push
           (`spanLength, applied `WritableSpan.length_cons #[fact], subject, #[], #[])
       for (frame, frameType) in typed do
-        unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 &&
-          frameType.getArg! 1 == arguments[0]! do continue
+        let some #[_, caller, framed, _, _, _] := argumentsOf? frameType `CIL.Safety.LoopFrame 6
+          | continue
+        unless caller == spanMemory do continue
         for (formed, formedType) in typed do
           unless formedType.isAppOfArity ``Memory.WellFormed 1 &&
-            formedType.appArg! == arguments[0]! do continue
+            lastArgument? formedType == some spanMemory do continue
           candidates := candidates.push (`spanFacts,
             applied `WritableSpan.valid_within #[fact, named formed, named frame],
-            variables #[frameType.getArg! 2, arguments[2]!], #[frameType.getArg! 2], #[])
+            variables #[framed, view], #[framed], #[])
     -- A reference check or address, or a caller fact a frame carries to its own memory. The
     -- caller's memory can be live too, since a frame's activation names its watermark.
     let hole : Term ← `(_)
@@ -579,19 +588,21 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
     let carriers (memory : Expr) : Array (Lean.Name × Lean.Name × Expr) := Id.run do
       let mut found := #[]
       for (frame, frameType) in typed do
-        unless frameType.isAppOfArity `CIL.Safety.LoopFrame 6 && frameType.getArg! 1 == memory &&
-          frameType.getArg! 2 != memory do continue
+        let some #[_, caller, framed, _, _, _] := argumentsOf? frameType `CIL.Safety.LoopFrame 6
+          | continue
+        unless caller == memory && framed != memory do continue
         for (formed, formedType) in typed do
-          if formedType.isAppOfArity ``Memory.WellFormed 1 && formedType.appArg! == memory then
-            found := found.push (frame, formed, frameType.getArg! 2)
+          if formedType.isAppOfArity ``Memory.WellFormed 1 &&
+              lastArgument? formedType == some memory then
+            found := found.push (frame, formed, framed)
       return found
     let formTerms (memory : Expr) (proof : Term) : Array (Term × Array Expr) :=
       (if isLive memory then #[(proof, #[])] else #[]) ++
         (carriers memory).map fun (frame, formed, framed) =>
           (applied `LoopFrame.caller_form #[named frame, named formed, proof], #[framed])
     if let some (_, checked, _) := type.eq? then
-      if checked.isAppOfArity `CIL.Safety.access 5 then
-        for (proof, memories) in formTerms (checked.getArg! 0) (applied `access_reference_valid
+      if let some #[accessed, _, _, _, _] := argumentsOf? checked `CIL.Safety.access 5 then
+        for (proof, memories) in formTerms accessed (applied `access_reference_valid
             #[hole, hole, hole, hole, hole, fact]) do
           candidates := candidates.push (`referenceFact, proof, #[], memories, #[])
     if let some (carry, memory, formedResult) ← loopCallerFact? type then
@@ -603,39 +614,43 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
       -- A span fact is carried only for a span the goal names; each produces its result.
       if let some (_, lhs, rhs) := type.consumeMData.eq? then
         let subject := if formedResult.isSome then #[]
-          else (variables lhs.getAppArgs).filter (· != memory.fvarId!)
+          else (variables lhs.getAppArgs).filter (some · != memory.fvarId?)
         -- A span's or array's validity stays with every step, since loading either reads it.
         let viewValid := carry == `LoopFrame.caller_valid || carry == `LoopFrame.caller_array_valid
         let base := if viewValid then `callerFact else `referenceFact
         for (frame, formed, framed) in carriers memory do
           candidates := candidates.push (base,
             applied carry #[named frame, named formed, fact], subject, #[framed], variables #[rhs])
-    if type.isAppOfArity `CIL.Safety.SpanContents 4 then
+    if let some #[_, view, _, _] := argumentsOf? type `CIL.Safety.SpanContents 4 then
       candidates := candidates.push (`elementWidth, applied `SpanContents.elementWidth #[fact],
-        variables #[arguments[1]!], #[], #[])
+        variables #[view], #[], #[])
     -- An entry frame for every footprint gives the frame facts at the empty one.
     let entered ← match type with
       | .forallE _ domain body _ =>
-        if body.isAppOfArity `CIL.Safety.LoopFrame 6 && body.getArg! 0 == .bvar 0 then
-          let empty ← mkAppOptM ``List.nil #[domain.appArg!]
+        if body.isAppOfArity `CIL.Safety.LoopFrame 6 && argument? body 0 == some (.bvar 0) then
+          let some element := lastArgument? domain | pure none
+          let empty ← mkAppOptM ``List.nil #[element]
           pure (some (← `(($fact [])), body.instantiate1 empty))
         else pure none
       | _ => pure none
     let framed := if type.isAppOfArity `CIL.Safety.LoopFrame 6 then some (fact, type) else entered
     if let some (frameTerm, frameType) := framed then
-      let frameArguments := frameType.getAppArgs
+      -- Both sources of `framed` state a `LoopFrame` applied to all six arguments.
+      let #[_, _, frameMemory, _, slots, remembered] := frameType.getAppArgs
+        | throwError "gatherLoopFactGroups: expected a loop frame, but found\
+            {indentExpr frameType}"
       -- Facts at a frame's memory are kept once a state holds it or a kept step produces it.
-      let memory := #[frameArguments[2]!]
-      let subject := variables #[frameArguments[4]!]
+      let memory := #[frameMemory]
+      let subject := variables #[slots]
       let numeral (index : Nat) : Term := ⟨Syntax.mkNumLit (toString index)⟩
       -- Each byte home forms, so `localAddr` of it steps.
-      for (index, slot) in ← listEntries frameArguments[4]! do
+      for (index, slot) in ← listEntries slots do
         if (← whnf slot).isAppOfArity ``LocalSlot.bytes 2 then
           candidates := candidates.push (`homeForm,
             applied `LoopFrame.form_home #[frameTerm, numeral index], subject, memory, #[])
-      let remembered := frameArguments[5]!.consumeMData
-      if remembered.isAppOfArity `CIL.Safety.knownLocals 1 then
-        for (index, entry) in ← listEntries remembered.appArg! do
+      let remembered := remembered.consumeMData
+      if let some #[locals] := argumentsOf? remembered `CIL.Safety.knownLocals 1 then
+        for (index, entry) in ← listEntries locals do
           unless (← whnf entry).isAppOfArity ``Option.some 2 do continue
           candidates := candidates.push (`homeLoad,
             applied `LoopFrame.load #[frameTerm, numeral index], subject, memory, #[])
@@ -660,13 +675,15 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
               #[valid, numeral field, valuesTerm], subject, memory, #[])
             candidates := candidates.push (base, applied load
               #[frameTerm, numeral index, valid, numeral field], subject, memory, #[])
-    if type.isAppOfArity `CIL.Safety.LoopFrame 6 && isLive arguments[2]! then
-      if confinedToNone type && scope.returns then
+    if let some #[_, caller, frameMemory, _, _, _] :=
+        argumentsOf? type `CIL.Safety.LoopFrame 6 then
+      if isLive frameMemory && confinedToNone type && scope.returns then
         for (setup, setupType) in typed do
           let some (_, entry, _) := setupType.eq? | continue
-          unless entry.isAppOfArity ``enterFrame 3 && entry.appArg! == arguments[1]! do continue
+          unless entry.isAppOfArity ``enterFrame 3 && lastArgument? entry == some caller do
+            continue
           candidates := candidates.push (`frameLeave,
-            applied `LoopFrame.leave_kept #[named setup, fact], variables #[arguments[2]!], #[],
+            applied `LoopFrame.leave_kept #[named setup, fact], variables #[frameMemory], #[],
             #[])
   -- Checked loads extend object reachability; unrelated objects and memories stay excluded.
   let direct := reached
@@ -674,13 +691,13 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
   let mut changed := true
   while changed do
     changed := false
-    for index in [:candidates.size] do
-      let (base, _, subject, memories, produced) := candidates[index]!
+    for h : index in [:candidates.size] do
+      let (base, _, subject, memories, produced) := candidates[index]
       -- A span's validity is read where a kept equation, such as a slice, produced the span.
       let visible := if base.isAnonymous || base == `caseSplit || base == `spanFacts ||
           base == `objectFact then reached
         else direct
-      if !kept[index]! && subject.all visible.contains &&
+      if kept[index]? == some false && subject.all visible.contains &&
           memories.all fun memory => live.all (·.contains memory) then
         kept := kept.set! index true
         reached := reached ++ produced

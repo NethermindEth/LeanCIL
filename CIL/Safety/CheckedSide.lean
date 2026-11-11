@@ -2,6 +2,7 @@ import CIL.Safety.CheckedHomes
 import CIL.Safety.FrameLemmas
 import CIL.Safety.WordMemory
 import CIL.SymbolicExecution
+import CIL.TermAccess
 
 /-!
 # Checked side-condition normalization
@@ -16,7 +17,7 @@ namespace CIL.Safety
 open Lean Meta in
 /-- Expose the scalar constructor returned by a helper while retaining its symbolic payload. -/
 dsimproc_decl checkedScalarConstructor (Value.scalar _) := fun expression => do
-  let value := expression.appArg!
+  let some value := lastArgument? expression | return .continue
   let reduced ← whnfD value
   if reduced == value then return .continue
   let some name := reduced.getAppFn.constName? | return .continue

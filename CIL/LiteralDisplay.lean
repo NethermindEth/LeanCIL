@@ -28,18 +28,18 @@ private def hexDisplayed? (value : Expr) : DelabM (Option Nat) := do
 @[delab app.BitVec.ofNat]
 def delabHexBitVec : Delab := do
   let literal ← getExpr
-  guard (literal.getAppNumArgs == 2)
-  let some width := literal.getArg! 0 |>.nat? | failure
-  let some value ← hexDisplayed? (literal.getArg! 1) | failure
+  let #[widthTerm, valueTerm] := literal.getAppArgs | failure
+  let some width := widthTerm.nat? | failure
+  let some value ← hexDisplayed? valueTerm | failure
   `($(Syntax.mkNumLit (hexLiteral value)):num#$(Syntax.mkNumLit (toString width)):num)
 
 /-- Print a wide numeral of a bit-vector type, such as `(0x80000000 : W32)`, in hexadecimal. -/
 @[delab app.OfNat.ofNat]
 def delabHexBitVecNumeral : Delab := do
   let literal ← getExpr
-  guard (literal.getAppNumArgs == 3)
-  guard ((← Meta.whnfR (literal.getArg! 0)).isAppOfArity ``BitVec 1)
-  let some value ← hexDisplayed? (literal.getArg! 1) | failure
+  let #[type, valueTerm, _] := literal.getAppArgs | failure
+  guard ((← Meta.whnfR type).isAppOfArity ``BitVec 1)
+  let some value ← hexDisplayed? valueTerm | failure
   return Syntax.mkNumLit (hexLiteral value)
 
 end CIL

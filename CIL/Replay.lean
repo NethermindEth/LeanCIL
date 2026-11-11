@@ -93,11 +93,18 @@ def addDecl (decl : Lean.Declaration) : ReplayM Unit := do
     | .ok env => modify fun s => { s with env }
     | .error ex => throw <| .userError (← kernelMessage ex)
 
+/-- The constant `name` among those being replayed; a name the replay reaches but the replayed
+    constants lack is an error naming it. -/
+def replayedConstant (name : Lean.Name) : ReplayM Lean.ConstantInfo := do
+  let some ci := (← read).newConstants[name]?
+    | throw <| .userError s!"Constant {name} is not among the replayed constants"
+  return ci
+
 mutual
 /-- Replays the constants a pending name uses, then the name itself. -/
 partial def replayConstant (name : Lean.Name) : ReplayM Unit := do
   if ← isTodo name then
-    let some ci := (← read).newConstants[name]? | unreachable!
+    let ci ← replayedConstant name
     replayConstants ci.getUsedConstantsAsSet
     -- A mutual block may already have replayed this name.
     if (← get).pending.contains name then
@@ -114,12 +121,15 @@ partial def replayConstant (name : Lean.Name) : ReplayM Unit := do
         | .axiomInfo info => addDecl (.axiomDecl info)
         | .opaqueInfo info => addDecl (.opaqueDecl info)
         | .inductInfo info =>
-          let all ← info.all.mapM fun n => do pure (← read).newConstants[n]!
+          let all ← info.all.mapM replayedConstant
           for o in all do
             modify fun s =>
               { s with remaining := s.remaining.erase o.name, pending := s.pending.erase o.name }
           let ctorInfo ← all.mapM fun ci => do
-            pure (ci, ← ci.inductiveVal!.ctors.mapM fun n => do pure (← read).newConstants[n]!)
+            let .inductInfo member := ci
+              | throw <| .userError s!"Constant {ci.name} in the mutual block of {name} is not \
+                  an inductive"
+            pure (ci, ← member.ctors.mapM replayedConstant)
           for (_, ctors) in ctorInfo do
             for ctor in ctors do
               replayConstants ctor.getUsedConstantsAsSet

@@ -146,16 +146,16 @@ elab_rules : command
         let code := mkApp (mkConst ``CIL.Method.code) method
         let ops ← instructions name code
         declareSuffixes body code ops
-        for pc in [0:ops.size] do
+        for inRange : pc in [0:ops.size] do
           let index := pc % suffixBlock
           let start := pc - index
           -- A window per equation, so a long body's statements do not exhaust the command's.
           withCurrHeartbeats do
-            let found ← mkAppM ``Option.some #[ops[pc]!]
+            let found ← mkAppM ``Option.some #[ops[pc]]
             body.prove s!"_instruction{pc}" s!"The instruction at pc {pc} of `{name}`."
               (← mkEq (lookup.beta #[method, mkNatLit pc]) found)
               (mkApp7 (mkConst ``CIL.CodeSuffix.lookup) code (body.constant s!"_suffix{start}")
-                (mkNatLit start) ops[pc]! (mkNatLit index)
+                (mkNatLit start) ops[pc] (mkNatLit index)
                 (body.constant s!"_suffix{start}_placed") (← mkEqRefl found))
             -- Pre-order, as `@[cil_code ↓]`: simp rewrites the lookup before unfolding the body.
             addSimpTheorem simpSet (name.appendAfter s!"_instruction{pc}") (post := false)

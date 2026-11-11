@@ -4,6 +4,7 @@ import CIL.Safety.LoopFacts
 import CIL.Safety.NumericLocals
 import CIL.Safety.Obligations
 import CIL.Safety.MissingFacts
+import CIL.TermAccess
 
 /-!
 # Loop path automation
@@ -104,9 +105,10 @@ open Lean Meta in
 /-- The source state of a loop goal and, for `LoopReaches`, its target. -/
 def loopGoalStates (target : Expr) : MetaM (Option (Expr × Option Expr)) := do
   let target := (← instantiateMVars target).consumeMData
-  if target.isAppOfArity ``LoopReaches 5 then
-    return some (target.getArg! 3, some (target.getArg! 4))
-  if target.isAppOfArity ``LoopTerminates 5 then return some (target.getArg! 4, none)
+  if let some #[_, _, _, source, reached] := argumentsOf? target ``LoopReaches 5 then
+    return some (source, some reached)
+  if let some #[_, _, _, _, source] := argumentsOf? target ``LoopTerminates 5 then
+    return some (source, none)
   return none
 
 open Lean Meta in
@@ -123,10 +125,12 @@ open Lean Meta in
     as its literal value; the result is definitionally equal to `term`. -/
 def loopLiteralSums (term : Expr) : Expr :=
   term.replace fun part =>
-    if part.isAppOfArity ``HAdd.hAdd 6 && (part.getArg! 0).isConstOf ``Nat then
-      match (part.getArg! 4).nat?, (part.getArg! 5).nat? with
-      | some left, some right => some (mkNatLit (left + right))
-      | _, _ => none
+    if let some #[carrier, _, _, _, augend, addend] := argumentsOf? part ``HAdd.hAdd 6 then
+      if carrier.isConstOf ``Nat then
+        match augend.nat?, addend.nat? with
+        | some left, some right => some (mkNatLit (left + right))
+        | _, _ => none
+      else none
     else none
 
 open Lean Elab Tactic Meta in
@@ -167,15 +171,23 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
     forallMetaTelescopeReducing (← inferType (← mkConstWithFreshMVarLevels lemma))
   unless ← isDefEq conclusion target do throwError "the goal is not a loop path at a literal state"
   let lookups := premises.size - 4
-  for proof in [premises[lookups]!, premises[lookups + 1]!] do
-    let remaining ← Tactic.run proof.mvarId! <| Term.withoutErrToSorry <| withoutRecover <|
+  let methodLookup ← entryAt "loopFetch" premises lookups
+  let instructionLookup ← entryAt "loopFetch" premises (lookups + 1)
+  let stepPremise ← entryAt "loopFetch" premises (lookups + 2)
+  for proof in [methodLookup, instructionLookup] do
+    let .mvar lookup := proof | throwError "loopFetch: expected a lookup premise, but found\
+      {indentExpr proof}"
+    let remaining ← Tactic.run lookup <| Term.withoutErrToSorry <| withoutRecover <|
       evalTactic (← `(tactic| cil_lookup [$facts,*]))
     unless remaining.isEmpty do throwError "the method or instruction lookup did not close"
-  let fetched ← instantiateMVars (← inferType premises[lookups + 1]!)
+  let fetched ← instantiateMVars (← inferType instructionLookup)
   let some (_, _, op) := fetched.eq? | throwError "unexpected instruction lookup"
-  let found ← instantiateMVars premises[lookups]!
-  let instruction ← instantiateMVars premises[lookups + 1]!
-  return { op := op.appArg!, found, instruction, step := premises[lookups + 2]!.mvarId! }
+  let found ← instantiateMVars methodLookup
+  let instruction ← instantiateMVars instructionLookup
+  let op ← lastArgument "loopFetch" op
+  let .mvar step := stepPremise
+    | throwError "loopFetch: expected a step premise, but found{indentExpr stepPremise}"
+  return { op, found, instruction, step }
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
@@ -204,26 +216,28 @@ def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
   unless loopScalarOnly.contains name do return true
   let scalar (value : Expr) : MetaM Bool := return (← whnfR value).isAppOf ``Value.scalar
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
-  unless lhs.isAppOf ``step && lhs.getAppNumArgs == 7 do return true
+  let some #[_, _, _, args, frame, stack, _] := argumentsOf? lhs ``step 7 | return true
   if name == ``CIL.Op.arg then
     -- An argument is checked as it is loaded, so a reference argument's `form` is read.
-    let some index ← literalNat? (op.getArg! 0) | return true
-    let entries ← listEntries (lhs.getArg! 3)
+    let some indexTerm := argument? op 0 | return true
+    let some index ← literalNat? indexTerm | return true
+    let entries ← listEntries args
     let some (_, value) := entries.find? (·.1 == index) | return true
     return !(← scalar value)
   if name == ``CIL.Op.setLocal then
-    let stack ← whnfR (lhs.getArg! 5)
-    unless stack.isAppOfArity ``List.cons 3 do return true
-    return !(← scalar (stack.getArg! 1))
+    let stack ← whnfR stack
+    let some #[_, top, _] := argumentsOf? stack ``List.cons 3 | return true
+    return !(← scalar top)
   if name == ``CIL.Op.local then
     -- Loading a span or reference local checks it.
-    let some index ← literalNat? (op.getArg! 0) | return true
-    let frame ← whnfR (lhs.getArg! 4)
-    unless frame.isAppOfArity ``Frame.mk 5 do return true
-    let some (_, slot) := (← listEntries (frame.getArg! 1)).find? (·.1 == index) | return true
+    let some indexTerm := argument? op 0 | return true
+    let some index ← literalNat? indexTerm | return true
+    let frame ← whnfR frame
+    let some #[_, locals, _, _, _] := argumentsOf? frame ``Frame.mk 5 | return true
+    let some (_, slot) := (← listEntries locals).find? (·.1 == index) | return true
     let slot ← whnfR slot
-    unless slot.isAppOfArity ``LocalSlot.bytes 2 do return true
-    return (← whnfR (slot.getArg! 0)).isConstOf ``CIL.LocalKind.reference
+    let some #[kind, _] := argumentsOf? slot ``LocalSlot.bytes 2 | return true
+    return (← whnfR kind).isConstOf ``CIL.LocalKind.reference
   return false
 
 open Lean Meta in
@@ -234,17 +248,18 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) : MetaM Bool
     step.withContext do
   let op ← whnfR op
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
-  unless lhs.isAppOf ``CIL.Safety.step && lhs.getAppNumArgs == 7 do return true
+  let some #[_, _, _, _, frame, _, memory] := argumentsOf? lhs ``CIL.Safety.step 7
+    | return true
   if op.isAppOf ``CIL.Op.setLocal then
     -- A span or reference local's store reduces without a fact.
-    let some index ← literalNat? (op.getArg! 0) | return true
-    let frame ← whnfR (lhs.getArg! 4)
-    unless frame.isAppOfArity ``Frame.mk 5 do return true
-    let some (_, slot) := (← listEntries (frame.getArg! 1)).find? (·.1 == index) | return true
+    let some indexTerm := argument? op 0 | return true
+    let some index ← literalNat? indexTerm | return true
+    let frame ← whnfR frame
+    let some #[_, locals, _, _, _] := argumentsOf? frame ``Frame.mk 5 | return true
+    let some (_, slot) := (← listEntries locals).find? (·.1 == index) | return true
     unless (← whnfR slot).isAppOf ``LocalSlot.bytes do return true
   else unless op.isAppOf ``CIL.Op.setFieldAt || op.isAppOf ``CIL.Op.initAggregate do
     return true
-  let memory := lhs.getArg! 6
   let heads := [``storeLocal, ``storeValue, ``CIL.Safety.step]
   let states (type : Expr) : Bool := (type.find? fun part =>
     heads.any part.isAppOf && part.getAppArgs.contains memory).isSome
@@ -278,12 +293,12 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
   let saved ← saveState
   let some (source, _) ← loopGoalStates (← getMainTarget)
     | throwError "{tactic}: expected a `LoopReaches` or `LoopTerminates` goal{← obligationNote}"
-  let some parts ← loopStateParts? source
+  let some #[pc, _, _, memory] ← loopStateParts? source
     | throwError "{tactic}: the source state does not reduce to a literal state:\
         {indentExpr (loopLiteralSums source)}"
-  let some position ← literalNat? parts[0]!
+  let some position ← literalNat? pc
     | throwError "{tactic}: the pc is not a literal, so a branch was not decided; supply a fact \
-        deciding its condition. The pc is{indentExpr parts[0]!}"
+        deciding its condition. The pc is{indentExpr pc}"
   let fetched ← try loopFetch facts catch error =>
     saved.restore
     throwError "{tactic}: cannot fetch the instruction at pc {position}: {error.toMessageData}"
@@ -303,7 +318,7 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
     | some goals => MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n"
     | none => m!"no step equation or fact rewrites it"
   let hint ← loopMissingHint (residual.getD #[obligation])
-  throwError "{tactic}: cannot step pc {position} ({op}) at memory{indentExpr parts[3]!}\n\
+  throwError "{tactic}: cannot step pc {position} ({op}) at memory{indentExpr memory}\n\
     The step is{indentExpr obligation}\n\
     With the step equations and facts it reduces to{indentD shown}\n\
     Supply {hint}."
@@ -317,11 +332,11 @@ def loopTargetMismatch (tactic : String) (position : Nat) (source target : Expr)
   let some expected ← loopStateParts? target | return
   let names := #["pc", "frame", "stack", "memory"]
   let mut differing : MessageData := m!""
-  for index in [:4] do
-    unless ← withNewMCtxDepth (isDefEq reached[index]! expected[index]!) do
-      differing := differing ++ m!"\n{names[index]!}: reached\
-        {indentExpr (loopLiteralSums reached[index]!)}\n\
-        but the target has{indentExpr (loopLiteralSums expected[index]!)}"
+  for (name, reachedPart, expectedPart) in names.zip (reached.zip expected) do
+    unless ← withNewMCtxDepth (isDefEq reachedPart expectedPart) do
+      differing := differing ++ m!"\n{name}: reached\
+        {indentExpr (loopLiteralSums reachedPart)}\n\
+        but the target has{indentExpr (loopLiteralSums expectedPart)}"
   throwError "{tactic}: target state not matched at pc {position}:{differing}\nState a fact in \
     the reached form, or state the target in it."
 
@@ -330,7 +345,7 @@ open Lean Elab Tactic Meta in
 def loopMentionsStackOperations : TacticM Bool := withMainContext do
   let operations := [``List.drop, ``List.take, ``List.reverse, ``HAppend.hAppend]
   return ((← instantiateMVars (← getMainTarget)).find? fun term =>
-    term.isConst && operations.contains term.constName!).isSome
+    term.constName?.any operations.contains).isSome
 
 open Lean Elab Tactic Meta in
 /-- Step a loop goal through fetched instructions with the `facts` as `mode` directs, failing
@@ -361,15 +376,15 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     catch _ => saved.restore; return false
   let reachedPc : TacticM (Option (Nat × Expr × Expr)) := withMainContext do
     let some (source, some target) ← loopGoalStates (← getMainTarget) | return none
-    let some parts ← loopStateParts? source | return none
-    let some targetParts ← loopStateParts? target | return none
-    let some position ← literalNat? parts[0]! | return none
-    unless (← literalNat? targetParts[0]!) == some position do return none
+    let some #[pc, _, _, _] ← loopStateParts? source | return none
+    let some #[targetPc, _, _, _] ← loopStateParts? target | return none
+    let some position ← literalNat? pc | return none
+    unless (← literalNat? targetPc) == some position do return none
     return some (position, source, target)
   let currentPc : TacticM (Option Nat) := withMainContext do
     let some (source, _) ← loopGoalStates (← getMainTarget) | return none
-    let some parts ← loopStateParts? source | return none
-    literalNat? parts[0]!
+    let some #[pc, _, _, _] ← loopStateParts? source | return none
+    literalNat? pc
   let stops : Lean.Name → Bool := match mode with
     | .reach => fun _ => false
     | .finish => (· == ``CIL.Op.ret)
@@ -414,12 +429,14 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     -- The groups this instruction reads, normalised in the goal the first time one is read.
     let mut reading := prepared
     let read := facts.readBy op references
-    for index in [:read.size] do
-      if read[index]!.isEmpty then continue
-      let ready ← match normalised[index]! with
+    for h : index in [:read.size] do
+      if read[index].isEmpty then continue
+      let cached ← entryAt tactic normalised index
+      let base ← entryAt tactic groupBases index
+      let ready ← match cached with
         | some ready => pure ready
         | none => do
-          let asserted ← assertLoopFacts groupBases[index]! read[index]! facts.known
+          let asserted ← assertLoopFacts base read[index] facts.known
           normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|)) asserted
       normalised := normalised.set! index (some ready)
       reading := reading ++ ready

@@ -5,7 +5,8 @@ Read this when a `leancil` command exits with `1` or a proof step stops. It maps
 
 ## Diagnostic format
 
-A failed command prints three lines on stderr, then any Lean errors under `Lean errors (N):`:
+A failed command prints three lines on stderr, then any internal errors under
+`Internal errors (N):` and any Lean errors under `Lean errors (N):`:
 
 ```text
 Invalid: Lean could not prove the selected theorem.
@@ -39,7 +40,7 @@ starts it with `Error:`. Each Lean error cites `file:line:column` in the file yo
 
 `verify` writes `failed.json` into the artifact directory; `verify-batch` and `gates` write it
 into each failing request's output. Its `kind` classifies the failure, `diagnostics` lists every
-Lean error with its location, `message` is the unmodified output and `rerun` is the command that
+internal error and Lean error with its location, `message` is the unmodified output and `rerun` is the command that
 repeats the request
 ([failure reports](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#failure-reports)).
 
@@ -48,6 +49,7 @@ repeats the request
 | `stale-input` | The assembly, artifacts or proof inputs changed after extraction or during verification | Run `extract` again, then `verify` |
 | `unsupported-extraction` | The method or something it calls is outside the supported subset | Report the named item |
 | `invalid-request` | The proof path, the theorem name or an import is wrong | Fix `--proof`, `--theorem` or the import |
+| `internal-error` | Lean or a LeanCIL tactic printed an internal error, such as `PANIC at ...` or `Error: index out of bounds`, and the run is rejected even when Lean exited with `0`. The report says nothing about whether the proof holds | Report the message, with the proof and the module it names, as a LeanCIL issue |
 | `elaboration-error` | A Lean error other than an unsolved goal or a resource limit: a failed tactic, a missing import, an unknown name | Read the error |
 | `unsolved-goal` | A tactic block left goals open, or a `--goals` run found open goals | Rerun with `--goals` |
 | `resource-limit` | Heartbeats or recursion depth ran out; `resource` names which | Confirm the method and profile first: a proof run on another method or of a false property also exhausts limits. Then split the proof or supply the missing fact |

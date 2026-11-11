@@ -593,8 +593,13 @@ partial class Program : IDisposable
     // A reused process id must not append to an earlier process's trace, which a reader treats as old.
     static readonly string TraceFile = $"{Environment.ProcessId}-{Guid.NewGuid():N}.jsonl";
 
+    /// <summary>
+    /// Runs `command` and returns its exit code and output. A Lean command that exits 0 after printing an internal
+    /// error fails here, unless `internalErrors` is false and the caller attributes them itself.
+    /// </summary>
     static (int Code, string Output, string Stdout, string Stderr) Execute(IEnumerable<string> command, string? cwd = null, string? leanPath = null,
-        bool streamOutput = false, string? progress = null, IReadOnlyDictionary<string, string>? environment = null)
+        bool streamOutput = false, string? progress = null, IReadOnlyDictionary<string, string>? environment = null,
+        bool internalErrors = true)
     {
         var traceStage = progress;
 #if LEANCIL_TOOL
@@ -687,6 +692,8 @@ partial class Program : IDisposable
             Console.Error.WriteLine($"END {traceStage} (exit {process.ExitCode}, {elapsed.Elapsed.TotalSeconds:F1}s)");
 #endif
         Trace(traceStage ?? string.Join(" ", args.Take(2)), startedAtUtc, start.WorkingDirectory, elapsed.Elapsed, process.ExitCode, transcript, args);
+        if (internalErrors && LeanOutput.RejectedSuccess(args, process.ExitCode, output + error) is { } rejected)
+            throw rejected;
         return (process.ExitCode, output + error, output, error);
     }
 
@@ -3605,6 +3612,142 @@ partial class Program : IDisposable
             throw new InvalidOperationException("The verified result above stands and its certificate is " +
                 "written, but the whole certified library was not built: " + error.Message, error);
         }
+    }
+}
+/// <summary>
+/// Internal errors in the output of Lean, Lake or a Lean executable. Lean prints a panic and continues on a
+/// default value, so a run that reports one can still exit 0; no result of such a run is trusted.
+/// </summary>
+internal static partial class LeanOutput
+{
+    /// <summary>Starts each line that summarizes internal errors above the output they were found in.</summary>
+    internal const string SummaryPrefix = "Internal error: ";
+
+    /// <summary>One internal-error message, the module Lake was building and the position Lean logged it at.</summary>
+    internal sealed record InternalError(string? Module, string? Location, string Message);
+
+    // Lake job headers: failed, warned, informational and built.
+    [GeneratedRegex(@"^(?:✖|⚠|ℹ|✔) \[\d+/\d+\] \S+ (?<module>\S+)")]
+    internal static partial Regex Job();
+
+    // The exact text Lean's runtime writes to stderr: `panic!` with its source position, runtime aborts, the C
+    // array accessors, stack exhaustion and failed assertions. It counts only where a stderr line or a message
+    // body starts with it, which is where the runtime writes it; the same words inside a sentence are a quote.
+    [GeneratedRegex(@"\A(?:PANIC at \S+(?: \S+)?:\d+:\d+: .*|INTERNAL PANIC: .*|Error: index out of bounds\z|" +
+        @"Stack overflow detected\. Aborting\.|LEAN ASSERTION VIOLATION.*)")]
+    private static partial Regex Marker();
+
+    // A Lake log entry or a Lean message that starts at a source position.
+    [GeneratedRegex(@"^(?:(?:error|warning|info|trace): (?<location>.+?\.lean:\d+:\d+): |" +
+        @"(?<location>.+?\.lean:\d+:\d+): (?:error|warning|info)(?:\([^)]*\))?: )")]
+    private static partial Regex Located();
+
+    [GeneratedRegex(@"^(?:error|warning|info|trace): ")]
+    private static partial Regex Entry();
+
+    /// <summary>Whether `executable` is Lean, Lake or the audit executable built from Lean sources.</summary>
+    internal static bool RunsLean(string executable)
+    {
+        // Either separator ends the directory, so a path written on another host still names its program.
+        var name = executable[(executable.LastIndexOfAny(['/', '\\']) + 1)..];
+        if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name[..^".exe".Length];
+        return name is "lean" or "lake" or "leancil-audit";
+    }
+
+    /// <summary>
+    /// Every internal error in `output`, in order: a line of stderr, or a line of a message Lean logged, that
+    /// starts with the runtime's text. A logged one is at its message's position, in plain or `--json` output;
+    /// one written straight to stderr has none. `hidden` omits the modules of other requests.
+    /// </summary>
+    internal static List<InternalError> InternalErrors(string output, IReadOnlyCollection<string>? hidden = null)
+    {
+        var found = new List<InternalError>();
+        string? module = null;
+        // The position of the entry the current lines continue, kept only while that entry is an internal error.
+        string? continued = null;
+        foreach (var line in output.ReplaceLineEndings("\n").Split('\n'))
+        {
+            if (line.StartsWith(SummaryPrefix, StringComparison.Ordinal)) continue;
+            if (Job().Match(line) is { Success: true } job)
+            {
+                (module, continued) = (job.Groups["module"].Value, null);
+                continue;
+            }
+            if (module is not null && hidden?.Contains(module) == true) continue;
+            if (JsonMessage(line) is { } message)
+            {
+                foreach (var text in message.Data.ReplaceLineEndings("\n").Split('\n'))
+                    if (Marker().Match(text) is { Success: true } match)
+                        found.Add(new(module, message.Position, match.Value));
+                continued = null;
+                continue;
+            }
+            var located = Located().Match(line);
+            var entry = located.Success ? located : Entry().Match(line);
+            var location = located.Success ? located.Groups["location"].Value : entry.Success ? null : continued;
+            // The body of a logged message starts after its level and position; any other line is read whole.
+            var internalError = Marker().Match(line[entry.Length..]);
+            if (internalError.Success) found.Add(new(module, location, internalError.Value));
+            if (entry.Success) continued = internalError.Success ? location : null;
+        }
+        return found;
+    }
+
+    // The position and text of one `lean --json` message line.
+    static (string? Position, string Data)? JsonMessage(string line)
+    {
+        if (!line.StartsWith('{')) return null;
+        try
+        {
+            var message = JsonSerializer.Deserialize<JsonElement>(line);
+            if (message.ValueKind != JsonValueKind.Object || !message.TryGetProperty("data", out var data) ||
+                data.ValueKind != JsonValueKind.String)
+                return null;
+            var position = message.TryGetProperty("fileName", out var file) && file.ValueKind == JsonValueKind.String &&
+                message.TryGetProperty("pos", out var pos) && pos.ValueKind == JsonValueKind.Object &&
+                pos.TryGetProperty("line", out var row) && pos.TryGetProperty("column", out var column)
+                ? $"{file.GetString()}:{row.GetInt32()}:{column.GetInt32()}" : null;
+            return (position, data.GetString()!);
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException) { return null; }
+    }
+
+    /// <summary>
+    /// The errors each request's proof module printed, in the order of `modules`, or null when a module the
+    /// requests share printed one, which no single request owns.
+    /// </summary>
+    internal static InternalError[][]? ByRequest(IReadOnlyList<InternalError> errors, IReadOnlyList<string> modules) =>
+        errors.Any(error => error.Module is null || !modules.Contains(error.Module)) ? null
+            : [.. modules.Select(module => errors.Where(error => error.Module == module).ToArray())];
+
+    /// <summary>
+    /// The failure of a Lean command that exited 0 after printing an internal error, or null for any other run:
+    /// a failed command already fails, and other programs print such text only when they quote it.
+    /// </summary>
+    internal static InvalidOperationException? RejectedSuccess(IReadOnlyList<string> command, int code,
+        string output) =>
+        code == 0 && RunsLean(command[0]) && InternalErrors(output) is { Count: > 0 } errors
+            ? Failure(command, code, output, errors) : null;
+
+    /// <summary>
+    /// The failure of a command whose output holds `errors`: one summary line for each distinct message, naming
+    /// its module and position, then the whole output.
+    /// </summary>
+    internal static InvalidOperationException Failure(IEnumerable<string> command, int code, string output,
+        IReadOnlyList<InternalError> errors)
+    {
+        var text = new StringBuilder(
+            $"Lean reported an internal error (exit {code}): {string.Join(' ', command)}\n");
+        foreach (var group in errors.GroupBy(error => error))
+        {
+            var count = group.Count();
+            text.Append(SummaryPrefix).Append(group.Key.Message);
+            if (count > 1) text.Append($" ({count} times)");
+            if (group.Key.Location is { } location) text.Append(" at ").Append(location);
+            if (group.Key.Module is { } module) text.Append(" (building ").Append(module).Append(')');
+            text.Append('\n');
+        }
+        return new InvalidOperationException(text.Append(output).ToString());
     }
 }
 /// <summary>

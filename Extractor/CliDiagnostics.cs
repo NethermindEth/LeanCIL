@@ -87,7 +87,15 @@ internal static class CliDiagnostics
         if (missingTool)
             next = "Install the missing tool and ensure it is on PATH. Verification requires .NET, Lean and Lake.";
 
-        var summary = error is CliFailure && !missingTool ? stage switch
+        // A panic leaves a tactic running on a default value, so the report leads with it at any stage.
+        var internalError = !missingTool && LeanOutput.InternalErrors(error.Message,
+            raised.Data[LeanDiagnostics.HiddenModulesKey] as string[]).Count > 0;
+        if (internalError)
+            next = "Report the internal error below as a LeanCIL issue with the proof or module that produced it. " +
+                "No result of this run is accepted.";
+
+        var summary = internalError ? "Lean or a LeanCIL tactic reported an internal error."
+            : error is CliFailure && !missingTool ? stage switch
         {
             "proof checking" => "Lean could not prove the selected theorem.",
             "compile check" => "Lean could not compile the selected proof.",

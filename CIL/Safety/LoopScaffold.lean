@@ -5,6 +5,7 @@ import CIL.Safety.LoopFrames
 import CIL.Safety.LoopFrameFields
 import CIL.Safety.LoopFrameSteps
 import CIL.MethodIdentity
+import CIL.TermAccess
 import Lean
 
 /-!
@@ -268,23 +269,29 @@ private partial def withHomeReferences {α : Type} (homes : List AllocatedLocal)
     Meta.withLocalDeclD (Name.mkSimple s!"home{home.index}") (mkConst ``Reference) fun _ =>
       withHomeReferences rest continuation
 
+/-- The local a `bind_entry` binder or home reference is, or an error showing a term that is
+    not a local. -/
+private def localOf {m : Type → Type} [Monad m] [MonadError m] (binder : Expr) : m FVarId := do
+  let .fvar id := binder | throwError "bind_entry: expected a local, but found{indentExpr binder}"
+  return id
+
 /-- The binders among `variables` that `value` mentions, with the binders their types mention,
     as binder syntax and as arguments: a frame takes only what its layout depends on. -/
 private def mentionedBinders (variables : Array Expr) (value : Expr) :
     TermElabM (Array (TSyntax ``Lean.Parser.Term.bracketedBinderF) × Array Ident) := do
-  let userIds := variables.map Expr.fvarId!
+  let userIds ← variables.mapM localOf
   let mut needed := (collectFVars {} (← instantiateMVars value)).fvarIds.filter userIds.contains
-  for binder in variables.reverse do
-    if needed.contains binder.fvarId! then
-      let dependencies := (collectFVars {} (← binder.fvarId!.getType)).fvarIds
+  for binder in userIds.reverse do
+    if needed.contains binder then
+      let dependencies := (collectFVars {} (← binder.getType)).fvarIds
       needed := needed ++ dependencies.filter userIds.contains
-  let selected := variables.filter (needed.contains ·.fvarId!)
+  let selected := userIds.filter needed.contains
   let binders ← selected.mapM fun selection => do
-    let declaration ← selection.fvarId!.getDecl
+    let declaration ← selection.getDecl
     let type ← PrettyPrinter.delab declaration.type
     `(Lean.Parser.Term.bracketedBinderF| ($(mkIdent declaration.userName) : $type))
   let arguments ← selected.mapM fun selection => do
-    return mkIdent (← selection.fvarId!.getDecl).userName
+    return mkIdent (← selection.getDecl).userName
   return (binders, arguments)
 
 /-- Derive an entry whose locals allocate homes in symbolic memory. The frame is
@@ -306,7 +313,8 @@ private def elabAllocatingEntry (name : Ident)
       liftTermElabM <| Term.elabBinders binders fun variables => do
     let homes ← allocatedLocals body
     withAllocatedHomes memory homes 0 memory #[] fun introduced final => do
-      let references := (List.range homes.size).toArray.map (introduced[3 * ·]!)
+      let references ← (List.range homes.size).toArray.mapM fun position =>
+        entryAt "bind_entry" introduced (3 * position)
       let finalValue ← Term.elabTerm final (some (mkConst ``Memory))
       let keptType ← Term.elabTerm (← `(MemoryBelow ($memory).nextIdentity $memory $final))
         (some (mkSort .zero))
@@ -332,7 +340,9 @@ private def elabAllocatingEntry (name : Ident)
         let success ← Meta.mkAppOptM ``Except.ok
           #[some (mkConst ``ExecutionFault), some (← Meta.inferType pair), some pair]
         let equality ← Meta.mkFreshExprMVar (← Meta.mkEq (← instantiateMVars outcome) success)
-        let remaining ← Tactic.run equality.mvarId! (Tactic.evalTactic normalizer)
+        let .mvar equalityGoal := equality
+          | throwError "bind_entry: expected a metavariable, but found{indentExpr equality}"
+        let remaining ← Tactic.run equalityGoal (Tactic.evalTactic normalizer)
         unless remaining.isEmpty do
           throwError "Entry facts do not establish a successful allocation"
         let pair ← instantiateMVars pair
@@ -341,17 +351,17 @@ private def elabAllocatingEntry (name : Ident)
         if frame.hasMVar then throwError "Entry facts leave the allocated frame unresolved"
         unless entered == (← instantiateMVars finalValue) do
           throwError "Frame entry allocates storage other than its local homes"
-        let homeIds := references.map Expr.fvarId!
-        let userIds := variables.map Expr.fvarId!
+        let homeIds ← references.mapM localOf
+        let userIds ← variables.mapM localOf
         let mentioned := (collectFVars {} frame).fvarIds
         for fvar in mentioned do
           unless homeIds.contains fvar || userIds.contains fvar do
             throwError "The entered frame depends on intermediate allocation state"
         let (frameBinders, frameParameters) ← mentionedBinders variables frame
         addClosedTheorem setupName (variables ++ introduced.push keptVar)
-          (← equality.mvarId!.getType) equality
-        let parameters ← variables.mapM fun binder => do
-          return mkIdent (← binder.fvarId!.getDecl).userName
+          (← equalityGoal.getType) equality
+        let parameters ← userIds.mapM fun binder => do
+          return mkIdent (← binder.getDecl).userName
         return (homes, frameBinders, frameParameters, ← PrettyPrinter.delab frame, parameters)
   let frameName := mkIdent (name.getId ++ `frame)
   let homeNames := homes.map fun home => indexed "home" home.index
@@ -460,7 +470,7 @@ private def elabAllocatingEntry (name : Ident)
     let some (home, position) := homeAt index
       | writableHomes ← `(WritableHomes.skip (by intro _ _ same; cases same) $writableHomes)
         snapshots ← `(LocalSnapshots.skip $snapshots)
-    let fact := entryHomes[position]!
+    let fact ← entryAt "bind_entry" entryHomes position
     let storage ← storageFact home fact
     let fresh ← match position, homes[position - 1]? with
       | _ + 1, some prior => `(EntryHome.before_made
@@ -500,7 +510,9 @@ elab_rules : command
         let success ← Meta.mkAppOptM ``Except.ok
           #[some (mkConst ``ExecutionFault), some (← Meta.inferType pair), some pair]
         let equality ← Meta.mkFreshExprMVar (← Meta.mkEq outcome success)
-        let remaining ← Tactic.run equality.mvarId! (Tactic.evalTactic normalizer)
+        let .mvar equalityGoal := equality
+          | throwError "bind_entry: expected a metavariable, but found{indentExpr equality}"
+        let remaining ← Tactic.run equalityGoal (Tactic.evalTactic normalizer)
         unless remaining.isEmpty do
           throwError "Entry facts do not establish a successful allocation"
         let pair ← instantiateMVars pair
@@ -512,7 +524,7 @@ elab_rules : command
           (← Meta.whnf (← instantiateMVars outcome)).isAppOf ``Except.ok do
         throwError "Frame entry must reduce to a successful checked allocation"
       let parameters ← variables.mapM fun parameter => do
-        return mkIdent (← parameter.fvarId!.getDecl).userName
+        return mkIdent (← (← localOf parameter).getDecl).userName
       return (parameters, computed)
     let result := mkIdent (name.getId ++ `result)
     let frame := mkIdent (name.getId ++ `frame)
