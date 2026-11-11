@@ -42,8 +42,9 @@ theorem word_holds : wordContract.Holds Extracted.program 0 := by
   have formed := access_reference_valid _ _ _ _ _ (read_access loaded)
   have word := contents.load_word selected
   simp only [Reference.element_zero] at word
-  refine ⟨5, memory, [.scalar (.i64 input.first)], ?_, Confined.refl _ _,
-    input.first, rfl, rfl, rfl⟩
+  refine MethodContract.Holds.intro (c := wordContract) (input := input)
+    memory input.first ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+  cil_supply_fuel
   dsimp only [wordContract]
   simp only [Safety.invoke, Extracted.lookup0]
   simp [checkedValue, valid, enterFrame, Extracted.method0, makeLocals,

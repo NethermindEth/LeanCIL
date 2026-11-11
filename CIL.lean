@@ -59,10 +59,13 @@ import CIL.Safety.CallComposition
 import CIL.Safety.Embedding.DeadLocals
 import CIL.Safety.Embedding.Outcomes
 import CIL.Safety.Embedding.Simulation
+import CIL.Safety.Embedding.Contracts
 import CIL.Safety.Embedding.Suffix
 import CIL.Safety.Embedding.Step
 import CIL.Safety.Calling
 import CIL.Safety.CallingTransport
+import CIL.Safety.CallingFields
+import CIL.Safety.CallSegments
 import CIL.Safety.Certificate
 import CIL.Safety.CertifiedContract
 import CIL.Safety.CodeAt
@@ -201,6 +204,7 @@ import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
 import CIL.Safety.Segment
 import CIL.Safety.SegmentLocals
+import CIL.Safety.LocalCalls
 
 /-!
 # LeanCIL

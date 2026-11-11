@@ -29,8 +29,9 @@ internal static class VerificationSuites
     {
         [Core] =
         [
-            "Add", "AddModel", "Alias", "Calls", "Choose", "ConsumerBatchA", "ConsumerBatchB",
+            "Add", "AddModel", "Alias", "Calls", "CertificateReuse", "Choose", "ConsumerBatchA", "ConsumerBatchB",
             "ConsumerSupportUnion", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
+            "ProofBindingFamilies",
             "StaticData", "Struct", "StructCopy", "VerificationReuse", "WrongAdd"
         ],
         ["loops"] = ["Loops", "WordArrayOutlines"],
@@ -128,6 +129,10 @@ internal static class VerificationSuites
         new("lookups", "Tests/LookupScaling.cs",
             "lookup equations of extracted methods, hand-written bodies and templates at a per-instruction " +
             "cost that does not grow with the method"),
+        new("gates", "Tests/ProofGates.cs",
+            "manifest extraction, profiles, changed-source selection and mutation expectations"),
+        new("stepping", "Tests/SteppingScaling.cs",
+            "scalar and checked-memory stepping with per-instruction work, proof-size and latency budgets"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
             "substitution rejection"),

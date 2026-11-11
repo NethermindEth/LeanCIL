@@ -97,3 +97,59 @@ for (var methodIndex = 0; methodIndex < expectedImports.Length; methodIndex++)
         throw new Exception("Component imports lost declaration order, deduplication or conservative text dependencies");
 }
 Console.WriteLine("PASS component imports preserve order, literal dependencies and prior declarations only");
+
+var previousCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+var previousDisabled = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE");
+Directory.CreateDirectory(root);
+try
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(root, "Cache"));
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
+    using var producer = new Program { resolvedToolchain = Path.Combine(root, "Toolchain"), libraryKey = "same-sources" };
+    Directory.CreateDirectory(Path.Combine(producer.Toolchain, "bin"));
+    foreach (var binary in new[] { "lean", "leanchecker", "lake" })
+        File.WriteAllText(Path.Combine(producer.Toolchain, "bin", binary +
+            (OperatingSystem.IsWindows() ? ".exe" : "")), "unchanged toolchain fixture");
+    var snapshot = new SortedDictionary<string, string>(StringComparer.Ordinal) { ["revision:consumer"] = "unchanged" };
+    var framework = new SortedDictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["CIL.olean"] = "public-first", ["CIL.olean.private"] = "private-first",
+        ["CIL.olean.server"] = "server-first"
+    };
+    producer.baseModules = framework;
+    string Family() => producer.ConsumerSupportCacheKey(snapshot, [".lake/build/lib/lean"], ["lakefile.toml:unchanged"]);
+    var originalFamily = Family();
+    var publication = Path.Combine(root, "Publication");
+    Directory.CreateDirectory(publication);
+    const string artifact = "Extracted.olean";
+    File.WriteAllText(Path.Combine(publication, artifact), "generated certificate against first framework");
+    var generated = new SortedDictionary<string, ConsumerSupportModule>(StringComparer.Ordinal)
+    {
+        ["Extracted"] = new(new(StringComparer.Ordinal) { [ExtractedSourceKey] = "same-extraction" },
+            ["CIL"], [artifact])
+    };
+    File.WriteAllText(Path.Combine(publication, ConsumerSupportRecordName),
+        System.Text.Json.JsonSerializer.Serialize(generated));
+    producer.PublishSuccess(originalFamily + "-first", publication, originalFamily);
+    var bound = new Dictionary<string, string>(StringComparer.Ordinal) { [ExtractedSourceKey] = "same-extraction" };
+    var restored = producer.RestoreConsumerSupport(originalFamily, bound, Path.Combine(root, "Same"), dependent: true);
+    if (!restored.ContainsKey(artifact)) throw new Exception("Matching compiled framework lost authenticated support reuse");
+    foreach (var part in framework.Keys.ToArray())
+    {
+        var original = framework[part];
+        framework[part] = original + "-rebuilt";
+        var destination = Path.Combine(root, "Changed-" + part);
+        var mismatched = producer.RestoreConsumerSupport(Family(), bound, destination, dependent: true);
+        if (mismatched.Count != 0 || Directory.Exists(destination))
+            throw new Exception("Generated certificate restored against changed compiled framework: " + part);
+        framework[part] = original;
+    }
+    if (Family() != originalFamily) throw new Exception("Unchanged framework cannot recover its support generation");
+    Console.WriteLine("PASS authenticated generated support requires the exact compiled framework parts");
+}
+finally
+{
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", previousCache);
+    Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", previousDisabled);
+    Directory.Delete(root, true);
+}

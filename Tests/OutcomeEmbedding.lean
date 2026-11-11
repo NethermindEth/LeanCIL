@@ -46,8 +46,8 @@ theorem check_holds : checkContract.Holds literal 1 := by
   by_cases within : v ≤ 100
   · have bound : ¬ 100#64 < v := by simpa using within
     simp only [checkContract, raisesAbove, within, ite_true]
-    refine ⟨10, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
-    cil_checked_steps [bound]
+    cil_contract_steps [bound]
+    exact ⟨Confined.refl _ m, _, rfl, rfl⟩
   · have bound : 100#64 < v := by simpa using within
     simp only [checkContract, raisesAbove, within, ite_false]
     cil_raise_steps [bound]
@@ -63,7 +63,7 @@ def checkInRange : MethodContract W64 W64 where
 theorem check_in_range : checkInRange.Holds literal 1 := by
   rintro v m (within : v ≤ 100)
   have bound : ¬ 100#64 < v := by simpa using within
-  refine MethodContract.Holds.intro m _ ⟨10, ?_⟩ (Confined.refl _ m) rfl
+  refine MethodContract.Holds.intro m _ ?_ (Confined.refl _ m) rfl
   cil_checked_steps [bound]
 
 -- The method contract transfers to the extraction without reading `extractedCheck`.
@@ -81,14 +81,17 @@ theorem outer_holds (checkHolds : checkContract.Holds literal 1) : outerContract
     exact run_call_raises_of_contract checkHolds v rfl outer_call (by cil_checked_step []) rfl
       rfl trivial raised
   | none =>
-    cil_contract_steps []
-    refine run_call_of_outcome checkHolds v rfl outer_call (by cil_checked_step []) rfl trivial raised ?_
-    intro m1 out call
-    have same := call.post
+    apply WP.exists_execution
+    apply WP.enter rfl (by rfl) (by rfl)
+    apply WP.step rfl (by rfl) (by cil_checked_step [])
+    apply WP.call rfl outer_call (by cil_checked_step [])
+      ((WP.adequate (post := fun result =>
+        Confined [] m result.1 ∧ checkContract.Returns v m result.1 result.2)).mpr
+        (checkHolds.returning (initial := m) trivial raised))
+    rintro final values ⟨framed, out, rfl, same⟩
     subst out
-    dsimp only [checkContract]
-    cil_contract_steps []
-    exact MethodContract.Holds.returns call.framed rfl
+    apply WP.returned rfl (by rfl) (by cil_checked_step []) (by rfl)
+    exact ⟨framed, _, rfl, rfl⟩
 
 -- Both contracts transfer to the extraction; neither proof reads `extractedCheck`.
 theorem extracted_check : checkContract.Holds extracted 1 := check_embeds.holds (literal_set ▸ check_holds)
@@ -104,9 +107,11 @@ example (m : Safety.Memory) : Raises extracted 0 [.scalar (.i64 101)] m outOfRan
   extracted_outer.raising (input := 101) trivial (by show raisesAbove 101 = _; decide)
 
 example (m : Safety.Memory) : ∃ fuel final, Safety.invoke extracted fuel 0 [.scalar (.i64 100)] m = .ok (final, [.scalar (.i64 100)]) := by
-  obtain ⟨fuel, final, _, invoked, -, out, rfl, rfl⟩ :=
-    extracted_outer.returning (input := 100) (initial := m) trivial (by show raisesAbove 100 = _; decide)
-  exact ⟨fuel, final, invoked⟩
+  obtain ⟨final, out, call⟩ := extracted_outer.result (input := 100) (initial := m)
+    trivial (by show raisesAbove 100 = _; decide)
+  have same := call.post
+  subst out
+  exact exists_comm.mpr ⟨final, call.invoked⟩
 
 /-! The relocated fault location: the literal body throws at pc 6 of method 1, the extraction at pc 7. -/
 

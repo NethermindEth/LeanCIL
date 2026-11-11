@@ -228,7 +228,7 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
     ∃ fuel result returned,
       run program fuel method pc args frame (contract.args input).reverse memory =
         .ok (result, returned) ∧ post result returned := by
-  obtain ⟨_, _, _, invoked, _, _⟩ := holds input memory permitted
+  obtain ⟨_, _, invoked, _, _⟩ := holds input memory permitted
   obtain ⟨_, _, _, _, _, calleeChecked, _, _⟩ := invoke_success_setup invoked
   have calleeValid : ValuesValid memory (contract.args input) := by
     obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ calleeChecked
@@ -279,7 +279,7 @@ theorem MethodContract.Holds.forward {Input Output : Type}
       ReturnsUnchanged narrow (contract.results out)) :
     (contract.withArgs forwarded).Holds program method := by
   intro input initial permitted
-  obtain ⟨_, _, _, invoked, _, _⟩ := holds input initial permitted
+  obtain ⟨_, _, invoked, _, _⟩ := holds input initial permitted
   obtain ⟨_, _, _, _, _, calleeChecked, _, _⟩ := invoke_success_setup invoked
   have forwardedValid : ValuesValid initial (forwarded input) := by
     obtain ⟨same, valid⟩ := checkedValues_valid _ _ _ calleeChecked
@@ -290,6 +290,7 @@ theorem MethodContract.Holds.forward {Input Output : Type}
     simpa using (congrArg List.length (selected input)).symm
   have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode loads callee narrow)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
+  apply WP.adequate.mpr
   refine invoke_exists_of_run found (checkedValues_of_valid forwardedValid)
     (forwards.enterFrame _ _) ?_
   refine run_load_arguments found forwardedValid loads 0 [] (contract.args input)
@@ -489,6 +490,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     rw [split, ← List.append_nil loads, List.zip_append same]
     exact List.mem_append_left _ member
   have enteredValid := outerValid.preserve formed owned.1
+  apply WP.adequate.mpr
   refine invoke_exists_of_run found (checkedValues_of_valid outerValid) setup ?_
   refine run_load_arguments found enteredValid loads 0 [] loaded
     (fun position load located => ?_) loadedSome.symm loadedNarrowed ?_

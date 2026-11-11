@@ -78,7 +78,9 @@ theorem correctness (memory : Memory) (formed : memory.WellFormed)
     (Or.inr (Or.inr (by simp [numberBytes_length])))
   have countLoaded := load_word64_of_read countRead
   have stepLoaded := load_scalar_of_read (width := 4) (x := step) (by decide) stepRead
-  refine ⟨CIL.executionBound Extracted.program fresh, afterCount, ?_, ?_⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨afterCount, ?_, ?_⟩
   · cil_checked_steps [allocated, created, stepField, stepWritten, stepFormed,
       countFieldAfterStep, countStored, countFormed, countFieldAfter, stepFieldAfter,
       countLoaded, stepLoaded, tally, tallyType, tallySize]

@@ -44,8 +44,10 @@ theorem add_internal : addInternal.Holds Extracted.program 0 := by
   have sumForm := access_reference_valid _ _ _ _ _ writable
   have leftLoad := load_word64_of_read readLeft
   have rightLoad := load_word64_of_read readRight
-  refine ⟨CIL.executionBound Extracted.program 0, stored, [], ?_,
-    Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
+  refine MethodContract.Holds.intro (c := addInternal)
+    (input := ⟨left, right, sum, region, leftValue, rightValue⟩) stored [] ?_
+    (Confined.write wrote (by simp [addInternal, numberBytes])) ⟨rfl, readback⟩
+  dsimp only [addInternal, DerivedInterface.addArguments]
   cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction,
     memoryInstruction, observerCount, unspecifiedOperands, Value.hasUnspecified,
     CIL.Value.hasUnspecified, leftForm, rightForm, sumForm, leftLoad, rightLoad, store,
@@ -104,8 +106,8 @@ theorem smaller_footprint_not_refines : ¬ addInternal.Refines addUnframed := fu
 
 /-- No proof of the empty footprint exists for the actual extraction. -/
 theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program 0 := fun holds => by
-  obtain ⟨_, final, values, invoked, framed, -⟩ := holds sampleInput sample sample_pre
-  obtain ⟨_, otherFinal, otherValues, otherInvoked, -, _, rfl, -, readback⟩ :=
+  obtain ⟨_, ⟨final, values⟩, invoked, framed, -⟩ := holds sampleInput sample sample_pre
+  obtain ⟨_, ⟨otherFinal, otherValues⟩, otherInvoked, -, _, rfl, -, readback⟩ :=
     add_internal sampleInput sample sample_pre
   have same := congrArg Prod.fst (invoke_ok_unique invoked otherInvoked)
   dsimp only at same

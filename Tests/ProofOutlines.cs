@@ -1346,7 +1346,8 @@ foreach (var (name, fills) in new (string Name, (string Hole, string Filled)[] F
             "def Postcondition (_ : Reference) (_ : CIL.Extraction.TypeExpr) (nodesLength : Nat)\n" +
             "    (initial final : Memory) (result : W32) : Prop :=\n" +
             "  result = BitVec.ofNat 32 nodesLength ∧ final = initial"),
-        ("sorry -- Postcondition of the returned value", "exact ⟨rfl, rfl⟩")]),
+        ("sorry -- Postcondition of the returned value",
+            "exact ⟨BitVec.setWidth_ofNat_of_le (by decide) nodesLength, rfl⟩")]),
     // The statement leaves the covariance check of the stored shape as a premise, since a `Shape[]` may be an
     // array of any class derived from `Shape`.
     ("ArrayCovariance", [

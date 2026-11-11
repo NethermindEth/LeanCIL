@@ -87,14 +87,14 @@ theorem count_calls (holds : decrementContract.Holds Extracted.program decrement
   intro args initial permitted
   obtain ⟨x, rfl, rfl⟩ := permitted
   obtain ⟨remaining, counted, entered, enter⟩ := entry.checked x
-  obtain ⟨fuel, final, values, executed, satisfied⟩ :
+  have started :
       LoopTerminates Extracted.program countCalls [.scalar (.i32 x)]
         (fun _ values => values = [.scalar (.i32 x)])
         ⟨0, entry.frame remaining counted, [], entered⟩ := by
     cil_loop_recurse (terminates holds [.scalar (.i32 x)] x) (x, 0)
     case invariant => simp [invariant]
   exact ⟨countBody, entry.frame remaining counted, entered, countCalls.found, rfl, enter.setup,
-    fuel, final, values, executed, satisfied⟩
+    started⟩
 
 theorem correctness : CIL.Safety.Ensures Extracted.program countCalls
     (fun args initial => ∃ x : W32, args = [.scalar (.i32 x)] ∧ initial = Memory.empty)

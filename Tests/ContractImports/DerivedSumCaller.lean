@@ -19,26 +19,20 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   have rightForm := access_reference_valid _ _ _ _ _ (read_access readRight)
   have sumForm := access_reference_valid _ _ _ _ _ writable
   dsimp only [DerivedInterface.addPublic, DerivedInterface.addArguments, MethodContract.Returns]
-  refine invoke_exists_of_run found
+  apply WP.enter found
     (by simp [checkedValue, formValue, checkedAt, leftForm, rightForm, sumForm,
-      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) (by rfl) ?_
-  refine run_next_exists _ found Extracted.method0_instruction0
-    (by cil_checked_step [checkedValue, formValue, checkedAt, leftForm, Except.mapError]) ?_
-  refine run_next_exists _ found Extracted.method0_instruction1
-    (by cil_checked_step [checkedValue, formValue, checkedAt, rightForm, Except.mapError]) ?_
-  refine run_next_exists _ found Extracted.method0_instruction2
-    (by cil_checked_step [checkedValue, formValue, checkedAt, sumForm, Except.mapError]) ?_
-  refine run_call_of_contract holds ⟨left, right, sum, region, leftValue, rightValue⟩ found
-    Extracted.method0_instruction3
-    (by cil_checked_step [formValue, leftForm, rightForm, sumForm, DerivedInterface.addPublic,
-      DerivedInterface.addArguments, Except.mapError]) rfl
-    ⟨formed, readLeft, readRight, writable, apart, within⟩ ?_
-  intro final values call
-  obtain ⟨rfl, stored, kept⟩ := call.post
-  refine run_return_exists found Extracted.method0_instruction4 (by cil_checked_step [])
-    (by rfl) ?_
-  exact ⟨call.framed, [], rfl, rfl, stored, kept⟩
-
+      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) (by rfl)
+  apply WP.step found Extracted.method0_instruction0 (by cil_checked_step [leftForm])
+  apply WP.step found Extracted.method0_instruction1 (by cil_checked_step [rightForm])
+  apply WP.step found Extracted.method0_instruction2 (by cil_checked_step [sumForm])
+  apply WP.call found Extracted.method0_instruction3
+    (by cil_checked_step [leftForm, rightForm, sumForm, DerivedInterface.addPublic,
+      DerivedInterface.addArguments])
+    (holds ⟨left, right, sum, region, leftValue, rightValue⟩ memory
+      ⟨formed, readLeft, readRight, writable, apart, within⟩)
+  rintro final values ⟨framed, output, rfl, rfl, stored, kept⟩
+  apply WP.returned found Extracted.method0_instruction4 (by cil_checked_step []) (by rfl)
+  exact ⟨framed, [], rfl, rfl, stored, kept⟩
 #print axioms correctness
 
 end DerivedSumCaller

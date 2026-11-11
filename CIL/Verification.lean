@@ -54,7 +54,7 @@ theorem ensures_of_loop (program : CIL.Program) (method : Nat)
         LoopTerminates program method args (post args initial) ⟨0, frame, [], entered⟩) :
     Ensures program method pre post := by
   intro args initial permitted
-  obtain ⟨body, frame, entered, found, checked, setup, fuel, final, values, executed,
+  obtain ⟨body, frame, entered, found, checked, setup, fuel, ⟨final, values⟩, executed,
     satisfied⟩ := verified args initial permitted
   exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩
 

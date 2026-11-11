@@ -447,6 +447,23 @@ info: 'Tests.Automation.store_from_instruction_fact' depends on axioms: [propext
 #guard_msgs in #print axioms store_from_instruction_fact
 
 open CIL.Safety in
+/-- A quantified instruction fact supplies duplication through the generic step equation. -/
+theorem duplicate_from_instruction_fact (body : CIL.Method) (pc : Nat)
+    (args rest : List Value) (frame : Frame) (memory : Memory) (bits : BitVec 256)
+    (duplicated : ∀ (memory : Memory) (bits : BitVec 256) (rest : List Value),
+      instruction .dup (.scalar (.v256 bits) :: rest) memory =
+        .ok (memory, .scalar (.v256 bits) :: .scalar (.v256 bits) :: rest)) :
+    step body .dup pc args frame (.scalar (.v256 bits) :: rest) memory =
+      .ok (.next (pc + 1) (.scalar (.v256 bits) :: .scalar (.v256 bits) :: rest)
+        frame memory) := by
+  cil_checked_step [duplicated]
+
+/--
+info: 'Tests.Automation.duplicate_from_instruction_fact' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in #print axioms duplicate_from_instruction_fact
+
+open CIL.Safety in
 /-- A fact one level up, on `staticInstruction`, still closes the store: the retry tries it
     before unfolding `staticInstruction`, which would rewrite past it. -/
 theorem store_from_static_fact (body : CIL.Method) (args : List Value) (frame : Frame)

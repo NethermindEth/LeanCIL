@@ -59,8 +59,9 @@ theorem read_holds : readContract.Holds Extracted.program 1 := by
     simp [enterFrame, Extracted.method1, makeLocals, makeArgumentHomes, makeParameterHomes,
       makeLocal, storeLocal, Safety.Value.hasUnspecified, ReadInput.view, checked,
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  refine ⟨10, memory, [.scalar (.i32 input.expected)], ?_, Confined.refl _ _,
-    input.expected, rfl, rfl, rfl⟩
+  refine MethodContract.Holds.intro (c := readContract) (input := input)
+    memory input.expected ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+  cil_supply_fuel
   dsimp only [readContract]
   simp only [Safety.invoke, Extracted.lookup1]
   simp [checkedValue, numericValue, valid, entered, checkedAt, Except.mapError,
@@ -98,22 +99,18 @@ theorem slice_read_composes (program : Program)
       makeParameterHomes, makeLocal, storeLocal, sourceWidth, sourceReadonly, sourceValid,
       Safety.Value.hasUnspecified, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
-  have execution : ∃ fuel final returned,
-      Safety.run program fuel 0 0 args frame [] memory = .ok (final, returned) ∧
-      final = memory ∧ returned =
-        [.scalar (.i32 (input.expected + BitVec.ofNat 32 input.values.length))] := by
-    cil_contract_steps [caller, args, frame, loadLocal, storeLocal, sourceValid, sourceWidth,
-      sourceReadonly, valid, sliced, startBound, lengthBound, ReadInput.view]
-    cil_contract_call helper input [caller, args, ReadInput.view, sourceValid, valid]
-    · exact permitted
-    · intro final value call
-      obtain ⟨rfl, rfl⟩ := call.post
-      cil_contract_steps [caller, args, loadLocal, valid, ReadInput.view]
-      exact ⟨rfl, rfl⟩
-  obtain ⟨fuel, final, returned, ran, result⟩ := execution
-  refine ⟨fuel, final, returned, ?_, result⟩
-  simpa [Safety.invoke, caller, args, checkedValue, numericValue, sourceValid, entered,
-    checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure] using ran
-
+  apply WP.exists_execution
+  refine WP.enter caller (by
+    simp [checkedValue, numericValue, sourceValid, checkedAt, Except.mapError,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]) entered ?_
+  cil_contract_steps [caller, args, frame, loadLocal, storeLocal, sourceValid, sourceWidth,
+    sourceReadonly, valid, sliced, startBound, lengthBound, ReadInput.view]
+  apply WP.exists_execution
+  apply WP.call (by cil_lookup [caller]) (by cil_lookup [caller])
+    (by cil_checked_step [caller, args, ReadInput.view, sourceValid, valid])
+    (helper input memory permitted)
+  rintro final values ⟨framed, output, rfl, rfl, rfl⟩
+  cil_contract_steps [caller, args, loadLocal, valid, ReadInput.view]
+  exact ⟨rfl, rfl⟩
 #print axioms slice_read_composes
 end Tests.MemorySpanContracts

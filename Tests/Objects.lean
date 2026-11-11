@@ -383,4 +383,92 @@ theorem self_linked_no_segment {field : ReferenceField} {linked : CIL.Safety.Mem
     exact shorter next
 #print axioms self_linked_no_segment
 
+/-- A reference load followed by a word load through the object it produced. -/
+@[cil_code] def linkedReading : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.arg 0,
+      .memory (.objectReferenceField account.identity 8),
+      .memory (.objectField account.identity 0 8 false), .ret] }
+
+/-- The linked-object reader alone. -/
+@[cil_code] def linkedProgram : CIL.Program := [linkedReading]
+
+/-- The checked reference load makes its target's field evidence reachable even when the
+    goal does not name the target or its value before stepping. -/
+theorem loaded_reference_evidence (memory : CIL.Safety.Memory) (source target : Reference)
+    (frame : Frame)
+    (link : (ReferenceField.mk account.identity 8).Readable memory source)
+    (held : (ReferenceField.mk account.identity 8).of memory source = .address target)
+    (value : (WordField.mk account.identity 0 : WordField 8).Readable memory target) :
+    ∃ result, run linkedProgram 20 0 0 [.object (.address source)] frame [] memory =
+      .ok (leaveFrame frame memory, [result]) := by
+  refine ⟨?_, ?_⟩
+  case refine_2 => cil_checked_steps [link.facts held value.live]
+#print axioms loaded_reference_evidence
+
+/-- Named checked loads also expose their produced object's evidence, without collecting
+    a field of an unrelated object or a field stated at a different memory. -/
+theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
+    (source target unrelated : Reference) (frame : Frame)
+    (link : (ReferenceField.mk account.identity 8).Readable memory source)
+    (held : (ReferenceField.mk account.identity 8).of memory source = .address target)
+    (value : (WordField.mk account.identity 0 : WordField 8).Readable memory target)
+    (irrelevant : (WordField.mk account.identity 0 : WordField 8).Readable memory unrelated)
+    (stale : (WordField.mk account.identity 0 : WordField 8).Readable otherMemory target) :
+    ∃ result, run linkedProgram 20 0 0 [.object (.address source)] frame [] memory =
+      .ok (leaveFrame frame memory, [result]) := by
+  have loaded := link.load_live held value.live
+  refine ⟨?_, ?_⟩
+  case refine_2 =>
+    run_tac Lean.Elab.Tactic.withMainContext do
+      let gathered ← gatherEvidenceFacts #[]
+      let unrelated ← Lean.Elab.Tactic.getFVarId (Lean.mkIdent `unrelated)
+      let otherMemory ← Lean.Elab.Tactic.getFVarId (Lean.mkIdent `otherMemory)
+      for fact in gathered do
+        Lean.Elab.Tactic.withMainContext do
+          let proof ← Lean.Elab.Term.elabTerm fact none
+          let type ← Lean.Meta.inferType proof
+          if type.hasAnyFVar (fun id => id == unrelated || id == otherMemory) then
+            throwError "Unreachable object evidence entered the step facts"
+    cil_checked_steps
+#print axioms named_reference_load_evidence
+
+/-- A receiver check selects a Boolean-returning instance call or an explicit exception. -/
+@[cil_code] private def checkedReceiverProgram : CIL.Program := [
+  { returnsValue := true, locals := [], code := [
+    .arg 0, .brnonzero 3, .throw "MissingReceiver", .arg 0, .const32 1,
+    .callInstance 1 2, .ret (some .unsigned8)] },
+  { returnsValue := true, locals := [], code := [.arg 1, .ret (some .unsigned8)] }]
+
+/-- A symbolic live receiver decides the branch and passes the call's closed argument guard. -/
+theorem checked_receiver_call (memory : CIL.Safety.Memory) (receiver : Reference)
+    (frame : Frame)
+    (formed : formObject memory (.address receiver) = .ok (.object (.address receiver))) :
+    run checkedReceiverProgram 12 0 0 [.object (.address receiver)] frame [] memory =
+      .ok (leaveFrame frame memory, [.scalar (.i32 1)]) := by
+  cil_checked_steps [formed]
+#print axioms checked_receiver_call
+
+/-- A null receiver takes the explicit exception path without entering the callee. -/
+theorem checked_receiver_throws (memory : CIL.Safety.Memory) (frame : Frame) :
+    run checkedReceiverProgram 12 0 0 [.object .null] frame [] memory =
+      .error ⟨0, 2, .thrown "MissingReceiver"⟩ := by
+  cil_checked_steps
+#print axioms checked_receiver_throws
+
+/-- A narrow Boolean parameter is written through its receiver's one-byte field. -/
+@[cil_code] private def narrowStoreProgram (kind : NarrowKind) : CIL.Program := [
+  { returnsValue := false, locals := [], code := [
+    .arg 0, .arg 1 (some kind), .memory (.setObjectField account.identity 0 1), .ret] }]
+
+/-- Narrowing a literal Boolean preserves the payload of a supplied checked field write. -/
+theorem narrowed_boolean_store (kind : NarrowKind) (memory stored : CIL.Safety.Memory)
+    (receiver : Reference) (frame : Frame)
+    (formed : formObject memory (.address receiver) = .ok (.object (.address receiver)))
+    (written : memoryInstruction (.setObjectField account.identity 0 1)
+      [.scalar (.i32 1), .object (.address receiver)] memory = .ok (stored, [])) :
+    run (narrowStoreProgram kind) 5 0 0 [.object (.address receiver), .scalar (.i32 1)]
+      frame [] memory = .ok (leaveFrame frame stored, []) := by
+  cil_checked_steps [formed, written]
+#print axioms narrowed_boolean_store
+
 end Tests.Objects

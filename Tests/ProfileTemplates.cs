@@ -34,6 +34,11 @@ public static class Dispatch
         return value;
     }
 }
+public static class StaticDispatch
+{
+    public static readonly uint Bias = 7;
+    public static uint Read() => Bias;
+}
 """);
 Run(["dotnet", "build", Path.Combine(source, "Dispatch.csproj"), "-c", "Release"]);
 var assembly = Path.Combine(source, "bin/Dispatch.dll");
@@ -52,7 +57,12 @@ if (templates.Split("@[cil_code] def method").Length != 4 ||
 var renamed = File.ReadAllText(Path.Combine(shared, "TemplateBindings3.lean"));
 if (!renamed.Contains("Templates.method0 Extracted.profile true true 2", StringComparison.Ordinal))
     throw new InvalidOperationException("Wrapper extraction did not exercise changed managed callee indices.");
-var library = FixtureLeanPath();
+var library = args switch
+{
+    [] => FixtureLeanPath(),
+    ["--framework", var framework] => Path.Combine(Path.GetFullPath(framework), ".lake/build/lib/lean"),
+    _ => throw new ArgumentException("Usage: ProfileTemplates.cs [--framework <compiled checkout>]")
+};
 var sharedPath = shared + Path.PathSeparator + library;
 
 void Compile(string root, string name, string path)
@@ -192,3 +202,47 @@ File.Copy(Path.Combine(genericShared, "TemplateBindings0.lean"), Path.Combine(ge
     overwrite: true);
 Compile(generic, "TemplateBindings0", genericPath);
 Console.WriteLine("PASS distinct closed generic callee identities and exact bindings");
+
+var staticOutputs = new[] { "scalar", "x64-v3" }.Select(profile =>
+    Path.Combine(directory, "Static-" + profile)).ToArray();
+for (var index = 0; index < staticOutputs.Length; index++)
+    Run(["dotnet", ExtractorPath, "extract", assembly, "StaticDispatch::Read()", staticOutputs[index],
+        index == 0 ? "scalar" : "x64-v3", "--assume-initialized", "StaticDispatch"]);
+var staticShared = Path.Combine(directory, "StaticShared");
+Run(["dotnet", ExtractorPath, "templates", staticShared, .. staticOutputs]);
+var staticTemplate = File.ReadAllText(Path.Combine(staticShared, "Templates.lean"));
+if (!staticTemplate.Contains("fieldName := \"System.UInt32 StaticDispatch::Bias\"", StringComparison.Ordinal))
+    throw new InvalidOperationException("Static template omitted its field identity.");
+var staticFiles = Directory.GetFiles(staticShared).ToDictionary(path => Path.GetFileName(path)!, File.ReadAllText);
+Run(["dotnet", ExtractorPath, "templates", staticShared, .. staticOutputs]);
+if (Directory.GetFiles(staticShared).Any(path => File.ReadAllText(path) != staticFiles[Path.GetFileName(path)]))
+    throw new InvalidOperationException("Static template closure is not deterministic.");
+Compile(staticShared, "Templates", staticShared + Path.PathSeparator + library);
+for (var index = 0; index < staticOutputs.Length; index++)
+{
+    var path = staticOutputs[index] + Path.PathSeparator + staticShared + Path.PathSeparator + library;
+    Compile(staticOutputs[index], "Extracted", path);
+    var binding = "TemplateBindings" + index;
+    File.Copy(Path.Combine(staticShared, binding + ".lean"), Path.Combine(staticOutputs[index], binding + ".lean"),
+        overwrite: true);
+    Compile(staticOutputs[index], binding, path);
+}
+var staticBinding = File.ReadAllText(Path.Combine(staticShared, "TemplateBindings0.lean"));
+var staticPath = staticOutputs[0] + Path.PathSeparator + library;
+var changedStatic = Path.Combine(directory, "ChangedStatic");
+Directory.CreateDirectory(changedStatic);
+File.WriteAllText(Path.Combine(changedStatic, "Templates.lean"),
+    staticTemplate.Replace("StaticDispatch::Bias", "StaticDispatch::Changed", StringComparison.Ordinal));
+Compile(changedStatic, "Templates", changedStatic + Path.PathSeparator + library);
+RejectLean("ChangedStaticIdentity", staticBinding, changedStatic + Path.PathSeparator + staticPath);
+var siteStart = staticTemplate.IndexOf("staticSites := [", StringComparison.Ordinal);
+var siteEnd = staticTemplate.IndexOf("], code := [", siteStart, StringComparison.Ordinal);
+if (siteStart < 0 || siteEnd < 0) throw new InvalidOperationException("Static template has no descriptor list.");
+var missingStatic = Path.Combine(directory, "MissingStatic");
+Directory.CreateDirectory(missingStatic);
+File.WriteAllText(Path.Combine(missingStatic, "Templates.lean"),
+    staticTemplate[..siteStart] + "staticSites := [" + staticTemplate[siteEnd..]);
+Compile(missingStatic, "Templates", missingStatic + Path.PathSeparator + library);
+RejectLean("MissingStaticMetadata", staticBinding, missingStatic + Path.PathSeparator + staticPath);
+Console.WriteLine("PASS deterministic static metadata, exact profile bindings " +
+    "and changed/missing descriptor rejection");

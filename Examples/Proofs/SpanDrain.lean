@@ -53,8 +53,11 @@ theorem correctness : Ensures Extracted.program 0
       view.validate initial = .ok () ∧ view.width = 4 ∧ view.writable = false)
     (fun _ initial final values => final = initial ∧ values = [.scalar (.i32 0)]) := by
   rintro args initial ⟨view, rfl, valid, width, readOnly⟩
-  obtain ⟨fuel, executed⟩ := drain initial view valid width readOnly
-  exact ⟨fuel, initial, [.scalar (.i32 0)], executed, rfl, rfl⟩
+  apply WP.exists_execution
+  refine WP.consequence (post := fun result => result = (initial, [.scalar (.i32 0)])) ?_ ?_
+  · exact WP.exact_iff.mpr (drain initial view valid width readOnly)
+  rintro result rfl
+  exact ⟨rfl, rfl⟩
 #print axioms correctness
 
 end ExampleProof

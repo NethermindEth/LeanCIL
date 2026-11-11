@@ -63,4 +63,24 @@ theorem run_call_exists {program : CIL.Program} {method pc callee : Nat}
 #print axioms run_call_of_invoke
 #print axioms run_call_exists
 
+/-- Compose a separately proved child invocation with a caller postcondition. -/
+theorem run_call_post {program : CIL.Program} {method pc callee : Nat}
+    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {frame : Frame} {memory updated final : Memory} {post : Memory → List Value → Prop}
+    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
+    (stepped : step body op pc args frame stack memory =
+      .ok (.call callee arguments rest updated))
+    (child : ∃ fuel, invoke program fuel callee arguments updated = .ok (final, values))
+    (continuation : ∃ fuel result returned,
+      run program fuel method (pc + 1) args frame (values ++ rest) final =
+        .ok (result, returned) ∧ post result returned) :
+    ∃ fuel result returned,
+      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
+        post result returned := by
+  obtain ⟨parentFuel, result, returned, resumed, satisfied⟩ := continuation
+  obtain ⟨fuel, composed⟩ := run_call_exists methodFound instructionFound stepped child
+    ⟨parentFuel, resumed⟩
+  exact ⟨fuel, result, returned, composed, satisfied⟩
+#print axioms run_call_post
+
 end CIL.Safety

@@ -52,8 +52,9 @@ theorem correctness : TypedImportInterface.copy.Holds Extracted.program 0 := by
   have destinationAddress : add memory destination 1 (BitVec.ofNat 64 0) = .ok destination := by
     simpa using destinationReady.add_slice formed 1 0 8 (by decide) (by decide)
   have loaded := load_word64_of_read readable
-  refine ⟨CIL.executionBound Extracted.program 0, result, [], ?_,
-    Confined.write wrote (by simp only [width, List.mem_singleton]), (), rfl, readback⟩
+  refine MethodContract.Holds.intro (c := TypedImportInterface.copy)
+    (input := (source, destination, value)) result () ?_
+    (Confined.write wrote (by simp [TypedImportInterface.copy, width])) readback
   cil_checked_steps [checkedValue, numericValue, instruction, formValue, checkedAt,
     sourceForm, destinationForm, sourceAddress, destinationAddress, loaded, wrote,
     referenceAt, ordinaryAccessAlignment, Except.mapError, Bind.bind, Except.bind,

@@ -146,9 +146,13 @@ A source is measured on each tree by the run that verifies it:
 - A proof suite (`core`, `loops`, `outlines-control`, `outlines-objects`, `outlines-buffers`,
   `structoutlines`, `receiveroutlines`, `wordreader`, `savedwordreader`) is compared when
   selection chose that suite. Its rows are every output directory the suite verified: its
-  `Extracted.lean`, its `Symbols.lean` when present, and the proof that `verified.json` names,
-  provided the proof is unchanged since. Each extracted method's instruction equations are one
-  row, named for its `cil_instruction_equations` command. A directory is measured only while it
+  `Extracted.lean`, its `Symbols.lean` when present, keyed re-export modules imported by the proof,
+  and the proof that `verified.json` names, provided the proof is unchanged since.
+  Package-local imports are resolved through Lake and
+  measured with the proof; their source bytes and package configuration must match its verified
+  inputs. Missing or changed support is reported as unmeasured. Each extracted method's instruction
+  equations are one row, named for its `cil_instruction_equations` command. A directory is measured
+  only while it
   holds the report of an accepted proof, so a suite that also checks rejected proofs against an
   extraction verifies the accepted one last.
 
@@ -169,7 +173,8 @@ those rows as its base when the push run of its merge base published them: the r
 of that commit on main, which is what reusing a certified library without replay requires of its
 producer, the file must have the digest that job logged, and its rows must come from the same
 measurer and from that commit. The measurer is `scripts/ProofCost.lean`,
-`scripts/ProofCostReport.cs`, the row schema and the two workflow steps that measure. No other run
+`scripts/ProofCostReport.cs`, the shared selection helpers in `scripts/Verification.cs`, the row
+schema and the two workflow steps that measure. No other run
 supplies a base, and no pull request run measures one.
 
 `Proof cost` waits for the suites and measures nothing: on a pull request it downloads the head's
@@ -250,6 +255,9 @@ which needs no Lean, so every PR runs it:
   `cil_checked_steps` and pass a fact about the operation instead. A name the block binds with
   `have` is a hypothesis.
 - Every theorem of an example under `Examples/Proofs` has a `#print axioms` line in its file.
+- The consumer proof fixture imports only `CIL`, uses no interpreter dispatch or value-check
+  implementation helpers, and prints every theorem's axioms. Its elaboration in `core` checks
+  named call evidence and the goal forms described by the [public proof surface](PROOFS.md#public-proof-surface).
 
 Every fenced Lean block is elaborated unless its info string says why not:
 

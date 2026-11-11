@@ -1,5 +1,67 @@
 # Consumer packages and batch verification
 
+## Run a proof catalog
+
+`leancil gates gates.json` extracts and verifies an explicit catalog. Paths for assemblies,
+`proofRoot`, `outputRoot` and custom `@profile.json` files are relative to the manifest;
+proof paths are relative to `proofRoot`. Each profile gets its own extraction and result.
+
+```json
+{
+  "schema": 1,
+  "proofRoot": "verification",
+  "outputRoot": "artifacts/gates",
+  "gates": [{
+    "name": "add",
+    "assembly": "bin/Arithmetic.dll",
+    "method": "Arithmetic::Add(ulong,ulong)",
+    "profiles": ["scalar", "x64-v3"],
+    "proof": "Add.lean",
+    "theorem": "Add.correctness",
+    "variants": [{
+      "name": "commuted",
+      "assembly": "variants/Commuted.dll",
+      "expect": "certifies"
+    }, {
+      "name": "wrong-operation",
+      "assembly": "variants/Wrong.dll",
+      "expect": "rejected"
+    }]
+  }]
+}
+```
+
+Variant expectations apply the unchanged production proof to the variant assembly. `rejected`
+requires proof rejection and leaves no `verified.json`; a variant that verifies fails that
+expectation. `certifies` requires ordinary certification. Entries may also supply
+`initializedTypes` and `typeArguments`, with the same meaning as extraction options.
+
+`--method` selects a signature substring; `--profile` selects one exact profile name.
+Repeat `--changed path` for paths relative to the command's working directory. Lean changes
+select proofs whose import closure includes the file. C# changes use matching PDB locations of
+the extracted reachable methods. Missing debug information or referenced assemblies select
+conservatively; project and build-property changes select every candidate. No matching selection
+is an error. Selection makes no verification claim about omitted entries.
+
+`--parallel`, `--results`, `--format`, `--trace`, `--fresh` and `--rebuild-library` use the
+batch verifier's behavior and result format. `--check` uses compile-only behavior and cannot
+be combined with selected rejection expectations.
+
+## Check compilation
+
+`leancil verify-batch requests.json --check` compiles each proof and its import closure against
+the selected extraction. It reports every request as `Checked` or failed, with source locations
+for elaboration errors. Shared support is compiled once where possible; these compiled artifacts
+remain private to the invocation. This mode skips consumer kernel replay and theorem axiom audit,
+removes existing `verified.json` files and issues no certificate. A compile check makes no trust
+claim and does not replace verification. Rejection expectations require normal verification.
+
+Batch result records include `elapsedSeconds`, the latency from entry into batch verification
+until that request's result is known. It includes shared preparation and waiting for earlier
+workspaces, but excludes subsequent workspace cleanup. Requests sharing work can finish together;
+do not sum their latencies as independent execution costs. Normal verification and compile checks
+report the same measure for comparisons on identical requests.
+
 `leancil resolve-imports` derives `--import` and `--import-implementation` from
 SDK deps/NuGet asset selection; see [resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets).
 It only locates files; verification requires pins, caller audits, kernel replay and deployment
@@ -36,6 +98,27 @@ and dependency revisions. Sources are checked again before writing the report;
 new or changed consumer and dependency modules undergo kernel replay, and
 the selected theorem's transitive axioms are audited with the same policy as
 single-file verification. `verification.json` remembers the package root.
+
+## Generated proof bindings
+
+File-based C# runners can include [ProofBindingCatalog.cs](../scripts/ProofBindingCatalog.cs)
+from their pinned LeanCIL package. A `ProofGate` names the exact method, profile, proof path
+and theorem. Each `ProofBinding` supplies the complete Lean source from an explicit,
+consumer-reviewed recipe. `ProofBindingCatalog.Sources` checks the recipe identities against
+the catalog and rejects missing or duplicate entries, changed profiles or theorem names,
+conflicting sources and unsafe output paths. Recipes cover every catalog profile of each
+method they generate; other methods may keep handwritten proofs.
+
+Call `ProofBindingCatalog.Materialize(root, catalog, recipes)` before selecting imports or
+capturing verification sources. It emits deterministic UTF-8 files with LF endings. Pass
+`check: true` to reject missing or changed bytes without writing files. Identical source shared
+by several gates is emitted once. Proof-family recipes and arithmetic specifications belong
+in the consumer; the catalog does not infer them from method names.
+
+Generated files participate in the ordinary source identity, extraction binding and kernel
+audit described above. Generation removes maintained binding text, not proof obligations.
+Use the extractor's [profile templates](PROOFS-BINDING.md#generated-profile-templates) for shared extracted
+bodies; binding recipes do not replace its reachable-helper or static-metadata checks.
 
 ## Proof-authoring workspace
 
@@ -220,7 +303,8 @@ across method gates.
 **Cache key.** A support generation is keyed by:
 
 - the effective Lake configuration files, ordered resolved import paths and dependency revisions;
-- the `lean`, `leanchecker` and `lake` binaries, the certified framework and the verifier;
+- the `lean`, `leanchecker` and `lake` binaries, the certified framework's source identity
+  and compiled module hashes, and the verifier;
 - the environment variables Lean, Lake and elan read: `LEAN_*` except
   `LEAN_NUM_THREADS`, `LAKE_*`, `ELAN_*` and `RESERVOIR_*`. Unrelated variables
   such as `DOTNET_HOST_PATH` do not affect reuse. If consumer elaborators read
@@ -247,6 +331,9 @@ across method gates.
 
 **Integrity.**
 
+- A rebuilt framework with different compiled bytes cannot restore support from the
+  previous build, even when its sources are identical. This includes generated extraction
+  certificates, whose Lake traces depend on those compiled imports.
 - Modified or unsigned cache files fall back to rebuilding and kernel replay.
 - Republishing the same module set from a new session is a no-op, concurrent
   verifiers publish through an atomic rename, and a corrupt entry is replaced.
@@ -323,6 +410,13 @@ extractions need separate workspaces because `Extracted` is a single module name
 The first workspace certifies the extraction-independent support and later
 workspaces reuse exactly those artifacts; `--parallel count` bounds how many
 later workspaces run at once (default: processor count / 8).
+
+If a proof build changes an extraction's compiled module, verification fails at
+`extraction integrity`. The diagnostic names each changed module part and its before/after
+SHA-256 hashes, whether preparation restored or built the certificate, the isolated package path,
+and artifact/trace modification times and trace hashes. No certificate is issued for that
+request. These details distinguish changed artifact bytes from an ordinary unproved theorem;
+a timestamp alone does not establish why Lake rebuilt a module.
 
 Each request keeps an independent certificate. It is audited in its own Lean
 process importing only its own proof module, and it fails only for build or

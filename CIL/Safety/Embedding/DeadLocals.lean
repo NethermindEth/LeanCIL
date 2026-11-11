@@ -520,8 +520,8 @@ theorem _root_.CIL.MethodEmbedsDeadLocals.method_holds {Input Output : Type}
     {method : Nat} (holds : contract.Holds (program.set index expected) method) :
     contract.Holds program method := by
   intro input initial permitted
-  obtain ⟨fuel, final, values, invoked, confined, returns⟩ := holds input initial permitted
-  exact ⟨fuel, final, values, embeds.invoke invoked, confined, returns⟩
+  obtain ⟨fuel, result, invoked, confined, returns⟩ := holds input initial permitted
+  exact ⟨fuel, result, embeds.invoke invoked, confined, returns⟩
 
 #print axioms CIL.MethodEmbedsDeadLocals.method_holds
 

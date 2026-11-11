@@ -446,6 +446,10 @@ jobs:
             artifacts/verification-traces/
             artifacts/stage-timings.*
             artifacts/test-results-*.json
+            artifacts/CliReports/*.json
+            artifacts/SteppingScaling/*.json
+            artifacts/SteppingScaling/source.patch
+            artifacts/SteppingScaling/Runner.cs
             artifacts/**/verified.json
             artifacts/**/identity.json
             artifacts/**/*.lean

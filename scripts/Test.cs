@@ -201,6 +201,12 @@ RunFixture("Tests/InitializedTypes.cs", [], streamOutput: true, progress: "Initi
 Passed("explicit type initialization assumptions and identity");
 RunFixture("Tests/ConsumerVerification.cs", [], streamOutput: true, progress: "Consumer proof packages");
 Passed("external consumer proof package and transitive source identity");
+RunFixture("Tests/ProofBindingCatalog.cs", [], streamOutput: true, progress: "Consumer binding catalogs");
+Passed("exact binding catalogs and deterministic source materialization");
+RunFixture("Tests/ProofCostFrontend.cs", [], streamOutput: true, progress: "Proof measurement imports");
+Passed("proof measurements reject missing imports before diagnostic assertions");
+RunFixture("Tests/ProofBindingFamilies.cs", [], streamOutput: true, progress: "Generated integer binding families");
+Passed("certified equality and bitwise binding families with rejected recipe and body mutations");
 RunFixture("Tests/MethodSelectors.cs", [], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 
@@ -209,11 +215,14 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.DebugNames", "Tests.MethodContract", "Tests.ContractCalls", "Tests.ConstructContract", "Tests.OutcomeContract",
     "Tests.RuntimeExceptions", "Tests.Imports", "Tests.LoopOutcome", "Tests.ConfinedFootprints",
     "Tests.LocalSnapshots", "Tests.LocalSnapshotSteps", "Tests.AggregateFields", "Tests.LoopFrames",
+    "Tests.WeakestPrecondition", "Tests.LocalCalls", "Tests.CallingFields", "Tests.OperationFacts",
+    "Tests.VectorLocalCalls", "Tests.SimdCarryCalls", "Tests.OperationFactAdapters",
+    "Tests.AggregateMemorySteps",
     "Tests.LoopDiagnostics", "Tests.ContractConsequence", "Tests.InvocationCertificates",
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
-    "Tests.LiteralDisplay"],
+    "Tests.LiteralDisplay", "Tests.PublicProofSurface"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "

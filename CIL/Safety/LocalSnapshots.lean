@@ -81,6 +81,32 @@ theorem LocalSnapshots.after_below {before after : Memory} {slots : List LocalSl
   exact ⟨kind, home, stored, number, slot, fits, result,
     (preserved.read home (formed.access_bound (read_access loaded)) _ 1).trans loaded⟩
 
+/-- A checked readback replaces one local's snapshot. Every other remembered home needs
+    its own read-preservation proof, whether supplied by a write or a helper contract. -/
+theorem LocalSnapshots.after_effect {before after : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots before slots known)
+    (index : Nat) (kind : CIL.LocalKind) (home : Reference) (stored : CIL.Value) (number : Nat)
+    (slot : slots[index]? = some (.bytes kind home))
+    (fits : localNumber kind stored = .ok number)
+    (loaded : read after home (localWidth kind) 1 = .ok (numberBytes number (localWidth kind)))
+    (preserved : ∀ other value otherKind otherHome bytes, other ≠ index →
+      known other = some value → slots[other]? = some (.bytes otherKind otherHome) →
+      read before otherHome (localWidth otherKind) 1 = .ok bytes →
+      read after otherHome (localWidth otherKind) 1 = .ok bytes) :
+    LocalSnapshots after slots (rememberLocal known index (localResult kind stored)) := by
+  intro other value specified
+  by_cases same : other = index
+  · subst other
+    have result : localResult kind stored = value := by simpa [rememberLocal] using specified
+    exact ⟨kind, home, stored, number, slot, fits, result, loaded⟩
+  · have previous : known other = some value := by simpa [rememberLocal, same] using specified
+    obtain ⟨otherKind, otherHome, otherStored, otherNumber, otherSlot, otherFits, result,
+      readback⟩ := snapshots other value previous
+    exact ⟨otherKind, otherHome, otherStored, otherNumber, otherSlot, otherFits, result,
+      preserved other value otherKind otherHome _ same previous otherSlot readback⟩
+
+#print axioms LocalSnapshots.after_effect
+
 /-- Writing the bytes of `stored` to the home of local `index` remembers the value it loads
     as and keeps every other snapshot, since distinct writable homes never share an
     allocation. -/
@@ -93,22 +119,14 @@ theorem LocalSnapshots.after_write {entered before after : Memory} {boundary : N
     (slot : slots[index]? = some (.bytes kind home))
     (written : write before home (numberBytes number (localWidth kind)) 1 = .ok after) :
     LocalSnapshots after slots (rememberLocal known index (localResult kind stored)) := by
-  intro other value specified
-  by_cases same : other = index
-  · subst other
-    have sameValue : localResult kind stored = value := by
-      simpa [rememberLocal] using specified
-    have readback := write_readback _ _ _ _ _ written
-    have length : (numberBytes number (localWidth kind)).length = localWidth kind := by
-      simp [numberBytes]
-    rw [length] at readback
-    exact ⟨kind, home, stored, number, slot, fits, sameValue, readback⟩
-  · have previous : known other = some value := by simpa [rememberLocal, same] using specified
-    obtain ⟨otherKind, otherHome, otherStored, otherNumber, otherSlot, otherFits, result,
-      loaded⟩ := snapshots other value previous
-    exact ⟨otherKind, otherHome, otherStored, otherNumber, otherSlot, otherFits, result,
-      write_preserves_disjoint_read written loaded
-        (Or.inl (homes.distinct other index otherKind kind otherHome home same otherSlot slot))⟩
+  have readback := write_readback _ _ _ _ _ written
+  have length : (numberBytes number (localWidth kind)).length = localWidth kind := by
+    simp [numberBytes]
+  rw [length] at readback
+  apply snapshots.after_effect index kind home stored number slot fits readback
+  intro other _ otherKind otherHome _ different _ otherSlot loaded
+  exact write_preserves_disjoint_read written loaded
+    (Or.inl (homes.distinct other index otherKind kind otherHome home different otherSlot slot))
 
 /-- A checked local read pushes the remembered value. -/
 theorem LocalSnapshots.load {body : CIL.Method} {pc index : Nat} {args stack : List Value}

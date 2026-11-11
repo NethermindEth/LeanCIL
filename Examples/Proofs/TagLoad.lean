@@ -36,7 +36,9 @@ theorem correctness (memory : Memory) (tagged tags text : Reference) (length : N
       Tagged.Tag.Holds final tagged (.address text) := by
   have loaded := readable.facts held live
   obtain ⟨stored, framed, holds⟩ := owned.store live
-  refine ⟨CIL.executionBound Extracted.program take, _, ?_, framed, holds⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, framed, holds⟩
   cil_checked_steps [loaded.1, loaded.2, stored]
 
 #print axioms correctness
@@ -52,7 +54,9 @@ theorem takes_null (memory : Memory) (tagged tags : Reference) (length : Nat)
       Tagged.Tag.Holds final tagged .null := by
   have loaded := readable.facts_null held
   obtain ⟨stored, -, holds⟩ := owned.store_formed (value := .null) rfl
-  refine ⟨CIL.executionBound Extracted.program take, _, ?_, holds⟩
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨_, ?_, holds⟩
   cil_checked_steps [loaded.1, loaded.2, stored]
 
 #print axioms takes_null

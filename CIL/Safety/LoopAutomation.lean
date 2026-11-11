@@ -26,11 +26,12 @@ def instructionLocation (body : CIL.Method) (predicate : CIL.Op → Bool) : Nat 
 /-- A finite checked path whose cost is inferred while composing its instructions. -/
 def LoopReaches (program : CIL.Program) (method : Nat) (args : List Value)
     (source target : LoopState) : Prop :=
-  ∃ cost, LoopSegment program method args source target cost
+  WP (fun cost reached => LoopSegment program method args source reached cost)
+    (fun reached => reached = target)
 
 theorem loop_reaches_refl {program : CIL.Program} {method : Nat} {args : List Value}
     {state : LoopState} : LoopReaches program method args state state :=
-  ⟨0, fun _ => rfl⟩
+  ⟨0, state, (fun _ => rfl), rfl⟩
 
 /-- Prepends one fetched non-branching step to a loop path. -/
 theorem loop_reaches_next {program : CIL.Program} {method pc next : Nat}
@@ -41,8 +42,8 @@ theorem loop_reaches_next {program : CIL.Program} {method pc next : Nat}
     (stepped : step body op pc args frame stack memory = .ok (.next next values nextFrame updated))
     (rest : LoopReaches program method args ⟨next, nextFrame, values, updated⟩ target) :
     LoopReaches program method args ⟨pc, frame, stack, memory⟩ target := by
-  obtain ⟨cost, segment⟩ := rest
-  refine ⟨cost + 1, ?_⟩
+  obtain ⟨cost, reached, segment, rfl⟩ := rest
+  refine ⟨cost + 1, reached, ?_, rfl⟩
   intro fuel
   change run program (fuel + (cost + 1)) method pc args frame stack memory = _
   rw [← Nat.add_assoc, run_next found instruction stepped]
@@ -57,7 +58,7 @@ theorem loop_terminates_next {program : CIL.Program} {method pc next : Nat}
     (stepped : step body op pc args frame stack memory = .ok (.next next values nextFrame updated))
     (rest : LoopTerminates program method args post ⟨next, nextFrame, values, updated⟩) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
-  run_next_exists post found instruction stepped rest
+  WP.step found instruction stepped rest
 
 /-- A fetched `ret` whose checked results satisfy `post` terminates. -/
 theorem loop_terminates_return {program : CIL.Program} {method pc : Nat}
@@ -69,16 +70,15 @@ theorem loop_terminates_return {program : CIL.Program} {method pc : Nat}
     (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values)
     (satisfied : post (leaveFrame frame updated) values) :
     LoopTerminates program method args post ⟨pc, frame, stack, memory⟩ :=
-  ⟨1, leaveFrame frame updated, values, run_return found instruction stepped checked, satisfied⟩
+  WP.returned found instruction stepped checked satisfied
 
 theorem loop_reaches_terminates {program : CIL.Program} {method : Nat} {args : List Value}
     {source target : LoopState} {post : Memory → List Value → Prop}
     (path : LoopReaches program method args source target)
     (finished : LoopTerminates program method args post target) :
     LoopTerminates program method args post source := by
-  obtain ⟨cost, segment⟩ := path
-  obtain ⟨fuel, final, values, executed, satisfied⟩ := finished
-  exact ⟨fuel + cost, final, values, (segment fuel).trans executed, satisfied⟩
+  obtain ⟨cost, reached, segment, rfl⟩ := path
+  exact WP.of_prefix segment finished
 
 #print axioms loop_reaches_next
 #print axioms loop_terminates_return
@@ -267,7 +267,7 @@ def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
 
 /-- A hint naming the fact a stuck step needs, from the residual of that step. -/
 def loopMissingHint (residual : Array Lean.Expr) : Lean.MetaM Lean.MessageData :=
-  return (missingFactOf residual).hint
+  return missingFactHint residual
 
 open Lean Elab Tactic Meta in
 /-- Fail, as `tactic`, naming why the loop goal cannot be stepped: an undecided branch, an

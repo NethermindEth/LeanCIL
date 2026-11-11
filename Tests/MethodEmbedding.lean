@@ -1,6 +1,7 @@
 import CIL.Embedding.Tactic
 import CIL.Safety.Embedding.DeadLocals
 import CIL.Safety.Embedding.Simulation
+import CIL.Safety.Embedding.Contracts
 import CIL.Safety.SymbolicExecution
 import Tests.MulScalarFixture
 
@@ -37,6 +38,27 @@ def inserted : Method := {
 theorem identity : MethodEmbeds [body] 0 body := by cil_embed
 
 theorem dead_block_inserted : MethodEmbeds [inserted] 0 body := by cil_embed
+
+/-- A placed canonical suffix reuses its proof at the checked embedding's new position. -/
+theorem relocated_suffix (frame : Safety.Frame) (memory : Safety.Memory) (value : W32) :
+    Safety.CodeAt inserted 6 [.arg 1, .ret] ∧
+    Safety.WP (Safety.Execution (fun fuel => Safety.run [inserted] fuel 0 6
+      [.scalar (.i32 0), .scalar (.i32 value)] frame [] memory))
+      (fun (final, values) => final = Safety.leaveFrame frame memory ∧
+        values = [.scalar (.i32 value)]) := by
+  refine ⟨rfl, ?_⟩
+  have placed : Safety.CodeAt body 4 [.arg 1, .ret] := rfl
+  have canonical : Safety.WP (Safety.Execution (fun fuel =>
+      Safety.run ([inserted].set 0 body) fuel 0 4
+      [.scalar (.i32 0), .scalar (.i32 value)] frame [] memory))
+      (fun (final, values) => final = Safety.leaveFrame frame memory ∧
+        values = [.scalar (.i32 value)]) := by
+    cil_contract_steps [placed]
+    exact ⟨rfl, rfl⟩
+  have embedded : Embeds body inserted [0, 1, 2, 3, 6, 7] := by constructor <;> rfl
+  exact canonical.of_embedded_run rfl embedded
+
+#print axioms relocated_suffix
 
 /-- An expected body that still carries a dead block the extraction no longer emits. -/
 def withDeadBlock : Method := {

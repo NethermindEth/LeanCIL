@@ -18,6 +18,11 @@ namespace CIL.Safety
     Value.hasUnspecified (.scalar value) = value.hasUnspecified := rfl
 @[cil_guard] theorem guard_reference (value : ManagedReference) :
     Value.hasUnspecified (.reference value) = false := rfl
+/-- Managed object references carry no unspecified vector bits. -/
+@[cil_guard] theorem guard_managed_object (value : ManagedReference) :
+    Value.hasUnspecified (.object value) = false := rfl
+#print axioms guard_managed_object
+
 @[cil_guard] theorem guard_span (reference : ManagedReference) (length : Nat) :
     Value.hasUnspecified (.span reference length) = false := rfl
 

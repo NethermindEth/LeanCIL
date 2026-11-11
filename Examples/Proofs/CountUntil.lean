@@ -31,8 +31,8 @@ theorem bump_holds : bumpContract.Holds Extracted.program bump := by
     simp only [bumpContract, ite_true]
     cil_raise_steps []
   · simp only [bumpContract, same, ite_false]
-    refine ⟨8, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
-    cil_checked_steps [same]
+    cil_contract_steps [same]
+    exact ⟨Confined.refl _ m, _, rfl, rfl⟩
 
 /-- `CountUntil` raises exactly when the input exceeds the limit, after `limit` successful calls. -/
 def untilRaises (value limit : W32) : Option String :=

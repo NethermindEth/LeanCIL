@@ -10,14 +10,10 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   have found : linked[0]? = some Extracted.method0 := links.found Extracted.lookup0
   have holds : ImportFixture.addOne.Holds linked 1 := imported
   dsimp only [ImportFixture.addOne, MethodContract.Returns]
-  refine invoke_exists_of_run found (by rfl) (by rfl) ?_
-  refine run_next_exists _ found (by rfl : Extracted.method0.code[0]? = some (.arg 0))
-    (by cil_checked_step []) ?_
-  refine run_call_of_contract holds input found
-    (by rfl : Extracted.method0.code[1]? = some (.call 1 1)) (by cil_checked_step []) rfl formed ?_
-  intro final output call
-  refine run_return_exists found (by rfl : Extracted.method0.code[2]? = some (.ret none))
-    (by cil_checked_step []) (by rfl) ?_
-  exact ⟨call.framed, output, rfl, call.post⟩
-
+  apply WP.enter found (by rfl) (by rfl)
+  apply WP.step found (by rfl) (by cil_checked_step [])
+  apply WP.call found (by rfl) (by cil_checked_step []) (holds input memory formed)
+  rintro final values ⟨framed, output, rfl, post⟩
+  apply WP.returned found (by rfl) (by cil_checked_step []) (by rfl)
+  exact ⟨framed, output, rfl, post⟩
 end ExampleProof

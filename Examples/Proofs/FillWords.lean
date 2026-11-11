@@ -78,9 +78,15 @@ theorem correctness : Ensures Extracted.program 0
       Contents final base 8 (List.replicate n.toNat (v : BitVec (8 * 8))) ∧
         Confined [(base, 8 * n.toNat)] initial final) := by
   rintro args initial ⟨base, v, n, rfl, formed, valid, small, writable⟩
-  obtain ⟨fuel, final, executed, contents, framed⟩ :=
-    fill_words initial base v n formed valid small writable
-  refine ⟨fuel, final, [], executed, rfl, ?_⟩
+  have execution := fill_words initial base v n formed valid small writable
+  rw [exists_comm] at execution
+  simp only [exists_and_right] at execution
+  obtain ⟨final, executed, contents, framed⟩ := execution
+  apply WP.exists_execution
+  refine WP.consequence (post := fun result => result = (final, [])) ?_ ?_
+  · exact WP.exact_iff.mpr executed
+  rintro result rfl
+  refine ⟨rfl, ?_⟩
   intro other value count same
   simp only [List.cons.injEq, Value.reference.injEq, ManagedReference.address.injEq,
     Value.scalar.injEq, CIL.Value.i64.injEq, CIL.Value.i32.injEq, and_true] at same

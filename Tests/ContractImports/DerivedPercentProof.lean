@@ -28,9 +28,8 @@ theorem percent_exact : percentExact.Holds Extracted.program 0 := by
   by_cases within : value ≤ 100
   · have bound : value ≤ 100#64 := within
     simp only [percentExact, within, ite_true]
-    refine ⟨CIL.executionBound Extracted.program 0, memory, _, ?_, Confined.refl _ memory, _,
-      rfl, rfl⟩
-    cil_checked_steps [bound]
+    cil_contract_steps [bound]
+    exact ⟨Confined.refl _ memory, _, rfl, rfl⟩
   · have bound : ¬ value ≤ 100#64 := within
     simp only [percentExact, within, ite_false]
     cil_raise_steps [bound]
@@ -160,7 +159,7 @@ theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := f
 
 /-- No proof of the weaker pre exists for the actual extraction. -/
 theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program 0 := fun holds => by
-  obtain ⟨fuel, final, values, invoked, -⟩ := holds 101 Memory.empty trivial
+  obtain ⟨fuel, ⟨final, values⟩, invoked, -⟩ := holds 101 Memory.empty trivial
   exact raises_not_returns percent_above invoked
 
 /-- A changed exception type: `Percent(101)` throws `ArgumentOutOfRangeException`, not

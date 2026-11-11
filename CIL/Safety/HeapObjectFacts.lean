@@ -134,6 +134,16 @@ theorem objectMemory_field (memory : Memory) (type : RuntimeType) {size offset :
     Nat.lt_trans positive bounded, owned]
 #print axioms objectMemory_field
 
+/-- A fresh instance rejects a field declared by a class outside its runtime lineage. -/
+theorem objectMemory_field_unrelated (memory : Memory) (type : RuntimeType)
+    (size offset : Nat) (owner : CIL.Extraction.TypeExpr) (unrelated : owner ∉ type.lineage) :
+    objectFieldAddress (objectMemory memory type size) (.address ⟨memory.nextIdentity, 0⟩)
+      owner offset =
+        .error (.unsupported "Field owner is not the object's class or a base of it") := by
+  simp [objectFieldAddress, liveAllocation, objectMemory, checkedAt, Except.mapError, Bind.bind,
+    Except.bind, Pure.pure, Except.pure, unrelated]
+#print axioms objectMemory_field_unrelated
+
 /-- The bytes of a fresh instance are readable and writable with byte alignment. -/
 theorem objectMemory_access (memory : Memory) (type : RuntimeType) {size offset width : Nat}
     (bounded : size < nativeLimit) (fits : offset + width ≤ size) (nonempty : 0 < width)

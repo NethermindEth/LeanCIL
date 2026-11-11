@@ -125,7 +125,7 @@ theorem bump_outcome : bumpOutcome.Holds Extracted.program bump := by
   | null =>
     obtain ⟨fuel, thrown⟩ := bump_null_throws memory amount
     exact ⟨fuel, _, thrown, rfl⟩
-  | address account => exact bump_holds (account, amount) memory permitted
+  | address account => exact WP.adequate.mp (bump_holds (account, amount) memory permitted)
 
 #print axioms bump_outcome
 end ExampleProof

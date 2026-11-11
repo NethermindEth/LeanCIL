@@ -45,7 +45,7 @@ theorem loop_continue_vc {α : Type} {program : CIL.Program} {method : Nat}
     LoopTerminates program method args post (configuration state) ∨
       ∃ next cost, invariant next ∧ measure next < measure state ∧
         LoopSegment program method args (configuration state) (configuration next) cost := by
-  obtain ⟨cost, segment⟩ := path
+  obtain ⟨cost, reached, segment, rfl⟩ := path
   exact Or.inr ⟨next, cost, preserved, decreases, segment⟩
 #print axioms loop_continue_vc
 
@@ -66,7 +66,7 @@ theorem invoke_loop_vc {α : Type} {program : CIL.Program} {method : Nat} {body 
         LoopSegment program method args (configuration state) (configuration next) cost) :
     ∃ fuel final values,
       invoke program fuel method args memory = .ok (final, values) ∧ post final values := by
-  obtain ⟨fuel, final, values, executed, satisfied⟩ := loop_reaches_terminates path
+  obtain ⟨fuel, ⟨final, values⟩, executed, satisfied⟩ := loop_reaches_terminates path
     (loop_terminates program method args configuration invariant measure post progress start
       initial)
   exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩

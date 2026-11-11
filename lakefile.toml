@@ -30,6 +30,18 @@ name = "Tests.LiteralDisplay"
 name = "Tests.Automation"
 
 [[lean_lib]]
+name = "Tests.VectorLocalCalls"
+
+[[lean_lib]]
+name = "Tests.OperationFacts"
+
+[[lean_lib]]
+name = "Tests.OperationFactAdapters"
+
+[[lean_lib]]
+name = "Tests.AggregateMemorySteps"
+
+[[lean_lib]]
 name = "Tests.MethodBinding"
 
 [[lean_lib]]
@@ -112,6 +124,9 @@ name = "Tests.StoreFacts"
 
 [[lean_lib]]
 name = "Tests.SimdLanes"
+
+[[lean_lib]]
+name = "Tests.SimdCarryCalls"
 
 [[lean_lib]]
 name = "Tests.MulScalarFixture"
@@ -297,3 +312,15 @@ name = "Tests.NativeMethodTables"
 
 [[lean_lib]]
 name = "Tests.AggregateArrayStorage"
+
+[[lean_lib]]
+name = "Tests.WeakestPrecondition"
+
+[[lean_lib]]
+name = "Tests.LocalCalls"
+
+[[lean_lib]]
+name = "Tests.CallingFields"
+
+[[lean_lib]]
+name = "Tests.PublicProofSurface"

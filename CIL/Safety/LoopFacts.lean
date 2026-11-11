@@ -39,7 +39,8 @@ def entryEvidenceFields (proof type : Expr) : MetaM (Array (Name × Expr × Expr
 def loopFactHeads : List Lean.Name :=
   [``CIL.Safety.step, ``CIL.Safety.instruction, ``CIL.Safety.memoryInstruction,
     ``CIL.Safety.staticInstruction, ``CIL.Safety.loadLocal, ``CIL.Safety.storeLocal,
-    ``CIL.Safety.loadValue, ``CIL.Safety.storeValue, ``CIL.Safety.SpanView.element,
+    ``CIL.Safety.loadValue, ``CIL.Safety.loadSlot, ``CIL.Safety.storeValue,
+    ``CIL.Safety.SpanView.element,
     ``CIL.Safety.SpanView.slice, ``CIL.Safety.SpanView.validate, ``CIL.Safety.SpanView.width,
     ``CIL.Safety.SpanView.writable, ``CIL.Safety.ArrayView.validate, ``CIL.Safety.form,
     ``CIL.Safety.add]
@@ -257,6 +258,18 @@ structure LoopGoalScope where
   /-- Whether the goal can be closed by returning from the method. -/
   returns : Bool
 
+/-- Memories named by checked execution goals, including executions inside a postcondition.
+    This keeps evidence for an unrelated memory out of straight-line stepping. -/
+partial def executionMemories (expression : Lean.Expr) : Array Lean.Expr :=
+  let expression := expression.consumeMData
+  if expression.isAppOfArity ``run 8 || expression.isAppOfArity ``invoke 5 ||
+      expression.isAppOfArity ``step 7 then #[expression.appArg!]
+  else match expression with
+    | .app function argument => executionMemories function ++ executionMemories argument
+    | .lam _ _ body _ | .forallE _ _ body _ => executionMemories body
+    | .letE _ _ value body _ => executionMemories value ++ executionMemories body
+    | _ => #[]
+
 open Lean Meta in
 /-- The scope of a loop goal: for `LoopReaches` or `LoopTerminates`, its states, any
     postcondition and, only when the program reads an argument, the arguments; for any other
@@ -268,7 +281,10 @@ def loopGoalScope (target : Expr) : MetaM LoopGoalScope := do
     else if target.isAppOfArity `CIL.Safety.LoopTerminates 5 then
       (#[arguments[4]!], #[arguments[3]!])
     else (#[], #[])
-  if states.isEmpty then return { parts := #[target], memories := none, returns := true }
+  if states.isEmpty then
+    let memories := executionMemories target
+    let memories := if memories.isEmpty then none else some memories
+    return { parts := #[target], memories, returns := true }
   let read := if ← readsArguments arguments[0]! then #[arguments[2]!] else #[]
   let parts := states ++ post ++ read
   let returns := !post.isEmpty
@@ -302,6 +318,27 @@ partial def listEntries (list : Lean.Expr) (index : Nat := 0) :
   let cell ← whnf list
   unless cell.isAppOfArity ``List.cons 3 do return #[]
   return #[(index, cell.getArg! 1)] ++ (← listEntries cell.appArg! (index + 1))
+
+open Lean Elab Tactic Meta in
+/-- Checked argument facts with their source views, shared by entry gathering and write
+    continuations. The caller retains memory and reachability filtering. -/
+def validCallArgumentFacts (call : Term) (type : Expr) :
+    TacticM (Array (Name × Term × Expr)) := do
+  unless type.isAppOfArity `CIL.Safety.ValidCall 3 do return #[]
+  let arguments := type.getAppArgs
+  let mut facts := #[]
+  for (position, view) in ← listEntries arguments[1]! do
+    let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
+    let member ← `(List.mem_of_getElem? (i := $(quote position)) rfl)
+    for (base, name) in [(`argumentForm, `CIL.Safety.ValidCall.input_formed),
+        (`argumentRead, `CIL.Safety.ValidCall.input_word_step)] do
+      facts := facts.push (base, Syntax.mkApp (mkCIdent name) #[call, viewTerm, member], view)
+  for (position, view) in ← listEntries arguments[2]! do
+    let viewTerm ← Term.exprToSyntax (← withTransparency .default <| whnf view)
+    let member ← `(List.mem_of_getElem? (i := $(quote position)) rfl)
+    facts := facts.push (`argumentForm,
+      Syntax.mkApp (mkCIdent `CIL.Safety.ValidCall.output_formed) #[call, viewTerm, member], view)
+  return facts
 
 open Lean Meta in
 /-- The layout and field values of a remembered struct, `some (.aggregate (layout.encode
@@ -384,7 +421,7 @@ open Lean Elab Tactic Meta in
     Only hypotheses reachable by name are read, so shadowed and hygienic ones are skipped. A
     fact is kept only when the goal reaches every variable it is about: those of the scope
     `loopGoalScope` gives and of the explicit facts, then the right side of each kept equation;
-    a derived fact must be about variables reached without an equation. An equation is kept only
+    object evidence also follows references produced by kept equations. An equation is kept only
     at a memory that a state of the goal holds or a kept equation or explicit fact mentions, and
     a derived fact only at a state's memory. Derived facts are asserted as hygienic hypotheses,
     skipping any statement already gathered. Home forms, field reads and the negative sides of
@@ -394,8 +431,9 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
   let context ← getLCtx
   -- Most straight-line goals hold no object evidence, and step with the facts as given.
   if evidenceOnly then
-    let stated ← context.anyM fun declaration =>
-      return !(objectEvidenceIn (← instantiateMVars declaration.type)).isEmpty
+    let stated ← context.anyM fun declaration => do
+      let type ← instantiateMVars declaration.type
+      return !(objectEvidenceIn type).isEmpty || type.isAppOfArity `CIL.Safety.ValidCall 3
     unless stated do return { core := facts }
   let explicitName? (fact : Term) : TacticM (Option Lean.Name) := do
     unless fact.raw.isIdent do return none
@@ -450,21 +488,35 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
       catch _ => pure none
     saved.restore
     if let some type := type? then
-      unless type.hasMVar do known := known.push type.consumeMData
+      unless type.hasMVar do
+        known := known.push type.consumeMData
+        reached := reached ++ variables #[type]
+        let memories ← loopFactMemories type
+        live := live.map (· ++ asTerms (variables #[type]) ++ memories)
   for (name, type) in typed do
     let fact := named name
     if explicitNames.contains name then
       reached := reached ++ variables #[type]
-      live := live.map (· ++ asTerms (variables #[type]))
+      let memories ← loopFactMemories type
+      live := live.map (· ++ asTerms (variables #[type]) ++ memories)
       known := known.push type
       constants := constants ++ type.getUsedConstants
-    else if evidenceOnly then pure ()
+    else if evidenceOnly then
+      if let some (_, lhs, _) := type.eq? then
+        if lhs.isAppOf ``CIL.Safety.loadSlot then
+          if let some (subject, produced) ← loopFactSides? type then
+            candidates := candidates.push (.anonymous, fact, subject,
+              ← loopFactMemories type, produced)
     else if let some (subject, produced) ← loopFactSides? type then
       let memories ← loopFactMemories type
       candidates := candidates.push (.anonymous, fact, subject, memories, produced)
     else if ← isCaseDisequality type then
       candidates := candidates.push (`caseSplit, fact, variables #[type], #[], #[])
     let arguments := type.getAppArgs
+    if type.isAppOfArity `CIL.Safety.ValidCall 3 then
+      let memory := arguments[0]!
+      for (base, derived, view) in ← validCallArgumentFacts fact type do
+        candidates := candidates.push (base, derived, variables #[view], #[memory], #[])
     for (side, evidence, stated) in objectEvidenceIn type do
       -- A straight-line goal names the object but not each memory its steps pass through.
       let memory := stated.getArg! evidence.memory
@@ -616,8 +668,7 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
           candidates := candidates.push (`frameLeave,
             applied `LoopFrame.leave_kept #[named setup, fact], variables #[arguments[2]!], #[],
             #[])
-  -- Kept equations extend what is reached; derived facts need what the goal itself names,
-  -- since a value only a step produces may never reach the goal.
+  -- Checked loads extend object reachability; unrelated objects and memories stay excluded.
   let direct := reached
   let mut kept : Array Bool := candidates.map fun _ => false
   let mut changed := true
@@ -626,7 +677,8 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
     for index in [:candidates.size] do
       let (base, _, subject, memories, produced) := candidates[index]!
       -- A span's validity is read where a kept equation, such as a slice, produced the span.
-      let visible := if base.isAnonymous || base == `caseSplit || base == `spanFacts then reached
+      let visible := if base.isAnonymous || base == `caseSplit || base == `spanFacts ||
+          base == `objectFact then reached
         else direct
       if !kept[index]! && subject.all visible.contains &&
           memories.all fun memory => live.all (·.contains memory) then
@@ -705,9 +757,12 @@ def gatherLoopFacts (facts : Array Term) : TacticM (Array Term) :=
   return (← gatherLoopFactGroups facts).all
 
 open Lean Elab Tactic in
-/-- `facts`, followed by the object evidence facts `gatherLoopFactGroups` finds: what a
-    stepping tactic outside a loop takes from its context. -/
+/-- Explicit facts and the object, argument and frame evidence available to straight-line
+    stepping. A frame supplies storage and snapshots through the same rules as loop stepping. -/
 def gatherEvidenceFacts (facts : Array Term) : TacticM (Array Term) :=
-  return (← gatherLoopFactGroups facts (evidenceOnly := true)).all
+  withMainContext do
+    let framed ← (← getLCtx).anyM fun declaration => do
+      return (← instantiateMVars declaration.type).isAppOfArity `CIL.Safety.LoopFrame 6
+    return (← gatherLoopFactGroups facts (evidenceOnly := !framed)).all
 
 end CIL.Safety

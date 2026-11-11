@@ -72,7 +72,7 @@ theorem loop_reaches_outcome {program : CIL.Program} {method : Nat} {args : List
   cases raises with
   | none => exact loop_reaches_terminates path finished
   | some exception =>
-    obtain ⟨cost, segment⟩ := path
+    obtain ⟨cost, reached, segment, rfl⟩ := path
     obtain ⟨fuel, fault, ran, thrown⟩ := finished
     exact ⟨fuel + cost, fault, (segment fuel).trans ran, thrown⟩
 
@@ -98,8 +98,9 @@ theorem loop_outcome_call {Input Output : Type} {c : OutcomeContract Input Outpu
     exact run_call_raises_after_outcome holds input methodFound instructionFound stepped encoded
       permitted normal continuation
   | none =>
-    exact run_call_of_outcome holds input methodFound instructionFound stepped encoded permitted
-      normal continuation
+    exact WP.adequate.mpr (run_call_of_outcome holds input methodFound instructionFound stepped
+      encoded permitted normal (fun final output result =>
+        WP.adequate.mp (continuation final output result)))
 
 /-- `loop_outcome_call` that also hands the continuation the callee's `WellFormed`, static
     world and catalog agreement. -/
@@ -203,7 +204,7 @@ theorem ensures_outcome_of_loop (program : CIL.Program) (method : Nat)
   cases raises args initial with
   | some exception => exact raises_of_run found checked setup
   | none =>
-    rintro ⟨fuel, final, values, executed, satisfied⟩
+    rintro ⟨fuel, ⟨final, values⟩, executed, satisfied⟩
     exact ⟨fuel, final, values, invoke_of_run found checked setup executed, satisfied⟩
 
 #print axioms loop_outcome_induction

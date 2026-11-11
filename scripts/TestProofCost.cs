@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ProofCostReport.cs
+#:include Verification.cs
 #:include CertifiedLibraryDonor.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationGroupRunner.cs
@@ -128,7 +129,7 @@ try
     string Save(string name, Measurement measurement)
     {
         var path = Path.Combine(directory, name);
-        File.WriteAllText(path, JsonSerializer.Serialize(measurement, Json));
+        File.WriteAllText(path, JsonSerializer.Serialize(measurement, ProofCostReport.Json));
         return path;
     }
     var first = Save("base.json", Tree("base", Proof("slow", 10_000_000)));
@@ -138,13 +139,13 @@ try
     Require(merged.Rows.Count == 2 && merged.Rows[1].Measures["msPerInstruction"] == 10,
         "measurements from several producers merge into one");
     var markdown = Path.Combine(directory, "report.md");
-    Require(Run(["compare", "--base", first, "--head", second, "--markdown", markdown]) == 1 &&
+    Require(ProofCostReport.Run(["compare", "--base", first, "--head", second, "--markdown", markdown]) == 1 &&
         File.ReadAllText(markdown).Contains("### Regressions"), "the command exits nonzero on a regression");
     var acceptedPath = Path.Combine(directory, "accepted.json");
-    File.WriteAllText(acceptedPath, JsonSerializer.Serialize(new[] { entry }, Json));
-    Require(Run(["compare", "--base", first, "--head", second, "--accepted", acceptedPath]) == 0,
+    File.WriteAllText(acceptedPath, JsonSerializer.Serialize(new[] { entry }, ProofCostReport.Json));
+    Require(ProofCostReport.Run(["compare", "--base", first, "--head", second, "--accepted", acceptedPath]) == 0,
         "the command exits zero once the increase is accepted");
-    Require(Run(["compare", "--base", first, "--head", first]) == 0, "an unchanged tree exits zero");
+    Require(ProofCostReport.Run(["compare", "--base", first, "--head", first]) == 0, "an unchanged tree exits zero");
 }
 finally { Directory.Delete(directory, true); }
 
@@ -221,7 +222,7 @@ string RowsFile(string directory, string source, params Row[] rows)
 {
     Directory.CreateDirectory(Path.Combine(scratch, directory));
     var path = Path.Combine(scratch, directory, source + ".json");
-    File.WriteAllText(path, JsonSerializer.Serialize(Tree(source, rows), Json));
+    File.WriteAllText(path, JsonSerializer.Serialize(Tree(source, rows), ProofCostReport.Json));
     return Path.Combine(scratch, directory);
 }
 RowsFile("measured", "core", Proof("slow", 10_000_000));
@@ -231,7 +232,7 @@ var bundle = Path.Combine(scratch, "proof-cost-rows.json");
 var published = Publish(Path.Combine(scratch, "measured"), "measurer", "base commit");
 Require(published.Sources.Keys.SequenceEqual(["core", "wordreader"]),
     "a source main measured without rows is not published as a base");
-File.WriteAllText(bundle, JsonSerializer.Serialize(published, Json));
+File.WriteAllText(bundle, JsonSerializer.Serialize(published, ProofCostReport.Json));
 var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(bundle)));
 var baseRows = PublishedRows(bundle, digest, "measurer", "base commit");
 Require(baseRows.Keys.Order().SequenceEqual(["core", "wordreader"]) && baseRows["core"].Rows.Single().Name == "slow",
@@ -268,6 +269,14 @@ Require(Owner("ProofOutlines/control/Outlines/Choose") == "outlines-control" &&
     Owner("StructOutlines/Narrow") == "structoutlines" && Owner("CheckedConversions/conv_ovf_i1-32") is null &&
     Owner("Additional") is null, "an output belongs to the one suite that declares its directory");
 var noon = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc);
+Require(Owner("CertificateReuse-56769cb9/OtherExtraction") == "core" &&
+    Misattributed([new("core", noon, 0)],
+        [("CertificateReuse-56769cb9/OtherExtraction", noon.AddSeconds(30))]).Count == 0,
+    "certificate reuse outputs remain owned by core so its proof cost is measured");
+Require(Owner("ProofBindingFamilies/Equal32_scalar") == "core" &&
+    Misattributed([new("core", noon, 0)],
+        [("ProofBindingFamilies/Equal32_scalar", noon.AddSeconds(30))]).Count == 0,
+    "certified binding families are included in core proof measurements");
 VerificationGroupRunner.SuiteRun[] members =
 [
     new("conversions", noon, 0), new("receiveroutlines", noon.AddMinutes(1), 0),

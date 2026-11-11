@@ -56,8 +56,8 @@ theorem MethodContract.Holds.of_refines {Input Output : Type} {c : MethodContrac
     (refines : ProgramRefines expected actual maps) {method : Nat}
     (holds : c.Holds expected method) : c.Holds actual method := by
   intro input initial permitted
-  obtain ⟨fuel, final, values, invoked, confined, returns⟩ := holds input initial permitted
-  exact ⟨fuel, final, values, invoke_refines refines invoked, confined, returns⟩
+  obtain ⟨fuel, result, invoked, confined, returns⟩ := holds input initial permitted
+  exact ⟨fuel, result, invoke_refines refines invoked, confined, returns⟩
 
 /-- A method contract proved with `expected` in place of method `index` holds for `program`. -/
 theorem _root_.CIL.MethodEmbeds.method_holds {Input Output : Type}

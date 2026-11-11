@@ -226,7 +226,7 @@ theorem setSlot_slots_of_ne (memory : Memory) {field other : Reference}
       access memory reference width alignment writing := rfl
 
 /-- Object formation is unaffected by a field reference store. -/
-@[simp] theorem formObject_setSlot (memory : Memory) (field : Reference)
+@[simp, cil_side] theorem formObject_setSlot (memory : Memory) (field : Reference)
     (value reference : ManagedReference) :
     formObject (setSlot memory field value) reference = formObject memory reference := rfl
 

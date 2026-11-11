@@ -239,9 +239,11 @@ byte home is a skipped `WritableHomes` slot and a `none` value, and so the lemma
 pairs the loop's values with a memory and its `LoopFrame`, with the slots and remembered values as
 functions of the loop's values, so an invariant over a `FrameState` states only the property.
 `bind_entry ... allocating` proves the frame of the entered locals and parameter homes for any
-footprint, with each home remembered as its initializer and every other local as `none`; a
-default span or object local holds the null span or null and allocates nothing.
-`LoopFrame.ofEntry`, `WritableHomes.entry` and `skip`, and `LocalSnapshots.entry` and `skip` are
+footprint. Initialized homes remember their initializer; `.unmodeled` homes retain storage and
+write access with a `none` snapshot. The generated `Checked` evidence exposes `storageN` for an
+unknown local and `numericN` for an initialized one. Both carry allocation freshness and bounds.
+A default span or object local holds the null span or null and allocates nothing.
+`LoopFrame.ofEntry`, `WritableHomes.cons` and `skip`, and `LocalSnapshots.entry` and `skip` are
 the lemmas it composes. `set_local` keeps the frame when a local without a byte home is assigned,
 as the span fold slices its span and a list walk moves its object local to the next node; it
 rejects a home and a remembered local.
@@ -255,7 +257,24 @@ caller storage, `LoopFrame []`, has `kept` all of it and `leave_kept` gives the 
 `MemoryBelow` fact from the entry's `setup`. A local whose address is
 taken can change through that reference, so `write` and `after_confined` require every written
 allocation to be older than the frame (`allocation < caller.nextIdentity`); a write or callee that
-reaches a home does not elaborate and the snapshot stays the author's obligation.
+reaches a home requires an updated snapshot.
+
+Import `CIL.Safety.LocalCalls` for helpers that write private numeric homes, including vectors
+and writable but uninitialized locals. `LoopFrame.after_local_write` takes a helper confined
+to one home and its checked readback, replaces that home's snapshot, and preserves all other
+homes using their allocation separation. `LoopFrame.after_helper_write` also permits writes
+within the caller footprint; retaining other snapshots then requires separation from the
+complete helper footprint. These rules retain caller confinement, well-formedness and writable
+homes. Existing `leave` and `leave_kept` rules still discharge frame exit from actual allocation.
+
+`WP.local_call` composes a fetched call through a proved `MethodContract`, derives the updated
+frame, and supplies the continuation with named `CallResult` and `LoopFrame` evidence. Its
+postcondition must establish the destination's initialized readback. The typed output can
+carry another result, such as a high word returned alongside a low word written to a local.
+`CompleteWritableHomes.after_confined` keeps complete typed storage without claiming contents.
+Cell preservation or `AccessBelow` alone does not imply `Confined`; a helper using a weaker
+contract needs a proof of the additional allocation, slot and permission guarantees.
+
 `add_int_element`, `int_lt` and `toNat_succ` step a signed `int` index below `2^31` to an element
 offset and its compare. The [buffer fill proof](../Examples/Proofs/FillWords.lean) uses them with
 an invariant of only `Filled` and `k <= n`. [Countdown](../Examples/Proofs/Countdown.lean) needs

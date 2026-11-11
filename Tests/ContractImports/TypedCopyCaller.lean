@@ -11,22 +11,16 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
   have sourceForm := access_reference_valid _ _ _ _ _ (read_access readable)
   have destinationForm := access_reference_valid _ _ _ _ _ writable
   dsimp only [TypedImportInterface.copy, MethodContract.Returns]
-  refine invoke_exists_of_run found
+  apply WP.enter found
     (by simp [checkedValue, formValue, checkedAt, sourceForm, destinationForm,
-      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) (by rfl) ?_
-  refine run_next_exists _ found (by rfl : Extracted.method0.code[0]? = some (.arg 0))
-    (by cil_checked_step [checkedValue, formValue, checkedAt, sourceForm, Except.mapError]) ?_
-  refine run_next_exists _ found (by rfl : Extracted.method0.code[1]? = some (.arg 1))
-    (by cil_checked_step [checkedValue, formValue, checkedAt, destinationForm, Except.mapError]) ?_
-  refine run_call_of_contract holds (source, destination, value) found
-    (by rfl : Extracted.method0.code[2]? = some (.call 1 2))
-    (by cil_checked_step [formValue, sourceForm, destinationForm,
-      TypedImportInterface.copy, Except.mapError]) rfl
-    ⟨formed, readable, writable⟩ ?_
-  intro final output call
-  refine run_return_exists found (by rfl : Extracted.method0.code[3]? = some (.ret none))
-    (by cil_checked_step []) (by rfl) ?_
-  exact ⟨call.framed, (), rfl, call.post⟩
-
+      Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) (by rfl)
+  apply WP.step found (by rfl) (by cil_checked_step [sourceForm])
+  apply WP.step found (by rfl) (by cil_checked_step [destinationForm])
+  apply WP.call found (by rfl)
+    (by cil_checked_step [sourceForm, destinationForm, TypedImportInterface.copy])
+    (holds (source, destination, value) memory ⟨formed, readable, writable⟩)
+  rintro final values ⟨framed, output, rfl, post⟩
+  apply WP.returned found (by rfl) (by cil_checked_step []) (by rfl)
+  exact ⟨framed, (), rfl, post⟩
 #print axioms correctness
 end TypedCopyCaller

@@ -92,9 +92,9 @@ theorem correctness : CIL.Safety.MethodContract.Holds ImportFixture.addOne Extra
   have subtractMax : value - 18446744073709551615#64 = value + 1 := by
     rw [BitVec.sub_eq_add_neg]
     rfl
-  refine ⟨12, memory, [.scalar (.i64 (value + 1))], ?execution,
-    Confined.refl _ memory, value + 1, rfl, ?post⟩
-  case post => simp only [CIL.importedPost]
+  refine MethodContract.Holds.intro (c := ImportFixture.addOne) (input := value)
+    memory (value + 1) ?execution (Confined.refl _ memory) ?post
+  case post => simp only [ImportFixture.addOne, CIL.importedPost]
   case execution =>
     cil_checked_steps [subtractMax]
     all_goals bv_omega

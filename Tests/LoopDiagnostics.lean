@@ -866,4 +866,67 @@ run_meta do
       unless (← Lean.getEnv).contains name do throwError "{name} is not declared"
 
 
+-- Missing authority is an obligation to prove, not a diagnosis that permission is denied.
+/-- "missing":"authority","obligation":"precondition.helper" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (home : Reference) : access memory home 8 1 true = .ok () := by
+  refine ?precondition.helper
+  cil_loop_advance
+
+-- Access after an overlapping write does not establish the old contents. The diagnostic
+-- identifies a missing current snapshot while retaining the original proposition and tag.
+/-- "missing":"contentSnapshot","obligation":"postcondition.snapshot" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (before after : Memory) (home : Reference) (old new : CIL.W64)
+    (previous : read before home 8 1 = .ok (numberBytes old.toNat 8))
+    (written : write before home (numberBytes new.toNat 8) 1 = .ok after)
+    (readable : access after home 8 1 false = .ok ()) :
+    read after home 8 1 = .ok (numberBytes old.toNat 8) := by
+  refine ?postcondition.snapshot
+  cil_loop_advance
+
+-- An opaque helper precondition keeps its tag instead of being misreported as a failed read.
+/-- "missing":"helperPrecondition","obligation":"precondition.helper" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (contract : MethodContract Nat Nat) (input : Nat) (memory : Memory) :
+    contract.pre input memory := by
+  refine ?precondition.helper
+  cil_loop_advance
+
+-- A missing aggregate snapshot is a content obligation even when it retains unknown bytes.
+/-- "missing":"contentSnapshot","obligation":"postcondition.snapshot" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (home : Reference) :
+    loadSnapshot memory (.address home) (.aggregate 1) =
+      .ok (.snapshot (.aggregate 1) [(0, false)]) := by
+  refine ?postcondition.snapshot
+  cil_loop_advance
+
+-- Byte snapshots retain the exact region in the missing-content diagnosis.
+/-- "missing":"contentSnapshot","obligation":"postcondition.snapshot" -/
+#guard_msgs (substring := true) in
+set_option cil.diagnostics true in
+example (memory : Memory) (home : Reference) :
+    readSnapshot memory home 1 1 = .ok [(0, false)] := by
+  refine ?postcondition.snapshot
+  cil_loop_advance
+
+/-- The unresolved checked operation retains the memory, region and requested access mode. -/
+example (memory : Memory) (home : Reference) : True := by
+  run_tac Lean.Elab.Tactic.withMainContext do
+    let memory ← Lean.Elab.Term.elabTerm (Lean.mkIdent `memory) none
+    let home ← Lean.Elab.Term.elabTerm (Lean.mkIdent `home) none
+    let operation ← Lean.Meta.mkAppM ``access
+      #[memory, home, Lean.mkNatLit 8, Lean.mkNatLit 1, Lean.mkConst ``Bool.true]
+    let message ← (← Lean.addMessageContext (missingFactHint #[operation])).toString
+    unless message.contains "access memory home 8 1 true" do
+      throwError "The missing-authority diagnostic lost the checked region: {message}"
+    unless message.contains "does not establish that access is forbidden" do
+      throwError "The missing-authority diagnostic asserted a violation: {message}"
+  trivial
+
 end Tests.LoopDiagnostics

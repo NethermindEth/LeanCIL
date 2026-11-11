@@ -8,8 +8,9 @@ partial class Program
     {
         var measure = args.Contains("--measure", StringComparer.Ordinal);
         var configurationReuse = args.Contains("--configuration-reuse", StringComparer.Ordinal);
+        var compileCheck = args.Contains("--compile-check", StringComparer.Ordinal);
         var cli = new[] { "dotnet", args.FirstOrDefault(argument =>
-            argument is not ("--measure" or "--configuration-reuse")) ?? ExtractorPath };
+            argument is not ("--measure" or "--configuration-reuse" or "--compile-check")) ?? ExtractorPath };
         var directory = At("artifacts/ConsumerComponents-" + Guid.NewGuid().ToString("N"));
         var assemblyRoot = Path.Combine(directory, "Assembly");
         var package = Path.Combine(directory, "Package");
@@ -59,6 +60,11 @@ partial class Program
         ExtractBatch("extract", null, extractions, cli[1]);
         var requests = extractions.Select(request =>
             new { output = request.Output, proof, theorem = "ExampleProof.correctness" }).ToArray();
+        if (compileCheck)
+        {
+            CheckConsumerCompilation(cli, package, proof, requests.Select(request => request.output).ToArray());
+            return;
+        }
         var first = SplitExtractionComponents(File.ReadAllText(Path.Combine(requests[0].output, "Extracted.lean")));
         var second = SplitExtractionComponents(File.ReadAllText(Path.Combine(requests[1].output, "Extracted.lean")));
         var reused = first.Sources.Keys.Intersect(second.Sources.Keys).ToArray();
@@ -173,5 +179,72 @@ partial class Program
         {
             foreach (var (name, value) in saved) Environment.SetEnvironmentVariable(name, value);
         }
+    }
+
+    static void CheckConsumerCompilation(string[] cli, string package, string proof, string[] outputs)
+    {
+        var directory = Path.GetDirectoryName(package)!;
+        var manifest = Path.Combine(directory, "check.json");
+        var results = Path.Combine(directory, "check-results.json");
+        var good = Path.Combine(package, "Good.lean");
+        var bad = Path.Combine(package, "Broken.lean");
+        var source = File.ReadAllText(proof);
+        File.AppendAllText(Path.Combine(package, "lakefile.toml"),
+            "\n[[lean_lib]]\nname = \"CompileSupport\"\n");
+        File.WriteAllText(Path.Combine(package, "CompileSupport.lean"),
+            "theorem support : True := True.intro\n#print axioms support\n");
+        File.WriteAllText(good, "import CompileSupport\n" + source);
+        File.WriteAllText(bad, "import CompileSupport\n" +
+            source.Replace("Extracted.translation_valid", "unknown_theorem", StringComparison.Ordinal));
+        var valid = outputs.Take(2).Select(output =>
+            new { output, proof = good, theorem = "ExampleProof.correctness" }).ToArray();
+        File.WriteAllText(manifest,
+            JsonSerializer.Serialize(new { schema = 1, proofRoot = package, requests = valid }));
+        Run([.. cli, "verify-batch", manifest, "--results", results]);
+        var verified = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
+        if (verified.Any(result => result.GetProperty("status").GetString() != "verified"))
+            throw new Exception("Expected certificates before checking that compile-only removes them.");
+        Run([.. cli, "verify-batch", manifest, "--check", "--results", results]);
+        var checkedValid = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
+        if (checkedValid.Length != valid.Length || checkedValid.Any(result =>
+                result.GetProperty("status").GetString() != "checked") ||
+            outputs.Take(2).Any(output => File.Exists(Path.Combine(output, "verified.json"))))
+            throw new Exception("The identical requests were not checked without certificates.");
+        for (var index = 0; index < valid.Length; index++)
+        {
+            var checkedSeconds = checkedValid[index].GetProperty("elapsedSeconds").GetDouble();
+            var verifiedSeconds = verified[index].GetProperty("elapsedSeconds").GetDouble();
+            if (checkedSeconds <= 0 || verifiedSeconds <= 0)
+                throw new Exception("A completed request has no elapsed latency.");
+            Console.WriteLine($"Compile request {Path.GetFileName(valid[index].output)} " +
+                $"({Path.GetFileName(good)}): " + FormattableString.Invariant(
+                    $"check {checkedSeconds:F3}s; verify {verifiedSeconds:F3}s (batch-to-result latency)"));
+        }
+        var mixed = new[] { valid[0], new { output = outputs[1], proof = bad, theorem = "ExampleProof.correctness" } };
+        File.WriteAllText(manifest,
+            JsonSerializer.Serialize(new { schema = 1, proofRoot = package, requests = mixed }));
+        var trace = ConsumerTraceDirectory.Create(directory, "CompileTrace");
+        var previous = Environment.GetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY");
+        try
+        {
+            Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+            var checkedRun = Execute([.. cli, "verify-batch", manifest, "--check", "--results", results]);
+            var checkedResults = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
+            if (checkedRun.Code != 1 || !checkedRun.Output.Contains("PASS Checked", StringComparison.Ordinal) ||
+                checkedRun.Output.Contains("PASS verified", StringComparison.Ordinal) ||
+                !checkedRun.Output.Contains("Broken.lean:", StringComparison.Ordinal) ||
+                checkedResults[0].GetProperty("status").GetString() != "checked" ||
+                checkedResults[1].GetProperty("status").GetString() != "failed" ||
+                outputs.Take(2).Any(output => File.Exists(Path.Combine(output, "verified.json"))))
+                throw new Exception("Unexpected compile-only outcomes:\n" + checkedRun.Output);
+            var stages = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+                .Select(line => JsonSerializer.Deserialize<JsonElement>(line).GetProperty("stage").GetString()!);
+            if (stages.Any(stage => stage.Contains("replay", StringComparison.OrdinalIgnoreCase) ||
+                stage.Contains("leancil-audit", StringComparison.OrdinalIgnoreCase) &&
+                    !stage.EndsWith(" --imports", StringComparison.Ordinal)))
+                throw new Exception("Compile-only unexpectedly performed replay or audit.");
+            Console.WriteLine("PASS compile-only reports both requests and leaves no certificates");
+        }
+        finally { Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", previous); }
     }
 }

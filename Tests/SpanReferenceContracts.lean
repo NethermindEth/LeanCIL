@@ -67,8 +67,9 @@ theorem read_holds : readContract.Holds Extracted.program 0 := by
     simp [bound, element, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure, unspecifiedOperands, MemoryOp.argumentCount,
       Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]
-  refine ⟨6, memory, [.scalar (.i32 (input.expected.zeroExtend 32))], ?_, Confined.refl _ _,
-    input.expected, rfl, rfl, rfl⟩
+  refine MethodContract.Holds.intro (c := readContract) (input := input)
+    memory input.expected ?_ (Confined.refl _ _) ⟨rfl, rfl⟩
+  cil_supply_fuel
   dsimp only [readContract]
   simp only [Safety.invoke, Extracted.lookup0]
   simp [checkedValue, numericValue, valid, enterFrame, Extracted.method0, makeLocals,

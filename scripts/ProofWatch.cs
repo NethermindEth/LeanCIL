@@ -230,9 +230,9 @@ partial class Program
             if (hashes.ContainsKey(relative) || !File.Exists(path)) continue;
             hashes[relative] = Sha(path);
             // Every source a module name could resolve to counts, so an ambiguous import only widens the set.
-            foreach (Match import in SourceImport().Matches(File.ReadAllText(path)))
+            foreach (var import in ConsumerSourceImports(File.ReadAllText(path)))
             {
-                var module = "/" + import.Groups[1].Value.Replace('.', '/') + ".lean";
+                var module = "/" + import.Replace('.', '/') + ".lean";
                 foreach (var source in sources.Where(source =>
                     source.Relative.EndsWith(module, StringComparison.Ordinal)))
                     pending.Enqueue(source.Path);

@@ -71,7 +71,7 @@ def rootContract : MethodContract RootInput where
 /-- Proved once on the unlinked program; every linked program reuses it through `extend`. -/
 theorem mix_holds : mixContract.Holds Extracted.program mix := by
   rintro ⟨x, y⟩ m -
-  refine MethodContract.Holds.intro m _ ⟨8, ?_⟩ (Confined.refl _ m) rfl
+  refine MethodContract.Holds.intro m _ ?_ (Confined.refl _ m) rfl
   cil_checked_steps
 
 /-- The import's contract is the only assumption about `AddTo`; no body is fixed at its slot. -/
@@ -139,8 +139,9 @@ theorem add_linked : importsAdd linkedProgram := by
   have fr := access_reference_valid _ _ _ _ _ writable
   have la := load_word64_of_read readA
   have lb := load_word64_of_read readB
-  refine ⟨9, stored, [], ?_, Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
-  cil_checked_steps [fa, fb, fr, la, lb, store]
+  have found : linkedProgram[addTo]? = some addBody := rfl
+  cil_contract_steps [found, fa, fb, fr, la, lb, store]
+  exact ⟨Confined.write wrote (by simp [numberBytes]), _, rfl, rfl, readback⟩
 
 theorem root_linked : rootContract.Holds linkedProgram root :=
   root_given.discharge ⟨[addBody], rfl⟩ add_linked
@@ -181,7 +182,7 @@ theorem root_unlinked_never_returns (input : RootInput) (m : Memory) (permitted 
 /-- So the unlinked contract holds only vacuously: no input meets its precondition. -/
 theorem root_unlinked_vacuous (holds : rootContract.Holds Extracted.program root) (input : RootInput) (m : Memory) :
     ¬ rootContract.pre input m := fun permitted =>
-  let ⟨fuel, final, values, invoked, _⟩ := holds input m permitted
+  let ⟨fuel, ⟨final, values⟩, invoked, _⟩ := holds input m permitted
   root_unlinked_never_returns input m permitted fuel (final, values) invoked
 
 #print axioms root_given
@@ -317,8 +318,8 @@ theorem percent_linked : importsPercent linkedProgram := by
   by_cases within : v ≤ 100
   · have bound : v ≤ 100#64 := within
     simp only [percentContract, within, ite_true]
-    refine ⟨10, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
-    cil_checked_steps [bound]
+    cil_contract_steps [bound]
+    exact ⟨Confined.refl _ m, _, rfl, rfl⟩
   · have bound : ¬ v ≤ 100#64 := within
     simp only [percentContract, within, ite_false]
     cil_raise_steps [bound]

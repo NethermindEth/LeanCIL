@@ -129,6 +129,8 @@ partial class Program
         if (configurationReuse)
             File.AppendAllText(Path.Combine(package, "lakefile.toml"),
                 "\n# Restore generated-only preparation before mutation.\n");
+        var cleanProof = Path.Combine(package, "CleanProof.lean");
+        File.Copy(proof, cleanProof);
         File.AppendAllText(proof, """
 
         open Lean Elab Command in
@@ -146,10 +148,39 @@ partial class Program
             var replaced = Execute([.. cli, "verify", output, "--proof", proof, "--proof-root", package, .. options]);
             if (replaced.Code != 1 ||
                 !replaced.Output.Contains("Extraction certificate artifacts changed during proof checking") ||
+                !replaced.Output.Contains("Stage: extraction integrity", StringComparison.Ordinal) ||
+                !replaced.Output.Contains("Extracted.olean: sha256 before=", StringComparison.Ordinal) ||
+                !replaced.Output.Contains(", after=", StringComparison.Ordinal) ||
+                !replaced.Output.Contains("trace sha256=", StringComparison.Ordinal) ||
+                replaced.Output.Contains("Lean could not prove", StringComparison.Ordinal) ||
                 File.Exists(Path.Combine(output, "verified.json")))
                 throw new InvalidOperationException("Consumer proof replaced the prechecked extraction artifact: " + replaced.Output);
         }
         Console.WriteLine("PASS consumer proof cannot replace restored or freshly checked extraction artifacts");
+        var other = Path.Combine(directory, "OtherExtraction");
+        Run([.. cli, "extract", At("Examples/Assembly/bin/Examples.dll"),
+            "Arithmetic::Add(ulong,ulong)", other, "x64-v3"]);
+        var batch = Path.Combine(directory, "requests.json");
+        var results = Path.Combine(directory, "results.json");
+        File.WriteAllText(batch, JsonSerializer.Serialize(new
+        {
+            schema = 1, proofRoot = package,
+            requests = new[]
+            {
+                new { output, proof, theorem = "ExampleProof.correctness" },
+                new { output = other, proof = cleanProof, theorem = "ExampleProof.correctness" }
+            }
+        }, Json));
+        var changed = Execute([.. cli, "verify-batch", batch, "--results", results]);
+        var rows = JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
+        if (changed.Code != 1 || rows[0].GetProperty("stage").GetString() != "extraction integrity" ||
+            rows[0].GetProperty("status").GetString() != "failed" ||
+            rows[1].GetProperty("status").GetString() != "verified" ||
+            File.Exists(Path.Combine(output, "verified.json")))
+            throw new InvalidOperationException(
+                "Batch did not isolate the changed extraction artifact: " + changed.Output);
+        Console.WriteLine("PASS batch artifact replacement reports integrity failure " +
+            "and preserves unrelated verification");
         File.WriteAllText(Path.Combine(directory, "timings.json"), JsonSerializer.Serialize(measurements, Json));
         Console.WriteLine("Measurements: " + Path.Combine(directory, "timings.json"));
     }

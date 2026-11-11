@@ -220,8 +220,8 @@ theorem MethodContract.Holds.extend {Input Output : Type} {c : MethodContract In
     {base linked : CIL.Program} {method : Nat} (holds : c.Holds base method)
     (links : Links base linked) :
     c.Holds linked method := fun input initial permitted =>
-  let ⟨fuel, final, values, invoked, framed, returns⟩ := holds input initial permitted
-  ⟨fuel, final, values, invoke_extend links _ _ _ _ _ (fun _ h => nomatch h) invoked,
+  let ⟨fuel, result, invoked, framed, returns⟩ := holds input initial permitted
+  ⟨fuel, result, invoke_extend links _ _ _ _ _ (fun _ h => nomatch h) invoked,
     framed, returns⟩
 
 /-- Both outcomes transfer: a normal return as for `MethodContract`, a raise by `Raises.extend`. -/

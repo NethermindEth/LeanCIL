@@ -77,7 +77,7 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
       contract.post input initial targetFinal output) :
     contract.Holds targetProgram method := by
   intro input initial permitted
-  obtain ⟨fuel, final, values, success, confined, output, encoded, post⟩ :=
+  obtain ⟨fuel, ⟨final, values⟩, success, confined, output, encoded, post⟩ :=
     holds input initial permitted
   obtain ⟨scalars, scalarEncoding⟩ := scalarResults input initial final output permitted post
   rw [encoded, scalarEncoding] at success
@@ -86,7 +86,7 @@ theorem MethodContract.Holds.of_allocationRenaming {Input Output : Type}
     programs.invoke_scalars formed statics literals success
   have targetGrowth :=
     (invoke_preserves_caller_allocations _ _ _ _ _ _ _ targetSuccess).next
-  refine ⟨fuel, targetFinal, scalars.map Value.scalar, targetSuccess, ?_,
+  refine ⟨fuel, (targetFinal, scalars.map Value.scalar), targetSuccess, ?_,
     output, scalarEncoding.symm, stablePost _ _ _ _ _ permitted related agree targetGrowth post⟩
   exact ⟨targetGrowth,
     fun identity bound => (related.allocations identity bound).trans

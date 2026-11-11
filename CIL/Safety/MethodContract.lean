@@ -10,6 +10,7 @@ import CIL.Safety.AccessSlices
 import CIL.Safety.WordFootprint
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.FrameInvariants
+import CIL.Safety.WeakestPrecondition
 
 /-!
 # Method contracts
@@ -356,9 +357,24 @@ def MethodContract.Returns {Input Output : Type} (c : MethodContract Input Outpu
 def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
     (program : CIL.Program) (method : Nat) : Prop :=
   ∀ input initial, c.pre input initial →
-    ∃ fuel final values,
-      invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Confined (c.footprint input) initial final ∧ c.Returns input initial final values
+    WP (Execution (fun fuel => invoke program fuel method (c.args input) initial))
+      (fun (final, values) =>
+        Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
+
+/-- A located semantic fault on an input meeting the precondition refutes the contract at
+    every fuel budget. Exhaustion alone does not refute termination. -/
+theorem MethodContract.not_holds_of_fault {Input Output : Type}
+    (contract : MethodContract Input Output) {program : CIL.Program} {method observed : Nat}
+    {input : Input} {initial : Memory} {fault : LocatedFault}
+    (permitted : contract.pre input initial) (semantic : fault.fault ≠ .fuelExhausted)
+    (failed : invoke program observed method (contract.args input) initial = .error fault) :
+    ¬ contract.Holds program method := by
+  intro holds
+  obtain ⟨fuel, ⟨final, values⟩, invoked, _⟩ := holds input initial permitted
+  exact invoke_fault_refutes_success program observed method (contract.args input) initial
+    fault semantic failed fuel (final, values) invoked
+
+#print axioms MethodContract.not_holds_of_fault
 
 /-- A contract is `Ensures` at each input, with the footprint as part of the postcondition. -/
 theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract Input Output}
@@ -367,7 +383,7 @@ theorem MethodContract.Holds.ensures {Input Output : Type} {c : MethodContract I
       (fun _ initial final values =>
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values) := by
   rintro args initial ⟨rfl, permitted⟩
-  exact holds input initial permitted
+  exact WP.adequate.mp (holds input initial permitted)
 
 /-- What one invocation of `method` established under contract `c` at `input`: it ran from
     `before` to `final`, returned the encoding of `output`, changed only the footprint and met
@@ -392,10 +408,10 @@ theorem MethodContract.Holds.intro {Input Output : Type} {c : MethodContract Inp
       invoke program fuel method (c.args input) initial = .ok (final, c.results output))
     (framed : Confined (c.footprint input) initial final)
     (post : c.post input initial final output) :
-    ∃ fuel final values,
-      invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Confined (c.footprint input) initial final ∧ c.Returns input initial final values :=
-  invoked.elim fun fuel ran => ⟨fuel, final, c.results output, ran, framed, output, rfl, post⟩
+    WP (Execution (fun fuel => invoke program fuel method (c.args input) initial))
+      (fun result => Confined (c.footprint input) initial result.1 ∧
+        c.Returns input initial result.1 result.2) :=
+  invoked.elim fun fuel ran => ⟨fuel, (final, c.results output), ran, framed, output, rfl, post⟩
 
 /-- Close the goal a `Holds` proof reaches once stepping has run to a return, from the footprint
     evidence and the postcondition of `output`, by name. The footprint is the one the goal
@@ -412,11 +428,11 @@ theorem MethodContract.Holds.returns {Input Output : Type} {c : MethodContract I
     `CallResult`; the converse of `MethodContract.Holds.intro`. -/
 theorem CallResult.of_returned {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory}
-    (returned : ∃ fuel final values,
-      invoke program fuel method (c.args input) initial = .ok (final, values) ∧
-      Confined (c.footprint input) initial final ∧ c.Returns input initial final values) :
+    (returned : WP (Execution (fun fuel => invoke program fuel method (c.args input) initial))
+      (fun result => Confined (c.footprint input) initial result.1 ∧
+        c.Returns input initial result.1 result.2)) :
     ∃ final output, CallResult c program method input initial final output := by
-  obtain ⟨fuel, final, _, invoked, framed, output, rfl, post⟩ := returned
+  obtain ⟨fuel, ⟨final, _⟩, invoked, framed, output, rfl, post⟩ := returned
   exact ⟨final, output, { invoked := ⟨fuel, invoked⟩, framed, post }⟩
 
 /-- What a proved contract establishes for an input meeting `pre`: a final memory and output
@@ -454,30 +470,8 @@ theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Out
         post result returned := by
   subst encoded
   obtain ⟨final, output, call⟩ := holds.result input permitted
-  obtain ⟨parentFuel, result, returned, resumed, finished⟩ := continuation final output call
-  obtain ⟨fuel, composed⟩ :=
-    run_call_exists methodFound instructionFound stepped call.invoked ⟨parentFuel, resumed⟩
-  exact ⟨fuel, result, returned, composed, finished⟩
-
-/-- Compose a separately proved child invocation with a caller postcondition. -/
-theorem run_call_post {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
-    {frame : Frame} {memory updated final : Memory} {post : Memory → List Value → Prop}
-    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
-    (stepped : step body op pc args frame stack memory =
-      .ok (.call callee arguments rest updated))
-    (child : ∃ fuel, invoke program fuel callee arguments updated = .ok (final, values))
-    (continuation : ∃ fuel result returned,
-      run program fuel method (pc + 1) args frame (values ++ rest) final =
-        .ok (result, returned) ∧ post result returned) :
-    ∃ fuel result returned,
-      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
-        post result returned := by
-  obtain ⟨parentFuel, result, returned, resumed, satisfied⟩ := continuation
-  obtain ⟨fuel, composed⟩ := run_call_exists methodFound instructionFound stepped child
-    ⟨parentFuel, resumed⟩
-  exact ⟨fuel, result, returned, composed, satisfied⟩
-#print axioms run_call_post
+  exact run_call_post methodFound instructionFound stepped call.invoked
+    (continuation final output call)
 
 /-- A successful call from a well-formed memory returns a well-formed memory and keeps the static
     world and catalog agreement, whatever the callee's contract states. -/
@@ -544,36 +538,6 @@ theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract In
   exact run_call_of_contract holds input methodFound instructionFound stepped rfl permitted
     fun final output call => continuation final output call
       (call.frame_invariants methodFound instructionFound stepped formed)
-
-/-- Some fuel runs to a successful return satisfying `post` when the fetched instruction
-    returns checked values that satisfy it. -/
-theorem run_return_exists {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
-    {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
-    (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
-    (stepped : step body op pc args frame stack memory = .ok (.returned values updated))
-    (checked : values.mapM (checkedValue (leaveFrame frame updated)) = .ok values)
-    (satisfied : post (leaveFrame frame updated) values) :
-    ∃ fuel result returned,
-      run program fuel method pc args frame stack memory = .ok (result, returned) ∧
-        post result returned :=
-  ⟨1, _, _, run_return (fuel := 0) methodFound instructionFound stepped checked, satisfied⟩
-
-/-- Reduces an invocation goal to running the body from pc 0 in the frame `enterFrame`
-    builds for checked arguments. -/
-theorem invoke_exists_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
-    {args : List Value} {frame : Frame} {memory entered : Memory}
-    {post : Memory → List Value → Prop}
-    (found : program[method]? = some body)
-    (checked : args.mapM (checkedValue memory) = .ok args)
-    (setup : enterFrame body args memory = .ok (frame, entered))
-    (executed : ∃ fuel result returned,
-      run program fuel method 0 args frame [] entered = .ok (result, returned) ∧
-        post result returned) :
-    ∃ fuel result returned,
-      invoke program fuel method args memory = .ok (result, returned) ∧ post result returned := by
-  obtain ⟨fuel, result, returned, ran, satisfied⟩ := executed
-  exact ⟨fuel, result, returned, invoke_of_run found checked setup ran, satisfied⟩
 
 /-- Successful invocations agree at every fuel, so a computed run refutes a contract. -/
 theorem invoke_ok_unique {program : CIL.Program} {method left right : Nat} {args : List Value}
@@ -692,9 +656,9 @@ theorem MethodContract.Holds.weaken {Input Output : Type}
     {program : CIL.Program} {method : Nat} (holds : internal.Holds program method)
     (refines : internal.Refines exported) : exported.Holds program method := by
   intro input initial permitted
-  obtain ⟨fuel, final, values, invoked, framed, out, encoded, satisfied⟩ :=
+  obtain ⟨fuel, ⟨final, values⟩, invoked, framed, out, encoded, satisfied⟩ :=
     holds input initial (refines.pre _ _ permitted)
-  refine ⟨fuel, final, values, ?_, framed.widen_within (refines.footprint _ _ permitted),
+  refine ⟨fuel, (final, values), ?_, framed.widen_within (refines.footprint _ _ permitted),
     out, ?_, refines.post _ _ _ _ permitted framed satisfied⟩
   · rw [refines.args]; exact invoked
   · rw [refines.results]; exact encoded
@@ -726,6 +690,7 @@ macro "cil_contract_prepare" "[" facts:term,* "]" : tactic =>
   `(tactic| (
     -- A contract continuation resumes at `pc + 1` on `results ++ rest` with projected inputs.
     cil_unfold_contracts
+    try apply CIL.Safety.WP.adequate.mpr
     try dsimp only [Nat.reduceAdd]
     cil_stack_cleanup
     try (cil_strict refine CIL.Safety.invoke_exists_of_run
@@ -914,12 +879,14 @@ elab_rules : tactic
   | `(tactic| cil_contract_step [$facts:term,*]) => withMainContext do
     let (methodFound, instructionFound, operation) ←
       cilFetchedOp ``CIL.Safety.run_next_exists some 4 facts.getElems
+    let currentFacts := facts.getElems ++ (← cilOutputFacts operation)
+    let facts := currentFacts
     if callsCallee operation then
       let saved ← saveState
-      try cilContractApply methodFound instructionFound facts.getElems
+      try cilContractApply methodFound instructionFound facts
       catch _ =>
         saved.restore
-        cilContractChild methodFound instructionFound facts.getElems
+        cilContractChild methodFound instructionFound facts
       return
     if operation == ``CIL.Op.ret then
       evalTactic (← `(tactic| cil_strict refine CIL.Safety.run_return_exists
@@ -931,19 +898,37 @@ elab_rules : tactic
       evalTactic (← `(tactic| cil_frame_exit))
       (← getMainGoal).setTag `postcondition
       return
-    evalTactic (←
-      `(tactic| (
+    let advance (facts : Array Term) := do
+      evalTactic (← `(tactic| (
         cil_strict refine CIL.Safety.run_next_exists (post := _)
           $methodFound $instructionFound
           (by cil_checked_step_normalized [$[$facts:term],*]) ?_
         cil_stack_cleanup)))
+    unless [``CIL.Op.store64, ``CIL.Op.storeScalar, ``CIL.Op.setFieldAt].contains operation do
+      advance facts
+      return
+    let saved ← saveState
+    if ← cilOnlyInputFacts operation facts then
+      try
+        let prepared ← cilPrepareOutputStore instructionFound operation facts
+        if prepared.size != facts.size then
+          advance prepared
+          return
+      catch _ => saved.restore
+    try advance facts
+    catch error =>
+      saved.restore
+      let prepared ← cilPrepareOutputStore instructionFound operation facts
+      if prepared.size == facts.size then throw error
+      advance prepared
 
 /-- Step a goal `∃ fuel result returned, run ... ∧ post` through checked instructions,
     composing calls with registered contracts or child evidence. Each composed call names its
     final memory `called`, its typed output `output` and its `CallResult` `call`, all three
     with the suffix `_1`, `_2` once a name is taken. Unmatched calls and the postcondition at
     each return remain explicit goals, a callee's precondition tagged `precondition` and the
-    postcondition `postcondition`. -/
+    postcondition `postcondition`. With `CallingFields`, an output-word store can obtain its
+    write and current-memory argument facts from `ValidCall`, after trying supplied facts. -/
 syntax "cil_contract_steps" "[" term,* "]" : tactic
 /-- As `cil_contract_steps`, naming the first call it composes: its final memory, typed output
     and `CallResult` take the three names given. Fails when it composes no call. -/
@@ -1006,12 +991,33 @@ elab_rules : tactic
         break
   | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
     let prepared ← prepareStepFacts facts.getElems
+    let (direct, finish) ← withMainContext do
+      let saved ← saveState
+      try
+        unless continuation.raw.isIdent || continuation.raw.isOfKind ``Lean.Parser.Term.app do
+          throwError "The continuation requires its reached goal"
+        let proof ← Term.withoutErrToSorry <| Term.withSynthesize <|
+          Term.elabTerm continuation none
+        let proof ← instantiateMVars proof
+        if proof.hasMVar then throwError "The continuation requires its reached goal"
+        let direct ← Term.exprToSyntax proof
+        let suffix ← if (← Meta.whnfUntil (← Meta.inferType proof) ``WP).isSome then
+          let adapted ← Term.withoutErrToSorry <| Term.withSynthesize <|
+            Term.elabTerm (← `(term| CIL.Safety.WP.adequate.mp $direct)) none
+          Term.exprToSyntax adapted
+        else pure direct
+        pure (direct, ← `(tactic| exact $suffix))
+      catch _ =>
+        -- Contextual terms still receive each reached goal as their expected type.
+        saved.restore
+        pure (continuation, ← `(tactic| first
+          | exact $continuation | exact CIL.Safety.WP.adequate.mp $continuation))
     withMainContext <| evalTactic (← `(tactic| (first
-      | (cil_strict exact $continuation)
+      | (cil_strict exact $direct)
       | (
         cil_contract_prepare [$[$prepared:term],*]
         repeat first
-        | (cil_strict exact $continuation)
+        | (cil_strict $finish)
         | cil_contract_step [$[$prepared:term],*]))))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
@@ -1022,6 +1028,7 @@ syntax "cil_contract_call" term:max term:max (" at " ident)? "[" term,* "]" : ta
 macro_rules
   | `(tactic| cil_contract_call $holds $input [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract $holds $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
@@ -1030,6 +1037,7 @@ macro_rules
   | `(tactic| cil_contract_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
     -- The site fixes the body, so the lookup may close during simplification.
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?_
@@ -1043,6 +1051,7 @@ syntax "cil_formed_call" term:max term:max (" at " ident)? "[" term,* "]" : tact
 macro_rules
   | `(tactic| cil_formed_call $holds $input [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract_formed $holds $input
       (by cil_lookup [$[$facts:term],*])
       (by cil_lookup [$[$facts:term],*])
@@ -1050,6 +1059,7 @@ macro_rules
     cil_name_obligations $holds))
   | `(tactic| cil_formed_call $holds $input at $site:ident [$facts:term,*]) =>
   `(tactic| (
+    try apply CIL.Safety.WP.adequate.mpr
     refine CIL.Safety.run_call_of_contract_formed $holds $input
       (by cil_lookup [$[$facts:term],*]) $(Lean.mkIdent (site.getId ++ `call))
       (by cil_checked_step [$[$facts:term],*]) (by rfl) ?precondition ?wellFormed ?_

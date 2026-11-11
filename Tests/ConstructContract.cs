@@ -78,9 +78,9 @@ theorem pair_holds : pairContract.Holds Extracted.program pair := by
     Confined.write_within w1 ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩
   have c2 : Confined [(⟨id, offset⟩, 16)] m1 m2 :=
     Confined.write_within w2 ⟨_, List.mem_singleton_self _, rfl, by simp, by simp [length]⟩
-  refine ⟨8, m2, [], ?_, c1.trans c2, (), rfl, readback⟩
-  cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
+  cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
     f0, f1, a1, a2, w1, w2, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  exact ⟨c1.trans c2, (), rfl, readback⟩
 
 theorem word_holds : wordContract.Holds Extracted.program word := by
   rintro ⟨⟨id, offset⟩, u0, u1, u2, u3⟩ m ⟨formed, writable⟩
@@ -133,11 +133,11 @@ theorem word_holds : wordContract.Holds Extracted.program word := by
       write a { allocation := id, offset := offset + start } bytes 1 = .ok b → start + bytes.length ≤ 32 →
       Confined [(⟨id, offset⟩, 32)] a b :=
     fun written inside => Confined.write_within written ⟨_, List.mem_singleton_self _, rfl, by simp, by simp; omega⟩
-  refine ⟨14, m4, [], ?_, (covered w1 (by simp [length])).trans ((covered w2 (by simp [length])).trans
+  cil_contract_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
+    f0, f1, f2, f3, a1, a2, a3, a4, w1, w2, w3, w4', Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  refine ⟨(covered w1 (by simp [length])).trans ((covered w2 (by simp [length])).trans
     ((covered w3 (by simp [length])).trans (covered (start := 0) w4 (by simp [length])))), (), rfl, ?_⟩
-  · cil_checked_steps [checkedValue, numericValue, formValue, checkedAt, instruction, memoryInstruction,
-      f0, f1, f2, f3, a1, a2, a3, a4, w1, w2, w3, w4', Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
-  · simpa [wordBytes, List.append_assoc] using readback
+  simpa [wordBytes, List.append_assoc] using readback
 
 """;
 
@@ -173,7 +173,7 @@ theorem storage_formed : storage.WellFormed where
 /-- This build stores `high + 1`, so `Pair(0, 0)` reads back as `Pair(0, 1)`. -/
 theorem correctness : ¬ pairContract.Holds Extracted.program pair := by
   intro holds
-  obtain ⟨_, final, values, ran, -, _, -, wrong⟩ := holds ⟨⟨0, 0⟩, 0, 0⟩ storage ⟨storage_formed, rfl⟩
+  obtain ⟨_, ⟨final, values⟩, ran, -, _, -, wrong⟩ := holds ⟨⟨0, 0⟩, 0, 0⟩ storage ⟨storage_formed, rfl⟩
   obtain ⟨rfl, rfl⟩ := Prod.mk.inj (invoke_ok_unique ran (rfl : invoke Extracted.program 16 pair
     (pairContract.args ⟨⟨0, 0⟩, 0, 0⟩) storage = .ok _))
   have observed : (Except.ok (pairBytes ⟨⟨0, 0⟩, 0, 0⟩) : Checked (List (BitVec 8))) =

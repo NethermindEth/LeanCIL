@@ -127,7 +127,18 @@ Test("main and manual always full", () =>
 });
 Test("test entry points", () =>
 {
+    foreach (var path in new[] { "Tests/ProofBindingCatalog.cs", "Tests/ProofBindingFamilies.cs",
+        "Tests/BindingFamilies/Recipes.cs", "Tests/BindingFamilies/Methods.cs",
+        "Tests/BindingFamilies/Support.lean", "Tests/PublicProofSurface.lean" })
+    {
+        var selected = VerificationSelection.Select([path]);
+        Require(selected.Contains("core") && selected.All(suite => suite is "core" or "docs"),
+            "Binding and public-surface fixtures must select core without unrelated suites: " + path);
+    }
     Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
+    Equal(VerificationSelection.Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
+    foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
+        Equal(VerificationSelection.Select([$"Tests/{module}.lean"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/ProofOutlines.cs"]),
         ["outlines-buffers", "outlines-control", "outlines-objects"]);
     Equal(VerificationSelection.Select(["Tests/StructOutlines.cs"]), ["structoutlines"]);

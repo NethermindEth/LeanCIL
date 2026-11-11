@@ -67,8 +67,8 @@ theorem percent_holds : percentContract.Holds Extracted.program percent := by
   by_cases within : v ≤ 100
   · have bound : v ≤ 100#64 := within
     simp only [percentContract, within, ite_true]
-    refine ⟨10, m, _, ?_, Confined.refl _ m, _, rfl, rfl⟩
-    cil_checked_steps [bound]
+    cil_contract_steps [bound]
+    exact ⟨Confined.refl _ m, _, rfl, rfl⟩
   · have bound : ¬ v ≤ 100#64 := within
     simp only [percentContract, within, ite_false]
     cil_raise_steps [bound]

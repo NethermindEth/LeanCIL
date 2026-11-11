@@ -34,10 +34,12 @@ theorem correctness (memory : Memory) (x : CIL.W64) (wellFormed : memory.WellFor
       Extracted.layout0_valid (by decide) rfl payloadValues (fieldIndex := 1) rfl (.i32 3) rfl
   have loaded := tagSnapshots.load_field tagFormed slot rfl Extracted.layout0_valid rfl tagValues
     (fieldIndex := 0) rfl rfl
-  refine ⟨CIL.executionBound Extracted.program 0, leaveFrame (entry.frame memory reference) tagged,
+  rw [exists_comm]
+  simp only [exists_and_right]
+  refine ⟨leaveFrame (entry.frame memory reference) tagged,
     ?_, MemoryBelow.frame_round_trip enter.setup (zeroBelow.trans (payloadBelow.trans tagBelow))⟩
-  apply invoke_of_run (by simp only [cil_code] <;> rfl) rfl enter.setup
-  cil_checked_steps [zeroStep, storePayload, storeTag, loaded, localAddress, entry.frame,
+  cil_checked_steps [enter.setup, zeroStep, storePayload, storeTag, loaded, localAddress,
+    entry.frame,
     access_reference_valid _ _ _ _ _ enter.numeric0.writable, zeroForm, payloadForm, tagForm,
     numericOfWidth]
 

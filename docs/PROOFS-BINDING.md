@@ -549,8 +549,10 @@ produce unsupported instructions, and no correctness claim about another extract
 generating a template. The full profile remains an explicit parameter; a behavioral proof must
 relate its feature fields to the flag arguments it uses. Profiles that produce different metadata,
 different instruction counts, or different instructions under identical observed flags are rejected.
-Static-site metadata, imported callee slots and the model's `newVector256` constructor form are
-currently unsupported in template generation.
+Static descriptors are retained when their complete metadata agrees across the selected profiles,
+including field identities, bytes, initializer indices and arguments. Different static metadata is
+rejected rather than remapped. Imported callee slots and the model's `newVector256` constructor form
+are currently unsupported in template generation.
 
 
 ### Instruction equations for parametric bodies

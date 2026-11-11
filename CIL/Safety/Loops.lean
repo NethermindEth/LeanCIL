@@ -1,4 +1,4 @@
-import CIL.Safety.StepComposition
+import CIL.Safety.Segment
 
 /-!
 # Loop termination by measure
@@ -27,13 +27,13 @@ def LoopState.run (state : LoopState) (program : CIL.Program) (method : Nat)
     It cannot hide a fault or replace the loop body by an assumed summary. -/
 def LoopSegment (program : CIL.Program) (method : Nat) (args : List Value)
     (source target : LoopState) (cost : Nat) : Prop :=
-  ∀ fuel, source.run program method args (fuel + cost) = target.run program method args fuel
+  SegmentRun program method source.pc target.pc cost args
+    ⟨source.frame, source.stack, source.memory⟩ ⟨target.frame, target.stack, target.memory⟩
 
 /-- Some fuel runs the method from `state` to a successful return satisfying `post`. -/
 def LoopTerminates (program : CIL.Program) (method : Nat) (args : List Value)
     (post : Memory → List Value → Prop) (state : LoopState) : Prop :=
-  ∃ fuel final values,
-    state.run program method args fuel = .ok (final, values) ∧ post final values
+  WP (Execution (state.run program method args)) (Function.uncurry post)
 
 /-- An invariant and a strictly decreasing natural measure establish a finite,
     successful checked execution. Exit obligations include the desired postcondition.
@@ -52,9 +52,7 @@ theorem loop_terminates {α : Type} (program : CIL.Program) (method : Nat) (args
   | ind n ih =>
     rcases progress state valid with finished | ⟨next, cost, preserved, decreases, segment⟩
     · exact finished
-    · obtain ⟨fuel, final, values, executed, satisfied⟩ :=
-        ih (measure next) (by omega) next preserved rfl
-      exact ⟨fuel + cost, final, values, (segment fuel).trans executed, satisfied⟩
+    · exact WP.of_prefix segment (ih (measure next) (by omega) next preserved rfl)
 
 #print axioms loop_terminates
 end CIL.Safety

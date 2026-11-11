@@ -808,6 +808,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             JsonSerializer.Serialize(ConsumerCacheEnvironment()) + "\n" +
             JsonSerializer.Serialize(inputs) + "\n" + extra);
 
+    // Lake traces depend on compiled imports even when framework sources are unchanged.
+    string ConsumerSupportCacheKey(SortedDictionary<string, string> snapshot,
+        IEnumerable<string> importDirectories, IEnumerable<string> configuration) =>
+        ConsumerCacheKey("support", new(snapshot.Where(pair =>
+                pair.Key.StartsWith("revision:", StringComparison.Ordinal))
+                .ToDictionary(), StringComparer.Ordinal),
+            string.Join("\n", importDirectories) + "\n" + string.Join("\n", configuration) + "\n" +
+            JsonSerializer.Serialize(baseModules));
+
     static HashSet<string> ImportClosure(Dictionary<string, string[]> graph, IEnumerable<string> roots)
     {
         var closure = new HashSet<string>(roots, StringComparer.Ordinal);
@@ -1103,17 +1112,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             context + string.Concat(bodies) + tail, shared);
     }
 
-    // Resolve source roots through Lake so library and package srcDir settings agree with imports.
-    static string[] ConsumerSourceDirectories(string session, IEnumerable<string> packageRoots)
-    {
-        var lines = Run(["lake", "env"], session).Split('\n', StringSplitOptions.TrimEntries)
-            .Where(line => line.StartsWith("LEAN_SRC_PATH=", StringComparison.Ordinal)).ToArray();
-        if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean source paths.");
-        return lines[0]["LEAN_SRC_PATH=".Length..]
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => Path.GetFullPath(path, session)).Concat(packageRoots).Distinct().ToArray();
-    }
-
     static void RejectContractSourceShadow(string module, IEnumerable<string> sourceDirectories)
     {
         var relative = module.Replace('.', Path.DirectorySeparatorChar) + ".lean";
@@ -1345,6 +1343,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         public Report? Report;
         public Exception? Error;
         public bool Rejected;
+        public bool Checked;
+        public double ElapsedSeconds;
         public string? Detail;
         // Proof modules of other requests in the workspace, omitted from this request's diagnostics.
         public string[]? Hidden;
@@ -1409,13 +1409,17 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // extraction share one Lake workspace, build and kernel replay.
     // `finished` reports each request once its outcome is final, possibly from parallel workspaces.
     ConsumerOutcome[] VerifyConsumerRequests(string root, IReadOnlyList<ConsumerRequest> requests,
-        Action<int, string>? stage, bool batch, int parallelism = 1, Action<int, ConsumerOutcome>? finished = null)
+        Action<int, string>? stage, bool batch, int parallelism = 1,
+        Action<int, ConsumerOutcome>? finished = null, bool checkOnly = false)
     {
+        var requestClock = System.Diagnostics.Stopwatch.StartNew();
         root = Path.GetFullPath(root);
         if (requests.Any(request => request.ExportAudit is not null) && !freshProofs && !freshLibrary)
             throw new InvalidDataException("Contract exports require fresh independent verification.");
         var outcomes = requests.Select(_ => new ConsumerOutcome()).ToArray();
-        bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected && outcomes[i].Report is null;
+        void CompleteTiming(int index) => outcomes[index].ElapsedSeconds = requestClock.Elapsed.TotalSeconds;
+        bool Live(int i) => outcomes[i].Error is null && !outcomes[i].Rejected &&
+            !outcomes[i].Checked && outcomes[i].Report is null;
         int[] Pending(IEnumerable<int> members) => members.Where(Live).ToArray();
         void Stage(IEnumerable<int> members, string value)
         {
@@ -1427,7 +1431,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }
         void Fail(IEnumerable<int> members, Exception error)
         {
-            foreach (var i in Pending(members)) outcomes[i].Error = error;
+            foreach (var i in Pending(members))
+            {
+                outcomes[i].Error = error;
+                CompleteTiming(i);
+            }
         }
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var all = Enumerable.Range(0, requests.Count).ToArray();
@@ -1578,7 +1586,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
                     (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : "") +
                     ProofOptionsKey);
-                if (requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
+                if (checkOnly || requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
                 try
@@ -1614,6 +1622,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 outcomes[i].Detail = null;
                 if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
+                CompleteTiming(i);
                 CacheProgress("certified consumer proof: " + requests[i].Theorem);
             }
             foreach (var i in cached.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
@@ -1657,7 +1666,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             componentPlans[index] = SharedExtractionComponents(componentPlans[index], repeatedComponents);
         }
         var sources = ConsumerSourceHashes(snapshot, root);
-        bool exporting = !forceFullVerification && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
+        bool exporting = !checkOnly && !forceFullVerification &&
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT"));
         var export = new ConsumerSupportExport();
         string supportKey = "";
         string[] relativeImportDirectories = [];
@@ -1739,9 +1749,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 var configuration = prepared.Copied.Where(pair => Path.GetFileName(pair.Key) is "lakefile.toml" or "lakefile.lean" or "lake-manifest.json" or "lean-toolchain")
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
                     .Select(pair => Path.GetRelativePath(session, pair.Key).Replace('\\', '/') + ":" + pair.Value);
-                supportKey = ConsumerCacheKey("support", new(snapshot.Where(pair => pair.Key.StartsWith("revision:", StringComparison.Ordinal))
-                        .ToDictionary(), StringComparer.Ordinal),
-                    string.Join("\n", relativeImportDirectories) + "\n" + string.Join("\n", configuration));
+                supportKey = ConsumerSupportCacheKey(snapshot, relativeImportDirectories, configuration);
                 // Workspaces differ in Extracted, so only extraction-independent support is shared.
                 supportArtifacts = RestoreConsumerSupport(supportKey, bound, support, dependent: false);
             }
@@ -1783,6 +1791,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 finally { Directory.Delete(own, true); }
             }
             if (supportKey.Length > 0) RestoreCertificateSupport(supportKey, dependent: true);
+            if (checkOnly)
+            {
+                CheckGroup(members, session, names, bound, first, share);
+                return;
+            }
             if (interfaceModules.Length > 0)
             {
                 Stage(members, "contract interface validation");
@@ -1846,11 +1859,36 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Dictionary<string, SortedDictionary<string, string>> ExtractionArtifacts() => certificateModules.ToDictionary(
                 module => module, module => ConsumerModuleParts(Path.Combine(generatedPackage,
                     ".lake/build/lib/lean", module.Replace('.', '/') + ".olean")), StringComparer.Ordinal);
-            string checkedExtractionArtifacts = JsonSerializer.Serialize(ExtractionArtifacts());
+            string ExtractionBuildState(string module)
+            {
+                var path = Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/'));
+                var trace = path + ".trace";
+                return "artifact modified=" + File.GetLastWriteTimeUtc(path + ".olean").ToString("O") +
+                    ", trace sha256=" + (File.Exists(trace) ? Sha(trace) : "missing") +
+                    ", trace modified=" + File.GetLastWriteTimeUtc(trace).ToString("O");
+            }
+            var checkedExtractionArtifacts = ExtractionArtifacts();
+            var checkedBuildStates = certificateModules.ToDictionary(module => module, ExtractionBuildState);
             void RequireExtractionArtifacts()
             {
-                if (JsonSerializer.Serialize(ExtractionArtifacts()) != checkedExtractionArtifacts)
-                    throw new InvalidDataException("Extraction certificate artifacts changed during proof checking.");
+                var changes = new List<string>();
+                foreach (var (module, current) in ExtractionArtifacts())
+                {
+                    var accepted = checkedExtractionArtifacts[module];
+                    foreach (var part in accepted.Keys.Union(current.Keys, StringComparer.Ordinal))
+                    {
+                        var beforeHash = accepted.GetValueOrDefault(part, "missing");
+                        var afterHash = current.GetValueOrDefault(part, "missing");
+                        if (beforeHash == afterHash) continue;
+                        changes.Add($"{module}{part}: sha256 before={beforeHash}, after={afterHash}\n" +
+                            $"  before: {checkedBuildStates[module]}\n  after: {ExtractionBuildState(module)}");
+                    }
+                }
+                if (changes.Count == 0) return;
+                Stage(members, "extraction integrity");
+                throw new InvalidDataException("Extraction certificate artifacts changed during proof checking.\n" +
+                    "Preparation: " + (restoredCertificate ? "restored" : "built") +
+                    "; package: " + generatedPackage + "\n" + string.Join("\n", changes));
             }
             // Generated reference modules must be fixed before consumer configuration or proof code can run.
             SortedDictionary<string, string> GeneratedArtifacts()
@@ -1965,6 +2003,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     outcomes[i].Detail = buildFailure!.Message;
                     if (members.Length > 1) outcomes[i].Hidden = names.Where((_, m) => members[m] != i).ToArray();
                     outcomes[i].Rejected = true;
+                    CompleteTiming(i);
                 }
             }
             var proceeding = Pending(members);
@@ -2294,7 +2333,60 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 PublishSuccess(proofKeys[i], receipt);
                 if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
+                CompleteTiming(i);
             }
+        }
+
+        // Compiled support stays inside this invocation; it is never published as certified support.
+        void CheckGroup(int[] members, string session, string[] names,
+            IReadOnlyDictionary<string, string> bound, bool first, bool share)
+        {
+            if (!first)
+                foreach (var file in CacheFiles(support).Keys.Where(file => file != ConsumerSupportRecordName))
+                {
+                    var destination = Within(session, file);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    File.Copy(Within(support, file), destination, true);
+                }
+            Stage(members, "compile check");
+            var build = Execute(["lake", "build", .. names.Select(name => "+" + name + ":olean")],
+                session, progress: "Compile checking consumer proofs and dependencies");
+            var (directories, _) = ConsumerImportDirectories(session);
+            for (var index = 0; index < members.Length; index++)
+            {
+                var member = members[index];
+                var source = Path.Combine(session, names[index] + ".lean");
+                var artifact = directories.Select(directory => Path.Combine(directory, names[index]))
+                    .FirstOrDefault(path => File.Exists(path + ".olean") && File.Exists(path + ".trace"));
+                if (artifact is not null)
+                {
+                    outcomes[member].Messages = LakeTraceMessages(artifact + ".trace", session, source);
+                    outcomes[member].Checked = true;
+                    CompleteTiming(member);
+                }
+                else
+                {
+                    outcomes[member].Messages = LakeOutputMessages(build.Output, session, source);
+                    var error = new InvalidOperationException("Compile check failed:\n" + build.Output);
+                    error.Data[LeanDiagnostics.HiddenModulesKey] = names.Where((_, other) => other != index).ToArray();
+                    Fail([member], error);
+                }
+            }
+            if (!share) return;
+            var modules = directories.Where(directory => Path.GetFullPath(directory).StartsWith(
+                    session + Path.DirectorySeparatorChar, OperatingSystem.IsWindows()
+                        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                .Where(Directory.Exists).SelectMany(directory => Directory.EnumerateFiles(
+                    directory, "*.olean", SearchOption.AllDirectories).Select(path =>
+                        (Name: ModuleName(Path.GetRelativePath(directory, path)), Path: path)))
+                .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
+            var graph = ConsumerModuleImports(session, modules);
+            var dependent = DependentModules(graph, ["Extracted", "ExtractedSymbols",
+                .. extractions[members[0]].Sources.Keys, .. names]);
+            var collected = CollectConsumerSupport(session, modules, graph, dependent, dependent, bound);
+            if (collected is null) return;
+            Directory.Delete(support, true);
+            Directory.Move(collected, support);
         }
 
         void RunGroup(int[] members, bool first, bool share)
@@ -2305,7 +2397,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Directory.CreateDirectory(session);
             try { VerifyGroup(members, session, first, share); }
             catch (Exception error) { Fail(members, error); }
-            finally { referenceOnlyAuthoring = priorReferenceOnly; Directory.Delete(session, true); }
+            finally
+            {
+                referenceOnlyAuthoring = priorReferenceOnly;
+                Directory.Delete(session, true);
+            }
             foreach (var i in members.Where(i => !Live(i))) finished?.Invoke(i, outcomes[i]);
         }
 
