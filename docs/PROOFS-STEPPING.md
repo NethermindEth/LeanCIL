@@ -87,6 +87,9 @@ After each step the tactics evaluate the closed literal operands the state holds
 `cil_literal` simp set: a width conversion, sign extension or `toNat` of a bit-vector numeral, and
 a remainder of numerals, as a masked shift count is. The set fires on numerals only, so a symbolic
 operand stays as stated, and `simp only [cil_literal]` gives a hand-written step the same form.
+A `localResult kind value` whose constructors decide it is stated as the value the load pushes, so
+a `.vector128` load of `.v128 bits` leaves `.v128 bits` for the next fact; `cil_local_results`
+does the same for a hand-written step.
 
 A goal stating a located fault, `invoke p fuel m args memory = .error ⟨m, pc, fault⟩`, enters
 through `invoke_of_run_fault` and steps the same way. At the stated `pc` the tactic first tries
@@ -145,6 +148,9 @@ equation path.
 
 A branch on a literal operand, such as the `1` a decided feature test pushes, continues at a
 numeral program counter.
+
+A step fact may state an opcode index as closed arithmetic, such as `.local (↑(6 : Fin 10) + 1)`:
+fact preparation also states it at the numeral, `.local 7`, which is the form a fetched opcode has.
 
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding the
 intrinsic evaluator. Register consumer lemmas in the form `CIL.evalIntrinsic operation operands =

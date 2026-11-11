@@ -181,6 +181,46 @@ private def hasClosedLiteralOperand (expression : Expr) : Bool :=
     (value.isAppOfArity ``HMod.hMod 6 && numeral value.appArg! &&
       numeral value.appFn!.appArg!)).isSome
 
+open Lean Meta in
+/-- `type` with each closed natural-number argument of a `step` opcode evaluated to a numeral,
+    such as the local index `↑(6 : Fin 10) + 1`; a fetched opcode carries numerals, which a
+    fact matches only up to instances. The result is definitionally equal to `type`. -/
+def evaluateOpcodeIndices (type : Expr) : MetaM Expr := do
+  let natType := mkConst ``Nat
+  -- Most facts state no step, and are returned without being rebuilt.
+  if (type.find? (·.isConstOf ``CIL.Safety.step)).isNone then return type
+  Meta.transform type (pre := fun term => do
+    unless term.isAppOfArity ``CIL.Safety.step 7 do return .continue
+    let opcode := term.getAppArgs[1]!
+    unless opcode.getAppFn.isConst do return .continue
+    let mut arguments := opcode.getAppArgs
+    for position in [:arguments.size] do
+      let argument := arguments[position]!
+      if argument.hasLooseBVars || argument.hasFVar || argument.hasMVar then continue
+      if argument.isRawNatLit || (argument.isAppOfArity ``OfNat.ofNat 3 &&
+          argument.appFn!.appArg!.isRawNatLit) then continue
+      unless ← isDefEq (← inferType argument) natType do continue
+      let some value ← (Lean.Meta.evalNat (← reduce argument)).run | continue
+      arguments := arguments.set! position (mkNatLit value)
+    if arguments == opcode.getAppArgs then return .continue
+    return .continue (mkAppN term.getAppFn
+      (term.getAppArgs.set! 1 (mkAppN opcode.getAppFn arguments))))
+
+open Lean Meta in
+/-- `term` with each `localResult kind value` that its constructors decide replaced by the value
+    a load of that kind pushes, so a loaded `localResult .vector128 (.v128 bits)` reads
+    `.v128 bits` as the next fact states it. The result is definitionally equal to `term`. -/
+def reduceLocalResults (term : Expr) : MetaM Expr := do
+  -- Most goals and facts name no local result, and are returned without being rebuilt.
+  if (term.find? (·.isConstOf ``CIL.Safety.localResult)).isNone then return term
+  Meta.transform term (pre := fun candidate => do
+    unless candidate.isAppOfArity ``CIL.Safety.localResult 2 do return .continue
+    let some unfolded ← unfoldDefinition? candidate | return .continue
+    let reduced ← whnfCore unfolded
+    if reduced == candidate.appArg! || reduced.isAppOfArity ``CIL.Value.i32 1 then
+      return .visit reduced
+    return .continue)
+
 open Lean Elab Tactic Meta in
 /-- `proof` and, for a fact over `Fin n` (n <= 64) or over every `Feature`, its instance at
     each value: the profile fields and indexed lemmas are reached only through concrete
@@ -253,6 +293,14 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
           let (explicitResult, _) ← simp type explicitContext explicitProcs
           if explicitResult.expr != type && !results.any (·.expr == explicitResult.expr) then
             results := results.push explicitResult
+        -- A step fact is also stated at the numeral of a closed opcode index and at the value
+        -- of a decided local result, the forms a stepped goal has.
+        for result in results do
+          let indexed ← reduceLocalResults (← evaluateOpcodeIndices result.expr)
+          if indexed != result.expr && !results.any (·.expr == indexed) then
+            let restated ← result.proof?.mapM fun equation => do
+              mkExpectedTypeHint equation (← mkEq type indexed)
+            results := results.push { expr := indexed, proof? := restated }
         for result in results do
           if result.expr.consumeMData.isConstOf ``True then continue
           if result.expr == type && instanceProof == proof then continue
@@ -595,14 +643,27 @@ elab "cil_literal_operands" : tactic => do
   if hasClosedLiteralOperand (← instantiateMVars (← getMainTarget)) then
     evalTactic (← `(tactic| try simp only [cil_literal]))
 
-/-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack and
-    evaluates its closed literal operands (`cil_literal_operands`); never fails. -/
+open Lean Elab Tactic Meta in
+/-- State the goal with each decided `localResult` as the value it loads as
+    (`reduceLocalResults`); a goal with none is left untouched. Never fails. -/
+elab "cil_local_results" : tactic => do
+  if (← getGoals).isEmpty then return
+  withMainContext do
+    let goal ← getMainGoal
+    let target ← instantiateMVars (← goal.getType)
+    let reduced ← reduceLocalResults target
+    unless reduced == target do replaceMainGoal [← goal.replaceTargetDefEq reduced]
+
+/-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack,
+    evaluates its closed literal operands (`cil_literal_operands`) and states each decided local
+    result as its value (`cil_local_results`); never fails. -/
 macro "cil_stack_cleanup" : tactic =>
   `(tactic| (
     try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
       List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
       List.nil_append, List.cons_append, List.append_nil]
-    cil_literal_operands))
+    cil_literal_operands
+    cil_local_results))
 
 /-- Closes a checked `step` goal by rewriting with the `@[cil_step]` and
     `@[cil_instruction_step]` equations, failing if nothing rewrites, then by the checked-value
