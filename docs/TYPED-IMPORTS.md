@@ -84,9 +84,8 @@ definition. Memory read/write permission and aliasing remain contract obligation
 
 Verification reports include typed signatures, public layout metadata and type
 arguments beside the exact implementation hash. Normal
-verification uses the published-certification trust boundary.
-[Full verification](FULL_VERIFICATION.md) re-extracts the current selected DLL and checks the
-author, extraction, relocation and linked caller proof through its replay path.
+verification uses the published-certification trust boundary, and
+[full verification](FULL_VERIFICATION.md) applies to typed imports too.
 Typed imports add no method-summary axiom and no native proof evaluation.
 
 A typed import keeps the callee behind its contract. To extract the callee's body instead, pass

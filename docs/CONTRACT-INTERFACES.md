@@ -7,9 +7,9 @@ establish. Publishing a sidecar is in
 [publishing verified contracts](CONSUMERS.md#publishing-verified-contracts); generic instances
 and struct references are in [typed imports](TYPED-IMPORTS.md).
 
-`extract` can bind a plain static external `call` to a contract slot. The
-implementation DLL is read as metadata. Its method bodies are not copied into
-the caller program. The imported method has no body in the unlinked program.
+`extract` can bind a plain static external `call` to a contract slot. The implementation DLL is
+read as metadata: its method bodies are not copied into the caller program, and the imported
+method has no body in the unlinked program.
 
 ```
 leancil extract App.dll 'App::Entry(ulong)' extracted scalar \
@@ -32,26 +32,25 @@ uncalled libraries need no pins and never enter the extraction. A hash found in 
 cannot serve as the independent `--import-sha256` input. A supplied digest establishes byte
 identity; it does not establish authenticity or prove the implementation.
 
-The independent `--import-interface-sha256` is required before staging or
-compiling the interface. It pins the canonical interface descriptor, including
-every Lean source byte. Obtain it through your accepted publisher channel.
-Interface sources can execute Lean metaprograms and IO with verifier permissions.
-Accepting their digest accepts execution of those exact sources. A digest is
-neither a sandbox nor independent publisher authentication. Rechecks enforce
-the recorded independent interface pin before compilation.
+`--import-interface-sha256` pins the canonical interface descriptor, including every Lean source
+byte, and is required before the interface is staged or compiled. Obtain it through your
+accepted publisher channel. Interface sources can execute Lean metaprograms and IO with verifier
+permissions, and accepting their digest accepts execution of those exact sources. A digest is
+neither a sandbox nor independent publisher authentication. Rechecks enforce the recorded
+independent interface pin before compilation.
 
-`check` reopens recorded sidecars and implementations. It recomputes their hashes,
-metadata, generated CIL, import slots and interface sources. It reports both the
-expected and actual implementation SHA-256 after the DLL changes. CLI path/hash
-overrides can be supplied again for an explicit recheck. `identity.json` records
-sidecar and implementation paths relative to the output directory, as it does
-`assemblyPath`, so a moved extraction rechecks against the moved files.
+`check` reopens recorded sidecars and implementations and recomputes their hashes, metadata,
+generated CIL, import slots and interface sources. After the DLL changes it reports both the
+expected and actual implementation SHA-256. CLI path/hash overrides can be supplied again for
+an explicit recheck. `identity.json` records sidecar and implementation paths relative to the
+output directory, as it does `assemblyPath`, so a moved extraction rechecks against the moved
+files.
 
 ## Resolving imports from SDK assets
 
-`resolve-imports` turns SDK output into the explicit `--import` and
-`--import-implementation` arguments above. It only locates files. `extract`
-never reads deps.json or NuGet assets, and the independent pins stay required.
+`resolve-imports` turns SDK output into the explicit `--import` and `--import-implementation`
+arguments of `extract`. It only locates files: `extract` never reads deps.json or NuGet assets,
+and the independent pins stay required.
 
 ```
 leancil resolve-imports bin/App.dll --library Lib \
@@ -74,33 +73,30 @@ leancil resolve-imports bin/App.dll --library Lib \
 Only `net10.0` targets are accepted. The command does not restore, use the network, or infer a
 RID from the host.
 
-Selection follows the .NET 8+ host and NuGet. RID fallback is NuGet's
-breadth-first `RuntimeGraph.ExpandRuntime` over the SDK's
-`PortableRuntimeIdentifierGraph.json`; for `linux-x64` that is `linux-x64`,
-`linux`, `unix-x64`, `unix`, `any`, `base`; the host's built-in list is its prefix
-through `any`. A
-deps.json `runtimes` section is never read; the host ignores it too unless
-`UseRidGraph` is set. A library's best-matching RID group replaces its whole
-portable `runtime` group. With no match, the portable group applies. A library
-with RID-specific runtime assets needs `--runtime-identifier` and `--rid-graph`.
-deps.json assets are probed in the application directory as hostpolicy does: at
-`localPath` (written for executables), else at a RID asset's relative path, else
-at the bare file name. Package assets are probed
-at `<root>/<package path>/<asset path>`. Copies with different bytes are rejected.
+Selection follows the .NET 8+ host and NuGet. RID fallback is NuGet's breadth-first
+`RuntimeGraph.ExpandRuntime` over the SDK's `PortableRuntimeIdentifierGraph.json`. For
+`linux-x64` that is `linux-x64`, `linux`, `unix-x64`, `unix`, `any`, `base`; the host's built-in
+list is its prefix through `any`. A deps.json `runtimes` section is never read; the host ignores
+it too unless `UseRidGraph` is set. A library's best-matching RID group replaces its whole
+portable `runtime` group; with no match, the portable group applies. A library with
+RID-specific runtime assets needs `--runtime-identifier` and `--rid-graph`.
 
-The RID must be x64 or arm64. A fallback that ends in another architecture is
-rejected. `--profile` defaults to scalar, as `extract` does; any other profile
-must agree with the RID's architecture. Compile
-assets never become implementations. A reference-only selection fails.
+deps.json assets are probed in the application directory as hostpolicy does: at `localPath`
+(written for executables), else at a RID asset's relative path, else at the bare file name.
+Package assets are probed at `<root>/<package path>/<asset path>`. Copies with different bytes
+are rejected.
 
-`Nethermind.LeanCIL.LeanCilContractsAttribute(string digest)` on the runtime or
-reference assembly advertises the interface digest; declare it in the library
-source with assembly-only, non-repeatable usage. The resolver looks for
-`Lib.leancil.contracts` and `contracts/<digest>.leancil.contracts` in the
-application, implementation and package directories. The located sidecar must
-name the library and, when advertised, carry that digest. The output lists each
-import's library, asset path, matched RID, implementation and sidecar, plus the
-arguments for `extract`. The attribute is a locator, not a pin.
+The RID must be x64 or arm64. A fallback that ends in another architecture is rejected.
+`--profile` defaults to scalar, as `extract` does; any other profile must agree with the RID's
+architecture. Compile assets never become implementations. A reference-only selection fails.
+
+`Nethermind.LeanCIL.LeanCilContractsAttribute(string digest)` on the runtime or reference
+assembly advertises the interface digest; declare it in the library source with assembly-only,
+non-repeatable usage. The attribute locates a sidecar and pins nothing. The resolver looks for
+`Lib.leancil.contracts` and `contracts/<digest>.leancil.contracts` in the application,
+implementation and package directories. The located sidecar must name the library and, when
+advertised, carry that digest. The output lists each import's library, asset path, matched RID,
+implementation and sidecar, plus the arguments for `extract`.
 
 ## Sidecar schema 1
 
@@ -130,32 +126,33 @@ Required fields of a sidecar:
 - `fullVerificationLocator`: optional provenance metadata. This importer does not
   fetch or verify the named artifact.
 
-Unknown properties, duplicate JSON properties, missing fields and invalid digest
-or identifier forms are rejected. Methods must be static, non-virtual, public or
-protected, non-P/Invoke, and non-generic. Instance, constructor, function pointer
-and virtual call sites are rejected. Import signatures must use supported
-parameter and result types with matching assembly-scoped type identities.
-Profiles must name an exact built-in profile; custom profiles are not admitted.
-For an implementation DLL, the selected export is validated with its independently
-pinned direct dependencies and its explicitly declared initialization assumptions. Its
-own reachable static identity set must match the selected certification exactly.
-This checks metadata and serialization; it does not verify the imported theorem.
-An optional `initializationAssumptions` descriptor records each exported profile's
-sorted assembly/type pairs and participates in the interface digest. Each local
-type must have a static constructor in the selected implementation. These premises
-require the implementation DLL; a reference-only import is rejected. Imported
-dependency premises must match those reached by implementation validation exactly.
-The exporter kernel-checks and structurally audits equality with the generated
-`Extracted.initializationAssumptions` list. Callers propagate this list into their
-generated source, identity and report; exporting such a caller propagates it again.
-These are deployment premises that initialization completed successfully, not CLR
+Unknown properties, duplicate JSON properties, missing fields and invalid digest or identifier
+forms are rejected. Methods must be static, non-virtual, public or protected, non-P/Invoke and
+non-generic. Instance, constructor, function pointer and virtual call sites are rejected.
+Import signatures must use supported parameter and result types with matching assembly-scoped
+type identities. Profiles must name an exact built-in profile; custom profiles are not admitted.
+
+For an implementation DLL, the selected export is validated with its independently pinned
+direct dependencies and its explicitly declared initialization assumptions. Its own reachable
+static identity set must match the selected certification exactly. This checks metadata and
+serialization; it does not verify the imported theorem.
+
+An optional `initializationAssumptions` descriptor records each exported profile's sorted
+assembly/type pairs and participates in the interface digest. Each local type must have a
+static constructor in the selected implementation. These premises require the implementation
+DLL; a reference-only import is rejected. Imported dependency premises must match those reached
+by implementation validation exactly. The exporter kernel-checks and structurally audits
+equality with the generated `Extracted.initializationAssumptions` list. Callers propagate this
+list into their generated source, identity and report; exporting such a caller propagates it
+again. These are deployment premises that initialization completed successfully, not CLR
 initialization theorems or field-value guarantees. Recorded `staticValues`, including unknown
-ones, remain unexportable, and forced full verification still rejects initialization premises.
-Each node's static identities are checked with those of its direct imports before
-output. A collision reports both scoped field names. Full verification uses
-`linkChecked` to check all descriptors in its linked program, including those of
-dependencies linked into an imported library. Conditional transitive proofs retain the
-`StaticWorldValid` premises; extraction does not compare every pair of graph nodes.
+ones, are unexportable, and forced full verification rejects initialization premises.
+
+Each node's static identities are checked with those of its direct imports before output, and a
+collision reports both scoped field names. Extraction does not compare every pair of graph
+nodes: conditional transitive proofs retain the `StaticWorldValid` premises, and
+[full verification](FULL_VERIFICATION.md) checks all descriptors of its linked program with
+`linkChecked`, including those of dependencies linked into an imported library.
 
 The framework manifest lists `CIL.lean`, all `CIL/**/*.lean`, and `lean-toolchain`
 in ordinal relative-path order. Paths use `/`. Each line is `path=sha256(bytes)`.
@@ -168,14 +165,15 @@ The canonical interface descriptor serializes these fields in this order:
 `targetFramework`, `interfaceModules`, `exports`, `dependencies`. Use compact
 `System.Text.Json` serialization with the declared record field order, camel-case
 property names, and its default string escaping. Arrays retain their order.
+Every interface module source and every qualified contract name is included in this digest.
 The descriptor excludes MVID, implementation SHA-256, certification records and
-full-verification locator. A rebuild can retain its interface digest when its
-source interface and assembly identity do not change. Every interface module
-source and every qualified contract name is included in this digest.
+full-verification locator, so a rebuild can retain its interface digest when its
+source interface and assembly identity do not change.
 
 `closureDigest` is recomputed from the canonical exported contract closure and
-must equal the selected certification record. This includes definition values,
+must equal the selected certification record. The closure includes definition values,
 theorem/inductive types, constructor metadata and recursor computation rules.
+
 A certification record does not supply a Lean implementation proof. Its theorem,
 statement and statement digest are publisher provenance accepted by
 the consumer, and are reported as such. No pinned digest covers them: the
@@ -248,11 +246,8 @@ rejected; run `leancil extract` again.
 
 ## Transitive imports
 
-For [transitive imports](CONSUMERS.md#transitive-contract-imports), each dependency node must have
-its own independently
-pinned implementation and interface digest. The graph rejects cycles before
-method validation. Each library implementation is checked against its declared
-direct dependencies with separate call slots. Validation compares its actual
-static identity set with its certification record. A supplied library does not
-authorize an undeclared dependency. Application slots contain only calls made
-by the selected application methods.
+[Transitive contract imports](CONSUMERS.md#transitive-contract-imports) states how to supply and
+pin a dependency graph. The graph rejects cycles before method validation. Each library
+implementation is checked against its declared direct dependencies with separate call slots,
+and validation compares its actual static identity set with its certification record. A
+supplied library does not authorize an undeclared dependency.

@@ -16,7 +16,7 @@ selects a local copy of the producer's content-addressed source bundle. Its
 directory name and complete inventory must match the recorded bundle identity.
 Missing, stale or unsupported inputs fail without fallback or `verified.json`.
 
-The three assurance levels are distinct:
+The assurance levels are:
 
 | Level | Checked result |
 | --- | --- |
@@ -25,7 +25,7 @@ The three assurance levels are distinct:
 | Independent verification | Current library DLLs are re-extracted, author proofs are freshly checked, and actual theorem terms discharge the caller imports in a concrete linked CIL program. |
 
 Full mode uses no proof receipts, portable support or successful proof caches.
-It validates source inventory and framework/toolchain bytes. It rebases proof
+It validates source inventory and framework/toolchain bytes, rebases proof
 paths into a fresh package and ignores original absolute filesystem locations.
 Library exports may depend only on the `leancil` source package. Extra source
 packages, static-value assumptions and initialization assumptions fail.
@@ -82,7 +82,7 @@ root, so their files cannot shadow a caller or toolchain module.
 
 Building the author source elaborates producer code with the verifier's
 privileges: macros, `initialize` and `run_cmd` can read and write any file the
-verifier can, start processes, and use the network. Hashes cannot contain that.
+verifier can, start processes, and use the network. Hash checks do not restrict that code.
 The verifier snapshots the inputs, caller artifacts and module resolution once
 before and once after each run that elaborates producer-derived code. Caller
 artifacts are compared by size and modification time rather than hashed. These
@@ -97,7 +97,7 @@ It rechecks the selected bundle immediately before building it, detecting change
 left by an earlier dependency before the later bundle starts. The isolation
 requirement still applies to ongoing or hostile producer processes.
 
-Reports retain the original conditional caller theorem. They add the composed
+Reports retain the original conditional caller theorem and add the composed
 theorem and audit, source bundle identities, and `acceptedVia:
 independently-verified`. Faithful DLL decoding and CIL/runtime correspondence
 remain trust boundaries. These checks establish CIL theorems, not correctness
