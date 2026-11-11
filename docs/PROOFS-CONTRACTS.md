@@ -71,6 +71,9 @@ words. `LocalSnapshots` (`CIL.Safety.LocalSnapshots`) remembers locals of every 
 as vectors and int32s; `LocalSnapshots.after_confined` keeps them across such a call, and
 `after_write_apart`, `after_below` and `store` across writes, frame changes and local stores.
 `snapshots.load value specified` is a step fact for `.local`, so stepping tactics take it.
+`snapshots.read_at specified slot` gives back the typed read of a remembered local whose slot is
+known, and `read_vector128`, `read_vector256` and `read_vector512` state it for a remembered
+vector as `read memory home 16 1 = .ok (numberBytes bits.toNat 16)` and its wider forms.
 
 `unknown_frame_setup` supplies `CompleteWritableHomes` for numeric locals with unknown initial
 contents. Its `home_at` lookup proves that every declared local has a typed writable byte home;

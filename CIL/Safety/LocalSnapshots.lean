@@ -142,6 +142,50 @@ theorem LocalSnapshots.load {body : CIL.Method} {pc index : Nat} {args stack : L
     (stack := stack) kind stored number fits slot loaded
   rwa [result] at stepped
 
+/-- A remembered local whose slot is known reads back the bytes of a stored value that loads
+    as the remembered one. -/
+theorem LocalSnapshots.read_at {memory : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    {index : Nat} {kind : CIL.LocalKind} {home : Reference} {value : CIL.Value}
+    (specified : known index = some value) (slot : slots[index]? = some (.bytes kind home)) :
+    ∃ stored number, localNumber kind stored = .ok number ∧ localResult kind stored = value ∧
+      read memory home (localWidth kind) 1 = .ok (numberBytes number (localWidth kind)) := by
+  obtain ⟨found, reference, stored, number, located, fits, result, loaded⟩ :=
+    snapshots index value specified
+  rw [slot] at located
+  cases located
+  exact ⟨stored, number, fits, result, loaded⟩
+
+/-- A remembered 128-bit vector reads back as its sixteen bytes. -/
+theorem LocalSnapshots.read_vector128 {memory : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    {index : Nat} {home : Reference} {bits : BitVec 128}
+    (specified : known index = some (.v128 bits))
+    (slot : slots[index]? = some (.bytes .vector128 home)) :
+    read memory home 16 1 = .ok (numberBytes bits.toNat 16) := by
+  obtain ⟨stored, number, fits, result, loaded⟩ := snapshots.read_at specified slot
+  cases stored <;> simp_all [localResult, localNumber, CIL.Value.hasUnspecified, localWidth]
+
+/-- A remembered 256-bit vector reads back as its thirty-two bytes. -/
+theorem LocalSnapshots.read_vector256 {memory : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    {index : Nat} {home : Reference} {bits : BitVec 256}
+    (specified : known index = some (.v256 bits))
+    (slot : slots[index]? = some (.bytes .vector256 home)) :
+    read memory home 32 1 = .ok (numberBytes bits.toNat 32) := by
+  obtain ⟨stored, number, fits, result, loaded⟩ := snapshots.read_at specified slot
+  cases stored <;> simp_all [localResult, localNumber, CIL.Value.hasUnspecified, localWidth]
+
+/-- A remembered 512-bit vector reads back as its sixty-four bytes. -/
+theorem LocalSnapshots.read_vector512 {memory : Memory} {slots : List LocalSlot}
+    {known : Nat → Option CIL.Value} (snapshots : LocalSnapshots memory slots known)
+    {index : Nat} {home : Reference} {bits : BitVec 512}
+    (specified : known index = some (.v512 bits))
+    (slot : slots[index]? = some (.bytes .vector512 home)) :
+    read memory home 64 1 = .ok (numberBytes bits.toNat 64) := by
+  obtain ⟨stored, number, fits, result, loaded⟩ := snapshots.read_at specified slot
+  cases stored <;> simp_all [localResult, localNumber, CIL.Value.hasUnspecified, localWidth]
+
 /-- Storing a numeric value initializes precisely its home, remembers the value it loads as
     and keeps the caller's memory and the other snapshots. No prior read permission is
     needed. -/
@@ -283,6 +327,10 @@ theorem NumericHomes.snapshots {memory : Memory} {lower : Nat} {specs slots}
 #print axioms LocalSnapshots.after_below
 #print axioms LocalSnapshots.after_write
 #print axioms LocalSnapshots.load
+#print axioms LocalSnapshots.read_at
+#print axioms LocalSnapshots.read_vector128
+#print axioms LocalSnapshots.read_vector256
+#print axioms LocalSnapshots.read_vector512
 #print axioms LocalSnapshots.store
 #print axioms WordSnapshots.toLocalSnapshots
 #print axioms LocalSnapshots.toWordSnapshots
