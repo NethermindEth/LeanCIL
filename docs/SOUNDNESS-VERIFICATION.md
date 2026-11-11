@@ -41,6 +41,10 @@ the extractor.
 Verification requires regenerated extraction, compiled proof dependencies, kernel replay,
 extraction certificate audit, selected theorem audit and final source/artifact stability. Generated
 code and proofs use isolated module roots. A failed attempt removes its previous output report.
+A run of Lean, Lake or the audit executable that prints an internal error, such as a panic in a
+tactic, fails even when the process exits with `0`, so a report is written only from runs whose
+tactics never continued on a default value. The kernel checks every proof term regardless, and
+this check keeps a verified result free of internal errors in the tools that produced it.
 Verification settings select the theorem but are not evidence. Reports record the actual audited
 statement, inputs and library identity; their prose is not an independent specification.
 

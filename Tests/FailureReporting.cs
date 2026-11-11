@@ -216,6 +216,40 @@ if (Text(singleReport, "kind") != "resource-limit" || Text(singleReport, "resour
 Rerun(singleReport, single, singleProof, null);
 Console.WriteLine("PASS a single heartbeat limit is a resource limit located in the user's proof and removes the stale certificate");
 
+// The proof holds, but a tactic it runs reads past the end of an array: Lean prints the panic, the tactic
+// continues on a default value and Lean exits 0. No certificate may come of such a run.
+const string PastEnd = """
+
+open Lean Elab Tactic in
+/-- Reads the second entry of an empty array, as a tactic that assumed a longer term would. -/
+elab "read_past_end" : tactic => do
+  let entries : Array Nat := #[]
+  if entries[1]! == 7 then logInfo "seven"
+
+""";
+const string AddStatement = "theorem correctness : addContract.Holds Extracted.program addTo := by\n";
+var panicking = Path.Combine(root, "Out", "Panicking");
+Run([.. cli, "extract", arithmetic, Selector, panicking]);
+File.WriteAllText(Path.Combine(panicking, "verified.json"), "stale success");
+var panickingProof = Path.Combine(root, "Panicking.lean");
+File.WriteAllText(panickingProof, Contracts.Replace("namespace Client", "namespace ExampleProof").Replace("end Client", "") +
+    PastEnd + AddHolds.Replace(AddStatement, AddStatement + "  read_past_end\n") + "\nend ExampleProof\n");
+var panickingRun = Execute([.. cli, "verify", panicking, "--proof", panickingProof]);
+if (panickingRun.Code != 1 || File.Exists(Path.Combine(panicking, "verified.json")) ||
+    !panickingRun.Output.Contains("Lean or a LeanCIL tactic reported an internal error.", StringComparison.Ordinal) ||
+    !panickingRun.Output.Contains("Internal errors (1):", StringComparison.Ordinal))
+    throw new InvalidOperationException("Expected a proof that panics while checking to fail without a certificate:\n" +
+        panickingRun.Output);
+var panickingReport = Failure(panicking);
+var panicked = panickingReport.GetProperty("diagnostics").EnumerateArray().ToArray();
+if (Text(panickingReport, "kind") != "internal-error" || Text(panickingReport, "stage") != "proof checking" ||
+    Text(panickingReport, "module") != "Proof" || Text(panickingReport, "proof") != panickingProof ||
+    panicked.Length != 1 || Text(panicked[0], "kind") != "internal-error" ||
+    Text(panicked[0], "message") != "Error: index out of bounds")
+    throw new InvalidOperationException("Unexpected internal error report:\n" + panickingReport);
+Rerun(panickingReport, panicking, panickingProof, null);
+Console.WriteLine("PASS a proof that checks while its tactic panics fails as an internal error, names the proof and leaves no certificate");
+
 var manifest = Path.Combine(root, "Batch.json");
 var resultsPath = Path.Combine(root, "BatchResults.json");
 var cases = new (string Name, string Proof)[]

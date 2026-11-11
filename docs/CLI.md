@@ -947,6 +947,24 @@ such as a crashed tool, `Details:` holds the whole output instead. The
 unmodified output is the `message` of [`failed.json`](#failure-reports) and,
 when `LEANCIL_TRACE_DIRECTORY` is set, its transcripts.
 
+Lean prints an internal error when its runtime or a tactic reads a part of a term or an array
+that is absent, and elaboration then continues on a default value. The messages are
+`PANIC at ...`, `INTERNAL PANIC: ...`, `Error: index out of bounds`,
+`Stack overflow detected. Aborting.` and `LEAN ASSERTION VIOLATION`. One counts where a line of
+the process's stderr, or a line of a message Lean logged, starts with that text, which is where
+Lean's runtime writes it. The same words inside a sentence, a goal or a term are ordinary output,
+and a failed tactic, an expected rejection and the goals of `--goals` are Lean errors with their
+own kinds. Every command that runs
+Lean, Lake or the audit executable fails when their output holds one, including when the
+process exits with `0`, so `verify`, `verify-batch`, `gates`, `check`, `audit-library`,
+`workspace` and the certified library build write no report or certificate from that run. The
+report starts with `Lean or a LeanCIL tactic reported an internal error.` and leads with
+`Internal errors (N):`. It lists each message once with the number of times it was printed, its
+`file:line:col` when Lean logged it at a position, and the module Lake was building. The Lean
+errors of the run follow. In a batch, an internal error printed while building one request's
+proof module fails that request, and one printed while building a module the requests share
+fails each of them. The [failure report](#failure-reports) has kind `internal-error`.
+
 Verification checks a copy of the proof, `Extracted.lean`, the PDB names and, under
 `--proof-root`, the package's sources and its proof module. A location in a copy cites the file it
 was copied from, at the same line and column, and Lake's module names the proof's own module, so
@@ -1020,6 +1038,7 @@ output (for the last request of an output, as with `verified.json`) and as the
 |------|---------|
 | `unsupported-extraction` | `check` rejected the method in metadata and CIL validation, or Lean rejected the extraction certificate |
 | `stale-input` | The assembly, extraction artifacts or proof inputs changed after extraction or during verification |
+| `internal-error` | Lean, Lake or the audit executable printed an [internal error](#diagnostics), such as a panic in a tactic. The run is rejected whatever its exit code, and the report says nothing about whether the proof holds |
 | `elaboration-error` | A Lean error other than an unsolved goal or a resource limit |
 | `unsolved-goal` | A Lean `unsolved goals` error, or a `verify --goals` run that stopped at the goals it found open |
 | `resource-limit` | Heartbeats (`(deterministic) timeout`, `(kernel) deterministic timeout`) or recursion depth; `resource` names which |
@@ -1028,8 +1047,9 @@ output (for the last request of an output, as with `verified.json`) and as the
 | `invalid-request` | The proof or theorem selection is invalid |
 | `unclassified` | Anything else, such as a missing tool; read `message` |
 
-The request's `kind`, `file`, `line` and `column` are those of the first Lean error; `diagnostics`
-lists every error of the request's own modules with its message block. Lines are 1-based and
+The request's `kind`, `file`, `line` and `column` are those of the first diagnostic. `diagnostics`
+lists each distinct internal error and then every Lean error of the request's own modules with its
+message block, so an internal error gives the request its kind. Lines are 1-based and
 columns 0-based, as Lean prints them. Locations in the session's copies cite their originals, as
 in the text report. `message` is the original output, unmodified; `rerun` reruns just that
 request. Classification uses only the stage, LeanCIL's own messages and Lean's error prefixes

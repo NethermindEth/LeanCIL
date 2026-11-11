@@ -237,8 +237,113 @@ Require(refuted is { kind: FailureReports.Refutation, line: 21, column: 0, stage
 // The marker comes from the Lean audit only; statement text never makes a refutation.
 Require(FailureReports.Refuted(Audit, "ExampleProof.correctness", proof, output, package) is null &&
     unsolved.kind != FailureReports.Refutation, "an unsolved goal or a negated statement alone is never a refutation");
+
+// A build that Lake reports as successful while a tactic of the proof module read past the end of an array.
+const string built = "\u2139";
+var panicking = $"""
+    {built} [214/215] Built Client.Shared (2.1s)
+    info: Client/Shared.lean:3:0: 'Client.lemma' depends on axioms: [propext, Quot.sound]
+    {built} [215/215] Built LeanCILProof0 (12s)
+    info: LeanCILProof0.lean:55:0: Error: index out of bounds
+    Error: index out of bounds
+    warning: LeanCILProof0.lean:60:2: unused variable `x`
+    Build completed successfully (215 jobs).
+
+    """;
+string[] lakeBuild = ["lake", "build", "+LeanCILProof0:olean"];
+var internalErrors = LeanOutput.InternalErrors(panicking);
+var logged = new LeanOutput.InternalError("LeanCILProof0", "LeanCILProof0.lean:55:0", "Error: index out of bounds");
+Require(internalErrors.Count == 2 && internalErrors.All(error => error == logged),
+    "each line of a panic Lean logged is at that message's position and module", string.Join("\n", internalErrors));
+var rejected = LeanOutput.RejectedSuccess(lakeBuild, 0, panicking);
+Require(rejected is not null && rejected.Message.StartsWith(
+        "Lean reported an internal error (exit 0): lake build +LeanCILProof0:olean\n" +
+        "Internal error: Error: index out of bounds (2 times) at LeanCILProof0.lean:55:0 (building LeanCILProof0)\n",
+        StringComparison.Ordinal) && rejected.Message.EndsWith(panicking, StringComparison.Ordinal),
+    "a successful Lean command that printed an internal error fails, naming the module and quoting the message",
+    rejected?.Message);
+// The summary lines repeat no error: the report reads the output below them.
+Require(LeanOutput.InternalErrors(rejected!.Message).SequenceEqual(internalErrors),
+    "summary lines are not read as further internal errors");
+// Every form: Lean `panic!` with and without a declaration, runtime aborts, stack exhaustion and assertions.
+string[] forms =
+[
+    "PANIC at Lean.Expr.appArg! Lean.Expr:1234:20: application expected",
+    "PANIC at Init.Data.Option.BasicAux:16:14: value is none",
+    "INTERNAL PANIC: unreachable code has been reached", "INTERNAL PANIC: out of memory",
+    "Error: index out of bounds", "Stack overflow detected. Aborting.", "LEAN ASSERTION VIOLATION"
+];
+foreach (var form in forms)
+{
+    // Written to stderr, logged by Lake under `stderr:`, logged by Lean at a declaration, and in `--json` output.
+    var json = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        severity = "information", pos = new { line = 7, column = 0 }, fileName = "Proof.lean",
+        data = form + "\nbacktrace:"
+    });
+    (string Output, string? Location)[] shapes =
+    [
+        (form + "\nbacktrace:\n", null), ($"info: stderr:\n{form}\nbacktrace:\n", null),
+        ($"info: Proof.lean:7:0: {form}\n", "Proof.lean:7:0"), ($"Proof.lean:7:0: info: {form}\n", "Proof.lean:7:0"),
+        (json + "\n", "Proof.lean:7:0")
+    ];
+    foreach (var (text, location) in shapes)
+    {
+        var found = LeanOutput.InternalErrors(text);
+        Require(found.Count == 1 && found[0] == new LeanOutput.InternalError(null, location, form) &&
+            LeanOutput.RejectedSuccess([@"C:\elan\bin\lean.exe", "Proof.lean"], 0, text) is not null &&
+            LeanOutput.RejectedSuccess(["/opt/audit/leancil-audit", "--replay", "t.json"], 0, text) is not null,
+            "internal-error form: " + form, text + "\n" + string.Join("\n", found));
+        Require(Classify("proof checking", "Command failed (134): lean Proof.lean\n" + text) is
+                { kind: FailureReports.InternalError, diagnostics: [{ kind: FailureReports.InternalError } first] } &&
+            first.message == form,
+            "a failed run that printed an internal error is an internal error, not a failed proof: " + form);
+    }
+}
+// Ordinary output passes: axiom reports, warnings, a caller's own wording, and text another program quotes.
+var ordinary = replayed + "warning: Client/Shared.lean:11:0: declaration uses 'sorry'\n" +
+    "info: Client/Shared.lean:12:0: a panic is an internal error; index 3 is out of bounds for this list\n" +
+    // The runtime's words inside a sentence, a goal or a quoted term are a message about them, at any severity.
+    "info: Client/Shared.lean:13:0: the run printed Error: index out of bounds twice\n" +
+    "warning: Client/Shared.lean:14:0: expected \"PANIC at Lean.Expr.appArg! Lean.Expr:1:2: no application\"\n" +
+    "  Error: index out of bounds\n" +
+    "error: Client/Shared.lean:15:2: unsolved goals\nh : message = \"INTERNAL PANIC: out of memory\"\n⊢ False\n" +
+    "PANIC at lean\nBuild completed successfully (420 jobs).\n";
+Require(LeanOutput.InternalErrors(ordinary).Count == 0 && LeanOutput.RejectedSuccess(lakeBuild, 0, ordinary) is null &&
+    LeanOutput.RejectedSuccess(["dotnet", "run", "--file", "Tests/Fixture.cs"], 0, panicking) is null &&
+    LeanOutput.RejectedSuccess(lakeBuild, 1, panicking) is null,
+    "ordinary info and warning output passes, as does a program that only quotes an internal error");
+// Resource limits Lean reports as errors keep their kind.
+Require(Classify("proof checking", "error: LeanCILProof.lean:8:0: (kernel) deep recursion detected\n") is
+        { kind: FailureReports.ResourceLimit, resource: "recursion" } &&
+    Classify("proof checking", "error: LeanCILProof.lean:8:0: maximum recursion depth has been reached\n") is
+        { kind: FailureReports.ResourceLimit, resource: "recursion" },
+    "recursion limits stay resource limits");
+var internalReport = Classify("proof checking", rejected.Message);
+Require(internalReport is { kind: FailureReports.InternalError, stage: "proof checking", line: 55, column: 0,
+        module: "Proofs.Mix", diagnostics.Length: 1 } && internalReport.file == proof &&
+    internalReport.diagnostics[0] is { kind: FailureReports.InternalError, module: "Proofs.Mix",
+        message: "Error: index out of bounds" } && internalReport.message == rejected.Message,
+    "the report has its own kind, names the proof module and file, and quotes the message",
+    System.Text.Json.JsonSerializer.Serialize(internalReport));
+// An internal error leads the errors printed after it, which a tactic on a default value may have caused.
+var mixed = Classify("proof checking", "Command failed (1): lake build\n" + panicking.Replace(
+    "warning: LeanCILProof0.lean:60:2: unused variable `x`",
+    "error: LeanCILProof0.lean:61:4: unsolved goals\n⊢ False"));
+Require(mixed is { kind: FailureReports.InternalError, line: 55, diagnostics.Length: 2 } &&
+    mixed.diagnostics[1] is { kind: FailureReports.UnsolvedGoal, line: 61 },
+    "an internal error leads the Lean errors of the same run");
+Require(Classify("proof checking", rejected.Message, ["LeanCILProof0"]).kind != FailureReports.InternalError &&
+    LeanOutput.InternalErrors(panicking, ["LeanCILProof0"]).Count == 0,
+    "another request's proof module does not make this request an internal error");
+var internalSummary = LeanDiagnostics.Summarize(rejected.Message, null,
+    location => sessionCopies.Locate(location))!.Text;
+Require(internalSummary == $"Internal errors (1):\n  {proof}:55:0 (building LeanCILProof0)\n" +
+        "    Error: index out of bounds (2 times)\n",
+    "the summary shows each internal error once, at the user's file", internalSummary);
 Directory.Delete(work, true);
 Console.WriteLine("PASS failure reports classify stages and Lean diagnostics and map locations to the user's files");
+Console.WriteLine("PASS internal errors of Lean fail a successful run with their own kind, and ordinary output passes");
 
 // The JSON report reads Lean's records by these names; a renamed tag or marker would drop every record.
 var obligationSource = File.ReadAllText(At("CIL/Safety/Obligations.lean"));

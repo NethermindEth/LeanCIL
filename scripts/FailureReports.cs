@@ -14,6 +14,7 @@ internal static partial class FailureReports
     internal const string ReplayOrAuditRejected = "replay-or-audit-rejected";
     internal const string Refutation = "refutation";
     internal const string InvalidRequest = "invalid-request";
+    internal const string InternalError = "internal-error";
     internal const string Unclassified = "unclassified";
 
     internal sealed record Method(string entry, string assembly, string assemblySha256);
@@ -61,16 +62,26 @@ internal static partial class FailureReports
         string proof, string output, string? proofRoot, SourceCopies? copies = null)
     {
         var module = ModuleOf(proof, proofRoot);
-        var diagnostics = LeanDiagnostics.Errors(message, hidden).Select(error =>
+        // Internal errors lead: after one, a tactic ran on a default value and no later diagnostic is reliable.
+        var internalErrors = LeanOutput.InternalErrors(message, hidden).Distinct().Select(error =>
+        {
+            var (file, line, column) = Place(error.Location, copies);
+            var origin = error.Module is { } name && ProofModule().IsMatch(name) ? module : error.Module;
+            return new Diagnostic(InternalError, null, origin ?? (file == proof ? module : null), file, line, column,
+                error.Message);
+        });
+        var diagnostics = internalErrors.Concat(LeanDiagnostics.Errors(message, hidden).Select(error =>
         {
             var (kind, resource) = KindOf(stage, error.Lines[0]);
-            var (file, line, column) = Place(error, copies);
+            var (file, line, column) = Place(error.Location, copies);
             var origin = error.Module is { } name && ProofModule().IsMatch(name) ? module : error.Module;
             return new Diagnostic(kind, resource, origin ?? (file == proof ? module : null), file, line, column, string.Join("\n", error.Lines));
-        }).ToArray();
+        })).ToArray();
         string requestKind;
         string? requestResource = null;
-        if (stage == "extraction integrity")
+        if (diagnostics.Length > 0 && diagnostics[0].kind == InternalError)
+            requestKind = InternalError;
+        else if (stage == "extraction integrity")
             requestKind = ChildStage().Match(message) is { Success: true } child && child.Groups["stage"].Value == "metadata and CIL validation"
                 ? UnsupportedExtraction : StaleInput;
         else if (diagnostics.Length > 0)
@@ -114,11 +125,11 @@ internal static partial class FailureReports
     }
 
     // A location in a file the session copied cites the original the user edits; any other keeps its printed path.
-    static (string? File, int? Line, int? Column) Place(LeanDiagnostics.Diagnostic error, SourceCopies? copies)
+    static (string? File, int? Line, int? Column) Place(string? location, SourceCopies? copies)
     {
-        if (error.Location is null) return (null, null, null);
-        var match = Location().Match(error.Location);
-        if (!match.Success) return (error.Location, null, null);
+        if (location is null) return (null, null, null);
+        var match = Location().Match(location);
+        if (!match.Success) return (location, null, null);
         var (file, line, column) = (match.Groups["file"].Value, int.Parse(match.Groups["line"].Value),
             int.Parse(match.Groups["column"].Value));
         return copies?.Position(file, line, column) ?? (file, line, column);
