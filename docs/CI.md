@@ -135,8 +135,10 @@ the frontend `scripts/ProofCost.lean`, and writes one row per command and one pe
 | Elapsed ms | wall time of the command; kernel time is in the JSON report | no |
 
 Elapsed time depends on the runner's load, so it is reported and never fails a job. The frontend
-checks nothing: a proof is accepted by the verification suites, and a module that reports an error
-is listed as not measured.
+does not certify proofs: a proof is accepted by the verification suites. An error in any command
+or nested elaboration snapshot makes the module unmeasured; later successful commands cannot
+erase it. Expected diagnostics consumed by `#guard_msgs` do not count as errors. Auxiliary
+theorems contribute to the declaring command's kernel heartbeats and proof objects.
 
 A source is measured on each tree by the run that verifies it:
 

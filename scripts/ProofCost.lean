@@ -166,6 +166,7 @@ def measure (moduleName : Name) (sourcePath : String) :
   let mut state : Frontend.State := { commandState, parserState, cmdPos := parserState.pos }
   let mut known : NameSet := {}
   let mut costs : Array CommandCost := #[]
+  let mut diagnostics : MessageLog := {}
   let mut finished := false
   while !finished do
     let start := state.cmdPos
@@ -176,6 +177,8 @@ def measure (moduleName : Name) (sourcePath : String) :
     let heartbeats := (← IO.getNumHeartbeats) - startBeats
     let elapsedMs := (← IO.monoMsNow) - startMs
     state := next
+    -- Lean resets the immediate message log for each top-level command.
+    diagnostics := diagnostics ++ state.commandState.messages
     finished := isLast
     let some command := state.commands.back? | continue
     if command.isOfKind ``Parser.Command.eoi then continue
@@ -199,7 +202,10 @@ def measure (moduleName : Name) (sourcePath : String) :
       line := firstLine
       sourceLines := lastLine + 1 - firstLine
       constants := added.size }
-  let log := state.commandState.messages
+  let snapshots : Language.SnapshotTree :=
+    { element := default, children := state.commandState.snapshotTasks }
+  let log := snapshots.getAll.foldl
+    (fun messages snapshot => messages ++ snapshot.diagnostics.msgLog) diagnostics
   for message in log.toList do
     if message.severity == .error then IO.eprintln (← message.toString)
   return (costs, state.commandState.env, log.hasErrors)
