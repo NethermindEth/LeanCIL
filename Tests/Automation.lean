@@ -1168,4 +1168,28 @@ theorem widened_boolean_cast (body : CIL.Method) (frame : Frame) (field : CIL.W6
 
 #print axioms widened_boolean_cast
 
+open CIL.Safety in
+/-- A value known only to be numeric loads as an argument: the fact meets the checked value
+    test in the unfolded form stepping leaves it in. -/
+theorem opaque_numeric_argument (body : CIL.Method) (frame : Frame) (argument : CIL.Value)
+    (memory : Memory) (numeric : numericValue argument = true) :
+    step body (.arg 0) 0 [.scalar argument] frame [] memory =
+      .ok (.next 1 [.scalar argument] frame memory) := by
+  fail_if_success cil_checked_step []
+  cil_checked_step [numeric]
+
+#print axioms opaque_numeric_argument
+
+open CIL.Safety in
+/-- The same fact passes an opaque numeric value to a call. -/
+theorem opaque_numeric_call (body : CIL.Method) (frame : Frame) (argument : CIL.Value)
+    (memory : Memory) (numeric : numericValue argument = true)
+    (known : argument.hasUnspecified = false) :
+    step body (.call 1 1) 0 [] frame [.scalar argument] memory =
+      .ok (.call 1 [.scalar argument] [] memory) := by
+  fail_if_success cil_checked_step [known]
+  cil_checked_step [numeric, known]
+
+#print axioms opaque_numeric_call
+
 end Tests.Automation

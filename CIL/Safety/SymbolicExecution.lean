@@ -1099,9 +1099,45 @@ elab_rules : tactic
 /-- One checked `step` goal: normalises `facts`, then runs `cil_checked_step_normalized`. -/
 syntax "cil_checked_step" "[" term,* "]" : tactic
 
+open Lean Meta in
+/-- The `numericValue value` a fact's conclusion tests, when `value` is no constructor. -/
+private def opaqueNumericTest? (conclusion : Expr) : MetaM (Option Expr) := do
+  let some (_, tested, _) := conclusion.consumeMData.eq? | return none
+  unless tested.isAppOfArity ``CIL.Safety.numericValue 1 do return none
+  if ← isConstructorApp (← whnfR tested.appArg!) then return none
+  return some tested
+
+open Lean Elab Tactic Meta in
+/-- Each fact `numericValue value = result` about a value that is no constructor, restated over
+    the unfolded definition: stepping unfolds `numericValue` before a fact can rewrite it, so
+    only this form meets the checked value test. Quantified facts retain their binders. -/
+def numericValueFacts (facts : Array Term) : TacticM (Array Term) := withMainContext do
+  let mut restated := #[]
+  for fact in facts do
+    unless ← suppliedFactSatisfies fact (fun type => forallTelescope type fun _ conclusion =>
+        return (← opaqueNumericTest? conclusion).isSome) do continue
+    let saved ← saveState
+    try
+      let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm fact none
+      let unfolded ← forallTelescope (← instantiateMVars (← inferType proof))
+        fun variables conclusion => do
+          let some tested ← opaqueNumericTest? conclusion
+            | throwError "Not a numeric value test"
+          let some definition ← unfoldDefinition? tested
+            | throwError "The numeric value test does not unfold"
+          let statement := conclusion.consumeMData.replace fun term =>
+            if term == tested then some definition.headBeta else none
+          mkLambdaFVars variables (← mkExpectedTypeHint (mkAppN proof variables) statement)
+      let unfolded ← instantiateMVars unfolded
+      if unfolded.hasMVar then saved.restore
+      else restated := restated.push (← Term.exprToSyntax unfolded)
+    catch _ => saved.restore
+  return restated
+
 open Lean Elab Tactic Meta in
 /-- Derive checked load and store facts from byte operations once, before stepping. The
-    byte width selects the existing bridge; quantified facts retain their binders. -/
+    byte width selects the existing bridge; quantified facts retain their binders. A numeric
+    value test of an opaque value is also stated in its unfolded form (`numericValueFacts`). -/
 def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMainContext do
   let operationEquation (operation : Expr) :=
     operation.isAppOfArity ``CIL.Safety.read 4 ||
@@ -1175,7 +1211,7 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
         for result in derived do
           prepared := prepared.push (← Term.exprToSyntax result)
     catch _ => saved.restore
-  return prepared
+  return prepared ++ (← numericValueFacts facts)
 
 open Lean Elab Tactic in
 /-- Normalise `CIL.truth` and `facts` once for a stepping loop, then build its tactic from the

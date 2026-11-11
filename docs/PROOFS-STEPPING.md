@@ -168,6 +168,10 @@ so a supplied `read` steps a `.loadAggregate` through a managed-reference addres
 meets that for every `c`; any other int32 needs the fact `bits.toNat ≤ 1`. The fact may bound a value
 inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32`.
 
+A value known only as `argument : CIL.Value` loads as an argument, and passes to a call, from the
+fact `numericValue argument = true`: fact preparation also states it over the unfolded definition,
+the form the checked value test has when the step reaches it.
+
 Intrinsic steps expose `checkedIntrinsic` and apply proved `@[cil_eval]` lemmas before unfolding the
 intrinsic evaluator. Register consumer lemmas in the form `CIL.evalIntrinsic operation operands =
 some result`. Nonnegative `BitVec.ofInt` literals become `BitVec.ofNat` literals so these equations
