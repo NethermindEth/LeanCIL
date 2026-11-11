@@ -101,7 +101,7 @@ if (suite is "all" or "core")
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
         "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
-        "Tests/EnvironmentLimit.cs"]);
+        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
@@ -205,6 +205,9 @@ RunFixture("Tests/ProofBindingCatalog.cs", [], streamOutput: true, progress: "Co
 Passed("exact binding catalogs and deterministic source materialization");
 RunFixture("Tests/ProofCostFrontend.cs", [], streamOutput: true, progress: "Proof measurement imports");
 Passed("proof measurements reject missing imports before diagnostic assertions");
+RunFixture("Tests/ConsumerSupportCandidates.cs", ["--lake"], streamOutput: true,
+    progress: "Coherent extraction restoration");
+Passed("complete authenticated extraction generations remain stable during proof builds");
 RunFixture("Tests/ProofBindingFamilies.cs", [], streamOutput: true, progress: "Generated integer binding families");
 Passed("certified equality and bitwise binding families with rejected recipe and body mutations");
 RunFixture("Tests/MethodSelectors.cs", [], streamOutput: true, progress: "Method selector checks");

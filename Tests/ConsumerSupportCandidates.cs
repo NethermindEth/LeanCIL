@@ -4,6 +4,13 @@
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 
+bool includeLake = args switch
+{
+    [] => false,
+    ["--lake"] => true,
+    _ => throw new ArgumentException("Usage: ConsumerSupportCandidates.cs [--lake]")
+};
+
 var root = Path.Combine(Path.GetTempPath(), "leancil-support-candidates-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
 try
@@ -153,6 +160,8 @@ finally
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", previousDisabled);
     Directory.Delete(root, true);
 }
+
+if (!includeLake) return;
 
 Directory.CreateDirectory(root);
 try
