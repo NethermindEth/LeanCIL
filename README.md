@@ -59,14 +59,14 @@ leancil extract Examples/Assembly/bin/Examples.dll "Arithmetic::Add(ulong,ulong)
 leancil verify artifacts/Add --proof Examples/Proofs/Add.lean
 ```
 
-Success prints `Verified: ExampleProof.correctness` and writes `artifacts/Add/verified.json`.
-The theorem states that the result equals `(x + y) mod 2^64` for every pair of 64-bit inputs.
-Changing the implementation to subtraction makes the unchanged proof fail.
+Success prints `Verified: ExampleProof.correctness` and writes `artifacts/Add/verified.json`. The
+theorem states that the result equals `(x + y) mod 2^64` for every pair of 64-bit inputs. Changing
+the implementation to subtraction makes the unchanged proof fail.
 
-The [getting-started walkthrough](docs/GETTING-STARTED.md) shows the expected output,
-edit/rebuild/failure/recovery sequence, and a proof that an invalid memory access cannot succeed.
-The [examples](docs/EXAMPLES.md) cover arithmetic, calls, structs, classes and virtual calls,
-strings, generic methods, loops, memory access and compiled F#.
+The [getting-started walkthrough](docs/GETTING-STARTED.md) shows the expected output, a failing
+proof and its recovery, and a proof that an invalid memory access cannot succeed. The
+[examples](docs/EXAMPLES.md) cover arithmetic, calls, structs, classes and virtual calls, strings,
+generic methods, loops, memory access and compiled F#.
 
 ## Commands
 
@@ -85,10 +85,9 @@ strings, generic methods, loops, memory access and compiled F#.
 | `leancil export-contracts` | Publish verified method contracts for separately compiled callers |
 | `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library |
 
-`check` validates extraction consistency; `verify` establishes the selected theorem, and
-`verify --goals` prints the goal at each `sorry` and failing tactic of an unfinished proof.
-Failures return a nonzero exit code. See the [CLI reference](docs/CLI.md) for every command and
-option, profiles, saved settings and diagnostics.
+`verify --goals` prints the goal at each `sorry` and failing tactic of an unfinished proof. A
+failing command returns a nonzero exit code. See the [CLI reference](docs/CLI.md) for every
+command and option, profiles, saved settings and diagnostics.
 
 ## Consumer packages and batches
 
@@ -145,10 +144,9 @@ dotnet run --file scripts/Test.cs -- --suite core
 ```
 
 These commands are for working on LeanCIL itself; using the tool needs neither. Run
-`dotnet run --file scripts/Test.cs` for the full suite. Tests compile example assemblies,
-check Lean proofs, exercise rejection cases and validate artifact identity. Results are written
-to `artifacts/`. Use separate checkouts for concurrent suites because they mutate those files.
-See [validation coverage and suite commands](docs/VALIDATION.md) and [CI operation](docs/CI.md).
+`dotnet run --file scripts/Test.cs` for the full suite. Results are written to `artifacts/`; use
+separate checkouts for concurrent suites because they mutate those files. See [validation coverage
+and suite commands](docs/VALIDATION.md) and [CI operation](docs/CI.md).
 
 ## Documentation
 

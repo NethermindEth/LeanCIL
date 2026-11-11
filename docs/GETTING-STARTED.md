@@ -2,14 +2,13 @@
 
 This walkthrough installs the `leancil` tool, verifies one method of the example assembly, shows
 the same proof fail after the method is broken, and verifies that an invalid memory access cannot
-succeed. Read it first; the [CLI reference](CLI.md) has every command and option.
+succeed. The [CLI reference](CLI.md) has every command and option.
 
 ## Install
 
-Install the Lean version in [lean-toolchain](../lean-toolchain) through elan and the .NET SDK
-in [global.json](../global.json). The tool carries the framework sources and builds its own
-library from them, so using it needs no `lake build` of this checkout; that command is for
-working on the framework itself.
+Install the Lean version in [lean-toolchain](../lean-toolchain) through elan and the .NET SDK in
+[global.json](../global.json). The tool carries the framework sources and builds its own library
+from them, so using it needs no `lake build` of this checkout.
 
 Build and install the .NET tool from this checkout:
 
@@ -19,9 +18,8 @@ dotnet tool update --global Nethermind.LeanCIL --add-source artifacts/packages -
 ```
 
 Each development pack is a new prerelease version, `0.1.0-dev.` and its UTC build time, so
-rerunning both commands after a change replaces the installed tool instead of reusing a cached
-package of the same version. A release pack, given its certified library descriptors, keeps the
-plain version.
+rerunning both commands after a change replaces the installed tool. A release pack, given its
+certified library descriptors, keeps the plain version.
 
 ## Verify a method
 
@@ -69,11 +67,10 @@ extraction started from; see [reading the report](CLI.md#reading-the-report).
 
 The first `verify` on a machine builds and kernel-replays only the framework modules the proof
 imports, reports its result, and then builds the whole certified library in the same command:
-every framework module (about 330 Lake jobs), each kernel-replayed, which takes several
-minutes. Stderr says what is being built and reports the job count as
-[stage progress](CLI.md#stage-progress) describes. The library is cached and reused, so later
-runs take seconds; a release package downloads it instead of building it. See
-[library cache](CLI.md#library-cache) for its location and integrity checks.
+about 330 Lake jobs, which takes several minutes. Stderr reports [stage
+progress](CLI.md#stage-progress). Later runs reuse the cached library and take seconds; a release
+package downloads it instead of building it. See [library cache](CLI.md#library-cache) for its
+location and integrity checks.
 
 `extract` generates definitions, `check` validates extraction consistency, and `verify`
 establishes the selected theorem about those definitions. Its guarantee is exactly the theorem's
@@ -81,18 +78,17 @@ statement, including its preconditions and quantifiers. `verify` reuses authenti
 unchanged inputs; `--fresh` bypasses that reuse and `--rebuild-library` also rebuilds the
 library (see [verify](CLI.md#verify)).
 
-List the methods of an assembly with `leancil list`, and check that generated files match the
-assembly and extraction settings, without running Lean, with `leancil check`:
+List the methods of an assembly with `leancil list`. Check that generated files match the assembly
+and extraction settings, without running Lean, with `leancil check`:
 
 ```sh run
 leancil list Examples/Assembly/bin/Examples.dll
 leancil check artifacts/Add
 ```
 
-`Examples/Proofs/Add.lean` states the mathematical property independently: the returned word's
-natural value equals `(x.toNat + y.toNat) % 2^64`. Its universal proof derives execution from the
-generated program. `Examples/Proofs/WrongAdd.lean` independently proves a counterexample to the
-addition contract for a subtracting implementation, for every successful fuel budget.
+`Examples/Proofs/Add.lean` derives execution from the generated program for all inputs.
+`Examples/Proofs/WrongAdd.lean` proves a counterexample to the addition contract for a subtracting
+implementation, for every successful fuel budget.
 
 ## Try breaking the implementation
 
@@ -150,23 +146,19 @@ the theorem does not claim the access fails for every possible allocation layout
 The commands and output on this page are run and compared by the repository's `docs` suite; see
 [validation coverage](VALIDATION.md).
 
-## What a result means
+## Scope of a result
 
 - A verification report identifies the **specific named theorem and its printed type**, not all
   methods or all inputs.
-- `leancil check` validates extraction artifacts only; `leancil verify` runs the proof.
-- A failed proof exits with `1`, prints `Invalid:` and the diagnostic to standard error, and
-  removes the previous `verified.json`.
 - Fuel exhaustion and unsupported states are failures, never successful verification.
 
 ## Prove another method
 
 1. Find the method's selector with `leancil list` and extract it into its own directory.
-2. Run `leancil new-proof artifacts/Method Proofs/Method.lean` for a starting proof. It states
-   the theorem, binds the entry and any loop, and leaves each decision as a commented `sorry`
-   that `verify` refuses until filled; see [start a proof](CLI.md#start-a-proof). Alternatively
-   write a Lean file that imports `Extracted`, states a specification and proves it from
-   `Extracted.program`.
+2. Run `leancil new-proof artifacts/Method Proofs/Method.lean` for a starting proof. It states the
+   theorem, binds the entry and any loop, and leaves each decision as a commented `sorry`; see
+   [start a proof](CLI.md#start-a-proof). Alternatively write a Lean file that imports
+   `Extracted`, states a specification and proves it from `Extracted.program`.
 3. Run `leancil verify artifacts/Method --proof Proofs/Method.lean --goals` to print the goal at
    each hole, fill the holes, then verify without `--goals`. `verify` checks
    `ExampleProof.correctness` unless `--theorem` names another theorem.

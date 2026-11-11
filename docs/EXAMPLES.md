@@ -2,9 +2,8 @@
 
 This page lists the example methods and proofs shipped in the repository and what each theorem
 establishes. Read it to find a complete proof close to the method you want to verify. The C#
-sources are under `Examples/Assembly`, the F# sources under `Examples/FSharp` and the proofs
-under `Examples/Proofs`. To run one, build the assembly, extract the method and verify its proof
-as in [getting started](GETTING-STARTED.md):
+sources are under `Examples/Assembly`, the F# sources under `Examples/FSharp` and the proofs under
+`Examples/Proofs`. Build, extract and verify one as in [getting started](GETTING-STARTED.md):
 
 ```sh
 dotnet build Examples/Assembly -c Release
@@ -12,9 +11,9 @@ leancil extract Examples/Assembly/bin/Examples.dll "Loops::Countdown(uint)" arti
 leancil verify artifacts/Countdown --proof Examples/Proofs/Countdown.lean
 ```
 
-Sentences about what "the suite" checks describe the repository's own tests
-(`dotnet run --file scripts/Test.cs -- --suite <name>`, see [validation](VALIDATION.md)); they
-record which wrong implementations each unchanged proof rejects.
+Sentences about what a suite checks describe the repository's own tests
+(`dotnet run --file scripts/Test.cs -- --suite <name>`, see [validation](VALIDATION.md)): the
+wrong implementations each unchanged proof rejects.
 
 ## Independent examples
 
@@ -144,9 +143,9 @@ supplies successful finite execution for every input, including the maximum 32-b
 without unrolling billions of iterations. Subtraction cannot underflow because it occurs only when
 the counter is positive.
 
-The loop suite checks the unchanged universal proof after inserting NOPs and rearranging basic
-blocks. It also requires that proof to reject both an incorrect result and a loop whose counter
-never decreases.
+The `loops` suite checks the unchanged universal proof after inserting NOPs and rearranging basic
+blocks, and requires it to reject both an incorrect result and a loop whose counter never
+decreases.
 
 [The counted-loop proof](../Examples/Proofs/CountCalls.lean) shows that `Loops.CountCalls` returns
 its input for every `uint`, counting iterations while a `Decrement` helper lowers the remaining
@@ -154,11 +153,8 @@ count. Each iteration crosses the call through `decrementContract` with `loop_te
 and `cil_loop_call`, which names the returned count and keeps both locals of the generated frame
 across the call through `LoopFrame.after_confined`; `cil_loop_recurse` stores them and steps back to
 the head, and the invariant states only `count + remaining = value`. The suite verifies the
-unchanged loop proof against a build whose helper computes `value + 0xFFFFFFFF`, re-proving only the
-helper contract, and rejects builds that discard the helper result or count twice. Against the
-correct build, measuring by the count instead of the remaining value fails the decrease obligation,
-and the non-inductive invariant `count + remaining = value + count * remaining` fails only its
-preservation.
+unchanged loop proof against a build whose helper computes `value + 0xFFFFFFFF`, re-proving only
+the helper contract, and rejects builds that discard the helper result or count twice.
 
 [The struct-local loop proof](../Examples/Proofs/TallyTwice.lean) shows that `Loops.TallyTwice`
 returns twice its input for every `uint` and allocates nothing the caller sees. Its loop state is a
@@ -173,9 +169,8 @@ caller byte outside the copied words, for every span length and contents and eve
 authority over those words that lies apart from the span. The proof states the bindings, `Stamp`'s
 contract, the invariant and the measure: the loop tactics read the span in each frame memory from
 its facts at the caller's memory, cross the call with the frame after it, and carry the buffer's
-contents and write authority through every store and the return. The suite compares five spans with
-.NET, checking the words past the copy are unchanged, and rejects builds whose `Stamp` writes zero
-or whose loop copies past a zero.
+contents and write authority through every store and the return. The suite rejects builds whose
+`Stamp` writes zero or whose loop copies past a zero.
 
 [The outcome loop proof](../Examples/Proofs/CountUntil.lean) shows that
 `Loops.CountUntil(value, limit)` returns `value` when `value <= limit`, and otherwise propagates the
@@ -183,13 +178,10 @@ or whose loop copies past a zero.
 after `limit` successful calls. It holds for every pair of `uint`s from empty caller memory. The
 proof uses only `bumpContract`, an `OutcomeContract` naming when `Bump` throws, through
 `loop_outcome_induction`, `cil_loop_outcome_call` and `cil_loop_outcome_raise`;
-`ensures_outcome_of_loop` gives the method's `EnsuresOutcome`. The suite compares five inputs with
-.NET, two of which throw. It verifies the unchanged loop proof against a `Bump` that tests
-inequality and subtracts minus one, and rejects it at the exceptional exit for a `Bump` that throws
-`System.ArgumentException` under a contract re-proved to say so. Against the correct build,
-measuring by the count fails the decrease obligation, the invariant `count <= limit - remaining`
-fails only its preservation, and specifying `System.ArgumentException` for the loop fails only at
-the exceptional exit.
+`ensures_outcome_of_loop` gives the method's `EnsuresOutcome`. The suite verifies the unchanged
+loop proof against a `Bump` that tests inequality and subtracts minus one, and rejects it at the
+exceptional exit for a `Bump` that throws `System.ArgumentException` under a contract re-proved to
+say so.
 
 [The buffer fill proof](../Examples/Proofs/FillWords.lean) shows that `Loops.FillWords`, which
 stores `value` through `Unsafe.Add(ref destination, i)` for each `i < count`, leaves
@@ -198,9 +190,8 @@ stores `value` through `Unsafe.Add(ref destination, i)` for each `i < count`, le
 never readable or initialized contents, and its invariant is `Filled`: the first `i` words filled,
 the rest still only writable. The loop state is a `FrameState`, whose `LoopFrame` carries the
 footprint, well-formedness, index home and index value; the proof writes the element through the
-frame and the loop tactics keep the rest. The suite compares the runtime result for four counts,
-checking that both neighbouring words are unchanged, and rejects builds that shift every store by
-one word or skip every other word.
+frame and the loop tactics keep the rest. The suite rejects builds that shift every store by one
+word or skip every other word.
 
 [The span predicate proof](../Examples/Proofs/SpanAllZero.lean) and [the span fold
 proof](../Examples/Proofs/SpanSum.lean) state their results over `SpanContents`, the library's
@@ -213,10 +204,9 @@ measure is the suffix length, and `CheckedSpan.head` and `CheckedSpan.tail` carr
 `values[0]` read and `values.Slice(1)`. Each proof states its specification, invariant and
 measure, the next state of each iteration and the facts its steps use; frame entry, the frame
 home and the exit's memory fact come from the [loop verification
-conditions](PROOFS-STEPPING.md#loop-verification-conditions). The suite compares both methods with
-.NET, including
-`default` spans and wrapping sums, and rejects a build of `AllZero` that replaces every read with
-zero and a build of `Sum` that stops while one element remains.
+conditions](PROOFS-STEPPING.md#loop-verification-conditions). The suite rejects a build of
+`AllZero` that replaces every read with zero and a build of `Sum` that stops while one element
+remains.
 
 Loop invariants and decreasing measures are supplied by the proof author. The `loops` suite
 rejects an incorrect loop under the unchanged contract, checks malformed stack joins and changing
@@ -243,8 +233,8 @@ leancil verify artifacts/FSharpAdd --proof Examples/Proofs/Add.lean
 ```
 
 The theorem proves `(x + y) mod 2^64` for every pair of 64-bit inputs. The `fsharp` suite also
-checks universal store/load and constructor contracts, compares compiled F# results with checked
-CIL execution, and rejects subtraction under the unchanged addition contract.
+checks universal store/load and constructor contracts and rejects subtraction under the unchanged
+addition contract.
 
 These examples cover F# programs that compile into the supported CIL subset. F# lists, closures,
 discriminated unions and arbitrary FSharp.Core calls are not generally supported; the suite
