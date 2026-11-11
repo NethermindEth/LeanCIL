@@ -241,10 +241,28 @@ private def snapshotRetainedAccess (entered current : Expr) : TacticM Term := wi
   -- Stated as `AccessBelow`, the link follows each later store under one watermark.
   assertSnapshotFact `snapshotRetained (← mkAppM ``MemoryBelow.accessBelow #[preserved])
 
+/-- Close a home's kind lookup `kinds[index]? = some _` with a supplied fact that states it, or
+    that states the numeric spec at that index. -/
+syntax "cil_snapshot_kind" "[" term,* "]" : tactic
+
+elab_rules : tactic
+  | `(tactic| cil_snapshot_kind [$facts:term,*]) => do
+    for fact in facts.getElems do
+      let saved ← saveState
+      try
+        evalTactic (← `(tactic| cil_strict first
+          | exact $fact
+          | exact numericKinds_getElem? $fact))
+        return
+      catch _ => saved.restore
+    throwError "No supplied fact states the local's kind at this index"
+
 /-- Discover a selected writable home without exposing the concrete frame's slot list. Homes
     stated at an earlier memory, or after leading slots without byte homes, are used when the
-    context shows that the current memory retains their access. -/
-private def prepareSnapshotHome (memory frame index : Expr) : TacticM Unit := withMainContext do
+    context shows that the current memory retains their access. A kind lookup that does not
+    compute, as over opaque kinds, is closed from `facts`. -/
+private def prepareSnapshotHome (memory frame index : Expr) (facts : Array Term) :
+    TacticM Unit := withMainContext do
   let locals ← mkAppM ``Frame.locals #[frame]
   let declarations := (← getLCtx).decls.toArray.filterMap id
   for declaration in declarations.reverse do
@@ -267,7 +285,8 @@ private def prepareSnapshotHome (memory frame index : Expr) : TacticM Unit := wi
         let homes ← assertSnapshotFact `snapshotHomes proof
         let index ← Term.exprToSyntax index
         evalTactic (← `(tactic| obtain ⟨$home, $slot, $bound, $ready⟩ :=
-          CompleteWritableHomes.home_at $homes $index _ (by rfl)))
+          CompleteWritableHomes.home_at $homes $index _
+            (by first | rfl | cil_snapshot_kind [$facts,*])))
         return
       let (skipped, layout) ← snapshotLeadingSlots locals slots
       let some position ← getNatValue? (← whnfR index)
@@ -293,7 +312,7 @@ private def prepareSnapshotHome (memory frame index : Expr) : TacticM Unit := wi
       evalTactic (← `(tactic| cil_strict obtain ⟨$home, $raw, $bound, $ready⟩ :=
         CompleteWritableHomes.home_retained $homes (by assumption) $retained
           (by first | exact Nat.le_refl _ | assumption | omega) [$skippedTerms,*] $inner _
-          (by rfl)))
+          (by first | rfl | cil_snapshot_kind [$facts,*])))
       let outer := Syntax.mkNumLit (toString position)
       let kind ← withMainContext do
         let found ← instantiateMVars (← inferType (← Term.elabTerm raw none))
@@ -376,7 +395,7 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
       if known.hasMVar then throwError "The supplied store does not determine its result"
       pure (some (← Term.exprToSyntax known))
     else pure none
-  if automatic then prepareSnapshotHome memory arguments[5]! operation.getAppArgs[0]!
+  if automatic then prepareSnapshotHome memory arguments[5]! operation.getAppArgs[0]! facts
   let index ← Term.exprToSyntax operation.getAppArgs[0]!
   let evidence ← match known with
     | some known => `(term| LocalSnapshots.store_at

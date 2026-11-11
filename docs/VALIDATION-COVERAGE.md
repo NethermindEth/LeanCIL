@@ -313,7 +313,8 @@ isolated store or load and a matching successful run with only the missing autho
 kind or remembered contents supplied. Strict proof elaboration prevents an incomplete rejected proof
 from inserting a placeholder. Contract walks cross stores whose homes are stated at the frame's
 entry memory or after a leading root slot, and are rejected without evidence that the current
-memory retains the homes' access or that the leading slot is no byte home. A supplied store
+memory retains the homes' access or that the leading slot is no byte home. Homes over opaque
+numeric specs take a local's kind from a supplied fact and stop at the store without it. A supplied store
 advances the snapshots to its own memory, and a store's named evidence and the caller reads and
 buffers it carries are checked against the final memory.
 

@@ -408,6 +408,37 @@ theorem opaque_leading_slot (entered : Memory) (frame : Frame) (leading : LocalS
 
 #print axioms opaque_leading_slot
 
+/-- Homes over an opaque list of numeric specs give a local's kind from a supplied fact about
+    the spec at its index, since the lookup in `numericKinds specs` does not compute. -/
+theorem opaque_specs_wp (entered memory : Memory) (frame : Frame)
+    (root : Option ManagedReference) (slots : List LocalSlot) (boundary : Nat)
+    (specs : List NumericLocalSpec) (layout : frame.locals = .root root :: slots)
+    (homes : NumericHomes entered boundary specs slots)
+    (specified : specs[0]? = some ⟨.word64, .i64 0, 0, rfl⟩)
+    (enteredFormed : entered.WellFormed) (formed : memory.WellFormed)
+    (retained : AccessBelow entered.nextIdentity entered memory) (word : BitVec 64) :
+    WP (Execution (fun fuel => run [rootedHomes] fuel 0 0 [.scalar (.i64 word)] frame []
+      memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  fail_if_success (cil_contract_steps (snapshots := snapshots) []; rfl)
+  cil_contract_steps (snapshots := snapshots) [specified]
+  rfl
+
+#print axioms opaque_specs_wp
+
+/-- The fact may state the kind itself, at homes that are the frame's own locals. -/
+theorem opaque_kinds_wp (memory : Memory) (frame : Frame) (boundary : Nat)
+    (specs : List NumericLocalSpec) (homes : NumericHomes memory boundary specs frame.locals)
+    (specified : (numericKinds specs)[1]? = some .word64) (formed : memory.WellFormed)
+    (word : BitVec 64) :
+    WP (Execution (fun fuel => run [rootedHomes] fuel 0 0 [.scalar (.i64 word)] frame []
+      memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  fail_if_success (cil_contract_steps (snapshots := snapshots) []; rfl)
+  cil_contract_steps (snapshots := snapshots) [specified]
+  rfl
+
+#print axioms opaque_kinds_wp
 /-- Store a vector and reload it. -/
 @[cil_code] def storeReload : CIL.Method := {
   code := [.setLocal 0, .local 0, .ret], locals := [.v128 0], returnsValue := true }

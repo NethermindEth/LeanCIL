@@ -118,6 +118,11 @@ leading slots that have no byte home, as in `layout : frame.locals = .root value
 leading slot must be a constructor other than `.bytes` or have a hypothesis `∀ kind reference,
 slot ≠ .bytes kind reference` (`WritableHomes.after_skipped`).
 
+A kind lookup that does not compute, as over an opaque `specs` in `NumericHomes entered boundary
+specs slots`, is closed from a supplied fact: `specs[4]? = some spec` (`numericKinds_getElem?`) or
+`(numericKinds specs)[4]? = some kind`. The fact is stated at the index among the homes, which is
+the local's index less the leading slots skipped.
+
 Each store, in the checked form too, names what it produced: the memory `storedLocal`, the step
 `storingLocal`, the snapshots `localSnapshots`, `localFormed : storedLocal.WellFormed`,
 `localBelow : MemoryBelow boundary memory storedLocal`, `localAccess : AccessBelow
