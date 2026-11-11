@@ -24,8 +24,10 @@ modes. For one complete verification, read the [getting-started guide](GETTING-S
 
 `leancil --help`, `leancil -h` and `leancil` with no arguments print the usage of every command. A
 failing command exits with `1` and prints on standard error a summary line starting `Invalid:` or
-`Error:`, a `Stage:` line naming the failed step and a `Next:` line with the fix to try. An
-unknown option is an error, as is repeating an option that takes one value.
+`Error:`, a `Stage:` line naming the failed step and a `Next:` line with the fix to try. `check`,
+`verify` and `audit-library` start the summary with `Invalid:`, as does each failed request of
+`verify-batch` and `gates`. Every other failure starts it with `Error:`. An unknown option is
+an error, as is repeating an option that takes one value.
 
 ## Build
 
@@ -115,13 +117,12 @@ The output directory holds:
 | `Symbols.lean` | PDB names and source locations, written only when the assembly has a matching portable PDB. |
 
 `Extracted.lean` also holds raw metadata and an `Extracted.translation_valid` certificate.
-Independent Lean validators recompute layouts, check all layout-dependent sites and
-parameter-home mappings, validate structural generic substitution and managed-call bindings, and
-check feature-analysis states, decided type tests and control-flow coverage. Per-site validators
-walk the raw code, reachability mask and emitted code in lockstep, so a long branch excluded by
-the profile adds linear checking cost. Verification requires this certificate to have the exact
-validator type for the complete emitted program and kernel-replays it separately from the user
-proof. Raw metadata serialization and transformations outside those checks are trusted.
+Verification requires this certificate to have the exact validator type for the complete emitted
+program and kernel-replays it separately from the user proof.
+[Extraction evidence](SOUNDNESS-EVIDENCE.md#independently-checked-extraction-evidence) lists what
+its validators recompute; raw metadata serialization and transformations outside those checks are
+trusted. The per-site validators walk the raw code, reachability mask and emitted code in
+lockstep, so a long branch excluded by the profile adds linear checking cost.
 
 `check` and `verify` read the profile from the manifest. Capability prerequisites of a profile
 are validated. Instructions unreachable under the fixed profile are emitted as explicit
@@ -796,7 +797,8 @@ repository. The installed package pins its archive hash, producer manifest hash,
 source/toolchain key. The download is validated and independently kernel-replayed before it
 receives a local cache receipt. A missing descriptor, incompatible library or unavailable download
 falls back to building the packaged sources. `--rebuild-library` bypasses this download and the
-local library cache.
+local library cache. Whoever packs a release produces the descriptor and its archive as
+[release assets](performance/LibraryDistribution.md#release-assets) describes.
 
 ### Saved settings
 
@@ -826,7 +828,8 @@ leancil verify artifacts/Add
 Every invocation validates the request's identity and required proof evidence. Authenticated
 caches can reuse unchanged certified builds and an unchanged proof's result (see
 [local support cache](CONSUMERS.md#local-support-cache)); source and hash checks, audits and
-required kernel replay apply regardless, and `--fresh` bypasses the reuse. A failed proof removes
+required kernel replay apply regardless. `--fresh`, `--rebuild-library`, `--force-full-verify` and
+`LEANCIL_DISABLE_SUCCESS_CACHE=true` each bypass the reuse. A failed proof removes
 the previous `verified.json`.
 
 When the assembly or the extractor changed since extraction, `verify` first extracts again from
@@ -924,33 +927,6 @@ verification without `--goals` names the option on a `Goals:` line after `Next:`
 option `cil.goals` set (see [PROOFS-STEPPING](PROOFS-STEPPING.md#observer-linter)), and
 its result is cached apart from one without it. With `--format json` the goals are the report's
 `goals`. [`leancil watch --goals`](CONSUMERS.md#watch) prints them after every save.
-
-### Publishing certified library assets
-
-This section is for whoever packs a LeanCIL release; using the tool does not need it.
-
-For each supported runtime, from the exact sources that will be packaged, prepare and replay a
-library, then create its archive and package descriptor. The digest comes from the preparation
-command's output, independently of the directory being archived:
-
-```sh
-dotnet run --file scripts/PrepareLibrary.cs -- artifacts/release-library
-dotnet run --file scripts/PackageCertifiedLibrary.cs -- artifacts/release-library PRODUCER_SHA256 vVERSION artifacts/release-assets
-```
-
-The packaging command checks the entire producer artifact, replays its modules, and validates the
-bytes written to the archive. Collect the generated `certified-library-release.*.json`
-files from supported runtimes into one directory and pass that directory when packing the CLI:
-
-```sh
-dotnet pack Extractor -c Release -p:CertifiedLibraryReleaseDirectory=/absolute/path/to/release-assets
-```
-
-Publish the generated ZIP files as assets of the named release in `NethermindEth/LeanCIL` and
-distribute the CLI package through the normal trusted package channel. The descriptor is part of
-that installed package, so neither a mutable release asset nor a manifest inside its ZIP can
-authorize replacement bytes. These commands prepare files; they do not publish a release or upload
-a package. Without descriptors, development builds retain the normal local build behavior.
 
 ## Diagnostics
 
@@ -1178,17 +1154,8 @@ After import-aware extraction, `leancil verify output --proof Caller.lean` check
 the caller under the published contracts. `--proof-root` uses the same interface
 audit for a consumer package. `--fresh` can use an empty `LEANCIL_CACHE_DIR`; no
 library implementation proof source, artifact or full bundle is required.
-
-Each sidecar export has a `kind` (`method` or `outcome`). Each selected certification
-record requires `theorem`, `statement` and `statementDigest`. The driver checks
-its required `staticIdentities` list against the selected implementation's
-reachable static fields. Each entry contains `identity`, `assemblyIdentity` and
-`fieldName`. Extraction recomputes this list from the selected implementation's metadata and
-reachable instructions. The driver also checks
-the exported contract type structurally and computes its canonical closure
-from replayed oleans. `statementDigest` hashes the UTF-8 `statement` returned by
-that audit. The consumer records this provenance without obtaining the
-implementation proof. See [Contract interfaces](CONTRACT-INTERFACES.md).
+[Contract interfaces](CONTRACT-INTERFACES.md) gives the `extract` options and required pins, the
+sidecar schema and its checks, and the form the caller theorem must have.
 
 A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to
 `published-certification`, the implementation SHA-256, interface digest,
@@ -1199,19 +1166,14 @@ record with its sidecar SHA-256, and the obligation. The caller theorem is
 conditional on those imported contracts.
 
 `--force-full-verify` freshly checks the selected library implementations and discharges those
-imports in a concrete linked CIL theorem. Repeat `--full-artifact Lib=directory` to select
-relocated copies of the published source bundles. Missing or invalid bundles fail without
-fallback. See [Independent imported-library verification](FULL_VERIFICATION.md) for the supported
-source format, checks and trust boundaries.
+imports in a concrete linked CIL theorem; `--full-artifact Lib=directory`, repeatable, selects a
+relocated copy of a published source bundle.
+[Independent imported-library verification](FULL_VERIFICATION.md) states the checks, the supported
+source format and the trust boundaries.
 
 Reference-only extraction is an authoring input. Verification checks its caller
 proof, then exits with status 1 and an authoring-only diagnostic. It does not
 write `verified.json` or publish a successful proof receipt.
-
-Extraction with contract imports requires `--import-sha256 Lib=<hex>` and
-`--import-interface-sha256 Lib=<digest>` from an accepted publisher channel. The interface digest
-independently pins the interface descriptor and all executable Lean source bytes before
-compilation. See [contract interfaces](CONTRACT-INTERFACES.md) for the source trust boundary.
 
 ## Exception documentation lint experiment
 

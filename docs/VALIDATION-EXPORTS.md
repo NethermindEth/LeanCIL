@@ -208,19 +208,20 @@ These regressions cover the extractor's own C# indexes:
 
 ## Interface and theorem audits
 
-- Imported-interface auditing selects declarations from the imported module catalogs;
-  current-file declarations use the environment scan. Private and auxiliary declarations are
-  included and their module ownership is checked. Dependency traversal visits shared
+- Imported-interface auditing selects declarations from the imported module catalogs.
+  `interfaceDeclarations` finds current-file declarations in the second stage of Lean's staged
+  constant map; it scans every constant when the map is still in its first stage or the current
+  module reuses an imported module's name. Private and auxiliary declarations are included and
+  their module ownership is checked. Dependency traversal visits shared
   expression nodes once; contract serialization uses canonical expressions.
   `Tests.ContractClosure` compares selected membership with the list-based scan, including
-  current, imported, missing and duplicate modules. The `imports` suite compiles that test against
-  its certified library.
+  current, imported, missing and duplicate modules and a colliding module name. The `imports`
+  suite compiles that test against its certified library.
 - Fresh consumer verification audits the extraction certificate and requested proof in one native
   import environment. Both artifacts must match their kernel-replayed module paths, and their
   individual theorem types, premises and allowed axioms are checked. This audit reuses no
-  previous proof result and skips no fresh verification. `Tests/ConsumerCertificateReuse.cs`
-  checks combined certificate/theorem audits and rejects corrupted receipts, changed extraction
-  and generated-source modifications.
+  previous proof result and skips no fresh verification. The `certificate-reuse`
+  [consumer check](VALIDATION-COVERAGE.md#consumer-checks) covers it.
 - The native auditor parses contract source import headers with Lean's parser. It rejects
   malformed headers, keeps comments and module-system import syntax, and never elaborates source
   commands. The `imports` fixture checks those properties.
@@ -234,9 +235,9 @@ These regressions cover the extractor's own C# indexes:
 
 ### Allocation reference-step proof search
 
-`fixed_fallback` normalizes mapped stack constructors definitionally and rewrites the target profile
-once, without asking the simplifier to discharge the large dispatcher's negative match conditions.
-Reference operations use a proved finite classification before stack case analysis.
+`fixed_fallback` normalizes mapped stack constructors definitionally and rewrites the target
+profile once, without asking the simplifier to discharge the large dispatcher's negative match
+conditions. Reference operations use a proved finite classification before stack case analysis.
 
 ### Core example batches
 
@@ -269,7 +270,7 @@ before executing it. Bootstrap and profiling use the toolchain frontend runner.
 | Compatible consumer requests | May share that replay and audit. Each selected theorem and its reachable replay-target declarations must belong to the request's own import closure. The fallback replays each request's import-closed target set independently, so a forged proof cannot use an undeclared sibling dependency before an isolated axiom audit. |
 | Duplicate declarations, skipped consumer support | Checked separately. |
 | Export callback, full-import audit, profiled replay, audit needing source locations | Use the ordinary audit import of the checked artifacts. |
-| Direct and consumer contract interfaces | Replayed and validated in the same native environment when their complete declaration ownership is unambiguous. The ownership map enumerates private, auxiliary and unused declarations; interface checks do not select only the exported contract's dependencies. |
+| Direct and consumer contract interfaces | Replayed and validated in the same native environment when their complete declaration ownership is unambiguous. The ownership map enumerates private, auxiliary and unused declarations; interface checks do not select only the exported contract's dependencies. A reached declaration that neither the map nor the imported module index places in a module fails the closure walk. |
 | Imported interface outside the replay target set, duplicate ownership, conflicting code-generator ownership | Metadata import fallback. |
 | Rejected joint set | `--replay-separately` replays per module: each module gets its own imported environment and sequential kernel replay, so no successful sibling can supply an undeclared dependency, and each failure is attributed to its module. |
 | Single request whose fused audit reports a kernel rejection | Goes directly to isolated replay. Unrecognized diagnostics and metadata or eligibility failures use the ordinary joint retry. |
@@ -326,20 +327,22 @@ These regressions cover joint replay:
   regression rejects reuse of the scalar report under the x64-v3 profile.
 - The runtime-scope constants in the scalar, type-test, throw, span and imported-layout fixtures
   use the byte representation whose equality to the full assembly-name literal `runtimeScope_eq`
-  proves.
-- Constrained-call rejection fixtures keep the emitted definitions and the exact constrained
-  validator obligations, while their full positive certificates check every validator. Positive
-  controls compile that same reduced fixture before changing its call target, so a missing
-  prerequisite cannot be the cause of the rejection.
+  proves. Generated generic constraint lists name the byte-backed
+  `CIL.Extraction.valueTypeConstraint` and `CIL.Extraction.unmanagedTypeConstraint`, whose equality
+  theorems prove them equal to the scoped metadata strings; other constraint identities stay
+  string literals.
+- `Tests/ScalarEvidence.lean` groups related kernel-decided cases into named private theorems,
+  each a conjunction of the original statements followed by `#print axioms`; the other cases stay
+  separate.
+- [Coverage](VALIDATION-COVERAGE.md#evidence-batches) gives the positive-control rules for
+  constrained-call rejection fixtures.
 - Static-span proofs share one batch across original and mutated assemblies, and UTF-8 identity
   mutations use isolated rejection scopes.
 - Generated verification batches use the authenticated native kernel replay command when it
   succeeds and the toolchain checker as the failure fallback for the same module set.
-- Translation-audit fixtures compile all six certificate variants against one checked prefix
-  before testing wrapper rejection, then replay those declarations and audit their exact native
-  statements. Missing certificates, unrelated statements, definitions and altered import tables
-  must fail both their wrapper checks and direct certificate audits; the definitionally equal
-  wrapped statement passes elaboration but fails the exact emitted-statement check.
+- Translation-audit fixtures share one checked prefix across their certificate variants;
+  [coverage](VALIDATION-COVERAGE.md#standalone-certificates-and-translation-audit) lists the
+  cases.
 - Generic substitution, managed-call and method-shape mutations select their corresponding emitted
   validator; type-test mutations select feature-flow validation. External-call mutation fixtures
   check only the intended division or intrinsic validator, with a complete positive certificate
@@ -360,10 +363,10 @@ These regressions cover joint replay:
   names keep numeric and string components, and universe expressions keep their full structure.
   Metadata is stripped. The decoder rejects missing, cyclic and forward references, unknown
   binder annotations and malformed table data. Free variables and expression/universe
-  metavariables are not supported. Decoding constructs expressions only: each transferred
-  declaration passes `Lean.addDecl` with kernel checking explicitly enabled, followed by the
-  independent replay and exact composition audit. The generated source imports the decoder from
-  the certified `CIL.Interface.FullTransfer` module. `Tests.FullTransfer` checks exact
+  metavariables are not supported. Decoding constructs expressions only; each transferred
+  declaration is kernel-checked as [full verification](FULL_VERIFICATION.md) describes, then
+  passes the independent replay and exact composition audit. The generated source imports the
+  decoder from the certified `CIL.Interface.FullTransfer` module. `Tests.FullTransfer` checks exact
   reconstructed types and values across binders, universes, projections, local lets, string
   literals and proofs, plus malformed table rejection. The full transitive suite covers forged
   dependency, staged mutation, changed implementation, cyclic dependency and missing-bundle
@@ -432,19 +435,13 @@ and traces match exactly.
 ## Allocation-relative reference helpers
 
 `Unsafe.AreSame<T>`, `IsAddressLessThan<T>`, `IsAddressGreaterThan<T>`, `ByteOffset<T>`,
-`AddByteOffset<T>` and `SubtractByteOffset<T>` (signed and unsigned native offsets) use the checked
-allocation-relative reference operations. Generic storage types must have a supported managed
-layout. Exact runtime identity, closed signatures, offset signedness and byte scaling are checked
-by Lean translation evidence.
-
-- Byte differences and ordering require live references in the same allocation.
-- Equality supports nulls and distinct allocation interiors; cross-allocation end-pointer equality
-  is not supported.
-- Byte offsets preserve bounds and grant no read/write authority.
-- `ByteOffset` accepts readonly views; addition requires a writable-reference input, and
-  subtraction preserves a readonly input.
-- Element `Subtract<T>` covers signed 32-bit and signed/unsigned native offsets, including
-  aggregate and vector scaling.
+`AddByteOffset<T>`, `SubtractByteOffset<T>` (signed and unsigned native offsets) and element
+`Subtract<T>` use the checked allocation-relative reference operations, whose admitted forms
+[OPCODES](OPCODES.md#reference-observations) lists and whose limits
+[reference observations](SOUNDNESS-EVIDENCE.md#reference-observations) states. Generic storage
+types must have a supported managed layout. Lean translation evidence checks exact runtime
+identity, closed signatures, offset signedness and byte scaling. `ByteOffset` accepts readonly
+views, and byte and element offsets from a readonly reference stay readonly.
 
 Tests compare native wraparound with the runtime and reject forged strides and signedness in Lean
 evidence. These operations do not model arbitrary numeric addresses or establish runtime placement

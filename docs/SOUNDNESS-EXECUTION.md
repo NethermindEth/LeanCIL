@@ -26,10 +26,10 @@ Handlers, exception-object identity, unwinding and post-throw memory are outside
 Outcome loop rules require preservation and decrease only for continuing iterations; exits must
 establish the specified normal or exceptional outcome from the initial state.
 
-[Countdown](../Examples/Proofs/Countdown.lean) proves termination and zero return for all uint inputs
-under its empty-memory precondition. [FillWords](../Examples/Proofs/FillWords.lean) proves a fill for
-every admitted count, final sequence contents and confinement. Neither proof is a runtime cost
-claim.
+[Countdown](../Examples/Proofs/Countdown.lean) proves termination and zero return for all uint
+inputs under its empty-memory precondition. [FillWords](../Examples/Proofs/FillWords.lean) proves a
+fill for every admitted count, final sequence contents and confinement. Neither proof is a runtime
+cost claim.
 
 ### Allocation and access
 
@@ -46,8 +46,9 @@ physical stack availability. Quota failure is a model fault; it is not automatic
 exception.
 The conventions assume the admitted .NET 10
 [x64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenxarch.cpp) and
-[ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp) implementations.
-Heap-array lifetime and resource assumptions are in [runtime storage](SOUNDNESS-RUNTIME.md).
+[ARM64](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/jit/codegenarm64.cpp)
+implementations. Heap-array lifetime and resource assumptions are in
+[runtime storage](SOUNDNESS-RUNTIME.md).
 
 ### Virtual dispatch
 
@@ -86,7 +87,8 @@ not CLR correspondence. See [layout assumptions](SOUNDNESS-RUNTIME.md#sequential
 `MethodEmbeds` checks execution metadata, static descriptors and live instructions under a PC map.
 Entry, branch/call targets and resumable fallthroughs must match. Expected `.unsupported` locations
 constrain no actual code and cannot occur on a successful expected path. Even a live inserted `nop`
-is outside this exact relation. `cil_embed` computes a candidate map; the kernel checks every field.
+is outside this exact relation. `cil_embed` computes a candidate map; the kernel checks every
+field.
 
 `ProgramRefines` transfers successful runs with the same fuel and final memory. Outcome variants
 transfer named throws with relocated PCs, preserving method and exception. They do not transfer

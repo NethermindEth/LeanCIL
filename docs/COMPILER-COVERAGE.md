@@ -86,10 +86,10 @@ metadata and compares the report with the checked-in
 
 The gate checks admission and ignores blocker totals: it requires the admitted set to match the
 baseline exactly. A method the baseline admits that is no longer admitted, an admission the
-baseline omits, and an admitted method that no longer exists each fail the scan, since the scan
-checks no method that a stale baseline leaves out. Review the difference, then record it with
-`dotnet run --file Tests/SelfAdmission.cs -- --update` in the PR that causes it. Counts, the
-difference and the most widely reached blockers are reported in
+baseline omits, and an admitted method that no longer exists each fail the scan, since a method
+missing from a stale baseline could later lose admission unnoticed. Review the difference, then
+record it with `dotnet run --file Tests/SelfAdmission.cs -- --update` in the PR that causes it.
+Counts, the difference and the most widely reached blockers are reported in
 `artifacts/SelfAdmission/summary.md` and the CI job summary. The baseline names a
 compiler-generated method (a closure, lambda, local function or state machine) by the source
 method it was generated for, one line per admitted method, since the compiler numbers it by

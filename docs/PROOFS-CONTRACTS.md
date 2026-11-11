@@ -245,8 +245,8 @@ the memory written to at the new memory, each under the name it already has:
 
 A fact whose condition is not shown stays at the old memory.
 
-The tactic then prepares its step facts again at `storedLocal`. The carried `ValidCall` forms the
-by-reference arguments and reads their fields there, and the restated reads supply their loads, so
+The contract form then prepares its step facts again at `storedLocal`. The carried `ValidCall`
+forms the by-reference arguments and reads their fields there, and the restated reads supply their loads, so
 `.arg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
 word load through a `ValidCall` is stated at that store's memory, as `view.word storedLocal
 offset`. `ArgumentView.word_below localBelow view old` restates a word at the memory the store

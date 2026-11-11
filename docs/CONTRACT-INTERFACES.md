@@ -179,7 +179,8 @@ theorem/inductive types, constructor metadata and recursor computation rules.
 A certification record does not supply a Lean implementation proof. Its theorem,
 statement and statement digest are publisher provenance accepted by
 the consumer, and are reported as such. No pinned digest covers them: the
-interface digest excludes certifications. Hashing the reported statement cannot
+interface digest excludes certifications. `statementDigest` hashes the UTF-8 `statement` that
+the theorem audit returned, and hashing the reported statement cannot
 authenticate a publisher's theorem. Reports therefore set `certificationAuthenticated` to `false`
 and record the `sidecarSha256` the text came from.
 

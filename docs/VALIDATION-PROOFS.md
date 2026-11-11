@@ -270,17 +270,11 @@ lake build CIL Tests.Automation Tests.MethodEmbedding Tests.RetainedNumericLocal
 dotnet run --file scripts/Test.cs -- --suite loops
 ```
 
-The `loops` suite builds a fresh verification library and performs kernel replay as part of
-extracted-loop verification. [Validation](VALIDATION.md) lists every suite and the full command.
-
-When changing proof tactics or shared contracts:
-
-- Measure fresh elaboration of the library and its consumers, compiled artifact size, CPU time,
-  peak process memory and kernel replay separately.
-- Compile identical consumer sources against both revisions and alternate serial runs with
-  prebuilt dependencies on the same machine.
-- Do not take a smaller compiled proof alone as a speed or memory improvement.
-- Keep the kernel replay, axiom audits and negative regressions.
+[Validation](VALIDATION.md) lists every suite. When changing proof tactics or shared contracts,
+compare [proof cost](VALIDATION.md#proof-cost) with the base, and measure CPU time, peak process
+memory and kernel replay separately in alternating serial runs on one machine. A smaller compiled
+proof alone is no speed or memory improvement. Keep the kernel replay, axiom audits and negative
+regressions.
 
 ## Binding and transport
 

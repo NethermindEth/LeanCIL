@@ -58,7 +58,7 @@ the model's semantics and makes no claim about how a JIT implements them.
 | `Vector128.Sum<ulong>`, `Vector256.Sum<ulong>` | Vector of `ulong` | Wrapping sum of the 64-bit lanes |
 | `AsByte`, `AsUInt32`, `AsInt64`, `AsDouble`, `AsUInt64`, `AsInt32`, `AsSingle` on `Vector128` / `Vector256` | Source element type is `ulong`, `byte`, `uint`, `long`, `int` or `float`; target is the named type | Preserve the bit pattern. The extractor does not accept `double` as a source for these casts |
 
-No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and to `ldobj`/`stobj`/`initobj` of `V512<ulong>`, and there is no general vector load/store API coverage beyond the byte-span `Create` and `Vector128<byte>` `LoadUnsafe`/`StoreUnsafe` rows. `Vector256.Create<ulong>(ReadOnlySpan<ulong>)` and the other element types of `LoadUnsafe`/`StoreUnsafe` are not mapped. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
+No other element types or operators are implied. In particular, portable vector multiplication is present as a Lean operation but has no generic vector-operator mapping in the extractor. There is no Vector64 support, Vector512 is limited to bitwise/equality operators, the rows naming it and the [vector storage](OPCODES.md#vector-storage-and-fields) instructions, and there is no general vector load/store API coverage beyond the byte-span `Create` and `Vector128<byte>` `LoadUnsafe`/`StoreUnsafe` rows. `Vector256.Create<ulong>(ReadOnlySpan<ulong>)` and the other element types of `LoadUnsafe`/`StoreUnsafe` are not mapped. The specific vector `ldobj`/`stobj` cases are documented in the [opcode table](OPCODES.md).
 
 ## SSE
 
@@ -167,7 +167,7 @@ No other AdvSimd operations or `ReverseElement8` overloads, signed `MultiplyHigh
 
 ## Feature getters, profiles and execution restrictions
 
-Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Avx`, `Avx2`, `Avx512F`, `Avx512F.VL`, `Avx512DQ`, `Avx512DQ.VL`, `Avx512Vbmi`, `Avx512Vbmi.VL`, `Bmi1`, `Bmi2.X64`, x86 `Aes`, `Aes.X64`, `AdvSimd`, `AdvSimd.Arm64`, `ArmBase.Arm64`, ARM64 `Aes` and `Aes.Arm64`. `AdvSimd.Arm64` answers with the `AdvSimd` capability, `Avx512Vbmi.VL` with the `Avx512Vbmi` capability and each 64-bit `Aes` class with its architecture's AES capability (`aes` or `armAes`), as .NET 10 reports each pair together ([runtime profiles](RUNTIME-PROFILES.md)). No built-in profile enables `Avx512Vbmi`, since x86-64-v4 does not include it, or either AES capability, since no x86-64 level includes AES and it is optional on ARMv8; declare them in a custom profile. `Vector128.IsHardwareAccelerated` and `Vector256.IsHardwareAccelerated` are also recognised. The getter result comes from the chosen profile, not the host CPU. Other getters are rejected.
+Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Avx`, `Avx2`, `Avx512F`, `Avx512F.VL`, `Avx512DQ`, `Avx512DQ.VL`, `Avx512Vbmi`, `Avx512Vbmi.VL`, `Bmi1`, `Bmi2.X64`, x86 `Aes`, `Aes.X64`, `AdvSimd`, `AdvSimd.Arm64`, `ArmBase.Arm64`, ARM64 `Aes` and `Aes.Arm64`. `AdvSimd.Arm64` answers with the `AdvSimd` capability, `Avx512Vbmi.VL` with the `Avx512Vbmi` capability and each 64-bit `Aes` class with its architecture's AES capability (`aes` or `armAes`), as .NET 10 reports each pair together ([runtime profiles](RUNTIME-PROFILES.md)). No built-in profile enables `Avx512Vbmi` or either AES capability; declare them in a [custom profile](RUNTIME-PROFILES.md#profile-selection). `Vector128.IsHardwareAccelerated` and `Vector256.IsHardwareAccelerated` are also recognised. The getter result comes from the chosen profile, not the host CPU. Other getters are rejected.
 
 | Built-in profile | Enabled capabilities |
 | --- | --- |
@@ -178,9 +178,11 @@ Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `S
 | `x64-v4` | The above plus `Avx512F`, `Avx512FVL`, `Avx512DQ`, `Avx512DQVL` |
 | `arm64-advsimd` | `ArmBase64`, `AdvSimd`, `Vector128Accelerated` |
 
-Profiles target .NET 10 CoreCLR. Both the extractor and Lean certificate reject capability sets that split its runtime groups. Custom profiles must supply every field and satisfy the same constraints. A v3/v4 custom profile may disable `vector256Accelerated` for a runtime configured with `PreferredVectorBitWidth=128`; it cannot enable it without AVX2.
-
-See [runtime-profile evidence and selection](RUNTIME-PROFILES.md) for measured x64/arm64 versions and profile constraints. Changing a profile requires fresh extraction and proof verification; certificates from another profile do not acquire its capabilities.
+Profiles target .NET 10 CoreCLR, and both the extractor and the Lean certificate reject capability
+sets that split its runtime groups. [Runtime profiles](RUNTIME-PROFILES.md) gives the group
+constraints, the custom-profile rules and the measured x64 and arm64 runtimes. Changing a profile
+requires fresh extraction and proof verification; certificates from another profile do not acquire
+its capabilities.
 
 Pass the profile after the extraction output directory, for example:
 
@@ -198,9 +200,9 @@ The extraction inventory comes from [RuntimeModels.cs](../Extractor/RuntimeModel
 
 A Lean definition without an extractor mapping, such as portable vector multiplication, is not extractable. These tables describe implemented support, not exhaustive testing of every overload or universal correctness of user methods. See [validation](VALIDATION.md) for the suites that test it and the [opcode table](OPCODES.md) for non-intrinsic CIL support.
 
-`initobj` for the exact `Vector128<UInt64>`, `Vector256<UInt64>`, and
-`Vector512<UInt64>` runtime types clears 16, 32, and 64 bytes respectively. The
-translation certificate binds the raw opcode, full type identities, and byte
-width. These ordinary memory writes need no SIMD ISA capability and require a
-valid modeled profile. They retain ordinary write bounds and access checks.
-Vector512 field layouts are not supported, and the model does not verify CoreCLR behavior.
+`initobj` of a `Vector128<T>`, `Vector256<T>` or `Vector512<T>` over `byte`, `int`, `uint`, `long`
+or `ulong` clears 16, 32 or 64 bytes; [vector storage](OPCODES.md#vector-storage-and-fields)
+lists the other storage instructions and the field rules. The translation certificate binds the
+raw opcode, full type identities and byte width. These ordinary memory writes need no SIMD ISA
+capability and require a valid modeled profile. They retain ordinary write bounds and access
+checks. Vector512 field layouts are not supported, and the model does not verify CoreCLR behavior.

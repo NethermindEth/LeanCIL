@@ -131,8 +131,10 @@ records the package root.
 ## Generated proof bindings
 
 File-based C# runners can include [ProofBindingCatalog.cs](../scripts/ProofBindingCatalog.cs)
-from their pinned LeanCIL package. A `ProofGate` names the exact method, profile, proof path
-and theorem. Each `ProofBinding` supplies the complete Lean source from an explicit,
+from the `leancil` checkout that Lake pins, at
+`.lake/packages/leancil/scripts/ProofBindingCatalog.cs`, with an `#:include` directive. The
+installed `leancil` tool does not contain this file. A `ProofGate` names the exact method,
+profile, proof path and theorem. Each `ProofBinding` supplies the complete Lean source from an explicit,
 consumer-reviewed recipe. `ProofBindingCatalog.Sources` checks the recipe identities against
 the catalog and rejects missing or duplicate entries, changed profiles or theorem names,
 conflicting sources and unsafe output paths. Recipes cover every catalog profile of each
@@ -212,8 +214,7 @@ run replaces a cache entry that no longer matches its manifest. A tool with diff
 sources has a library under another cache key; the next `workspace` or `watch` rewrites
 `.lake/leancil-framework` to name it, building it first when absent.
 
-`leancil workspace --remove KEY` deletes a method's selection directory, both modules and their
-Lake outputs, and rebuilds nothing.
+[`leancil workspace --remove`](CLI.md#editor-workspace) drops one method's selection.
 
 The command rejects:
 
@@ -569,18 +570,19 @@ runs the package's Lake configuration and elaborators; the replay and the audit 
 
 ## Limits
 
-These limits apply to verification of a consumer package (`--proof-root`, `verify-batch` and
-`gates`):
+These limits apply wherever a command reads a consumer package: `verify --proof-root`,
+`verify-batch`, `gates`, `export-contracts`, and `workspace` and `watch` over such a package:
 
 - Only Lean source packages are supported. Local path dependencies, custom Lake cache
   directories, symlinked sources and native/precompiled dependencies are not supported.
 - Build/artifact directories (`.lake`, `.git`, `artifacts`, `generated`, `bin`, `obj`, `.work`)
-  and the selected extraction output directory are excluded. Place handwritten proofs outside
-  them.
+  are excluded, and `verify --proof-root` also excludes the selected extraction output directory.
+  `verify-batch` and `gates` exclude no output directory, so keep each output under an excluded
+  directory or outside the package. Place handwritten proofs outside them.
 - `Extracted.lean` is reserved for the selected artifact; do not keep another copy among
   consumer sources.
-- Lake configuration and Lean elaborators are executable code, so use this mode with packages
-  you trust.
+- Lake configuration and Lean elaborators are executable code, so run these commands only on
+  packages you trust.
 
 ## Publishing verified contracts
 

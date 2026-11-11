@@ -523,8 +523,8 @@ null is rejected by name, since the model tests only object references.
 Admitted layouts are reference-free and bounded by 65,536 bytes. Sequential fields include supported
 integers/enums, nested aggregates and admitted vectors. Closed same-assembly generic owners bind
 their original fields, arguments and constraints to substituted layouts. Field order, packing, size
-and target architecture determine offsets. Default packing is eight; nested alignment comes from
-the child layout, capped by packing. Inferred sizes include tail padding, declared size cannot
+and target architecture determine offsets. Unset packing is a limit of 64 bytes; nested alignment
+comes from the child layout, capped by packing. Inferred sizes include tail padding, declared size cannot
 truncate fields, and empty structs occupy at least one byte. Explicit overlap follows byte storage.
 
 Open generic owners, explicit/auto generic layouts, reference/float fields, inline arrays and

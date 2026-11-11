@@ -9,14 +9,12 @@ code.
 
 ## Cost properties
 
-`cil_instruction_equations body` states one `@[cil_code ↓]` equation per instruction,
-`body_instruction{pc} : (body xs).code[pc]? = some op`; see
-[binding proofs](../PROOFS-BINDING.md) for its use. It names the suffix of the code list at
-every 16th instruction (`body_suffix{start}`), proves each named suffix from the one before it
-with `CIL.CodeSuffix.advance` (`body_suffix{start}_placed`), and proves each equation from the
+[Binding proofs](../PROOFS-BINDING.md#instruction-equations-for-parametric-bodies) describes the
+equations and the suffix declarations of `cil_instruction_equations`. The command proves each
+named suffix from the one before it with `CIL.CodeSuffix.advance` and each equation from the
 suffix that starts its block with `CIL.CodeSuffix.lookup`. No proof walks more than 16 cells of
-the code list, so the equations cost time linear in the method's length, about 6,400 heartbeats
-each. The equations depend on `propext` alone.
+the code list, so each equation costs about 6,400 heartbeats at any method length. The equations
+depend on `propext` alone.
 
 Three properties keep that cost:
 
@@ -59,10 +57,9 @@ computed pc costs more than 1.25 times as much per case at 16 repeated segments 
 
 ## Reference figures
 
-The figures were measured on Windows with 32 cores and Lean 4.35.0, on one method of
-`word = word * y + x;` repeated at the scalar profile. Each file was compiled with
-`-DElab.async=false`, and heartbeats come from `IO.getNumHeartbeats` at the end of the file;
-they repeat to within a few hundred between runs.
+The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the
+scalar profile. Each file was compiled with `-DElab.async=false`, and heartbeats, read as the
+suite reads them, repeat to within a few hundred between runs.
 CPU seconds were taken while other builds ran and compare only within one session.
 
 The first table measures the extraction, `Extracted.lean` with its certificate. "Without

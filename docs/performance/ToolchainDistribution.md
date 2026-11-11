@@ -23,8 +23,8 @@ is part of the
 
 ## Measuring
 
-On Linux, with the toolchain installed by Elan under `$HOME/.elan`, run the workflow's own
-commands under `time`, reading and writing a Linux file system:
+On Linux, with the toolchain installed by Elan under `$HOME/.elan`, time the workflow's pack and
+restore commands and a decompression to `/dev/null`, reading and writing a Linux file system:
 
 ```sh
 prefix="$(lean --print-prefix)"
@@ -33,11 +33,12 @@ time (tar -C "$HOME" -cf - .elan/bin .elan/settings.toml "$toolchain" \
   | zstd -T2 -6 -q > lean-toolchain.tar.zst)
 time zstd -d -q -c lean-toolchain.tar.zst > /dev/null
 mkdir restored && time tar --zstd -xf lean-toolchain.tar.zst --no-same-owner -C restored
-restored/.elan/bin/lean --version
+ELAN_HOME="$PWD/restored/.elan" restored/.elan/bin/lean --version
 ```
 
-Check the size with `wc -c lean-toolchain.tar.zst`. A change of compressor or level must leave
-the decoded tar stream identical (`zstd -d -c <archive> | sha256sum`).
+Check the size with `wc -c lean-toolchain.tar.zst`. The workflow hashes the compressed archive
+and never the decoded stream. When you change the compressor or level, compare
+`zstd -d -c <archive> | sha256sum` before and after by hand; the tar stream must be identical.
 
 The reference figures are for the Linux x64 installation of Lean 4.35.0, on Ubuntu 24.04 under
 WSL on an AMD Ryzen 9 9950X, with no other build running:

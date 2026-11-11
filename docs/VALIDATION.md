@@ -20,6 +20,8 @@ dotnet run --file scripts/Test.cs -- --suite outlines-objects
 - A suite builds its own prerequisites, checks every Lean proof fresh and writes
   `artifacts/test-results-<suite>.json`; a full run writes `artifacts/test-results.json`.
 - Suites build and mutate `artifacts/`, so run concurrent suites in separate checkouts.
+- In CI one job builds the extractor and example assembly with `--build-tools`, and suite jobs set
+  `LEANCIL_PREBUILT_TOOLS=true` to use them.
 - `lake build` builds only `CIL`. A change under `CIL/` requires building every library target in
   `lakefile.toml` before pushing.
 - A C# change requires analyzer validation, including changed file-based tests.
@@ -194,8 +196,7 @@ completion.
 
 Positive fixtures compare compiled .NET behavior with checked model execution or establish
 universal theorems. Negative fixtures independently tamper with translation evidence, violate
-memory premises, or change implementations while retaining their specifications. An unsupported
-instruction must not satisfy a named-exception obligation.
+memory premises, or change implementations while retaining their specifications.
 
 - [Coverage reference](VALIDATION-COVERAGE.md): extraction, runtime comparisons, artifact binding
   and preparation infrastructure.

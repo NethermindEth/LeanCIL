@@ -115,8 +115,10 @@ workflow.
   batch compilation/replay time.
 - `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
   unchecked declaration reaches, and fails, independent kernel replay.
-- Runtime bit tests run each distinct typed input once. Replay fallback tests check rejection and
-  attribution in one invocation. Independent metadata mutations, malformed proofs, cache
+- Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
+  so each distinct typed input runs once; every rotation count runs as supplied, including
+  negative and out-of-width counts. Replay fallback tests check rejection and attribution in one
+  invocation. Independent metadata mutations, malformed proofs, cache
   invalidation and native/bootstrap paths each have their own case.
 
 ```sh
@@ -128,7 +130,9 @@ these rules:
 
 - Generic and constrained-call positive controls keep their narrowed declarations and exact
   obligation types, and reuse the original checked theorem without reducing its validator again.
-  Generic controls compile and replay in the original positive batch.
+  Generic controls compile and replay in the original positive batch. A constrained-call control
+  compiles the same reduced fixture its mutation changes, so a missing prerequisite cannot cause
+  the rejection, and the full positive certificate checks every validator.
 - Missing or changed control declarations must fail type checking. Isolated mutation cases keep
   their own validator proofs and diagnostic checks, without access to the positive-control
   witnesses.
@@ -288,17 +292,31 @@ performance fixture is never supplied to a verifier as a certified library.
   requires. The fixture checks frontend process counts for initial,
   unchanged, proof-edited, changed-extraction and `--fresh` requests. The generated and proof
   modules elaborate independently; there are no shared frontend environments or native snapshots.
-- `Tests/TranslationAudit.cs` independently checks the direct certificate's exact type and rejects
-  missing, unrelated, non-theorem and wrong-import-table declarations, and a definitionally equal
-  but structurally different statement. It shares and replays the checked prefix once across
-  certificate mutations; each variant keeps its own certificate audit and rejection assertions. A
-  changed prefix is rejected before any suffix can use the checked module.
+- `Tests/TranslationAudit.cs` compiles six certificate variants against one checked prefix,
+  replays them together and audits each exact statement. Missing, unrelated, non-theorem and
+  wrong-import-table certificates must fail both the `ExtractionAudit` wrapper and the direct
+  audit; a definitionally equal but structurally different statement passes elaboration and the
+  wrapper but fails the direct audit. A changed prefix is rejected before any suffix can use the
+  checked module.
 - CLI regressions cover unchecked-theorem and transitive-helper rejection, stale-report removal
   and changed-code proof failure.
 - `Tests/TranslationScaling.cs` checks the extraction prefix once, then imports it into the
   compositional certificate and a deliberately failing monolithic certificate. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
   The consumer verifies the original extraction.
+
+### Proof workspace
+
+The `workspace` suite (`Tests/ProofWorkspace.cs`) builds a small library with a four-limb
+`Workspace.Wide` struct and opens `Workspace.Wide::get_IsZeroOrOne()` under the scalar profile
+with `--assume-initialized Workspace.Wide`. It checks the proof in place, adds a helper about the
+method body, and expects that helper to fail after a C# rebuild with a different body and no Lean
+edit. It verifies the same files fresh, shows that a forged editor module changes nothing
+verification reads, and rejects a tampered extraction and a proof importing another extraction's
+key. Under `watch`, editing a second method, `Workspace.Arith::Twice(ulong)`, refreshes and
+rechecks only its proof, which fails at its theorem, while every file of the first method keeps
+its bytes and write time. A C# syntax error makes both proofs stale and deletes both
+certificates, and renaming the method reports its proof missing.
 
 ## Execution and extraction regressions
 
@@ -377,17 +395,7 @@ workload.
 
 ## Running the suites
 
-The repository pins .NET SDK **10.0.403** and Lean **4.35.0**.
-
-```sh
-lake build
-dotnet run --file scripts/Test.cs
-```
-
-[Validation](VALIDATION.md#running-suites) shows how to run one suite and what a run writes. In
-CI one job builds the extractor and example assembly with `--build-tools`, and suite jobs set
-`LEANCIL_PREBUILT_TOOLS=true` to use them.
-
+[Validation](VALIDATION.md#running-suites) shows how to run the suites and what a run writes.
 The runner:
 
 - builds the independent assemblies and the CIL library, then prepares a source-keyed,
@@ -409,8 +417,9 @@ struct parameter, and an isolated installation of the packaged .NET tool.
 
 ## Certified library preparation
 
-[CI](CI.md#certified-library) describes which runs may donate a library and when reuse skips
-kernel replay. This section covers `scripts/PrepareLibrary.cs` and its tests.
+This section covers `scripts/PrepareLibrary.cs` and its tests. CI's [donors](CI.md#donors) and
+[reuse and replay](CI.md#reuse-and-replay) rules say which runs may donate a library and when
+reuse skips kernel replay.
 
 | Invocation | Behavior |
 | --- | --- |
@@ -535,18 +544,30 @@ These tests cover preparation:
 The `loops` suite checks cyclic control flow and termination:
 
 - A universal checked countdown proof holds for every `uint`, including zero and the maximum
-  value, with 17 runtime comparisons. An incorrect implementation is rejected under the unchanged
-  contract, and an infinite loop is proved to exhaust every fuel budget. Backward switch, native
-  arithmetic and fixed-feature loops are checked, and eight malformed or unsupported fixtures are
+  value, with 17 runtime comparisons, and holds unchanged after inserted NOPs and reordered
+  blocks. An incorrect implementation is rejected under the unchanged contract, and an infinite
+  loop is proved to exhaust every fuel budget. Backward switch, native arithmetic and
+  fixed-feature loops are checked, and eight malformed or unsupported fixtures are rejected.
+- `CountCalls` is proved through its helper's contract, unchanged for a helper reimplemented as
+  `value + 0xFFFFFFFF` with only its contract re-proved; builds that discard the helper result or
+  count twice are rejected. On the correct build, measuring by the count fails the decrease
+  obligation, and the non-inductive invariant `count + remaining = value + count * remaining`
+  fails only its preservation.
+- `CountUntil`, which returns or raises its helper's exception after earlier calls, is proved for
+  every pair of `uint`s from the helper's outcome contract and compared with .NET on five inputs,
+  two of which throw. The proof holds unchanged for a reimplemented helper and fails at the
+  exceptional exit for a helper throwing `System.ArgumentException` under a re-proved contract.
+  On the correct build, measuring by the count fails the decrease obligation, the invariant
+  `count <= limit - remaining` fails only its preservation, and specifying
+  `System.ArgumentException` for the loop fails only at the exceptional exit.
+- `CopyUntilZero` is compared with .NET on five spans, checking that the words past the copy are
+  unchanged; builds whose `Stamp` writes zero or whose loop copies past a zero are rejected.
+- `FillWords` is proved to write exactly `count` words for every nonnegative count and compared
+  with .NET for four counts, keeping both neighbouring words; shifted or skipping stores are
   rejected.
-- A counted loop is proved through its helper's contract, unchanged for a reimplemented helper; a
-  discarded result and a double count are rejected.
-- A loop that returns or raises its helper's exception after earlier calls is proved for every
-  pair of `uint`s from the helper's outcome contract, unchanged for a reimplemented helper.
-  Another exception type, a nondecreasing measure, a non-inductive invariant and a wrong
-  specified exception are rejected.
-- A buffer fill loop is proved to write exactly `count` words for every nonnegative count, with
-  four runtime comparisons; shifted or skipping stores are rejected.
+- `AllZero` and `Sum` are compared with their sequence specifications on five spans each and a
+  `default` span, including wrapping sums; a build of `AllZero` that replaces every read with zero
+  and a build of `Sum` that stops while one element remains are rejected.
 
 The outline suites check `new-proof` outlines:
 
@@ -590,9 +611,9 @@ successful execution for every fuel budget. The subtraction theorem independentl
 intended addition result. Other example claims have the quantifiers and inputs displayed in their
 theorem statements; concrete examples do not establish universal method correctness.
 
-Audited example theorems must use only the permitted standard Lean axioms, if any.
-The verifier rejects `sorry`, `admit`, native proof evaluation and unproved summaries.
-See [the trusted base](SOUNDNESS.md) for runtime and extraction assumptions.
+Audited example theorems meet the axiom rules of the
+[trusted computing base](SOUNDNESS-VERIFICATION.md#trusted-computing-base);
+[the trusted base](SOUNDNESS.md) lists the runtime and extraction assumptions.
 
 Each successful proof produces an identity-bound `verified.json`. That file and the
 [result files](VALIDATION.md#running-suites) are reproducible outputs and are not committed.
@@ -644,8 +665,8 @@ and a list-returning function must fail extraction. These examples use the share
 
 ## Contracts and extraction evidence
 
-`Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results with
-and without localsinit, rejects uninitialized reads and escaped storage, and checks
+`Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results
+with and without localsinit, rejects uninitialized reads and escaped storage, and checks
 insufficient-budget failure. Mutating the emitted initialization flag is rejected by the Lean
 certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
 `Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack items
@@ -683,20 +704,18 @@ These fixtures cover constrained and constant calls, all in the `dispatch` suite
   re-abstraction, unlisted base interface and live derived flag, and has Lean reject a catalog
   hiding the most specific `MethodImpl` or moving its interface outside its pin.
 
-The core and universal-contract suites cover checked execution and memory preservation. Choose and
-GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller memory
-under its well-formedness hypothesis. Each unchanged contract rejects its incorrect compiled
-implementation. Countdown validation covers original instructions, inserted NOPs and reordered
-blocks, and rejects wrong results and nontermination.
+The core and universal-contract suites cover checked execution and memory preservation. Choose
+and GenericIdentity preserve arbitrary caller memory exactly; Struct preserves preexisting caller
+memory under its well-formedness hypothesis. Each unchanged contract rejects its incorrect
+compiled implementation.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
-generated-evidence mutations and mandatory-certificate positive/negative checks. CLI checks
-include kernel replay of imported helpers and rejection of unchecked direct/transitive proofs.
-`Tests/ImportEvidence.lean` accepts an external call into a matching
-import slot and rejects a forged identity, parameter count, receiver or result shape, a wrong
-emitted argument count, a slot index inside the program or past the table, constructor and generic
-sites, and managed or non-call sites reaching the import range; the certificate audit also rejects a
-certificate over a different import table. These tests do not establish full raw-CIL/runtime
+generated-evidence mutations and mandatory-certificate positive/negative checks.
+`Tests/ImportEvidence.lean` accepts an external call into a matching import slot and rejects a
+forged identity, parameter count, receiver or result shape, a wrong emitted argument count, a slot
+index inside the program or past the table, constructor and generic sites, and managed or non-call
+sites reaching the import range; the certificate audit also rejects a certificate over a different
+import table. These tests do not establish full raw-CIL/runtime
 correspondence.
 
 The [pinned native evidence](evidence/native/README.md) records x64 and ARM64 observations, model

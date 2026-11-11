@@ -162,9 +162,8 @@ run's artifact when it uploaded one; a PR run that reused a donor takes that don
 directly.
 
 A library is transferred between jobs as one authenticated tar/zstd archive;
-[library distribution](performance/LibraryDistribution.md) defines the format, the restore checks
-and how to measure them. A donor artifact stored as raw files, with no archive digest, is checked
-against its manifest.
+[library distribution](performance/LibraryDistribution.md) defines the format, the restore checks,
+the raw-file donor case and how to measure them.
 
 `scripts/TestFindCertifiedLibrary.cs` covers `main` pushes, unchanged and changed PR producer
 paths, non-main bases, forks, PR entry and head mismatches, unreachable pushes, ambiguous main
@@ -443,8 +442,10 @@ the generated `Countdown` proof outline.
 ## Other workflows
 
 The ARM64 AES workflow runs only `Tests/AesHardware.cs` and the runtime probe on a macOS Apple
-silicon runner, for changes to the AES model, its hardware check, the probe or the macOS evidence;
-see [runtime profiles](RUNTIME-PROFILES.md). The x64 suites check x86 AESENC.
+silicon runner, for changes to the AES model, its hardware check, the probe or the macOS evidence.
+The hardware check compares the runner's AESE and AESMC with the Lean model; the probe then
+validates the runner's runtime groups against the [profile constraints](RUNTIME-PROFILES.md) and
+uploads the observation. The x64 suites check x86 AESENC.
 
 Downstream libraries check their own compatibility with LeanCIL in their own CI, pinning a
 LeanCIL revision and advancing it through a reviewed change; LeanCIL's checks build no consumer.

@@ -103,8 +103,9 @@ independently-verified`. Faithful DLL decoding and CIL/runtime correspondence
 remain trust boundaries. These checks establish CIL theorems. They do not establish
 correctness of CoreCLR or a JIT.
 
-Supported dependency shapes include a chain (a caller importing A, which imports B) and a
-diamond (a caller importing A and C, which both import B). A shared dependency has one selected
+Imported libraries may depend on each other in any acyclic graph, such as a chain (a caller
+importing A, which imports B) or a diamond (a caller importing A and C, which both import B). A
+dependency cycle fails the run. A shared dependency has one selected
 identity, and each implementation is checked once per run, also when an ordinary proof receipt
 for it exists. A named exceptional outcome is preserved through forwarding libraries, and a
 table-reading contract through a transitive dependency keeps its explicit `StaticWorldValid`

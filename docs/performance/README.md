@@ -71,5 +71,7 @@ lake env lean -Dprofiler=true docs/performance/fold-roles/ThrowScaling.lean
 ```
 
 To check scaling, double the size (`256` or `4096`, at each occurrence in the file) in a scratch
-copy and compare: the time should about double. A fourfold increase means a scan per local or per
-load has returned. There are no reference figures for these files.
+copy and compare. The time of `ThrowScaling.lean` should about double; a fourfold increase means
+a scan per load has returned. The time of `CountScaling.lean` grows faster than double, because
+each local's type is looked up by position in the list of locals. Compare it with the same
+doubling on the base commit. There are no reference figures for these files.

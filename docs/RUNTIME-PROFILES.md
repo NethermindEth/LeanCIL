@@ -101,10 +101,8 @@ theorems. The runtime-profile drift workflow probes Linux x64 and ARM64 weekly,
 on demand and on policy changes, using the installed .NET 10 servicing runtime.
 Its artifacts record the actual runtime version and architecture; a successful
 job validates only those observations, not every possible deployment.
-The ARM64 AES workflow runs on a macOS Apple silicon runner when the AES model, its hardware
-check, the probe or the macOS evidence changes. It compares the runner's AESE and AESMC with the
-Lean model through its AES hardware check, then probes and validates the runner's runtime groups
-and uploads the observation; it runs no other suite.
+The [ARM64 AES workflow](CI.md#other-workflows) checks the AES model and the runtime groups on
+Apple silicon.
 
 Evidence field `bmi2` is `Bmi2.X64.IsSupported`, `x86Base64` is
 `X86Base.X64.IsSupported`, and `armBase64` is `ArmBase.Arm64.IsSupported`.

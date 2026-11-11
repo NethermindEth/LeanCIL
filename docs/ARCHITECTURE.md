@@ -27,26 +27,23 @@ proofs and advice on avoiding repeated interpreter expansion. The APIs are:
 ### Stepping
 
 Import `CIL.Safety.SymbolicExecution` and use `cil_checked_steps` to compose checked instruction
-steps. With no facts it first tries definitional equality, then uses local instruction equations
-and simplification. For symbolic branches or memory operations, supply the proved conditions with
-`cil_checked_steps [facts]`. Local facts are normalised with the goal, so a store fact may state
-its value in source form, and a fact that matches a memory dispatch keeps its abstract result
-instead of expanding bytes. Contract stepping handles signed and unsigned widening in either
-argument order.
+steps; for symbolic branches or memory operations, supply the proved conditions with
+`cil_checked_steps [facts]`. [Instruction composition](PROOFS-STEPPING.md#compose-instructions)
+lists the tactics, the goals they accept and the facts each instruction family needs, and
+[fact preparation](PROOFS-CONTRACTS.md#supply-facts-to-the-stepping-tactics) states how supplied
+facts are normalised. Contract stepping handles signed and unsigned widening in either argument
+order.
 
-`CodeAt` facts let the tactics resolve instructions within a known code segment without expanding
-the whole method. `cil_checked_steps (snapshots := snapshots) [facts]` also tracks numeric local
-stores and updated snapshots, including mixed Vector128, Vector256 and int32 locals, and names
-each store's memory and evidence. Snapshot facts do not supply write authority or justify a value
-of the wrong local kind.
-
-`Segment` contracts compose checked prefixes through exact intermediate states and fuel costs.
-`cil_segment` proves an exact-state contract from `CodeAt` placements and checked step facts. A
-local frame rule preserves untouched numeric snapshots from actual write effects and separate
-writable homes; placement alone never grants memory preservation. See
-[composable segments](PROOFS-STEPPING.md).
-
-Loop segments use `CIL.Safety.LoopAutomation` and require an invariant and a decreasing measure.
+- `CodeAt` facts let the tactics resolve instructions within a known code segment without
+  expanding the whole method, and `Segment` contracts compose checked prefixes through exact
+  intermediate states and fuel costs; see
+  [segments](PROOFS-STEPPING.md#place-code-and-compose-segments).
+- The snapshot forms of the stepping tactics track numeric local stores and loads, including
+  mixed Vector128, Vector256 and int32 locals; see
+  [snapshot walks](PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots). Snapshot facts
+  neither supply write authority nor justify a value of the wrong local kind.
+- Loop segments use `CIL.Safety.LoopAutomation` and require an invariant and a decreasing measure;
+  see [loops](PROOFS-STEPPING.md#step-loops).
 
 ### Reusing a proof across bodies and profiles
 
@@ -62,18 +59,11 @@ Loop segments use `CIL.Safety.LoopAutomation` and require an invariant and a dec
   each input. Prove the template once and use the generated bindings for the selected profiles;
   see [generated profile templates](PROOFS-BINDING.md#generated-profile-templates) for the
   supported domain and checking workflow.
-- Embedding proofs can ignore trailing unread byref, pointer or span locals. For unused numeric
-  locals, retain the extracted declarations and local indices in the expected body and use
-  ordinary embedding. This preserves later allocation identities, including for interspersed
-  numeric homes and nested allocating calls. Deleting a numeric local requires a separate
-  allocation-renaming simulation.
-- Allocation refinement relates numeric and interspersed dead locals in ordinary frames,
-  including inserted locals with valid initializers: retained initializers, scalar results,
-  caller-memory prefixes and named exceptions transfer, while fresh allocation identities may
-  differ. Import
-  `CIL.Safety.AllocationRefinement` explicitly; the `CIL` umbrella does not load its proof
-  dependencies. See [dead-local refinement](PROOFS-BINDING.md#bodies-modulo-dead-code) for its
-  frame restrictions.
+- Embedding proofs can ignore trailing unread byref, pointer or span locals. Allocation
+  refinement (`CIL.Safety.AllocationRefinement`, which `import CIL` does not load) relates
+  numeric and interspersed dead locals, with fresh allocation identities free to differ. See
+  [dead-local refinement](PROOFS-BINDING.md#bodies-modulo-dead-code) for which route keeps exact
+  memory and for the frame restrictions.
 
 ### Publishing and importing contracts
 
@@ -82,11 +72,10 @@ including a derived class calling a protected base method. A call through a publ
 statically resolved.
 
 Exported contracts can carry an explicit type-initialization premise for libraries with static
-constructors, including types containing `static readonly` struct fields. The sidecar binds each
-premise to an assembly, type and profile; importing callers retain it in their generated
-artifacts and verification reports. The premise is a runtime assumption; it does not prove that
-the CLR initializer ran. Constructor-initialized field values are not supported for export. See
-[contract interfaces](CONTRACT-INTERFACES.md).
+constructors, including types containing `static readonly` struct fields. The premise is a
+runtime assumption and does not prove that the CLR initializer ran; the
+[sidecar schema](CONTRACT-INTERFACES.md#sidecar-schema-1) states how it is bound and propagated.
+Constructor-initialized field values are not supported for export.
 
 An `export-contracts` manifest can list several profile artifacts for one method and one family
 theorem. Each extraction is checked independently, with kernel-checked flag agreement and exact
@@ -97,16 +86,9 @@ theorem, contract closure, replay and publication checks.
 
 `leancil verify --force-full-verify` independently checks supported imported libraries and their
 reachable contract dependencies against separately pinned implementation DLLs, interfaces and
-source bundles. Conditional exports and shared dependencies are checked in dependency order, and
-caller and imported proofs are checked again even when ordinary verification has cached
-successful results. Composition preserves normal returns and named exceptional outcomes.
-Libraries may read immutable RVA static tables: checked composition preserves their
-assembly-scoped identities and shared-table descriptors. Static-world requirements are explicit
-contract preconditions; static-constructor and static-value assumptions are not supported in
-this mode. Transferred proofs share repeated expression nodes in a compact data table;
-reconstruction kernel-checks every declaration and independently replays the compiled result.
-See [independent verification](FULL_VERIFICATION.md) for the trust boundary and required
-producer evidence.
+source bundles, using no cached proof result. Composition preserves normal returns and named
+exceptional outcomes. See [independent verification](FULL_VERIFICATION.md) for the checks, the
+supported libraries, the trust boundary and the required producer evidence.
 
 See [proof automation validation](VALIDATION-PROOFS.md#proof-automation) for the regression
 coverage and the commands that run it.

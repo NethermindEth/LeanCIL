@@ -2,10 +2,11 @@
 
 <!-- audience: maintainers -->
 
-This page describes the format in which CI passes the certified library between jobs, and how
-to measure packing and restoring it. Read it before changing
-`scripts/CertifiedLibraryArchive.cs` or the library steps of the verification workflow.
-[CI operation](../CI.md) describes which runs may donate a library.
+This page describes the format in which CI passes the certified library between jobs, how to
+measure packing and restoring it, and how to produce the library assets of a release. Read it
+before changing `scripts/CertifiedLibraryArchive.cs` or the library steps of the verification
+workflow, or before packing a release. [CI operation](../CI.md#certified-library) describes which
+runs may donate a library and which artifact a suite job takes.
 
 ## Format
 
@@ -14,9 +15,8 @@ compression disabled. The packer streams all regular files, including the hidden
 through `zstd -T2 -6`. Hard-linked files are stored as independent file contents; no native
 executable, proof artifact or source is omitted. Unix permission bits are stored and restored.
 
-The producer prints the archive SHA256 in its job log. Donor selection reads that digest from
-the same successful job as the manifest digest; suite jobs receive both through producer
-outputs. Restoration:
+The producer prints the archive SHA256 in its job log, where
+[donor selection](../CI.md#donors) reads it with the manifest digest. Restoration:
 
 1. checks the archive digest before decompression;
 2. rejects traversal paths, links, special entries and duplicate paths;
@@ -27,8 +27,34 @@ unless the producer ran reviewed producer code.
 
 A raw-directory artifact is accepted only when its producer logged no archive digest; it is
 checked against the manifest digest alone. An archive without its trusted digest is rejected. A
-failed donor restore permits fresh preparation; a failed suite restore fails the suite. Main
-republishes a certified library even when it reused a donor.
+failed donor restore permits fresh preparation; a failed suite restore fails the suite.
+
+## Release assets
+
+A release package of the tool can carry a descriptor of a certified library for each supported
+runtime, which the tool [downloads on a cache miss](../CLI.md#library-cache). For each runtime,
+from the exact sources that will be packaged, prepare and replay a library, then create its
+archive and package descriptor. Take `PRODUCER_SHA256` from the preparation command's output, so
+that the digest is independent of the directory being archived:
+
+```sh
+dotnet run --file scripts/PrepareLibrary.cs -- artifacts/release-library
+dotnet run --file scripts/PackageCertifiedLibrary.cs -- artifacts/release-library PRODUCER_SHA256 vVERSION artifacts/release-assets
+```
+
+The packaging command checks the entire producer artifact, replays its modules and validates the
+bytes written to the archive. Collect the generated `certified-library-release.*.json` files of
+the supported runtimes into one directory and pass that directory when packing the CLI:
+
+```sh
+dotnet pack Extractor -c Release -p:CertifiedLibraryReleaseDirectory=/absolute/path/to/release-assets
+```
+
+Publish the generated ZIP files as assets of the named release in `NethermindEth/LeanCIL` and
+distribute the CLI package through the normal trusted package channel. The descriptor is part of
+the installed package, so neither a mutable release asset nor a manifest inside its ZIP can
+authorize replacement bytes. These commands prepare files and neither publish a release nor upload
+a package. A build without descriptors builds the library locally.
 
 ## Measuring
 
