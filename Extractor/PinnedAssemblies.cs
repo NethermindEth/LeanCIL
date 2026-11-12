@@ -1,3 +1,5 @@
+using System.Reflection.PortableExecutable;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Mono.Cecil;
 
@@ -27,6 +29,8 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly DefaultAssemblyResolver platform = new();
     readonly Dictionary<string, ModuleDefinition> modules = new(StringComparer.Ordinal);
     readonly Dictionary<ModuleDefinition, ModuleDefinition> originals = [];
+    readonly Dictionary<ModuleDefinition, byte[]> images = [];
+    readonly Dictionary<byte[], PEReader> readers = [];
     readonly List<(Pin Pin, string Path, ModuleDefinition Module)> references = [];
 
     internal ModuleDefinition Selected { get; }
@@ -47,7 +51,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         Selected = Read(selected);
         SelectedPin = new(Selected.Assembly.Name.FullName, Selected.Mvid, selectedHash);
         modules.Add(SelectedPin.Identity, Selected);
-        originals.Add(Selected, StaticData.ReadModule(selected, this));
+        AddOriginal(Selected, selected);
         foreach (Source source in sources)
         {
             byte[] bytes = File.ReadAllBytes(source.Path);
@@ -63,13 +67,22 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
                 throw new InvalidDataException("Platform assemblies are runtime models, not references: " + identity);
             if (!modules.TryAdd(identity, module))
                 throw new InvalidDataException("Duplicate pinned assembly identity: " + identity);
-            originals.Add(module, StaticData.ReadModule(bytes, this));
+            AddOriginal(module, bytes);
             references.Add((new(identity, module.Mvid, hash), Path.GetFullPath(source.Path), module));
         }
         active = this;
     }
 
     ModuleDefinition Read(byte[] bytes) => StaticData.ReadModule(bytes, this);
+
+    // The working module and its untouched copy are two readings of the same image.
+    void AddOriginal(ModuleDefinition module, byte[] image)
+    {
+        ModuleDefinition original = StaticData.ReadModule(image, this);
+        originals.Add(module, original);
+        images.Add(module, image);
+        images.Add(original, image);
+    }
 
     /// <summary>The pinned set of the current extraction, or none outside one.</summary>
     internal static PinnedAssemblies? Active => active;
@@ -102,6 +115,16 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     static InvalidDataException Outside(ModuleDefinition module) =>
         new("Method body outside the pinned assemblies: " + module.Assembly.Name.FullName);
 
+    /// <summary>The header and code bytes of a method's body, read from the image of its module.</summary>
+    internal MethodBodyBytes.Body Body(MethodDefinition method)
+    {
+        if (!images.TryGetValue(method.Module, out byte[]? image)) throw Outside(method.Module);
+        if (!method.HasBody || method.RVA == 0)
+            throw new InvalidDataException("Method has no body in its image: " + method.FullName);
+        if (!readers.TryGetValue(image, out PEReader? reader))
+            readers.Add(image, reader = new(ImmutableCollectionsMarshal.AsImmutableArray(image)));
+        return MethodBodyBytes.Read(reader, (int)method.RVA);
+    }
     /// <summary>The index of a pinned module in <see cref="Pins"/>.</summary>
     internal int Index(ModuleDefinition module) => module == Selected ? 0 :
         references.FindIndex(reference => reference.Module == module) is >= 0 and var index ? index + 1 :
@@ -137,6 +160,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     {
         active = previous;
         platform.Dispose();
+        foreach (PEReader reader in readers.Values) reader.Dispose();
         foreach (ModuleDefinition module in modules.Values.Concat(originals.Values)) module.Dispose();
     }
 }

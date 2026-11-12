@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -11,12 +12,16 @@ namespace Nethermind.LeanCIL;
 internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence layouts,
     ImportResolution? imports = null)
 {
+    // Closed instantiations share their definition's bytes; the first method to use a body names them.
+    readonly Dictionary<(ModuleDefinition Module, uint Token), int> bodyBytes = [];
     readonly ExternalIdentityEvidence externalIdentities = new();
     int methodParameterCount;
 
     // Type serialization needs no method bodies; only method and dispatch evidence read originals.
-    ModuleDefinition Original(ModuleDefinition module) => (pinned ??
-        throw new InvalidOperationException("Method evidence requires the pinned assemblies.")).Original(module);
+    PinnedAssemblies Pinned => pinned ??
+        throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
+
+    ModuleDefinition Original(ModuleDefinition module) => Pinned.Original(module);
 
     static string Quote(string value) => JsonSerializer.Serialize(value);
     static string Bool(bool value) => value.ToString().ToLowerInvariant();
@@ -225,6 +230,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             (open.Length == 0 ? "" : $", interfaces := {List(open)}") + " }";
     }
 
+    string Locals(MethodDefinition method) =>
+        List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
+
     string Method(MethodDefinition method, MethodDefinition admitted, IReadOnlySet<Instruction> reachable)
     {
         methodParameterCount = method.GenericParameters.Count;
@@ -250,7 +258,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var objectFields = classOwner ? ObjectTypes.Fields(method.DeclaringType).Length : 0;
         var objectBases = classOwner ? ObjectTypes.BaseList(method.DeclaringType) : "[]";
         var parameters = List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)));
-        var locals = List(method.Body.Variables.Select(local => LocalType(local.VariableType)));
+        var locals = Locals(method);
         // Lines break only after a comma, so the emitted definition stays on one line.
         return $$"""
             { token := {{method.MetadataToken.ToUInt32()}}, owner := {{owner}},
@@ -273,9 +281,13 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
         var originalEvidence = Method(original, method, reachable);
+        // Token operands are spelled in the original's generic context, as its code is.
+        var body = Body(original, method, reachable, number);
         var closedEvidence = Method(method, method, reachable);
         externalIdentities.Emit(lean);
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
+        lean.AppendLine(body.Bytes);
+        lean.AppendLine(body.Definition);
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
         lean.AppendLine($"def method{number}Closed : Extraction.RawMethod := {closedEvidence}");
         lean.AppendLine($"def method{number}DispatchTypes : List Extraction.DispatchType := {DispatchTypes(method)}");
@@ -283,6 +295,60 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         lean.AppendLine($"theorem method{number}_specialization_validated :" +
             $" Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw" +
             $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
+        lean.AppendLine($"theorem method{number}_body_validated :" +
+            $" Extraction.BodyDecodes method{number}Body method{number}Original := {LeanEmitter.Decide}");
+    }
+
+    static readonly HashSet<Instruction> EmptySet = [];
+
+    // A body's metadata tokens are the four bytes after the opcode of these operand kinds.
+    static bool HasToken(OpCode opcode) => opcode.OperandType is OperandType.InlineMethod or OperandType.InlineField
+        or OperandType.InlineType or OperandType.InlineString or OperandType.InlineSig or OperandType.InlineTok;
+
+    /// <summary>
+    /// The body bytes of an original method and its token table: each token read from the body, with the operand
+    /// the extractor resolved it to. The Lean decoder reads the same bytes and checks them against the code.
+    /// </summary>
+    (string Bytes, string Definition) Body(MethodDefinition original, MethodDefinition admitted,
+        IReadOnlySet<Instruction> reachable, int number)
+    {
+        var body = Pinned.Body(original);
+        var bytes = body.Bytes;
+        var instructions = new InstructionIndex(original);
+        var operands = new List<(uint Token, string Key, string Operand)>();
+        for (var index = 0; index < original.Body.Instructions.Count; index++)
+        {
+            var instruction = original.Body.Instructions[index];
+            if (!HasToken(instruction.OpCode)) continue;
+            var at = body.HeaderLength + instruction.Offset + instruction.OpCode.Size;
+            if (at + sizeof(uint) > bytes.Length)
+                throw new InvalidDataException($"Method body of {original.FullName} ends inside a token operand.");
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at, sizeof(uint)));
+            var site = admitted.Body.Instructions[index];
+            // An external identity is a materialized name at a reachable site and a literal at an unreachable
+            // one. The literal spelling names the operand, so two sites share a token only if it agrees.
+            var key = Operand(original, instructions, instruction, site, EmptySet);
+            var operand = Operand(original, instructions, instruction, site, reachable);
+            var known = operands.FindIndex(entry => entry.Token == token);
+            if (known < 0) operands.Add((token, key, operand));
+            else if (operands[known].Key != key)
+                throw new InvalidDataException($"""
+                    Metadata token 0x{token:X8} resolves to two operands in {original.FullName}.
+                      The body evidence holds one operand per token.
+                    """);
+            // The kernel decides the equality of a literal and its materialized name, so the table may hold
+            // either; the name spares the reachable site a conversion.
+            else if (reachable.Contains(site)) operands[known] = (token, key, operand);
+        }
+        var definition = (original.Module, original.MetadataToken.ToUInt32());
+        var data = bodyBytes.TryGetValue(definition, out var first)
+            ? $"method{first}Bytes" : List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        bodyBytes.TryAdd(definition, number);
+        var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
+        return ($"def method{number}Bytes : List Nat := {data}",
+            $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
+            $"tokens := {{ operands := {table}, localSignature := {original.Body.LocalVarToken.ToUInt32()}, " +
+            $"locals := {Locals(original)} }} }}");
     }
 
     string DispatchTypes(MethodDefinition method)

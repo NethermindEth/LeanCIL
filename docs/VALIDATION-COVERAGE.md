@@ -115,6 +115,16 @@ workflow.
   batch compilation/replay time.
 - `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
   unchecked declaration reaches, and fails, independent kernel replay.
+- `GenericEvidence` mutates the body evidence of its first sample: a body byte, the header, a token
+  operand byte, a token table key, a token table operand, an emitted instruction offset, `maxStack` and
+  a branch index. Each must fail a body obligation with the kernel's failed-decision message, so a
+  mutation that only breaks parsing does not count, and the unmutated obligation is the positive
+  control.
+  `Tests/BodyDecoding.lean` decodes hand-made tiny and fat bodies with short and long branches, a
+  switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
+  body separately with its specific error, and compares the operand table with a static list
+  generated once from the opcodes of Mono.Cecil.
+  `Tests/BodyEncoding.lean` writes bytes for the hand-built methods of other Lean fixtures.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one

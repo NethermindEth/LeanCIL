@@ -7,6 +7,7 @@ import CIL.Extraction.StaticValues
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.Constrained
 import CIL.Extraction.Assemblies
+import CIL.Extraction.BodyDecoding
 import Std.Data.TreeMap.Lemmas
 
 /-!
@@ -15,9 +16,10 @@ import Std.Data.TreeMap.Lemmas
 The top of the extraction checks. `TranslationValid` conjoins the kernel-checked validators
 for one extraction: layouts recompute, every emitted method passes the per-method validators
 against its evidence record, static values are reproduced by their initializers, import
-layouts agree, and every body is owned by the pinned assembly its evidence names. It is not a
-simulation proof for every raw opcode; general instruction translation and metadata decoding
-stay trusted, as `docs/SOUNDNESS.md` describes.
+layouts agree, every body is owned by the pinned assembly its evidence names, and every decoded
+method definition is what its body bytes decode to. It is not a simulation proof for every raw
+opcode; general instruction translation, the metadata tables behind a body's token table and the
+PE container stay trusted, as `docs/SOUNDNESS.md` describes.
 
 Generated modules prove each method's evidence separately and assemble it with
 `translation_of_methods`, so no validator is reduced twice.
@@ -28,6 +30,8 @@ namespace CIL.Extraction
 /-- Every extracted method has exactly one record, in emitted program order. -/
 structure MethodEvidence where
   original : RawMethod
+  /-- The bytes `original` was decoded from, and the metadata its tokens resolve to. -/
+  body : BodyEvidence
   arguments : List TypeExpr
   closed : RawMethod
   parameterInput : RawArguments
@@ -183,13 +187,15 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   OpaqueLocalsValid item.closed method ∧
   VectorInitializationsValid item.closed item.reachable method ∧
   ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
-  ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable method
+  ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
+    method ∧
+  BodyDecodes item.body item.original
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
     (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)

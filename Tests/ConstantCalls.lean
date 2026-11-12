@@ -1,4 +1,5 @@
 import CIL.Extraction.Translation
+import Tests.BodyEncoding
 
 /-!
 # Constant-return calls in feature flow
@@ -37,7 +38,7 @@ private def state (stack : List (Option W32)) : Option FeatureState := some ⟨s
 /-- A program method as the whole-program obligation sees it: only its closed body and feature
     certificate matter here. -/
 private def method (closed : RawMethod) (featureStates : FeatureCertificate) : MethodEvidence := {
-  original := closed, arguments := [], closed,
+  original := closed, body := Tests.BodyEncoding.noBody, arguments := [], closed,
   parameterInput := ⟨[], [], []⟩, reachable := featureStates.map Option.isSome,
   featureStates, scalarStates := [], layoutUses := [] }
 

@@ -24,6 +24,12 @@ name = "Tests.Support"
 name = "Tests.Semantics"
 
 [[lean_lib]]
+name = "Tests.BodyEncoding"
+
+[[lean_lib]]
+name = "Tests.BodyDecoding"
+
+[[lean_lib]]
 name = "Tests.LiteralDisplay"
 
 [[lean_lib]]

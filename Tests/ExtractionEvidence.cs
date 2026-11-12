@@ -7,7 +7,8 @@ if (args is not ([] or ["--prepare-only"]))
     throw new ArgumentException("Usage: ExtractionEvidence.cs [--prepare-only]");
 using var fixtures = new Program();
 fixtures.PrepareLeanFixtures(
-    "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.ScalarEvidence",
+    "Tests.BodyEncoding", "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence",
+    "Tests.ScalarEvidence",
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
     "Tests.MemorySpanExecution", "Tests.ManagedPointerValues", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences",

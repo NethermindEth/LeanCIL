@@ -1,5 +1,6 @@
 import CIL.Extraction.Translation
 import CIL.Safety.Frames
+import Tests.BodyEncoding
 
 /-!
 Certificate regression fixtures, evaluated against the checked CIL extraction model.
@@ -8,7 +9,7 @@ Each conjunction retains its positive and negative obligations.
 -/
 
 namespace Tests.ScalarEvidence
-open CIL CIL.Extraction
+open CIL CIL.Extraction Tests.BodyEncoding
 
 /-- The primitive assembly identity with its checked byte representation. -/
 private def runtime := runtimeScope
@@ -121,8 +122,8 @@ private def addRaw := raw [i 2, i 3, i 88, i 42]
 private def addFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 2, unknown 1]
 private def addStates : ScalarCertificate := [some [], some [.word64], some [.word64, .word64], some [.word64]]
 private def addCode : List Instruction := [.arg 0, .arg 1, .add, .ret]
-private def addEvidence : MethodEvidence := {
-  original := addRaw, arguments := [], closed := addRaw,
+private def addEvidence : MethodEvidence := withBody {
+  body := noBody, original := addRaw, arguments := [], closed := addRaw,
   parameterInput := { arguments := [.field .unsigned64, .field .unsigned64], locals := [], code := [.load 0, .load 1, .other, .other] },
   reachable := List.replicate 4 true, featureStates := addFeatures, scalarStates := addStates, layoutUses := [], assembly := scope }
 private def addMethod : Method := { locals := [], returnsValue := true, code := addCode }
@@ -138,7 +139,7 @@ example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.drop 1) :
 example : ¬ ScalarFlowValid #[] addRaw (addFeatures.drop 1) addStates addCode := by decide
 
 private def binaryEvidence (opcode : Nat) : MethodEvidence :=
-  { addEvidence with original := { addRaw with code := addRaw.code.set 2 (i opcode) }, closed := { addRaw with code := addRaw.code.set 2 (i opcode) } }
+  withBody { addEvidence with original := { addRaw with code := addRaw.code.set 2 (i opcode) }, closed := { addRaw with code := addRaw.code.set 2 (i opcode) } }
 private def binaryMethod (operation : Instruction) : Method :=
   { addMethod with code := addCode.set 2 operation }
 private def arithmeticFlagCases : List (Nat × Instruction) := [
@@ -154,8 +155,8 @@ example : arithmeticFlagMutations.all (fun (opcode, operation) =>
 private def literalRaw := raw [i 33 (.integer (-9223372036854775808)), i 42] []
 private def literalFeatures : FeatureCertificate := [unknown 0, unknown 1]
 private def literalStates : ScalarCertificate := [some [], some [.word64]]
-private def literalEvidence : MethodEvidence := {
-  original := literalRaw, arguments := [], closed := literalRaw,
+private def literalEvidence : MethodEvidence := withBody {
+  body := noBody, original := literalRaw, arguments := [], closed := literalRaw,
   parameterInput := { arguments := [], locals := [], code := [.other, .other] },
   reachable := [true, true], featureStates := literalFeatures, scalarStates := literalStates, layoutUses := [], assembly := scope }
 private def literalMethod : Method := { locals := [], returnsValue := true, code := [.const64 9223372036854775808, .ret] }
@@ -166,8 +167,8 @@ example : ¬ TranslationValid [] #[] [literalEvidence] []
 private def convertRaw := raw [i 2, i 133, i 42] [word]
 private def convertFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
 private def convertStates : ScalarCertificate := [some [], some [.word64], some [.word64]]
-private def convertEvidence : MethodEvidence := {
-  original := convertRaw, arguments := [], closed := convertRaw,
+private def convertEvidence : MethodEvidence := withBody {
+  body := noBody, original := convertRaw, arguments := [], closed := convertRaw,
   parameterInput := { arguments := [.field .unsigned64], locals := [], code := [.load 0, .other, .other] },
   reachable := [true, true, true], featureStates := convertFeatures, scalarStates := convertStates, layoutUses := [], assembly := scope }
 private def convertMethod : Method := { locals := [], returnsValue := true, code := [.arg 0, .checkedConvert 64 true true, .ret] }
@@ -182,8 +183,8 @@ example : ¬ TranslationValid [] #[] [convertEvidence] []
 private def floatRaw (opcode : Nat) := raw [i 23, i opcode, i 106, i 42] []
 private def floatFeatures : FeatureCertificate := [unknown 0, state [some 1], unknown 1, unknown 1]
 private def floatStates : ScalarCertificate := [some [], some [.word32], some [.word32], some [.word64]]
-private def floatEvidence (opcode : Nat) : MethodEvidence := {
-  original := floatRaw opcode, arguments := [], closed := floatRaw opcode,
+private def floatEvidence (opcode : Nat) : MethodEvidence := withBody {
+  body := noBody, original := floatRaw opcode, arguments := [], closed := floatRaw opcode,
   parameterInput := { arguments := [], locals := [], code := List.replicate 4 .other },
   reachable := List.replicate 4 true, featureStates := floatFeatures, scalarStates := floatStates, layoutUses := [], assembly := scope }
 private def floatMethod : Method := { locals := [], returnsValue := true, code := [.const32 1, .neg, .convI8, .ret] }
@@ -219,8 +220,8 @@ private def localRaw := { raw [i 23, i 107, i 10, i 6, i 106, i 42] [] with loca
 private def localFeatures : FeatureCertificate :=
   ([[], [some 1], [none], [], [none], [none]] : List (List (Option W32))).map fun stack => some ⟨stack, [none]⟩
 private def localStates : ScalarCertificate := [some [], some [.word32], some [.other], some [], some [.word32], some [.word64]]
-private def localEvidence : MethodEvidence := {
-  original := localRaw, arguments := [], closed := localRaw,
+private def localEvidence : MethodEvidence := withBody {
+  body := noBody, original := localRaw, arguments := [], closed := localRaw,
   parameterInput := { arguments := [], locals := [.field .signed32], code := List.replicate 6 .other },
   reachable := List.replicate 6 true, featureStates := localFeatures, scalarStates := localStates, layoutUses := [], assembly := scope }
 private def localMethod : Method := {
@@ -232,8 +233,8 @@ example : ¬ TranslationValid [] #[] [localEvidence] [] [localMethod] := by deci
 
 private def argumentRaw := raw [i 23, i 108, i 16 (.argument 0), i 2, i 106, i 42] [intType]
 private def argumentFeatures : FeatureCertificate := [unknown 0, state [some 1], unknown 1, unknown 0, unknown 1, unknown 1]
-private def argumentEvidence : MethodEvidence := {
-  original := argumentRaw, arguments := [], closed := argumentRaw,
+private def argumentEvidence : MethodEvidence := withBody {
+  body := noBody, original := argumentRaw, arguments := [], closed := argumentRaw,
   parameterInput := { arguments := [.field .signed32], locals := [], code := [.other, .other, .store 0, .load 0, .other, .other] },
   reachable := List.replicate 6 true, featureStates := argumentFeatures, scalarStates := localStates, layoutUses := [], assembly := scope }
 private def argumentMethod : Method := {
@@ -339,8 +340,8 @@ private def faultLocalRaw := { raw [i 2, i 10, i 6, i 42] [word] with locals := 
 private def faultLocalFeatures : FeatureCertificate :=
   ([[], [none], [], [none]] : List (List (Option W32))).map fun stack => some ⟨stack, [none]⟩
 private def faultLocalStates : ScalarCertificate := [some [], some [.word64], some [], some [.word32]]
-private def faultLocalEvidence : MethodEvidence := {
-  original := faultLocalRaw, arguments := [], closed := faultLocalRaw,
+private def faultLocalEvidence : MethodEvidence := withBody {
+  body := noBody, original := faultLocalRaw, arguments := [], closed := faultLocalRaw,
   parameterInput := { arguments := [.field .unsigned64], locals := [.field .signed32], code := [.load 0, .other, .other, .other] },
   reachable := List.replicate 4 true, featureStates := faultLocalFeatures, scalarStates := faultLocalStates, layoutUses := [], assembly := scope }
 private def faultLocalMethod : Method := {
@@ -367,8 +368,8 @@ example (memory : Safety.Memory) (reference : Safety.Reference) (kind : NarrowKi
 private def nativeHomeRaw := raw [i 3, i 16 (.argument 0), i 2, i 110, i 42] [nativeType, word]
 private def nativeHomeFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1, unknown 1]
 private def nativeHomeStates : ScalarCertificate := [some [], some [.word64], some [], some [.native], some [.word64]]
-private def nativeHomeEvidence : MethodEvidence := {
-  original := nativeHomeRaw, arguments := [], closed := nativeHomeRaw,
+private def nativeHomeEvidence : MethodEvidence := withBody {
+  body := noBody, original := nativeHomeRaw, arguments := [], closed := nativeHomeRaw,
   parameterInput := { arguments := [.field .nativeInt, .field .unsigned64], locals := [], code := [.load 1, .store 0, .load 0, .other, .other] },
   reachable := List.replicate 5 true, featureStates := nativeHomeFeatures, scalarStates := nativeHomeStates, layoutUses := [], assembly := scope }
 private def nativeHomeMethod : Method := {
@@ -384,8 +385,8 @@ example : ¬ ScalarFlowValid #[] nativeHomeRaw nativeHomeFeatures
 private def nativeReturnRaw := raw [i 2, i 77, i 42] [.byref word]
 private def nativeReturnFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
 private def nativeReturnStates : ScalarCertificate := [some [], some [.reference], some [.native]]
-private def nativeReturnEvidence : MethodEvidence := {
-  original := nativeReturnRaw, arguments := [], closed := nativeReturnRaw,
+private def nativeReturnEvidence : MethodEvidence := withBody {
+  body := noBody, original := nativeReturnRaw, arguments := [], closed := nativeReturnRaw,
   parameterInput := { arguments := [.reference], locals := [], code := [.load 0, .other, .other] },
   reachable := List.replicate 3 true, featureStates := nativeReturnFeatures, scalarStates := nativeReturnStates, layoutUses := [], assembly := scope }
 private def nativeReturnMethod : Method := { locals := [], returnsValue := true, code := [.arg 0, .loadScalar 8, .ret] }
@@ -547,8 +548,8 @@ example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode
 example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode .add) := by decide
 example : ¬ ScalarFlowValid #[] (holeRaw 143 (.type intType)) holeFeatures holeStates (holeCode (.divide true false)) := by decide
 example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode (.nativeBinary .add)) := by decide
-private def holeEvidence (opcode : Nat) (states : ScalarCertificate) : MethodEvidence := {
-  original := holeRaw opcode, arguments := [], closed := holeRaw opcode,
+private def holeEvidence (opcode : Nat) (states : ScalarCertificate) : MethodEvidence := withBody {
+  body := noBody, original := holeRaw opcode, arguments := [], closed := holeRaw opcode,
   parameterInput := { arguments := [.field .unsigned64, .field .unsigned64], locals := [], code := [.load 0, .load 1, .other, .other, .load 0, .other] },
   reachable := List.replicate 6 true, featureStates := holeFeatures, scalarStates := states, layoutUses := [], assembly := scope }
 private def holeMethod (emitted : Instruction) : Method :=
@@ -849,5 +850,16 @@ theorem native_home_rejects_int32 :
       CIL.Safety.localNumber .word64 (.i64 (-1)) = .ok (2 ^ 64 - 1) :=
   ⟨rfl, rfl⟩
 #print axioms native_home_rejects_int32
+
+/-- Every evidence record in this file carries the bytes of its own original body, so the
+    certificate checks above fail for the reason they state and not for a missing body. -/
+theorem fixtures_carry_their_bodies :
+    ([addEvidence, literalEvidence, convertEvidence, floatEvidence 107, floatEvidence 108,
+      localEvidence, argumentEvidence, faultLocalEvidence, nativeHomeEvidence,
+      nativeReturnEvidence, holeEvidence 88 holeStates, holeEvidence 149 holeStates] ++
+      (arithmeticFlagCases ++ arithmeticFlagMutations).map fun entry =>
+        binaryEvidence entry.1).all (fun item => bodyMatches item.body item.original) = true := by
+  decide +kernel
+#print axioms fixtures_carry_their_bodies
 
 end Tests.ScalarEvidence

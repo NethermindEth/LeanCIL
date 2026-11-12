@@ -8,6 +8,7 @@
 
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Nethermind.LeanCIL;
 
 if (args is not ([] or ["--external-identities"] or ["--measure"]))
@@ -109,7 +110,7 @@ string ChangeDefinition(string source, string name, Func<string, string> change)
     return source[..start] + change(source[start..end]) + source[end..];
 }
 void Reject(int sample, string name, Func<string, string> mutate,
-    string? theorem = "method1_specialization_validated")
+    string? theorem = "method1_specialization_validated", string diagnostic = "error:")
 {
     var baseline = File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean"));
     var source = mutate(baseline);
@@ -126,7 +127,7 @@ void Reject(int sample, string name, Func<string, string> mutate,
     }
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, source);
-    rejected.Add(path, "PASS generic evidence rejects " + name, "error:");
+    rejected.Add(path, "PASS generic evidence rejects " + name, diagnostic);
 }
 foreach (var (name, scope) in new[]
 {
@@ -149,6 +150,32 @@ Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed",
     line => line.Replace("operand := .target 4", "operand := .target 3")));
 Reject(0, "wrong-managed-target", source => source.Replace(".call 1 1", ".call 0 1"), "method0_calls_validated");
 Console.WriteLine("PASS original-metadata generic substitution, complete managed-call binding and malformed evidence rejection");
+// Each mutation changes one fact of the first sample's body evidence, so only the decoding check can reject it;
+// the unmutated obligation is checked as the positive control.
+const string bodyTheorem = "method0_body_validated";
+// A failed kernel decision prints this text; a mutation that only breaks parsing does not.
+const string decisionFailed = "proved that the proposition";
+void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change) =>
+    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, decisionFailed);
+// The metadata rows of a body shift with the assembly, so each byte is found by its position in the emitted list.
+string ChangeByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
+    match => match.Groups[1].Value + (int.Parse(match.Groups[2].Value) + change) + match.Groups[3].Value);
+// Sample 0 starts `ldarg.0; call <token>` under a tiny header: header, ldarg.0, call, then the token bytes.
+RejectBody(0, "altered-body-byte", bodyTheorem, "method0Bytes", line => ChangeByte(line, @"(\[\d+, )(\d+)(,)", 1));
+RejectBody(0, "altered-body-header", bodyTheorem, "method0Bytes", line => ChangeByte(line, @"(\[)(\d+)(,)", 4));
+RejectBody(0, "altered-token-operand-byte", bodyTheorem, "method0Bytes",
+    line => ChangeByte(line, @"(\[\d+, 2, 40, )(\d+)(,)", 1));
+RejectBody(0, "altered-token-table-key", bodyTheorem, "method0Body",
+    line => ChangeByte(line, @"(\()(\d+)(, \.call)", 1));
+RejectBody(0, "altered-token-table-operand", bodyTheorem, "method0Body",
+    line => line.Replace("name := \"Identity\"", "name := \"Other\""));
+RejectBody(0, "altered-instruction-offset", bodyTheorem, "method0Original",
+    line => line.Replace("offset := 1, opcode := 40", "offset := 2, opcode := 40"));
+RejectBody(0, "altered-max-stack", bodyTheorem, "method0Original",
+    line => line.Replace("maxStack := 8", "maxStack := 9"));
+RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",
+    line => line.Replace("operand := .target 4", "operand := .target 3"));
+Console.WriteLine("PASS body bytes, token table and original definition reject changed bytes and operands");
 Reject(0, "omitted-method-evidence", source => ChangeDefinition(source, "methodEvidence",
     _ => "def methodEvidence : List Extraction.MethodEvidence := []"), null);
 Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "methodEvidence",
