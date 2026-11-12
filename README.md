@@ -82,7 +82,8 @@ generic methods, loops, memory access and compiled F#.
 | `leancil workspace` | Generate a method's extraction into the proof's package for live editor goals |
 | `leancil watch` | Rebuild C# on change, refresh the changed extractions and verify the affected proofs |
 | `leancil verify-batch` | Verify multiple requests against one consumer snapshot |
-| `leancil gates` | Build, extract and verify a catalog of methods, profiles, proofs and regression variants |
+| `leancil gates` | Build, extract and verify a catalog of methods, profiles, proofs and regression variants, or plan it over CI jobs |
+| `leancil bindings` | Generate the proof sources of a binding catalog, or check them |
 | `leancil export-contracts` | Publish verified method contracts for separately compiled callers |
 | `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library |
 

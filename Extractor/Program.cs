@@ -9,7 +9,8 @@ internal static partial class Program
 {
     const string Usage =
         "Usage: leancil list assembly.dll\n" +
-        "       leancil templates output-directory extraction-directory...\n" +
+        "       leancil templates output-directory extraction-directory... [--check] [--namespace name] " +
+        "[--omit-equations] [--module file.lean]\n" +
         "       leancil lint-exceptions output-directory --documentation assembly.xml\n" +
         "       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory " +
         "[profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... " +
@@ -31,9 +32,14 @@ internal static partial class Program
         "[--format text|json] [--trace] [--goals]\n" +
         "       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] " +
         "[--results results.json] [--format text|json] [--trace] [--check]\n" +
-        "       leancil gates manifest.json [--method name] [--profile name] [--changed path]... " +
-        "[--check] [--fresh] [--rebuild-library] [--trace] [--parallel count] [--results results.json] " +
+        "       leancil gates manifest.json [--method name] [--profile name] [--only id-prefix]... " +
+        "[--changed path]... [--check] [--fresh] [--rebuild-library] [--trace] [--parallel count] " +
+        "[--results results.json] [--format text|json]\n" +
+        "       leancil gates manifest.json --plan count [--costs results.json]... [selection options] " +
         "[--format text|json]\n" +
+        "       leancil gates manifest.json --plan-group plan.json group [verification options]\n" +
+        "       leancil gates manifest.json --require-results directory --plan plan.json\n" +
+        "       leancil bindings catalog.json [--check]\n" +
         "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +
         "[--results results.json]\n" +
         "       leancil --version";
@@ -149,6 +155,11 @@ internal static partial class Program
             {
                 stage = "proof selection";
                 return global::Program.VerifyBatch(args[1..]);
+            }
+            if (args[0] == "bindings")
+            {
+                stage = "binding generation";
+                return global::Program.RunBindings(args[1..]);
             }
             if (args[0] == "gates")
             {

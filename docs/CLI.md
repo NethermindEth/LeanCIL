@@ -12,13 +12,14 @@ modes. For one complete verification, read the [getting-started guide](GETTING-S
 | `leancil new-proof` | Write a starting proof with marked holes | [Start a proof](#start-a-proof) |
 | `leancil verify` | Check, kernel-replay and audit one theorem | [Verify](#verify) |
 | `leancil verify-batch` | Verify many requests in one session | [Batch verification](CONSUMERS.md#batch-verification) |
-| `leancil gates` | Build, extract and verify a catalog of methods, profiles, proofs and regression variants | [Run a proof catalog](CONSUMERS.md#run-a-proof-catalog) |
+| `leancil gates` | Build, extract and verify a catalog of methods, profiles, proofs and regression variants, or plan it over jobs | [Run a proof catalog](CONSUMERS.md#run-a-proof-catalog) |
+| `leancil bindings` | Write or check the proof sources a binding catalog generates | [Binding catalogs](CONSUMERS.md#binding-catalogs) |
 | `leancil workspace` | Generate a method's extraction into a Lake package for editor goals | [Editor workspace](#editor-workspace) |
 | `leancil watch` | Rebuild, re-extract and verify on change | [Watch](CONSUMERS.md#watch) |
 | `leancil export-contracts` | Publish verified contracts as a sidecar | [Export contracts](#export-contracts) |
 | `leancil resolve-imports` | Locate contract sidecars and implementations from SDK output | [Resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets) |
 | `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library | [Library audits](CONSUMERS.md#library-audits) |
-| `leancil templates` | Generate shared proof templates from extractions of several profiles | [Generated profile templates](PROOFS-BINDING.md#generated-profile-templates) |
+| `leancil templates` | Generate shared proof templates from extractions of several profiles, or check generated ones | [Generated profile templates](PROOFS-BINDING.md#generated-profile-templates) |
 | `leancil lint-exceptions` | Compare modeled throw sites with XML documentation | [Exception documentation lint experiment](#exception-documentation-lint-experiment) |
 | `leancil --version` | Print the tool, framework and toolchain versions | [Version](#version) |
 

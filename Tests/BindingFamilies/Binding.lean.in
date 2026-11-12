@@ -1,0 +1,20 @@
+import Extracted
+import Support
+/-! Exact extraction binding to a reviewed integer proof family. -/
+namespace Generated
+/-- The complete managed signature retains width and signedness. -/
+theorem signature : Extracted.method0Signature =
+    "@returnType@ BindingMethods::@name@(@managed@,@managed@)" := rfl
+#print axioms signature
+/-- The complete extracted body retains the reviewed operation and polarity. -/
+theorem binding : Extracted.program[0]? =
+    some (BindingSupport.@body@) := rfl
+#print axioms binding
+/-- The reviewed family theorem instantiated at this exact extraction. -/
+theorem correctness (left right : CIL.W@width@) (memory : CIL.Safety.Memory) :
+    CIL.Safety.invoke Extracted.program @fuel@ 0
+      [.scalar (.i@width@ left), .scalar (.i@width@ right)] memory =
+      .ok (memory, [.scalar (@value@)]) :=
+  BindingSupport.@shared@ Extracted.program Extracted.profile binding left right memory
+#print axioms correctness
+end Generated

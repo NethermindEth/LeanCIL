@@ -9,6 +9,8 @@ commands and their output are in the [CLI reference](CLI.md).
 | --- | --- |
 | Verify a proof that imports your own modules | [Consumer proof packages](#consumer-proof-packages) |
 | Verify every method, profile and proof of a project | [Run a proof catalog](#run-a-proof-catalog) |
+| Split a catalog over CI jobs and check that every job passed | [Plan jobs](#plan-jobs) |
+| Generate proof sources from a table of variables | [Binding catalogs](#binding-catalogs) |
 | Verify a list of existing extractions | [Batch verification](#batch-verification) |
 | Compile proofs without certifying them | [Check compilation](#check-compilation) |
 | Edit a proof with live goals | [Proof-authoring workspace](#proof-authoring-workspace) |
@@ -20,9 +22,13 @@ commands and their output are in the [CLI reference](CLI.md).
 ## Run a proof catalog
 
 ```text
-leancil gates manifest.json [--method name] [--profile name] [--changed path]... [--check]
-    [--fresh] [--rebuild-library] [--trace] [--parallel count] [--results results.json]
+leancil gates manifest.json [--method name] [--profile name] [--only id-prefix]...
+    [--changed path]... [--check] [--fresh] [--rebuild-library] [--trace] [--parallel count]
+    [--results results.json] [--format text|json]
+leancil gates manifest.json --plan count [--costs results.json]... [selection options]
     [--format text|json]
+leancil gates manifest.json --plan-group plan.json group [verification options]
+leancil gates manifest.json --require-results directory --plan plan.json
 ```
 
 `leancil gates` builds, extracts and verifies an explicit catalog of methods, their proofs and
@@ -32,8 +38,9 @@ as a second batch.
 Assembly, project, `proofRoot`, `outputRoot` and custom `@profile.json` paths are relative to the
 manifest; proof and template paths are relative to `proofRoot`. Each profile of each variant gets
 its own extraction and result in `<outputRoot>/<gate name>/<profile hash>/<variant name>`, where
-the gate's own assembly is the variant `production`. `<outputRoot>/requests.json` lists the
-requests of both batches; the statement each compared request is checked at is not part of it.
+the gate's own assembly is the variant `production`. That variant under that profile is a row,
+whose id is `<gate>/<profile>/<variant>`. `<outputRoot>/requests.json` lists the requests of both
+batches; the statement each compared request is checked at is not part of it.
 
 ```json
 {
@@ -110,6 +117,9 @@ repeat a profile. Unknown manifest properties are rejected. A gate may also give
 | `templates.<name>` | A template's `path` and default `values`; a use that names it merges its own `values` over these. |
 | `profiles.<name>` | An `@file` execution profile, relative to the manifest, that gates and variants name by `<name>`. |
 | `generatedRoot` | Required with any template: the directory under `proofRoot` that receives instantiated proofs. |
+| `defaults` | `assembly` or `build`, `initializedTypes` and `typeArguments` for every gate that does not give its own. |
+| `selection.all`, `selection.ignore` | Path prefixes, relative to the manifest, for `--changed`: a path under an `all` prefix selects every row, and one under an `ignore` prefix selects nothing. The two lists must not overlap. |
+| `catalogs` | [Binding catalogs](#binding-catalogs), relative to the manifest, each of whose generated gates is a gate of this manifest. |
 
 `gates` builds each distinct project and property set once with `dotnet build`, into
 `<outputRoot>/builds/<key>/`. It sets `BaseOutputPath`, `OutputPath` and `OutDir` to that
@@ -121,6 +131,14 @@ Global properties also reach referenced projects, so a project built this way sh
 reference other projects, and a multi-targeted project should select one framework with a
 `TargetFramework` property. A build failure fails every variant that uses it; the other variants
 still run. The build runs the consumer's project, which is executable code like its Lake package.
+
+A gate that a catalog generates has no variants and takes its assembly or build from `defaults`.
+No gate the manifest lists may name a method that a catalog generates; give a different proof for
+one of a catalog's rows as a `handwritten` entry of the catalog. `gates` writes the sources of
+every catalog, then every template-generated proof, before it reads or hashes any proof source,
+so a manifest with catalogs needs no generated file beforehand. Each catalog's `generatedRoot`
+must lie under `proofRoot`, outside the directories verification skips, and must not overlap the
+manifest's `generatedRoot` or another catalog's.
 
 A named profile is a custom profile file that results, generated paths and `--profile` call by its
 name, while extraction reads the file. The name must not be a built-in profile name, retired ones
@@ -169,7 +187,9 @@ A variant passes as follows:
 | `unchanged` | Its program comparison holds. No proof is requested. |
 
 A build, extraction, program comparison or template failure, a missing proof, and a proof whose
-check printed an internal error each fail the variant; none counts as a rejection. A `rejected`
+check printed an internal error each fail the variant; none counts as a rejection. Before it
+builds or extracts a row, `gates` removes the row's `verified.json` and `failed.json`, so a row
+that fails before its proof is checked keeps neither from an earlier run. A `rejected`
 variant's refutation and proof are requests on the same output, the proof last, so the output
 keeps no `verified.json`: neither the proof's, which was rejected, nor the refutation's, whose
 outcome is recorded in the results.
@@ -194,13 +214,18 @@ certifying variant's comparison, as `statementIdentity`.
 | --- | --- |
 | `--method name` | Select gates whose `method` contains this substring. |
 | `--profile name` | Select one exact profile name. |
+| `--only id-prefix` | Select the rows whose id is the prefix or starts with it and `/`; repeatable. A prefix that matches no row is an error. |
 | `--changed path` | Select variants affected by a changed file; repeatable, relative to the working directory. |
+| `--plan`, `--costs`, `--plan-group`, `--require-results` | See [plan jobs](#plan-jobs). |
 | `--check` | [Compile only](#check-compilation); an error when a selected variant expects `rejected`. |
 | `--fresh`, `--rebuild-library`, `--trace`, `--parallel` | As for [`verify-batch`](#batch-verification). |
-| `--results results.json` | Write one result per variant and profile, in manifest order. |
+| `--results results.json` | Write the manifest digest, the revision and one result per row, in manifest order. |
 | `--format json` | Print one JSON document instead of the text lines. |
 
-Each result has the [batch](#batch-verification) fields of the variant's proof (`output`,
+The results file is an object with `manifest`, the SHA-256 of the manifest and its catalog files
+with LF line endings, `revision`, the output of `git rev-parse HEAD` in the manifest's directory
+or `null`, and `rows`. Each row has its `id` and the [batch](#batch-verification) fields of the
+variant's proof (`output`,
 `proof`, `theorem`, `expect`, `status`, `stage`, `error`, `axioms`, `libraryBuild`, `failure`,
 `elapsedSeconds`), where `status` is the variant's verdict, and `gate`, `profile`, `variant`,
 `build` (`built`, `failed` or `null` for a given assembly), `extraction` (`extracted` or
@@ -215,11 +240,14 @@ document has `schema`, `passed` and `failed` counted over these results, `varian
 and `requests` as `verify-batch --format json` prints them. The exit code is `0` only when every variant passed.
 
 Selection makes no verification claim about omitted variants, and a selection that matches
-nothing is an error. `--changed` selects by file kind:
+nothing is an error, except under `--plan`. `--changed` ignores a path under a
+`selection.ignore` prefix, and a path under a `selection.all` prefix selects every row. Other
+paths select by file kind:
 
 - A `.lean` file selects the variants whose proof or refutation imports it, directly or not.
 - A template selects the variants instantiated from it, a profile file the variants extracted
-  with it, and the manifest selects every variant.
+  with it, a catalog or a catalog family's template the gates generated from it, and the
+  manifest selects every variant.
 - A file under a project's directory selects every variant built from that project.
 - A `.cs` file selects the variants whose extracted reachable methods have PDB sequence points
   in it. A variant without debug information, or with referenced assemblies, is selected.
@@ -229,6 +257,47 @@ nothing is an error. `--changed` selects by file kind:
 A variant whose program is compared still extracts the variant it compares with, and a variant
 whose statement is compared still verifies production for that gate and profile, whether or not
 those are selected.
+
+### Plan jobs
+
+```text
+leancil gates manifest.json --plan 8 --costs earlier/results.json --format json > plan.json
+leancil gates manifest.json --plan-group plan.json job-3 --results results/job-3/results.json
+leancil gates manifest.json --require-results results --plan plan.json
+```
+
+`--plan count` selects rows as a run would, with every selection option, and prints a plan of at
+most `count` groups named `job-1` to `job-n`, none of them empty. It verifies nothing. Every row
+of one gate and profile is in one group, since its variants need production's extraction and
+statement. A changed path outside proofs, templates, catalogs and the manifest still builds and
+extracts the candidates to select them by their methods' sources, as in a run.
+
+Each gate and profile costs the mean `elapsedSeconds` of its rows in the `--costs` results files,
+scaled to the number of its selected rows. Without a record it costs the median of its method's
+recorded gates and profiles, else the median of all recorded ones, else 1, so a plan without
+costs balances counts of gates and profiles. The planner assigns them largest first, ties broken
+by id, each to the group with the least cost, ties broken by group number. The same manifest,
+selection and costs give the same plan, and the costliest group exceeds the mean by at most the
+cost of one gate and profile.
+
+`--format json` prints an object with `manifest` and `revision`, which every group's results
+must carry, `selection` (the selection options, with changed paths relative to the manifest),
+`selected` (the row ids in manifest order) and `groups`, each with `id`, `rows` and `cost` in
+seconds. The text form prints one group per line. An empty selection plans no group and exits
+`0`.
+
+`--plan-group plan.json group` runs the rows of one group, after checking that the plan's
+`manifest` is the digest of the current manifest and catalogs; it takes no selection option.
+`--require-results directory --plan plan.json` reads every `*.json` file under the directory,
+each of which must be a results file. It fails unless each row the plan selected has exactly one
+result, with `status` `verified`, `rejected` or `unchanged`, and every file has the plan's
+`manifest` and `revision`, and prints a `MISSING`, `DUPLICATE`, `FAILED` or `FOREIGN` line for
+each row id that breaks a rule. A plan with no rows passes.
+
+Each group can export and restore [portable support](#portable-support-across-machines) like any
+run. Restore only support that a trusted run exported, such as a run of the same repository on a
+protected branch, and take its digest from that run's output, never from the downloaded artifact.
+The workflow chooses which artifact each job restores.
 
 ## Check compilation
 
@@ -272,29 +341,80 @@ consumer and dependency modules undergo kernel replay, and the selected theorem'
 axioms are audited with the same policy as single-file verification. `verification.json`
 records the package root.
 
-## Generated proof bindings
+## Binding catalogs
 
-File-based C# runners can include [ProofBindingCatalog.cs](../scripts/ProofBindingCatalog.cs)
-from the `leancil` checkout that Lake pins, at
-`.lake/packages/leancil/scripts/ProofBindingCatalog.cs`, with an `#:include` directive. The
-installed `leancil` tool does not contain this file. A `ProofGate` names the exact method,
-profile, proof path and theorem. Each `ProofBinding` supplies the complete Lean source from an explicit,
-consumer-reviewed recipe. `ProofBindingCatalog.Sources` checks the recipe identities against
-the catalog and rejects missing or duplicate entries, changed profiles or theorem names,
-conflicting sources and unsafe output paths. Recipes cover every catalog profile of each
-method they generate; other methods may keep handwritten proofs.
+```text
+leancil bindings catalog.json [--check]
+```
 
-Call `ProofBindingCatalog.Materialize(root, catalog, recipes)` before selecting imports or
-capturing verification sources. It emits deterministic UTF-8 files with LF endings, and emits
-source shared by several gates once. Pass `check: true` to reject missing or changed bytes
-without writing files. Proof-family recipes and arithmetic specifications belong in the
-consumer; the catalog does not infer them from method names.
+A binding catalog generates one proof file per combination of variables from a template, for
+gates that share one proof across operations, widths or profiles:
 
-Generated files participate in the ordinary source identity, extraction binding and kernel
-audit. Generation writes binding text; it discharges no proof obligation. Use the extractor's
-[profile templates](PROOFS-BINDING.md#generated-profile-templates) for shared extracted bodies;
-binding recipes do not replace its reachable-helper or static-metadata checks.
+```json
+{
+  "schema": 1,
+  "generatedRoot": "Bindings",
+  "families": [{
+    "template": "Binding.lean.in",
+    "dimensions": [
+      [{ "op": "Add", "symbol": "+" }, { "op": "Sub", "symbol": "-" }],
+      [{ "width": "32", "type": "uint" }, { "width": "64", "type": "ulong" }],
+      [{ "profile": "scalar", "family": "Scalar" }, { "profile": "x64-v3", "family": "Vector" }]
+    ],
+    "exclude": [{ "op": "Sub", "width": "32" }],
+    "rows": [{ "op": "Mul", "symbol": "*", "width": "64", "type": "ulong", "profile": "scalar",
+               "family": "Scalar" }],
+    "assign": [
+      { "match": { "family": "Scalar" }, "set": { "tactic": "decide" } },
+      { "match": { "family": "Vector" }, "set": { "tactic": "rfl" } }
+    ],
+    "gate": {
+      "name": "@op@@width@-@profile@",
+      "method": "Arithmetic::@op@(@type@,@type@)",
+      "profiles": ["@profile@"],
+      "proof": "@op@@width@@family@.lean",
+      "theorem": "Binding.@op@@width@@family@.correctness"
+    },
+    "handwritten": [{ "op": "Add", "width": "64", "profile": "scalar", "proof": "AddScalar.lean",
+                      "theorem": "Add.correctness" }]
+  }]
+}
+```
 
+The template here would use `@symbol@` and `@tactic@` along with the gate's variables. A family
+expands as follows:
+
+- Its rows are the cartesian product of `dimensions`, each a list of variable objects merged left
+  to right, without the rows that match an `exclude` object, then the explicit `rows`. A row
+  matches an object when it has each of the object's variables with the same value.
+- Each `assign` entry, in order, adds its `set` variables to every row that matches its `match`.
+- A `handwritten` entry gives variables, a `proof` and a `theorem`. Every row it matches takes
+  that proof and theorem and generates no source. An entry that matches no row adds a row of its
+  own, which needs the variables of the gate's name, method and profiles.
+- Each row yields a gate by replacing each `@NAME@` of the `gate` patterns with the row's value,
+  and, unless the row is handwritten, a source at `proof` with the template's text substituted the
+  same way. Values are strings, may be empty or span lines, and replace text exactly.
+
+A variable given twice for one row, by two dimensions or by a row and an assign, is an error, and
+so are an `exclude` or `assign` that matches no row, a row that two handwritten entries match, a
+placeholder without a value, and a variable that no placeholder of the template or the gate and
+no assign's `match` uses. No variable may be named `proof` or `theorem`. Gate names follow the
+manifest's rules and must be unique ignoring case. Rows that generate one path must generate the
+same text, and generated paths must not differ only in case.
+
+`template`, `generatedRoot` and a handwritten `proof` are relative to the catalog, and a generated
+`proof` is relative to `generatedRoot`, which belongs to the catalog alone. Sources are UTF-8
+without a byte order mark, with LF line endings, and hold exactly the substituted text.
+`leancil bindings catalog.json` writes each source whose bytes differ and prints a `WARNING` for
+each `.lean` file under `generatedRoot` that no row produces, which it never deletes. With
+`--check` it writes nothing and fails on a missing or differing source and on such a file. An
+unknown key is an error.
+
+A [gate manifest](#run-a-proof-catalog) that lists a catalog in `catalogs` writes its sources
+before it reads any proof source, and verifies each generated gate like a listed one. Generated
+sources are ordinary proof sources: they are hashed, elaborated, kernel-replayed and audited like
+handwritten files, and generation establishes no theorem. Use the extractor's
+[profile templates](PROOFS-BINDING.md#generated-profile-templates) for shared extracted bodies.
 ## Proof-authoring workspace
 
 `leancil workspace` generates one method's extraction into the proof's Lake package so the proof

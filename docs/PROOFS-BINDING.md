@@ -540,6 +540,15 @@ package, import that binding from the consumer proof, and run `leancil verify` w
 extraction and proof package. The templates command generates proof source; it does not replace
 Lean checking or verification of the extraction.
 
+The command writes every file with LF line endings and accepts these options:
+
+| Option | Effect |
+| --- | --- |
+| `--check` | Write nothing; fail, naming each file, unless the output holds exactly what the command would write and no other `TemplateBindingsN.lean`. |
+| `--namespace name` | Use `name` in place of `Templates` for the shared bodies; the bindings and `templates.json` name them there. |
+| `--omit-equations` | Leave out each body's `cil_instruction_equations` line and its `#print axioms` line, and keep `import CIL.InstructionEquations`. `templates.json` records `instructionEquations: false`. |
+| `--module file.lean` | Write the shared module to `file.lean`, which must lie under the output directory; the bindings import it by its path from that directory, and `templates.json` records it as `module`. |
+
 Only the input profiles receive extraction bindings. Unselected combinations of observed flags
 produce unsupported instructions, and no correctness claim about another extraction follows from
 generating a template. The full profile remains an explicit parameter; a behavioral proof must

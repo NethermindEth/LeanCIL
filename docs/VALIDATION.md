@@ -53,7 +53,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 
 | Suite | Checks |
 | --- | --- |
-| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, certified integer binding families, method selectors, caches, batched extraction and joint kernel replay |
+| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, binding catalogs and certified integer binding families, gate plans and required results, method selectors, caches, batched extraction and joint kernel replay |
 | `templates` | shared profile templates, exact instruction equations and checked bindings |
 | `workspace` | per-method editor extractions, watch refresh and ordinary fresh certification |
 | `imports` | implementation-bound contract imports and conditional caller verification |
@@ -103,7 +103,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `scaling` | compositional certificate for a six-method call graph and its consumer replay |
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates at a per-instruction cost that does not grow with the method |
-| `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, changed-source selection and mutation expectations |
+| `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
 | `stepping` | full scalar and checked-memory bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |

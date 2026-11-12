@@ -105,7 +105,9 @@ internal static class VerificationSelection
         {
             "Examples/Verify.cs", "Examples/Hardware/Hardware.cs", "scripts/Verify.cs",
             "Tests/LibraryCache.cs", "Tests/InitializedTypes.cs", "Tests/ConsumerVerification.cs",
-            "Tests/ProofBindingCatalog.cs", "Tests/ProofBindingFamilies.cs", "Tests/PublicProofSurface.lean",
+            "Tests/ProofBindingCatalog.cs", "Tests/ProofBindingFamilies.cs", "Tests/BindingFamilies/Support.lean",
+            "Tests/BindingFamilies/Binding.lean.in", "Tests/BindingFamilies/Bindings.json",
+            "Tests/BindingFamilies/Negative.json", "Tests/GatePlans.cs", "Tests/PublicProofSurface.lean",
             "Tests/ProofCostFrontend.cs", "Tests/ConsumerSupportCandidates.cs",
             "Tests/MethodSelectors.cs", "Tests/MetadataMutator.cs", "Tests/Semantics.lean",
             "Tests/Automation.lean", "Tests/MethodBinding.lean", "Tests/MethodIdentity.lean",

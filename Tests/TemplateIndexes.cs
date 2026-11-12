@@ -33,7 +33,19 @@ var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 };
 var read = typeof(Program).GetMethod(nameof(ReadVariants), BindingFlags.Static | BindingFlags.NonPublic)!
     .MakeGenericMethod(variantType).Invoke(null, [variants]);
-void Emit() => run.Invoke(null, [new[] { output, first, second }, read]);
+void Emit(params string[] options) => EmitTo(output, options);
+void EmitTo(string target, params string[] options) =>
+    run.Invoke(null, [(string[])[target, first, second, .. options], read]);
+// The emitter's own exceptions arrive wrapped by the reflective call.
+string Rejected(Action action)
+{
+    try { action(); }
+    catch (TargetInvocationException error) when (error.InnerException is InvalidDataException or ArgumentException)
+    {
+        return error.InnerException!.Message;
+    }
+    throw new Exception("An invalid template option or stale output was accepted");
+}
 Emit();
 var templates = File.ReadAllText(Path.Combine(output, "Templates.lean"));
 var firstBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings0.lean"));
@@ -47,6 +59,50 @@ var expected = Directory.GetFiles(output).ToDictionary(path => Path.GetFileName(
 Emit();
 if (Directory.GetFiles(output).Any(path => File.ReadAllText(path) != expected[Path.GetFileName(path)]))
     throw new Exception("Template output is not deterministic");
+if (Directory.GetFiles(output).Any(path => File.ReadAllText(path).Contains('\r')))
+    throw new Exception("Template output has a CR line ending");
+Emit("--check");
+var shared = Path.Combine(output, "Templates.lean");
+File.WriteAllText(shared, templates.Replace("end Templates", "end Changed"));
+if (!Rejected(() => Emit("--check")).Contains("Template output differs: " + shared) ||
+    File.ReadAllText(shared).Contains("end Templates"))
+    throw new Exception("--check accepted a changed template, or repaired it");
+Emit();
+var extra = Path.Combine(output, "TemplateBindings2.lean");
+File.WriteAllText(extra, firstBinding);
+if (!Rejected(() => Emit("--check")).Contains("Template output has no input: " + extra))
+    throw new Exception("--check accepted a binding with no input extraction");
+File.Delete(extra);
+File.Delete(Path.Combine(output, "templates.json"));
+if (!Rejected(() => Emit("--check")).Contains("Template output missing"))
+    throw new Exception("--check accepted missing template output");
+Emit();
+
+var shaped = Path.Combine(root, "Shaped");
+var module = Path.Combine(shaped, "Proofs", "Shared.lean");
+EmitTo(shaped, "--namespace", "Proofs.Bodies", "--omit-equations", "--module", module);
+var shapedTemplates = File.ReadAllText(module);
+var shapedBinding = File.ReadAllText(Path.Combine(shaped, "TemplateBindings1.lean"));
+using var shapedManifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(shaped, "templates.json")));
+if (File.Exists(Path.Combine(shaped, "Templates.lean")) ||
+    !shapedTemplates.StartsWith("import CIL.InstructionEquations\n", StringComparison.Ordinal) ||
+    !shapedTemplates.Contains("namespace Proofs.Bodies\n") || !shapedTemplates.Contains("end Proofs.Bodies\n") ||
+    shapedTemplates.Contains("cil_instruction_equations") || shapedTemplates.Contains("_instruction") ||
+    shapedTemplates.Replace("Proofs.Bodies", "Templates") != templates.Replace(
+        "cil_instruction_equations method0\n#print axioms method0_instruction2\n", "")
+        .Replace("cil_instruction_equations method1\n#print axioms method1_instruction0\n", "") ||
+    !shapedBinding.Contains("import Proofs.Shared\n") || !shapedBinding.Contains("some (Proofs.Bodies.method0 ") ||
+    shapedManifest.RootElement.GetProperty("module").GetString() != "Proofs.Shared" ||
+    shapedManifest.RootElement.GetProperty("instructionEquations").GetBoolean() ||
+    shapedManifest.RootElement.GetProperty("methods")[0].GetProperty("name").GetString() != "Proofs.Bodies.method0")
+    throw new Exception("The namespace, module or equation options changed more than they name:\n" +
+        shapedTemplates + "\n" + shapedBinding);
+EmitTo(shaped, "--namespace", "Proofs.Bodies", "--omit-equations", "--module", module, "--check");
+if (!Rejected(() => EmitTo(shaped, "--module", Path.Combine(root, "Outside.lean"))).Contains("--module") ||
+    !Rejected(() => EmitTo(shaped, "--namespace", "Bad Name")).Contains("--namespace"))
+    throw new Exception("A module outside the output or an invalid namespace was accepted");
+Console.WriteLine("PASS template --check, LF output, namespace, module and omitted equations");
+
 variants[second] = Variant(second, true, [Method("Caller", ".ret"), Method("Caller", ".ret")]);
 try { Emit(); throw new Exception("Duplicate managed identity was accepted"); }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&

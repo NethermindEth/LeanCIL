@@ -1,4 +1,4 @@
-/// <summary>Small integer operations whose proof recipes retain exact managed signatures.</summary>
+/// <summary>Small integer operations whose catalog bindings keep exact managed signatures.</summary>
 public static class BindingMethods
 {
     /// <summary>Unsigned equality at the 32-bit stack width.</summary>

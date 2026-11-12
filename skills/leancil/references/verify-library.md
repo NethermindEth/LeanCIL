@@ -79,6 +79,9 @@ leancil gates gates.json
 | `templates.<name>` | A template `path` and default `values`, which a use's own `values` override |
 | `profiles.<name>` | An `@file` profile, relative to the manifest, used by name; not a built-in name |
 | `generatedRoot` | Required with a template: where instantiated proofs are written under `proofRoot` |
+| `defaults` | `assembly` or `build`, `initializedTypes` and `typeArguments` for each gate that gives none |
+| `selection.all`, `selection.ignore` | Path prefixes for `--changed`: a path under `all` selects every row, one under `ignore` nothing; they must not overlap |
+| `catalogs` | Binding catalogs whose generated gates join the manifest; see below |
 
 An unknown manifest key is an error. A `certifies` variant passes when its proof verifies and the
 kernel accepts its theorem at production's statement `T`, unless its `statement` is
@@ -103,9 +106,13 @@ entry uses that entry, otherwise a file. The result is written to
 verification hashes the sources, and is verified like any other proof.
 
 Each result goes to `<outputRoot>/<gate name>/<profile hash>/<variant name>`, where the gate's
-own assembly is the variant `production`. `gates` writes the requests of both its batches to
-`<outputRoot>/requests.json`. Each `--results` entry has the `verify-batch` fields of the
-variant's proof, with `status` the variant's verdict, plus `gate`, `profile`, `variant`,
+own assembly is the variant `production`; that variant under that profile is a row with id
+`<gate>/<profile>/<variant>`. Before building or extracting a row, `gates` removes its
+`verified.json` and `failed.json`. `gates` writes the requests of both its batches to
+`<outputRoot>/requests.json`. The `--results` file holds `manifest` (a digest of the manifest and
+its catalogs), `revision` (`git rev-parse HEAD`, or `null`) and `rows`. Each row has its `id`
+and the `verify-batch` fields of the variant's proof, with `status` the variant's verdict, plus
+`gate`, `profile`, `variant`,
 `build`, `extraction`, `program`, `refutation` (the refutation's `status`, `stage`, `error`
 and `axioms`, or `null`) and `statement` (its `status`, `same`, `different`, `unavailable` or
 `independent`, and the `production` and `variant` statements, or `null`).
@@ -114,11 +121,42 @@ and `axioms`, or `null`) and `statement` (its `status`, `same`, `different`, `un
 | --- | --- |
 | `--method name` | Select gates whose `method` contains this substring |
 | `--profile name` | Select one exact profile name |
+| `--only id-prefix` | Select rows whose id is the prefix or starts with it and `/`; repeatable |
 | `--changed path` | Select variants affected by a changed `.lean`, `.cs`, template, assembly, manifest or project file, or a file under a project's directory; repeatable. Omitted variants get no verification claim |
 | `--check` | [Compile only](#compile-check) |
 | `--fresh`, `--rebuild-library`, `--trace`, `--parallel count`, `--results file`, `--format json` | As for `verify-batch` |
 
-A selection that matches no gate is an error.
+A selection that matches no gate is an error, except under `--plan`.
+
+## Split a catalog over CI jobs
+
+```sh
+leancil gates gates.json --plan 8 --costs earlier/results.json --format json > plan.json
+leancil gates gates.json --plan-group plan.json job-1 --results results/job-1/results.json
+leancil gates gates.json --require-results results --plan plan.json
+```
+
+`--plan count` selects as a run would and prints at most `count` nonempty groups, keeping every
+row of one gate and profile together; it verifies nothing. Costs are each row's mean
+`elapsedSeconds` in the `--costs` files, else the median of the method's recorded gates, else
+the median of all, else 1, and the same inputs give the same plan. `--plan-group` runs one
+group, after checking that the plan's `manifest` digest matches the manifest and catalogs.
+`--require-results` fails unless every row the plan selected has exactly one result that passed,
+in results files carrying the plan's `manifest` and `revision`; it names each `MISSING`,
+`DUPLICATE`, `FAILED` and `FOREIGN` row. Restore portable support in a job only from a trusted
+run, with the digest taken from that run's output.
+
+## Generated bindings
+
+`leancil bindings catalog.json [--check]` writes, or with `--check` only compares, one proof file
+per row of a binding catalog: the product of `dimensions`, minus `exclude`, plus `rows`, with
+`assign` adding variables and `handwritten` entries giving a row its own proof and theorem. Each
+row yields a gate from the `gate` patterns and a source from the template by exact `@NAME@`
+replacement. A missing value, an unused variable, a duplicate gate, conflicting sources at one
+path and, under `--check`, a stale or stray file under `generatedRoot` are errors. List the
+catalog in a gate manifest's `catalogs` to verify its gates; `gates` writes the sources first.
+Generation proves nothing; each source is verified like a handwritten one
+([binding catalogs](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md#binding-catalogs)).
 
 ## Batch with leancil verify-batch
 
@@ -181,7 +219,8 @@ issues no certificate. A request or variant that expects `rejected` is an error 
 List every deployment profile in `profiles`. A method whose body differs by hardware profile
 needs a proof that holds for each extraction.
 `leancil templates output-directory extraction-directory...` generates one shared body with a
-profile parameter and a binding per input extraction
+profile parameter and a binding per input extraction; `--check` compares committed output,
+`--namespace`, `--module` and `--omit-equations` shape the shared module
 ([profile templates](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BINDING.md#generated-profile-templates)).
 
 ## Further tools
@@ -190,6 +229,6 @@ profile parameter and a binding per input extraction
   and profile pairs, every construct that blocks extraction, without stopping at the first. Run
   it before estimating work on a library
   ([blockers](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#report-extraction-blockers)).
-- Proof files generated from C# recipes, contract export for callers in other assemblies and
+- Contract export for callers in other assemblies and
   audits of a whole Lean library are described in the
   [consumer guide](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CONSUMERS.md).

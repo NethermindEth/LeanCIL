@@ -128,8 +128,9 @@ Test("main and manual always full", () =>
 Test("test entry points", () =>
 {
     foreach (var path in new[] { "Tests/ProofBindingCatalog.cs", "Tests/ProofBindingFamilies.cs",
-        "Tests/BindingFamilies/Recipes.cs", "Tests/BindingFamilies/Methods.cs",
-        "Tests/BindingFamilies/Support.lean", "Tests/PublicProofSurface.lean" })
+        "Tests/BindingFamilies/Bindings.json", "Tests/BindingFamilies/Negative.json",
+        "Tests/BindingFamilies/Binding.lean.in", "Tests/BindingFamilies/Methods.cs",
+        "Tests/BindingFamilies/Support.lean", "Tests/GatePlans.cs", "Tests/PublicProofSurface.lean" })
     {
         var selected = VerificationSelection.Select([path]);
         Require(selected.Contains("core") && selected.All(suite => suite is "core" or "docs"),
