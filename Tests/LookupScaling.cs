@@ -156,3 +156,40 @@ Console.WriteLine(FormattableString.Invariant(
     $"PASS computed lookup: {fourCaseCost:F0} heartbeats/case at 4; {sixteenCaseCost:F0} at 16"));
 if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
     throw new Exception("Computed lookup cost per case grows with the segment count.");
+
+// Each distinct metadata token of a body adds one row lookup and one decode to the kernel's metadata check, so
+// the cost per token may not grow with the number of tokens. Every literal below is a user string of its own.
+const int FewTokens = 125;
+const int ManyTokens = 500;
+var tokenSource = Path.Combine(directory, "TokenAssembly");
+Directory.CreateDirectory(tokenSource);
+File.WriteAllText(Path.Combine(tokenSource, "Tokens.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+</Project>
+""");
+string TokenMethod(string name, int count) =>
+    $"public static ulong {name}(ulong x) {{ " +
+    string.Concat(Enumerable.Range(0, count).Select(index => $"Use(\"{name}{index}\"); ")) + "return x; } ";
+File.WriteAllText(Path.Combine(tokenSource, "Tokens.cs"),
+    "public static class Tokens { public static void Use(string text) { } " +
+    TokenMethod("Few", FewTokens) + TokenMethod("Many", ManyTokens) + "}");
+Run(["dotnet", "build", Path.Combine(tokenSource, "Tokens.csproj"), "-c", "Release"]);
+var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
+double TokenCost(string name, int count)
+{
+    var output = Path.Combine(directory, "Tokens" + name);
+    Run(Extract("extract", tokenAssembly, "Tokens", $"Tokens::{name}(ulong)", output));
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var distinct = Regex.Matches(extracted, @"\(\d+, \.text ""[^""]*""\)").Count;
+    if (distinct < count)
+        throw new InvalidOperationException($"Expected {count} distinct string tokens in {name}; found {distinct}.");
+    return (double)(Heartbeats(Path.Combine(output, "Measured.lean"), extracted, equations: false) - floor) / count;
+}
+var tokenGrowth = TokenCost("Many", ManyTokens) / TokenCost("Few", FewTokens);
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS metadata check of {FewTokens} and {ManyTokens} distinct tokens: {tokenGrowth:F2} times the cost per token"));
+if (tokenGrowth > AllowedGrowth)
+    throw new Exception(FormattableString.Invariant(
+        $"Checking {ManyTokens} tokens costs {tokenGrowth:F2} times as much per token as {FewTokens}; " +
+        $"the limit is {AllowedGrowth}."));

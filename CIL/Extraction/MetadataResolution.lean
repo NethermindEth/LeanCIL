@@ -168,7 +168,20 @@ def enumUnderlying (index : MetadataIndex) (token : Nat) : Except MetadataError 
     | _ => .error (.unresolvedType token)
   | _ => .error (.unresolvedType token)
 
-mutual
+/-- An interface has the interface flag; a type that extends `System.Enum` is an enum with the
+    underlying type of its instance field, one that extends `System.ValueType` is a value
+    type, and any other type is a class. -/
+def typeDefKind (env : MetadataEnv) (position token : Nat) (row : TypeDefRow) :
+    Except MetadataError TypeKind := do
+  if row.flags / 0x20 % 2 == 1 then return .interfaceType
+  if metadataTableOf row.extends_ != Table.typeRef then return .classType
+  let index ← env.slice position token
+  let (scope, name) ← typeRefQualified env position resolveFuel row.extends_
+  let corlib ← index.corlibIdentity
+  if some scope != corlib then return .classType
+  if name == bytesOf "System.Enum" then return .enumType (← enumUnderlying index token)
+  if name == bytesOf "System.ValueType" then return .valueType
+  .ok .classType
 
 /-- The named type of a `TypeDef` in the slice at `position`: its scope is that slice's
     assembly, its name follows the `NestedClass` row for a nested type and its kind follows
@@ -190,25 +203,8 @@ def typeDefNamed (env : MetadataEnv) (position : Nat) : Nat → Nat → Except M
         if nested.nested != token then throw (.unresolvedType token)
         let enclosing ← typeDefNamed env position fuel nested.enclosing
         pure (nestedName enclosing.name simple)
-    let kind ← typeDefKind env position fuel token row
+    let kind ← typeDefKind env position token row
     .ok { scope := index.identity, name := name, kind := kind, pinned := true }
-
-/-- An interface has the interface flag; a type that extends `System.Enum` is an enum with the
-    underlying type of its instance field, one that extends `System.ValueType` is a value
-    type, and any other type is a class. -/
-def typeDefKind (env : MetadataEnv) (position : Nat) :
-    Nat → Nat → TypeDefRow → Except MetadataError TypeKind
-  | 0, token, _ => .error (.unresolvedType token)
-  | fuel + 1, token, row => do
-    if row.flags / 0x20 % 2 == 1 then return .interfaceType
-    if metadataTableOf row.extends_ != Table.typeRef then return .classType
-    let index ← env.slice position token
-    let base ← typeRefNamed env position fuel row.extends_ none
-    let corlib ← index.corlibIdentity
-    if some base.scope != corlib then return .classType
-    if base.name == bytesOf "System.Enum" then return .enumType (← enumUnderlying index token)
-    if base.name == bytesOf "System.ValueType" then return .valueType
-    .ok .classType
 
 /-- The named type of a `TypeRef`. A scope that names a carried slice is resolved through the
     slice's definition link to the `TypeDef` that defines it, whose name must be the one the
@@ -228,8 +224,6 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
       let named ← typeDefNamed env linked fuel definition
       if named.scope != scope || named.name != name then throw (.operandMismatch token)
       .ok named
-
-end
 
 /-- Whether a signature's class-or-value-type byte agrees with a type found in a carried
     slice. -/
