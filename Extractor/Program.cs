@@ -32,7 +32,8 @@ internal static partial class Program
         "       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] " +
         "[--results results.json] [--format text|json] [--trace] [--check]\n" +
         "       leancil gates manifest.json [--method name] [--profile name] [--changed path]... " +
-        "[--check] [--results results.json] [--format text|json]\n" +
+        "[--check] [--fresh] [--rebuild-library] [--trace] [--parallel count] [--results results.json] " +
+        "[--format text|json]\n" +
         "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +
         "[--results results.json]\n" +
         "       leancil --version";

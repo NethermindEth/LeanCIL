@@ -36,6 +36,15 @@ starts it with `Error:`. Each Lean error cites `file:line:column` in the file yo
 | `compile check` | A proof did not elaborate under `--check` | Fix the elaboration errors |
 | `proof outline` | `new-proof` cannot state a starting proof for this method's shape, or the proof path exists | Write the proof by hand from the closest example; choose a new path |
 
+`gates` reports these stages in a variant's result, in place of a printed `Stage:` line:
+
+| `stage` | Meaning | Next action |
+| --- | --- | --- |
+| `build` | `dotnet build` of the variant's project and properties failed, or wrote no assembly of the project's `assembly` name | Read the build output in `error`; fix the project or the properties |
+| `extraction` | Extracting the variant's method failed | Read `error`; run `leancil extract` on the built assembly |
+| `program comparison` | The variant's program does not relate to production's as its `program` says | Fix the fixture case, or `program` if the change is intended |
+| `refutation template` | The template is missing, or its placeholders and `values` differ | Add the missing values or placeholders |
+
 ## failed.json
 
 `verify` writes `failed.json` into the artifact directory; `verify-batch` and `gates` write it

@@ -580,6 +580,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return path;
     }
 
+    /// <summary>A directory name whose contents are never consumer sources, such as build outputs.</summary>
+    static bool ExcludedConsumerDirectory(string name) =>
+        name is ".git" or ".lake" or "artifacts" or "generated" or "bin" or "obj" or ".work";
+
     static IEnumerable<string> ConsumerSources(string root, string? excludedDirectory = null)
     {
         if (excludedDirectory is not null && Path.GetFullPath(root) == Path.GetFullPath(excludedDirectory)) yield break;
@@ -589,7 +593,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidDataException("Consumer sources must not contain symbolic links: " + path);
             if (Directory.Exists(path))
             {
-                if (Path.GetFileName(path) is ".git" or ".lake" or "artifacts" or "generated" or "bin" or "obj" or ".work") continue;
+                if (ExcludedConsumerDirectory(Path.GetFileName(path))) continue;
                 foreach (var source in ConsumerSources(path, excludedDirectory)) yield return source;
             }
             else if (Path.GetExtension(path) is ".lean" or ".toml" or ".json" || Path.GetFileName(path) == "lean-toolchain")

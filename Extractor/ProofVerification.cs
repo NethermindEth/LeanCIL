@@ -60,11 +60,48 @@ partial class Program
                 "Examples.empty.");
     }
 
+    /// <summary>How a batch verifies and reports its requests, from the options of `verify-batch`.</summary>
+    sealed record BatchOptions(bool Fresh, bool RebuildLibrary, bool Trace, bool CheckOnly, bool Json,
+        int? Parallelism, string? ResultsPath);
+
+    /// <summary>The outcome of each request in request order, and its JSON report under `--format json`.</summary>
+    sealed record BatchRun(BatchResult[] Results, JsonArray Reports);
+
     internal static int VerifyBatch(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
             throw new ArgumentException(BatchUsage);
         var manifestPath = Path.GetFullPath(args[0]);
+        var options = ParseBatchOptions(args[1..]);
+        var manifest = JsonSerializer.Deserialize<BatchManifest>(File.ReadAllText(manifestPath),
+            new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow })
+            ?? throw new InvalidDataException("Missing batch manifest.");
+        var run = RunBatch(manifest, Path.GetDirectoryName(manifestPath)!, options);
+        var count = run.Results.Length;
+        var failed = run.Results.Count(result => result.status == "failed");
+        if (options.ResultsPath is not null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(options.ResultsPath)!);
+            File.WriteAllText(options.ResultsPath, JsonSerializer.Serialize(run.Results, Json) + "\n");
+        }
+        if (options.Json)
+            Console.Write(VerifyReports.Serialize(new JsonObject
+            {
+                ["schema"] = VerifyReports.BatchSchema,
+                ["passed"] = count - failed,
+                ["failed"] = failed,
+                ["requests"] = run.Reports,
+            }));
+        else Console.WriteLine(options.CheckOnly
+            ? $"Compile check: {count - failed} checked, {failed} failed of {count} requests. " +
+                "No verification certificate."
+            : $"Batch: {count - failed} passed, {failed} failed of {count} requests.");
+        return failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>The options of `verify-batch` after its manifest, each given at most once.</summary>
+    static BatchOptions ParseBatchOptions(string[] args)
+    {
         var fresh = false;
         var rebuildLibrary = false;
         var trace = false;
@@ -72,7 +109,7 @@ partial class Program
         string? format = null;
         int? parallelism = null;
         string? resultsPath = null;
-        for (var index = 1; index < args.Length; index++)
+        for (var index = 0; index < args.Length; index++)
         {
             var option = args[index];
             if (option == "--check" && !checkOnly)
@@ -114,12 +151,18 @@ partial class Program
                     throw new ArgumentException($"Unknown or duplicate option: {option}");
             }
         }
-        var json = format == "json";
+        return new(fresh, rebuildLibrary, trace, checkOnly, format == "json", parallelism, resultsPath);
+    }
 
-        var directory = Path.GetDirectoryName(manifestPath)!;
-        var manifest = JsonSerializer.Deserialize<BatchManifest>(File.ReadAllText(manifestPath),
-            new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow })
-            ?? throw new InvalidDataException("Missing batch manifest.");
+    /// <summary>
+    /// Verifies every request of `manifest`, whose paths are relative to `directory`, in one session.
+    /// Prints each request's text outcome as soon as it is final, unless the options ask for JSON.
+    /// </summary>
+    static BatchRun RunBatch(BatchManifest manifest, string directory, BatchOptions options)
+    {
+        var (fresh, rebuildLibrary, trace, checkOnly, json) =
+            (options.Fresh, options.RebuildLibrary, options.Trace, options.CheckOnly, options.Json);
+        var parallelism = options.Parallelism;
         if (manifest.schema != 1 || string.IsNullOrWhiteSpace(manifest.proofRoot) || manifest.requests is null || manifest.requests.Length == 0 ||
             manifest.requests.Any(request => request is null || string.IsNullOrWhiteSpace(request.output) ||
                 string.IsNullOrWhiteSpace(request.proof) || string.IsNullOrWhiteSpace(request.theorem) ||
@@ -222,7 +265,6 @@ partial class Program
 
         var results = new List<BatchResult>();
         var reports = new JsonArray();
-        var failed = 0;
         for (var i = 0; i < count; i++)
         {
             var request = manifest.requests[i];
@@ -230,7 +272,6 @@ partial class Program
             var expect = checkOnly ? "checked" : request.expect ?? "verified";
             var passed = Print(i, outcome);
             var status = passed ? expect : "failed";
-            if (!passed) failed++;
             // A verified refutation is a certificate and a failed contract; any other pass leaves no failure.
             var failure = outcome.Located() is { } error
                 ? FailureReports.Failed(outcome.Stage, error, request.theorem, proofs[i], outputs[i], proofRoot)
@@ -248,24 +289,7 @@ partial class Program
                 outcome.Report?.axioms, outcome.Report?.libraryBuild, failure, outcome.ElapsedSeconds));
             if (json) reports.Add(BatchEntry(outcome, failure, expect, status, request.theorem, proofs[i], outputs[i]));
         }
-        if (resultsPath is not null)
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(resultsPath)!);
-            File.WriteAllText(resultsPath, JsonSerializer.Serialize(results, Json) + "\n");
-        }
-        if (json)
-            Console.Write(VerifyReports.Serialize(new JsonObject
-            {
-                ["schema"] = VerifyReports.BatchSchema,
-                ["passed"] = count - failed,
-                ["failed"] = failed,
-                ["requests"] = reports,
-            }));
-        else Console.WriteLine(checkOnly
-            ? $"Compile check: {count - failed} checked, {failed} failed of {count} requests. " +
-                "No verification certificate."
-            : $"Batch: {count - failed} passed, {failed} failed of {count} requests.");
-        return failed == 0 ? 0 : 1;
+        return new([.. results], reports);
 
         // A request's expectation and status, with the report `verify --format json` gives for it.
         JsonObject BatchEntry(ConsumerOutcome outcome, FailureReports.Report? failure, string expect, string status,

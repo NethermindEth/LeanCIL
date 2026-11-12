@@ -83,7 +83,8 @@ internal static class ProofBindingCatalog
         }
     }
 
-    private static void CheckPath(string path)
+    /// <summary>Rejects a generated source path that is not a relative, `/`-separated `.lean` path.</summary>
+    internal static void CheckPath(string path)
     {
         if (string.IsNullOrEmpty(path) || !path.EndsWith(".lean", StringComparison.Ordinal) ||
             path.Contains('\\') || path.Contains(':') || Path.IsPathRooted(path) ||
@@ -92,13 +93,14 @@ internal static class ProofBindingCatalog
             throw new InvalidOperationException("Expected a relative Lean source path: " + path);
     }
 
-    private static void CheckLinks(string root, string path)
+    /// <summary>Rejects a generated path under `root` that would be written through a link.</summary>
+    internal static void CheckLinks(string root, string path)
     {
         for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
         {
             if ((File.Exists(current) || Directory.Exists(current)) &&
                 (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidOperationException("Generated binding path contains a link: " + current);
+                throw new InvalidOperationException("Generated proof path contains a link: " + current);
             if (current == root) break;
         }
     }

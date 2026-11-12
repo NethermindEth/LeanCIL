@@ -33,6 +33,7 @@
     <Compile Include="../scripts/FailureReports.cs" Link="FailureReports.cs" />
     <Compile Include="../scripts/VerifyReports.cs" Link="VerifyReports.cs" />
     <Compile Include="../scripts/LibraryAudit.cs" Link="LibraryAudit.cs" />
+    <Compile Include="../scripts/ProofBindingCatalog.cs" Link="ProofBindingCatalog.cs" />
     <Content Include="../CIL/**/*.lean;../CIL.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
       <Link>verification/%(Identity)</Link>
       <TargetPath>verification/$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/..', '%(FullPath)'))</TargetPath>

@@ -16,24 +16,39 @@ verify-batch` verifies extractions that already exist.
 
 ## Catalog with leancil gates
 
-Write one manifest that names every method, its profiles, its proof and its theorem:
+Write one manifest that names every method, its profiles, its proof and its theorem, and the
+regression variants each proof must accept or reject:
 
 ```json
 {
   "schema": 1,
   "proofRoot": "verification",
   "outputRoot": "artifacts/gates",
+  "generatedRoot": "Generated",
+  "projects": {
+    "fixture": {
+      "path": "fixtures/Arithmetic.csproj",
+      "assembly": "Arithmetic.dll",
+      "properties": { "Configuration": "Release", "FixtureCase": "Production" }
+    }
+  },
   "gates": [{
     "name": "add",
-    "assembly": "bin/Arithmetic.dll",
+    "build": { "project": "fixture" },
     "method": "Arithmetic::Add(ulong,ulong)",
     "profiles": ["scalar", "x64-v3"],
     "proof": "Add.lean",
     "theorem": "Add.correctness",
     "variants": [{
       "name": "wrong-operation",
-      "assembly": "variants/Wrong.dll",
-      "expect": "rejected"
+      "build": { "project": "fixture", "properties": { "FixtureCase": "Wrong" } },
+      "expect": "rejected",
+      "program": "different",
+      "refutation": {
+        "template": "Refutation.lean.in",
+        "theorem": "Witness.refuted",
+        "values": { "LEFT": "1", "RIGHT": "1" }
+      }
     }]
   }]
 }
@@ -45,27 +60,47 @@ leancil gates gates.json
 
 | Manifest key | Meaning |
 | --- | --- |
-| `proofRoot`, `outputRoot`, `assembly`, `@profile.json` | Paths relative to the manifest |
-| `gates[].name` | Letters, digits, `_`, `.` and `-`; unique ignoring case |
+| `proofRoot`, `outputRoot`, `assembly`, `@profile.json`, `projects.<name>.path` | Paths relative to the manifest |
+| `gates[].name`, `variants[].name` | Letters, digits, `_`, `.` and `-`; unique ignoring case. A variant cannot be named `production` |
 | `gates[].method`, `gates[].theorem` | A selector and a fully qualified theorem name, as for `extract` and `verify` |
 | `gates[].profiles` | Built-in names or `@profile.json`, without repeats; each is extracted and verified separately |
-| `gates[].proof` | Path relative to `proofRoot` |
+| `gates[].proof`, refutation `proof` and `template` | Paths relative to `proofRoot` |
 | `gates[].initializedTypes`, `gates[].typeArguments` | As `--assume-initialized` and `--type-argument` of `extract` |
-| `gates[].variants[]` | Another assembly the unchanged proof is applied to, with `"expect": "certifies"` or `"rejected"`. A variant cannot be named `production` |
+| `assembly` or `build` | Exactly one per gate and variant: a built assembly, or `{ "project", "properties" }` to build |
+| `projects.<name>` | A project's `path`, the `assembly` file name it builds and default build `properties` |
+| `variants[].expect` | `certifies` or `rejected` |
+| `variants[].profiles` | A nonempty subset of the gate's profiles |
+| `variants[].proof`, `variants[].theorem` | Together, replace the gate's proof and theorem for this variant |
+| `variants[].initializedTypes` | Replaces the gate's list |
+| `variants[].program` | `same`, `renamed` or `different` from production's program for the same profile |
+| `variants[].refutation` | Required for `rejected`: a `theorem` and a `proof`, or a `template` and string `values` |
+| `generatedRoot` | Required with a template: where instantiated refutations are written under `proofRoot` |
 
-An unknown manifest key is an error. A `certifies` variant passes when the proof verifies. A
-`rejected` variant passes when the proof fails at proof checking and leaves no `verified.json`;
-use one to show that a proof detects a wrong implementation, built as a mutated assembly.
+An unknown manifest key is an error. A `certifies` variant passes when its proof verifies. A
+`rejected` variant passes only when its refutation verifies against the variant's extraction and
+its proof fails at proof checking; use one to show that a proof detects a wrong implementation.
+A build, extraction, program comparison or template failure, a missing proof or an internal error
+fails the variant and never counts as a rejection. The variant's output keeps no `verified.json`.
+LeanCIL does not check that the refutation states the negation of the contract, so write it so.
+
+`gates` builds each distinct project and property set once into `<outputRoot>/builds/`. A
+template's `@NAME@` placeholders take `values.NAME`; every placeholder needs a value and every
+value a placeholder. The result is written to
+`<proofRoot>/<generatedRoot>/<gate>/<profile>/<variant>.lean` before verification hashes the
+sources, and is verified like any other proof.
 
 Each result goes to `<outputRoot>/<gate name>/<profile hash>/<variant name>`, where the gate's
 own assembly is the variant `production`. `gates` writes the batch manifest it runs to
-`<outputRoot>/requests.json`.
+`<outputRoot>/requests.json`. Each `--results` entry has the `verify-batch` fields of the
+variant's proof, with `status` the variant's verdict, plus `gate`, `profile`, `variant`,
+`build`, `extraction`, `program` and `refutation` (the refutation's `status`, `stage`, `error`
+and `axioms`, or `null`).
 
 | Option | Meaning |
 | --- | --- |
 | `--method name` | Select gates whose `method` contains this substring |
 | `--profile name` | Select one exact profile name |
-| `--changed path` | Select gates affected by a changed `.lean`, `.cs`, assembly or project file; repeatable. Omitted gates get no verification claim |
+| `--changed path` | Select variants affected by a changed `.lean`, `.cs`, template, assembly, manifest or project file, or a file under a project's directory; repeatable. Omitted variants get no verification claim |
 | `--check` | [Compile only](#compile-check) |
 | `--fresh`, `--rebuild-library`, `--trace`, `--parallel count`, `--results file`, `--format json` | As for `verify-batch` |
 
