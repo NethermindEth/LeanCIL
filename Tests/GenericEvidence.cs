@@ -170,7 +170,7 @@ void RejectBody(int sample, string name, string theorem, string definition, Func
     var refutation = obligation.Groups[1].Value + "_body_refuted";
     var refuted = mutated.Replace(obligation.Value, $"theorem {refutation} : Extraction.bodyMatches " +
         $"{obligation.Groups[2].Value} {obligation.Groups[3].Value} {obligation.Groups[4].Value} = false := " +
-        LeanEmitter.Decide);
+        "by decide +kernel");
     var path = Path.Combine(output, "Refuted-" + name + ".lean");
     File.WriteAllText(path, NarrowEvidence(refuted, refutation));
     evidence.Add(path, "PASS the kernel proves the mutated body obligation false: " + name, refutation);
