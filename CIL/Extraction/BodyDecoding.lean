@@ -1,5 +1,4 @@
-import CIL.Extraction.Generics
-import CIL.Extraction.MetadataBytes
+import CIL.Extraction.MetadataBinding
 import Std.Data.TreeMap
 
 /-!
@@ -10,11 +9,11 @@ header and the instruction stream (III and VI.C). `BodyDecodes` states that the 
 `maxStack`, `initLocals`, `locals` and `code` of a `RawMethod`, so an extractor's decoded
 definition cannot differ from the bytes it was read from.
 
-Metadata stays the extractor's claim. A `TokenTable` says which decoded operand each metadata
-token resolves to in this method, and which local types the local-variable signature token
-names. The decoder ties every operand to the four token bytes in the body and every local
-type list to the header's signature token. Reading the metadata tables, resolving tokens and
-the PE container stay trusted.
+A `TokenTable` says which decoded operand each metadata token resolves to in this method. The
+decoder ties every operand to the four token bytes in the body, and `MetadataBinding` checks
+each table entry, the local variable types the header's signature token names and the method's
+own definition against the metadata rows the body carries. That the carried rows are the image's
+rows, the PE container and definitions in platform assemblies stay trusted.
 
 Opcodes use the numbering of `RawInstruction`: one-byte opcodes keep their byte and two-byte
 opcodes `0xFE nn` are `0xFE00 + nn`. Branch operands become instruction indices, and a branch may
@@ -152,30 +151,27 @@ def operandKind : Nat → Option OperandKind
   | 0xD0 => some .token
   | _ => none
 
-/-- The extractor's claims about the metadata a body refers to: the operand each token resolves
-    to in this method, the local-variable signature token and the local types it names. -/
+/-- The extractor's claim of the operand each metadata token resolves to in this method. -/
 structure TokenTable where
   operands : List (Nat × RawOperand)
-  localSignature : Nat
-  locals : List TypeExpr
   deriving DecidableEq, Repr
 
 /-- The exact bytes of one method body, its header and code but not its extra sections, each
-    byte a `Nat` below 256, with the token table its operands resolve through. -/
+    byte a `Nat` below 256, with the token table its operands resolve through, the metadata
+    those tokens are checked against and the address the body was read at. -/
 structure BodyEvidence where
   bytes : List Nat
   tokens : TokenTable
-  /-- The metadata rows and heap entries the body's tokens, locals and method reach. -/
-  metadata : MethodMetadata := {}
-  /-- The relative virtual address the body was read at. -/
-  rva : Nat := 0
+  metadata : MethodMetadata
+  rva : Nat
   deriving DecidableEq, Repr
 
-/-- What a body's bytes say about its method: the fields `RawMethod` takes from the body. -/
+/-- What a body's bytes say about its method: the fields `RawMethod` takes from the body, and
+    the token of the local-variable signature the locals are checked against. -/
 structure DecodedBody where
   maxStack : Nat
   initLocals : Bool
-  locals : List TypeExpr
+  localSignature : Nat
   code : List RawInstruction
   deriving DecidableEq, Repr
 
@@ -187,7 +183,8 @@ inductive BodyError where
   | unsupportedHeader (flags : Nat)
   | extraSections
   | codeSizeMismatch (declared supplied : Nat)
-  | localSignatureMismatch
+  | duplicateToken (token : Nat)
+  | metadata (error : MetadataError)
   | unknownOpcode (offset opcode : Nat)
   | truncatedOperand (offset : Nat)
   | missingToken (offset token : Nat)
@@ -273,16 +270,19 @@ private def readSwitch (offset start : Nat) (rest : List Nat) :
 
 /-- A token operand: the four token bytes, the operand the table gives them, and the check that
     the token's metadata table suits the opcode. -/
-private def readToken (tokens : Std.TreeMap Nat RawOperand) (offset start : Nat)
-    (kind : OperandKind) (rest : List Nat) : Except BodyError (RawOperand × Nat × List Nat) := do
+private def readToken (tokens : Std.TreeMap Nat (RawOperand × TokenFacts)) (offset start : Nat)
+    (opcode : Nat) (kind : OperandKind) (rest : List Nat) :
+    Except BodyError (RawOperand × Nat × List Nat) := do
   let (token, tail) ← readUnsigned offset 4 rest
-  let some operand := tokens[token]? | throw (.missingToken offset token)
-  if !tokenAdmits kind (metadataTableOf token) operand then throw (.mismatchedToken offset token)
+  let some (operand, facts) := tokens[token]? | throw (.missingToken offset token)
+  if !tokenAdmits kind (metadataTableOf token) operand || !checkSite opcode facts operand then
+    throw (.mismatchedToken offset token)
   .ok (operand, start + 4, tail)
 
 /-- Decode the operand that starts at byte offset `start`, returning it, the offset after it
     and the remaining bytes. Branch operands carry absolute byte offsets. -/
-private def decodeOperand (tokens : Std.TreeMap Nat RawOperand) (offset start : Nat) :
+private def decodeOperand (tokens : Std.TreeMap Nat (RawOperand × TokenFacts))
+    (offset start opcode : Nat) :
     OperandKind → List Nat → Except BodyError (RawOperand × Nat × List Nat)
   | .none, rest => .ok (.none, start, rest)
   | .signed8, rest => readValue offset start 1 (fun value => .integer (signedOf 1 value)) rest
@@ -300,7 +300,7 @@ private def decodeOperand (tokens : Std.TreeMap Nat RawOperand) (offset start : 
   | .shortBranch, rest => readBranch offset start 1 rest
   | .longBranch, rest => readBranch offset start 4 rest
   | .switch, rest => readSwitch offset start rest
-  | kind, rest => readToken tokens offset start kind rest
+  | kind, rest => readToken tokens offset start opcode kind rest
 
 /-- The opcode at the front of the bytes, its width in bytes and the bytes after it. -/
 private def readOpcode (offset : Nat) : List Nat → Except BodyError (Nat × Nat × List Nat)
@@ -312,7 +312,7 @@ private def readOpcode (offset : Nat) : List Nat → Except BodyError (Nat × Na
 /-- Decode the instruction stream starting at byte `offset`. `fuel` is the byte count, which
     bounds the instruction count since each instruction takes at least one byte. Branch operands
     carry absolute byte offsets. -/
-private def decodeInstructions (tokens : Std.TreeMap Nat RawOperand) :
+private def decodeInstructions (tokens : Std.TreeMap Nat (RawOperand × TokenFacts)) :
     Nat → Nat → List Nat → Except BodyError (List RawInstruction)
   | _, _, [] => .ok []
   | 0, offset, _ => .error (.truncatedOperand offset)
@@ -320,7 +320,7 @@ private def decodeInstructions (tokens : Std.TreeMap Nat RawOperand) :
     let (opcode, width, afterOpcode) ← readOpcode offset bytes
     let some kind := operandKind opcode | throw (.unknownOpcode offset opcode)
     let (operand, following, remaining) ←
-      decodeOperand tokens offset (offset + width) kind afterOpcode
+      decodeOperand tokens offset (offset + width) opcode kind afterOpcode
     let rest ← decodeInstructions tokens fuel following remaining
     .ok ({ offset := offset, opcode := opcode, operand := operand } :: rest)
 
@@ -394,47 +394,65 @@ private def decodeHeader : List Nat → Except BodyError (BodyHeader × List Nat
       | _ => .error .truncatedHeader
     else .error (.unsupportedHeader first)
 
-/-- The local types the header's signature token names, which the table must agree with: no
-    token means no locals, and any token must be a standalone signature. -/
-private def localTypes (header : BodyHeader) (tokens : TokenTable) :
-    Except BodyError (List TypeExpr) :=
-  if header.localSignature != tokens.localSignature then .error .localSignatureMismatch
-  else if header.localSignature == 0 then
-    if tokens.locals.isEmpty then .ok [] else .error .localSignatureMismatch
-  else if metadataTableOf header.localSignature == 0x11 then .ok tokens.locals
-  else .error .localSignatureMismatch
+/-- The checked table of a body: every entry is checked against the metadata, and no token has
+    two entries. -/
+private def checkTable (env : MetadataEnv) (arity : Nat) :
+    List (Nat × RawOperand) → Std.TreeMap Nat (RawOperand × TokenFacts) →
+      Except BodyError (Std.TreeMap Nat (RawOperand × TokenFacts))
+  | [], table => .ok table
+  | (token, operand) :: rest, table => do
+    if table.contains token then throw (.duplicateToken token)
+    let facts ← (checkEntry env arity token operand).mapError BodyError.metadata
+    checkTable env arity rest (table.insert token (operand, facts))
 
-/-- Decode a method body: its header, its locals through the token table and its instructions,
-    with branch operands as instruction indices. The supplied bytes must be exactly the header
-    and the declared code. -/
-def decodeBody (body : BodyEvidence) : Except BodyError DecodedBody := do
+/-- The metadata of a body as an environment of indexed slices, its own first. -/
+def MethodMetadata.environment (metadata : MethodMetadata) : Except MetadataError MetadataEnv := do
+  let own ← metadata.own.index
+  .ok { slices := own :: (← metadata.others.mapM MetadataSlice.index) }
+
+/-- Decode a method body: its header and its instructions, with branch operands as instruction
+    indices and every token operand checked against the metadata. `arity` is the number of
+    generic parameters of the method. The supplied bytes must be exactly the header and the
+    declared code. -/
+def decodeBody (env : MetadataEnv) (arity : Nat) (body : BodyEvidence) :
+    Except BodyError DecodedBody := do
   if !body.bytes.all (· < 256) then throw .invalidByte
   let (header, code) ← decodeHeader body.bytes
   if code.length != header.codeSize then
     throw (.codeSizeMismatch header.codeSize code.length)
-  let locals ← localTypes header body.tokens
-  let tokens := body.tokens.operands.foldr (fun entry map => map.insert entry.1 entry.2) ∅
+  let tokens ← checkTable env arity body.tokens.operands ∅
   let raw ← decodeInstructions tokens code.length 0 code
   let starts := indexStarts raw 0 false ∅
   let instructions ← raw.mapM (resolveBranches starts code.length)
-  .ok { maxStack := header.maxStack, initLocals := header.initLocals, locals := locals,
-        code := instructions }
+  .ok { maxStack := header.maxStack, initLocals := header.initLocals,
+        localSignature := header.localSignature, code := instructions }
 
-/-- Whether the body decodes to exactly the method's `maxStack`, `initLocals`, `locals` and
-    `code`. -/
-def bodyMatches (body : BodyEvidence) (method : RawMethod) : Bool :=
-  match decodeBody body with
+/-- The method's definition, its locals and its body, each checked against the metadata the
+    body carries: the decoded body, when everything agrees with the method. -/
+def checkBody (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) :
+    Except BodyError DecodedBody := do
+  let env ← body.metadata.environment.mapError BodyError.metadata
+  (methodIdentityValid env pin method body.rva).mapError BodyError.metadata
+  let decoded ← decodeBody env method.genericParameters.length body
+  (checkLocals env method.genericParameters.length decoded.localSignature method.locals).mapError
+    BodyError.metadata
+  .ok decoded
+
+/-- Whether the body decodes to exactly the method's `maxStack`, `initLocals` and `code`, with
+    the method's definition and locals agreeing with the metadata. -/
+def bodyMatches (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) : Bool :=
+  match checkBody pin body method with
   | .ok decoded => decoded.maxStack == method.maxStack &&
-      decoded.initLocals == method.initLocals && decoded.locals == method.locals &&
-      decoded.code == method.code
+      decoded.initLocals == method.initLocals && decoded.code == method.code
   | .error _ => false
 
-/-- The method's `maxStack`, `initLocals`, `locals` and `code` are what its body bytes decode
-    to, through the body's token table. -/
-def BodyDecodes (body : BodyEvidence) (method : RawMethod) : Prop :=
-  bodyMatches body method = true
+/-- The method's definition, locals, `maxStack`, `initLocals` and `code` are what the body bytes
+    and the metadata they carry say, through the body's token table. -/
+def BodyDecodes (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) : Prop :=
+  bodyMatches pin body method = true
 
-instance (body : BodyEvidence) (method : RawMethod) : Decidable (BodyDecodes body method) :=
+instance (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) :
+    Decidable (BodyDecodes pin body method) :=
   inferInstanceAs (Decidable (_ = true))
 
 end CIL.Extraction

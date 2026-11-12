@@ -17,9 +17,9 @@ The top of the extraction checks. `TranslationValid` conjoins the kernel-checked
 for one extraction: layouts recompute, every emitted method passes the per-method validators
 against its evidence record, static values are reproduced by their initializers, import
 layouts agree, every body is owned by the pinned assembly its evidence names, and every decoded
-method definition is what its body bytes decode to. It is not a simulation proof for every raw
-opcode; general instruction translation, the metadata tables behind a body's token table and the
-PE container stay trusted, as `docs/SOUNDNESS.md` describes.
+method definition is what its body bytes and carried metadata say. It is not a simulation proof for
+every raw opcode; general instruction translation, that the carried metadata rows are the image's,
+definitions in platform assemblies and the PE container stay trusted, as `docs/SOUNDNESS.md`\ndescribes.
 
 Generated modules prove each method's evidence separately and assemble it with
 `translation_of_methods`, so no validator is reduced twice.
@@ -189,7 +189,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
-  BodyDecodes item.body item.original
+  BodyDecodes item.assembly item.body item.original
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)

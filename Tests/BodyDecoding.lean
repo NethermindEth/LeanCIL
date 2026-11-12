@@ -1,39 +1,46 @@
-import CIL.Extraction.BodyDecoding
 import Tests.BodyEncoding
+import Tests.MetadataWorld
 
 /-!
 # Method body decoding tests
 
 Hand-made ECMA-335 bodies with tiny and fat headers, short and long branches, a switch,
 two-byte opcodes, token operands and float constants must decode to the expected `RawMethod`
-fields. Each rejection changes one fact about a body that matches and asserts the error or
-mismatch it causes. The opcode table is compared in `operand_kinds_agree_with_cecil` with a
-static list generated once from `Mono.Cecil.Cil.OpCodes`; no test reads Cecil at run time.
+fields, with every token operand, the locals and the method definition checked against the
+metadata of a hand-built assembly. Each rejection changes one fact about a body that matches and
+asserts the error or mismatch it causes. The opcode table is compared in
+`operand_kinds_agree_with_cecil` with a static list generated once from `Mono.Cecil.Cil.OpCodes`;
+no test reads Cecil at run time.
 -/
 
 namespace Tests.BodyDecoding
 
-open CIL CIL.Extraction Tests.BodyEncoding
-/-- A 32-bit integer type, as locals and tokens name it. -/
-private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
+open CIL CIL.Extraction Tests.BodyEncoding Tests.MetadataBuilder Tests.MetadataWorld
 
-/-- A body with the given bytes and token claims. -/
-private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := [])
-    (localSignature : Nat := 0) (locals : List TypeExpr := []) : BodyEvidence :=
-  { bytes := bytes, tokens := { operands := operands, localSignature := localSignature,
-                                locals := locals } }
+/-- The assembly whose metadata the bodies are checked against. -/
+private def pin : AssemblyPin := { identity := ownIdentity }
 
-/-- A decoded method with the given body fields and nothing else of interest. -/
+/-- A body with the given bytes and token claims, at the address of the world's `Main`. -/
+private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := []) :
+    BodyEvidence :=
+  { bytes := bytes, tokens := { operands := operands },
+    metadata := { own := own.1, others := [lib] }, rva := bodyRva }
+
+/-- A decoded method with the given body fields: the world's `Main`, a public static method
+    with no parameters. -/
 private def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
     (code : List RawInstruction) : RawMethod :=
-  { token := 0x06000001, owner := "T", hasThis := false, explicitThis := false,
-    callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
-    parameters := [], locals := locals, initLocals := initLocals, maxStack := maxStack,
-    genericParameters := [], code := code }
+  { token := tokens.main, owner := ownIdentity ++ "::Program", hasThis := false,
+    explicitThis := false, callingConvention := 0, attributes := 0x96, implementation := 0,
+    returnType := .void, parameters := [], locals := locals, initLocals := initLocals,
+    maxStack := maxStack, genericParameters := [], code := code }
 
 /-- One decoded instruction. -/
 private def instr (offset opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
   { offset := offset, opcode := opcode, operand := operand }
+
+/-- The four little-endian bytes of a token. -/
+private def token (value : Nat) : List Nat := (Tests.BodyEncoding.littleEndian 4 value)
 
 /-! ## Bodies that decode -/
 
@@ -44,7 +51,7 @@ private def tinyBytes : List Nat := [0x12, 0x02, 0x03, 0x58, 0x2A]
 private def tinyMethod : RawMethod :=
   method 8 false [] [instr 0 0x02, instr 1 0x03, instr 2 0x58, instr 3 0x2A]
 
-theorem tiny_header_decodes : bodyMatches (evidence tinyBytes) tinyMethod = true := by
+theorem tiny_header_decodes : bodyMatches pin (evidence tinyBytes) tinyMethod = true := by
   decide +kernel
 #print axioms tiny_header_decodes
 
@@ -55,13 +62,13 @@ private def fatBytes : List Nat :=
 
 /-- The decoded `fatBytes`: the signed byte, the macro `stloc.0` and the short local index. -/
 private def fatMethod : RawMethod :=
-  method 2 true [int32] [instr 0 0x1F (.integer (-3)), instr 2 0x0A, instr 3 0x11 (.local 0),
+  method 2 true [uint64] [instr 0 0x1F (.integer (-3)), instr 2 0x0A, instr 3 0x11 (.local 0),
     instr 5 0x20 (.integer 1000), instr 10 0x58, instr 11 0x2A]
 
-/-- `fatBytes` with the claim that its signature token 0x11000001 names one int32 local. -/
-private def fatEvidence : BodyEvidence := evidence fatBytes [] 0x11000001 [int32]
+/-- `fatBytes`, whose signature token `0x11000001` names the world's one `uint64` local. -/
+private def fatEvidence : BodyEvidence := evidence fatBytes
 
-theorem fat_header_decodes : bodyMatches fatEvidence fatMethod = true := by decide +kernel
+theorem fat_header_decodes : bodyMatches pin fatEvidence fatMethod = true := by decide +kernel
 #print axioms fat_header_decodes
 
 /-- Short and long branches, forward and backward; targets are instruction indices. -/
@@ -74,19 +81,19 @@ private def branchMethod : RawMethod :=
     instr 5 0x2B (.target 3), instr 7 0x16, instr 8 0x38 (.target 0), instr 13 0x2A]
 
 theorem branches_decode_to_instruction_indices :
-    bodyMatches (evidence branchBytes) branchMethod = true := by decide +kernel
+    bodyMatches pin (evidence branchBytes) branchMethod = true := by decide +kernel
 #print axioms branches_decode_to_instruction_indices
 
 /-- A `switch` whose targets are measured from the end of its table. -/
 private def switchBytes : List Nat :=
   [0x52, 0x02, 0x45, 3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0xEF, 0xFF, 0xFF, 0xFF, 0x2A, 0x2A]
 
-/-- The decoded switchBytes: the case targets are instruction indices. -/
+/-- The decoded `switchBytes`: the case targets are instruction indices. -/
 private def switchMethod : RawMethod :=
   method 8 false [] [instr 0 0x02, instr 1 0x45 (.targets [2, 3, 1]), instr 18 0x2A, instr 19 0x2A]
 
 theorem switch_decodes_to_instruction_indices :
-    bodyMatches (evidence switchBytes) switchMethod = true := by decide +kernel
+    bodyMatches pin (evidence switchBytes) switchMethod = true := by decide +kernel
 #print axioms switch_decodes_to_instruction_indices
 
 /-- Two-byte opcodes `0xFE nn`: `ceq`, a long local and the unsigned `unaligned.` prefix. -/
@@ -99,92 +106,106 @@ private def twoByteMethod : RawMethod :=
     instr 8 0xFE12 (.integer 255), instr 11 0x2A, instr 12 0x2A]
 
 theorem two_byte_opcodes_decode :
-    bodyMatches (evidence twoByteBytes) twoByteMethod = true := by decide +kernel
+    bodyMatches pin (evidence twoByteBytes) twoByteMethod = true := by decide +kernel
 #print axioms two_byte_opcodes_decode
 
-/-- The call a token stands for in the token tests. -/
-private def callee : CallSite :=
-  { target := .managed 0x06000002, typeArguments := [], parameterCount := 0, hasThis := false,
-    returnsValue := false }
-
-/-- A method token, a user string, a type token, and float constants of both widths. -/
+/-- A method token, a user string, a type token, and float constants of both widths:
+    `throw; call; ldstr; ldtoken; ldc.r4; ldc.r8; ret`. -/
 private def tokenBytes : List Nat :=
-  [0x7A, 0x28, 0x05, 0x00, 0x00, 0x0A, 0x72, 0x01, 0x00, 0x00, 0x70, 0xD0, 0x03, 0x00, 0x00, 0x01,
-   0x22, 0x00, 0x00, 0x80, 0xBF, 0x23, 0, 0, 0, 0, 0, 0, 0, 0xC0, 0x2A]
+  [0x7A, 0x28] ++ token tokens.writeLine ++ [0x72] ++ token tokens.hello ++ [0xD0] ++
+    token tokens.objectRef ++ [0x22, 0x00, 0x00, 0x80, 0xBF, 0x23, 0, 0, 0, 0, 0, 0, 0, 0xC0, 0x2A]
+
+/-- The system type `ldtoken` names in `tokenBytes`. -/
+private def objectType : TypeExpr := .atom runtimeScope "System.Object"
 
 /-- The token table of `tokenBytes`: a method, a user string and a type. -/
 private def tokenOperands : List (Nat × RawOperand) :=
-  [(0x0A000005, .call callee), (0x70000001, .text "hi"), (0x01000003, .type int32)]
+  [(tokens.writeLine, .call writeLineSite), (tokens.hello, .text "hi"),
+   (tokens.objectRef, .type objectType)]
 
 /-- The decoded `tokenBytes`; float constants are the bit patterns of the encoded values. -/
 private def tokenMethod : RawMethod :=
-  method 8 false [] [instr 0 0x28 (.call callee), instr 5 0x72 (.text "hi"),
-    instr 10 0xD0 (.type int32), instr 15 0x22 (.text "float:-1082130432"),
+  method 8 false [] [instr 0 0x28 (.call writeLineSite), instr 5 0x72 (.text "hi"),
+    instr 10 0xD0 (.type objectType), instr 15 0x22 (.text "float:-1082130432"),
     instr 20 0x23 (.text "double:-4611686018427387904"),
     instr 29 0x2A]
 
 theorem token_operands_resolve_through_the_table :
-    bodyMatches (evidence tokenBytes tokenOperands) tokenMethod = true := by decide +kernel
+    bodyMatches pin (evidence tokenBytes tokenOperands) tokenMethod = true := by decide +kernel
 #print axioms token_operands_resolve_through_the_table
 
-/-- The other operand encodings: long argument, `ldc.i8`, `no.`, `calli`, a field token and
-    `ldtoken` of a method and of a field. -/
+/-- The other operand encodings: long argument, `ldc.i8`, `no.`, `calli`, an instance field and
+    `ldtoken` of a method and of a static field. -/
 private def formsBytes : List Nat :=
   [0x9E, 0xFE, 0x09, 0x03, 0x00, 0x0E, 0x02, 0x21, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-   0xFE, 0x19, 0x07, 0x29, 0x01, 0x00, 0x00, 0x11, 0x7B, 0x01, 0x00, 0x00, 0x04,
-   0xD0, 0x09, 0x00, 0x00, 0x06, 0xD0, 0x01, 0x00, 0x00, 0x04, 0x2A]
+   0xFE, 0x19, 0x07, 0x29] ++ token tokens.indirect ++ [0x7B] ++ token tokens.countField ++
+    [0xD0] ++ token tokens.writeLine ++ [0xD0] ++ token tokens.totalField ++ [0x2A]
 
-/-- The field `ldfld` and `ldtoken` name in `formsBytes`. -/
-private def someField : RawOperand := .field .void 0 .void false
+/-- The instance field `ldfld` names in `formsBytes`. -/
+private def someField : RawOperand := countOperand
+
+/-- The static field `ldtoken` names in `formsBytes`. -/
+private def staticField : RawOperand := .field (.atom ownIdentity "Program") 1 int32 true
 
 /-- The signature `calli` names in `formsBytes`. -/
-private def someSignature : RawOperand := .indirectCall .void [] false false 0
+private def someSignature : RawOperand := .indirectCall .void [int32] false false 0
 
 /-- The token table of `formsBytes`. -/
 private def formsOperands : List (Nat × RawOperand) :=
-  [(0x11000001, someSignature), (0x04000001, someField), (0x06000009, .call callee)]
+  [(tokens.indirect, someSignature), (tokens.countField, someField),
+   (tokens.writeLine, .call writeLineSite), (tokens.totalField, staticField)]
 
 /-- The decoded `formsBytes`. -/
 private def formsMethod : RawMethod :=
   method 8 false [] [instr 0 0xFE09 (.argument 3), instr 4 0x0E (.argument 2),
     instr 6 0x21 (.integer (-2)), instr 15 0xFE19 (.integer 7), instr 18 0x29 someSignature,
-    instr 23 0x7B someField, instr 28 0xD0 (.call callee), instr 33 0xD0 someField,
+    instr 23 0x7B someField, instr 28 0xD0 (.call writeLineSite), instr 33 0xD0 staticField,
     instr 38 0x2A]
 
 theorem other_operand_forms_decode :
-    bodyMatches (evidence formsBytes formsOperands) formsMethod = true := by decide +kernel
+    bodyMatches pin (evidence formsBytes formsOperands) formsMethod = true := by decide +kernel
 #print axioms other_operand_forms_decode
 
 /-- A branch to a `volatile.` prefix enters the prefixed instruction at its first prefix. -/
 theorem branch_to_a_prefix_decodes :
-    bodyMatches (evidence [0x1A, 0x2B, 0x00, 0xFE, 0x13, 0x4A, 0x2A])
+    bodyMatches pin (evidence [0x1A, 0x2B, 0x00, 0xFE, 0x13, 0x4A, 0x2A])
       (method 8 false [] [instr 0 0x2B (.target 1), instr 2 0xFE13, instr 4 0x4A,
         instr 5 0x2A]) = true := by decide +kernel
 #print axioms branch_to_a_prefix_decodes
 
 /-! ## The test encoder agrees with the hand-written bytes -/
 
-/-- The encoder writes the bytes and token claims written out by hand above. -/
+/-- The encoder writes the bytes written out by hand above, and the metadata it writes makes the
+    body decode to the method. -/
 theorem encoder_reproduces_the_hand_written_bodies :
-    encodeBody tinyMethod = some (evidence tinyBytes) ∧
-    encodeBody fatMethod = some fatEvidence ∧
-    encodeBody branchMethod = some (evidence branchBytes) ∧
-    encodeBody switchMethod = some (evidence switchBytes) ∧
-    encodeBody twoByteMethod = some (evidence twoByteBytes) := by decide +kernel
+    (encodeBody pin tinyMethod).map (·.bytes) = some tinyBytes ∧
+    (encodeBody pin fatMethod).map (·.bytes) = some fatBytes ∧
+    (encodeBody pin branchMethod).map (·.bytes) = some branchBytes ∧
+    (encodeBody pin switchMethod).map (·.bytes) = some switchBytes ∧
+    (encodeBody pin twoByteMethod).map (·.bytes) = some twoByteBytes ∧
+    (encodeBody pin tinyMethod).any (bodyMatches pin · tinyMethod) = true ∧
+    (encodeBody pin fatMethod).any (bodyMatches pin · fatMethod) = true ∧
+    (encodeBody pin twoByteMethod).any (bodyMatches pin · twoByteMethod) = true := by
+  decide +kernel
 #print axioms encoder_reproduces_the_hand_written_bodies
+
 /-! ## Bodies that must not match -/
 
+/-- A method that every test body is checked against unless the test names another. -/
+private def plain : RawMethod := method 8 false [] []
+
 /-- Whether the body fails to decode with exactly this error. -/
-private def failsWith (body : BodyEvidence) (error : BodyError) : Bool :=
-  match decodeBody body with
+private def failsWith (body : BodyEvidence) (error : BodyError) (method : RawMethod := plain) :
+    Bool :=
+  match checkBody pin body method with
   | .error found => found == error
   | .ok _ => false
 
 /-- Whether the body decodes but to something other than the method: the failure is the
     mismatch, not a decoding error. -/
 private def mismatches (body : BodyEvidence) (method : RawMethod) : Bool :=
-  match decodeBody body with
-  | .ok _ => !bodyMatches body method
+  match checkBody pin body method with
+  | .ok _ => !bodyMatches pin body method
   | .error _ => false
 
 /-- One opcode byte changed: `sub` where the decoded method says `add`. -/
@@ -194,8 +215,7 @@ theorem rejects_changed_opcode_byte :
 
 /-- One operand byte changed: the signed byte is -4 where the decoded method says -3. -/
 theorem rejects_changed_operand_byte :
-    mismatches (evidence (fatBytes.set 13 0xFC) [] 0x11000001 [int32]) fatMethod = true := by
-  decide +kernel
+    mismatches (evidence (fatBytes.set 13 0xFC)) fatMethod = true := by decide +kernel
 #print axioms rejects_changed_operand_byte
 
 /-- A decoded instruction with a wrong byte offset. -/
@@ -224,7 +244,7 @@ theorem rejects_branch_into_an_instruction :
 
 /-- The check is `false` for the same body, whatever instructions the method claims. -/
 theorem branch_into_an_instruction_does_not_match :
-    bodyMatches (evidence midInstructionBytes)
+    bodyMatches pin (evidence midInstructionBytes)
       (method 8 false [] [instr 0 0x2C (.target 1), instr 2 0x2A]) = false := by decide +kernel
 #print axioms branch_into_an_instruction_does_not_match
 
@@ -260,37 +280,56 @@ theorem rejects_switch_target_after_a_prefix :
   decide +kernel
 #print axioms rejects_switch_target_after_a_prefix
 
-/-- The table resolves a token to another operand than the decoded method has. -/
+/-- The table resolves a token to another operand than the metadata names: the call has a
+    parameter more than the member the token names. -/
 theorem rejects_token_with_different_operand :
-    mismatches (evidence tokenBytes
-        [(0x0A000005, .call { callee with parameterCount := 1 }), (0x70000001, .text "hi"),
-         (0x01000003, .type int32)]) tokenMethod = true := by decide +kernel
+    failsWith (evidence tokenBytes
+        [(tokens.writeLine, .call { writeLineSite with parameterCount := 2 }),
+         (tokens.hello, .text "hi"), (tokens.objectRef, .type objectType)])
+      (.metadata (.operandMismatch tokens.writeLine)) = true := by decide +kernel
 #print axioms rejects_token_with_different_operand
 
 /-- A token missing from the table fails the check. -/
 theorem rejects_missing_token :
-    failsWith (evidence tokenBytes [(0x0A000005, .call callee), (0x70000001, .text "hi")])
-      (.missingToken 10 0x01000003) = true := by decide +kernel
+    failsWith (evidence tokenBytes [(tokens.writeLine, .call writeLineSite),
+      (tokens.hello, .text "hi")]) (.missingToken 10 tokens.objectRef) = true := by
+  decide +kernel
 #print axioms rejects_missing_token
 
-/-- A method token from the TypeRef table, which no method operand may come from. -/
+/-- A call whose token names a type reference, which the table resolves to a type: the entry
+    matches its metadata, so the failure is the table of the token. -/
 theorem rejects_method_operand_from_the_wrong_table :
-    failsWith (evidence [0x16, 0x28, 0x05, 0x00, 0x00, 0x01] [(0x01000005, .call callee)])
-      (.mismatchedToken 0 0x01000005) = true := by decide +kernel
+    failsWith (evidence ([0x16, 0x28] ++ token tokens.objectRef)
+        [(tokens.objectRef, .type objectType)]) (.mismatchedToken 0 tokens.objectRef) = true := by
+  decide +kernel
 #print axioms rejects_method_operand_from_the_wrong_table
 
-/-- A user-string operand from the MemberRef table, which holds no user strings. -/
+/-- A user-string operand whose token names a type reference. -/
 theorem rejects_string_operand_from_the_wrong_table :
-    failsWith (evidence [0x16, 0x72, 0x05, 0x00, 0x00, 0x0A] [(0x0A000005, .text "hi")])
-      (.mismatchedToken 0 0x0A000005) = true := by decide +kernel
+    failsWith (evidence ([0x16, 0x72] ++ token tokens.objectRef)
+        [(tokens.objectRef, .type objectType)]) (.mismatchedToken 0 tokens.objectRef) = true := by
+  decide +kernel
 #print axioms rejects_string_operand_from_the_wrong_table
 
 /-- A token the table resolves to an operand the opcode cannot take. -/
 theorem rejects_token_with_the_wrong_operand_kind :
-    failsWith (evidence [0x16, 0x28, 0x05, 0x00, 0x00, 0x0A]
-        [(0x0A000005, .text "hi")]) (.mismatchedToken 0 0x0A000005) = true := by
+    failsWith (evidence ([0x16, 0x28] ++ token tokens.hello) [(tokens.hello, .text "hi")])
+      (.mismatchedToken 0 tokens.hello) = true := by
   decide +kernel
 #print axioms rejects_token_with_the_wrong_operand_kind
+
+/-- `ldsfld` of a token that names an instance field. -/
+theorem rejects_a_static_load_of_an_instance_field :
+    failsWith (evidence ([0x16, 0x7E] ++ token tokens.countField)
+      [(tokens.countField, someField)]) (.mismatchedToken 0 tokens.countField) = true := by
+  decide +kernel
+#print axioms rejects_a_static_load_of_an_instance_field
+
+/-- A token that has two entries in the table. -/
+theorem rejects_a_token_with_two_entries :
+    failsWith (evidence tokenBytes (tokenOperands ++ [(tokens.hello, .text "hi")]))
+      (.duplicateToken tokens.hello) = true := by decide +kernel
+#print axioms rejects_a_token_with_two_entries
 
 /-- The last operand byte is missing although the header agrees with the bytes. -/
 theorem rejects_truncated_operand :
@@ -347,32 +386,56 @@ theorem rejects_init_locals_claimed_set :
 
 /-- A fat header whose flags also set the extra-sections bit, as a body with handlers does. -/
 theorem rejects_body_with_exception_section :
-    failsWith (evidence (0x1B :: fatBytes.tail) [] 0x11000001 [int32]) .extraSections =
-      true := by decide +kernel
+    failsWith (evidence (0x1B :: fatBytes.tail)) .extraSections fatMethod = true := by
+  decide +kernel
 #print axioms rejects_body_with_exception_section
 
 /-- A body with an exception section does not match the method that has the same code. -/
 theorem body_with_exception_section_does_not_match :
-    bodyMatches (evidence (0x1B :: fatBytes.tail) [] 0x11000001 [int32]) fatMethod = false := by
+    bodyMatches pin (evidence (0x1B :: fatBytes.tail)) fatMethod = false := by
   decide +kernel
 #print axioms body_with_exception_section_does_not_match
 
 /-- The method's locals differ from the types the signature token names. -/
 theorem rejects_wrong_locals :
-    mismatches fatEvidence { fatMethod with locals := [] } = true := by decide +kernel
+    failsWith fatEvidence (.metadata (.localMismatch 0)) { fatMethod with locals := [] } = true ∧
+    failsWith fatEvidence (.metadata (.localMismatch 0)) { fatMethod with locals := [uint32] } =
+      true := by decide +kernel
 #print axioms rejects_wrong_locals
 
-/-- The table names another signature token than the header carries. -/
-theorem rejects_wrong_local_signature_token :
-    failsWith (evidence fatBytes [] 0x11000002 [int32]) .localSignatureMismatch = true := by
+/-- The header names a standalone signature that is not a local variable signature. -/
+theorem rejects_a_local_signature_token_that_names_a_call_signature :
+    failsWith (evidence (fatBytes.set 8 0x02)) (.metadata (.unsupportedSignature 0 0)) fatMethod =
+      true := by
   decide +kernel
-#print axioms rejects_wrong_local_signature_token
+#print axioms rejects_a_local_signature_token_that_names_a_call_signature
 
-/-- A tiny header names no locals, so a table that claims some is refused. -/
+/-- A tiny header names no locals, so a method that claims some is refused. -/
 theorem rejects_locals_without_a_signature :
-    failsWith (evidence tinyBytes [] 0 [int32]) .localSignatureMismatch = true := by
+    failsWith (evidence tinyBytes) (.metadata (.localMismatch 0))
+      { tinyMethod with locals := [int32] } = true := by
   decide +kernel
 #print axioms rejects_locals_without_a_signature
+
+/-- A method whose attributes differ from its `MethodDef` row. -/
+theorem rejects_a_method_with_other_attributes :
+    failsWith (evidence tinyBytes) (.metadata (.methodMismatch tokens.main))
+      { tinyMethod with attributes := 0x97 } = true := by decide +kernel
+#print axioms rejects_a_method_with_other_attributes
+
+/-- A pin of another version than the `Assembly` row spells. -/
+theorem rejects_a_pin_of_another_version :
+    (match checkBody { identity := "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" }
+        (evidence tinyBytes) tinyMethod with
+      | .error found => found == .metadata .identityMismatch
+      | .ok _ => false) = true := by decide +kernel
+#print axioms rejects_a_pin_of_another_version
+
+/-- A body read from another address than the `MethodDef` row gives. -/
+theorem rejects_a_body_at_another_address :
+    failsWith { evidence tinyBytes with rva := 0x2051 } (.metadata (.bodyLocation tokens.main))
+      tinyMethod = true := by decide +kernel
+#print axioms rejects_a_body_at_another_address
 
 /-- Byte `0x24` is not an opcode. -/
 theorem rejects_unknown_opcode :

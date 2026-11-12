@@ -45,9 +45,9 @@ def encodeRow (table : Nat) (columns : List Nat) : List Nat :=
   | some widths => (widths.zip columns).flatMap fun (width, value) => littleEndian width value
   | none => []
 
-/-- Add a `#Strings` entry and return its offset. -/
-def Builder.addString (builder : Builder) (text : String) : Builder × Nat :=
-  let bytes := bytesOf text ++ [0]
+/-- Add a `#Strings` entry of the given UTF-8 bytes and return its offset. -/
+def Builder.addString (builder : Builder) (text : List Nat) : Builder × Nat :=
+  let bytes := text ++ [0]
   ({ builder with strings := builder.strings ++ [(builder.stringEnd, bytes)],
                   stringEnd := builder.stringEnd + bytes.length }, builder.stringEnd)
 
@@ -78,8 +78,12 @@ def Builder.addLink (builder : Builder) (kind source slice target : Nat) : Build
 /-- A builder step, so a world reads as a sequence of additions. -/
 abbrev Step := StateM Builder
 
-/-- A `#Strings` entry. -/
+/-- A `#Strings` entry of the bytes of a text. -/
 def string (text : String) : Step Nat :=
+  modifyGet fun builder => let (next, offset) := builder.addString (bytesOf text); (offset, next)
+
+/-- A `#Strings` entry of the given UTF-8 bytes. -/
+def stringBytes (text : List Nat) : Step Nat :=
   modifyGet fun builder => let (next, offset) := builder.addString text; (offset, next)
 
 /-- A `#Blob` entry. -/
@@ -107,17 +111,18 @@ def tableHeader (counts : List (Nat × Nat)) : List Nat :=
     (tables.flatMap fun table => littleEndian 4 ((counts.lookup table).getD 0))
 
 /-- An assembly name and the pinned identity it spells, with one `Assembly` row. -/
-def assemblyBlock (builder : Builder) (name identity : String) (version : Nat) :
+def assemblyBlock (builder : Builder) (name : List Nat) (identity : String) (version : Nat) :
     Builder × AssemblyMetadata :=
   let (builder, nameOffset) := builder.addString name
   let counts := builder.counts.filter (·.1 != Table.assembly) ++ [(Table.assembly, 1)]
   let row := littleEndian 4 0x8004 ++ littleEndian 2 version ++ [0, 0, 0, 0, 0, 0] ++
     littleEndian 4 0 ++ littleEndian 2 0 ++ littleEndian 2 nameOffset ++ littleEndian 2 0
   (builder, { identity := identity, tableHeader := tableHeader counts, assemblyRow := row,
-              strings := [(0, [0]), (nameOffset, bytesOf name ++ [0])], blobs := [(0, [0])] })
+              strings := [(0, [0]), (nameOffset, name ++ [0])], blobs := [(0, [0])] })
 
 /-- The slice a builder describes, with the `Assembly` row of the given name and identity. -/
-def finish (builder : Builder) (name identity : String) (version : Nat) : MetadataSlice :=
+def finish (builder : Builder) (name : List Nat) (identity : String) (version : Nat) :
+    MetadataSlice :=
   let (builder, assembly) := assemblyBlock builder name identity version
   { assembly := { assembly with
         tableHeader := tableHeader (builder.counts.filter (·.1 != Table.assembly) ++
@@ -126,7 +131,7 @@ def finish (builder : Builder) (name identity : String) (version : Nat) : Metada
     userStrings := builder.userStrings, corlib := builder.corlib, links := builder.links }
 
 /-- The slice that `step` builds, and what it returns. -/
-def build {α : Type} (step : Step α) (name identity : String) (version : Nat := 1) :
+def build {α : Type} (step : Step α) (name : List Nat) (identity : String) (version : Nat := 1) :
     MetadataSlice × α :=
   let (value, builder) := step.run {}
   (finish builder name identity version, value)
