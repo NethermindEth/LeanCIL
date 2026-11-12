@@ -18,7 +18,7 @@ open CIL CIL.Extraction Tests.BodyEncoding
 private def int32 : TypeExpr := .atom runtimeScope "System.Int32"
 
 /-- A body with the given bytes and token claims. -/
-private def evidence (bytes : List Nat) (operands : List (Nat ÃÂ RawOperand) := [])
+private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := [])
     (localSignature : Nat := 0) (locals : List TypeExpr := []) : BodyEvidence :=
   { bytes := bytes, tokens := { operands := operands, localSignature := localSignature,
                                 locals := locals } }
@@ -113,7 +113,7 @@ private def tokenBytes : List Nat :=
    0x22, 0x00, 0x00, 0x80, 0xBF, 0x23, 0, 0, 0, 0, 0, 0, 0, 0xC0, 0x2A]
 
 /-- The token table of `tokenBytes`: a method, a user string and a type. -/
-private def tokenOperands : List (Nat ÃÂ RawOperand) :=
+private def tokenOperands : List (Nat × RawOperand) :=
   [(0x0A000005, .call callee), (0x70000001, .text "hi"), (0x01000003, .type int32)]
 
 /-- The decoded `tokenBytes`; float constants are the bit patterns of the encoded values. -/
@@ -141,7 +141,7 @@ private def someField : RawOperand := .field .void 0 .void false
 private def someSignature : RawOperand := .indirectCall .void [] false false 0
 
 /-- The token table of `formsBytes`. -/
-private def formsOperands : List (Nat ÃÂ RawOperand) :=
+private def formsOperands : List (Nat × RawOperand) :=
   [(0x11000001, someSignature), (0x04000001, someField), (0x06000009, .call callee)]
 
 /-- The decoded `formsBytes`. -/
@@ -166,10 +166,10 @@ theorem branch_to_a_prefix_decodes :
 
 /-- The encoder writes the bytes and token claims written out by hand above. -/
 theorem encoder_reproduces_the_hand_written_bodies :
-    encodeBody tinyMethod = some (evidence tinyBytes) Ã¢ÂÂ§
-    encodeBody fatMethod = some fatEvidence Ã¢ÂÂ§
-    encodeBody branchMethod = some (evidence branchBytes) Ã¢ÂÂ§
-    encodeBody switchMethod = some (evidence switchBytes) Ã¢ÂÂ§
+    encodeBody tinyMethod = some (evidence tinyBytes) ∧
+    encodeBody fatMethod = some fatEvidence ∧
+    encodeBody branchMethod = some (evidence branchBytes) ∧
+    encodeBody switchMethod = some (evidence switchBytes) ∧
     encodeBody twoByteMethod = some (evidence twoByteBytes) := by decide +kernel
 #print axioms encoder_reproduces_the_hand_written_bodies
 /-! ## Bodies that must not match -/
@@ -399,7 +399,7 @@ theorem rejects_a_value_above_255 :
 /-- Every opcode of `Mono.Cecil.Cil.OpCodes`, listed once from Cecil's table, with the operand
     encoding its operand type implies: `InlineNone` is `.none`, `ShortInlineI` is `.signed8`
     for `ldc.i4.s` and `.unsigned8` for `unaligned.` and `no.`, and so on. -/
-private def cecilOpcodes : List (Nat ÃÂ OperandKind) := [
+private def cecilOpcodes : List (Nat × OperandKind) := [
   (0x00, .none), (0x01, .none), (0x02, .none), (0x03, .none),
   (0x04, .none), (0x05, .none), (0x06, .none), (0x07, .none),
   (0x08, .none), (0x09, .none), (0x0A, .none), (0x0B, .none),
@@ -458,10 +458,10 @@ private def cecilOpcodes : List (Nat ÃÂ OperandKind) := [
 ]
 
 /-- The opcodes that have an operand encoding: every one-byte value and every `0xFE nn`. -/
-private def candidates : List Nat := List.range 256 ++ (List.range 256).map (0xFE00 + ÃÂ·)
+private def candidates : List Nat := List.range 256 ++ (List.range 256).map (0xFE00 + ·)
 
 theorem operand_kinds_agree_with_cecil :
-    cecilOpcodes.all (fun (opcode, kind) => operandKind opcode == some kind) = true Ã¢ÂÂ§
+    cecilOpcodes.all (fun (opcode, kind) => operandKind opcode == some kind) = true ∧
     (candidates.filter fun opcode => (operandKind opcode).isSome).length =
       cecilOpcodes.length := by
   decide +kernel
