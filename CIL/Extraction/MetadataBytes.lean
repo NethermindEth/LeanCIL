@@ -72,6 +72,7 @@ inductive MetadataError where
   | missingHeap (heap offset : Nat)
   | malformedHeap (heap offset : Nat)
   | malformedUserString (offset : Nat)
+  | truncatedSignature (offset : Nat)
   | unsupportedSignature (offset element : Nat)
   | unsupportedAssemblyRef (token : Nat)
   | unsupportedScope (token : Nat)
@@ -657,11 +658,13 @@ def hexDigits : List Nat → List Nat
 
 /-- The text of an assembly name as Cecil writes it:
     `Name, Version=a.b.c.d, Culture=culture, PublicKeyToken=token`. -/
-def assemblySpelling (name : List Nat) (major minor build revision : Nat) (culture token : List Nat) :
+def assemblySpelling (name : List Nat) (major minor build revision : Nat)
+    (culture token : List Nat) :
     List Nat :=
   name ++ bytesOf ", Version=" ++ decimalDigits 5 major ++ [46] ++ decimalDigits 5 minor ++ [46] ++
     decimalDigits 5 build ++ [46] ++ decimalDigits 5 revision ++ bytesOf ", Culture=" ++
-    (if culture.isEmpty then bytesOf "neutral" else culture) ++ bytesOf ", PublicKeyToken=" ++ token
+    (if culture.isEmpty then bytesOf "neutral" else culture) ++ bytesOf ", PublicKeyToken=" ++
+    token
 
 /-- The `AssemblyRef` row's identity. A flag other than 0 means a full public key (whose token
     needs SHA-1) or a retargetable reference (which Cecil spells apart): both are unsupported. -/

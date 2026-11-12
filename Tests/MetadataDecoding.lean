@@ -1,4 +1,4 @@
-import CIL.Extraction.MetadataBytes
+import CIL.Extraction.Signatures
 
 /-!
 # Metadata table and heap decoding tests
@@ -485,5 +485,68 @@ theorem rejects_an_assembly_reference_with_a_full_key :
       (·.assemblyRefIdentity 0x23000001))
       (.unsupportedAssemblyRef 0x23000001) = true := by decide +kernel
 #print axioms rejects_an_assembly_reference_with_a_full_key
+
+/-! ## Signatures -/
+
+/-- The signature blobs of `Examples.dll` and `System.Private.CoreLib.dll` decode to the types
+    their bytes spell by ECMA-335 II.23.2. -/
+theorem real_signatures_decode :
+    -- `void (int)` on an instance
+    gives (decodeMethodSig [32, 1, 1, 8]) ⟨0x20, 0, .primitive 1, [.primitive 8]⟩ ∧
+    -- `uint (uint, uint)` as a static
+    gives (decodeMethodSig [0, 2, 9, 9, 9])
+      ⟨0, 0, .primitive 9, [.primitive 9, .primitive 9]⟩ ∧
+    -- an instance method taking a value type named by a `TypeRef`
+    gives (decodeMethodSig [32, 1, 1, 17, 17]) ⟨0x20, 0, .primitive 1, [.named true 0x01000004]⟩ ∧
+    gives (decodeTypeSpec [21, 18, 72, 1, 8])
+      (.genericInst false 0x02000012 (.cons (.primitive 8) .nil)) ∧
+    gives (decodeLocalSig [7, 1, 21, 17, 89, 1, 17, 131, 36])
+      [.genericInst true 0x01000016 (.cons (.named true 0x020000C9) .nil)] ∧
+    gives (decodeFieldSig [6, 29, 17, 131, 36]) (.szarray (.named true 0x020000C9)) ∧
+    gives (decodeMethodSpec [10, 1, 30, 1]) [.mvar 1] ∧
+    gives (decodeTypeSpec [21, 17, 135, 0, 1, 11])
+      (.genericInst true 0x020001C0 (.cons (.primitive 11) .nil)) ∧
+    gives (decodeMethodSig [0, 7, 8, 24, 15, 3, 8, 15, 3, 8, 17, 138, 148, 15, 8])
+      ⟨0, 0, .primitive 8, [.primitive 24, .pointer (.primitive 3), .primitive 8,
+        .pointer (.primitive 3), .primitive 8, .named true 0x020002A5, .pointer (.primitive 8)]⟩
+      := by
+  decide +kernel
+#print axioms real_signatures_decode
+
+/-- Modifiers wrap the type that follows them, function pointers carry their convention, and
+    generic methods state their arity. -/
+theorem modifiers_function_pointers_and_generic_arity_decode :
+    gives (decodeMethodSig [0x20, 1, 1, 0x1F, 13, 0x10, 9])
+      ⟨0x20, 0, .primitive 1, [.modified true 0x01000003 (.byref (.primitive 9))]⟩ ∧
+    gives (decodeMethodSig [0x30, 2, 2, 1, 0x13, 0, 0x1E, 1])
+      ⟨0x30, 2, .primitive 1, [.var 0, .mvar 1]⟩ ∧
+    gives (decodeFieldSig [6, 0x1B, 0, 1, 1, 8])
+      (.functionPointer 0 (.primitive 1) (.cons (.primitive 8) .nil))
+      ∧ gives (decodeMethodSig [0x20, 1, 0x1F, 13, 1, 8])
+      ⟨0x20, 0, .modified true 0x01000003 (.primitive 1), [.primitive 8]⟩ := by
+  decide +kernel
+#print axioms modifiers_function_pointers_and_generic_arity_decode
+
+/-- A general array, `typedref`, the vararg sentinel and a pinned local report their byte. -/
+theorem rejects_signature_forms_the_model_lacks :
+    failsWith (decodeMethodSig [0, 1, 1, 0x14, 8, 1, 3]) (.unsupportedSignature 3 0x14) = true ∧
+    failsWith (decodeMethodSig [0, 1, 1, 0x16]) (.unsupportedSignature 3 0x16) = true ∧
+    failsWith (decodeMethodSig [0, 1, 1, 0x41, 8]) (.unsupportedSignature 3 0x41) = true ∧
+    failsWith (decodeLocalSig [7, 1, 0x45, 8]) (.unsupportedSignature 2 0x45) = true ∧
+    failsWith (decodeMethodSig [0x05, 0, 1]) (.unsupportedSignature 0 0x05) = true ∧
+    failsWith (decodeFieldSig [0x07, 8]) (.unsupportedSignature 0 0x07) = true ∧
+    failsWith (decodeFieldSig [6, 0x1B, 0x10, 0, 1]) (.unsupportedSignature 2 0x10) = true := by
+  decide +kernel
+#print axioms rejects_signature_forms_the_model_lacks
+
+/-- A byte after the last type, a blob that ends inside a type and a bad type token tag. -/
+theorem rejects_malformed_signatures :
+    failsWith (decodeMethodSig [0, 0, 1, 8]) (.unsupportedSignature 3 0x100) = true ∧
+    failsWith (decodeMethodSig [0, 1, 1]) (.truncatedSignature 3) = true ∧
+    failsWith (decodeFieldSig [6, 0x11]) (.truncatedSignature 2) = true ∧
+    failsWith (decodeTypeSpec [0x11, 3]) (.badCodedIndex 3) = true ∧
+    failsWith (decodeTypeSpec [0x15, 0x0E, 1, 1, 8]) (.unsupportedSignature 1 0x0E) = true := by
+  decide +kernel
+#print axioms rejects_malformed_signatures
 
 end Tests.MetadataDecoding
