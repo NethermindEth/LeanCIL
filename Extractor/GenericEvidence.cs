@@ -356,8 +356,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         return ($"def method{number}Bytes : List Nat := {data}",
             $"def method{number}Metadata : Extraction.MethodMetadata := {rows}",
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
-            $"tokens := {{ operands := {table}, localSignature := {original.Body.LocalVarToken.ToUInt32()}, " +
-            $"locals := {Locals(original)} }}, metadata := method{number}Metadata, rva := {original.RVA} }}");
+            $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, rva := {original.RVA} }}");
     }
 
     /// <summary>The identity block of each pinned assembly: its table header and <c>Assembly</c> row.</summary>
