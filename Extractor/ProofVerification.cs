@@ -455,7 +455,7 @@ partial class Program
                 tracesSteps = trace,
                 showsGoals = goals
             };
-            // Each stage starts after the one before it ended, so the first one after the proof check sees its goals.
+            // Check open goals before replacing the stage that produced them.
             void Advance(string next)
             {
                 RequireNoOpenGoals();

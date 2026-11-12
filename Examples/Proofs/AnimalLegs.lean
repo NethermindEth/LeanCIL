@@ -8,8 +8,8 @@ import CIL.Safety.FuelLemmas
 
 `VirtualCalls.LegsOf(animal)` calls the abstract `Animal.Legs()`, which `Dog` and `Bird`
 override. The call's dispatch table lists both classes with their overrides, and Lean rechecked
-each entry against the extraction's catalog, so the body that runs is the one the receiver's
-runtime class selects: a `Dog` has four legs and a `Bird` two. A null receiver throws
+each entry against the extraction's catalog. The receiver's runtime class selects the body:
+a `Dog` has four legs and a `Bird` two. A null receiver throws
 `NullReferenceException` at the `callvirt`. An instance of any class the table omits, such as a
 class from an assembly outside the extraction, is the model fault `outsideDispatchTable`: no
 return and no exception is proved for it, so every theorem here names the receiver's class.

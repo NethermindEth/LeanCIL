@@ -127,7 +127,7 @@ object Const(string name, params int[] levels) => new { @const = name, levels };
 object App(params object[] parts) => new { app = parts };
 object Nat(int n) => new { nat = n };
 
-// The elaborated audits are really fooled, so these fixtures exercise the attacks rather than a typo.
+// These fixtures elaborate successfully, so rejection exercises the audit rather than a syntax error.
 Compile("Overrides", """
     import Lean
     axiom Overrides.bogus : 1 = 2

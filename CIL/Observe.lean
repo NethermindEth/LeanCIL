@@ -724,7 +724,7 @@ def logGoals (command : Syntax) (tactics : Array TacticNode) (errors : Array Mes
         found := found.insert (start.byteIdx, index + 1)
           { start, stop, kind := .unsolved, text := Format.text goal }
       continue
-    -- The innermost tactic the error lies in is the one that raised it.
+    -- Attribute an error to the innermost tactic that raised it.
     let mut raiser : Option (TacticNode × String.Pos.Raw × String.Pos.Raw) := none
     for node in tactics do
       let some (nodeStart, nodeStop) := sourceRange? node.info.stx | continue

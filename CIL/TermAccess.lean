@@ -5,8 +5,8 @@ import Lean
 
 Tactics, commands and linters read the arguments of `Expr` applications and the entries of
 arrays through these accessors. Core's `xs[i]!`, `Expr.getArg!`, `Expr.appArg!` and
-`Expr.appFn!` return a default value after printing a panic when the shape is not the one the
-caller assumed, and the caller then continues on that value. Each accessor here either reports
+`Expr.appFn!` return a default value after printing a panic if the term has an unexpected
+shape; the caller then continues with that value. Each accessor here either reports
 the absent part as `none`, for code that probes a term's shape, or fails with an error naming
 its reader and the term, for code that has committed to a shape.
 -/

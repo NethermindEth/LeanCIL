@@ -1590,7 +1590,7 @@ partial class Program : IDisposable
     static string ClosureKey(string libraryKey, string[] modules) => ContentKey(
         "leancil-library-closure-v1-these-modules-kernel-replayed\n" + libraryKey + "\n" + string.Join("\n", modules));
 
-    /// <summary>Beside a library's cache entry: the key of the one closure entry built before the whole.</summary>
+    /// <summary>The closure key recorded beside the library cache entry before the full closure is built.</summary>
     static string ClosureRecord(string cacheRoot, string libraryKey) =>
         Path.Combine(cacheRoot, libraryKey + ".closure");
 

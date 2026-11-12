@@ -414,9 +414,9 @@ theorem MethodContract.Holds.intro {Input Output : Type} {c : MethodContract Inp
         c.Returns input initial result.1 result.2) :=
   invoked.elim fun fuel ran => ⟨fuel, (final, c.results output), ran, framed, output, rfl, post⟩
 
-/-- Close the goal a `Holds` proof reaches once stepping has run to a return, from the footprint
-    evidence and the postcondition of `output`, by name. The footprint is the one the goal
-    states, since stepping shows the contract's projections unfolded. Give `(output := ..)` where
+/-- Close the goal a `Holds` proof reaches once stepping has run to a return, using the named
+    footprint evidence and the postcondition of `output`. Stepping unfolds the contract's
+    projections, so the goal states the required footprint. Give `(output := ..)` where
     the returned values do not determine it, as for a method that returns nothing. -/
 theorem MethodContract.Holds.returns {Input Output : Type} {c : MethodContract Input Output}
     {input : Input} {initial final : Memory} {footprint : List (Reference × Nat)}

@@ -2,7 +2,7 @@ import CIL.Safety.ActionRenaming
 import CIL.Safety.MemoryInstructionRenaming
 
 /-!
-# The one-step allocation-renaming obligation
+# Allocation-renaming obligation for a checked step
 
 Execution composition consumes this checked-step interface. The concrete dispatcher proof
 supplies it independently of recursive runs or consumer postconditions.
