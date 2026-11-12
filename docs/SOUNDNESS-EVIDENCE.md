@@ -59,6 +59,11 @@ against the metadata it carries ([Metadata binding](#metadata-binding)):
   belong to a metadata table the opcode accepts. A token has one entry, and a field access names
   a static or instance field as its opcode requires.
 
+Only the kernel decides `BodyDecodes`: the elaborator's `decide` is refused at once with `failed to reduce`,
+and extractions prove it with `cil_body_decodes`, which runs `decide +kernel` and, when the kernel refutes
+it, reports the method and either the error the check raised or the part of the decoded body that differs
+from the emitted definition.
+
 Lean does not establish that the emitted bytes are the method's body in the assembly image;
 System.Reflection.Metadata locates the body in the PE image, and the PE container stays trusted.
 What the tokens, the locals and the method definition mean is checked against the metadata rows

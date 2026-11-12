@@ -137,6 +137,12 @@ workflow.
   `Tests/MetadataDifferential.cs` writes every reference, type specification and method
   specification row of `Examples.dll`, with Cecil's full name for each method reference, and Lean
   must spell the same names from the bytes.
+  Tests/BodyLiteral.lean writes the evidence of one method as literals, proves its body check with
+  the kernel, rejects a changed byte, and requires the elaborator's decide to refuse the check
+  within a small heartbeat budget. Tests/ScalarEvidence.lean does the same for the whole
+  certificate, and reduces the fixture encoder in the elaborator at two method sizes.
+  Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
+  string and field tokens and for 25 and 100 call tokens.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one
