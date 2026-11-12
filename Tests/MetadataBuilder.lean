@@ -45,36 +45,48 @@ def encodeRow (table : Nat) (columns : List Nat) : List Nat :=
   | some widths => (widths.zip columns).flatMap fun (width, value) => littleEndian width value
   | none => []
 
-/-- Add a `#Strings` entry of the given UTF-8 bytes and return its offset. -/
-def Builder.addString (builder : Builder) (text : List Nat) : Builder × Nat :=
-  let bytes := text ++ [0]
-  ({ builder with strings := builder.strings ++ [(builder.stringEnd, bytes)],
-                  stringEnd := builder.stringEnd + bytes.length }, builder.stringEnd)
+/-- Add a `#Strings` entry of the given UTF-8 bytes and return its offset. Each operation takes
+    the builder apart once, so that elaborator reduction reads the previous state once per field
+    instead of once per use. -/
+def Builder.addString : Builder → List Nat → Builder × Nat
+  | ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts, links, corlib⟩,
+    text =>
+    let bytes := text ++ [0]
+    (⟨rows, strings ++ [(stringEnd, bytes)], blobs, userStrings, stringEnd + bytes.length, blobEnd,
+      userEnd, counts, links, corlib⟩, stringEnd)
 
 /-- Add a `#Blob` entry with the length prefix and return its offset. -/
-def Builder.addBlob (builder : Builder) (payload : List Nat) : Builder × Nat :=
-  let bytes := compressedLength payload.length ++ payload
-  ({ builder with blobs := builder.blobs ++ [(builder.blobEnd, bytes)],
-                  blobEnd := builder.blobEnd + bytes.length }, builder.blobEnd)
+def Builder.addBlob : Builder → List Nat → Builder × Nat
+  | ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts, links, corlib⟩,
+    payload =>
+    let bytes := compressedLength payload.length ++ payload
+    (⟨rows, strings, blobs ++ [(blobEnd, bytes)], userStrings, stringEnd, blobEnd + bytes.length,
+      userEnd, counts, links, corlib⟩, blobEnd)
 
 /-- Add a `#US` entry with the length prefix and terminal byte, and return its offset. -/
-def Builder.addUserString (builder : Builder) (units : List Nat) : Builder × Nat :=
-  let payload := units.flatMap (littleEndian 2) ++ [if units.any userStringFlag then 1 else 0]
-  let bytes := compressedLength payload.length ++ payload
-  ({ builder with userStrings := builder.userStrings ++ [(builder.userEnd, bytes)],
-                  userEnd := builder.userEnd + bytes.length }, builder.userEnd)
+def Builder.addUserString : Builder → List Nat → Builder × Nat
+  | ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts, links, corlib⟩,
+    units =>
+    let payload := units.flatMap (littleEndian 2) ++ [if units.any userStringFlag then 1 else 0]
+    let bytes := compressedLength payload.length ++ payload
+    (⟨rows, strings, blobs, userStrings ++ [(userEnd, bytes)], stringEnd, blobEnd,
+      userEnd + bytes.length, counts, links, corlib⟩, userEnd)
 
 /-- Add a row of a table and return its token. -/
-def Builder.addRow (builder : Builder) (table : Nat) (columns : List Nat) : Builder × Nat :=
-  let count := ((builder.counts.lookup table).getD 0) + 1
-  let token := tokenOf table count
-  ({ builder with rows := builder.rows ++ [(token, encodeRow table columns)],
-                  counts := (builder.counts.filter (·.1 != table)) ++ [(table, count)] }, token)
+def Builder.addRow : Builder → Nat → List Nat → Builder × Nat
+  | ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts, links, corlib⟩,
+    table, columns =>
+    let count := ((counts.lookup table).getD 0) + 1
+    let token := tokenOf table count
+    (⟨rows ++ [(token, encodeRow table columns)], strings, blobs, userStrings, stringEnd, blobEnd,
+      userEnd, (counts.filter (·.1 != table)) ++ [(table, count)], links, corlib⟩, token)
 
 /-- Add a link. -/
-def Builder.addLink (builder : Builder) (kind source slice target : Nat) : Builder :=
-  { builder with links := builder.links ++ [⟨kind, source, slice, target⟩] }
-
+def Builder.addLink : Builder → Nat → Nat → Nat → Nat → Builder
+  | ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts, links, corlib⟩,
+    kind, source, slice, target =>
+    ⟨rows, strings, blobs, userStrings, stringEnd, blobEnd, userEnd, counts,
+      links ++ [⟨kind, source, slice, target⟩], corlib⟩
 /-- A builder step, so a world reads as a sequence of additions. -/
 abbrev Step := StateM Builder
 
@@ -131,7 +143,7 @@ def finish (builder : Builder) (name : List Nat) (identity : String) (version : 
     userStrings := builder.userStrings, corlib := builder.corlib, links := builder.links }
 
 /-- The slice that `step` builds, and what it returns. -/
-@[irreducible] def build {α : Type} (step : Step α) (name : List Nat) (identity : String) (version : Nat := 1) :
+def build {α : Type} (step : Step α) (name : List Nat) (identity : String) (version : Nat := 1) :
     MetadataSlice × α :=
   let (value, builder) := step.run {}
   (finish builder name identity version, value)

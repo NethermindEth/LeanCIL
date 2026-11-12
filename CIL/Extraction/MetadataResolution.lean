@@ -131,15 +131,14 @@ def typeRefQualified (env : MetadataEnv) (position : Nat) :
       .ok (scope, nestedName enclosing (← index.string row.name))
     | _ => .error (.unsupportedScope token)
 
-/-- The instance fields of a type before `stop`: the non-static rows from `start`. -/
-def instanceFieldsIn (index : MetadataIndex) : Nat → Nat → Except MetadataError (List Nat)
-  | 0, _ => .ok []
+/-- The first instance field among `count` consecutive `Field` rows from `row`: a scan that
+    stops at the first instance field, which an enum declares before its constants. -/
+def firstInstanceField (index : MetadataIndex) : Nat → Nat → Except MetadataError (Option Nat)
+  | 0, _ => .ok none
   | count + 1, row => do
     let token := tokenOf Table.field row
     let field ← index.field token
-    let rest ← instanceFieldsIn index count (row + 1)
-    .ok (if field.flags / 0x10 % 2 == 1 then rest else token :: rest)
-
+    if field.flags / 0x10 % 2 == 1 then firstInstanceField index count (row + 1) else .ok (some token)
 /-- The first `Field` row after a type's own: the next `TypeDef`'s, or one past the table. -/
 def MetadataIndex.fieldEnd (index : MetadataIndex) (token : Nat) (row : TypeDefRow) :
     Except MetadataError Nat :=
@@ -159,15 +158,15 @@ def MetadataIndex.fieldRange (index : MetadataIndex) (token : Nat) :
 /-- The integer element type of the single instance field of an enum. -/
 def enumUnderlying (index : MetadataIndex) (token : Nat) : Except MetadataError Nat := do
   let (start, stop) ← index.fieldRange token
-  match ← instanceFieldsIn index (stop - start) start with
-  | [field] =>
+  if index.instanceTotal[token]? != some 1 then throw (.unresolvedType token)
+  match ← firstInstanceField index (stop - start) start with
+  | some field =>
     let row ← index.field field
     match ← decodeFieldSig (← index.blob row.signature) with
     | .primitive code =>
       if 0x04 ≤ code && code ≤ 0x0B then .ok code else .error (.unresolvedType token)
     | _ => .error (.unresolvedType token)
-  | _ => .error (.unresolvedType token)
-
+  | none => .error (.unresolvedType token)
 /-- An interface has the interface flag; a type that extends `System.Enum` is an enum with the
     underlying type of its instance field, one that extends `System.ValueType` is a value
     type, and any other type is a class. -/

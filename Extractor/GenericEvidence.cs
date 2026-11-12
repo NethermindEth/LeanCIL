@@ -319,6 +319,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var bytes = body.Bytes;
         var instructions = new InstructionIndex(original);
         var operands = new List<(uint Token, string Key, string Operand)>();
+        var positions = new Dictionary<uint, int>();
         for (var index = 0; index < original.Body.Instructions.Count; index++)
         {
             var instruction = original.Body.Instructions[index];
@@ -332,8 +333,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             // one. The literal spelling names the operand, so two sites share a token only if it agrees.
             var key = Operand(original, instructions, instruction, site, EmptySet);
             var operand = Operand(original, instructions, instruction, site, reachable);
-            var known = operands.FindIndex(entry => entry.Token == token);
-            if (known < 0) operands.Add((token, key, operand));
+            var known = positions.GetValueOrDefault(token, -1);
+            if (known < 0)
+            {
+                positions[token] = operands.Count;
+                operands.Add((token, key, operand));
+            }
             else if (operands[known].Key != key)
                 throw new InvalidDataException($"""
                     Metadata token 0x{token:X8} resolves to two operands in {original.FullName}.

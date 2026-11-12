@@ -157,8 +157,9 @@ Console.WriteLine(FormattableString.Invariant(
 if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
     throw new Exception("Computed lookup cost per case grows with the segment count.");
 
-// Each distinct metadata token of a body adds one row lookup and one decode to the kernel's metadata check, so
-// the cost per token may not grow with the number of tokens. Every literal below is a user string of its own.
+// Each distinct metadata token of a body adds a row lookup and a decode to the kernel's metadata check, so the cost per
+// token may not grow with the number of tokens, whichever table the token names: user strings, instance fields of a
+// class, and methods (whose count also grows the number of methods of the extraction and so the metadata carried).
 const int FewTokens = 125;
 const int ManyTokens = 500;
 var tokenSource = Path.Combine(directory, "TokenAssembly");
@@ -168,28 +169,46 @@ File.WriteAllText(Path.Combine(tokenSource, "Tokens.csproj"), """
   <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
 </Project>
 """);
-string TokenMethod(string name, int count) =>
-    $"public static ulong {name}(ulong x) {{ " +
-    string.Concat(Enumerable.Range(0, count).Select(index => $"Use(\"{name}{index}\"); ")) + "return x; } ";
+string Join(int count, Func<int, string> piece) => string.Concat(Enumerable.Range(0, count).Select(piece));
+string StringMethod(int count, string name) =>
+    $"public static ulong {name}(ulong x) {{ " + Join(count, index => $"Use(\"{name}{index}\"); ") + "return x; } ";
+string FieldMethod(int count, string name) =>
+    $"public static ulong {name}(Wide{count} w) {{ return 0UL" + Join(count, index => $" + w.F{index}") + "; } " +
+    $"public sealed class Wide{count} {{ " + Join(count, index => $"public ulong F{index}; ") + "} ";
+string CallMethod(int count, string name) =>
+    $"public static ulong {name}(ulong x) {{ " + Join(count, index => $"x = {name}{index}(x); ") + "return x; } " +
+    Join(count, index => $"static ulong {name}{index}(ulong x) => x + {index + 1}UL; ");
 File.WriteAllText(Path.Combine(tokenSource, "Tokens.cs"),
     "public static class Tokens { public static void Use(string text) { } " +
-    TokenMethod("Few", FewTokens) + TokenMethod("Many", ManyTokens) + "}");
+    StringMethod(FewTokens, "StringsFew") + StringMethod(ManyTokens, "StringsMany") +
+    FieldMethod(FewTokens, "FieldsFew") + FieldMethod(ManyTokens, "FieldsMany") +
+    CallMethod(FewTokens, "CallsFew") + CallMethod(ManyTokens, "CallsMany") + "}");
 Run(["dotnet", "build", Path.Combine(tokenSource, "Tokens.csproj"), "-c", "Release"]);
 var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
-double TokenCost(string name, int count)
+double TokenCost(string name, string selector, int count, string distinctPattern)
 {
     var output = Path.Combine(directory, "Tokens" + name);
-    Run(Extract("extract", tokenAssembly, "Tokens", $"Tokens::{name}(ulong)", output));
+    Run(Extract("extract", tokenAssembly, "Tokens", selector, output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var distinct = Regex.Matches(extracted, @"\(\d+, \.text ""[^""]*""\)").Count;
+    var distinct = Regex.Matches(extracted, distinctPattern).Count;
     if (distinct < count)
-        throw new InvalidOperationException($"Expected {count} distinct string tokens in {name}; found {distinct}.");
+        throw new InvalidOperationException($"Expected {count} distinct tokens in {name}; found {distinct}.");
     return (double)(Heartbeats(Path.Combine(output, "Measured.lean"), extracted, equations: false) - floor) / count;
 }
-var tokenGrowth = TokenCost("Many", ManyTokens) / TokenCost("Few", FewTokens);
-Console.WriteLine(FormattableString.Invariant(
-    $"PASS metadata check of {FewTokens} and {ManyTokens} distinct tokens: {tokenGrowth:F2} times the cost per token"));
-if (tokenGrowth > AllowedGrowth)
-    throw new Exception(FormattableString.Invariant(
-        $"Checking {ManyTokens} tokens costs {tokenGrowth:F2} times as much per token as {FewTokens}; " +
-        $"the limit is {AllowedGrowth}."));
+foreach (var (kind, few, many, pattern) in new[]
+{
+    ("Strings", "Tokens::StringsFew(ulong)", "Tokens::StringsMany(ulong)", @"\(\d+, \.text ""[^""]*""\)"),
+    ("Fields", $"Tokens::FieldsFew(Tokens/Wide{FewTokens})", $"Tokens::FieldsMany(Tokens/Wide{ManyTokens})",
+        @"\(\d+, \.field "),
+    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", @"\(\d+, \.call ")
+})
+{
+    var tokenGrowth = TokenCost(kind + "Many", many, ManyTokens, pattern) /`n        TokenCost(kind + "Few", few, FewTokens, pattern);
+    Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+        $"PASS metadata check of {FewTokens} and {ManyTokens} distinct {kind.ToLowerInvariant()} tokens: " +
+        $"{tokenGrowth:F2} times the cost per token"));
+    if (tokenGrowth > AllowedGrowth)
+        throw new Exception(string.Create(CultureInfo.InvariantCulture,
+            $"Checking {ManyTokens} {kind.ToLowerInvariant()} tokens costs {tokenGrowth:F2} times as much per token " +
+            $"as {FewTokens}; the limit is {AllowedGrowth}."));
+}

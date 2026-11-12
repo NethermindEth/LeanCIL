@@ -396,14 +396,14 @@ private def decodeHeader : List Nat → Except BodyError (BodyHeader × List Nat
 
 /-- The checked table of a body: every entry is checked against the metadata, and no token has
     two entries. -/
-private def checkTable (env : MetadataEnv) (arity : Nat) :
+private def checkTable (env : MetadataEnv) (frame : Frame) :
     List (Nat × RawOperand) → Std.TreeMap Nat (RawOperand × TokenFacts) →
       Except BodyError (Std.TreeMap Nat (RawOperand × TokenFacts))
   | [], table => .ok table
   | (token, operand) :: rest, table => do
     if table.contains token then throw (.duplicateToken token)
-    let facts ← (checkEntry env arity token operand).mapError BodyError.metadata
-    checkTable env arity rest (table.insert token (operand, facts))
+    let facts ← (checkEntryIn env frame token operand).mapError BodyError.metadata
+    checkTable env frame rest (table.insert token (operand, facts))
 
 /-- The metadata of a body as an environment of indexed slices, its own first. -/
 def MethodMetadata.environment (metadata : MethodMetadata) : Except MetadataError MetadataEnv := do
@@ -420,7 +420,8 @@ def decodeBody (env : MetadataEnv) (arity : Nat) (body : BodyEvidence) :
   let (header, code) ← decodeHeader body.bytes
   if code.length != header.codeSize then
     throw (.codeSizeMismatch header.codeSize code.length)
-  let tokens ← checkTable env arity body.tokens.operands ∅
+  let frame ← (env.frame arity).mapError BodyError.metadata
+  let tokens ← checkTable env frame body.tokens.operands ∅
   let raw ← decodeInstructions tokens code.length 0 code
   let starts := indexStarts raw 0 false ∅
   let instructions ← raw.mapM (resolveBranches starts code.length)

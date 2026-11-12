@@ -883,11 +883,16 @@ set_option maxHeartbeats 20000 in
 #guard_msgs (substring := true) in
 example : MethodEvidenceValid [] #[] [addEvidence] [] addEvidence addMethod := by decide
 
-set_option maxHeartbeats 20000 in
-/-- error: Tactic `decide` failed to reduce -/
-#guard_msgs (substring := true) in
+/-- A method with eight times the parameters and four times the locals of `addRaw`. -/
+private def wideRaw : RawMethod :=
+  { addRaw with parameters := List.replicate 16 word, locals := List.replicate 8 intType }
+
+-- The fixture encoder reduces in the elaborator, within a small budget, at both sizes.
+set_option maxHeartbeats 100000 in
 example : (encodeBody scope addRaw).isSome = true := by decide
 
+set_option maxHeartbeats 100000 in
+example : (encodeBody scope wideRaw).isSome = true := by decide
 example : (encodeBody scope addRaw).isSome = true := by decide +kernel
 example : BodyDecodes scope addEvidence.body addEvidence.original := by decide +kernel
 example : MethodEvidenceValid [] #[] [addEvidence] [] addEvidence addMethod := by decide +kernel

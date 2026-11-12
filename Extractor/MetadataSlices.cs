@@ -30,6 +30,26 @@ internal sealed class MetadataImage
 
     internal int Count(int table) => Reader.GetTableRowCount((TableIndex)table);
 
+    Dictionary<int, uint>? nesting;
+
+    /// <summary>The NestedClass row of a nested type, from a map of the table built on first use.</summary>
+    internal uint? NestedClassRow(int typeRow)
+    {
+        if (nesting is null)
+        {
+            nesting = [];
+            var width = Reader.GetTableRowSize(TableIndex.NestedClass) / 2;
+            for (var row = 1; row <= Count(0x29); row++)
+            {
+                var bytes = Row(0x29000000 + (uint)row);
+                var nested = 0;
+                for (var index = width - 1; index >= 0; index--) nested = nested * 256 + bytes[index];
+                nesting.TryAdd(nested, 0x29000000 + (uint)row);
+            }
+        }
+        return nesting.TryGetValue(typeRow, out var found) ? found : null;
+    }
+
     /// <summary>The bytes of the row a token names.</summary>
     internal byte[] Row(uint token)
     {
@@ -155,6 +175,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         readonly List<(int Kind, uint Source, int Slice, uint Target)> links = [];
         readonly Dictionary<(int Kind, uint Source), (int Slice, uint Target)> linked = [];
         readonly HashSet<uint> visited = [];
+        readonly HashSet<uint> fieldsAdded = [];
+        readonly HashSet<uint> chained = [];
         int corlib;
 
         internal ModuleDefinition Module => module;
@@ -356,19 +378,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Token(TokenOf(enclosing));
         }
 
-        /// <summary>The <c>NestedClass</c> row that names a nested type, found by reading the table.</summary>
-        uint NestedClassRow(uint token)
-        {
-            var width = Reader.GetTableRowSize(TableIndex.NestedClass) / 2;
-            for (var row = 1; row <= image.Count(0x29); row++)
-            {
-                var bytes = image.Row(0x29000000 + (uint)row);
-                var nested = 0;
-                for (var index = width - 1; index >= 0; index--) nested = nested * 256 + bytes[index];
-                if (nested == RowOf(token)) return 0x29000000 + (uint)row;
-            }
+        /// <summary>The <c>NestedClass</c> row that names a nested type.</summary>
+        uint NestedClassRow(uint token) => image.NestedClassRow(RowOf(token)) ??
             throw new InvalidDataException($"No NestedClass row for type 0x{token:X8} in {module.Name}.");
-        }
 
         /// <summary>Every field row of a type, and for an enum the signature of its instance field.</summary>
         void FieldRows(SrmTypeDefinition definition, bool signatures)
@@ -404,6 +416,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
 
         void ClassChain(uint token)
         {
+            if (!chained.Add(token)) return;
             var definition = Reader.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle(RowOf(token)));
             FieldRows(definition, signatures: false);
             Chain(definition);
@@ -419,8 +432,11 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             var declaring = field.GetDeclaringType();
             Declared(token, declaring);
             var owner = Reader.GetTypeDefinition(declaring);
-            FieldRows(owner, signatures: false);
-            if (IsClass(owner)) Chain(owner);
+            if (fieldsAdded.Add(TokenOf(declaring)))
+            {
+                FieldRows(owner, signatures: false);
+                if (IsClass(owner)) Chain(owner);
+            }
         }
 
         void MethodDef(uint token)
@@ -490,8 +506,11 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             var owner = Reader.GetTypeDefinition(method.GetDeclaringType());
             GenericRun(TokenOf(method.GetDeclaringType()), owner.GetGenericParameters());
             if (!classOwner) return;
-            FieldRows(owner, signatures: false);
-            Chain(owner);
+            if (fieldsAdded.Add(TokenOf(method.GetDeclaringType())))
+            {
+                FieldRows(owner, signatures: false);
+                Chain(owner);
+            }
         }
 
         /// <summary>The generic parameter rows of an owner, the rows around them and the link to the first.</summary>

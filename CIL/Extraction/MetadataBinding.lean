@@ -183,22 +183,20 @@ def MetadataEnv.chainFieldCount (env : MetadataEnv) : List (Nat × Nat) → Exce
   | [] => .ok 0
   | (position, token) :: rest => do
     let index ← env.slice position token
-    let (start, stop) ← index.fieldRange token
-    let own ← instanceFieldsIn index (stop - start) start
-    .ok (own.length + (← env.chainFieldCount rest))
+    let some own := index.instanceTotal[token]? | throw (.missingRow token)
+    .ok (own + (← env.chainFieldCount rest))
 
 /-- The model index of an instance field: counting the fields of the bases of a class first,
     then the instance fields of the owner before the field. -/
 def MetadataEnv.instanceIndex (env : MetadataEnv) (position field : Nat) (classOwner : Bool) :
     Except MetadataError Nat := do
   let index ← env.slice position field
-  let owner ← env.declaringType position field
-  let (start, _) ← index.fieldRange owner
-  let before ← instanceFieldsIn index (tokenRow field - start) start
+  let some before := index.instanceBefore[field]? | throw (.unresolvedMember field)
   if classOwner then
+    let owner ← env.declaringType position field
     let inherited ← env.chainFieldCount (← env.classChain resolveFuel position owner)
-    .ok (inherited + before.length)
-  else .ok before.length
+    .ok (inherited + before)
+  else .ok before
 
 /-- The index a field operand must carry, and the type it must hold. -/
 def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSite)
@@ -401,10 +399,10 @@ def checkIndirectOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (resu
     throw (.operandMismatch token)
   .ok {}
 
-/-- Check one token-table entry: what the token names must be what the operand says. -/
-def checkEntry (env : MetadataEnv) (arity : Nat) (token : Nat) (operand : RawOperand) :
+/-- Check one token-table entry, read in a frame built once for the method: what the token names
+    must be what the operand says. -/
+def checkEntryIn (env : MetadataEnv) (frame : Frame) (token : Nat) (operand : RawOperand) :
     Except MetadataError TokenFacts := do
-  let frame ← env.frame arity
   match operand with
   | .type expr =>
     if metadataTableOf token == Table.typeRef || metadataTableOf token == Table.typeDef ||
@@ -420,6 +418,11 @@ def checkEntry (env : MetadataEnv) (arity : Nat) (token : Nat) (operand : RawOpe
     let index ← env.slice 0 token
     if (← userStringMatches index token text) then .ok {} else .error (.operandMismatch token)
   | _ => .error (.operandMismatch token)
+
+/-- Check one token-table entry of a method with rity generic parameters. -/
+def checkEntry (env : MetadataEnv) (arity : Nat) (token : Nat) (operand : RawOperand) :
+    Except MetadataError TokenFacts := do
+  checkEntryIn env (← env.frame arity) token operand
 
 /-- The facts that depend on the opcode using a token: a static field access names a static
     field, an instance access an instance field, and `ldtoken` of a field takes the static form. -/
@@ -531,10 +534,9 @@ def methodIdentityValid (env : MetadataEnv) (pin : AssemblyPin) (method : RawMet
   if method.objectReceiver then
     if !method.hasThis || owner.kind != .classType then throw (.methodMismatch method.token)
     let chain ← env.classChain resolveFuel 0 ownerToken
-    let (start, stop) ← index.fieldRange ownerToken
-    let own ← instanceFieldsIn index (stop - start) start
+    let some own := index.instanceTotal[ownerToken]? | throw (.missingRow ownerToken)
     let bases ← chain.mapM fun (position, token) => typeDefNamed env position resolveFuel token
-    if method.objectFieldCount != (← env.chainFieldCount chain) + own.length ||
+    if method.objectFieldCount != (← env.chainFieldCount chain) + own ||
         method.objectBases.length != bases.length ||
         !(bases.zip method.objectBases).all (fun (base, claimed) => baseAgrees base claimed) then
       throw (.methodMismatch method.token)

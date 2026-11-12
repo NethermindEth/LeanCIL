@@ -429,6 +429,10 @@ structure MetadataIndex where
   identity : List Nat
   /-- Links keyed by `kind * 2 ^ 32 + source`, giving the slice index and target token. -/
   links : Std.TreeMap Nat (Nat × Nat) compare
+  /-- For each Field row of a carried type, the instance fields before it in its type. -/
+  instanceBefore : Std.TreeMap Nat Nat compare := ∅
+  /-- For each carried TypeDef whose fields are all carried, its number of instance fields. -/
+  instanceTotal : Std.TreeMap Nat Nat compare := ∅
 
 /-- Insert entries into a map, refusing duplicate keys and values that are not bytes. -/
 private def insertEntries : List ByteEntry → Std.TreeMap Nat (List Nat) compare →
@@ -731,6 +735,50 @@ def AssemblyMetadata.spelling (assembly : AssemblyMetadata) :
   .ok (assemblySpelling (← stringBytes strings name) major minor build revision
     (← stringBytes strings culture) spelled)
 
+/-- The running instance field count before each of `count` consecutive `Field` rows from `row`,
+    with the total, or `none` when a row is not carried. A field is static when bit 4 of the
+    first flag byte is set. -/
+private def fieldCounts (index : MetadataIndex) :
+    Nat → Nat → Nat → List (Nat × Nat) → Option (List (Nat × Nat) × Nat)
+  | 0, _, instances, found => some (found, instances)
+  | count + 1, row, instances, found =>
+    match index.rows[tokenOf Table.field row]? with
+    | none => none
+    | some bytes =>
+      let isStatic := bytes.getD 0 0 / 0x10 % 2 == 1
+      fieldCounts index count (row + 1) (if isStatic then instances else instances + 1)
+        ((tokenOf Table.field row, instances) :: found)
+
+/-- Add the instance field counts of one carried type, when all its fields and the start of the
+    next type's fields are carried; a type without them contributes nothing. -/
+private def addTypeCounts (index : MetadataIndex) (token : Nat) (counts : MetadataIndex) :
+    MetadataIndex :=
+  match index.typeDef token with
+  | .error _ => counts
+  | .ok row =>
+    let stop :=
+      if tokenRow token == index.header.rows Table.typeDef then
+        some (index.header.rows Table.field + 1)
+      else (match index.typeDef (token + 1) with
+        | .ok next => some next.fieldList
+        | .error _ => none)
+    match stop with
+    | none => counts
+    | some stop =>
+      match fieldCounts index (stop - row.fieldList) row.fieldList 0 [] with
+      | none => counts
+      | some (found, total) =>
+        { counts with
+          instanceBefore := found.foldl (fun map (field, before) => map.insert field before)
+            counts.instanceBefore,
+          instanceTotal := counts.instanceTotal.insert token total }
+
+/-- The index with the instance field counts of every carried type, built once so that a field
+    operand costs a lookup rather than a scan of its type's fields. -/
+private def MetadataIndex.withFieldCounts (index : MetadataIndex) : MetadataIndex :=
+  index.rows.foldl (fun counts token _ =>
+    if metadataTableOf token == Table.typeDef then addTypeCounts index token counts
+    else counts) index
 /-- Insert links into a map keyed by kind and source, refusing a second link for one key. -/
 private def indexLinks : List MetadataLink → Std.TreeMap Nat (Nat × Nat) compare →
     Except MetadataError (Std.TreeMap Nat (Nat × Nat) compare)
@@ -751,8 +799,8 @@ def MetadataSlice.index (slice : MetadataSlice) : Except MetadataError MetadataI
   let blobs ← indexEntries slice.blobs
   let userStrings ← indexEntries slice.userStrings
   let links ← indexLinks slice.links ∅
-  .ok { header := header, rows := rows, strings := strings, blobs := blobs,
-        userStrings := userStrings, corlib := slice.corlib, identity := identity,
-        links := links }
+  .ok (MetadataIndex.withFieldCounts
+    { header := header, rows := rows, strings := strings, blobs := blobs,
+      userStrings := userStrings, corlib := slice.corlib, identity := identity, links := links })
 
 end CIL.Extraction
