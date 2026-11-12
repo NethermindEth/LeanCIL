@@ -130,7 +130,8 @@ internal static class VerificationSuites
             "lookup equations of extracted methods, hand-written bodies and templates at a per-instruction " +
             "cost that does not grow with the method"),
         new("gates", "Tests/ProofGates.cs",
-            "manifest extraction, profiles, changed-source selection and mutation expectations"),
+            "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
+            "witness refutations, kernel statement comparison, changed-source selection and mutation expectations"),
         new("stepping", "Tests/SteppingScaling.cs",
             "scalar and checked-memory stepping with per-instruction work, proof-size and latency budgets"),
         new("assemblies", "Tests/MultiAssembly.cs",

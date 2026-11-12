@@ -2335,9 +2335,36 @@ partial class Program : IDisposable
     static readonly string[] ApprovedAxioms = ["propext", "Quot.sound", "Classical.choice"];
 
     sealed record AuditRequest(string name, object? type = null, string[]? axioms = null,
-        bool statement = false, bool refutation = false, string[]? allowedModules = null);
+        bool statement = false, bool refutation = false, string[]? allowedModules = null, bool term = false,
+        object? expected = null);
     sealed record AuditRefutation(string contract, int line, int column);
-    sealed record AuditedTheorem(string name, string? error, string[]? axioms, string? statement, AuditRefutation? refutes);
+    sealed record AuditedTheorem(string name, string? error, string[]? axioms, string? statement,
+        AuditRefutation? refutes,
+        JsonElement? term = null, string? termError = null, bool? matches = null, string? mismatch = null);
+
+    /// <summary>
+    /// What a gate asks of a verified theorem's statement: its <c>term</c>, to compare other statements with, or
+    /// that the kernel accept the theorem at <c>Expected</c>, the term of another theorem, or at its negation.
+    /// </summary>
+    sealed record StatementRequest(bool Term, string? Expected = null, bool Negated = false)
+    {
+        /// <summary>The audit request fields, with <c>Expected</c> as the JSON the audit decodes.</summary>
+        internal AuditRequest Apply(AuditRequest audit) => audit with
+        {
+            term = Term,
+            expected = Expected is null ? null
+                : new { term = JsonDocument.Parse(Expected).RootElement, negated = Negated }
+        };
+    }
+
+    /// <summary>
+    /// The statement of a verified theorem as another audit decodes it (<c>term</c>, or <c>termError</c> saying why
+    /// there is none), and whether the kernel accepted the theorem at the statement it was compared with.
+    /// </summary>
+    sealed record StatementIdentity(JsonElement? term, string? termError, bool? matches, string? mismatch);
+
+    static StatementIdentity Identity(AuditedTheorem audited) =>
+        new(audited.term, audited.termError, audited.matches, audited.mismatch);
     sealed record AuditConstantRequest(string name, object value, object? type = null, string[]? axioms = null);
     sealed record AuditedInterfaces(string? error);
     sealed record AuditedClosure(string name, string? error, string? kind, string? canonical);
@@ -3108,7 +3135,8 @@ partial class Program : IDisposable
         string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
         DeploymentDependency[]? contractDependencies = null, string? compositionTheorem = null, string? compositionAudit = null,
         JsonElement[]? initializationAssumptions = null, string[]? opaqueStaticValues = null,
-        StatementDefinition[]? specification = null, string[]? libraryModules = null);
+        StatementDefinition[]? specification = null, string[]? libraryModules = null,
+        StatementIdentity? statementIdentity = null);
 
     static JsonElement[] InitializationAssumptions(JsonElement extraction) =>
         extraction.TryGetProperty("initializationAssumptions", out var assumptions)

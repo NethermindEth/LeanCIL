@@ -77,6 +77,13 @@ internal static class CliDiagnostics
             "open goals" => "Prove each goal listed below in place of its `sorry` or failing tactic, then rerun.",
             "proof outline" => "Write this proof by hand from a similar example, or report the shape as an issue.",
             "library audit" => "Address the kernel replay or axiom diagnostic for the listed theorems, or correct the namespace prefixes.",
+            "build" => "Read the build output, then fix the project or its build properties in the manifest.",
+            "extraction" => "Run leancil extract on the built assembly, method and profile to see why.",
+            "program comparison" => "Fix the fixture case, or the variant's program if the change is intended.",
+            "refutation template" or "proof template" =>
+                "Give every template placeholder a value and every value a placeholder.",
+            "statement identity" => "State the variant's theorem as production's statement, or its refutation as " +
+                "that statement's negation; name only declarations both proofs import.",
             _ => "Check the diagnostic and the input paths, then retry."
         };
 

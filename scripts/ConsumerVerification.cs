@@ -580,6 +580,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return path;
     }
 
+    /// <summary>A directory name whose contents are never consumer sources, such as build outputs.</summary>
+    static bool ExcludedConsumerDirectory(string name) =>
+        name is ".git" or ".lake" or "artifacts" or "generated" or "bin" or "obj" or ".work";
+
     static IEnumerable<string> ConsumerSources(string root, string? excludedDirectory = null)
     {
         if (excludedDirectory is not null && Path.GetFullPath(root) == Path.GetFullPath(excludedDirectory)) yield break;
@@ -589,7 +593,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidDataException("Consumer sources must not contain symbolic links: " + path);
             if (Directory.Exists(path))
             {
-                if (Path.GetFileName(path) is ".git" or ".lake" or "artifacts" or "generated" or "bin" or "obj" or ".work") continue;
+                if (ExcludedConsumerDirectory(Path.GetFileName(path))) continue;
                 foreach (var source in ConsumerSources(path, excludedDirectory)) yield return source;
             }
             else if (Path.GetExtension(path) is ".lean" or ".toml" or ".json" || Path.GetFileName(path) == "lean-toolchain")
@@ -1339,7 +1343,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         string[]? Closures = null);
 
     sealed record ConsumerRequest(string Assembly, string Output, string Proof, string Theorem, string? Settings,
-        bool ExpectRejection = false, ConsumerExportAudit? ExportAudit = null);
+        bool ExpectRejection = false, ConsumerExportAudit? ExportAudit = null, StatementRequest? Statement = null);
 
     sealed class ConsumerOutcome
     {
@@ -1606,7 +1610,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 // A result cached without a statement view must not satisfy a run that prints one.
                 proofKeys[i] = ConsumerCacheKey("proof", before[i], SemanticExtractionIdentity(extractions[i]) + "\n" + requests[i].Theorem + "\n" + Sha(requests[i].Assembly) +
                     (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : "") +
-                    ProofOptionsKey);
+                    ProofOptionsKey +
+                    (requests[i].Statement is { } statement ? "\nstatement " + JsonSerializer.Serialize(statement) : ""));
                 if (checkOnly || requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
@@ -2125,9 +2130,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 module.Name.StartsWith("CIL.", StringComparison.Ordinal) || replayedNames.Contains(module.Name));
             string[] AuditModules(int index) => [requestModules[index], "Extracted",
                 .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()];
+            AuditRequest Statemented(int index, AuditRequest audit) =>
+                requests[index].Statement?.Apply(audit) ?? audit;
             AuditRequest ScopedProof(int index)
             {
-                var audit = ProofTheorem(requests[index].Theorem, extractions[index]);
+                var audit = Statemented(index, ProofTheorem(requests[index].Theorem, extractions[index]));
                 // Another proof's declarations must not satisfy this request's missing theorem.
                 return members.Length == 1 ? audit : audit with
                 {
@@ -2240,7 +2247,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     string[] auditModules = [module, "Extracted",
                         .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
                     AuditRequest[] proofAudits = requests[i].ExportAudit?.Theorems ??
-                        [ProofTheorem(requests[i].Theorem, extractions[i])];
+                        [Statemented(i, ProofTheorem(requests[i].Theorem, extractions[i]))];
                     var audited = combinedAudits?.GetValueOrDefault(i) ?? AuditOleans(leanPath, auditModules,
                         [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")], ImportPremise(extractions[i]),
                         closures: requests[i].ExportAudit?.Closures);
@@ -2353,7 +2360,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     imports: fullResult?.Imports ?? PublishedImports(extraction),
                     contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction),
                     compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
-                    initializationAssumptions: InitializationAssumptions(extraction));
+                    initializationAssumptions: InitializationAssumptions(extraction),
+                    statementIdentity: requests[i].Statement is null ? null : Identity(audits[i].Result.theorems[0]));
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));

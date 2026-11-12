@@ -25,66 +25,210 @@ leancil gates manifest.json [--method name] [--profile name] [--changed path]...
     [--format text|json]
 ```
 
-`leancil gates` extracts every entry of an explicit catalog, then verifies them as one
-[batch](#batch-verification). Assembly, `proofRoot`, `outputRoot` and custom `@profile.json`
-paths are relative to the manifest; proof paths are relative to `proofRoot`. Each profile gets
+`leancil gates` builds, extracts and verifies an explicit catalog of methods, their proofs and
+regression variants in one run. It verifies production and the variants not compared with it as
+one [batch](#batch-verification), then the variants whose statements are compared with production's
+as a second batch.
+Assembly, project, `proofRoot`, `outputRoot` and custom `@profile.json` paths are relative to the
+manifest; proof and template paths are relative to `proofRoot`. Each profile of each variant gets
 its own extraction and result in `<outputRoot>/<gate name>/<profile hash>/<variant name>`, where
-the gate's own assembly is the variant `production`. The generated batch manifest is
-`<outputRoot>/requests.json`.
+the gate's own assembly is the variant `production`. `<outputRoot>/requests.json` lists the
+requests of both batches; the statement each compared request is checked at is not part of it.
 
 ```json
 {
   "schema": 1,
   "proofRoot": "verification",
   "outputRoot": "artifacts/gates",
+  "generatedRoot": "Generated",
+  "templates": {
+    "witness": { "path": "Refutation.lean.in", "values": { "LEFT": "1", "RIGHT": "1" } }
+  },
+  "profiles": { "server": "@profiles/server.json" },
+  "projects": {
+    "fixture": {
+      "path": "fixtures/Arithmetic.csproj",
+      "assembly": "Arithmetic.dll",
+      "properties": { "Configuration": "Release", "FixtureCase": "Production" }
+    }
+  },
   "gates": [{
     "name": "add",
-    "assembly": "bin/Arithmetic.dll",
+    "build": { "project": "fixture" },
     "method": "Arithmetic::Add(ulong,ulong)",
-    "profiles": ["scalar", "x64-v3"],
+    "profiles": ["scalar", "x64-v3", "server"],
     "proof": "Add.lean",
     "theorem": "Add.correctness",
     "variants": [{
       "name": "commuted",
-      "assembly": "variants/Commuted.dll",
-      "expect": "certifies"
+      "build": { "project": "fixture", "properties": { "FixtureCase": "Commuted" } },
+      "expect": "certifies",
+      "program": "different",
+      "proof": "Commuted.lean",
+      "theorem": "Commuted.correctness"
     }, {
-      "name": "wrong-operation",
-      "assembly": "variants/Wrong.dll",
-      "expect": "rejected"
+      "name": "wrong-carry",
+      "build": { "project": "fixture", "properties": { "FixtureCase": "WrongCarry" } },
+      "profiles": ["scalar"],
+      "expect": "rejected",
+      "program": "different",
+      "refutation": {
+        "template": "witness",
+        "theorem": "Witness.refuted",
+        "values": { "RIGHT": "2" }
+      }
+    }, {
+      "name": "vector-only",
+      "build": { "project": "fixture", "properties": { "FixtureCase": "VectorOnly" } },
+      "profiles": ["scalar"],
+      "expect": "unchanged",
+      "program": "same"
     }]
   }]
 }
 ```
 
-Gate and variant names use letters, digits, `_`, `.` and `-` and must be unique ignoring case. A
-variant cannot be named `production`, and `profiles` must not repeat a profile. Unknown manifest
-properties are rejected. A gate may also give `initializedTypes` and `typeArguments`, with the
-meaning of the `extract` options `--assume-initialized` and `--type-argument`.
+Gate, variant and project names use letters, digits, `_`, `.` and `-`; gate and variant names
+must be unique ignoring case. A variant cannot be named `production`, and `profiles` must not
+repeat a profile. Unknown manifest properties are rejected. A gate may also give
+`initializedTypes` and `typeArguments`, with the meaning of the `extract` options
+`--assume-initialized` and `--type-argument`.
 
-Each variant applies the unchanged production proof to the variant assembly:
+| Key | Meaning |
+| --- | --- |
+| `assembly` or `build` | Exactly one per gate and variant: a built assembly, or a project of `projects` to build. |
+| `projects.<name>` | The project's `path`, the file name of the `assembly` it builds and default build `properties`. |
+| `build.properties` | Build properties that replace the project's defaults of the same name. |
+| `variants[].profiles` | A nonempty subset of the gate's profiles; the default is all of them. |
+| `variants[].expect` | `certifies`, `rejected` or `unchanged`; see the table of verdicts below. |
+| `variants[].proof`, `variants[].theorem` | Given together, they replace the gate's proof and theorem for the variant. `proof` is a path, or a `template` and optional `values` as for a refutation. |
+| `variants[].statement` | `independent` lets a `certifies` variant verify a theorem other than production's statement, such as one that accepts a witness. It is never the default. |
+| `variants[].initializedTypes` | Replaces the gate's list. |
+| `variants[].program` | `same`, `renamed` or `different`: how the variant's program must relate to production's. Required with `unchanged` or `programOf`. |
+| `variants[].programOf` | Another variant of the gate whose extraction `program` compares with instead of production's. It must run under the same profiles. |
+| `variants[].refutation` | Required when `expect` is `rejected`: a `theorem`, and a `proof` or a `template` with optional `values`. |
+| `templates.<name>` | A template's `path` and default `values`; a use that names it merges its own `values` over these. |
+| `profiles.<name>` | An `@file` execution profile, relative to the manifest, that gates and variants name by `<name>`. |
+| `generatedRoot` | Required with any template: the directory under `proofRoot` that receives instantiated proofs. |
+
+`gates` builds each distinct project and property set once with `dotnet build`, into
+`<outputRoot>/builds/<key>/`. It sets `BaseOutputPath`, `OutputPath` and `OutDir` to that
+directory's `bin/`, and `BaseIntermediateOutputPath`, `IntermediateOutputPath` and
+`MSBuildProjectExtensionsPath` under its `obj/`, as global properties that a
+`Directory.Build.props` cannot override, and uses the project's `assembly` from `bin/`. Property
+names are MSBuild identifiers other than those paths, and values hold no `;`, `,`, `%` or quote.
+Global properties also reach referenced projects, so a project built this way should not
+reference other projects, and a multi-targeted project should select one framework with a
+`TargetFramework` property. A build failure fails every variant that uses it; the other variants
+still run. The build runs the consumer's project, which is executable code like its Lake package.
+
+A named profile is a custom profile file that results, generated paths and `--profile` call by its
+name, while extraction reads the file. The name must not be a built-in profile name, retired ones
+included.
+
+`program` compares the method bodies of the variant's `Extracted.lean` with those of production's
+extraction, or of the `programOf` variant's, for the same gate and profile: `same` when the bodies
+and the method signatures are equal, `renamed` when only the signatures differ, `different`
+otherwise. Assembly identities, digests, paths and metadata tokens are ignored. A comparison that
+does not hold fails the variant at stage `program comparison`, and its proof is not checked.
+
+A template is a text file under `proofRoot`, or the name of a `templates` entry, whose `values`
+the use's own `values` replace name by name. A `template` string that names an entry refers to
+the entry, otherwise to a file. `gates` replaces each `@NAME@` in the text with `values.NAME`,
+which may be empty or span lines, and changes nothing else; a placeholder without a value, or a
+value no placeholder uses, fails the variant at stage `refutation template` or `proof template`.
+Before any proof request is built or any source is hashed, it writes the result with LF endings
+to `<proofRoot>/<generatedRoot>/<gate>/<profile>/<variant>/Refutation.lean` or `Proof.lean`, so
+the instantiated text is a consumer source like any other. A profile file given directly as
+`@file` is named by a hash of its path there. The tool writes and deletes only those exact files,
+refuses to write through a link, and rejects a `generatedRoot`, gate, profile or variant directory
+that verification excludes (see [limits](#limits)). A generated proof is verified like any other
+proof.
+
+```text
+import Extracted
+import CIL.Safety.MethodContract
+open CIL.Safety
+theorem Witness.refuted : ¬ ∀ (left right : CIL.W64) (memory : Memory),
+    ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
+      memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
+  intro holds
+  obtain ⟨fuel, ran⟩ := holds @LEFT@ @RIGHT@ Memory.empty
+  have returned := congrArg Prod.snd (invoke_ok_unique ran (rfl : invoke Extracted.program 16 0
+    [.scalar (.i64 @LEFT@), .scalar (.i64 @RIGHT@)] Memory.empty = .ok _))
+  revert returned
+  decide
+```
+
+A variant passes as follows:
 
 | `expect` | Passes when |
 | --- | --- |
-| `certifies` | The proof verifies against the variant, as for the production assembly. |
-| `rejected` | The proof is rejected; no `verified.json` is left. A variant that verifies fails. |
+| `certifies` | Its proof verifies against its extraction, as for production, at production's statement unless `statement` is `independent`. |
+| `rejected` | Its refutation verifies against its extraction, with the same kernel replay and axiom audit as any theorem, at the negation of production's statement, and its proof fails at proof checking. |
+| `unchanged` | Its program comparison holds. No proof is requested. |
+
+A build, extraction, program comparison or template failure, a missing proof, and a proof whose
+check printed an internal error each fail the variant; none counts as a rejection. A `rejected`
+variant's refutation and proof are requests on the same output, the proof last, so the output
+keeps no `verified.json`: neither the proof's, which was rejected, nor the refutation's, whose
+outcome is recorded in the results.
+
+Production's theorem audit reports its statement `T` as a term in which each constant carries
+the module that declares it, and a definition or theorem of production's own proof file is
+replaced by its value. Production verifies first; the variants compared with it verify in a
+second batch, where the theorem audit decodes `T` in the variant's replayed environment and the
+kernel checks the variant's theorem, or its refutation, at `T` or `¬ T`. The check is
+structural first and then definitional, so a variant may state `T` through definitions, such as
+`Extracted.entryIndex` for `0`, that unfold to the same term. A constant of `T` that the variant's
+environment lacks, or declares in another module, fails the check, and so does a check that
+exceeds 200000 heartbeats. Name a definition the statements share from a module both proofs
+import; a structure or inductive type declared in production's own proof file cannot be
+compared. A failed comparison fails the variant at stage `statement identity`, removes a
+certifying variant's `verified.json`, and the result shows both statements. When production does
+not verify, its variants' statements are `unavailable` and they fail at that stage. `--check`
+audits no statement, so it compares none. `verified.json` records production's term, and a
+certifying variant's comparison, as `statementIdentity`.
 
 | Option | Meaning |
 | --- | --- |
 | `--method name` | Select gates whose `method` contains this substring. |
 | `--profile name` | Select one exact profile name. |
-| `--changed path` | Select gates affected by a changed file; repeatable, relative to the working directory. |
+| `--changed path` | Select variants affected by a changed file; repeatable, relative to the working directory. |
 | `--check` | [Compile only](#check-compilation); an error when a selected variant expects `rejected`. |
-| `--fresh`, `--rebuild-library`, `--trace`, `--parallel`, `--results`, `--format` | As for [`verify-batch`](#batch-verification). |
+| `--fresh`, `--rebuild-library`, `--trace`, `--parallel` | As for [`verify-batch`](#batch-verification). |
+| `--results results.json` | Write one result per variant and profile, in manifest order. |
+| `--format json` | Print one JSON document instead of the text lines. |
 
-Selection makes no verification claim about omitted gates, and a selection that matches nothing
-is an error. `--changed` selects by file kind:
+Each result has the [batch](#batch-verification) fields of the variant's proof (`output`,
+`proof`, `theorem`, `expect`, `status`, `stage`, `error`, `axioms`, `libraryBuild`, `failure`,
+`elapsedSeconds`), where `status` is the variant's verdict, and `gate`, `profile`, `variant`,
+`build` (`built`, `failed` or `null` for a given assembly), `extraction` (`extracted` or
+`failed`), `program` (`passed`, `failed` or `null`), `refutation` and `statement`. `refutation`
+is `null` or the refutation's `proof`, `theorem`, `status`, `stage`, `error` and `axioms`.
+`statement` is `null` for production, an `unchanged` variant or a variant whose own leg did not
+verify, and otherwise holds `status` (`same`, `different`, `unavailable` or `independent`) and
+the `production` and `variant` statements as the theorem audits print them. When a variant fails
+before its proof is checked, `stage` and `error` name that step. An `unchanged` variant's
+`status` is `unchanged` and its `proof` and `theorem` are the gate's, unchecked. The JSON
+document has `schema`, `passed` and `failed` counted over these results, `variants` holding them,
+and `requests` as `verify-batch --format json` prints them. The exit code is `0` only when every variant passed.
 
-- A `.lean` file selects the proofs whose import closure includes it.
-- A `.cs` file selects the gates whose extracted reachable methods have PDB sequence points in
-  it. A gate without debug information, or with referenced assemblies, is selected.
-- An assembly selects the gates extracted from it.
+Selection makes no verification claim about omitted variants, and a selection that matches
+nothing is an error. `--changed` selects by file kind:
+
+- A `.lean` file selects the variants whose proof or refutation imports it, directly or not.
+- A template selects the variants instantiated from it, a profile file the variants extracted
+  with it, and the manifest selects every variant.
+- A file under a project's directory selects every variant built from that project.
+- A `.cs` file selects the variants whose extracted reachable methods have PDB sequence points
+  in it. A variant without debug information, or with referenced assemblies, is selected.
+- An assembly selects the variants extracted from it.
 - A `.csproj`, `.props` or `.targets` file selects every candidate.
+
+A variant whose program is compared still extracts the variant it compares with, and a variant
+whose statement is compared still verifies production for that gate and profile, whether or not
+those are selected.
 
 ## Check compilation
 
@@ -578,7 +722,8 @@ These limits apply wherever a command reads a consumer package: `verify --proof-
 - Build/artifact directories (`.lake`, `.git`, `artifacts`, `generated`, `bin`, `obj`, `.work`)
   are excluded, and `verify --proof-root` also excludes the selected extraction output directory.
   `verify-batch` and `gates` exclude no output directory, so keep each output under an excluded
-  directory or outside the package. Place handwritten proofs outside them.
+  directory or outside the package. Place handwritten proofs outside them, and keep the
+  `generatedRoot` of `gates` outside them too, since its generated proofs must be consumer sources.
 - `Extracted.lean` is reserved for the selected artifact; do not keep another copy among
   consumer sources.
 - Lake configuration and Lean elaborators are executable code, so run these commands only on

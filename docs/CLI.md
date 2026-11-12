@@ -12,7 +12,7 @@ modes. For one complete verification, read the [getting-started guide](GETTING-S
 | `leancil new-proof` | Write a starting proof with marked holes | [Start a proof](#start-a-proof) |
 | `leancil verify` | Check, kernel-replay and audit one theorem | [Verify](#verify) |
 | `leancil verify-batch` | Verify many requests in one session | [Batch verification](CONSUMERS.md#batch-verification) |
-| `leancil gates` | Extract and verify a catalog of methods, profiles and proofs | [Run a proof catalog](CONSUMERS.md#run-a-proof-catalog) |
+| `leancil gates` | Build, extract and verify a catalog of methods, profiles, proofs and regression variants | [Run a proof catalog](CONSUMERS.md#run-a-proof-catalog) |
 | `leancil workspace` | Generate a method's extraction into a Lake package for editor goals | [Editor workspace](#editor-workspace) |
 | `leancil watch` | Rebuild, re-extract and verify on change | [Watch](CONSUMERS.md#watch) |
 | `leancil export-contracts` | Publish verified contracts as a sidecar | [Export contracts](#export-contracts) |
