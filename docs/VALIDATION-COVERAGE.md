@@ -124,7 +124,19 @@ workflow.
   switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
   body separately with its specific error, and compares the operand table with a static list
   generated once from the opcodes of Mono.Cecil.
-  `Tests/BodyEncoding.lean` writes bytes for the hand-built methods of other Lean fixtures.
+  `Tests/BodyEncoding.lean` writes bytes and the metadata slice for the hand-built methods of
+  other Lean fixtures.
+  `Tests/MetadataDecoding.lean` decodes rows, headers, heap entries, signature blobs and
+  assembly names copied from `Examples.dll` (two-byte columns) and from the runtime's
+  `System.Private.CoreLib.dll` (four-byte columns) and compares them with the values
+  System.Reflection.Metadata and Mono.Cecil read from the same positions, and rejects malformed
+  rows, headers, heaps and signatures with their specific errors.
+  `Tests/MetadataBinding.lean` checks every operand form, the locals and a method definition
+  against a hand-built pair of pinned assemblies, and changes one row byte, blob byte, heap
+  offset, scope, instantiation, field index, local or link at a time, each with its exact error.
+  `Tests/MetadataDifferential.cs` writes every reference, type specification and method
+  specification row of `Examples.dll`, with Cecil's full name for each method reference, and Lean
+  must spell the same names from the bytes.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one

@@ -193,18 +193,27 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             links.Add((kind, source, slice, target));
         }
 
-        /// <summary>The tokens a signature blob names, in the signature's order.</summary>
-        sealed class TokenCollector : ISignatureTypeProvider<int, object?>
+        /// <summary>
+        /// The tokens a signature blob names, in the signature's order. A form the Lean checker has no place for
+        /// stops the extraction with its name: a general array, a typed reference, a pinned local, a function
+        /// pointer in a member reference and a custom modifier other than the two Roslyn writes on `in` parameters
+        /// and `init` accessors.
+        /// </summary>
+        sealed class TokenCollector(MetadataReader reader, bool member) : ISignatureTypeProvider<int, object?>
         {
             internal readonly List<uint> Tokens = [];
 
             int Named(EntityHandle handle)
             {
                 Tokens.Add(TokenOf(handle));
-                return 0;
+                return (int)TokenOf(handle);
             }
 
-            public int GetPrimitiveType(PrimitiveTypeCode typeCode) => 0;
+            static InvalidDataException Unsupported(string form) =>
+                new($"Unsupported metadata signature: {form}. The metadata binding check reads neither this form nor its identity.");
+
+            public int GetPrimitiveType(PrimitiveTypeCode typeCode) =>
+                typeCode == PrimitiveTypeCode.TypedReference ? throw Unsupported("typed reference") : 0;
             public int GetTypeFromDefinition(MetadataReader reader, TypeDefinitionHandle handle,
                 byte rawTypeKind) => Named(handle);
             public int GetTypeFromReference(MetadataReader reader, TypeReferenceHandle handle,
@@ -212,24 +221,34 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             public int GetTypeFromSpecification(MetadataReader reader, object? context,
                 TypeSpecificationHandle handle, byte rawTypeKind) => Named(handle);
             public int GetSZArrayType(int elementType) => 0;
-            public int GetArrayType(int elementType, ArrayShape shape) => 0;
+            public int GetArrayType(int elementType, ArrayShape shape) => throw Unsupported("general array");
             public int GetByReferenceType(int elementType) => 0;
             public int GetPointerType(int elementType) => 0;
             public int GetGenericInstantiation(int genericType, ImmutableArray<int> typeArguments) => 0;
             public int GetGenericMethodParameter(object? context, int index) => 0;
             public int GetGenericTypeParameter(object? context, int index) => 0;
-            public int GetFunctionPointerType(MethodSignature<int> signature) => 0;
-            public int GetModifiedType(int modifier, int unmodifiedType, bool isRequired) => 0;
-            public int GetPinnedType(int elementType) => 0;
+            public int GetFunctionPointerType(MethodSignature<int> signature) =>
+                member ? throw Unsupported("function pointer in a member reference") : 0;
+
+            public int GetModifiedType(int modifier, int unmodifiedType, bool isRequired)
+            {
+                var handle = MetadataTokens.EntityHandle(modifier);
+                var name = handle.Kind == HandleKind.TypeReference
+                    ? reader.GetString(reader.GetTypeReference((TypeReferenceHandle)handle).Name) : "";
+                return isRequired && name is "InAttribute" or "IsExternalInit" ? 0
+                    : throw Unsupported("custom modifier " + (name.Length == 0 ? "of a type definition" : name));
+            }
+
+            public int GetPinnedType(int elementType) => throw Unsupported("pinned local");
         }
 
         enum Form { Method, Field, Locals, Type, Instantiation, Standalone }
 
         /// <summary>A signature blob and every token its types name.</summary>
-        void Signature(BlobHandle handle, Form form)
+        void Signature(BlobHandle handle, Form form, bool member = false)
         {
             Blob(handle);
-            var collector = new TokenCollector();
+            var collector = new TokenCollector(Reader, form is Form.Method or Form.Field && member);
             var decoder = new SignatureDecoder<int, object?>(collector, Reader, null);
             var blob = Reader.GetBlobReader(handle);
             if (form == Form.Standalone)
@@ -273,6 +292,10 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         {
             Row(token);
             var reference = Reader.GetAssemblyReference(MetadataTokens.AssemblyReferenceHandle(RowOf(token)));
+            if (reference.Flags != 0)
+                throw new InvalidDataException("Unsupported assembly reference flags 0x" +
+                    ((int)reference.Flags).ToString("X", CultureInfo.InvariantCulture) + " on " +
+                    Reader.GetString(reference.Name) + ": a full public key or a retargetable reference has no kernel-checked identity.");
             Text(reference.Name);
             Text(reference.Culture);
             Blob(reference.PublicKeyOrToken);
@@ -285,11 +308,17 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Text(reference.Name);
             Text(reference.Namespace);
             var scope = reference.ResolutionScope;
+            if (scope.Kind == HandleKind.ModuleReference)
+                throw new InvalidDataException("Unsupported type scope: " + Reader.GetString(reference.Name) +
+                    " is resolved through a module reference.");
             if (!scope.IsNil && scope.Kind != HandleKind.ModuleDefinition) Token(TokenOf(scope));
             var typeReference = (TypeReference)module.LookupToken(new MetadataToken(token));
             if (collection.Pinned.ModuleOf(typeReference) is null) return;
             var definition = typeReference.Resolve() ??
                 throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
+            if (typeReference.Scope is AssemblyNameReference named && named.FullName != definition.Module.Assembly.Name.FullName)
+                throw new InvalidDataException("Unsupported forwarded type: " + typeReference.FullName +
+                    " is defined in " + definition.Module.Assembly.Name.FullName + ", not in the assembly that names it.");
             var target = collection.SliceOf(definition.Module);
             Link(0, token, target.PositionOf, definition.MetadataToken.ToUInt32());
             target.Token(definition.MetadataToken.ToUInt32());
@@ -404,7 +433,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Row(token);
             var member = Reader.GetMemberReference(MetadataTokens.MemberReferenceHandle(RowOf(token)));
             Text(member.Name);
-            Signature(member.Signature, member.GetKind() == MemberReferenceKind.Field ? Form.Field : Form.Method);
+            Signature(member.Signature, member.GetKind() == MemberReferenceKind.Field ? Form.Field : Form.Method, true);
             Token(TokenOf(member.Parent));
             var reference = (MemberReference)module.LookupToken(new MetadataToken(token));
             var declaring = reference.DeclaringType is GenericInstanceType generic ? generic.ElementType : reference.DeclaringType;

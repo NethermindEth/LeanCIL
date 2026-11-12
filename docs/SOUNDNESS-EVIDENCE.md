@@ -14,7 +14,8 @@ cannot substitute for it.
 | Layouts | Recompute layouts from raw fields, packing and size; check required use sites and bounds | Faithful metadata/serialization and runtime layout correspondence |
 | Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
-| Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image, the PE and metadata readers, every token's resolution and the local types stay trusted; bodies with exception sections are rejected |
+| Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals` and every instruction with the original definition | That the bytes are the method's body in the image and the PE container stay trusted; bodies with exception sections are rejected |
+| Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them | That the carried bytes are the image's, platform definitions, public key tokens, the hashed part of generic import identities, raw layout content, dispatch catalogs, static data and generic parameter constraints |
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
 | Managed/imported calls | Target slot, scoped identity, full signature, argument count, receiver and result | An import slot does not prove its implementation contract |
@@ -40,7 +41,8 @@ See [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).
 Each method's evidence holds the bytes the extractor emitted for its body (the header and the
 code, not extra sections) and a token table. `BodyDecodes` decodes the bytes in the kernel
 ([BodyDecoding](../CIL/Extraction/BodyDecoding.lean)) and requires the result to equal the
-original definition's `maxStack`, `initLocals`, locals and `code`:
+original definition's `maxStack`, `initLocals` and `code`, and checks the definition and locals
+against the metadata it carries ([Metadata binding](#metadata-binding)):
 
 - The header is a tiny header or a fat header of three words that sets at most the init-locals
   flag. A body with extra sections (exception handlers) is rejected, and the supplied bytes must
@@ -54,15 +56,13 @@ original definition's `maxStack`, `initLocals`, locals and `code`:
   instruction after a prefix opcode (`unaligned.`, `volatile.`, `tail.`, `constrained.`, `no.`,
   `readonly.`) is an error.
 - A token operand is read from the four bytes in the body, looked up in the table, and must
-  belong to a metadata table the opcode accepts. The header's local signature token must equal
-  the table's.
+  belong to a metadata table the opcode accepts. A token has one entry, and a field access names
+  a static or instance field as its opcode requires.
 
-Lean does not establish that the emitted bytes are the method's body in the assembly image, nor
-that a token resolves to the operand the table gives it. Mono.Cecil resolves the tokens and
-System.Reflection.Metadata locates the body in the PE image; both stay trusted. The local types
-are the extractor's: one call produces them for the definition and for the table, so comparing
-them can only fail if the two were edited apart. Decoding the local signature blob and checking
-tokens against the emitted metadata rows are open items.
+Lean does not establish that the emitted bytes are the method's body in the assembly image;
+System.Reflection.Metadata locates the body in the PE image, and the PE container stays trusted.
+What the tokens, the locals and the method definition mean is checked against the metadata rows
+the body carries, as the next section describes.
 
 A closed generic instantiation carries the bytes of its open definition, so it shares the
 `method{n}Bytes` definition of the first method that uses them. A token used at several sites
@@ -70,6 +70,48 @@ has one table entry, and the extractor refuses a token whose sites resolve to di
 An external call spells its identity as a materialized name at a reachable site and as a literal
 at an unreachable one; the kernel decides that the two are equal strings, so one entry serves
 both.
+
+### Metadata binding
+
+Each method's body evidence also carries a `MethodMetadata`
+([MetadataBytes](../CIL/Extraction/MetadataBytes.lean)): the raw bytes of the table rows and heap
+entries that its tokens, its own definition and its locals reach, one slice per assembly it reaches,
+and for each pinned assembly one small block with its table stream header and `Assembly` row. A
+slice also holds links, each naming for a token the definition it resolves to, its declaring type,
+its `NestedClass` row or its first `GenericParam` row. Lean reads the rows by the widths the header
+fixes, decodes strings, blobs and user strings, and decodes the signature blobs
+([Signatures](../CIL/Extraction/Signatures.lean)). `MetadataResolution` and `MetadataBinding` then
+check what the extractor states:
+
+- The scope of every type is the assembly identity its `AssemblyRef` row spells (name, version,
+  culture, key token); nested types are named `Outer/Inner`; a type defined in a carried slice has
+  the value type, enum (with its integer type), class or interface kind its flags and base give.
+- Each `.type`, `.field`, `.call`, `.indirectCall` and string operand of the token table is
+  checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
+  for a type, and Lean accepts the choices that name the same scoped type with a form its kind
+  allows. A field's index and static flag, the generic arguments of a type or method instantiation,
+  the parameter and return types after substitution, the definition a member reference resolves to
+  in a pinned assembly (its name, its signature and its place in its type's members) and the
+  external identity of a call (the scope and Cecil's `result Owner::name(parameters)`) are
+  recomputed from the bytes.
+- The local variable types are checked against the standalone signature the body header names.
+- The method's own identity is checked against its `MethodDef` row: owner, flags, calling
+  convention, parameter and return types, generic parameter counts and flags, the class layout
+  facts of a class receiver, and the address of the body.
+- A table or signature form the checker does not read is an explicit error: tables other than
+  those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
+  modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
+  `void` return, forwarded types, module references and `AssemblyRef` rows with a public key flag.
+
+Trusted: that each carried row, heap entry and body is the image's bytes at that position (a wrong
+copy cannot be detected without the whole stream; every row must still have the length the header's
+widths give, every blob its length prefix and every string one terminating zero), the PE container
+and the mapping of a body's address to its bytes, definitions in platform assemblies (so whether a
+platform type is an enum, the field order of `ValueTuple`, and that `System.Object` declares no
+instance fields), public key tokens (the hash of a key is not computed in the kernel), the hashed
+part of a generic import identity, raw layout content, dispatch catalog completeness, static data
+bytes and generic parameter constraints. `check` hashes each assembly and regenerates the
+extraction, so the rows are a deterministic function of hashed inputs.
 ### Folded instruction patterns
 
 A fold applies only to its recognized raw sequence with checked entry edges. Different compiler
