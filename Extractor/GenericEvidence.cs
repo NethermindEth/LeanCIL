@@ -299,7 +299,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
         lean.AppendLine($"theorem method{number}_body_validated :" +
             $" Extraction.BodyDecodes ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
-            $" method{number}Original := {LeanEmitter.Decide}");
+            $" method{number}Original := by cil_body_decodes");
     }
 
     static readonly HashSet<Instruction> EmptySet = [];

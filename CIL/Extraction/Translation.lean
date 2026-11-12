@@ -8,6 +8,7 @@ import CIL.Extraction.ImportLayouts
 import CIL.Extraction.Constrained
 import CIL.Extraction.Assemblies
 import CIL.Extraction.BodyDecoding
+import CIL.Extraction.BodyDiagnostics
 import Std.Data.TreeMap.Lemmas
 
 /-!

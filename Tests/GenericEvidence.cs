@@ -153,10 +153,28 @@ Console.WriteLine("PASS original-metadata generic substitution, complete managed
 // Each mutation changes one fact of the first sample's body evidence, so only the decoding check can reject it;
 // the unmutated obligation is checked as the positive control.
 const string bodyTheorem = "method0_body_validated";
-// A failed kernel decision prints this text; a mutation that only breaks parsing does not.
-const string decisionFailed = "proved that the proposition";
-void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change) =>
+// The tactic that proves a body obligation names the method and the failure when the kernel refutes it; a mutation
+// that only breaks parsing prints other text, and the unmutated obligation is the positive control.
+const string decisionFailed = "the decoded method does not match its body bytes or metadata";
+// A mutated body obligation must fail to elaborate and its negation must be proved by the kernel: the second file keeps
+// the mutated definitions and replaces the obligation by `bodyMatches ... = false`.
+void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change)
+{
     Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, decisionFailed);
+    var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")),
+        definition, change);
+    var obligation = Regex.Match(mutated,
+        @"(?m)^theorem (method\d+)_body_validated : Extraction\.BodyDecodes (⟨[^⟩]*⟩) " +
+        @"(method\d+Body) (method\d+Original) := [^\r\n]*");
+    if (!obligation.Success) throw new InvalidOperationException("Missing body obligation to refute: " + name);
+    var refutation = obligation.Groups[1].Value + "_body_refuted";
+    var refuted = mutated.Replace(obligation.Value, $"theorem {refutation} : Extraction.bodyMatches " +
+        $"{obligation.Groups[2].Value} {obligation.Groups[3].Value} {obligation.Groups[4].Value} = false := " +
+        LeanEmitter.Decide);
+    var path = Path.Combine(output, "Refuted-" + name + ".lean");
+    File.WriteAllText(path, NarrowEvidence(refuted, refutation));
+    evidence.Add(path, "PASS the kernel proves the mutated body obligation false: " + name, refutation);
+}
 // The metadata rows of a body shift with the assembly, so each byte is found by its position in the emitted list.
 string ChangeByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
     match => match.Groups[1].Value + (int.Parse(match.Groups[2].Value) + change) + match.Groups[3].Value);
