@@ -211,7 +211,7 @@ RunFixture("Tests/ConsumerSupportCandidates.cs", ["--lake"], streamOutput: true,
     progress: "Coherent extraction restoration");
 Passed("complete authenticated extraction generations remain stable during proof builds");
 RunFixture("Tests/ProofBindingFamilies.cs", [], streamOutput: true, progress: "Generated integer binding families");
-Passed("certified equality and bitwise binding families with rejected recipe and body mutations");
+Passed("certified equality and bitwise binding families with rejected binding and body mutations");
 RunFixture("Tests/MethodSelectors.cs", [], streamOutput: true, progress: "Method selector checks");
 Passed("method selector aliases, overloads and actionable diagnostics");
 

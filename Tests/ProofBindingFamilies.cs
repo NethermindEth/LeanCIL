@@ -110,7 +110,7 @@ File.WriteAllText(requests, JsonSerializer.Serialize(new
 }));
 Run([.. cli, "verify-batch", requests, "--results", Path.Combine(directory, "negative-results.json")]);
 if (negativeRequests.Any(request => File.Exists(Path.Combine(request.output, "verified.json"))))
-    throw new InvalidOperationException("A rejected recipe retained a certificate.");
+    throw new InvalidOperationException("A rejected catalog binding retained a certificate.");
 
 int Lines(string path) => File.ReadLines(path).Count();
 var generatedFiles = Directory.GetFiles(Path.Combine(package, "Bindings"), "*.lean");
