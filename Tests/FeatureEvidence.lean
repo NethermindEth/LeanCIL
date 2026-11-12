@@ -134,8 +134,6 @@ example : featureOpMatches #[] loopRaw (i 0) (.bgt 7) = false := by decide
 example : featureOpMatches #[] loopRaw (i 0) (.ret) = false := by decide
 example : featureOpMatches #[] loopRaw (i 0) (.nativeBinary (.bgt 7)) = false := by decide
 example : featureOpMatches #[] loopRaw (i 33 (.integer 0)) (.localAddr 0) = false := by decide
-example : featureOpMatches #[] loopRaw (i 33 (.integer 0)) (.vectorLocalAddr 0) = false := by decide
-example : featureOpMatches #[] loopRaw (i 33 (.integer 0)) (.vectorArgAddr 0) = false := by decide
 example : featureOpMatches #[] loopRaw (i 10) (.setLocal 1) = false := by decide
 example : featureOpMatches #[] loopRaw (i 18 (.local 0)) (.localAddr 1) = false := by decide
 example : featureOpMatches #[] loopRaw (i 122) (.pop) = false := by decide

@@ -74,7 +74,7 @@ private def entrySimplifier {m : Type → Type} [Monad m] [MonadQuotation m]
     (definitions facts : Array (TSyntax `term)) : m (TSyntax `tactic) := do
   let facts := definitions ++ facts
   `(tactic| (simp [enterFrame, makeSelectedLocals, makeLocals,
-    makeArgumentHomes, makeParameterHomes, makeLocal, storeLocal, Value.hasUnspecified,
+    makeParameterHomes, makeLocal, storeLocal, Value.hasUnspecified,
     checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     $[$facts:term],*]; try rfl))
 

@@ -36,7 +36,6 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .arrayStore _ => (3, 0)
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
-  | .init256 | .skipInit => (1, 0)
   | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _ => (0, 1)
   | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => (1, 1)
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => (2, 0)
@@ -45,7 +44,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .throwIfNull | .zeroGuard .. => (2, 0)
   | .comparisonGuard .. => (3, 0)
   | .add .. | .spanCreate | .spanItem _ => (2, 1)
-  | .load128 | .load256 | .load512 | .asRef | .bitcast256 | .bitcastByteBool | .bitcastValue ..
+  | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue ..
   | .createSpan _ | .spanReference | .spanLength | .isNullRef => (1, 1)
 
 /-- Successful stack effects for instructions that cannot create a local alias or
@@ -55,17 +54,17 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   match op with
   | .managed (.address ..) => some (0, 1)
   | .managed .tableLength | .managed (.tableLoad _) => some (1, 1)
-  | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => some (2, 1)
+  | .managed (.tableElement _) | .managed .tableOffset => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
   | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
-  | .const32 _ | .const64 _ | .arg .. | .vectorArg _ | .local .. | .vectorLocal _ => some (0, 1)
+  | .const32 _ | .const64 _ | .arg .. | .local .. => some (0, 1)
   | .neg | .bnot | .convI1 | .convI2 | .convU2 | .convI8 | .convI4 | .convU1
   | .convU4 | .convU8 | .convU | .checkedConvert ..
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
-  | .aggregateFieldAt .. | .lane _ | .laneAddress _ | .asRef | .objectTest .. => some (1, 1)
+  | .aggregateFieldAt .. | .objectTest .. => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
   | .lt | .ltu | .gt | .gtu | .eq | .divide .. | .checkedArithmetic .. => some (2, 1)
@@ -75,18 +74,17 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
     | _ => none
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .store64 | .copyObject _
-  | .setFieldAt .. | .setAggregateFieldAt .. | .setLane _ => some (2, 0)
+  | .setFieldAt .. | .setAggregateFieldAt .. => some (2, 0)
   | .initAggregate _ | .skipInit | .pop => some (1, 0)
   | .dup => some (1, 2)
   -- Calls, construction, intrinsics and memory operations.
   | .call _ count | .callInstance _ count | .callVirtual _ count | .tailCall _ count =>
     some (count, if returnsValue then 1 else 0)
-  | .newAggregate _ count _ | .newVector256 _ count | .newObject _ count .. => some (count, 1)
+  | .newAggregate _ count _ | .newObject _ count .. => some (count, 1)
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
-  | .localAddr _ | .vectorLocalAddr _ | .vectorArgAddr _ | .setLocal .. | .setVectorLocal _
-  | .initializeSpanLocal ..
+  | .localAddr _ | .setLocal .. | .initializeSpanLocal ..
   | .feature _ | .ret _ | .throw _ | .unsupported _ | .branch _ | .switch _ | .brzero _
   | .brnonzero _ | .bgt _ | .ble _ | .bleu _ | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _
   | .beq _ | .bne _ => none

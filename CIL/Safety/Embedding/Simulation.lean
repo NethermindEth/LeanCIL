@@ -29,7 +29,6 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
   locals : actual.locals = expected.locals
   localKinds : actual.localKinds = expected.localKinds
   opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
-  vectorArgs : actual.vectorArgs = expected.vectorArgs
   parameterHomes : actual.parameterHomes = expected.parameterHomes
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
   entry : r 0 = 0
@@ -41,7 +40,7 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
 
 /-- Every body refines itself under the identity renaming. -/
 theorem BodyRefines.refl (body : Method) : BodyRefines body body id :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
     fun _ op found _ => ⟨by simp [found, Instruction.relabel_id], rfl, fun _ => rfl⟩⟩
 
 /-- A live instruction at `p` appears in `sites` with its mapped pc and mapped successor. -/
@@ -90,8 +89,7 @@ theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat}
     (embeds : Embeds expected actual map) :
     BodyRefines expected actual (rename map actual.code.length) := by
   refine ⟨embeds.profile, embeds.returnsValue, embeds.locals, embeds.localKinds,
-    embeds.opaqueVectorLocals, embeds.vectorArgs, embeds.parameterHomes, embeds.descriptors,
-    embeds.entry, ?_⟩
+    embeds.opaqueVectorLocals, embeds.parameterHomes, embeds.descriptors, embeds.entry, ?_⟩
   intro p op found live
   have member := mem_sites (limit := actual.code.length) (map := map) (start := 0) found live
   rw [Nat.zero_add] at member
@@ -120,7 +118,7 @@ theorem enterFrame_congr {expected actual : CIL.Method} {r : Nat → Nat}
     (refines : BodyRefines expected actual r) (args : List Value) (m : Memory) :
     enterFrame actual args m = enterFrame expected args m := by
   simp only [enterFrame, refines.locals, refines.localKinds, refines.opaqueVectorLocals,
-    refines.vectorArgs, refines.parameterHomes]
+    refines.parameterHomes]
 
 /-- `.unsupported` never steps successfully. -/
 theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {args : List Value}

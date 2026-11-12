@@ -112,7 +112,7 @@ elab "cil_frame_exit" : tactic => withMainContext do
     unless leaves e do return .continue
     let #[frame, memory] := e.getAppArgs | return .continue
     let frame ← whnfR frame
-    let some #[_, _, owned, _, _] := argumentsOf? frame `CIL.Safety.Frame.mk 5
+    let some #[_, _, owned, _] := argumentsOf? frame `CIL.Safety.Frame.mk 4
       | return .continue
     unless (← whnfR owned).isAppOfArity ``List.nil 1 do return .continue
     return .visit memory)

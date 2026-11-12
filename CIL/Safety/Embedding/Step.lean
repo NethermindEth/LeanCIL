@@ -316,30 +316,10 @@ theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
   plain_cases
   cases narrow <;> dsimp only at h ⊢ <;> lookup_lockstep
 
-theorem step_relabel_vectorArg (index : Nat) : StepRelabel (.vectorArg index) := by
-  explicit_intro
-  lockstep
-
-theorem step_relabel_vectorArgAddr (index : Nat) : StepRelabel (.vectorArgAddr index) := by
-  explicit_intro
-  lockstep
-
 theorem step_relabel_local (index : Nat) (narrow : Option NarrowKind) :
     StepRelabel (.local index narrow) := by
   plain_cases
   lookup_lockstep
-
-theorem step_relabel_vectorLocal (index : Nat) : StepRelabel (.vectorLocal index) := by
-  plain_cases
-  lookup_lockstep
-
-theorem step_relabel_vectorLocalAddr (index : Nat) : StepRelabel (.vectorLocalAddr index) := by
-  plain_cases
-  lookup_lockstep
-
-theorem step_relabel_setVectorLocal (index : Nat) : StepRelabel (.setVectorLocal index) := by
-  stack_cases =>
-    first | fallback_vacuous | lookup_lockstep
 
 theorem step_relabel_localAddr (index : Nat) : StepRelabel (.localAddr index) := by
   plain_cases
@@ -414,14 +394,6 @@ theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall calle
     lockstep
 
 #print axioms step_relabel_tailCall
-
-theorem step_relabel_newVector256 (callee argc : Nat) :
-    StepRelabel (.newVector256 callee argc) := by
-  plain_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    lockstep
 
 theorem step_relabel_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     StepRelabel (.newAggregate callee argc size) := by
@@ -710,12 +682,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case checkedConvert width signed unsignedInput =>
     exact step_relabel_checkedConvert width signed unsignedInput
   case arg index narrow => exact step_relabel_arg index narrow
-  case vectorArg index => exact step_relabel_vectorArg index
-  case vectorArgAddr index => exact step_relabel_vectorArgAddr index
   case «local» index narrow => exact step_relabel_local index narrow
-  case vectorLocal index => exact step_relabel_vectorLocal index
-  case vectorLocalAddr index => exact step_relabel_vectorLocalAddr index
-  case setVectorLocal index => exact step_relabel_setVectorLocal index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
   case localAddr index => exact step_relabel_localAddr index
@@ -724,7 +691,6 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case callInstance method argc => exact step_relabel_callInstance method argc
   case callVirtual targets argc => exact step_relabel_callVirtual targets argc
   case tailCall method argc => exact step_relabel_tailCall method argc
-  case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
   case newObject constructor argc owner bases size =>
     exact step_relabel_newObject constructor argc owner bases size
@@ -751,8 +717,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     | lt | branch | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
-    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | lane
-    | laneAddress | setLane | const32 | const64 | load64 | store64 | dup | pop | skipInit | asRef =>
+    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | const32
+    | const64 | load64 | store64 | dup | pop | skipInit =>
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
@@ -782,10 +748,6 @@ theorem step_relabel_aggregateFieldAt (offset : Nat) (size : Nat) :
     StepRelabel (.aggregateFieldAt offset size) := step_relabel _
 theorem step_relabel_setAggregateFieldAt (offset : Nat) (size : Nat) :
     StepRelabel (.setAggregateFieldAt offset size) := step_relabel _
-theorem step_relabel_lane (index : Fin 4) : StepRelabel (.lane index) := step_relabel _
-theorem step_relabel_laneAddress (index : Fin 4) : StepRelabel (.laneAddress index) :=
-  step_relabel _
-theorem step_relabel_setLane (index : Fin 4) : StepRelabel (.setLane index) := step_relabel _
 theorem step_relabel_const32 (word : W32) : StepRelabel (.const32 word) := step_relabel _
 theorem step_relabel_const64 (word : W64) : StepRelabel (.const64 word) := step_relabel _
 theorem step_relabel_convI1 : StepRelabel .convI1 := step_relabel _
@@ -816,7 +778,6 @@ theorem step_relabel_switch (targets : List Nat) : StepRelabel (.switch targets)
 theorem step_relabel_bge (target : Nat) : StepRelabel (.bge target) := step_relabel _
 theorem step_relabel_blt (target : Nat) : StepRelabel (.blt target) := step_relabel _
 theorem step_relabel_skipInit : StepRelabel .skipInit := step_relabel _
-theorem step_relabel_asRef : StepRelabel .asRef := step_relabel _
 theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_relabel _
 
 #print axioms step_relabel
@@ -1012,13 +973,6 @@ theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee ar
   exact h
 
 #print axioms step_raise_tailCall
-
-theorem step_raise_newVector256 (callee argc : Nat) : StepRaise (.newVector256 callee argc) := by
-  plain_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    raise_lockstep
 
 theorem step_raise_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     StepRaise (.newAggregate callee argc size) := by
@@ -1268,13 +1222,10 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case arg index narrow =>
     plain_cases
     cases narrow <;> dsimp only at h ⊢ <;> lookup_raise
-  case vectorArg | vectorArgAddr =>
-    explicit_intro
-    raise_lockstep
-  case «local» | vectorLocal | vectorLocalAddr | localAddr =>
+  case «local» | localAddr =>
     plain_cases
     lookup_raise
-  case setVectorLocal | setLocal =>
+  case setLocal =>
     stack_cases =>
       first | fallback_raise_vacuous | lookup_raise
   case initializeSpanLocal =>
@@ -1293,7 +1244,6 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case callInstance callee argc => exact step_raise_callInstance callee argc
   case callVirtual targets argc => exact step_raise_callVirtual targets argc
   case tailCall callee argc => exact step_raise_tailCall callee argc
-  case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
   case newObject callee argc owner bases size =>
     exact step_raise_newObject callee argc owner bases size
@@ -1327,8 +1277,8 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     | lt | branch | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
-    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | lane
-    | laneAddress | setLane | const32 | const64 | load64 | store64 | dup | pop | skipInit | asRef =>
+    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | const32
+    | const64 | load64 | store64 | dup | pop | skipInit =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)
 
 #print axioms step_raise

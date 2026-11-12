@@ -370,18 +370,6 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
            intro first second same
            subst second
            exact .ok (.next related frames))
-      | (apply (frames.argumentHome _).bind
-         intro slot otherSlot slots
-         rcases slots with ⟨bounded, rfl⟩
-         first
-         | (apply (related.loadLocal slot bounded).bind
-            intro first second same
-            subst second
-            exact .ok (.next related frames))
-         | (apply (related.localAddress slot bounded).bind
-            intro first second same
-            subst second
-            exact .ok (.next related frames)))
       | (try simp only [List.map_nil, List.length_map, ← List.map_take, ← List.map_drop,
            ← List.map_reverse, metadata.returnsValue]
          repeat first

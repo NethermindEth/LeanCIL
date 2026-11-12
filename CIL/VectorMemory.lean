@@ -33,60 +33,43 @@ def read128 (memory : Memory) : Address → Option Value
     let .v128 bits ← memory (.local frame index) | none
     return .v128 bits
   | .static bytes base => do return .v128 (BitVec.ofNat 128 (← readStaticBytes bytes base 16))
-  | .home frame kind index offset =>
-    if offset + 16 ≤ 32 then do
-      return .v128 (BitVec.ofNat 128 (← readHomeBytes memory frame kind index offset 16))
-    else none
 
-/-- Reads a 256-bit vector; a home read must cover the whole 32-byte home. -/
+/-- Reads a 256-bit vector. -/
 def read256 (memory : Memory) : Address → Option Value
   | .byte base => do return .v256 (BitVec.ofNat 256 (← readBytes memory base 32))
   | .local frame index => do
     let .v256 bits ← memory (.local frame index) | none
     return .v256 bits
   | .static bytes base => do return .v256 (BitVec.ofNat 256 (← readStaticBytes bytes base 32))
-  | .home frame kind index offset =>
-    if offset + 32 ≤ 32 then do
-      return .v256 (BitVec.ofNat 256 (← readHomeBytes memory frame kind index offset 32))
-    else none
 
-/-- Writes a 128-bit vector. Read-only data cannot be written; a home write must stay
-    within its 32 bytes. -/
+/-- Writes a 128-bit vector. Read-only data cannot be written. -/
 def write128 (memory : Memory) (address : Address) (bits : BitVec 128) : Option Memory :=
   match address with
   | .byte base => some (writeBytes memory base bits.toNat 16)
   | .local frame index => some (write memory (.local frame index) (.v128 bits))
   | .static _ _ => none
-  | .home frame kind index offset =>
-    if offset + 16 ≤ 32 then some (writeHomeBytes memory frame kind index offset bits.toNat 16)
-    else none
 
-/-- Writes a 256-bit vector. Read-only data cannot be written; a home write must cover the
-    whole 32-byte home. -/
+/-- Writes a 256-bit vector. Read-only data cannot be written. -/
 def write256 (memory : Memory) (address : Address) (bits : BitVec 256) : Option Memory :=
   match address with
   | .byte base => some (writeBytes memory base bits.toNat 32)
   | .local frame index => some (write memory (.local frame index) (.v256 bits))
   | .static _ _ => none
-  | .home frame kind index offset =>
-    if offset + 32 ≤ 32 then some (writeHomeBytes memory frame kind index offset bits.toNat 32)
-    else none
 
-/-- Reads a 512-bit vector; it does not fit in a home, so a home read is stuck. -/
+/-- Reads a 512-bit vector. -/
 def read512 (memory : Memory) : Address → Option Value
   | .byte base => do return .v512 (BitVec.ofNat 512 (← readBytes memory base 64))
   | .local frame index => do
     let .v512 bits ← memory (.local frame index) | none
     return .v512 bits
   | .static bytes base => do return .v512 (BitVec.ofNat 512 (← readStaticBytes bytes base 64))
-  | .home .. => none
 
-/-- Writes a 512-bit vector; read-only data cannot be written and a home is too small. -/
+/-- Writes a 512-bit vector; read-only data cannot be written. -/
 def write512 (memory : Memory) (address : Address) (bits : BitVec 512) : Option Memory :=
   match address with
   | .byte base => some (writeBytes memory base bits.toNat 64)
   | .local frame index => some (write memory (.local frame index) (.v512 bits))
-  | .static .. | .home .. => none
+  | .static .. => none
 
 /-- Only actual pointer representations may be reinterpreted as managed refs.
     In particular, a vector snapshot cannot become a pointer to caller storage. -/
@@ -107,9 +90,6 @@ def unsafeAdd (sizeBytes : Nat) (offset : Int) : Address → Option Address
   | .static bytes base =>
     let address := (base : Int) + (sizeBytes : Int) * offset
     if 0 ≤ address then some (.static bytes address.toNat) else none
-  | .home frame kind index base =>
-    let address := (base : Int) + (sizeBytes : Int) * offset
-    if 0 ≤ address ∧ address ≤ 32 then some (.home frame kind index address.toNat) else none
 
 @[simp ↓] theorem unsafeAdd_byte_natural (size base offset : Nat) :
     unsafeAdd size (offset : Int) (.byte base) = some (.byte (base + size * offset)) := by
@@ -161,7 +141,7 @@ inductive MemoryOp where
   /-- Signed `Math.DivRem(left, right, out remainder)` on `width`-bit integers. -/
   | divRemOut (width : Nat)
   | copyBlock (alignment : Nat) | initBlock (alignment : Nat)
-  | load128 | load256 | load512 | store128 | store256 | store512 | init256
+  | load128 | load256 | load512 | store128 | store256 | store512
   /-- `Vector128.LoadUnsafe` or `StoreUnsafe` on bytes: an unsigned native byte offset, when
       present, displaces the reference as `Unsafe.Add` does, then sixteen bytes move as in
       `load128` or `store128`. The store takes its vector below the reference. -/
@@ -175,7 +155,7 @@ inductive MemoryOp where
   | marshalWrite (kind : TransferKind) (tryWrite : Bool)
   /-- A typed pointer transfer with independently validated alignment. -/
   | pointerTransfer (kind : TransferKind) (alignment : Nat) (store : Bool)
-  | bitcast256 | bitcastByteBool | skipInit
+  | bitcastByteBool
   | bitcastValue (source target : SnapshotShape)
   | staticAddress (bytes : List (BitVec 8)) | spanCreate | spanReference
   /-- The value of a constructor-initialized readonly field; its address is never formed. -/
@@ -268,8 +248,8 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => 2
   | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _
   | .spanEmpty .. => 0
-  | .load128 | .load256 | .load512 | .init256 | .asRef | .bitcast256 | .bitcastByteBool
-  | .skipInit | .bitcastValue .. | .createSpan _ | .spanReference | .spanLength | .isNullRef
+  | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue .. | .createSpan _
+  | .spanReference | .spanLength | .isNullRef
   | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => 1
 
 /-- Signed Int32/native and unsigned native element offsets on the 64-bit target. -/
@@ -291,7 +271,7 @@ def evalMemory (op : MemoryOp) (stack : List Value) (memory : Memory) :
   | .bigMul64 true, .ref low :: .i64 right :: .i64 left :: rest =>
     return (← write64 memory low (left * right),
       .i64 (WideMultiply.signedHigh64 left right) :: rest)
-  -- Vector loads and stores, through a reference or an object; `init256` stores zero.
+  -- Vector loads and stores, through a reference or an object.
   | .load128, .ref address :: rest => return (memory, (← read128 memory address) :: rest)
   | .load256, .ref address :: rest => return (memory, (← read256 memory address) :: rest)
   | .load256, .object base :: rest => return (memory, (← read256 memory (.byte base)) :: rest)
@@ -304,7 +284,6 @@ def evalMemory (op : MemoryOp) (stack : List Value) (memory : Memory) :
     return (← write256 memory address bits, rest)
   | .store256, .v256 bits :: .object base :: rest =>
     return (← write256 memory (.byte base) bits, rest)
-  | .init256, .ref address :: rest => return (← write256 memory address 0, rest)
   -- `Vector128.LoadUnsafe` and `StoreUnsafe`, the offset in bytes above the reference.
   | .vector128Unsafe false false, .ref address :: rest =>
     return (memory, (← read128 memory address) :: rest)
@@ -316,17 +295,14 @@ def evalMemory (op : MemoryOp) (stack : List Value) (memory : Memory) :
   | .vector128Unsafe true true, offset :: .ref address :: .v128 bits :: rest =>
     let moved ← unsafeAdd 1 (← offsetValue false offset) address
     return (← write128 memory moved bits, rest)
-  | .init256, .object base :: rest => return (← write256 memory (.byte base) 0, rest)
-  -- `Unsafe` reinterpretation, offsets and skipped initialization.
+  -- `Unsafe` reinterpretation and offsets.
   | .asRef, v :: rest => return (memory, (← unsafeAsRef v) :: rest)
   | .add size signed, offset :: .ref address :: rest =>
     return (memory, .ref (← unsafeAdd size (← offsetValue signed offset) address) :: rest)
-  | .bitcast256, .v256 bits :: rest => return (memory, .v256 bits :: rest)
   | .bitcastByteBool, .i32 bits :: rest =>
     if bits.toNat < 256 then return (memory, .i32 bits :: rest) else none
   | .bitcastByteBool, .i8 bits :: rest =>
     return (memory, .i32 (bits.zeroExtend 32) :: rest)
-  | .skipInit, .object _ :: rest | .skipInit, .ref _ :: rest => return (memory, rest)
   -- Null references.
   | .nullRef, _ => return (memory, .nullRef :: stack)
   | .isNullRef, .nullRef :: rest => return (memory, .i32 1 :: rest)

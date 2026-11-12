@@ -25,7 +25,7 @@ theorem add_ok (size : Nat) (signed : Bool) (profile : CIL.FeatureProfile)
         Value.hasUnspecified, unknown] at rejected
   simp only [invoke, addMethod, List.getElem?_cons_zero, List.mapM_cons, List.mapM_nil,
     valid, numeric, enterFrame, makeSelectedLocals, List.isEmpty, ↓reduceIte, makeLocals,
-    makeArgumentHomes, makeParameterHomes,
+    makeParameterHomes,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     List.map_nil, List.nil_append]
   rw [run_next (body := addMethod size signed profile) rfl rfl
@@ -51,7 +51,7 @@ theorem add_error (size : Nat) (signed : Bool) (profile : CIL.FeatureProfile)
       .error ⟨0, 2, fault⟩ := by
   simp only [invoke, addMethod, List.getElem?_cons_zero, List.mapM_cons, List.mapM_nil,
     valid, numeric, enterFrame, makeSelectedLocals, List.isEmpty, ↓reduceIte, makeLocals,
-    makeArgumentHomes, makeParameterHomes,
+    makeParameterHomes,
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     List.map_nil, List.nil_append]
   rw [run_next (body := addMethod size signed profile) rfl rfl

@@ -256,7 +256,7 @@ theorem compact_returns (memory : Memory) :
 /-- A valid initializer supplies the existing ordinary-frame width requirements. -/
 theorem inserted_ready (kind : CIL.LocalKind) (initial : CIL.Value)
     (fits : InitializerFits kind initial) : OrdinaryFrame (inserted kind initial) := by
-  refine ⟨rfl, rfl, rfl, ?_⟩
+  refine ⟨rfl, rfl, ?_⟩
   intro selected member
   have same : selected = kind := List.mem_singleton.mp member
   subst selected
@@ -276,7 +276,7 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
     cases found
     refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil, ⟨rfl, rfl, rfl⟩,
       .skip kind initial fits .nil, ?_, inserted_ready kind initial fits, rfl⟩⟩⟩
-    exact ⟨rfl, rfl, rfl, by intro selected member; cases member⟩
+    exact ⟨rfl, rfl, by intro selected member; cases member⟩
   | succ method => cases found
 #print axioms inserted_related
 

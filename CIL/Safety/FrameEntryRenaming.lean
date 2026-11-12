@@ -5,16 +5,15 @@ import CIL.Safety.FrameRenaming
 
 Ordinary declarations preserve retained initializers while allocating corresponding
 homes. Entry transport derives target success from the actual successful source entry.
-Opaque slots and argument or parameter homes have separate setup semantics and are
+Opaque slots and parameter homes have separate setup semantics and are
 explicitly excluded by this entry theorem.
 -/
 
 namespace CIL.Safety
 
-/-- Ordinary declarations use explicit local metadata without auxiliary argument homes. -/
+/-- Ordinary declarations use explicit local metadata and no parameter homes. -/
 structure OrdinaryFrame (body : CIL.Method) : Prop where
   noOpaque : body.opaqueVectorLocals = []
-  vectorArguments : body.vectorArgs = []
   parameterHomes : body.parameterHomes = []
   layouts : ∀ kind ∈ body.localKinds, localWidth kind < nativeLimit ∧
     ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)
@@ -23,7 +22,6 @@ structure OrdinaryFrame (body : CIL.Method) : Prop where
 structure UnmodeledFrame (body : CIL.Method) : Prop where
   initializers : body.locals = body.localKinds.map (fun _ => .unmodeled)
   noOpaque : body.opaqueVectorLocals = []
-  vectorArguments : body.vectorArgs = []
   parameterHomes : body.parameterHomes = []
   layouts : ∀ kind ∈ body.localKinds, localWidth kind < nativeLimit ∧
     ∀ width writable, kind = .span width writable → (0 < width ∧ width < 2^64)
@@ -68,21 +66,19 @@ theorem Memory.Renamed.enterFrameUnmodeled {mapping : AllocationRenaming}
     extension, sourceMade, targetMade, remains, slots, owned⟩ :=
     extended.makeLocalsUnmodeled sourceFormed targetFormed staticBounds source.nextIdentity
       target.nextIdentity (enterScopes_new _ _ _) selected targetReady.layouts
-  let sourceFrame : Frame := ⟨source.nextIdentity, sourceSlots, sourceOwned, [], 0⟩
-  let targetFrame : Frame := ⟨target.nextIdentity, targetSlots, targetOwned, [], 0⟩
+  let sourceFrame : Frame := ⟨source.nextIdentity, sourceSlots, sourceOwned, 0⟩
+  let targetFrame : Frame := ⟨target.nextIdentity, targetSlots, targetOwned, 0⟩
   refine ⟨later, sourceFrame, targetFrame, sourceAfter, targetAfter, extension,
     ?_, ?_, remains, ?_⟩
   · simp only [enterFrame_of_no_opaque _ _ _ sourceReady.noOpaque, sourceReady.initializers,
-      sourceMade, sourceReady.vectorArguments, sourceReady.parameterHomes]
-    simp only [makeArgumentHomes, makeParameterHomes, Bind.bind, Except.bind,
+      sourceMade, sourceReady.parameterHomes]
+    simp only [makeParameterHomes, Bind.bind, Except.bind,
       Pure.pure, Except.pure, List.map_nil, List.append_nil, sourceFrame]
   · simp only [enterFrame_of_no_opaque _ _ _ targetReady.noOpaque, targetReady.initializers,
-      targetMade, targetReady.vectorArguments, targetReady.parameterHomes]
-    simp only [makeArgumentHomes, makeParameterHomes, Bind.bind, Except.bind,
+      targetMade, targetReady.parameterHomes]
+    simp only [makeParameterHomes, Bind.bind, Except.bind,
       Pure.pure, Except.pure, List.map_nil, List.append_nil, targetFrame]
-  refine ⟨enterScopes_new _ _ _, slots, owned, rfl, ?_, rfl⟩
-  intro home member
-  cases member
+  exact ⟨enterScopes_new _ _ _, slots, owned, rfl⟩
 #print axioms Memory.Renamed.enterFrameUnmodeled
 
 /-- Successful frame entry preserves retained initializers and inserts only private dead homes. -/
@@ -108,12 +104,12 @@ theorem Memory.Renamed.enterFrameInitialized {mapping : AllocationRenaming}
         sourceFrame targetFrame := by
   have originalEntry := entered
   simp only [enterFrame_of_no_opaque _ _ _ sourceReady.noOpaque,
-    sourceReady.vectorArguments, sourceReady.parameterHomes, Bind.bind, Except.bind] at entered
+    sourceReady.parameterHomes, Bind.bind, Except.bind] at entered
   split at entered
   · cases entered
   rename_i locals made
   rcases locals with ⟨sourceSlots, sourceOwned, sourceAfter⟩
-  simp only [makeArgumentHomes, makeParameterHomes,
+  simp only [makeParameterHomes,
     Pure.pure, Except.pure, List.map_nil, List.append_nil,
     Except.ok.injEq, Prod.mk.injEq] at entered
   obtain ⟨rfl, rfl⟩ := entered
@@ -124,16 +120,14 @@ theorem Memory.Renamed.enterFrameInitialized {mapping : AllocationRenaming}
     remains, slots, owned⟩ :=
     extended.makeLocalsInitialized sourceFormed targetFormed staticBounds source.nextIdentity
       target.nextIdentity (enterScopes_new _ _ _) selected targetReady.layouts made
-  let targetFrame : Frame := ⟨target.nextIdentity, targetSlots, targetOwned, [], 0⟩
+  let targetFrame : Frame := ⟨target.nextIdentity, targetSlots, targetOwned, 0⟩
   refine ⟨later, _, targetFrame, sourceAfter, targetAfter, extension, originalEntry,
     ?_, remains, ?_⟩
   · simp only [enterFrame_of_no_opaque _ _ _ targetReady.noOpaque,
-      targetMade, targetReady.vectorArguments, targetReady.parameterHomes]
-    simp only [makeArgumentHomes, makeParameterHomes, Bind.bind, Except.bind,
+      targetMade, targetReady.parameterHomes]
+    simp only [makeParameterHomes, Bind.bind, Except.bind,
       Pure.pure, Except.pure, List.map_nil, List.append_nil, targetFrame]
-  refine ⟨enterScopes_new _ _ _, slots, owned, rfl, ?_, rfl⟩
-  intro home member
-  cases member
+  exact ⟨enterScopes_new _ _ _, slots, owned, rfl⟩
 #print axioms Memory.Renamed.enterFrameInitialized
 
 /-- A sequential computation cannot introduce a throw when neither component can throw. -/
@@ -244,12 +238,12 @@ theorem enterFrame_not_thrown (body : CIL.Method) (ready : OrdinaryFrame body)
     enterFrame body arguments memory ≠ .error (.thrown exception) := by
   intro failed
   simp only [enterFrame_of_no_opaque _ _ _ ready.noOpaque,
-    ready.vectorArguments, ready.parameterHomes, Bind.bind, Except.bind] at failed
+    ready.parameterHomes, Bind.bind, Except.bind] at failed
   split at failed
   · rename_i reason localsFailed
     cases failed
     exact makeLocals_not_thrown _ _ _ _ _ localsFailed
-  · simp only [makeArgumentHomes, makeParameterHomes,
+  · simp only [makeParameterHomes,
       Pure.pure, Except.pure] at failed
     cases failed
 #print axioms enterFrame_not_thrown
