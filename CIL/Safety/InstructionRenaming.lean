@@ -14,7 +14,7 @@ set_option maxHeartbeats 600000 in
 /-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
 theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Op)
+    (related : Memory.Renamed mapping scopes source target) (operation : CIL.Instruction)
     (formed : source.WellFormed)
     (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow (instruction operation stack source)) :

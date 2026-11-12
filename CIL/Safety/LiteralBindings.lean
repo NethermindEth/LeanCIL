@@ -61,7 +61,8 @@ theorem staticReference_literals {source target : Memory} {descriptor : CIL.Stat
 #print axioms staticReference_literals
 
 /-- Every checked dispatcher effect leaves the literal bindings as they were. -/
-theorem StepEffect.literals {body : CIL.Method} {operation : CIL.Op} {source target : Memory}
+theorem StepEffect.literals {body : CIL.Method} {operation : CIL.Instruction}
+    {source target : Memory}
     {frame final : Frame} (effect : StepEffect body operation frame source final target) :
     target.literals = source.literals := by
   cases effect with

@@ -29,7 +29,7 @@ private theorem managedStep_not_returned (operation : CIL.ManagedOp) (pc : Nat) 
 
 set_option maxHeartbeats 400000 in
 /-- A successful return has its declared arity and exposes no unspecified SIMD lanes. -/
-theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
@@ -60,7 +60,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Op) (pc : Na
 #print axioms step_return_properties
 
 /-- A checked return has the arity declared by its actual method body. -/
-theorem step_return_length (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_return_length (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
@@ -95,7 +95,7 @@ theorem run_return_length (program : CIL.Program) (fuel method pc : Nat) (body :
 #print axioms run_return_length
 
 /-- Successful returns never expose unspecified SIMD lanes. -/
-theorem step_return_known (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
+theorem step_return_known (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory final : Memory)
     (values : List Value)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :

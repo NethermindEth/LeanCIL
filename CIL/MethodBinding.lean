@@ -19,7 +19,7 @@ open Lean Meta Elab Tactic
 
 -- Diagnostic comparison only; proofs never depend on these instances.
 deriving instance BEq for MemoryOp
-deriving instance BEq for Op
+deriving instance BEq for Instruction
 
 /-- The first index where two lists differ, with the element of each side there. -/
 def firstDifference [BEq T] :

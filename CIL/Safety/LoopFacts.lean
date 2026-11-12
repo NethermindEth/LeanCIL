@@ -243,7 +243,7 @@ def readsArguments (program : Expr) : MetaM Bool := do
     seen := seen.insert name
     let some value := ((← getEnv).find? name).bind (·.value?) | continue
     for used in value.getUsedConstants do
-      if used == ``CIL.Op.arg then return true
+      if used == ``CIL.Instruction.arg then return true
       if seen.contains used then continue
       let follow := used.getRoot == root.getRoot ||
         (((← getEnv).find? used).any fun info => code info.type)

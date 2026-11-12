@@ -242,7 +242,7 @@ theorem OutcomeContract.Holds.extend {Input Output : Type} {c : OutcomeContract 
 /-- A call to a method the program lacks, such as an unlinked import, faults `invalidState`
     at the call. -/
 theorem run_call_unlinked {program : CIL.Program} {fuel method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))

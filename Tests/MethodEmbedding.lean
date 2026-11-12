@@ -91,8 +91,8 @@ theorem inserted_invocation (memory : Safety.Memory) (condition value : W32) :
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 2 maps to actual pc 2
-  expected: CIL.Op.arg 1 none
-  actual:   CIL.Op.arg 0 none
+  expected: CIL.Instruction.arg 1 none
+  actual:   CIL.Instruction.arg 0 none
   the instructions differ
   expected pc 1 falls through to it, so it must be actual pc 2
 -/
@@ -103,10 +103,10 @@ example : MethodEmbeds [{ inserted with code := inserted.code.set 2 (.arg 0 none
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Op.brzero 4
-  renamed:  CIL.Op.brzero 6
-  actual:   CIL.Op.brzero 5
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 5; actual pc 5 (CIL.Op.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brzero 4
+  renamed:  CIL.Instruction.brzero 6
+  actual:   CIL.Instruction.brzero 5
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 5; actual pc 5 (CIL.Instruction.const32 0x00000009#32) is not the image of any live expected pc
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbeds [{ inserted with code := inserted.code.set 1 (.brzero 5) }] 0 body := by cil_embed
@@ -116,10 +116,10 @@ example : MethodEmbeds [{ inserted with code := inserted.code.set 1 (.brzero 5) 
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Op.brzero 4
-  renamed:  CIL.Op.brzero 6
-  actual:   CIL.Op.brzero 4
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Op.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brzero 4
+  renamed:  CIL.Instruction.brzero 6
+  actual:   CIL.Instruction.brzero 4
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.const32 0x00000009#32) is not the image of any live expected pc
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbeds [{ body with code := [.arg 0, .brzero 4, .arg 1, .ret, .const32 9, .ret, .arg 1, .ret] }] 0 body := by
@@ -130,8 +130,8 @@ example : MethodEmbeds [{ body with code := [.arg 0, .brzero 4, .arg 1, .ret, .c
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 2 maps to actual pc 2
-  expected: CIL.Op.arg 1 none
-  actual:   CIL.Op.const32 0x00000009#32
+  expected: CIL.Instruction.arg 1 none
+  actual:   CIL.Instruction.const32 0x00000009#32
   the instructions differ
   expected pc 1 falls through to it, so it must be actual pc 2
 -/
@@ -170,8 +170,8 @@ theorem mulscalar_embeds : MethodEmbeds mulScalar 0 expected := by cil_embed
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 188 maps to actual pc 200
-  expected: CIL.Op.call 8 5
-  actual:   CIL.Op.call 7 5
+  expected: CIL.Instruction.call 8 5
+  actual:   CIL.Instruction.call 7 5
   the instructions differ
 -/
 #guard_msgs (substring := true) in
@@ -389,8 +389,8 @@ theorem vector_dead_returns (memory : Safety.Memory) (value : W32) :
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 2 maps to actual pc 2
-  expected: CIL.Op.arg 0 none
-  actual:   CIL.Op.arg 1 none
+  expected: CIL.Instruction.arg 0 none
+  actual:   CIL.Instruction.arg 1 none
   the instructions differ
 -/
 #guard_msgs (substring := true) in

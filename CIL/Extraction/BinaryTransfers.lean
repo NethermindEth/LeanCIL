@@ -58,7 +58,7 @@ private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
     else some (.write width bigEndian trying)
 
 /-- Covered transfers cannot be forged from another call with the same stack effect. -/
-def binaryTransferMatches (raw : RawInstruction) (emitted : Op) : Bool :=
+def binaryTransferMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
   let expected := binaryCall raw
   let actual := match emitted with
     | .memory (.binaryRead width signed bigEndian trying) =>

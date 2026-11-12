@@ -18,7 +18,7 @@ example {α : Type} (program : CIL.Program) (method : Nat) (args : List Value)
   loop_outcome_induction program method args configuration invariant measure post none progress state valid
 
 example {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)

@@ -85,7 +85,7 @@ def checkedValue (m : Memory) : Value → ExecutionResult Value
 
 /-- Only the value-only instruction whitelist may use the original pure
     arithmetic semantics. No memory/reference operation can enter this path. -/
-def pureArity : CIL.Op → Option Nat
+def pureArity : CIL.Instruction → Option Nat
   | .convI1 | .convI2 | .convU2 => some 1
   | .nop => some 0
   | .neg => some 1
@@ -195,7 +195,7 @@ def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : E
 
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
-def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
+def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   let unknownArgument := match op with
     | .arg index (some _) => (args[index]?.map Value.hasUnspecified).getD false

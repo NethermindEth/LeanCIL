@@ -452,7 +452,7 @@ theorem MethodContract.Holds.result {Input Output : Type} {c : MethodContract In
 /-- Compose a fetched call through the callee's contract instead of its body. The
     continuation receives the callee's final memory and typed output with their `CallResult`. -/
 theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -477,7 +477,7 @@ theorem run_call_of_contract {Input Output : Type} {c : MethodContract Input Out
 /-- A successful call from a well-formed memory returns a well-formed memory and keeps the static
     world and catalog agreement, whatever the callee's contract states. -/
 theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest values : List Value}
     {frame : Frame} {memory updated final : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped :
@@ -500,7 +500,7 @@ theorem call_frame_invariants {program : CIL.Program} {method pc callee fuel : N
 /-- Compose an arbitrary checked helper postcondition with the frame and allocation evidence
     proved by its invocation. Cell preservation alone does not establish confinement. -/
 theorem WP.call_framed {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {operation : CIL.Op} {args stack arguments rest : List Value}
+    {body : CIL.Method} {operation : CIL.Instruction} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory}
     {helperPost post : (Memory × List Value) → Prop}
     (found : program[method]? = some body) (fetched : body.code[pc]? = some operation)
@@ -527,7 +527,7 @@ theorem WP.call_framed {program : CIL.Program} {method pc callee : Nat}
 /-- The `FrameInvariants` a call composed through a contract keeps, from its `CallResult` and
     the step that made the call. -/
 theorem CallResult.frame_invariants {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack rest : List Value} {frame : Frame} {memory updated final : Memory}
     {input : Input} {output : Output}
     (call : CallResult c program callee input updated final output)
@@ -543,7 +543,7 @@ theorem CallResult.frame_invariants {Input Output : Type} {c : MethodContract In
 /-- `run_call_of_contract` from a well-formed memory: the continuation also receives the
     `FrameInvariants` the call keeps from the caller's memory to the callee's final memory. -/
 theorem run_call_of_contract_formed {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -927,7 +927,7 @@ elab_rules : tactic
         saved.restore
         cilContractChild methodFound instructionFound facts
       return
-    if operation == ``CIL.Op.ret then
+    if operation == ``CIL.Instruction.ret then
       evalTactic (← `(tactic| cil_strict refine CIL.Safety.run_return_exists
         $methodFound $instructionFound
         (by cil_checked_step_normalized [$[$facts:term],*])
@@ -943,7 +943,8 @@ elab_rules : tactic
           $methodFound $instructionFound
           (by cil_checked_step_normalized [$[$facts:term],*]) ?_
         cil_stack_cleanup)))
-    unless [``CIL.Op.store64, ``CIL.Op.storeScalar, ``CIL.Op.setFieldAt].contains operation do
+    unless [``CIL.Instruction.store64, ``CIL.Instruction.storeScalar,
+        ``CIL.Instruction.setFieldAt].contains operation do
       advance facts
       return
     let saved ← saveState

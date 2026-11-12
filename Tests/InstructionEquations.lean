@@ -14,7 +14,7 @@ proved once over the flags is then bound to concrete profiles without restating 
 namespace Tests.InstructionEquations
 
 /-- The instruction a profile extraction emits for code its feature tests exclude. -/
-abbrev unreachable : CIL.Op := .unsupported "Unreachable under selected profile"
+abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected profile"
 
 /-- `if (Avx2.IsSupported) return Callee(a, b); return Sse42.IsSupported ? b : a;` with the
     paths of the other profile padded as `unreachable`, so every profile has the same pcs. -/
@@ -35,7 +35,7 @@ cil_instruction_equations dispatchBody
 /--
 info: Tests.InstructionEquations.dispatchBody_instruction4 (sse42 avx2 : Bool) (callee : Nat) :
   (dispatchBody sse42 avx2 callee).code[4]? =
-    some (if avx2 = true then CIL.Op.call callee 2 else unreachable)
+    some (if avx2 = true then CIL.Instruction.call callee 2 else unreachable)
 -/
 #guard_msgs (whitespace := lax) in #check dispatchBody_instruction4
 
@@ -135,7 +135,7 @@ def composedBody (avx2 : Bool) : CIL.Method :=
     code := List.replicate 2 unreachable ++ tailCode avx2 }
 where
   /-- The instructions after the padding. -/
-  tailCode (avx2 : Bool) : List CIL.Op := [if avx2 then .nop else unreachable, .ret]
+  tailCode (avx2 : Bool) : List CIL.Instruction := [if avx2 then .nop else unreachable, .ret]
 
 cil_instruction_equations composedBody
 
@@ -199,7 +199,7 @@ cil_instruction_equations guardedBody
 
 /--
 info: Tests.InstructionEquations.guardedBody_instruction0 {width : Nat} (_wide : 32 < width) :
-  (guardedBody _wide).code[0]? = some (CIL.Op.const32 (BitVec.ofNat 32 width))
+  (guardedBody _wide).code[0]? = some (CIL.Instruction.const32 (BitVec.ofNat 32 width))
 -/
 #guard_msgs (whitespace := lax) in #check guardedBody_instruction0
 

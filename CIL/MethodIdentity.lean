@@ -77,8 +77,8 @@ syntax (name := methodNamed) "method_named " str : term
   let some signature := stx[1].isStrLit? | throwUnsupportedSyntax
   return mkNatLit (← resolve signature)
 
-/-- A call instruction found in a method body: `CIL.Op.call` or the receiver-checked
-    `CIL.Op.callInstance`, with its pc, callee index and argument count. -/
+/-- A call instruction found in a method body: `CIL.Instruction.call` or the receiver-checked
+    `CIL.Instruction.callInstance`, with its pc, callee index and argument count. -/
 structure CallAt where
   pc : Nat
   callee : Nat
@@ -100,7 +100,7 @@ def calls (method : Expr) : MetaM (Array CallAt) := do
     match (← whnf cell).getAppFnArgs with
     | (``List.cons, #[_, op, tail]) =>
       if let (opcode, #[callee, argc]) := (← whnf op).getAppFnArgs then
-        if opcode == ``CIL.Op.call || opcode == ``CIL.Op.callInstance then
+        if opcode == ``CIL.Instruction.call || opcode == ``CIL.Instruction.callInstance then
           if let (some callee, some argc) := (← (evalNat callee).run, ← (evalNat argc).run) then
             found := found.push { pc, callee, argc, opcode }
       cell := tail

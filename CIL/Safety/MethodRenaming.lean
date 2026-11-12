@@ -22,7 +22,7 @@ structure MethodRenaming (source target : CIL.Method) where
 
 /-- Fetching an actual instruction selects its relocated target instruction at the same pc. -/
 theorem MethodRenaming.instruction {source target : CIL.Method}
-    (related : MethodRenaming source target) {pc : Nat} {operation : CIL.Op}
+    (related : MethodRenaming source target) {pc : Nat} {operation : CIL.Instruction}
     (found : source.code[pc]? = some operation) :
     target.code[pc]? = some (related.indices.operation operation) := by
   rw [related.code, List.getElem?_map, found]

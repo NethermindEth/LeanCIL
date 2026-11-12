@@ -51,7 +51,7 @@ long Heartbeats(string path, string text, bool equations = true)
 // stepping tactics rewrite with, depend on `propext` alone, and still be fetched by `cil_code`.
 long Checked(string path, string text, string binder, string method, string equation, int last)
 {
-    var statement = $"example {binder}: {method}.code[{last}]? = some CIL.Op.ret";
+    var statement = $"example {binder}: {method}.code[{last}]? = some CIL.Instruction.ret";
     return Heartbeats(path, text + $"""
 
         {statement} := {equation}
@@ -134,7 +134,7 @@ long ComputedLookupCost(int cases)
         import CIL.InstructionEquations
         import CIL.Safety.SymbolicExecution
         open CIL.Safety
-        def segment : List CIL.Op := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
+        def segment : List CIL.Instruction := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
         def body : CIL.Method :=
           { locals := [], returnsValue := true,
             code := [.nop] ++ (List.replicate {{cases}} segment).flatten ++ [.ret] }

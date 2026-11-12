@@ -46,81 +46,86 @@ theorem Memory.Renamed.staticInstructionResult {mapping : AllocationRenaming}
   split at observable
   all_goals try simp only [List.map_cons, AllocationRenaming.value,
     AllocationRenaming.managedReference]
-  case h_1 =>
-    rename_i bytes
-    cases found : body.staticSites.find? (fun site => site.1 == pc) with
-    | none => simp only [found, SuccessOrThrow] at observable
-    | some site =>
-      obtain ⟨key, descriptor⟩ := site
-      simp only [found] at observable ⊢
-      by_cases matched : (descriptor.bytes == bytes) = true
-      · simp only [matched, ite_true, Bind.bind, Except.bind] at observable ⊢
-        cases resolved : CIL.Safety.staticReference descriptor source with
-        | error fault =>
-          cases fault <;> simp only [resolved, SuccessOrThrow] at observable
-          rename_i exception
-          exact False.elim (staticReference_not_thrown descriptor source exception resolved)
-        | ok result =>
-          obtain ⟨sourceAfter, reference⟩ := result
-          obtain ⟨later, targetAfter, extension, targetLoaded, memories⟩ :=
-            related.staticReference sourceFormed targetFormed staticBounds
-              descriptor reference resolved
-          refine ⟨later, extension, ?_⟩
-          simp only [resolved, targetLoaded, Bind.bind, Except.bind]
-          exact .ok ⟨memories, by
-            simp only [List.map_cons, AllocationRenaming.value,
-              AllocationRenaming.managedReference, extension.values stack bounds]⟩
-      · simp only [matched, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
-          SuccessOrThrow] at observable
-  case h_2 =>
-    rename_i bytes
-    refine ⟨mapping, .refl mapping, ?_⟩
-    cases found : body.staticSites.find? (fun site => site.1 == pc) with
-    | none => exact .error _
-    | some site =>
-      obtain ⟨key, descriptor⟩ := site
-      simp only [found] at observable ⊢
-      cases flagged : descriptor.opaqueValue
-      case false =>
-        simp only [Bool.false_eq_true, ite_false]
-        repeat first
-          | exact .ok ⟨related, rfl⟩
-          | exact .error _
-          | (split <;> try simp only [Bind.bind, Except.bind])
-      simp only [flagged, ite_true] at observable ⊢
-      split
-      case isFalse => exact .error _
-      -- An opaque value is only ever read through the caller's cached binding.
-      cases cached : source.staticBindings.find? (fun binding => binding.1 == descriptor.identity)
-      case none =>
-        simp only [CIL.Safety.staticReference, related.staticLookup descriptor.identity, cached,
-          Option.map_none, flagged, ite_true, Bind.bind, Except.bind]
-        exact .error _
-      rename_i binding
-      obtain ⟨name, address⟩ := binding
-      have bound := staticBounds (name, address) (List.mem_of_find?_eq_some cached)
-      apply (related.cachedStatic descriptor name address bound cached).bindWithSuccess
-      intro sourceResult targetResult sourceLoaded paired
-      obtain ⟨sourceAfter, sourceReference⟩ := sourceResult
-      obtain ⟨targetAfter, targetReference⟩ := targetResult
-      obtain ⟨memories, rfl⟩ := paired
-      obtain ⟨rfl, rfl, _⟩ := cached_static_reference_checked _ _ _ _ _ _ cached sourceLoaded
-      dsimp only
-      rw [memories.read sourceReference bound]
-      apply ((ResultEquivalent.eq_refl _).checkedAt (.address sourceReference) _).bind
-      intro loaded other same
-      subst same
-      split <;> first | exact .ok ⟨memories, rfl⟩ | exact .error _
-  case h_6 =>
-    refine ⟨mapping, .refl mapping, ?_⟩
-    cases operation <;> first
-      | exact related.memoryInstructionResult _ sourceFormed _ bounds observable
-      | (unfold CIL.Safety.memoryInstruction at observable
-         repeat' first
-           | contradiction
-           | cases observable
-           | split at observable
-           | simp only [Bind.bind, Except.bind, SuccessOrThrow] at observable)
+  -- Only the `.staticAddress` and `.staticValue` arms resolve the static site at `pc`.
+  any_goals first
+    | (rename_i bytes
+       cases found : body.staticSites.find? (fun site => site.1 == pc) with
+       | none => simp only [found, SuccessOrThrow] at observable
+       | some site =>
+         obtain ⟨key, descriptor⟩ := site
+         simp only [found] at observable ⊢
+         by_cases matched : (descriptor.bytes == bytes) = true
+         · simp only [matched, ite_true, Bind.bind, Except.bind] at observable ⊢
+           cases resolved : CIL.Safety.staticReference descriptor source with
+           | error fault =>
+             cases fault <;> simp only [resolved, SuccessOrThrow] at observable
+             rename_i exception
+             exact False.elim (staticReference_not_thrown descriptor source exception resolved)
+           | ok result =>
+             obtain ⟨sourceAfter, reference⟩ := result
+             obtain ⟨later, targetAfter, extension, targetLoaded, memories⟩ :=
+               related.staticReference sourceFormed targetFormed staticBounds
+                 descriptor reference resolved
+             refine ⟨later, extension, ?_⟩
+             simp only [resolved, targetLoaded, Bind.bind, Except.bind]
+             exact .ok ⟨memories, by
+               simp only [List.map_cons, AllocationRenaming.value,
+                 AllocationRenaming.managedReference, extension.values stack bounds]⟩
+         · simp only [matched, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
+             SuccessOrThrow] at observable)
+    | (rename_i bytes
+       refine ⟨mapping, .refl mapping, ?_⟩
+       cases found : body.staticSites.find? (fun site => site.1 == pc) with
+       | none => exact .error _
+       | some site =>
+         obtain ⟨key, descriptor⟩ := site
+         simp only [found] at observable ⊢
+         cases flagged : descriptor.opaqueValue
+         case false =>
+           simp only [Bool.false_eq_true, ite_false]
+           repeat first
+             | exact .ok ⟨related, rfl⟩
+             | exact .error _
+             | (split <;> try simp only [Bind.bind, Except.bind])
+         simp only [flagged, ite_true] at observable ⊢
+         split
+         case isFalse => exact .error _
+         cases cached : source.staticBindings.find?
+             (fun binding => binding.1 == descriptor.identity)
+         case none =>
+           simp only [CIL.Safety.staticReference, related.staticLookup descriptor.identity, cached,
+             Option.map_none, flagged, ite_true, Bind.bind, Except.bind]
+           exact .error _
+         rename_i binding
+         obtain ⟨name, address⟩ := binding
+         have bound := staticBounds (name, address) (List.mem_of_find?_eq_some cached)
+         apply (related.cachedStatic descriptor name address bound cached).bindWithSuccess
+         intro sourceResult targetResult sourceLoaded paired
+         obtain ⟨sourceAfter, sourceReference⟩ := sourceResult
+         obtain ⟨targetAfter, targetReference⟩ := targetResult
+         obtain ⟨memories, rfl⟩ := paired
+         obtain ⟨rfl, rfl, _⟩ := cached_static_reference_checked _ _ _ _ _ _ cached sourceLoaded
+         dsimp only
+         rw [memories.read sourceReference bound]
+         apply ((ResultEquivalent.eq_refl _).checkedAt (.address sourceReference) _).bind
+         intro loaded other same
+         subst same
+         split <;> first | exact .ok ⟨memories, rfl⟩ | exact .error _)
+    | fail "not a static-site arm"
+  -- Only the fallback arm keeps `operation`, with `.staticAddress` excluded.
+  any_goals first
+    | (have excludesAddress : ∀ bytes, operation = .staticAddress bytes → False := by assumption
+       clear excludesAddress
+       refine ⟨mapping, .refl mapping, ?_⟩
+       cases operation <;> first
+         | exact related.memoryInstructionResult _ sourceFormed _ bounds observable
+         | (unfold CIL.Safety.memoryInstruction at observable
+            repeat' first
+              | contradiction
+              | cases observable
+              | split at observable
+              | simp only [Bind.bind, Except.bind, SuccessOrThrow] at observable))
+    | fail "not the fallback arm"
   all_goals refine ⟨mapping, .refl mapping, ?_⟩
   all_goals try exact related.memoryInstructionResult _ sourceFormed _ bounds observable
   all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below,

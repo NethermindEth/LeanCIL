@@ -106,7 +106,7 @@ theorem LoopFrame.after_local_write {footprint : List (Reference × Nat)}
     preservation evidence into the caller proof. The helper is actually invoked. -/
 theorem WP.local_call {Input Output : Type} {contract : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method}
-    {operation : CIL.Op} {args stack rest : List Value} {frame : Frame}
+    {operation : CIL.Instruction} {args stack rest : List Value} {frame : Frame}
     {footprint : List (Reference × Nat)} {caller current : Memory}
     {kinds : List CIL.LocalKind} {known : Nat → Option CIL.Value}
     {post : (Memory × List Value) → Prop}

@@ -25,7 +25,7 @@ def truth : Value → Option Bool
 
 /-- Two-operand arithmetic, bitwise and comparison instructions. `a` is the deeper stack
     operand. Comparisons push `1` or `0` as an `i32`; shift counts are taken modulo the width. -/
-def binary (op : Op) (a b : Value) : Option Value :=
+def binary (op : Instruction) (a b : Value) : Option Value :=
   match op, a, b with
   | .divide signed remainder, x, y => (divideValues signed remainder x y).toOption
   | .checkedArithmetic kind signed, x, y => (checkedValues kind signed x y).toOption
@@ -70,7 +70,7 @@ def binary (op : Op) (a b : Value) : Option Value :=
   | _ , _, _ => none
 
 /-- Native shift counts normalize to their low 32 bits under the admitted 64-bit runtime. -/
-theorem binary_native_shift_count (operation : Op) (value : Value) (count : W64)
+theorem binary_native_shift_count (operation : Instruction) (value : Value) (count : W64)
     (shift : operation = .shl ∨ operation = .shr ∨ operation = .shrUn) :
     binary operation value (.i64 count) = binary operation value (.i32 (count.setWidth 32)) := by
   rcases shift with rfl | rfl | rfl <;> cases value <;> rfl
@@ -79,7 +79,7 @@ theorem binary_native_shift_count (operation : Op) (value : Value) (count : W64)
 
 /-- One-operand instructions: negation, complement and integer conversions. A narrowing
     conversion truncates, then sign- or zero-extends back to `i32`. -/
-def unary (op : Op) (value : Value) : Option Value :=
+def unary (op : Instruction) (value : Value) : Option Value :=
   match op, value with
   | .checkedConvert width signed unsignedInput, value =>
     (convertInteger width signed unsignedInput value).toOption
@@ -135,7 +135,7 @@ def returnFromStack (narrow : Option NarrowKind) (returns : Bool)
 /-- Executes instruction `op` at `pc`. Binary operands are popped as `b :: a :: rest`, so
     `a` was pushed first. `returns` says whether the method returns a value; `profile`
     decides feature tests and intrinsic availability. -/
-def step (op : Op) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
+def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
   match op, stack with

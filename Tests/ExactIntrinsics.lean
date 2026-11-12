@@ -12,7 +12,8 @@ private def vectorType (width : String) : TypeExpr :=
   .apply (.constructor scope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
     (.atom runtimeScope "System.UInt64")
 private def profile : FeatureProfile := { architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true, sse42 := true, avx := true, avx2 := true, bmi1 := true, bmi2 := true, avx512F := true, avx512FVL := true, avx512DQ := true, avx512DQVL := true, vector128Accelerated := true, vector256Accelerated := true }
-private def body (operations : List Op) : Method := { code := operations, locals := [], returnsValue := true, profile }
+private def body (operations : List Instruction) : Method :=
+  { code := operations, locals := [], returnsValue := true, profile }
 private def raw (site : CallSite) : RawMethod := {
   token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,

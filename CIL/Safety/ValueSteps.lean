@@ -86,7 +86,7 @@ elab_rules : command
         let stack ← (names.zip shape).foldrM (init := (rest : Term)) fun (name, wide) tail =>
           if wide then `(Value.scalar (CIL.Value.i64 $name) :: $tail)
           else `(Value.scalar (CIL.Value.i32 $name) :: $tail)
-        let opName := mkIdent (`CIL.Op ++ op.getId)
+        let opName := mkIdent (instructionTypeName ++ op.getId)
         let opTerm ← `(($opName $paramTerms*))
         let statement ← `(∀ (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
             (memory : Memory) ($rest : List Value) $params* $operands*,

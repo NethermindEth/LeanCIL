@@ -37,7 +37,8 @@ private theorem nativeShiftKinds :
 
 /-- Native-count certificates bind both the exact shift operation and the count's metadata. -/
 private theorem nativeShiftCertificates :
-    ([(98, Op.shl), (99, Op.shr), (100, Op.shrUn)].all fun (opcode, operation) =>
+    ([(98, Instruction.shl), (99, Instruction.shr), (100, Instruction.shrUn)].all
+      fun (opcode, operation) =>
       let method := raw [i 2, i 3, i opcode, i 42] [word, nativeType]
       let features := [unknown 0, unknown 1, unknown 2, unknown 1]
       let states := [some [], some [ScalarKind.word64], some [.native, .word64], some [.word64]]
@@ -47,7 +48,7 @@ private theorem nativeShiftCertificates :
       !decide (ScalarFlowValid #[] method features states (code.set 2 .add))) = true := by decide +kernel
 #print axioms nativeShiftCertificates
 
-private def arithmetic : List (Nat × Op) := [
+private def arithmetic : List (Nat × Instruction) := [
   (88, .add), (89, .sub), (90, .mul), (91, .divide true false), (92, .divide false false),
   (93, .divide true true), (94, .divide false true), (95, .band), (96, .bor), (97, .bxor),
   (98, .shl), (99, .shr), (100, .shrUn), (214, .checkedArithmetic .add true),
@@ -70,7 +71,7 @@ example : scalarOpMatches (i 88) [.word32, .native] .add = false := by decide
 example : scalarOpMatches (i 88) [.word64, .word64] (.nativeBinary .add) = false := by decide
 example : scalarOpMatches (i 88) [.word32, .native] (.nativeBinary .sub) = false := by decide
 
-private def arithmeticFlagMutations : List (Nat × Op) := [
+private def arithmeticFlagMutations : List (Nat × Instruction) := [
   (91, .divide false false), (91, .divide true true), (91, .divide false true),
   (92, .divide true false), (92, .divide false true), (92, .divide true true),
   (93, .divide false true), (93, .divide true false), (93, .divide false false),
@@ -81,7 +82,7 @@ private def arithmeticFlagMutations : List (Nat × Op) := [
 example : arithmeticFlagMutations.all (fun (opcode, operation) =>
     !scalarOpMatches (i opcode) [.word64, .word64] operation) = true := by decide
 
-private def conversions : List (Nat × Op) := [
+private def conversions : List (Nat × Instruction) := [
   (103, .convI1), (104, .convI2), (105, .convI4), (106, .convI8), (109, .convU4), (110, .convU8),
   (130, .checkedConvert 8 true true), (131, .checkedConvert 16 true true),
   (132, .checkedConvert 32 true true), (133, .checkedConvert 64 true true),
@@ -119,7 +120,7 @@ example : scalarOpMatches (i 33) [] (.const64 0) = false := by decide
 private def addRaw := raw [i 2, i 3, i 88, i 42]
 private def addFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 2, unknown 1]
 private def addStates : ScalarCertificate := [some [], some [.word64], some [.word64, .word64], some [.word64]]
-private def addCode : List Op := [.arg 0, .arg 1, .add, .ret]
+private def addCode : List Instruction := [.arg 0, .arg 1, .add, .ret]
 private def addEvidence : MethodEvidence := {
   original := addRaw, arguments := [], closed := addRaw,
   parameterInput := { arguments := [.field .unsigned64, .field .unsigned64], locals := [], code := [.load 0, .load 1, .other, .other] },
@@ -138,8 +139,9 @@ example : ¬ ScalarFlowValid #[] addRaw (addFeatures.drop 1) addStates addCode :
 
 private def binaryEvidence (opcode : Nat) : MethodEvidence :=
   { addEvidence with original := { addRaw with code := addRaw.code.set 2 (i opcode) }, closed := { addRaw with code := addRaw.code.set 2 (i opcode) } }
-private def binaryMethod (operation : Op) : Method := { addMethod with code := addCode.set 2 operation }
-private def arithmeticFlagCases : List (Nat × Op) := [
+private def binaryMethod (operation : Instruction) : Method :=
+  { addMethod with code := addCode.set 2 operation }
+private def arithmeticFlagCases : List (Nat × Instruction) := [
   (91, .divide true false), (92, .divide false false), (93, .divide true true), (94, .divide false true),
   (214, .checkedArithmetic .add true), (215, .checkedArithmetic .add false),
   (216, .checkedArithmetic .mul true), (217, .checkedArithmetic .mul false),
@@ -243,7 +245,7 @@ example : ¬ TranslationValid [] #[] [argumentEvidence] [] [argumentMethod] := b
 
 private def mixedRaw := { raw [i 2, i 3, i 88, i 42] [nativeType, intType] with returnType := nativeType }
 private def mixedStates : ScalarCertificate := [some [], some [.native], some [.word32, .native], some [.native]]
-private def mixedCode : List Op := [.arg 0, .arg 1, .nativeBinary .add, .ret]
+private def mixedCode : List Instruction := [.arg 0, .arg 1, .nativeBinary .add, .ret]
 example : ScalarFlowValid #[] mixedRaw addFeatures mixedStates mixedCode := by decide
 example : ¬ ScalarFlowValid #[] mixedRaw addFeatures mixedStates (mixedCode.set 2 .add) := by decide
 example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.set 2 (.nativeBinary .add)) := by decide
@@ -405,7 +407,7 @@ private def byteSpanSite : CallSite := {
 private def byteSpanRaw := { raw [i 2, i 31 (.integer 16), i 115 (.call byteSpanSite), i 42] [.byref word] with returnType := byteSpanType }
 private def byteSpanFeatures : FeatureCertificate := [unknown 0, unknown 1, state [some 16, none], unknown 1]
 private def byteSpanStates : ScalarCertificate := [some [], some [.reference], some [.word32, .reference], some [.other]]
-private def byteSpanCode : List Op := [.arg 0, .const32 16, .memory .spanCreate, .ret]
+private def byteSpanCode : List Instruction := [.arg 0, .const32 16, .memory .spanCreate, .ret]
 /-- Span construction checks its exact signature and managed backing reference. -/
 private theorem span_constructor_cases :
     (ScalarFlowValid #[] byteSpanRaw byteSpanFeatures byteSpanStates byteSpanCode) ∧
@@ -496,7 +498,8 @@ private theorem span_signature_cases :
 private def joinRaw := { raw [i 2, i 45 (.target 4), i 22, i 43 (.target 5), i 22, i 42] [intType] with returnType := intType }
 private def joinFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, state [some 0], unknown 0, unknown 1]
 private def joinStates : ScalarCertificate := [some [], some [.word32], some [], some [.word32], some [], some [.word32]]
-private def joinCode : List Op := [.arg 0, .brnonzero 4, .const32 0, .branch 5, .const32 0, .ret]
+private def joinCode : List Instruction :=
+  [.arg 0, .brnonzero 4, .const32 0, .branch 5, .const32 0, .ret]
 example : ScalarFlowValid #[] joinRaw joinFeatures joinStates joinCode := by decide
 example : ¬ ScalarFlowValid #[] { joinRaw with code := joinRaw.code.set 4 (i 33 (.integer 0)) }
     joinFeatures joinStates (joinCode.set 4 (.const64 0)) := by decide
@@ -506,7 +509,7 @@ example : ¬ ScalarFlowValid #[] { joinRaw with code := joinRaw.code.set 4 (i 33
 private def loopRaw := raw [i 22, i 38, i 43 (.target 0)] []
 private def loopFeatures : FeatureCertificate := [unknown 0, state [some 0], unknown 0]
 private def loopStates : ScalarCertificate := [some [], some [.word32], some []]
-private def loopCode : List Op := [.const32 0, .pop, .branch 0]
+private def loopCode : List Instruction := [.const32 0, .pop, .branch 0]
 example : ScalarFlowValid #[] loopRaw loopFeatures loopStates loopCode := by decide
 example : ¬ ScalarFlowValid #[] loopRaw loopFeatures (loopStates.set 1 (some [.word64])) loopCode := by decide
 example : ¬ ScalarFlowValid #[] { loopRaw with code := [i 22, i 0, i 43 (.target 0)] }
@@ -536,7 +539,8 @@ private def holeRaw (opcode : Nat) (operand : RawOperand := .none) := raw [i 2, 
 private def holeFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 2, unknown 1, unknown 0, unknown 1]
 private def holeStates : ScalarCertificate :=
   [some [], some [.word64], some [.word64, .word64], some [.other], some [], some [.word64]]
-private def holeCode (emitted : Op) : List Op := [.arg 0, .arg 1, emitted, .pop, .arg 0, .ret]
+private def holeCode (emitted : Instruction) : List Instruction :=
+  [.arg 0, .arg 1, emitted, .pop, .arg 0, .ret]
 example : ScalarFlowValid #[] (holeRaw 88) holeFeatures (holeStates.set 3 (some [.word64])) (holeCode .add) := by decide
 -- Array loads now require exact array evidence rather than accepting an equal stack effect.
 example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode (.memory (.spanItem 4))) := by decide
@@ -547,7 +551,8 @@ private def holeEvidence (opcode : Nat) (states : ScalarCertificate) : MethodEvi
   original := holeRaw opcode, arguments := [], closed := holeRaw opcode,
   parameterInput := { arguments := [.field .unsigned64, .field .unsigned64], locals := [], code := [.load 0, .load 1, .other, .other, .load 0, .other] },
   reachable := List.replicate 6 true, featureStates := holeFeatures, scalarStates := states, layoutUses := [], assembly := scope }
-private def holeMethod (emitted : Op) : Method := { locals := [], returnsValue := true, code := holeCode emitted }
+private def holeMethod (emitted : Instruction) : Method :=
+  { locals := [], returnsValue := true, code := holeCode emitted }
 /-- A scalar opcode cannot be replaced by an unrelated instruction with the same stack effect. -/
 private theorem scalar_opcode_cases :
     (TranslationValid [] #[] [holeEvidence 88 (holeStates.set 3 (some [.word64]))] []
@@ -560,7 +565,8 @@ private theorem scalar_opcode_cases :
 private def unaryHoleRaw (opcode : Nat) := raw [i 2, i opcode, i 38, i 2, i 42] [word]
 private def unaryHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1, unknown 0, unknown 1]
 private def unaryHoleStates : ScalarCertificate := [some [], some [.word64], some [.other], some [], some [.word64]]
-private def unaryHoleCode (emitted : Op) : List Op := [.arg 0, emitted, .pop, .arg 0, .ret]
+private def unaryHoleCode (emitted : Instruction) : List Instruction :=
+  [.arg 0, emitted, .pop, .arg 0, .ret]
 example : ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates (unaryHoleCode (.loadScalar 8)) := by decide
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates (unaryHoleCode .convI8) := by decide
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
@@ -569,7 +575,8 @@ example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleS
 private def pushHoleRaw (opcode : Nat) := raw [i opcode, i 38, i 2, i 42] [word]
 private def pushHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1]
 private def pushHoleStates : ScalarCertificate := [some [], some [.other], some [], some [.word64]]
-private def pushHoleCode (emitted : Op) : List Op := [emitted, .pop, .arg 0, .ret]
+private def pushHoleCode (emitted : Instruction) : List Instruction :=
+  [emitted, .pop, .arg 0, .ret]
 example : ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures
     (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullObject)) := by decide
 -- `ldnull` has one canonical null; the byref null of `Unsafe.NullRef` is a different value.
@@ -585,7 +592,8 @@ private def fieldRaw : RawMethod := { raw [i 2, i 123 (.field account 1 word fal
   maxStack := 1 }
 private def fieldFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
 private def fieldStates : ScalarCertificate := [some [], some [.object], some [.word64]]
-private def fieldCode (operation : MemoryOp) : List Op := [.arg 0, .memory operation, .ret]
+private def fieldCode (operation : MemoryOp) : List Instruction :=
+  [.arg 0, .memory operation, .ret]
 -- A class field load names the field's declaring class, model offset, width and extension.
 example : ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
     (fieldCode (.objectField account 8 8 false)) := by decide
@@ -724,7 +732,7 @@ example : (guardOperand 64 false (.i64 0xFFFFFFFFFFFFFFFF#64)).map ZeroGuard.neg
 -- Size constants are the only uncovered literal producers; primitive widths are bound here.
 private def sizeRaw (instruction : RawInstruction) := raw [instruction, i 38, i 2, i 42] [word]
 private def sizeStates : ScalarCertificate := [some [], some [.word32], some [], some [.word64]]
-private def sizeCode (bits : W32) : List Op := [.const32 bits, .pop, .arg 0, .ret]
+private def sizeCode (bits : W32) : List Instruction := [.const32 bits, .pop, .arg 0, .ret]
 private def sizeAt (instruction : RawInstruction) (bits : W32) : Bool :=
   decide (ScalarFlowValid #[] (sizeRaw instruction) pushHoleFeatures sizeStates (sizeCode bits))
 private def sizeOfSite (type : TypeExpr) : CallSite := {
@@ -767,11 +775,12 @@ private def branchRaw (opcode : Nat) (parameters : List TypeExpr) :=
   { raw [i 2, i 3, i opcode (.target 3), i 42] parameters with returnType := .void }
 private def branchFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 2, unknown 0]
 private def branchStates (left right : ScalarKind) : ScalarCertificate := [some [], some [left], some [right, left], some []]
-private def branchCode (emitted : Op) : List Op := [.arg 0, .arg 1, emitted, .ret]
-private def branchAt (opcode : Nat) (left right : ScalarKind) (emitted : Op) : Bool :=
+private def branchCode (emitted : Instruction) : List Instruction :=
+  [.arg 0, .arg 1, emitted, .ret]
+private def branchAt (opcode : Nat) (left right : ScalarKind) (emitted : Instruction) : Bool :=
   let parameters := [left, right].map fun | .native => nativeType | .word32 => intType | .word64 => word | _ => .byref word
   decide (ScalarFlowValid #[] (branchRaw opcode parameters) branchFeatures (branchStates left right) (branchCode emitted))
-private def branches : List (Nat × Op) := [
+private def branches : List (Nat × Instruction) := [
   (46, .beq 3), (47, .bge 3), (48, .bgt 3), (49, .ble 3), (50, .blt 3), (51, .bne 3), (52, .bgeu 3),
   (53, .bgtu 3), (54, .bleu 3), (55, .bltu 3), (59, .beq 3), (60, .bge 3), (61, .bgt 3), (62, .ble 3),
   (63, .blt 3), (64, .bne 3), (65, .bgeu 3), (66, .bgtu 3), (67, .bleu 3), (68, .bltu 3)]

@@ -184,11 +184,13 @@ included. Masking the code outside the region with `.unsupported` makes it dead 
 after inline code to the same suffix after a helper call, one pc earlier.
 
 For a long suffix, import `CIL.Safety.Embedding.Suffix` and use
-`CIL.Embedding.BodyRefines.of_relocated_suffix`. It uses one list equality: `actual.code.drop start
-= (expected.code.drop lower).map (Op.relabel (fun pc => pc - lower + start))`. The expected prefix
-must contain only dead instructions. All branch targets in the suffix must be at least `lower`. The
-constructor also requires equal method metadata, equal static descriptor lists, and equal static
-lookups at each moved pc. If `lower = 0`, `start` must also be zero to preserve method entry.
+`CIL.Embedding.BodyRefines.of_relocated_suffix`. It uses one list equality:
+`actual.code.drop start
+= (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start))`.
+The expected prefix must contain only dead instructions. All branch targets in the suffix must be at
+least `lower`. The constructor also requires equal method metadata, equal static descriptor lists,
+and equal static lookups at each moved pc. If `lower = 0`, `start` must also be zero to preserve
+method entry.
 
 The resulting map, `suffixRename lower start`, sends prefix pcs to zero and suffix pcs to `pc -
 lower + start`. Pass the proof to `ProgramRefines.set_body` and then `run_refines`. This avoids
@@ -222,8 +224,8 @@ index, both elements and both lengths:
 cil_body: rfl could not prove the method-body binding
 method index 1
 field code: first difference at index 1 (left length 6, right length 6)
-  left:  CIL.Op.brzero 10
-  right: CIL.Op.brzero 4
+  left:  CIL.Instruction.brzero 10
+  right: CIL.Instruction.brzero 4
 ```
 
 The left side is the extraction's body. An index past the end of the program is reported with the
@@ -407,10 +409,10 @@ inserted live one is reported by expected and actual pc:
 cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Op.brzero 4
-  renamed:  CIL.Op.brzero 6
-  actual:   CIL.Op.brzero 4
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Op.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brzero 4
+  renamed:  CIL.Instruction.brzero 6
+  actual:   CIL.Instruction.brzero 4
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.const32 0x00000009#32) is not the image of any live expected pc
 ```
 
 The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for 1,414 instructions. See
@@ -572,7 +574,7 @@ one equation instead of unfolding the body:
 import CIL.InstructionEquations
 import CIL.Safety.SymbolicExecution
 
-abbrev unreachable : CIL.Op := .unsupported "Unreachable under selected profile"
+abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected profile"
 
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [

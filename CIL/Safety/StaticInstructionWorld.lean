@@ -70,7 +70,7 @@ theorem memoryInstruction_preserves_static_world (descriptors : List CIL.StaticD
   exact (memoryInstruction_effect _ _ _ _ _ h).staticWorld descriptors world
 
 theorem instruction_preserves_static_world (descriptors : List CIL.StaticDescriptor)
-    (operation : CIL.Op) (stack values : List Value) (m result : Memory)
+    (operation : CIL.Instruction) (stack values : List Value) (m result : Memory)
     (world : StaticWorldValid descriptors m)
     (h : instruction operation stack m = .ok (result, values)) :
     StaticWorldValid descriptors result := by

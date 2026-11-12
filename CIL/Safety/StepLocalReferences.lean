@@ -26,8 +26,8 @@ theorem stored_frame_references_valid (m result : Memory) (frame : Frame) (index
     exact stored
 
 /-- A step keeps every frame slot reference valid in the memory it leaves behind. -/
-theorem step_preserves_frame_references (body : CIL.Method) (operation : CIL.Op) (pc : Nat)
-    (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
+theorem step_preserves_frame_references (body : CIL.Method) (operation : CIL.Instruction)
+    (pc : Nat) (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (hm : m.WellFormed) (valid : frame.ReferencesValid m)
     (h : step body operation pc args frame stack m = .ok action) :
     (action.frameAfter frame).ReferencesValid action.memory := by

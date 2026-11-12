@@ -14,7 +14,7 @@ namespace CIL.Safety
 /-- A constructor must return void, and its full initialized value must be
     loaded successfully before the caller resumes with that value. -/
 theorem run_construct_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest values : List Value}
     {frame constructedFrame : Frame} {temporary : Reference} {kind : CIL.LocalKind} {value : Value}
     {memory updated childResult result : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
@@ -44,7 +44,7 @@ theorem run_construct_of_invoke {program : CIL.Program} {fuel method pc callee :
 
 /-- Independently sufficient budgets combine without requiring equal proof fuel. -/
 theorem run_construct_exists {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest values : List Value}
     {frame constructedFrame : Frame} {temporary : Reference} {kind : CIL.LocalKind} {value : Value}
     {memory updated childResult result : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)

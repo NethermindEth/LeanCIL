@@ -63,7 +63,8 @@ namespace CIL.Safety
       (value.hasUnspecified || unspecifiedOperands count rest) := rfl
 
 -- How many stack operands each instruction observes.
-@[cil_guard] theorem guard_nativeBinary (op : CIL.Op) : observerCount (.nativeBinary op) = 2 := rfl
+@[cil_guard] theorem guard_nativeBinary (op : CIL.Instruction) :
+    observerCount (.nativeBinary op) = 2 := rfl
 @[cil_guard] theorem guard_checkedConvert (width : Nat) (signed unsigned : Bool) :
     observerCount (.checkedConvert width signed unsigned) = 1 := rfl
 @[cil_guard] theorem guard_checkedArithmetic (kind : CIL.CheckedBinaryKind) (signed : Bool) :

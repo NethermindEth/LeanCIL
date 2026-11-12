@@ -15,7 +15,7 @@ stepping.
 namespace CIL.Safety
 
 /-- Observing an unspecified operand faults before any instruction changes memory or state. -/
-theorem step_unspecified {body : CIL.Method} {operation : CIL.Op} {pc : Nat}
+theorem step_unspecified {body : CIL.Method} {operation : CIL.Instruction} {pc : Nat}
     {args stack : List Value} {frame : Frame} {memory : Memory}
     (unknown : unspecifiedOperands (observerCount operation) stack = true) :
     step body operation pc args frame stack memory =
@@ -103,7 +103,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return FrameAction.next (if taken then target else pc + 1) rest frame memory := rfl
 
 /-- The dispatcher arm for an op that only touches the stack and memory. -/
-def instructionStep (op : CIL.Op) (pc : Nat) (frame : Frame) (stack : List Value)
+def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : List Value)
     (memory : Memory) :
     ExecutionResult FrameAction := do
   let (memory, values) ← instruction op stack memory
@@ -303,7 +303,7 @@ theorem invoke_of_run {program : CIL.Program} {fuel method : Nat} {body : CIL.Me
 
 /-- A fetched step that continues at `target` costs one unit of fuel. -/
 theorem run_next {program : CIL.Program} {fuel method pc target : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory}
     (methodFound : program[method]? = some body)
     (instructionFound : body.code[pc]? = some op)
@@ -316,7 +316,7 @@ theorem run_next {program : CIL.Program} {fuel method pc target : Nat}
 
 /-- Return through frame expiration and the checked result validation. -/
 theorem run_return {program : CIL.Program} {fuel method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame : Frame} {memory updated : Memory}
     (methodFound : program[method]? = some body)
     (instructionFound : body.code[pc]? = some op)
@@ -331,7 +331,7 @@ theorem run_return {program : CIL.Program} {fuel method pc : Nat}
 
 /-- A fetched step that faults ends the run with that fault, located at its method and pc. -/
 theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value}
     {frame : Frame} {memory : Memory} {fault : ExecutionFault}
     (methodFound : program[method]? = some body)
     (instructionFound : body.code[pc]? = some op)
@@ -357,7 +357,7 @@ theorem invoke_of_run_fault {program : CIL.Program} {fuel method : Nat} {body : 
 /-- Compose one checked fetched step with a terminating continuation without
     fixing the continuation's fuel in the caller proof. -/
 theorem run_next_exists {program : CIL.Program} {method pc target : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory}
     (post : Memory → List Value → Prop)
     (methodFound : program[method]? = some body)
@@ -378,7 +378,7 @@ theorem run_next_exists {program : CIL.Program} {method pc target : Nat}
 /-- Some fuel runs to a successful return satisfying `post` when the fetched instruction
     returns checked values that satisfy it. -/
 theorem run_return_exists {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.returned values updated))

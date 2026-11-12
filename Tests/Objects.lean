@@ -225,7 +225,7 @@ theorem reference_field_checks_slot :
   [depositing, fieldReading, slotReading, creating, doingNothing]
 
 -- A walk stopped at a receiver-checked call lacks the callee's contract, as at a direct call.
-/-- "instruction":"CIL.Op.callInstance 4 1","method":0,"missing":"calleeContract" -/
+/-- "instruction":"CIL.Instruction.callInstance 4 1","method":0,"missing":"calleeContract" -/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : CIL.Safety.Memory) (object : Reference) (frame : Frame)

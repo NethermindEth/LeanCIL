@@ -3,7 +3,7 @@ import CIL.Safety.Embedding.Simulation
 /-!
 # Relocated suffixes
 
-When the expected body is dead (`Op.live = false`) before pc `lower` and its code from
+When the expected body is dead (`Instruction.live = false`) before pc `lower` and its code from
 `lower` on appears relabeled at pc `start` of the actual body, the actual body refines it
 under `suffixRename`. Branch targets must stay inside the suffix. A proof about a region,
 with the code outside it masked as `.unsupported`, then transfers to the real method
@@ -20,10 +20,10 @@ def suffixRename (lower start pc : Nat) : Nat :=
   if pc < lower then 0 else pc - lower + start
 
 /-- Relabeling depends only on the renaming's values at the instruction's own targets. -/
-theorem _root_.CIL.Op.relabel_congr {left right : Nat → Nat} (op : Op)
+theorem _root_.CIL.Instruction.relabel_congr {left right : Nat → Nat} (op : Instruction)
     (same : ∀ target ∈ op.targets, left target = right target) :
     op.relabel left = op.relabel right := by
-  induction op <;> simp_all [Op.relabel, Op.targets]
+  induction op <;> simp_all [Instruction.relabel, Instruction.targets]
 
 /-- The expected code from `lower` on, relabeled and placed at `start` in `actual`, makes
     `actual` refine `expected` under `suffixRename lower start`. -/
@@ -33,7 +33,7 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     (entry : lower = 0 → start = 0)
     (dead : ∀ pc op, pc < lower → expected.code[pc]? = some op → op.live = false)
     (suffix : actual.code.drop start =
-      (expected.code.drop lower).map (Op.relabel (fun pc => pc - lower + start)))
+      (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start)))
     (targets : ∀ op ∈ expected.code.drop lower, ∀ target ∈ op.targets, lower ≤ target)
     (statics : ∀ pc, lower ≤ pc → staticAt actual (pc - lower + start) = staticAt expected pc) :
     BodyRefines expected actual (suffixRename lower start) := by

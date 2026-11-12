@@ -11,13 +11,13 @@ Their results can therefore be reused exactly while checked references are mappe
 namespace CIL.Safety
 
 /-- The empty relocation leaves every operand unchanged. -/
-theorem LocalIndexMap.operation_nil (operation : CIL.Op) :
+theorem LocalIndexMap.operation_nil (operation : CIL.Instruction) :
     LocalIndexMap.nil.operation operation = operation := by cases operation <;> rfl
 #print axioms LocalIndexMap.operation_nil
 
 /-- Relocating locals and references preserves the narrow-argument observation guard. -/
 theorem LocalIndexMap.argumentGuard (indices : LocalIndexMap) (mapping : AllocationRenaming)
-    (operation : CIL.Op) (arguments : List Value) :
+    (operation : CIL.Instruction) (arguments : List Value) :
     (match indices.operation operation with
       | .arg position (some _) =>
         ((arguments.map mapping.value)[position]?.map Value.hasUnspecified).getD false

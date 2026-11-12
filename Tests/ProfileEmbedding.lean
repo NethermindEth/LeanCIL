@@ -28,7 +28,7 @@ theorem profiles_valid : portable.Valid ∧ narrow.Valid ∧ wide.Valid := by de
 #print axioms profiles_valid
 
 /-- Code removed by profile extraction has no live instruction to match. -/
-abbrev unreachable : Op := .unsupported "Unreachable under selected profile"
+abbrev unreachable : Instruction := .unsupported "Unreachable under selected profile"
 
 /-- One body over two feature flags and a callee, shared by all extraction profiles. -/
 def template (profile : FeatureProfile) (sse42 avx2 : Bool) (callee : Nat) : Method := {

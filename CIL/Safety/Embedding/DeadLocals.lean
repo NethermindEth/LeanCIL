@@ -23,7 +23,7 @@ open CIL.Embedding
 
 /-- Replacing a body's locals keeps every step that succeeds or throws: steps read the
     profile, return arity and static sites, never the local declarations. -/
-theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Op) (pc : Nat)
+theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
     (outcome : ExecutionResult FrameAction)
     (stepped : step (actual.withLocalsOf expected) op pc args frame stack memory = outcome)
@@ -34,14 +34,14 @@ theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Op) (pc : Nat
   cases outcome with
   | ok action =>
     have same := step_relabel op _ actual id pc pc args frame stack memory action context stepped
-    rw [Op.relabel_id] at same
+    rw [Instruction.relabel_id] at same
     rw [same]
     cases action <;> rfl
   | error fault =>
     obtain ⟨exception, thrown⟩ := kept
     subst thrown
     have same := step_raise op _ actual id pc pc args frame stack memory exception context stepped
-    rwa [Op.relabel_id] at same
+    rwa [Instruction.relabel_id] at same
 
 #print axioms step_withLocalsOf
 

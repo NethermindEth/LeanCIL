@@ -192,7 +192,7 @@ var traced = Execute([.. cli, "verify", loopOutput, "--proof", countdownProof, "
 var tracedText = traced.Stdout.ReplaceLineEndings("\n");
 var tracedMessages = tracedText[..Math.Max(0, tracedText.IndexOf("  Trace (", StringComparison.Ordinal))];
 if (traced.Code != 0 || !tracedText.Contains("  Trace (") || tracedText.Contains("Untraced") ||
-    !tracedText.Contains("Countdown.lean:30:4: [CIL.step] pc 0: CIL.Op.arg 0\n") ||
+    !tracedText.Contains("Countdown.lean:30:4: [CIL.step] pc 0: CIL.Instruction.arg 0\n") ||
     !tracedText.Contains("[CIL.step] cil_loop_finish took ") || tracedMessages.Contains("[CIL.step]") ||
     // Each tactic reports its step count once, at its own position.
     tracedText.Split("Countdown.lean:30:4: [CIL.step] cil_loop_recurse took ").Length != 2)
@@ -225,7 +225,7 @@ RequireReport(Execute([.. cli, "verify", objectOutput, "--proof", unformed, "--t
 // The trace shows the receiver-checked call and the exception it throws on a null receiver.
 var objectTrace = Execute([.. cli, "verify", objectOutput, "--proof", depositBothProof, "--theorem",
     "ExampleProof.first_null_throws", "--trace"]).Stdout.ReplaceLineEndings("\n");
-if (!objectTrace.Contains("[CIL.step] pc 2: CIL.Op.callInstance 1 2\n") ||
+if (!objectTrace.Contains("[CIL.step] pc 2: CIL.Instruction.callInstance 1 2\n") ||
     !objectTrace.Contains("changes faults: ExecutionFault.thrown \"System.NullReferenceException\"\n"))
     throw new InvalidOperationException("verify --trace did not show the null receiver's call: " + objectTrace);
 Console.WriteLine("PASS CLI reports a proof stuck on a class instance and traces its receiver-checked call");

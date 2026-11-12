@@ -85,8 +85,8 @@ def Body.prove (body : Body) (tail doc : String) (statement proof : Expr) : Term
     type := ← mkForallFVars body.parameters statement
     value := ← mkLambdaFVars body.parameters proof }
 
-/-- `[Op]`, the type of a code list. -/
-def codeType : Expr := mkApp (mkConst ``List [.zero]) (mkConst ``CIL.Op)
+/-- `[Instruction]`, the type of a code list. -/
+def codeType : Expr := mkApp (mkConst ``List [.zero]) (mkConst instructionTypeName)
 
 /-- `Eq.refl list` for a code list. -/
 def codeRefl (list : Expr) : Expr := mkApp2 (mkConst ``Eq.refl [.one]) codeType list
@@ -101,9 +101,9 @@ def declareSuffixes (body : Body) (code : Expr) (ops : Array Expr) : TermElabM U
   for start in starts.reverse do
     let stop := min (start + suffixBlock) ops.size
     let rest := if stop < ops.size then suffix stop else
-      mkApp (mkConst ``List.nil [.zero]) (mkConst ``CIL.Op)
+      mkApp (mkConst ``List.nil [.zero]) (mkConst instructionTypeName)
     let value ← mkLambdaFVars body.parameters <| (ops.extract start stop).foldr (init := rest)
-      (mkApp3 (mkConst ``List.cons [.zero]) (mkConst ``CIL.Op))
+      (mkApp3 (mkConst ``List.cons [.zero]) (mkConst instructionTypeName))
     let name := body.name.appendAfter s!"_suffix{start}"
     body.declare name s!"The code of `{body.name}` from pc {start} on." <| .defnDecl {
       name, levelParams := body.levelParams, value, safety := .safe
@@ -113,7 +113,8 @@ def declareSuffixes (body : Body) (code : Expr) (ops : Array Expr) : TermElabM U
     modifyEnv (addNoncomputable · name)
   for start in starts do
     let previous := start - suffixBlock
-    let dropped := mkApp3 (mkConst ``List.drop [.zero]) (mkConst ``CIL.Op) (mkNatLit start) code
+    let dropped := mkApp3 (mkConst ``List.drop [.zero]) (mkConst instructionTypeName)
+      (mkNatLit start) code
     body.prove s!"_suffix{start}_placed"
       s!"The code of `{body.name}` from pc {start} on is `{body.name}_suffix{start}`."
       (mkApp3 (mkConst ``Eq [.one]) codeType dropped (suffix start))

@@ -26,14 +26,14 @@ namespace CIL.MethodBinding
 open Lean Meta Elab Tactic CIL.Embedding
 
 /-- An instruction with its code targets erased. -/
-def shape (op : Op) : Op := op.relabel (fun _ => 0)
+def shape (op : Instruction) : Instruction := op.relabel (fun _ => 0)
 
 /-- The instruction at `pc`, if any. -/
-private def opAt (code : Array Op) (pc : Nat) : Option Op := code[pc]?
+private def opAt (code : Array Instruction) (pc : Nat) : Option Instruction := code[pc]?
 
 /-- Maps each live expected pc to an actual pc: the next pc after a fallthrough, else a
     pc an already aligned branch targets, else the next actual instruction of the same shape. -/
-def alignLive (expected actual : Array Op) : Array Nat := Id.run do
+def alignLive (expected actual : Array Instruction) : Array Nat := Id.run do
   let mut map : Array (Option Nat) := Array.replicate expected.size none
   let mut hints : Std.HashMap Nat Nat := {}
   let mut cursor := 0
@@ -76,7 +76,7 @@ def alignLive (expected actual : Array Op) : Array Nat := Id.run do
   return full
 
 /-- An instruction for a failure message. -/
-private def showOp (op : Option Op) : String := match op with
+private def showOp (op : Option Instruction) : String := match op with
   | some op => reprStr op
   | none => "(past the end)"
 

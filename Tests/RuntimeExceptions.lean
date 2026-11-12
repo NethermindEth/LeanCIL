@@ -8,7 +8,7 @@ inductive Case where
   | add | sub | mul | convert | divide | remainder | signedDivide | signedRemainder
   deriving DecidableEq
 
-def operation : Case → CIL.Op
+def operation : Case → CIL.Instruction
   | .add => .checkedArithmetic .add true
   | .sub => .checkedArithmetic .sub true
   | .mul => .checkedArithmetic .mul true

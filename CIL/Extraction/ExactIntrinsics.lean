@@ -389,7 +389,7 @@ private theorem exactCallFamily_eq_original (instruction : RawInstruction) :
 #print axioms exactCallFamily_eq_original
 
 /-- The intrinsic and arity of an emitted admitted intrinsic. -/
-def emittedExactIntrinsic : Op → Option (Intrinsic × Nat)
+def emittedExactIntrinsic : Instruction → Option (Intrinsic × Nat)
   | .intrinsic intrinsic arity => match intrinsic with
     | .avx2 .band | .avx2 .bor | .avx2 .bxor | .avx2 .andNot
     | .avx2 .shl64Count | .avx2 .shr64Count | .avx2 .shl64 | .avx2 .shr64
@@ -406,7 +406,7 @@ def emittedExactIntrinsic : Op → Option (Intrinsic × Nat)
 /-- An emitted exact intrinsic must match the raw call and be available. Other emitted
     operations must not replace a call in the admitted family, including malformed calls. -/
 private def exactSiteMatches (profile : FeatureProfile) (raw : RawInstruction)
-    (emitted : Op) : Bool :=
+    (emitted : Instruction) : Bool :=
   match emittedExactIntrinsic emitted with
   | none => !exactCallFamily raw
   | some expected => match exactIntrinsic raw with
@@ -416,7 +416,7 @@ private def exactSiteMatches (profile : FeatureProfile) (raw : RawInstruction)
 /-- Dispatching on the emitted operation preserves every original site check, including
     malformed raw metadata, arity mismatches and unavailable intrinsics. -/
 private theorem exactSiteMatches_eq (profile : FeatureProfile) (raw : RawInstruction)
-    (emitted : Op) :
+    (emitted : Instruction) :
     exactSiteMatches profile raw emitted =
       ((if exactCallFamily raw || (emittedExactIntrinsic emitted).isSome then
         (exactIntrinsic raw).isSome &&

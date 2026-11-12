@@ -17,7 +17,7 @@ theorem option_bind_some {x : Option α} {f : α → Option β} {y : β} (h : x 
     ∃ a, x = some a ∧ f a = some y := Option.bind_eq_some_iff.mp h
 
 /-- Relabeling `op` maps its successor when the fallthrough pc is mapped consistently. -/
-def BaseRelabel (op : Op) : Prop :=
+def BaseRelabel (op : Instruction) : Prop :=
   ∀ (r : Nat → Nat) (pc q : Nat) (values : List Value) (profile : FeatureProfile) (target : Nat)
     (result : List Value) (memory : Memory), (op.continues = true → r (pc + 1) = q + 1) →
     step op false pc [] 0 values (fun _ => none) profile = some (.next target result memory) →
@@ -25,13 +25,14 @@ def BaseRelabel (op : Op) : Prop :=
       some (.next (r target) result memory)
 
 /-- A value-only instruction computes its output independently of the program counter. -/
-def Fallthrough (op : Op) (evaluate : List Value → FeatureProfile → Option (List Value)) : Prop :=
+def Fallthrough (op : Instruction) (evaluate : List Value → FeatureProfile → Option (List Value)) :
+    Prop :=
   ∀ pc stack profile, step op false pc [] 0 stack (fun _ => none) profile = do
     return .next (pc + 1) (← evaluate stack profile) (fun _ => none)
 
 /-- A falling-through value-only instruction that relabeling leaves unchanged satisfies
     `BaseRelabel`. -/
-theorem base_relabel_fallthrough {op : Op} {evaluate}
+theorem base_relabel_fallthrough {op : Instruction} {evaluate}
     (equation : Fallthrough op evaluate) (relabel : ∀ r, op.relabel r = op)
     (continues : op.continues = true) : BaseRelabel op := by
   intro r pc q values profile target result memory next h
@@ -44,13 +45,15 @@ theorem base_relabel_fallthrough {op : Op} {evaluate}
   rfl
 
 /-- The stack after a one-operand instruction. -/
-def unaryValues (op : Op) (stack : List Value) (_ : FeatureProfile) : Option (List Value) := do
+def unaryValues (op : Instruction) (stack : List Value) (_ : FeatureProfile) :
+    Option (List Value) := do
   match stack with
   | value :: rest => return (← unary op value) :: rest
   | [] => none
 
 /-- The stack after a two-operand instruction; `a` was pushed first. -/
-def binaryValues (op : Op) (stack : List Value) (_ : FeatureProfile) : Option (List Value) := do
+def binaryValues (op : Instruction) (stack : List Value) (_ : FeatureProfile) :
+    Option (List Value) := do
   match stack with
   | b :: a :: rest => return (← binary op a b) :: rest
   | _ => none
@@ -70,13 +73,14 @@ def truthValues (negate : Bool) (stack : List Value) : Option (Bool × List Valu
   | [] => none
 
 /-- A conditional branch observes values independently of either destination. -/
-def Branching (op : Nat → Op) (evaluate : List Value → Option (Bool × List Value)) : Prop :=
+def Branching (op : Nat → Instruction) (evaluate : List Value → Option (Bool × List Value)) :
+    Prop :=
   ∀ target pc stack profile, step (op target) false pc [] 0 stack (fun _ => none) profile = do
     let (taken, rest) ← evaluate stack
     return .next (if taken then target else pc + 1) rest (fun _ => none)
 
 /-- A conditional branch family whose relabeling maps its target satisfies `BaseRelabel`. -/
-theorem base_relabel_branching {op : Nat → Op} {evaluate}
+theorem base_relabel_branching {op : Nat → Instruction} {evaluate}
     (equation : Branching op evaluate) (relabel : ∀ r t, (op t).relabel r = op (r t))
     (continues : ∀ t, (op t).continues = true) (t : Nat) : BaseRelabel (op t) := by
   intro r pc q values profile target result memory next h
@@ -226,16 +230,16 @@ theorem base_relabel_feature (id : Feature) : BaseRelabel (.feature id) :=
     (evaluate := fun stack profile => some (.i32 (if profile.evaluate id then 1 else 0) :: stack))
     (fun _ _ _ => rfl) (fun _ => rfl) rfl
 
-theorem widenNativeOperand_relabel (r : Nat → Nat) (op : Op) :
+theorem widenNativeOperand_relabel (r : Nat → Nat) (op : Instruction) :
     widenNativeOperand (op.relabel r) = widenNativeOperand op := by
   cases op <;> rfl
 
-theorem nativePureBinary_relabel (r : Nat → Nat) (op : Op) :
+theorem nativePureBinary_relabel (r : Nat → Nat) (op : Instruction) :
     nativePureBinary (op.relabel r) = nativePureBinary op := by
   cases op <;> rfl
 
 /-- Every value-only instruction a native-width wrapper may carry satisfies `BaseRelabel`. -/
-theorem base_relabel_of_nativePure (op : Op) (pure : nativePureBinary op = true) :
+theorem base_relabel_of_nativePure (op : Instruction) (pure : nativePureBinary op = true) :
     BaseRelabel op := by
   cases op <;> simp only [nativePureBinary, Bool.false_eq_true] at pure
   all_goals first

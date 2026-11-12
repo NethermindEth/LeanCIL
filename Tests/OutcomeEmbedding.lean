@@ -146,8 +146,8 @@ def lowerBound : Method := { extractedCheck with code := extractedCheck.code.set
 error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 6 maps to actual pc 7
-  expected: CIL.Op.throw "System.ArgumentOutOfRangeException"
-  actual:   CIL.Op.throw "System.ArgumentException"
+  expected: CIL.Instruction.throw "System.ArgumentOutOfRangeException"
+  actual:   CIL.Instruction.throw "System.ArgumentException"
   the instructions differ
 -/
 #guard_msgs (substring := true) in
@@ -157,8 +157,8 @@ example : MethodEmbeds [outer, renamedException] 1 check := by cil_embed
 error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 1 maps to actual pc 1
-  expected: CIL.Op.const32 0x00000064#32
-  actual:   CIL.Op.const32 0x00000032#32
+  expected: CIL.Instruction.const32 0x00000064#32
+  actual:   CIL.Instruction.const32 0x00000032#32
   the instructions differ
 -/
 #guard_msgs (substring := true) in

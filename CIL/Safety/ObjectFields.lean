@@ -271,7 +271,7 @@ def entry (field : WordField width) (object : Reference) : Reference × Nat :=
 
 /-- `op` loads or stores this field: a scalar field operation of its class, offset and width.
     An extraction checks each field it names against an operation of its own code with this. -/
-def accessedBy (field : WordField width) : CIL.Op → Bool
+def accessedBy (field : WordField width) : CIL.Instruction → Bool
   | .memory (.objectField owner offset size _) | .memory (.setObjectField owner offset size) =>
     owner == field.owner && offset == field.offset && size == width
   | _ => false
@@ -642,7 +642,7 @@ def entry (field : ReferenceField) (object : Reference) : Reference × Nat :=
 
 /-- `op` loads or stores this field: a reference field operation of its class and offset. An
     extraction checks each field it names against an operation of its own code with this. -/
-def accessedBy (field : ReferenceField) : CIL.Op → Bool
+def accessedBy (field : ReferenceField) : CIL.Instruction → Bool
   | .memory (.objectReferenceField owner offset)
   | .memory (.setObjectReferenceField owner offset) =>
     owner == field.owner && offset == field.offset
@@ -989,7 +989,7 @@ def entry (field : ArrayField element) (object : Reference) : Reference × Nat :
 
 /-- `op` loads or stores this field: a value-array field operation of its class, offset and
     element. An extraction checks each field it names against an operation of its own code. -/
-def accessedBy (field : ArrayField element) : CIL.Op → Bool
+def accessedBy (field : ArrayField element) : CIL.Instruction → Bool
   | .memory (.arrayField owner offset held) | .memory (.setArrayField owner offset held) =>
     owner == field.owner && offset == field.offset && held == element
   | _ => false

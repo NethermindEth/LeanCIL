@@ -42,7 +42,7 @@ def viewObservation (raw : RawInstruction) : Option ViewObservation := do
     else none
 
 /-- Accessor calls and observation instructions agree in both directions. -/
-def viewObservationMatches (raw : RawInstruction) (emitted : Op) : Bool :=
+def viewObservationMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
   let actual := match emitted with
     | .memory (.observeView observation) => some observation
     | _ => none

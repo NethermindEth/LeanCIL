@@ -36,7 +36,7 @@ def loops (method : Expr) : MetaM (Array (Nat × Nat)) := do
   repeat
     match (← whnf cell).getAppFnArgs with
     | (``List.cons, #[_, op, tail]) =>
-      for target in ← nats (mkApp (mkConst ``CIL.Op.targets) op) do
+      for target in ← nats (mkApp (mkConst ``CIL.Instruction.targets) op) do
         if target ≤ pc then latches := latches.insert target pc
       cell := tail
       pc := pc + 1

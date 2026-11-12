@@ -699,9 +699,9 @@ does not establish is in [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assu
 
 ## Lean-only operations and implementation sources
 
-The Lean `CIL.Op` type and memory/SIMD modules contain operations that the extractor does not
-emit, including vector argument homes, fixed vector-lane helpers, `newVector256` and additional
-memory helpers. Their existence is not evidence that the corresponding arbitrary CIL or .NET API
+The Lean `CIL.Instruction` type and memory/SIMD modules contain operations that the extractor
+does not emit, including vector argument homes, fixed vector-lane helpers, `newVector256` and
+additional memory helpers. Their existence is not evidence that the corresponding arbitrary CIL or .NET API
 is extractable. The checked memory interpreter implements generic aggregate operations.
 
 The implementation this inventory describes is:

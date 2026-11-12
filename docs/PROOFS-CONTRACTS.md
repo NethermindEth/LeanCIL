@@ -1105,8 +1105,8 @@ rule; the next section describes relocating a library into the slot.
 A library extracted on its own calls its helpers by its own method indices. `CIL.Safety.Linking`
 relocates it into a linked program:
 
-- `Op.relocate f` renames only the method index of `.call`, `.newVector256` and `.newAggregate`
-  (`Op.callees`); pcs, locals, profiles and static sites are unchanged.
+- `Instruction.relocate f` renames only the method index of `.call`, `.newVector256` and
+  `.newAggregate` (`Instruction.callees`); pcs, locals, profiles and static sites are unchanged.
 - `Closed lib` says every callee index in `lib` is one of its methods (`Closed.of_check` decides
   it).
 - `RelocatesInto lib linked f` says method `i` sits at `f i` relocated by `f`.

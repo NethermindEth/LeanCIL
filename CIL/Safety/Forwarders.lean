@@ -58,7 +58,7 @@ theorem plainLoads_unchanged (indices : List Nat) (values : List Value) :
 /-- The body that performs `loads` in order, calls `callee` with the loaded values and
     returns its result through `ret narrow`. -/
 def forwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
-    (narrow : Option CIL.NarrowKind) : List CIL.Op :=
+    (narrow : Option CIL.NarrowKind) : List CIL.Instruction :=
   loads.map (fun load => .arg load.1 load.2) ++ [.call callee loads.length, .ret narrow]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
@@ -311,7 +311,7 @@ theorem MethodContract.Holds.forward {Input Output : Type}
 /-- The body that performs `loads` in order, loads the address of local 0, calls `callee`
     with them and returns its result through `ret narrow`. -/
 def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
-    (narrow : Option CIL.NarrowKind) : List CIL.Op :=
+    (narrow : Option CIL.NarrowKind) : List CIL.Instruction :=
   loads.map (fun load => .arg load.1 load.2) ++
     [.localAddr 0, .call callee (loads.length + 1), .ret narrow]
 

@@ -310,7 +310,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (formed : source.WellFormed) (sourceBody targetBody : CIL.Method)
-    (metadata : StepMetadata sourceBody targetBody) (operation : CIL.Op)
+    (metadata : StepMetadata sourceBody targetBody) (operation : CIL.Instruction)
     (family : fixedStepFamily operation = .boundary) (pc : Nat) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (argumentBounds : ∀ value ∈ arguments, value.Below mapping.sourceLimit)
@@ -348,30 +348,28 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
       | exact False.elim (tested ⟨_, _, rfl⟩)
-      | (case h_61 =>
-          rename_i _ _ position
-          rw [List.getElem?_map]
-          cases found : arguments[position]? with
-          | none => exact .error .invalidState
-          | some value =>
-            apply (related.checkedValue value
-              (argumentBounds value (List.mem_of_getElem? found))).bind
-            intro first second same
-            subst second
-            exact .ok (.next related frames))
-      | (case h_62 =>
-          rename_i _ _ position kind
-          rw [List.getElem?_map]
-          cases found : arguments[position]? with
-          | none => exact .error .invalidState
-          | some value =>
-            cases value <;> try exact .error .invalidState
-            rename_i scalar
-            cases scalar <;> try exact .error .invalidState
-            apply (related.checkedValue _ (by trivial)).bind
-            intro first second same
-            subst second
-            exact .ok (.next related frames))
+      | (rename_i position
+         rw [List.getElem?_map]
+         cases found : arguments[position]? with
+         | none => exact .error .invalidState
+         | some value =>
+           apply (related.checkedValue value
+             (argumentBounds value (List.mem_of_getElem? found))).bind
+           intro first second same
+           subst second
+           exact .ok (.next related frames))
+      | (rename_i position kind
+         rw [List.getElem?_map]
+         cases found : arguments[position]? with
+         | none => exact .error .invalidState
+         | some value =>
+           cases value <;> try exact .error .invalidState
+           rename_i scalar
+           cases scalar <;> try exact .error .invalidState
+           apply (related.checkedValue _ (by trivial)).bind
+           intro first second same
+           subst second
+           exact .ok (.next related frames))
       | (apply (frames.argumentHome _).bind
          intro slot otherSlot slots
          rcases slots with ⟨bounded, rfl⟩

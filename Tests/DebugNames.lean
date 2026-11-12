@@ -56,8 +56,8 @@ def program : Program := [{ code := [.ret], locals := [], returnsValue := false 
 error: cil_body: rfl could not prove the method-body binding
 method index 1
 field code: first difference at index 2 (left length 7, right length 7)
-  left:  CIL.Op.brzero 5
-  right: CIL.Op.brzero 3
+  left:  CIL.Instruction.brzero 5
+  right: CIL.Instruction.brzero 3
 source of actual pc 2: src/Math.cs:10:9
 -/
 #guard_msgs (substring := true) in
@@ -67,8 +67,8 @@ example : program[1]? = some (body 3) := by cil_body
 error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 3 maps to actual pc 3
-  expected: CIL.Op.const32 0x00000001#32
-  actual:   CIL.Op.arg 0 none
+  expected: CIL.Instruction.const32 0x00000001#32
+  actual:   CIL.Instruction.arg 0 none
   the instructions differ
   expected pc 2 falls through to it, so it must be actual pc 3
 source of actual pc 3: src/Math.cs:11:13

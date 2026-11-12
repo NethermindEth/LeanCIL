@@ -102,7 +102,7 @@ theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : 
 /-- A callee fault reaches the caller with the same fault kind; its location may be
     relocated to the call. -/
 theorem run_call_error {program : CIL.Program} {fuel method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest : List Value}
     {frame : Frame} {memory updated : Memory} {fault : LocatedFault}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
@@ -146,7 +146,7 @@ theorem raises_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
 
 /-- A run raises if it raises after one ordinary step. -/
 theorem run_next_raises {program : CIL.Program} {method pc target : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {exception : String}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =
@@ -158,7 +158,8 @@ theorem run_next_raises {program : CIL.Program} {method pc target : Nat}
 
 /-- A run raises at a step that throws. -/
 theorem run_throw_raises {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack : List Value} {frame : Frame} {memory : Memory}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value} {frame : Frame}
+    {memory : Memory}
     {exception : String}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .error (.thrown exception)) :
@@ -169,7 +170,7 @@ theorem run_throw_raises {program : CIL.Program} {method pc : Nat}
 
 /-- Propagate the exception a callee's contract names for this input. -/
 theorem run_call_raises_of_contract {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {exception : String}
     (holds : c.Holds program callee) (input : Input)
@@ -188,7 +189,7 @@ theorem run_call_raises_of_contract {Input Output : Type} {c : OutcomeContract I
 
 /-- Continue after a callee whose contract names no exception for this input. -/
 theorem run_call_of_outcome {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -216,7 +217,7 @@ theorem run_call_of_outcome {Input Output : Type} {c : OutcomeContract Input Out
 /-- Continue after a callee whose contract names no exception into a caller path that
     raises. -/
 theorem run_call_raises_after_outcome {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {exception : String}
     (holds : c.Holds program callee) (input : Input)
@@ -244,7 +245,7 @@ theorem run_call_raises_after_outcome {Input Output : Type} {c : OutcomeContract
 
 /-- `run_call_of_outcome` from a well-formed memory, with the frame invariants supplied. -/
 theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -273,7 +274,7 @@ theorem run_call_of_outcome_formed {Input Output : Type} {c : OutcomeContract In
     supplied. -/
 theorem run_call_raises_after_outcome_formed {Input Output : Type}
     {c : OutcomeContract Input Output} {program : CIL.Program}
-    {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {exception : String}
     (holds : c.Holds program callee) (input : Input)
@@ -395,7 +396,7 @@ elab_rules : tactic
   | `(tactic| cil_raise_run_step [$facts:term,*]) => withMainContext do
     let (methodSyntax, instructionSyntax, operation) ←
       cilFetchedOp ``CIL.Safety.run_next_raises some 4 facts.getElems
-    evalTactic (← if operation == ``CIL.Op.throw then
+    evalTactic (← if operation == ``CIL.Instruction.throw then
         `(tactic|
           cil_strict exact CIL.Safety.run_throw_raises $methodSyntax $instructionSyntax rfl)
       else

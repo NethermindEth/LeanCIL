@@ -397,7 +397,8 @@ elab "cil_lookup_equation" : tactic => withMainContext do
   let operation ← whnfD (← lastArgument "cil_lookup_equation" found)
   let some (.ctorInfo constructor) := operation.getAppFn.constName?.bind (← getEnv).find?
     | throwError "Instruction needs profile facts"
-  unless constructor.induct == ``CIL.Op do throwError "Expected an instruction constructor"
+  unless constructor.induct == instructionTypeName do
+    throwError "Expected an instruction constructor"
   let some (_, _, pending) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
     | throwError "Expected an instruction lookup"
   unless ← isDefEq pending (← mkAppM ``Option.some #[operation]) do
@@ -831,7 +832,7 @@ def cilReducedOp? (op : Expr) : MetaM (Option Expr) := do
   let reduced ← whnfD (← instantiateMVars op)
   let some name := reduced.getAppFn.constName? | return none
   let some (.ctorInfo info) := (← getEnv).find? name | return none
-  return if info.induct == ``CIL.Op then some reduced else none
+  return if info.induct == instructionTypeName then some reduced else none
 
 /-- One checked `step` goal, with facts already normalised: a supplied step fact for the
     fetched op, as given or with its `@[cil_code]` bodies unfolded, or else a strategy chosen
@@ -874,8 +875,8 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
     -- A named body may need its generated equation unfolded before application.
     let mut arguments := factLhs.getAppArgs |>.set! 0 body
     let operation ← whnfR factOpcode
-    if operation.isAppOfArity ``CIL.Op.local 2 ||
-        operation.isAppOfArity ``CIL.Op.setLocal 2 then
+    if operation.isAppOfArity ``CIL.Instruction.local 2 ||
+        operation.isAppOfArity ``CIL.Instruction.setLocal 2 then
       let some index := argument? operation 0 | return false
       arguments := arguments.set! 1
         (mkApp2 operation.getAppFn index
@@ -956,13 +957,13 @@ elab_rules : tactic
     let mut localOperation := false
     if let some (_, step, _) := initial.eq? then
       if step.isAppOfArity ``CIL.Safety.step 7 &&
-          (argument? step 1).any (·.isConstOf ``CIL.Op.nop) then
+          (argument? step 1).any (·.isConstOf ``CIL.Instruction.nop) then
         evalTactic (← `(tactic| exact step_nop_eq ..))
         return
       if let some #[_, opcode, _, _, _, _, _] := argumentsOf? step ``CIL.Safety.step 7 then
         let operation ← whnfR opcode
-        localOperation := operation.isAppOfArity ``CIL.Op.local 2 ||
-          operation.isAppOfArity ``CIL.Op.setLocal 2
+        localOperation := operation.isAppOfArity ``CIL.Instruction.local 2 ||
+          operation.isAppOfArity ``CIL.Instruction.setLocal 2
         if localOperation then
           let narrow ← lastArgument "cil_checked_step_normalized" operation
           unless (← whnfR narrow).isAppOf ``Option.none do
@@ -993,12 +994,14 @@ elab_rules : tactic
       let opcodeHead := (argument? pending 1).bind (·.getAppFn.constName?)
       if pending.isAppOfArity ``CIL.Safety.step 7 &&
           opcodeHead.any
-            ([``CIL.Op.brzero, ``CIL.Op.brnonzero, ``CIL.Op.beq, ``CIL.Op.bne,
-              ``CIL.Op.blt, ``CIL.Op.bltu, ``CIL.Op.ble, ``CIL.Op.bleu, ``CIL.Op.bgt,
-              ``CIL.Op.bgtu, ``CIL.Op.bge, ``CIL.Op.bgeu].contains ·) then
+            ([``CIL.Instruction.brzero, ``CIL.Instruction.brnonzero, ``CIL.Instruction.beq,
+              ``CIL.Instruction.bne, ``CIL.Instruction.blt, ``CIL.Instruction.bltu,
+              ``CIL.Instruction.ble, ``CIL.Instruction.bleu, ``CIL.Instruction.bgt,
+              ``CIL.Instruction.bgtu, ``CIL.Instruction.bge,
+              ``CIL.Instruction.bgeu].contains ·) then
         -- A matching truth equation must rewrite before its definition can erase that head.
         let mut truthDefinitions : Array Term := #[← `(term| CIL.truth)]
-        if opcodeHead.any ([``CIL.Op.brzero, ``CIL.Op.brnonzero].contains ·) then
+        if opcodeHead.any ([``CIL.Instruction.brzero, ``CIL.Instruction.brnonzero].contains ·) then
           let stackTerm ← argumentAt "cil_checked_step_normalized" pending 5
           let stack ← whnfD stackTerm
           if let some #[_, value, _] := argumentsOf? stack ``List.cons 3 then
@@ -1037,9 +1040,9 @@ elab_rules : tactic
       unless args == lhs.getAppArgs do
         target ← mkEq (mkAppN lhs.getAppFn args) rhs
         replaceMainGoal [← (← getMainGoal).replaceTargetDefEq target]
-    let checkedOperation := if operation == ``CIL.Op.checkedArithmetic then
+    let checkedOperation := if operation == ``CIL.Instruction.checkedArithmetic then
         some (``CIL.checkedValues, ``CIL.Safety.step_checkedArithmetic_result)
-      else if operation == ``CIL.Op.checkedConvert then
+      else if operation == ``CIL.Instruction.checkedConvert then
         some (``CIL.convertInteger, ``CIL.Safety.step_checkedConvert_result)
       else none
     if let some (function, bridge) := checkedOperation then
@@ -1055,12 +1058,15 @@ elab_rules : tactic
             all_goals cil_checked_side [])))
           return
         catch _ => saved.restore
-    let scalar := #[``CIL.Op.neg, ``CIL.Op.gt, ``CIL.Op.convI1, ``CIL.Op.convI2,
-      ``CIL.Op.convU2, ``CIL.Op.convI8, ``CIL.Op.convI4, ``CIL.Op.convU1,
-      ``CIL.Op.convU4, ``CIL.Op.convU8, ``CIL.Op.convU, ``CIL.Op.bnot,
-      ``CIL.Op.add, ``CIL.Op.sub, ``CIL.Op.mul, ``CIL.Op.band, ``CIL.Op.bor,
-      ``CIL.Op.bxor, ``CIL.Op.shl, ``CIL.Op.shr, ``CIL.Op.shrUn, ``CIL.Op.lt,
-      ``CIL.Op.ltu, ``CIL.Op.gtu, ``CIL.Op.eq].contains operation
+    let scalar := #[``CIL.Instruction.neg, ``CIL.Instruction.gt, ``CIL.Instruction.convI1,
+      ``CIL.Instruction.convI2, ``CIL.Instruction.convU2, ``CIL.Instruction.convI8,
+      ``CIL.Instruction.convI4, ``CIL.Instruction.convU1, ``CIL.Instruction.convU4,
+      ``CIL.Instruction.convU8, ``CIL.Instruction.convU, ``CIL.Instruction.bnot,
+      ``CIL.Instruction.add, ``CIL.Instruction.sub, ``CIL.Instruction.mul,
+      ``CIL.Instruction.band, ``CIL.Instruction.bor, ``CIL.Instruction.bxor,
+      ``CIL.Instruction.shl, ``CIL.Instruction.shr, ``CIL.Instruction.shrUn,
+      ``CIL.Instruction.lt, ``CIL.Instruction.ltu, ``CIL.Instruction.gtu,
+      ``CIL.Instruction.eq].contains operation
     if scalar && lhs.isAppOfArity ``CIL.Safety.step 7 then
       -- Reuse the selected value equation without rewriting its symbolic arithmetic result.
       let mut widths := #[]
@@ -1096,9 +1102,9 @@ elab_rules : tactic
             done)))
           return
         catch _ => saved.restore
-    let strategy ← if operation == ``CIL.Op.intrinsic then
+    let strategy ← if operation == ``CIL.Instruction.intrinsic then
         `(tactic| cil_checked_intrinsic [$facts:term,*])
-      else if operation == ``CIL.Op.memory then
+      else if operation == ``CIL.Instruction.memory then
         let matchingStatic :=
           !(← dispatchFacts lhs ``CIL.Safety.staticInstruction facts.getElems).isEmpty
         let matchingMemory :=
@@ -1424,7 +1430,7 @@ def cilOutputFacts (operation : Name) : TacticM (Array Term) := withMainContext 
   let some execution := (← instantiateMVars (← getMainTarget)).find?
       (·.isAppOfArity ``run 8) | return #[]
   let #[_, _, _, _, _, _, stack, memory] := execution.getAppArgs | return #[]
-  if operation == ``CIL.Op.ret && (← whnfD stack).isAppOf ``List.nil then return #[]
+  if operation == ``CIL.Instruction.ret && (← whnfD stack).isAppOf ``List.nil then return #[]
   let currentFacts := withMainContext do
     let mut facts := #[]
     for declaration in ← getLCtx do
@@ -1450,14 +1456,15 @@ def cilOnlyInputFacts (operation : Name) (facts : Array Term) : TacticM Bool :=
     if left.isAppOf ``form || left.isAppOf ``read then return true
     let some #[_, op, _, _, _, _, _] := argumentsOf? left ``step 7 | return false
     -- Only known reads are excluded; a generic or custom step retains its priority.
-    return op.isAppOf ``CIL.Op.fieldAt && operation != ``CIL.Op.fieldAt
+    return op.isAppOf ``CIL.Instruction.fieldAt && operation != ``CIL.Instruction.fieldAt
 
 open Lean Elab Tactic Meta in
 /-- Materialize a checked output-word write in the outer continuation. Only the fetched store
     and a `ValidCall` at its current memory are considered; permissions remain real premises. -/
 def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
     (facts : Array Term) : TacticM (Array Term) := withMainContext do
-  unless [``CIL.Op.store64, ``CIL.Op.storeScalar, ``CIL.Op.setFieldAt].contains operation do
+  unless [``CIL.Instruction.store64, ``CIL.Instruction.storeScalar,
+      ``CIL.Instruction.setFieldAt].contains operation do
     return facts
   unless (← getEnv).contains `CIL.Safety.ValidCall.store_word do return facts
   let some execution := (← instantiateMVars (← getMainTarget)).find?
@@ -1478,10 +1485,10 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
   let some fetchedOp := lastArgument? found | return facts
   let opcode ← whnf fetchedOp
   let mut offset := mkNatLit 0
-  if operation == ``CIL.Op.storeScalar then
+  if operation == ``CIL.Instruction.storeScalar then
     let some width := lastArgument? opcode | return facts
     unless ← isDefEq width (mkNatLit 8) do return facts
-  if operation == ``CIL.Op.setFieldAt then
+  if operation == ``CIL.Instruction.setFieldAt then
     let some width := lastArgument? opcode | return facts
     unless ← isDefEq width (mkNatLit 8) do return facts
     let some fieldOffset := (appliedFunction? opcode).bind lastArgument? | return facts
@@ -1555,8 +1562,8 @@ elab_rules : tactic
 
 /-- Whether an opcode steps to a call action: `call`, or `callvirt` with a non-null receiver. -/
 def callsCallee (operation : Lean.Name) : Bool :=
-  operation == ``CIL.Op.call || operation == ``CIL.Op.callInstance ||
-    operation == ``CIL.Op.callVirtual
+  operation == ``CIL.Instruction.call || operation == ``CIL.Instruction.callInstance ||
+    operation == ``CIL.Instruction.callVirtual
 
 open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
@@ -1581,12 +1588,12 @@ def cilRunStep (facts : Array Term) : TacticM Unit := withMainContext do
   let (methodSyntax, instructionSyntax, operation) ←
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
   -- An object construction runs its constructor as a call before continuing in the caller.
-  let constructs := operation == ``CIL.Op.newObject
+  let constructs := operation == ``CIL.Instruction.newObject
   -- These fault before their callee runs: a short heap budget, a null receiver, or a receiver
   -- whose class a dispatch table omits.
-  let faultsFirst := constructs || operation == ``CIL.Op.callInstance ||
-    operation == ``CIL.Op.callVirtual
-  evalTactic (← if operation == ``CIL.Op.ret then
+  let faultsFirst := constructs || operation == ``CIL.Instruction.callInstance ||
+    operation == ``CIL.Instruction.callVirtual
+  evalTactic (← if operation == ``CIL.Instruction.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
     else if callsCallee operation || constructs then
       let call ← `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])

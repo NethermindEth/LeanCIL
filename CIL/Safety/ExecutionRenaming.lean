@@ -25,7 +25,7 @@ theorem MethodRenaming.step_success (transport : StepTransport)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (statics : source.StaticBindingsBounded) {arguments stack : List Value}
     (argumentValues : ValuesValid source arguments) (stackValues : ValuesValid source stack)
-    {operation : CIL.Op} {pc : Nat} {action : FrameAction}
+    {operation : CIL.Instruction} {pc : Nat} {action : FrameAction}
     (stepped : step sourceBody operation pc arguments sourceFrame stack source = .ok action) :
     ∃ later targetAction, mapping.Extends later ∧
       step targetBody (methods.indices.operation operation) pc (arguments.map mapping.value)
@@ -431,7 +431,7 @@ theorem MethodRenaming.step_throw (transport : StepTransport)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (statics : source.StaticBindingsBounded) {arguments stack : List Value}
     (argumentValues : ValuesValid source arguments) (stackValues : ValuesValid source stack)
-    {operation : CIL.Op} {pc : Nat} {exception : String}
+    {operation : CIL.Instruction} {pc : Nat} {exception : String}
     (stepped : step sourceBody operation pc arguments sourceFrame stack source =
       .error (.thrown exception)) :
     step targetBody (methods.indices.operation operation) pc (arguments.map mapping.value)

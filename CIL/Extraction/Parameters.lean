@@ -178,7 +178,7 @@ theorem argumentHomeIndex_get (homes : List Nat) (offset index : Nat) :
     to appended home slots are rejected. -/
 def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option StorageType)
     (homeAt : Nat → Option Nat)
-    (operation : ArgumentOp) (live : Bool) (emitted : Op) : Bool :=
+    (operation : ArgumentOp) (live : Bool) (emitted : Instruction) : Bool :=
   if !live then match emitted with | .unsupported _ => true | _ => false
   else match operation with
   | .load index => (do
@@ -212,12 +212,12 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
 
 /-- The per-instruction rule against the original argument and home lists. -/
 def validateArgumentOpIn (raw : RawArguments) (homes : List Nat) :
-    ArgumentOp → Bool → Op → Bool :=
+    ArgumentOp → Bool → Instruction → Bool :=
   validateArgumentOpAt raw.locals.length (raw.arguments[·]?) (homeSlot raw homes)
 
 /-- Check the complete instruction stream with shared argument-type and home-slot indexes. -/
 def argumentInstructionsValid (raw : RawArguments) (homes : List Nat)
-    (reachable : List Bool) (code : List Op) : Bool :=
+    (reachable : List Bool) (code : List Instruction) : Bool :=
   let arguments := FlowIndex.ofList raw.arguments
   let slots := argumentHomeIndex homes raw.locals.length
   all3 (validateArgumentOpAt raw.locals.length arguments.get? (slots[·]?))
@@ -225,7 +225,7 @@ def argumentInstructionsValid (raw : RawArguments) (homes : List Nat)
 
 /-- Indexed access validation preserves every original instruction check and length failure. -/
 theorem argumentInstructionsValid_eq_scan (raw : RawArguments) (homes : List Nat)
-    (reachable : List Bool) (code : List Op) :
+    (reachable : List Bool) (code : List Instruction) :
     argumentInstructionsValid raw homes reachable code =
       all3 (validateArgumentOpIn raw homes) raw.code reachable code := by
   have arguments : (FlowIndex.ofList raw.arguments).get? = (raw.arguments[·]?) := by
@@ -240,7 +240,7 @@ theorem argumentInstructionsValid_eq_scan (raw : RawArguments) (homes : List Nat
 
 /-- `validateArgumentOpIn` with the home set derived from the body. -/
 def validateArgumentOp (raw : RawArguments) (reachable : List Bool) :
-    ArgumentOp → Bool → Op → Bool :=
+    ArgumentOp → Bool → Instruction → Bool :=
   validateArgumentOpIn raw (requiredHomeIndices raw reachable)
 
 /-- A complete mapping check, not a list of optional argument-use claims. -/
@@ -277,7 +277,7 @@ theorem validated_parameter_homes {layouts : Array ComputedLayout} {raw : RawArg
 theorem validated_argument_access {layouts : Array ComputedLayout} {raw : RawArguments}
     {reachable : List Bool} {method : Method}
     (valid : ParameterHomesValid layouts raw reachable method)
-    (pc : Fin raw.code.length) (operation : ArgumentOp) (live : Bool) (emitted : Op)
+    (pc : Fin raw.code.length) (operation : ArgumentOp) (live : Bool) (emitted : Instruction)
     (rawAt : raw.code[pc.val]? = some operation) (reachableAt : reachable[pc.val]? = some live)
     (emittedAt : method.code[pc.val]? = some emitted) :
     validateArgumentOp raw reachable operation live emitted = true := by

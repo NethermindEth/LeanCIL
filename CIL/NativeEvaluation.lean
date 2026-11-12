@@ -13,7 +13,7 @@ namespace CIL
 
 /-- Only mixed integer arithmetic, comparisons and branches may use this path.
     It cannot dispatch memory, calls, features or another native wrapper. -/
-def nativePureBinary : Op → Bool
+def nativePureBinary : Instruction → Bool
   | .add | .sub | .mul | .band | .bor | .bxor | .lt | .ltu | .gt | .gtu | .eq
     | .bgt _ | .ble _ | .bge _ | .blt _ | .beq _ => true
   | _ => false
@@ -22,14 +22,14 @@ def nativePureBinary : Op → Bool
     Other admitted mixed operations sign-extend, including scalar clt.un/cgt.un.
     Mixed unsigned branches are rejected: CoreCLR's widening depends on whether
     its importer sees a constant, which can change through inlining. -/
-def widenNativeOperand (op : Op) (bits : W32) : W64 :=
+def widenNativeOperand (op : Instruction) (bits : W32) : W64 :=
   match op with
   | .checkedArithmetic _ false => bits.zeroExtend 64
   | _ => bits.signExtend 64
 
 /-- Runs a mixed `i32`/`i64` binary instruction at `pc`: the next pc and the values it
     pushes, or the arithmetic fault. Any other operand pair is `invalidOperands`. -/
-def nativeBinaryValues (op : Op) (pc : Nat) (x y : Value) :
+def nativeBinaryValues (op : Instruction) (pc : Nat) (x y : Value) :
     Except ArithmeticFault (Nat × List Value) := do
   let (x, y) ← match x, y with
     | .i32 a, .i64 b => .ok (Value.i64 (widenNativeOperand op a), Value.i64 b)

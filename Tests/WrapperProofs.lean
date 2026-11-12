@@ -4,7 +4,7 @@ namespace Tests.WrapperProofs
 
 /-- An instruction fault terminates the checked execution at its actual site. -/
 theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack : List CIL.Safety.Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack : List CIL.Safety.Value}
     {frame : CIL.Safety.Frame} {memory : CIL.Safety.Memory}
     {fault : CIL.Safety.ExecutionFault}
     (found : program[method]? = some body) (instruction : body.code[pc]? = some op)

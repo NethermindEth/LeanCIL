@@ -15,7 +15,7 @@ by recursive execution. No consumer supplies or assumes a step simulation obliga
 namespace CIL.Safety.StepRenaming
 
 /-- Nonlocal nonallocating instructions retain their exact opcode under local relocation. -/
-private theorem fixedOperation (indices : LocalIndexMap) (operation : CIL.Op)
+private theorem fixedOperation (indices : LocalIndexMap) (operation : CIL.Instruction)
     (fixed : fixedStepFamily operation ≠ .excluded) : indices.operation operation = operation := by
   cases operation <;> try rfl
   all_goals exact False.elim (fixed rfl)

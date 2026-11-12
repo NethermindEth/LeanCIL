@@ -8,7 +8,7 @@ import CIL.MethodPointers
 /-!
 # Instructions and methods
 
-`Op` is the instruction set the extractor emits; `Method` is one extracted method body
+`Instruction` is the instruction set the extractor emits; `Method` is one extracted method body
 and `Program` the list a call index refers into.
 -/
 
@@ -100,9 +100,9 @@ def SpanConstructor.operation : SpanConstructor → MemoryOp
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
-inductive Op where
+inductive Instruction where
   /-- Widen the int32 operand of a metadata-validated mixed native operation. -/
-  | nativeBinary (operation : Op)
+  | nativeBinary (operation : Instruction)
   | divide (signed remainder : Bool)
   | checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool)
   | checkedConvert (width : Nat) (signed unsignedInput : Bool)
@@ -196,6 +196,9 @@ inductive Op where
   | unsupported (description : String)
   deriving Repr
 
+/-- The name of the instruction type, for tactics that recognise its constructors. -/
+def instructionTypeName : Lean.Name := ``CIL.Instruction
+
 /-- A literal, call or construction whose value a static constructor stores in a readonly field. -/
 structure StaticInitializer where
   method : Nat
@@ -228,7 +231,7 @@ structure StaticDescriptor where
 structure Method where
   /-- The hardware features the method was compiled against. -/
   profile : FeatureProfile := FeatureProfile.scalar
-  code : List Op
+  code : List Instruction
   /-- Initial values of the scalar locals. -/
   locals : List Value
   localKinds : List LocalKind := []

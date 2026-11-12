@@ -72,21 +72,21 @@ theorem gt_mixed_width_rejected :
     (step scalarBody .gt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk = false := rfl
 
 theorem branches_reject_underflow :
-    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+    ([CIL.Instruction.bgt 1, .ble 1, .bleu 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0)] Memory.empty).isOk) = true := rfl
 
 theorem signed_branches_reject_references :
-    ([CIL.Op.bgt 1, .ble 1].all fun op =>
+    ([CIL.Instruction.bgt 1, .ble 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [Tests.reference, Tests.reference] Tests.caller).isOk) = true := rfl
 
 #print axioms signed_branches_reject_references
 
 theorem branches_reject_mixed_widths :
-    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+    ([CIL.Instruction.bgt 1, .ble 1, .bleu 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk) = true := rfl
 
 theorem narrow_conversions_reject_references :
-    ([CIL.Op.convI1, .convI2, .convU2].all fun op =>
+    ([CIL.Instruction.convI1, .convI2, .convU2].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [Tests.reference] Tests.caller).isOk) = true := rfl
 
 theorem narrow_read_bounds :

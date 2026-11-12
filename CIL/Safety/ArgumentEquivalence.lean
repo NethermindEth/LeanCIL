@@ -11,7 +11,7 @@ Two argument lists that agree on every index the body loads therefore give the s
 namespace CIL.Safety
 
 /-- Only argument loads observe the argument list after frame setup. -/
-theorem step_arguments_eq (body : CIL.Method) (op : CIL.Op) (pc : Nat)
+theorem step_arguments_eq (body : CIL.Method) (op : CIL.Instruction) (pc : Nat)
     (args other : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
     (agreement : ∀ index narrow, op = .arg index narrow → args[index]? = other[index]?) :
     step body op pc args frame stack memory = step body op pc other frame stack memory := by
@@ -58,7 +58,7 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Op) (pc : Nat)
 theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)
     (lookup : program[method]? = some body) (args other : List Value)
     (agreement : ∀ index narrow,
-      CIL.Op.arg index narrow ∈ body.code → args[index]? = other[index]?)
+      CIL.Instruction.arg index narrow ∈ body.code → args[index]? = other[index]?)
     (fuel pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
     run program fuel method pc args frame stack memory =
       run program fuel method pc other frame stack memory := by
@@ -92,7 +92,7 @@ theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Meth
 theorem invoke_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)
     (lookup : program[method]? = some body) (args other : List Value)
     (agreement : ∀ index narrow,
-      CIL.Op.arg index narrow ∈ body.code → args[index]? = other[index]?)
+      CIL.Instruction.arg index narrow ∈ body.code → args[index]? = other[index]?)
     (fuel : Nat) (memory : Memory)
     (checkedArgs : args.mapM (checkedValue memory) = .ok args)
     (checkedOther : other.mapM (checkedValue memory) = .ok other)
