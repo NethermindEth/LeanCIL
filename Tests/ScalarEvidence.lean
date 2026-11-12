@@ -862,4 +862,33 @@ theorem fixtures_carry_their_bodies :
   decide +kernel
 #print axioms fixtures_carry_their_bodies
 
+/-! ## Only the kernel decides the body and metadata check
+
+The elaborator evaluates a call by name, so a certificate whose evidence carries a computed
+metadata slice would be unfolded again at every use. `bodyMatches` is irreducible, so `decide`
+refuses at once, within a small heartbeat budget, and `decide +kernel` decides. -/
+
+set_option maxHeartbeats 20000 in
+/-- error: Tactic `decide` failed to reduce -/
+#guard_msgs (substring := true) in
+example : BodyDecodes scope addEvidence.body addEvidence.original := by decide
+
+set_option maxHeartbeats 20000 in
+/-- error: Tactic `decide` failed to reduce -/
+#guard_msgs (substring := true) in
+example : TranslationValid [] #[] [addEvidence] [] [addMethod] := by decide
+
+set_option maxHeartbeats 20000 in
+/-- error: Tactic `decide` failed to reduce -/
+#guard_msgs (substring := true) in
+example : MethodEvidenceValid [] #[] [addEvidence] [] addEvidence addMethod := by decide
+
+set_option maxHeartbeats 20000 in
+/-- error: Tactic `decide` failed to reduce -/
+#guard_msgs (substring := true) in
+example : (encodeBody scope addRaw).isSome = true := by decide
+
+example : (encodeBody scope addRaw).isSome = true := by decide +kernel
+example : BodyDecodes scope addEvidence.body addEvidence.original := by decide +kernel
+example : MethodEvidenceValid [] #[] [addEvidence] [] addEvidence addMethod := by decide +kernel
 end Tests.ScalarEvidence

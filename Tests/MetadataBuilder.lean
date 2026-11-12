@@ -131,7 +131,7 @@ def finish (builder : Builder) (name : List Nat) (identity : String) (version : 
     userStrings := builder.userStrings, corlib := builder.corlib, links := builder.links }
 
 /-- The slice that `step` builds, and what it returns. -/
-def build {α : Type} (step : Step α) (name : List Nat) (identity : String) (version : Nat := 1) :
+@[irreducible] def build {α : Type} (step : Step α) (name : List Nat) (identity : String) (version : Nat := 1) :
     MetadataSlice × α :=
   let (value, builder) := step.run {}
   (finish builder name identity version, value)

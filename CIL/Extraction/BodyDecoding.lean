@@ -439,8 +439,11 @@ def checkBody (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) :
   .ok decoded
 
 /-- Whether the body decodes to exactly the method's `maxStack`, `initLocals` and `code`, with
-    the method's definition and locals agreeing with the metadata. -/
-def bodyMatches (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) : Bool :=
+    the method's definition and locals agreeing with the metadata. Only the kernel decides it:
+    the elaborator's default reduction evaluates a call by name and would unfold the decoder,
+    the metadata slices and every token's resolution without sharing, so the definition is
+    irreducible and `decide` fails at once; `decide +kernel` evaluates it. -/
+@[irreducible] def bodyMatches (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) : Bool :=
   match checkBody pin body method with
   | .ok decoded => decoded.maxStack == method.maxStack &&
       decoded.initLocals == method.initLocals && decoded.code == method.code
