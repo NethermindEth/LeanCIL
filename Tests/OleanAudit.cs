@@ -326,6 +326,47 @@ if (cilModules.Length == 0 || !ReusableCertified(new(), sessionParts, verificati
     throw new InvalidOperationException("The certified library's own CIL modules were not reusable");
 Console.WriteLine("PASS library audits replay the package and stale certified imports before auditing, and reject planted axioms");
 
+// A statement crosses audits as a term. The kernel accepts a theorem at it by unfolding definitions,
+// refuses a weaker one, and refuses a same-named constant that another module declares.
+Compile("StatementBase", "def StatementBase.zero : Nat := 0\n");
+Compile("StatementProduction", """
+    import StatementBase
+    def Production.one : Nat := 1
+    theorem Production.claim (n : Nat) : n + StatementBase.zero = n := rfl
+    theorem Production.base : StatementBase.zero = 0 := rfl
+    theorem Production.inlined : Production.one = 1 := rfl
+    """);
+Compile("StatementVariant", """
+    import StatementBase
+    def Variant.zero : Nat := 0
+    theorem Variant.claim (m : Nat) : m + Variant.zero = m := rfl
+    theorem Variant.weaker (n : Nat) (_ : n = 0) : n + StatementBase.zero = n := rfl
+    theorem Variant.one : (1 : Nat) = 1 := rfl
+    """);
+Compile("StatementForged", """
+    namespace StatementBase
+    def zero : Nat := 1
+    end StatementBase
+    theorem Forged.refuted : ¬ StatementBase.zero = 0 := by decide
+    """);
+var production = Audit("StatementProduction", [.. new[] { "Production.claim", "Production.base", "Production.inlined" }
+    .Select(name => new StatementRequest(true).Apply(ProofTheorem(name)))]).theorems;
+if (production.Any(theorem => theorem.term is null || theorem.termError is not null))
+    throw new InvalidOperationException("Statement terms: " + JsonSerializer.Serialize(production));
+AuditedTheorem Compared(string module, string theorem, AuditedTheorem expected, bool negated = false) =>
+    Audit(module, [new StatementRequest(false, expected.term!.Value.GetRawText(), negated)
+        .Apply(ProofTheorem(theorem))])
+        .theorems[0];
+var unfolded = Compared("StatementVariant", "Variant.claim", production[0]);
+var weaker = Compared("StatementVariant", "Variant.weaker", production[0]);
+var inlined = Compared("StatementVariant", "Variant.one", production[2]);
+var forged = Compared("StatementForged", "Forged.refuted", production[1], negated: true);
+if (unfolded.matches != true || weaker.matches != false || inlined.matches != true || forged.matches != false ||
+    forged.mismatch?.Contains("declares it in StatementForged", StringComparison.Ordinal) != true)
+    throw new InvalidOperationException("Statement comparisons: " +
+        JsonSerializer.Serialize(new[] { unfolded, weaker, inlined, forged }));
+Console.WriteLine("PASS the kernel compares statements by unfolding, refuses weaker ones and forged constants");
+
 // A user module cannot replace a toolchain module on the audit's search path.
 Compile("Init", "prelude\n");
 var resolved = verification.AuditOleans(fixtures, ["Init"], []).modules["Init"];

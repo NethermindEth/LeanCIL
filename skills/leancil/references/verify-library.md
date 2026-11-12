@@ -63,38 +63,52 @@ leancil gates gates.json
 | `proofRoot`, `outputRoot`, `assembly`, `@profile.json`, `projects.<name>.path` | Paths relative to the manifest |
 | `gates[].name`, `variants[].name` | Letters, digits, `_`, `.` and `-`; unique ignoring case. A variant cannot be named `production` |
 | `gates[].method`, `gates[].theorem` | A selector and a fully qualified theorem name, as for `extract` and `verify` |
-| `gates[].profiles` | Built-in names or `@profile.json`, without repeats; each is extracted and verified separately |
+| `gates[].profiles` | Built-in names, `profiles` names or `@profile.json`, without repeats; each is extracted and verified separately |
 | `gates[].proof`, refutation `proof` and `template` | Paths relative to `proofRoot` |
 | `gates[].initializedTypes`, `gates[].typeArguments` | As `--assume-initialized` and `--type-argument` of `extract` |
 | `assembly` or `build` | Exactly one per gate and variant: a built assembly, or `{ "project", "properties" }` to build |
 | `projects.<name>` | A project's `path`, the `assembly` file name it builds and default build `properties` |
-| `variants[].expect` | `certifies` or `rejected` |
+| `variants[].expect` | `certifies`, `rejected` or `unchanged` |
 | `variants[].profiles` | A nonempty subset of the gate's profiles |
-| `variants[].proof`, `variants[].theorem` | Together, replace the gate's proof and theorem for this variant |
+| `variants[].proof`, `variants[].theorem` | Together, replace the gate's proof and theorem for this variant; `proof` may be `{ "template", "values" }` |
+| `variants[].statement` | `independent` for a `certifies` theorem that is not production's statement |
 | `variants[].initializedTypes` | Replaces the gate's list |
-| `variants[].program` | `same`, `renamed` or `different` from production's program for the same profile |
-| `variants[].refutation` | Required for `rejected`: a `theorem` and a `proof`, or a `template` and string `values` |
-| `generatedRoot` | Required with a template: where instantiated refutations are written under `proofRoot` |
+| `variants[].program` | `same`, `renamed` or `different` from production's program for the same profile; required with `unchanged` |
+| `variants[].programOf` | Another variant whose program `program` compares with instead of production's |
+| `variants[].refutation` | Required for `rejected`: a `theorem` and a `proof`, or a `template` and optional string `values` |
+| `templates.<name>` | A template `path` and default `values`, which a use's own `values` override |
+| `profiles.<name>` | An `@file` profile, relative to the manifest, used by name; not a built-in name |
+| `generatedRoot` | Required with a template: where instantiated proofs are written under `proofRoot` |
 
-An unknown manifest key is an error. A `certifies` variant passes when its proof verifies. A
-`rejected` variant passes only when its refutation verifies against the variant's extraction and
-its proof fails at proof checking; use one to show that a proof detects a wrong implementation.
-A build, extraction, program comparison or template failure, a missing proof or an internal error
-fails the variant and never counts as a rejection. The variant's output keeps no `verified.json`.
-LeanCIL does not check that the refutation states the negation of the contract, so write it so.
+An unknown manifest key is an error. A `certifies` variant passes when its proof verifies and the
+kernel accepts its theorem at production's statement `T`, unless its `statement` is
+`independent`. A `rejected` variant passes only when its refutation verifies against the
+variant's extraction, the kernel accepts the refutation at `¬ T`, and its proof fails at proof
+checking; use one to show that a proof detects a wrong implementation. An `unchanged` variant
+requests no proof and passes when its program comparison holds. A build, extraction, program
+comparison, template or statement identity failure, a missing proof or an internal error fails
+the variant and never counts as a rejection. The variant's output keeps no `verified.json`.
+
+The kernel compares statements in the variant's own environment, structurally and then by
+definitional unfolding within 200000 heartbeats, so a statement may name `Extracted.entryIndex`
+where production says `0`. Each constant of `T` must be the same declaration of the same module
+in the variant's environment, so name shared definitions from a module both proofs import.
+Production verifies before the variants it is compared with. `--check` compares no statement.
 
 `gates` builds each distinct project and property set once into `<outputRoot>/builds/`. A
-template's `@NAME@` placeholders take `values.NAME`; every placeholder needs a value and every
-value a placeholder. The result is written to
-`<proofRoot>/<generatedRoot>/<gate>/<profile>/<variant>.lean` before verification hashes the
-sources, and is verified like any other proof.
+template's `@NAME@` placeholders take `values.NAME`, which may be empty or span lines; every
+placeholder needs a value and every value a placeholder. A `template` that names a `templates`
+entry uses that entry, otherwise a file. The result is written to
+`<proofRoot>/<generatedRoot>/<gate>/<profile>/<variant>/Refutation.lean` or `Proof.lean` before
+verification hashes the sources, and is verified like any other proof.
 
 Each result goes to `<outputRoot>/<gate name>/<profile hash>/<variant name>`, where the gate's
 own assembly is the variant `production`. `gates` writes the batch manifest it runs to
 `<outputRoot>/requests.json`. Each `--results` entry has the `verify-batch` fields of the
 variant's proof, with `status` the variant's verdict, plus `gate`, `profile`, `variant`,
-`build`, `extraction`, `program` and `refutation` (the refutation's `status`, `stage`, `error`
-and `axioms`, or `null`).
+`build`, `extraction`, `program`, `refutation` (the refutation's `status`, `stage`, `error`
+and `axioms`, or `null`) and `statement` (its `status`, `same`, `different`, `unavailable` or
+`independent`, and the `production` and `variant` statements, or `null`).
 
 | Option | Meaning |
 | --- | --- |
