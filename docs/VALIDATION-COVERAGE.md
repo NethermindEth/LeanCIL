@@ -323,7 +323,8 @@ performance fixture is never supplied to a verifier as a certified library.
 - CLI regressions cover unchecked-theorem and transitive-helper rejection, stale-report removal
   and changed-code proof failure.
 - `Tests/TranslationScaling.cs` checks the extraction prefix once, then imports it into the
-  compositional certificate and a deliberately failing monolithic certificate. `--measure` also
+  compositional certificate and a monolithic certificate that the elaborator's decide refuses at once,
+  since only the kernel may evaluate the body and metadata check. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
   The consumer verifies the original extraction.
 

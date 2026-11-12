@@ -5,8 +5,8 @@
 
 using System.Text.Json;
 
-// Real compiled C# call graph: each method fits the ordinary budget, while the
-// former monolithic translation proof repeats all six validators and times out.
+// Real compiled C# call graph: each method fits the ordinary budget, while one monolithic elaborator `decide`
+// over the whole certificate is refused at once, since only the kernel may evaluate the body and metadata check.
 var directory = At("artifacts/TranslationScaling");
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
@@ -30,13 +30,13 @@ var end = extracted.IndexOf("@[cil_code] theorem lookup0", start, StringComparis
 var monolithicSource = extracted[..start] +
     "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
     "methodEvidence imports program := by decide\n" + extracted[end..];
-void RequireHeartbeatRejection(int code, string diagnostic)
+void RequireElaboratorRefusal(int code, string diagnostic)
 {
     var errors = diagnostic.Split('\n').Where(line => line.Contains(": error:", StringComparison.Ordinal)).ToArray();
     if (code == 0 || errors.Length != 1 ||
-        !errors[0].Contains("maximum number of heartbeats", StringComparison.Ordinal))
+        !errors[0].Contains("failed to reduce", StringComparison.Ordinal))
         throw new InvalidOperationException(
-            "Fixture no longer demonstrates the original default-budget failure: " + diagnostic);
+            "Fixture no longer demonstrates the elaborator refusing the monolithic certificate: " + diagnostic);
 }
 if (args.Contains("--measure", StringComparer.Ordinal))
 {
@@ -47,17 +47,17 @@ if (args.Contains("--measure", StringComparer.Ordinal))
         progress: "Baseline complete compositional extraction");
     var original = Path.Combine(directory, "FullMonolithic.lean");
     File.WriteAllText(original, monolithicSource);
-    var result = Execute(["lake", "env", "lean", original], cwd: FixturePackage(), progress: "Baseline complete monolithic rejection");
-    RequireHeartbeatRejection(result.Code, result.Output);
+    var result = Execute(["lake", "env", "lean", original], cwd: FixturePackage(), progress: "Baseline complete monolithic refusal");
+    RequireElaboratorRefusal(result.Code, result.Output);
 }
 var old = Path.Combine(directory, "Monolithic.lean");
 // The monolithic decision uses the raw definitions, not the already-proved component lemmas.
 // The production consumer below checks the complete unchanged positive certificate once.
 File.WriteAllText(old, NarrowEvidence(monolithicSource, "translation_valid"));
 var monolithic = Execute(["lake", "env", "lean", old], cwd: FixturePackage(),
-    progress: "Checking monolithic certificate rejection");
-RequireHeartbeatRejection(monolithic.Code, monolithic.Output);
-Console.WriteLine("PASS six-method compiled fixture exceeds the monolithic default budget");
+    progress: "Checking monolithic certificate refusal");
+RequireElaboratorRefusal(monolithic.Code, monolithic.Output);
+Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the monolithic certificate");
 
 var consumer = Path.Combine(directory, "Consumer");
 Directory.CreateDirectory(consumer);
