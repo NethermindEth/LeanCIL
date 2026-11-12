@@ -313,7 +313,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                     " is resolved through a module reference.");
             if (!scope.IsNil && scope.Kind != HandleKind.ModuleDefinition) Token(TokenOf(scope));
             var typeReference = (TypeReference)module.LookupToken(new MetadataToken(token));
-            if (collection.Pinned.ModuleOf(typeReference) is null) return;
+            if (!IsPinned(typeReference)) return;
             var definition = typeReference.Resolve() ??
                 throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
             if (typeReference.Scope is AssemblyNameReference named && named.FullName != definition.Module.Assembly.Name.FullName)
@@ -323,6 +323,10 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Link(0, token, target.PositionOf, definition.MetadataToken.ToUInt32());
             target.Token(definition.MetadataToken.ToUInt32());
         }
+
+        /// <summary>Whether a type is declared by a pinned module: a module-scoped type of the untouched copy counts.</summary>
+        bool IsPinned(TypeReference type) => type.Scope is ModuleDefinition scope
+            ? collection.Pinned.Contains(collection.Pinned.Working(scope)) : collection.Pinned.ModuleOf(type) is not null;
 
         bool Extends(SrmTypeDefinition definition, string name)
         {
@@ -437,7 +441,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Token(TokenOf(member.Parent));
             var reference = (MemberReference)module.LookupToken(new MetadataToken(token));
             var declaring = reference.DeclaringType is GenericInstanceType generic ? generic.ElementType : reference.DeclaringType;
-            if (collection.Pinned.ModuleOf(declaring) is null) return;
+            if (!IsPinned(declaring)) return;
             (ModuleDefinition definingModule, uint definitionToken) = reference switch
             {
                 MethodReference method when method.Resolve() is { } resolved =>
