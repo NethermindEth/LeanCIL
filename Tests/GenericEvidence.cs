@@ -164,7 +164,8 @@ void RejectBody(int sample, string name, string theorem, string definition, Func
     var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")),
         definition, change);
     var obligation = Regex.Match(mutated,
-        @"(?m)^theorem (method\d+)_body_validated : Extraction\.BodyDecodes (⟨[^⟩]*⟩) " +
+        @"(?m)^theorem (" + Regex.Escape(theorem[..^"_body_validated".Length]) + @")_body_validated : " +
+        @"Extraction\.BodyDecodes (⟨[^⟩]*⟩) " +
         @"(method\d+Body) (method\d+Original) := [^\r\n]*");
     if (!obligation.Success) throw new InvalidOperationException("Missing body obligation to refute: " + name);
     var refutation = obligation.Groups[1].Value + "_body_refuted";
