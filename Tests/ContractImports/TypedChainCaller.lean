@@ -20,13 +20,13 @@ theorem correctness : HoldsGiven Extracted.program Extracted.ImportsHold
       formed nofun (fun _ _ => nofun) (fun _ => nofun) (fun _ => nofun) (fun _ => nofun)
       nofun (Or.inr rfl)
   let frame : Frame := ⟨memory.nextIdentity, [.bytes (.aggregate 8) middle], [middle.allocation],
-    [], 0⟩
+    0⟩
   have setup : enterFrame Extracted.method0
       [.reference (.address source), .reference (.address destination)] memory =
         .ok (frame, entered) := by
     simp only [enterFrame, Extracted.method0_opaqueVectorLocals, makeSelectedLocals,
       List.isEmpty_nil, ite_true, Extracted.method0_localKinds, Extracted.method0_locals,
-      makeLocals, made, Extracted.method0_vectorArgs, makeArgumentHomes,
+      makeLocals, made,
       Extracted.method0_parameterHomes, makeParameterHomes, List.map_nil, Bind.bind,
       Except.bind, Pure.pure, Except.pure, List.append_nil, frame]
   have owned := enterFrame_fresh _ _ _ _ _ setup

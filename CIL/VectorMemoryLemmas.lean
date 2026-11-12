@@ -67,7 +67,6 @@ theorem writeBytes_overwrite_same (m : Memory) (base old new count : Nat) :
         writeBytes_outside _ _ _ _ _ outside, writeBytes_outside _ _ _ _ _ outside]
   | «local» frame index => simp
   | static bytes offset => simp
-  | home frame kind index offset => simp
 
 /-- A successful read of `count` bytes is a number below `256^count`. -/
 theorem readBytes_bound (m : Memory) (base count number : Nat)

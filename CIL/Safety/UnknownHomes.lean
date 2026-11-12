@@ -163,7 +163,7 @@ theorem CompleteWritableHomes.home_at {memory : Memory} {lower : Nat} {kinds slo
   obtain ⟨reference, slot⟩ := homes.complete index kind specified
   exact homes.writable.home_at index kind specified ⟨kind, reference, slot⟩
 
-/-- Entering a method with only numeric `.unmodeled` locals and no vector arguments,
+/-- Entering a method with only numeric `.unmodeled` locals and no
     parameter homes or opaque vector locals succeeds, keeps the caller's memory below
     `nextIdentity` and gives writable homes for every local. -/
 theorem unknown_frame_setup (body : CIL.Method)
@@ -174,7 +174,7 @@ theorem unknown_frame_setup (body : CIL.Method)
     (notPointer : ∀ kind ∈ body.localKinds, ∀ signature, kind ≠ .methodPointer signature)
     (notTable : ∀ kind ∈ body.localKinds, ∀ signature, kind ≠ .methodTable signature)
     (notObject : ∀ kind ∈ body.localKinds, kind ≠ .object)
-    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = [])
+    (parameters : body.parameterHomes = [])
     (opaqueLocals : body.opaqueVectorLocals = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
     ∃ frame result,
@@ -184,10 +184,10 @@ theorem unknown_frame_setup (body : CIL.Method)
   obtain ⟨slots, owned, result, made, homes⟩ :=
     make_unknown_locals memory memory.nextIdentity body.localKinds wellFormed numeric notSpan notArray
       notPointer notTable notObject
-  let frame : Frame := ⟨memory.nextIdentity, slots, owned, [], 0⟩
+  let frame : Frame := ⟨memory.nextIdentity, slots, owned, 0⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
-      initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes,
+      initializers, made, parameters, makeParameterHomes,
       List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl

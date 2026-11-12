@@ -264,15 +264,6 @@ theorem step_aggregateFieldAt_aggregate_eq (offset size : Nat)
   instruction_step_proof step_aggregateFieldAt_eq
 
 -- Reference checks and struct initialization.
-/-- `asRef` pushes the reference once it forms. -/
-@[cil_instruction_step high]
-theorem step_asRef_reference_eq (reference : ManagedReference)
-    (rest : List Value) :
-    step body .asRef pc args frame (.reference reference :: rest) memory = do
-      let value ← formValue memory reference
-      return .next (pc + 1) (value :: rest) frame memory := by
-  instruction_step_proof step_asRef_eq
-
 /-- `skipInit` checks that the reference forms and pops it. -/
 @[cil_instruction_step high]
 theorem step_skipInit_reference_eq (reference : ManagedReference)
@@ -315,7 +306,6 @@ end InstructionEquations
 #print axioms step_fieldAt_aggregate_4_eq
 #print axioms step_fieldAt_aggregate_8_eq
 #print axioms step_aggregateFieldAt_aggregate_eq
-#print axioms step_asRef_reference_eq
 #print axioms step_skipInit_reference_eq
 #print axioms step_initAggregate_reference_eq
 
