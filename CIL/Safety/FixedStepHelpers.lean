@@ -15,7 +15,8 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (formed : source.WellFormed) (operation : CIL.Op) (pc : Nat) (profile : CIL.FeatureProfile)
+    (formed : source.WellFormed) (operation : CIL.Instruction) (pc : Nat)
+    (profile : CIL.FeatureProfile)
     (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow (do
       match pureArity operation with
@@ -90,7 +91,7 @@ inductive FixedStepFamily where
   | reference | numeric | boundary | other | excluded
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
-def fixedStepFamily : CIL.Op → FixedStepFamily
+def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .local .. | .localAddr _ | .setLocal .. | .vectorLocal _ | .vectorLocalAddr _
   | .setVectorLocal _ | .initializeSpanLocal .. | .stackAlloc _ | .newArray _ | .newVector256 ..
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
@@ -106,14 +107,14 @@ def fixedStepFamily : CIL.Op → FixedStepFamily
   | _ => .other
 
 /-- The dispatcher rejects a narrow argument whose source value contains unspecified bits. -/
-def argumentUnspecified (operation : CIL.Op) (arguments : List Value) : Bool :=
+def argumentUnspecified (operation : CIL.Instruction) (arguments : List Value) : Bool :=
   match operation with
   | .arg position (some _) => (arguments[position]?.map Value.hasUnspecified).getD false
   | _ => false
 
 /-- Allocation renaming cannot change the narrow argument observation. -/
 theorem argumentUnspecified_map (mapping : AllocationRenaming)
-    (operation : CIL.Op) (arguments : List Value) :
+    (operation : CIL.Instruction) (arguments : List Value) :
     argumentUnspecified operation (arguments.map mapping.value) =
       argumentUnspecified operation arguments := by
   cases operation <;> try rfl
@@ -123,7 +124,7 @@ theorem argumentUnspecified_map (mapping : AllocationRenaming)
 #print axioms argumentUnspecified_map
 
 /-- The finite reference-operation family exposes only the cases that can observe references. -/
-inductive ReferenceStepOperation : CIL.Op → Prop where
+inductive ReferenceStepOperation : CIL.Instruction → Prop where
   | sub : ReferenceStepOperation .sub
   | ltu : ReferenceStepOperation .ltu
   | gtu : ReferenceStepOperation .gtu
@@ -138,7 +139,7 @@ inductive ReferenceStepOperation : CIL.Op → Prop where
   | bne (destination : Nat) : ReferenceStepOperation (.bne destination)
 
 /-- Reference-family classification supplies its finite case analysis independently of step goals. -/
-theorem referenceStepOperation (operation : CIL.Op)
+theorem referenceStepOperation (operation : CIL.Instruction)
     (family : fixedStepFamily operation = .reference) : ReferenceStepOperation operation := by
   cases operation <;> try cases family
   all_goals constructor
@@ -178,13 +179,13 @@ macro "fixed_fallback" : tactic => `(tactic| (
       | exact fallback
       | (exfalso
          have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
-             CIL.Op.sub = CIL.Op.sub →
+             CIL.Instruction.sub = CIL.Instruction.sub →
              originalStack = Value.scalar offset :: Value.reference reference :: tail → False :=
            by assumption
          exact excluded _ _ _ rfl rfl)
       | (exfalso
          have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
-             CIL.Op.sub = CIL.Op.sub →
+             CIL.Instruction.sub = CIL.Instruction.sub →
              originalStack = Value.scalar offset :: Value.readOnlyReference reference :: tail →
                False := by assumption
          exact excluded _ _ _ rfl rfl)
@@ -213,7 +214,13 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    case h_85 =>
+    -- Only the dispatcher's final arm excludes `.managed`, so the guard skips every other arm
+    -- and fails if no arm is left to select.
+    any_goals
+      first
+        | (have excludesManaged : ∀ native, operation = .managed native → False := by assumption
+           clear excludesManaged)
+        | fail "not the dispatcher's fallback arm"
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noManaged : ∀ op, operation = .managed op → False := by assumption

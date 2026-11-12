@@ -21,7 +21,7 @@ namespace CIL.Safety
 
 /-- Locate an invariant cutpoint by instruction shape. Missing matches point past
     the body and cannot satisfy the checked fetch obligations below. -/
-def instructionLocation (body : CIL.Method) (predicate : CIL.Op → Bool) : Nat :=
+def instructionLocation (body : CIL.Method) (predicate : CIL.Instruction → Bool) : Nat :=
   body.code.findIdx predicate
 
 /-- A finite checked path whose cost is inferred while composing its instructions. -/
@@ -36,7 +36,7 @@ theorem loop_reaches_refl {program : CIL.Program} {method : Nat} {args : List Va
 
 /-- Prepends one fetched non-branching step to a loop path. -/
 theorem loop_reaches_next {program : CIL.Program} {method pc next : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {target : LoopState}
     (found : program[method]? = some body)
     (instruction : body.code[pc]? = some op)
@@ -52,7 +52,7 @@ theorem loop_reaches_next {program : CIL.Program} {method pc next : Nat}
 
 /-- A state terminates if its fetched instruction steps to a state that terminates. -/
 theorem loop_terminates_next {program : CIL.Program} {method pc next : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (found : program[method]? = some body)
     (instruction : body.code[pc]? = some op)
@@ -63,7 +63,7 @@ theorem loop_terminates_next {program : CIL.Program} {method pc next : Nat}
 
 /-- A fetched `ret` whose checked results satisfy `post` terminates. -/
 theorem loop_terminates_return {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (found : program[method]? = some body)
     (instruction : body.code[pc]? = some op)
@@ -191,20 +191,26 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
-  [``CIL.Op.nop, ``CIL.Op.arg, ``CIL.Op.vectorArg, ``CIL.Op.vectorArgAddr, ``CIL.Op.local,
-    ``CIL.Op.vectorLocal, ``CIL.Op.vectorLocalAddr, ``CIL.Op.setVectorLocal, ``CIL.Op.localAddr,
-    ``CIL.Op.setLocal, ``CIL.Op.const32, ``CIL.Op.const64, ``CIL.Op.branch, ``CIL.Op.skipInit,
-    ``CIL.Op.initAggregate, ``CIL.Op.fieldAddress]
+  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.vectorArg,
+    ``CIL.Instruction.vectorArgAddr, ``CIL.Instruction.local, ``CIL.Instruction.vectorLocal,
+    ``CIL.Instruction.vectorLocalAddr, ``CIL.Instruction.setVectorLocal,
+    ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.const32,
+    ``CIL.Instruction.const64, ``CIL.Instruction.branch, ``CIL.Instruction.skipInit,
+    ``CIL.Instruction.initAggregate, ``CIL.Instruction.fieldAddress]
 
 /-- Instructions that read no reference: they compare or compute on scalars, or move a value
     that `loopReadsReferences` shows is a scalar. -/
 def loopScalarOnly : List Lean.Name :=
-  [``CIL.Op.nop, ``CIL.Op.arg, ``CIL.Op.local, ``CIL.Op.localAddr, ``CIL.Op.setLocal,
-    ``CIL.Op.const32, ``CIL.Op.const64, ``CIL.Op.branch, ``CIL.Op.nativeBinary, ``CIL.Op.divide,
-    ``CIL.Op.checkedArithmetic, ``CIL.Op.checkedConvert, ``CIL.Op.convU2, ``CIL.Op.bxor,
-    ``CIL.Op.pop, ``CIL.Op.gt, ``CIL.Op.bgt, ``CIL.Op.ble, ``CIL.Op.bleu, ``CIL.Op.switch,
-    ``CIL.Op.brzero, ``CIL.Op.brnonzero, ``CIL.Op.bltu, ``CIL.Op.bgeu, ``CIL.Op.bgtu,
-    ``CIL.Op.bge, ``CIL.Op.blt, ``CIL.Op.beq, ``CIL.Op.bne]
+  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.local,
+    ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.const32,
+    ``CIL.Instruction.const64, ``CIL.Instruction.branch, ``CIL.Instruction.nativeBinary,
+    ``CIL.Instruction.divide, ``CIL.Instruction.checkedArithmetic,
+    ``CIL.Instruction.checkedConvert, ``CIL.Instruction.convU2, ``CIL.Instruction.bxor,
+    ``CIL.Instruction.pop, ``CIL.Instruction.gt, ``CIL.Instruction.bgt, ``CIL.Instruction.ble,
+    ``CIL.Instruction.bleu, ``CIL.Instruction.switch, ``CIL.Instruction.brzero,
+    ``CIL.Instruction.brnonzero, ``CIL.Instruction.bltu, ``CIL.Instruction.bgeu,
+    ``CIL.Instruction.bgtu, ``CIL.Instruction.bge, ``CIL.Instruction.blt,
+    ``CIL.Instruction.beq, ``CIL.Instruction.bne]
 
 open Lean Meta in
 /-- Whether the step obligation `step` of the fetched `op` can check a reference or span: any
@@ -217,18 +223,18 @@ def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
   let scalar (value : Expr) : MetaM Bool := return (← whnfR value).isAppOf ``Value.scalar
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
   let some #[_, _, _, args, frame, stack, _] := argumentsOf? lhs ``step 7 | return true
-  if name == ``CIL.Op.arg then
+  if name == ``CIL.Instruction.arg then
     -- An argument is checked as it is loaded, so a reference argument's `form` is read.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
     let entries ← listEntries args
     let some (_, value) := entries.find? (·.1 == index) | return true
     return !(← scalar value)
-  if name == ``CIL.Op.setLocal then
+  if name == ``CIL.Instruction.setLocal then
     let stack ← whnfR stack
     let some #[_, top, _] := argumentsOf? stack ``List.cons 3 | return true
     return !(← scalar top)
-  if name == ``CIL.Op.local then
+  if name == ``CIL.Instruction.local then
     -- Loading a span or reference local checks it.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
@@ -250,7 +256,7 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) : MetaM Bool
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
   let some #[_, _, _, _, frame, _, memory] := argumentsOf? lhs ``CIL.Safety.step 7
     | return true
-  if op.isAppOf ``CIL.Op.setLocal then
+  if op.isAppOf ``CIL.Instruction.setLocal then
     -- A span or reference local's store reduces without a fact.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
@@ -258,7 +264,8 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) : MetaM Bool
     let some #[_, locals, _, _, _] := argumentsOf? frame ``Frame.mk 5 | return true
     let some (_, slot) := (← listEntries locals).find? (·.1 == index) | return true
     unless (← whnfR slot).isAppOf ``LocalSlot.bytes do return true
-  else unless op.isAppOf ``CIL.Op.setFieldAt || op.isAppOf ``CIL.Op.initAggregate do
+  else unless
+      op.isAppOf ``CIL.Instruction.setFieldAt || op.isAppOf ``CIL.Instruction.initAggregate do
     return true
   let heads := [``storeLocal, ``storeValue, ``CIL.Safety.step]
   let states (type : Expr) : Bool := (type.find? fun part =>
@@ -273,10 +280,11 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) : MetaM Bool
     an instruction that `references` says can check a reference or span. -/
 def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
     Array (Array Lean.Syntax.Term) :=
-  if op == ``CIL.Op.ret then
+  if op == ``CIL.Instruction.ret then
     #[facts.addresses, facts.fields, facts.cases, facts.references] else
-  #[if op == ``CIL.Op.localAddr || op == ``CIL.Op.vectorLocalAddr then facts.addresses else #[],
-    if op == ``CIL.Op.fieldAt then facts.fields else #[],
+  #[if op == ``CIL.Instruction.localAddr || op == ``CIL.Instruction.vectorLocalAddr then
+      facts.addresses else #[],
+    if op == ``CIL.Instruction.fieldAt then facts.fields else #[],
     if loopMovesOnly.contains op then #[] else facts.cases,
     if references then facts.references else #[]]
 
@@ -387,12 +395,14 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     literalNat? pc
   let stops : Lean.Name → Bool := match mode with
     | .reach => fun _ => false
-    | .finish => (· == ``CIL.Op.ret)
-    | .advance => fun op => callsCallee op || op == ``CIL.Op.ret
-    | .resume _ => fun op => op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate
+    | .finish => (· == ``CIL.Instruction.ret)
+    | .advance => fun op => callsCallee op || op == ``CIL.Instruction.ret
+    | .resume _ => fun op =>
+      op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initAggregate
   -- A struct store no fact steps ends any walk but `.reach`, for the frame lemmas to take.
   let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&
-    (op == ``CIL.Op.setFieldAt || op == ``CIL.Op.initAggregate || op == ``CIL.Op.setLocal))
+    (op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initAggregate ||
+      op == ``CIL.Instruction.setLocal))
   let mut taken := 0
   repeat
     if (← getGoals).isEmpty then return none
@@ -410,7 +420,8 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     let saved ← saveState
     let fetched? ← observing? do
       let fetched ← loopFetch core
-      let stores := [``CIL.Op.setLocal, ``CIL.Op.setFieldAt, ``CIL.Op.initAggregate]
+      let stores := [``CIL.Instruction.setLocal, ``CIL.Instruction.setFieldAt,
+        ``CIL.Instruction.initAggregate]
       let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
           pure !(← loopStoreKnown fetched.op fetched.step facts.known)
         else pure false
@@ -419,7 +430,7 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
     let some (fetched, references, unknownStore) := fetched?
       | loopStuck tactic facts.all prepared stops; return none
     let op := ((← whnfR fetched.op).getAppFn.constName?).getD Name.anonymous
-    let finishing := mode == .finish && op == ``CIL.Op.ret
+    let finishing := mode == .finish && op == ``CIL.Instruction.ret
     -- A call or return ends an advance before any step; a resumed walk tries the store first,
     -- since a store fact the frame lemmas just produced may step it.
     let resuming := match mode with | .resume _ => true | _ => false

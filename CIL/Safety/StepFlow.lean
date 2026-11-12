@@ -11,7 +11,7 @@ loop proofs can enumerate successors without stepping.
 namespace CIL
 
 /-- Every method index an instruction calls or constructs with. -/
-def Op.callees : Op → List Nat
+def Instruction.callees : Instruction → List Nat
   | .managed (.call _ catalog _) => catalog.map ManagedTarget.method
   | .callVirtual targets _ => targets.map Prod.snd
   | .call method _ | .callInstance method _ | .tailCall method _ | .newVector256 method _
@@ -31,7 +31,8 @@ def FrameAction.callee : FrameAction → Option Nat
 theorem managedStep_callee {operation : CIL.ManagedOp} {pc : Nat} {frame : Frame}
     {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
     (executed : managedStep operation pc frame stack memory = .ok action)
-    (enters : action.callee = some callee) : callee ∈ (CIL.Op.managed operation).callees := by
+    (enters : action.callee = some callee) :
+      callee ∈ (CIL.Instruction.managed operation).callees := by
   unfold managedStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
@@ -51,7 +52,7 @@ theorem step_callVirtual_callee {body : CIL.Method}
     {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction} {callee : Nat}
     (executed : step body (.callVirtual targets argc) pc args frame stack memory = .ok action)
     (enters : action.callee = some callee) :
-    callee ∈ (CIL.Op.callVirtual targets argc).callees := by
+    callee ∈ (CIL.Instruction.callVirtual targets argc).callees := by
   simp only [step, observerCount, Bool.or_false] at executed
   split at executed
   · cases executed
@@ -69,7 +70,7 @@ theorem step_callVirtual_callee {body : CIL.Method}
 
 set_option maxHeartbeats 800000 in
 /-- A successful call or construction enters a method listed by its instruction. -/
-theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
+theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction} {callee : Nat}
     (h : step body op pc args frame stack m = .ok action)
     (enters : action.callee = some callee) : callee ∈ op.callees := by
@@ -85,7 +86,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Va
       cases h
       simp only [FrameAction.callee, Option.some.injEq] at enters
       subst callee
-      simp only [Op.callees, List.mem_singleton]
+      simp only [Instruction.callees, List.mem_singleton]
     | contradiction
     | (obtain ⟨_, _, h⟩ := except_bind_ok h)
     | split at h
@@ -109,7 +110,7 @@ theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSig
 
 /-- A step that stays in the frame resumes at the fallthrough of a continuing instruction or
     at one of its targets. -/
-theorem step_next_target {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
+theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {target : Nat} {stack' : List Value}
     {frame' : Frame} {m' : Memory}
     (h : step body op pc args frame stack m = .ok (.next target stack' frame' m')) :

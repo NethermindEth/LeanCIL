@@ -10,7 +10,7 @@ theorem Memory.Renamed.stepNumeric {indices : LocalIndexMap} {mapping : Allocati
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (formed : source.WellFormed) (sourceBody targetBody : CIL.Method)
-    (metadata : StepMetadata sourceBody targetBody) (operation : CIL.Op)
+    (metadata : StepMetadata sourceBody targetBody) (operation : CIL.Instruction)
     (family : fixedStepFamily operation = .numeric) (pc : Nat) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow

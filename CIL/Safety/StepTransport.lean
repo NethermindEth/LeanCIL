@@ -19,7 +19,7 @@ structure StepMetadata (source target : CIL.Method) : Prop where
 /-- One observable checked step transports frames, values and fresh allocation correspondence. -/
 def StepTransport : Prop :=
   ∀ (indices : LocalIndexMap) (mapping : AllocationRenaming) (scopes : Nat → Nat → Prop)
-    (sourceBody targetBody : CIL.Method) (operation : CIL.Op) (pc : Nat)
+    (sourceBody targetBody : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
     (arguments stack : List Value) (sourceFrame targetFrame : Frame) (source target : Memory),
     StepMetadata sourceBody targetBody →
     Memory.Renamed mapping scopes source target →

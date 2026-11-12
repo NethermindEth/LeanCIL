@@ -76,7 +76,7 @@ def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
 
 /-- Operands an op observes or exposes across a method boundary; `step` rejects the op when
     any of them has unspecified bits. -/
-def observerCount : CIL.Op → Nat
+def observerCount : CIL.Instruction → Nat
   -- Arithmetic and comparisons
   | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
   | .checkedConvert .. | .neg | .bnot | .convI1 | .convI2 | .convU2
@@ -1126,7 +1126,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with
     neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
     without static-field metadata, and any other op is unsupported here. -/
-def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
+def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
@@ -1284,7 +1284,7 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
 
 /-- Runs `ops` in order with `instruction`, stopping at the first fault. For straight-line
     examples only: it has no branches, calls or frames, which `run` handles. -/
-def instructions (ops : List CIL.Op) (stack : List Value) (m : Memory) :
+def instructions (ops : List CIL.Instruction) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
   match ops with
   | [] => return (m, stack)
@@ -1300,7 +1300,7 @@ structure LocatedFault where
   deriving DecidableEq, Repr
 
 /-- `instruction`, with a fault located at `method` and `pc`. -/
-def instructionAt (method pc : Nat) (op : CIL.Op) (stack : List Value) (memory : Memory) :
+def instructionAt (method pc : Nat) (op : CIL.Instruction) (stack : List Value) (memory : Memory) :
     Except LocatedFault (Memory × List Value) :=
   (instruction op stack memory).mapError fun fault => ⟨method, pc, fault⟩
 
@@ -1308,7 +1308,7 @@ def instructionAt (method pc : Nat) (op : CIL.Op) (stack : List Value) (memory :
     the stack when it holds exactly the declared number of results; running off the end is
     `invalidState`. Every other op goes through `instruction`, so branches and calls are
     unsupported here (`run` handles them). -/
-def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
+def block (returns : Bool) (args : List Value) (ops : List CIL.Instruction)
     (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) := do
   match ops with
   | [] => .error .invalidState

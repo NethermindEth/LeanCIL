@@ -35,7 +35,7 @@ def unsafeBlockCall (raw : RawInstruction) : Option (Bool × Nat) := do
       ",System.UInt32)") then none else some (copy, alignment)
 
 /-- Block helper calls bind operation, alignment and signature independently of the extractor. -/
-def unsafeBlockMatches (raw : RawInstruction) (emitted : Op) : Bool :=
+def unsafeBlockMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
   match unsafeBlockCall raw with
   | some (copy, alignment) => match copy, emitted with
     | true, .memory (.copyBlock actual) | false, .memory (.initBlock actual) => actual == alignment
@@ -46,7 +46,7 @@ def unsafeBlockMatches (raw : RawInstruction) (emitted : Op) : Bool :=
 
 /-- The exact load or store representation of an admitted reference-free value type. -/
 def typedTransferMatches (layouts : List RawLayout) (type : TypeExpr) (read : Bool)
-    (emitted : Op) : Bool :=
+    (emitted : Instruction) : Bool :=
   if let some width := integerVectorWidth type then
     match read, width, emitted with
     | true, 16, .memory .load128 | true, 32, .memory .load256
@@ -115,7 +115,8 @@ private def transferAlignmentMatches (layouts : List RawLayout) (type : TypeExpr
   | _ => false
 
 /-- Typed memory operations from calls are reserved for exact admitted Unsafe transfer helpers. -/
-def unsafeTransferMatches (layouts : List RawLayout) (raw : RawInstruction) (emitted : Op) : Bool :=
+def unsafeTransferMatches (layouts : List RawLayout) (raw : RawInstruction)
+    (emitted : Instruction) : Bool :=
   match unsafeValueCall raw with
   | some (type, read, false) => typedTransferMatches layouts type read emitted
   | some (type, read, true) => match emitted with
@@ -161,7 +162,7 @@ def vector128UnsafeCall (raw : RawInstruction) : Option (Bool × Bool) := do
 
 /-- An exact `Vector128` byte load or store emits its operation; no other instruction may emit
     it, and no other call named like one is admitted. -/
-def vector128UnsafeMatches (raw : RawInstruction) : Op → Bool
+def vector128UnsafeMatches (raw : RawInstruction) : Instruction → Bool
   | .memory (.vector128Unsafe store offset) => vector128UnsafeCall raw == some (store, offset)
   | _ => match raw.operand with
     | .call site => !vector128UnsafeFamily site

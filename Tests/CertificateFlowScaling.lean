@@ -23,7 +23,7 @@ def features (count : Nat) : FeatureCertificate :=
 def scalars (count : Nat) : ScalarCertificate := List.replicate (count + 1) (some [])
 
 /-- Every nop falls through to the final void return. -/
-def code (count : Nat) : List Op := List.replicate count .nop ++ [.ret]
+def code (count : Nat) : List Instruction := List.replicate count .nop ++ [.ret]
 
 set_option profiler true in
 /-- Fixed feature validation workload, reduced by the kernel. -/

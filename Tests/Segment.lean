@@ -12,7 +12,7 @@ namespace Tests.Segment
 open CIL.Safety
 
 /-- The argument formation sequence used by the vector input prefixes. -/
-def referencePrefix (index : Nat) : List CIL.Op :=
+def referencePrefix (index : Nat) : List CIL.Instruction :=
   [.arg index, .memory .asRef, .memory .asRef]
 
 /-- Argument formation is a reusable segment at any placed position. -/

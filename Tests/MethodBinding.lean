@@ -23,8 +23,8 @@ run_cmd do
 error: cil_body: rfl could not prove the method-body binding
 method index 1
 field code: first difference at index 1 (left length 6, right length 6)
-  left:  CIL.Op.brzero 10
-  right: CIL.Op.brzero 4
+  left:  CIL.Instruction.brzero 10
+  right: CIL.Instruction.brzero 4
 -/
 #guard_msgs (substring := true) in
 example : program[1]? = some (body 0) := by cil_body
@@ -51,7 +51,7 @@ example : program[2]? = some (body 6) := by cil_body
 error: cil_body: rfl could not prove the method-body binding
 field code: first difference at index 6 (left length 6, right length 7)
   left:  (past the end)
-  right: CIL.Op.nop
+  right: CIL.Instruction.nop
 -/
 #guard_msgs (substring := true) in
 example : body 6 = { body 6 with code := (body 6).code ++ [.nop] } := by cil_body

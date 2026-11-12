@@ -83,7 +83,7 @@ theorem rejects_non_exception_certificate :
 private def guardRaw := raw [i 2, i 45 (.target 5), i 114 (.text "zero"), i 115 argument, i 122, i 2, i 42]
 private def guardStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none], state [], state [none]]
-private def guardCode : List Op :=
+private def guardCode : List Instruction :=
   [.arg 0, .brnonzero 5, .nop, .nop, .throw "System.ArgumentException", .arg 0, .ret none]
 
 example : FeatureFlowValid #[] (fun _ => none) guardRaw .scalar guardStates

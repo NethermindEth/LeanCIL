@@ -153,7 +153,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   cil_loop_recurse recurse (count + 1, sum)
 
 -- A store whose home has no frame fact at its memory stops the walk at that store.
-/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Op.setFieldAt 4 4) at memory
+/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Instruction.setFieldAt 4 4) at memory
   final -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
@@ -165,7 +165,7 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
   cil_loop_recurse recurse (0, sum + 2)
 
 -- A contract applied before the loop reaches its call names the instruction it is at.
-/-- error: cil_loop_call: pc 3 is CIL.Op.localAddr 0, not a call; step to the call first with
+/-- error: cil_loop_call: pc 3 is CIL.Instruction.localAddr 0, not a call; step to the call first with
 `cil_loop_advance` -/
 #guard_msgs (whitespace := lax) in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
@@ -176,7 +176,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   cil_loop_call addTwo_holds sum
 
 -- A call stops `cil_loop_steps`, which names the pc and the tactic that crosses it.
-/-- error: cil_loop_steps: pc 6 is a call (CIL.Op.call 1 1); cross it with `cil_loop_call` -/
+/-- error: cil_loop_steps: pc 6 is a call (CIL.Instruction.call 1 1); cross it with `cil_loop_call` -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
     (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
@@ -187,7 +187,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
 
 -- A store with no frame fact at its memory fails naming the pc, the instruction and the
 -- memory, and what to supply.
-/-- error: cil_loop_steps: cannot step pc 7 (CIL.Op.setFieldAt 4 4) at memory
+/-- error: cil_loop_steps: cannot step pc 7 (CIL.Instruction.setFieldAt 4 4) at memory
   final -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) :
@@ -533,7 +533,7 @@ theorem stamps_returns_count (memory : Memory) (count : W32) (buffer : Reference
 #print axioms stamps_returns_count
 
 -- Without the `Unsafe.Add` result the advance stops at the add, naming that fact.
-/-- error: cil_loop_advance: cannot step pc 5 (CIL.Op.memory (CIL.MemoryOp.add 4 true)) -/
+/-- error: cil_loop_advance: cannot step pc 5 (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
@@ -544,7 +544,7 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
   cil_loop_advance
 
 -- The stuck step shows its pc as a literal, as the message's first line does.
-/-- (CIL.Op.memory (CIL.MemoryOp.add 4 true)) 5 -/
+/-- (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) 5 -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
@@ -581,7 +581,7 @@ bind_entry narrowedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
   narrowed with [] from memory allocating wellFormed
 
 -- A narrowing local store is not one `LoopFrame.store` models, so the walk stops at it.
-/-- error: cil_loop_finish: cannot step pc 1 (CIL.Op.setLocal 0 (some CIL.NarrowKind.unsigned8)) -/
+/-- error: cil_loop_finish: cannot step pc 1 (CIL.Instruction.setLocal 0 (some CIL.NarrowKind.unsigned8)) -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (home : Reference)
     (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
@@ -609,7 +609,7 @@ example (memory current : Memory) (count index : W32) (buffer home slotted : Ref
 
 -- A call whose address argument has no `form` fact does not step, and the failure names the
 -- check and the fact it needs.
-/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not step: its argument checks
+/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call 1 2) does not step: its argument checks
 reduce to -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (home slotted : Reference)
@@ -638,7 +638,7 @@ example (memory : Memory) (count : W32) (buffer home : Reference) (current : Mem
   case postcondition.part3 => exact stored _
 
 -- A call whose stacked argument is not the contract's names both.
-/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not take the contract's
+/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call 1 2) does not take the contract's
 arguments for this input, or is not the named site. -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
@@ -768,7 +768,7 @@ example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True 
   walk_to_head
 
 -- A step names each hypothesis its step proof used: the zeroing fact steps `initAggregate`.
-/-- [CIL.step] pc 1: CIL.Op.initAggregate (8 % 2 ^ 64)
+/-- [CIL.step] pc 1: CIL.Instruction.initAggregate (8 % 2 ^ 64)
   source: unknown, since the proof does not import ExtractedSymbols
   by loop_reaches_next
   used zeroing : -/
@@ -779,7 +779,7 @@ example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True 
 
 -- A branch uses no hypothesis, so no fact is named although `setup` and `wellFormed` are in
 -- context; the tactic's summary names the goals it left by obligation tag.
-/-- [CIL.step] pc 2: CIL.Op.branch 14
+/-- [CIL.step] pc 2: CIL.Instruction.branch 14
   source: unknown, since the proof does not import ExtractedSymbols
   by loop_reaches_next
   changes pc: 1 + 1 ⟶ 14 -/
@@ -808,7 +808,7 @@ example (memory : Memory) (value : W32) (frame : Frame) :
 
 -- A call tactic applied before the walk reaches a call records the instruction it is at and
 -- that the call site is missing.
-/-- "instruction":"CIL.Op.localAddr 0","method":0,"missing":"callSite","obligation":null,"pc":3 -/
+/-- "instruction":"CIL.Instruction.localAddr 0","method":0,"missing":"callSite","obligation":null,"pc":3 -/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
@@ -848,7 +848,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
 
 -- A tactic that stops without an error, leaving a step for the proof, is recorded as stopped
 -- there, with the instruction it did not take.
-/-- "instruction":"CIL.Op.const32 2","method":1,"missing" -/
+/-- "instruction":"CIL.Instruction.const32 2","method":1,"missing" -/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : Memory) (value : W32) (frame : Frame)

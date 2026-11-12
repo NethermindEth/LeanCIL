@@ -516,7 +516,7 @@ structure SpecializedMethod where
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
     opcode: `call` (40) for `.call`, `callvirt` (111) for a receiver-checked call, `newobj`
     (115) for a construction. -/
-private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
+private def managedCallTarget (opcode : Nat) : Instruction → Option (Nat × Nat)
   | .call target count | .tailCall target count =>
     if opcode = 40 then some (target, count) else none
   | .callInstance target count => if opcode = 111 then some (target, count) else none
@@ -527,7 +527,7 @@ private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
 /-- A class construction allocates an instance of the call site's declaring class, with that
     class's bases and one slot per instance field, whose constructor takes that instance as its
     object receiver. -/
-def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Op → Bool
+def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Instruction → Bool
   | .newObject _ _ owner bases size => owner == site.declaringType && callee.objectReceiver &&
     bases == callee.objectBases && size == objectFieldOffset callee.objectFieldCount &&
     match owner with | .object .. => true | _ => false
@@ -543,7 +543,7 @@ def RawMethod.isVirtual (method : RawMethod) : Bool :=
 /-- A receiver-checked call enters a non-virtual method of an admitted class, whose receiver is an
     object reference; no other managed call checks its receiver. A virtual callee would need
     dispatch, which one fixed target does not perform. -/
-def checkedReceiverMatches (callee : RawMethod) : Op → Bool
+def checkedReceiverMatches (callee : RawMethod) : Instruction → Bool
   | .callInstance .. => callee.objectReceiver && !callee.isVirtual
   | _ => true
 
@@ -639,7 +639,7 @@ def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
 with the exact substituted type arguments and signature; an external one, a matching import slot. -/
 def validateManagedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
-    (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
+    (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
   if !live then true else
   match emitted with
   | .managed (.address target signature) => managedAddressMatches methods raw target signature
@@ -694,7 +694,7 @@ def validateImportCall (methods : List SpecializedMethod) (imports : List Import
 
 /-- The call rule stated against the original lists for use in semantic consequences. -/
 def validateManagedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
+    (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
 
 /-- Every call emitted at a live call site of `raw` binds to the method table or an import

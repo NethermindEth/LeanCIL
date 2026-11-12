@@ -55,7 +55,7 @@ private def holdingSquare : CIL.Safety.Memory := objectMemory budgeted ⟨square
 private def squareObject : CIL.Safety.Value := .object (.address ⟨0, 0⟩)
 
 /-- Runs straight-line `code` returning one value, with the given arguments. -/
-private def runs (code : List CIL.Op) (arguments : List CIL.Safety.Value)
+private def runs (code : List CIL.Instruction) (arguments : List CIL.Safety.Value)
     (memory : CIL.Safety.Memory) :
     Except LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value) :=
   invoke [{ returnsValue := true, locals := [], code := code }] 16 0 arguments memory

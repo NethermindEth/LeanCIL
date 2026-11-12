@@ -76,7 +76,7 @@ theorem mixed_capability_equality :
       .reference (.address ⟨0, 3⟩)] memory = .ok (memory, [.scalar (.i32 1)]) := rfl
 #print axioms mixed_capability_equality
 
-private def branch (operation : CIL.Op) : CIL.Method := {
+private def branch (operation : CIL.Instruction) : CIL.Method := {
   code := [.arg 0, operation, .const32 0, .ret, .const32 1, .ret]
   locals := [], returnsValue := true }
 
@@ -92,7 +92,7 @@ theorem readonly_branch :
       .ok (memory, [.scalar (.i32 1)]) := rfl
 #print axioms readonly_branch
 
-private def compareBranch (operation : CIL.Op) : CIL.Method := {
+private def compareBranch (operation : CIL.Instruction) : CIL.Method := {
   code := [.arg 0, .arg 1, operation, .const32 0, .ret, .const32 1, .ret]
   locals := [], returnsValue := true }
 

@@ -17,7 +17,7 @@ open CIL CIL.Safety
     (if positive then [] else [.const32 0, .eq]) ++ [.ret (some .unsigned8)] }
 
 /-- The fixed body of one binary bitwise method. -/
-@[cil_code] def bitwiseBody (profile : FeatureProfile) (operation : Op) : Method := {
+@[cil_code] def bitwiseBody (profile : FeatureProfile) (operation : Instruction) : Method := {
   profile, locals := [], returnsValue := true, code := [.arg 0, .arg 1, operation, .ret] }
 
 /-- The equality family computes its boolean in arbitrary caller memory. -/

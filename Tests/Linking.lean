@@ -33,7 +33,8 @@ theorem add_holds : addContract.Holds addProgram 0 := by
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Calls.Extracted.program [addLib]
 
 /-- The entry fills import slot 0 at index 2 and its call to the helper is renamed from 1 to 3. -/
-example : linked.map (fun body => body.code.flatMap Op.callees) = [[2, 1], [], [3], []] := by decide
+example : linked.map (fun body => body.code.flatMap Instruction.callees) =
+    [[2, 1], [], [3], []] := by decide
 
 /-- `Root`'s conditional proof, discharged by the library proved alone and relocated. -/
 theorem root_composed : rootContract.Holds linked root :=
@@ -112,7 +113,8 @@ theorem percent_holds : percentContract.Holds percentProgram 0 := by
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Outcomes.Extracted.program [percentLib]
 
-example : linked.map (fun body => body.code.flatMap Op.callees) = [[1], [2], [3], []] := by decide
+example : linked.map (fun body => body.code.flatMap Instruction.callees) =
+    [[1], [2], [3], []] := by decide
 
 theorem root_composed : rootContract.Holds linked root :=
   composed (specs := [percentContract.relocatable]) (root_given.mono fun _ met => met 0 (by decide)) rfl
@@ -141,7 +143,8 @@ example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "Sys
   root_composed.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
 
 /-- Two libraries: entries fill slots 0 and 1, then each library's helpers follow in order. -/
-example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map (fun body => body.code.flatMap Op.callees) =
+example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map
+    (fun body => body.code.flatMap Instruction.callees) =
     [[2], [3], [], []] := by decide
 
 #print axioms check_holds

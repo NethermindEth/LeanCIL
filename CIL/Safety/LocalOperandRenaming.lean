@@ -12,7 +12,7 @@ indices, arithmetic operations and static sites retain their original meaning.
 namespace CIL.Safety
 
 /-- Relocate each local load, address or store through the retained declaration map. -/
-def LocalIndexMap.operation (indices : LocalIndexMap) : CIL.Op → CIL.Op
+def LocalIndexMap.operation (indices : LocalIndexMap) : CIL.Instruction → CIL.Instruction
   | .local position narrow => .local (indices.index position) narrow
   | .localAddr position => .localAddr (indices.index position)
   | .setLocal position narrow => .setLocal (indices.index position) narrow
@@ -24,13 +24,13 @@ def LocalIndexMap.operation (indices : LocalIndexMap) : CIL.Op → CIL.Op
   | operation => operation
 
 /-- Relocation leaves every instruction's unspecified-operand guard unchanged. -/
-theorem LocalIndexMap.operation_observers (indices : LocalIndexMap) (operation : CIL.Op) :
+theorem LocalIndexMap.operation_observers (indices : LocalIndexMap) (operation : CIL.Instruction) :
     observerCount (indices.operation operation) = observerCount operation := by
   cases operation <;> rfl
 #print axioms LocalIndexMap.operation_observers
 
 /-- Local operands never enter the pure arithmetic fallback, whose arity remains exact. -/
-theorem LocalIndexMap.operation_pureArity (indices : LocalIndexMap) (operation : CIL.Op) :
+theorem LocalIndexMap.operation_pureArity (indices : LocalIndexMap) (operation : CIL.Instruction) :
     pureArity (indices.operation operation) = pureArity operation := by
   cases operation <;> rfl
 #print axioms LocalIndexMap.operation_pureArity

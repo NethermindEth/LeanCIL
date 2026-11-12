@@ -68,7 +68,7 @@ private def byteSpanCreateMatches (raw : RawInstruction) (kind : TransferKind) :
 
 /-- No other raw instruction may manufacture a byte-span transfer operation, and a byte-span
     vector construction emits only the exact read of its vector. -/
-def marshalTransferMatches (layouts : List RawLayout) (raw : RawInstruction) : Op → Bool
+def marshalTransferMatches (layouts : List RawLayout) (raw : RawInstruction) : Instruction → Bool
   | .memory (.marshalRead kind trying) => marshalCallMatches layouts raw kind true trying ||
     !trying && byteSpanCreateMatches raw kind
   | .memory (.marshalWrite kind trying) => marshalCallMatches layouts raw kind false trying

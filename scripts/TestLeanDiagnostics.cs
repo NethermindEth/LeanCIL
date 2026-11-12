@@ -363,7 +363,8 @@ Require(obligationSource.Contains(leanTags) &&
     "the report's obligation tags and record marker are Lean's");
 var recordLine = new System.Text.Json.Nodes.JsonObject
 {
-    ["tactic"] = "cil_loop_steps", ["method"] = 0, ["pc"] = 1, ["instruction"] = "CIL.Op.add", ["stopped"] = false,
+    ["tactic"] = "cil_loop_steps", ["method"] = 0, ["pc"] = 1,
+    ["instruction"] = "CIL.Instruction.add", ["stopped"] = false,
     ["error"] = new System.Text.Json.Nodes.JsonObject { ["line"] = 3, ["column"] = 2 },
     ["obligation"] = "invariant", ["reached"] = new System.Text.Json.Nodes.JsonObject { ["stack"] = "[]" },
     ["expected"] = new System.Text.Json.Nodes.JsonObject(), ["missing"] = "load",

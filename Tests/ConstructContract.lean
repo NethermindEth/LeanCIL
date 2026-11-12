@@ -380,11 +380,12 @@ theorem half_width_rejected (value : PairInput → Unit → List (BitVec 8)) :
 set_option pp.mvars false in
 /--
 error: Tactic `rfl` failed: The left-hand side
-  [CIL.Op.arg 0, CIL.Op.arg 1, CIL.Op.newAggregate 2 2 16, CIL.Op.fieldAt 8 8, CIL.Op.arg 1, CIL.Op.const32 1,
-      CIL.Op.convI8, CIL.Op.const32 2, CIL.Op.convI8, CIL.Op.arg 0, CIL.Op.newAggregate 1 4 32, CIL.Op.fieldAt 24 8,
-      CIL.Op.add, CIL.Op.ret][2]?
+  [CIL.Instruction.arg 0, CIL.Instruction.arg 1, CIL.Instruction.newAggregate 2 2 16, CIL.Instruction.fieldAt 8 8,
+      CIL.Instruction.arg 1, CIL.Instruction.const32 1, CIL.Instruction.convI8, CIL.Instruction.const32 2,
+      CIL.Instruction.convI8, CIL.Instruction.arg 0, CIL.Instruction.newAggregate 1 4 32, CIL.Instruction.fieldAt 24 8,
+      CIL.Instruction.add, CIL.Instruction.ret][2]?
 is not definitionally equal to the right-hand side
-  some (CIL.Op.newAggregate 2 ?_ 8)
+  some (CIL.Instruction.newAggregate 2 ?_ 8)
 -/
 #guard_msgs (substring := true) in
 /-- The tactic refuses an 8-byte constructor contract at the 16-byte `newobj` site. -/

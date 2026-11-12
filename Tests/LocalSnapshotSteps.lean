@@ -231,7 +231,7 @@ theorem constructor_supplied_store (before after : Memory) (frame : Frame)
 #print axioms constructor_supplied_store
 
 /-- A named instruction exposes the same local lookup as a literal opcode. -/
-def rememberedLoad : CIL.Op := .local 0
+def rememberedLoad : CIL.Instruction := .local 0
 
 /-- Named generated instructions still consume the exact current snapshot. -/
 theorem named_snapshot_load (memory : Memory) (frame : Frame) (bits : BitVec 32)

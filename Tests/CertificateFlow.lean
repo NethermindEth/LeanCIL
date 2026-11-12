@@ -25,7 +25,8 @@ private def forward : RawMethod := raw
   [⟨0, 43, .target 3⟩, ⟨1, 0, .none⟩, ⟨2, 0, .none⟩, ⟨3, 42, .none⟩]
 
 /-- Pruned sites retain explicit holes. -/
-private def forwardCode : List Op := [.branch 3, .unsupported "hole", .unsupported "hole", .ret]
+private def forwardCode : List Instruction :=
+  [.branch 3, .unsupported "hole", .unsupported "hole", .ret]
 
 /-- Only the branch and its destination are reachable. -/
 private def forwardFeatures : FeatureCertificate := [emptyState, none, none, emptyState]

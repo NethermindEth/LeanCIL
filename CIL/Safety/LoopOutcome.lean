@@ -51,7 +51,7 @@ theorem loop_outcome_induction {α : Type} (program : CIL.Program) (method : Nat
 
 /-- A state has the outcome if its fetched instruction steps to a state that has it. -/
 theorem loop_outcome_next {program : CIL.Program} {method pc next : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     {raises : Option String}
     (found : program[method]? = some body)
@@ -79,7 +79,7 @@ theorem loop_reaches_outcome {program : CIL.Program} {method : Nat} {args : List
 /-- Continue a loop path past a callee whose outcome contract names no exception for this
     input. -/
 theorem loop_outcome_call {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop} {raises : Option String}
     (holds : c.Holds program callee) (input : Input)
@@ -105,7 +105,7 @@ theorem loop_outcome_call {Input Output : Type} {c : OutcomeContract Input Outpu
 /-- `loop_outcome_call` that also hands the continuation the callee's `WellFormed`, static
     world and catalog agreement. -/
 theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop} {raises : Option String}
     (holds : c.Holds program callee) (input : Input)
@@ -128,7 +128,7 @@ theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Inpu
 /-- Exit a loop with the exception a callee's contract names; no invariant or measure is
     needed. -/
 theorem loop_outcome_call_raises {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop} {exception : String}
     (holds : c.Holds program callee) (input : Input)
@@ -144,7 +144,8 @@ theorem loop_outcome_call_raises {Input Output : Type} {c : OutcomeContract Inpu
 
 /-- A fetched `throw` of the named exception exits the loop with that outcome. -/
 theorem loop_outcome_throw {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack : List Value} {frame : Frame} {memory : Memory}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value} {frame : Frame}
+    {memory : Memory}
     {post : Memory → List Value → Prop} {exception : String}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .error (.thrown exception)) :

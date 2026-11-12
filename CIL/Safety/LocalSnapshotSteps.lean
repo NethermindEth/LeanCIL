@@ -573,17 +573,17 @@ elab_rules : tactic
         let updated ← withMainContext do
           let (methodFound, instructionFound, operation) ←
             cilFetchedOp ``run_next (fun target => target.find? (·.isAppOf ``run)) 3 prepared
-          if operation == ``CIL.Op.setLocal then
+          if operation == ``CIL.Instruction.setLocal then
             let stored ← snapshotStore snapshot methodFound instructionFound prepared
             evalTactic (← `(tactic| cil_strict rw
               [run_next $methodFound $instructionFound $(stored.stepped)]))
             pure stored.snapshots
-          else if operation == ``CIL.Op.local then
+          else if operation == ``CIL.Instruction.local then
             let loaded ← snapshotLoad snapshot methodFound instructionFound prepared
             evalTactic (← `(tactic| cil_strict rw
               [run_next $methodFound $instructionFound $loaded]))
             pure snapshot
-          else if operation == ``CIL.Op.ret then
+          else if operation == ``CIL.Instruction.ret then
             evalTactic (← `(tactic| cil_strict
               (rw [run_return $methodFound $instructionFound
                 (by cil_checked_step_normalized [$[$prepared:term],*])
@@ -678,12 +678,13 @@ private def snapshotContractWalk (initial : Term) (facts : Array Term)
       withMainContext do
         let (found, instruction, operation) ←
           cilFetchedOp ``run_next_exists some 4 stepFacts
-        let (updated, checked, stored) ← if operation == ``CIL.Op.setLocal ||
-            operation == ``CIL.Op.setVectorLocal then do
+        let (updated, checked, stored) ← if operation == ``CIL.Instruction.setLocal ||
+            operation == ``CIL.Instruction.setVectorLocal then do
             let stored ← snapshotStore snapshot found instruction stepFacts true supplied
             pure (stored.snapshots, stored.stepped, some stored)
           else if supplied then throwError "The instruction is not a numeric store"
-          else if operation == ``CIL.Op.local || operation == ``CIL.Op.vectorLocal then do
+          else if operation == ``CIL.Instruction.local ||
+              operation == ``CIL.Instruction.vectorLocal then do
             pure (snapshot, ← snapshotLoad snapshot found instruction stepFacts, none)
           else throwError "The instruction is not a numeric local"
         evalTactic (← `(tactic| (

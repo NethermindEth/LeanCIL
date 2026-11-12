@@ -24,7 +24,8 @@ theorem memoryInstruction_emptySpan (memory : Memory) (stack : List Value)
   rfl
 #print axioms memoryInstruction_emptySpan
 
-theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m : Memory) :
+theorem instructions_append (first second : List CIL.Instruction) (stack : List Value)
+    (m : Memory) :
     instructions (first ++ second) stack m =
       (instructions first stack m).bind
         (fun (memory, values) => instructions second values memory) := by
@@ -39,13 +40,14 @@ theorem instructions_append (first second : List CIL.Op) (stack : List Value) (m
       exact ih values memory
 
 /-- A fault in a prefix of straight-line code is the fault of the whole sequence. -/
-theorem instruction_fault_cannot_be_erased (first second : List CIL.Op) (stack : List Value)
+theorem instruction_fault_cannot_be_erased (first second : List CIL.Instruction)
+    (stack : List Value)
     (m : Memory) (fault : ExecutionFault) (h : instructions first stack m = .error fault) :
     instructions (first ++ second) stack m = .error fault := by
   rw [instructions_append, h]
   rfl
 
-theorem successful_instruction_prefix (first second : List CIL.Op) (stack : List Value)
+theorem successful_instruction_prefix (first second : List CIL.Instruction) (stack : List Value)
     (m final : Memory) (values : List Value)
     (h : instructions (first ++ second) stack m = .ok (final, values)) :
     ∃ intermediate stack', instructions first stack m = .ok (intermediate, stack') := by
@@ -1098,7 +1100,8 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact otherMemoryInstruction_contract _ _ _ _ _ h
 
 set_option maxHeartbeats 800000 in
-theorem instruction_contract (operation : CIL.Op) (stack values : List Value) (m result : Memory)
+theorem instruction_contract (operation : CIL.Instruction) (stack values : List Value)
+    (m result : Memory)
     (h : instruction operation stack m = .ok (result, values)) :
     InstructionContract m result stack values := by
   unfold instruction at h
@@ -1113,7 +1116,8 @@ theorem memoryInstruction_effect (operation : CIL.MemoryOp) (stack values : List
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
     InstructionEffect m result := (memoryInstruction_contract _ _ _ _ _ h).effect
 
-theorem instruction_effect (operation : CIL.Op) (stack values : List Value) (m result : Memory)
+theorem instruction_effect (operation : CIL.Instruction) (stack values : List Value)
+    (m result : Memory)
     (h : instruction operation stack m = .ok (result, values)) : InstructionEffect m result :=
   (instruction_contract _ _ _ _ _ h).effect
 
@@ -1141,7 +1145,7 @@ theorem memoryInstruction_preserves_wellFormed (operation : CIL.MemoryOp)
 #print axioms memoryInstruction_preserves_wellFormed
 
 set_option maxHeartbeats 800000 in
-theorem instruction_preserves_wellFormed (operation : CIL.Op) (stack values : List Value)
+theorem instruction_preserves_wellFormed (operation : CIL.Instruction) (stack values : List Value)
     (m result : Memory) (hm : m.WellFormed)
     (h : instruction operation stack m = .ok (result, values)) : result.WellFormed := by
   exact (instruction_effect _ _ _ _ _ h).wellFormed hm

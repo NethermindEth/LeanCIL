@@ -5,7 +5,7 @@ import CIL.Safety.Embedding.Suffix
 /-! A suffix run moves to a body whose prefix is a call instead of inline code. -/
 namespace Tests.RegionRun
 
-open CIL (Method Op Embeds)
+open CIL (Method Instruction Embeds)
 open CIL.Safety
 
 def helper : Method := { code := [.arg 0, .const32 6, .shr, .ret], locals := [], returnsValue := true }
@@ -59,7 +59,7 @@ example : regionClosedCheck [caller, helper] [(0, 2)] = false := by decide
 /-- A whole method of straight-line code is closed. -/
 example : regionClosedCheck [{ caller with code := [.const32 0, .const32 1, .ret] }] [(0, 0)] = true := by decide
 
-def longSuffix : List Op :=
+def longSuffix : List Instruction :=
   List.replicate 96 .nop ++ [.brzero 102, .switch [3, 102], .nativeBinary (.bge 102), .ret]
 
 def longExpected (profile : CIL.FeatureProfile) : Method :=
@@ -70,7 +70,8 @@ def longMasked (profile : CIL.FeatureProfile) : Method :=
 
 def longActual (profile : CIL.FeatureProfile) (callee : Nat) : Method :=
   { longExpected profile with
-    code := [.arg 0, .call callee 1] ++ longSuffix.map (Op.relabel (fun pc => pc - 3 + 2)) }
+    code := [.arg 0, .call callee 1] ++
+      longSuffix.map (Instruction.relabel (fun pc => pc - 3 + 2)) }
 
 theorem longSuffix_length : longSuffix.length = 100 := by simp [longSuffix]
 
@@ -95,7 +96,8 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
     intro op member target inside
     simp only [longSuffix, List.mem_append, List.mem_replicate, List.mem_cons,
       List.not_mem_nil, or_false] at member
-    rcases member with ⟨_, rfl⟩ | rfl | rfl | rfl | rfl <;> simp_all [Op.targets] <;> omega
+    rcases member with ⟨_, rfl⟩ | rfl | rfl | rfl | rfl <;>
+      simp_all [Instruction.targets] <;> omega
   · intro pc after
     rfl
 

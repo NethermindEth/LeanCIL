@@ -63,8 +63,9 @@ private def foldRaw := raw (test marker marker ++ [i 44 (.target 8), i 23, i 42,
 private def foldStates : FeatureCertificate := [state [], state [none], state [none],
   state [none, none], state [none, none], state [some 1], state [], state [some 1], none, none]
 private def foldMask := [true, true, true, true, true, true, true, true, false, false]
-private def foldCode : List Op := [.nop, .nop, .nop, .nop, .const32 1, .brzero 8, .const32 1, .ret none,
-  .unsupported "pruned", .unsupported "pruned"]
+private def foldCode : List Instruction :=
+  [.nop, .nop, .nop, .nop, .const32 1, .brzero 8, .const32 1, .ret none, .unsupported "pruned",
+   .unsupported "pruned"]
 
 example : FeatureFlowValid #[] (fun _ => none)
     foldRaw .scalar foldStates foldMask foldCode := by decide
@@ -124,7 +125,7 @@ private def branchKinds (taken : Bool) : ScalarCertificate :=
     if taken then some [] else none, if taken then some [.word32] else none]
 
 /-- Four erased operands and one exact transfer preserve instruction numbering. -/
-private def branchCode (taken : Bool) : List Op :=
+private def branchCode (taken : Bool) : List Instruction :=
   [.nop, .nop, .nop, .nop, if taken then .branch 7 else .nop,
     if taken then .unsupported "pruned" else .const32 1,
     if taken then .unsupported "pruned" else .ret none,

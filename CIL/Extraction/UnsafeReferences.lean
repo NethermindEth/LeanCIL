@@ -65,7 +65,7 @@ def unsafeReferenceHelper (instruction : RawInstruction) : Option UnsafeReferenc
     else none
 
 /-- The exact existing operation implementing each reference helper. -/
-def UnsafeReferenceHelper.matches : UnsafeReferenceHelper → Op → Bool
+def UnsafeReferenceHelper.matches : UnsafeReferenceHelper → Instruction → Bool
   | .areSame, .eq | .less, .ltu | .greater, .gtu | .byteOffset, .memory .byteOffset
   | .subtractBytes, .sub | .asRef, .memory .asRef => true
   | .addBytes expected, .memory (.add width signed) => width == 1 && signed == expected
@@ -93,7 +93,7 @@ def unsafeElementOffset (instruction : RawInstruction) : Bool := Id.run do
       ("!!0& System.Runtime.CompilerServices.Unsafe::" ++ site.name ++ "(!!0&," ++ offset ++ ")")
 
 /-- New helper names and byte-add calls cannot escape exact matching through stack effects. -/
-def unsafeReferenceRequired (instruction : RawInstruction) (emitted : Op) : Bool :=
+def unsafeReferenceRequired (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   match emitted with
   | .memory .byteOffset => true
   | .call .. => (unsafeReferenceHelper instruction).isSome

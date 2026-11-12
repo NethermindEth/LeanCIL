@@ -120,7 +120,7 @@ theorem raisesCLR_of_run {program : CIL.Program} {method : Nat} {body : CIL.Meth
   exact ran
 
 theorem run_next_raisesCLR {program : CIL.Program} {method pc target : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {exception : String}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =
@@ -132,7 +132,8 @@ theorem run_next_raisesCLR {program : CIL.Program} {method pc target : Nat}
 
 /-- A run raises at a step whose fault surfaces as a CLR exception. -/
 theorem run_fault_raisesCLR {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack : List Value} {frame : Frame} {memory : Memory}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value} {frame : Frame}
+    {memory : Memory}
     {fault : ExecutionFault} {exception : String}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .error fault)
@@ -144,7 +145,7 @@ theorem run_fault_raisesCLR {program : CIL.Program} {method pc : Nat}
 
 /-- Propagate the CLR exception a callee's contract names for this input. -/
 theorem run_call_raisesCLR_of_contract {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {exception : String}
     (holds : c.HoldsCLR program callee) (input : Input)

@@ -143,7 +143,7 @@ theorem mixed_local_snapshot {caller current final : Memory} {word vector : Refe
 #print axioms mixed_local_snapshot
 
 /-- One reusable arithmetic prefix adds one to the top word. -/
-def incrementCode : List CIL.Op := [.const32 1, .add]
+def incrementCode : List CIL.Instruction := [.const32 1, .add]
 
 /-- A placed segment computes its stack value through the shared checked stepper. -/
 theorem increment_segment {program : CIL.Program} {method start : Nat} {body : CIL.Method}

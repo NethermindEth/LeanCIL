@@ -28,7 +28,8 @@ def FrameAction.StateValid (program : CIL.Program) (args : List Value) (current 
 
 /-- A successful step from a live state yields a state valid for its action. -/
 theorem step_live_state (program : CIL.Program) (method : Nat) (body : CIL.Method)
-    (operation : CIL.Op) (pc : Nat) (args : List Value) (frame : Frame) (stack : List Value)
+    (operation : CIL.Instruction) (pc : Nat) (args : List Value) (frame : Frame)
+    (stack : List Value)
     (m : Memory) (action : FrameAction) (state : LiveState program args frame stack m)
     (found : program[method]? = some body)
     (h : step body operation pc args frame stack m = .ok action) :

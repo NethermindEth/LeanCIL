@@ -236,7 +236,8 @@ def analyze (tactic : String) (goal : MVarId) (handed : Option MVarId) (error : 
   let record := { record with instruction := op }
   let calling := tactic.endsWith "_call"
   -- A receiver-checked call crosses into its callee as a direct call does.
-  let isCall := (← whnfR op).isAppOf `CIL.Op.call || (← whnfR op).isAppOf `CIL.Op.callInstance
+  let isCall := (← whnfR op).isAppOf ``CIL.Instruction.call ||
+    (← whnfR op).isAppOf ``CIL.Instruction.callInstance
   if isCall && !calling then
     return { record with
       missing := some "calleeContract",

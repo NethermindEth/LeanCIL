@@ -682,7 +682,7 @@ The lemmas of `CIL.Safety.StepFlow` give the possible successors of a successful
 unfolding it.
 `step_next_target` proves that an action that stays in the frame resumes at `pc + 1` of a
 continuing instruction or at one of `op.targets`. Given a successful action and its selected
-callee, `step_callee` proves membership in `Op.callees`: a singleton for a direct call or
+callee, `step_callee` proves membership in `Instruction.callees`: a singleton for a direct call or
 construction, or all authenticated targets for an indirect call. Tail transfers enter a callee
 without continuing in the current frame. `step_call_action` and `step_newVector256_action` /
 `step_newAggregate_action` separate a call from a construction. The module imports only the step

@@ -214,7 +214,7 @@ theorem Memory.Equivalent.newReferenceArray {m n : Memory} (same : m.Equivalent 
 #print axioms Memory.Equivalent.newReferenceArray
 
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
-    (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
+    (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
     ResultEquivalent FrameActionEquivalent (step body op pc args frame stack m)
       (step body op pc args frame stack n) := by

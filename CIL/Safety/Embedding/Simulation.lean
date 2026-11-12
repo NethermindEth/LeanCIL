@@ -19,8 +19,8 @@ namespace CIL.Embedding
 
 open CIL
 
-theorem Op.relabel_id (op : Op) : op.relabel id = op := by
-  induction op <;> simp only [Op.relabel, id] <;> simp_all
+theorem Instruction.relabel_id (op : Instruction) : op.relabel id = op := by
+  induction op <;> simp only [Instruction.relabel, id] <;> simp_all
 
 /-- The facts about one method that the simulation consumes. -/
 structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
@@ -42,10 +42,11 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
 /-- Every body refines itself under the identity renaming. -/
 theorem BodyRefines.refl (body : Method) : BodyRefines body body id :=
   ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
-    fun _ op found _ => ⟨by simp [found, Op.relabel_id], rfl, fun _ => rfl⟩⟩
+    fun _ op found _ => ⟨by simp [found, Instruction.relabel_id], rfl, fun _ => rfl⟩⟩
 
 /-- A live instruction at `p` appears in `sites` with its mapped pc and mapped successor. -/
-theorem mem_sites {limit : Nat} {code : List Op} {map : List Nat} {start p : Nat} {op : Op}
+theorem mem_sites {limit : Nat} {code : List Instruction} {map : List Nat} {start p : Nat}
+    {op : Instruction}
     (found : code[p]? = some op) (live : op.live = true) :
     (⟨start + p, map.getD p limit, map.getD (p + 1) limit, op⟩ : Site) ∈
       sites limit start code map := by
@@ -71,7 +72,7 @@ theorem mem_sites {limit : Nat} {code : List Op} {map : List Nat} {start p : Nat
       · exact member
 
 /-- `pick` agrees with pointwise lookup whenever its cursor is `code.drop start`. -/
-theorem pick_eq (code : List Op) (qs : List Nat) (start : Nat) :
+theorem pick_eq (code : List Instruction) (qs : List Nat) (start : Nat) :
     pick code (code.drop start) start qs = qs.map (fun q => code[q]?) := by
   induction qs generalizing start with
   | nil => rfl
@@ -176,7 +177,8 @@ theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : 
       · cases h
 
 /-- Calls and constructions come only from instructions that resume at the next pc. -/
-theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
+theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc : Nat}
+    {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body op pc args frame stack m = .ok action)
     (resumes : match action with | .call .. | .construct .. => True | _ => False) :

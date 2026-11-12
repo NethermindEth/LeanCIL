@@ -13,7 +13,7 @@ then walks more than one block, and the equations cost time linear in the method
 
 namespace CIL.CodeSuffix
 
-variable {code suffix next : List Op} {start : Nat}
+variable {code suffix next : List Instruction} {start : Nat}
 
 /-- Dropping `count` more instructions from the suffix at `start` leaves the suffix at
     `start + count`. -/
@@ -26,7 +26,7 @@ theorem advance (count : Nat) (placed : code.drop start = suffix)
 
 /-- The instruction at `index` of the suffix at `start` is the code's instruction at
     `start + index`. -/
-theorem lookup {op : Op} (index : Nat) (placed : code.drop start = suffix)
+theorem lookup {op : Instruction} (index : Nat) (placed : code.drop start = suffix)
     (found : suffix[index]? = some op) : code[start + index]? = some op := by
   rw [← placed, List.getElem?_drop] at found
   exact found

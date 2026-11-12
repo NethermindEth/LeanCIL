@@ -26,7 +26,7 @@ def features (count : Nat) : FeatureCertificate :=
 def scalars (count : Nat) : ScalarCertificate := List.replicate (count + 1) (some [])
 
 /-- Forward edges, a self edge and backedges retain their exact destinations. -/
-def code (count : Nat) : List Op :=
+def code (count : Nat) : List Instruction :=
   (List.range count).map (fun pc => .branch (count - pc)) ++ [.ret]
 
 set_option profiler true in

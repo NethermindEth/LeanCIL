@@ -31,12 +31,12 @@ def Memory.ClassesConsistent (catalog : List RuntimeType) (memory : Memory) : Pr
     allocation.kind = .object type → type.ConsistentWith catalog
 
 /-- An instruction creates no instance, or creates one whose type agrees with the catalog. -/
-def SiteConsistent (catalog : List RuntimeType) (operation : CIL.Op) : Prop :=
+def SiteConsistent (catalog : List RuntimeType) (operation : CIL.Instruction) : Prop :=
   match objectSiteType operation with
   | some type => type.ConsistentWith catalog
   | none => True
 
-instance (catalog : List RuntimeType) (operation : CIL.Op) :
+instance (catalog : List RuntimeType) (operation : CIL.Instruction) :
     Decidable (SiteConsistent catalog operation) := by
   unfold SiteConsistent
   split <;> infer_instance
@@ -138,7 +138,7 @@ theorem ObjectAllocationEffect.classesConsistent {catalog : List RuntimeType}
 /-- Every checked dispatcher effect keeps the catalog's agreement when the executed instruction's
     object site does. -/
 theorem StepEffect.classesConsistent {catalog : List RuntimeType} {body : CIL.Method}
-    {operation : CIL.Op} {frame final : Frame} {before after : Memory}
+    {operation : CIL.Instruction} {frame final : Frame} {before after : Memory}
     (effect : StepEffect body operation frame before final after)
     (site : SiteConsistent catalog operation) (consistent : before.ClassesConsistent catalog) :
     after.ClassesConsistent catalog := by
@@ -161,7 +161,8 @@ theorem StepEffect.classesConsistent {catalog : List RuntimeType} {body : CIL.Me
 #print axioms StepEffect.classesConsistent
 
 theorem step_preserves_classes {catalog : List RuntimeType} (body : CIL.Method)
-    (operation : CIL.Op) (pc : Nat) (args : List Value) (frame : Frame) (stack : List Value)
+    (operation : CIL.Instruction) (pc : Nat) (args : List Value) (frame : Frame)
+    (stack : List Value)
     (m : Memory) (action : FrameAction) (site : SiteConsistent catalog operation)
     (consistent : m.ClassesConsistent catalog)
     (h : step body operation pc args frame stack m = .ok action) :

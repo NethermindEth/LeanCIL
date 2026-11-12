@@ -90,7 +90,7 @@ local macro "frame_natural" : tactic => `(tactic| (
   | simp only [map_bind]))
 
 /-- The shared dispatcher tail carries the frame unchanged through pure and memory operations. -/
-theorem fallback_appendLocals (profile : FeatureProfile) (op : Op) (pc : Nat)
+theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc : Nat)
     (stack : List Value) (frame : Frame) (extra : List LocalSlot) (memory : Memory) :
     (match pureArity op with
     | some argc =>
@@ -133,7 +133,7 @@ theorem observed_appendLocals (observed : Bool) (extra : List LocalSlot)
 
 #print axioms observed_appendLocals
 /-- An instruction preserves successful and throwing steps under trailing local slots. -/
-def StepAppendLocals (op : Op) : Prop :=
+def StepAppendLocals (op : Instruction) : Prop :=
   ∀ (body : Method) (pc : Nat) (args : List Value) (frame : Frame)
     (extra : List LocalSlot) (stack : List Value) (memory : Memory)
     (outcome : ExecutionResult FrameAction),
@@ -151,7 +151,7 @@ local macro "append_stack_cases" " using " fallback:term : tactic => `(tactic| (
        all_goals first | exact $fallback | frame_natural)))
 
 /-- `nativeBinary` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_nativeBinary (operation : Op) :
+theorem step_appendLocals_nativeBinary (operation : Instruction) :
     StepAppendLocals (.nativeBinary operation) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
@@ -1328,7 +1328,7 @@ theorem step_appendLocals_managed (operation : ManagedOp) :
 #print axioms step_appendLocals_managed
 
 /-- Every instruction preserves successful and throwing steps under trailing local slots. -/
-theorem step_appendLocals (body : Method) (op : Op) (pc : Nat) (args : List Value)
+theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (extra : List LocalSlot) (stack : List Value) (memory : Memory)
     (outcome : ExecutionResult FrameAction)
     (stepped : step body op pc args frame stack memory = outcome) (kept : StepKept outcome) :

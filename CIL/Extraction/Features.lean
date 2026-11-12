@@ -247,7 +247,7 @@ where
 
 /-- The word an emitted parameterless call pushes when `constants` knows its callee's return.
     `constants` reads each callee's own certificate, which its own obligation validates. -/
-def calleeConstant (constants : Nat → Option W32) : Op → Option W32
+def calleeConstant (constants : Nat → Option W32) : Instruction → Option W32
   | .call index 0 => constants index
   | _ => none
 
@@ -292,7 +292,7 @@ def constantComparison (opcode : Nat) (left right : W32) : Option W32 := do
     | 65028 => some 4 | 65029 => some 9
     | _ => comparisonBranchIndex opcode
   let (operation, negate) ← match index with
-    | 0 => some (Op.eq, false) | 5 => some (.eq, true)
+    | 0 => some (Instruction.eq, false) | 5 => some (.eq, true)
     | 1 => some (.lt, true) | 2 => some (.gt, false)
     | 3 => some (.gt, true) | 4 => some (.lt, false)
     | 6 => some (.ltu, true) | 7 => some (.gtu, false)
@@ -446,7 +446,7 @@ private def rawFeatureEffect (instruction : RawInstruction) : Option (Nat × Nat
 
 /-- Raw and emitted instructions have the same known stack effect, and an emitted call
     or construction comes from the matching raw opcode. -/
-private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) : Bool :=
+private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   let returnsValue := match instruction.operand with
     | .call site => site.returnsValue
     | .indirectCall result .. => result != .void
@@ -466,7 +466,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) 
     emit an unsupported hole on a reachable path. -/
 private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
     (eligible : Nat → Option W32 → Bool)
-    (instruction : RawInstruction) (emitted : Op) : Bool :=
+    (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65044, 65050] then return false
@@ -564,7 +564,8 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod) :=
   featureOpMatchesWith layouts raw (featureLocalEligible raw)
 
 /-- A decided typeof branch preserves its raw target or falls through without a stack effect. -/
-def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : Op) : Bool :=
+def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : Instruction) :
+    Bool :=
   match instruction.operand, emitted with
   | .target target, .branch actual => taken && actual == target
   | .target _, .nop => !taken
@@ -576,7 +577,7 @@ def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : O
 private def featureOpMatchesAtWith (layouts : Array RawLayout) (raw : RawMethod)
     (eligible : Nat → Option W32 → Bool)
     (role : Option FoldRole)
-    (instruction : RawInstruction) (emitted : Op) : Bool :=
+    (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   match role, emitted with
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .const32 word => word == if value then 1 else 0
@@ -610,7 +611,7 @@ private def checkFeatureSiteWith (layouts : Array RawLayout) (constants : Nat �
     (profile : FeatureProfile)
     (certificate : Nat → Option (Option FeatureState))
     (roles : Nat → Option (Option FoldRole)) :
-    (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Op → Bool
+    (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Instruction → Bool
   | _, none, .unsupported _ => true
   | ((instruction, role), pc), some state, emitted =>
     wellShaped raw eligible state &&
@@ -644,7 +645,7 @@ private def checkFeatureSite (layouts : Array RawLayout) (constants : Nat → Op
     index, the word a parameterless call to that method pushes. -/
 def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32)
     (raw : RawMethod) (profile : FeatureProfile)
-    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Op) : Prop :=
+    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Instruction) : Prop :=
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := List.replicate raw.locals.length none }) ∧
@@ -656,7 +657,7 @@ def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32
 
 instance (layouts : Array RawLayout) (constants : Nat → Option W32) (raw : RawMethod)
     (profile : FeatureProfile) (certificate : FeatureCertificate)
-    (reachable : List Bool) (code : List Op) :
+    (reachable : List Bool) (code : List Instruction) :
     Decidable (FeatureFlowValid layouts constants raw profile certificate reachable code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
@@ -664,7 +665,7 @@ instance (layouts : Array RawLayout) (constants : Nat → Option W32) (raw : Raw
     as indexing the complete certificate and fold-role lists at every site. -/
 theorem FeatureFlowValid_iff_list (layouts : Array RawLayout) (constants : Nat → Option W32)
     (raw : RawMethod) (profile : FeatureProfile)
-    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Op) :
+    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Instruction) :
     FeatureFlowValid layouts constants raw profile certificate reachable code ↔
       certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
       reachable = certificate.map Option.isSome ∧
@@ -729,7 +730,7 @@ theorem factsWeaken_preserves {source target : List (Option W32)} {values : List
 /-- Abstract execution edges are computed from raw instructions, incoming facts and the
     emitted call targets, rather than copied from the extractor's claimed reachable mask. -/
 def FeatureEdge (layouts : Array RawLayout) (constants : Nat → Option W32) (raw : RawMethod)
-    (profile : FeatureProfile) (certificate : FeatureCertificate) (code : List Op)
+    (profile : FeatureProfile) (certificate : FeatureCertificate) (code : List Instruction)
     (pc target : Nat) : Prop :=
   ∃ instruction role state emitted after successors,
     (raw.code.zip (foldRoles raw.locals raw.code))[pc]? = some (instruction, role) ∧
@@ -742,7 +743,7 @@ def FeatureEdge (layouts : Array RawLayout) (constants : Nat → Option W32) (ra
     including backedges and every possible switch destination. -/
 theorem FeatureFlowValid.edge_closed {layouts : Array RawLayout}
     {constants : Nat → Option W32} {raw : RawMethod} {profile : FeatureProfile}
-    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Op}
+    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
     (valid : FeatureFlowValid layouts constants raw profile certificate reachable code)
     {pc target : Nat}
     (edge : FeatureEdge layouts constants raw profile certificate code pc target) :
@@ -773,7 +774,7 @@ theorem FeatureFlowValid.edge_closed {layouts : Array RawLayout}
 /-- The pcs reachable from entry along recomputed feature edges. -/
 inductive FeaturePath (layouts : Array RawLayout) (constants : Nat → Option W32)
     (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
-    (code : List Op) : Nat → Prop where
+    (code : List Instruction) : Nat → Prop where
   | entry : FeaturePath layouts constants raw profile certificate code 0
   | next {pc target} : FeaturePath layouts constants raw profile certificate code pc →
       FeatureEdge layouts constants raw profile certificate code pc target →
@@ -783,7 +784,7 @@ inductive FeaturePath (layouts : Array RawLayout) (constants : Nat → Option W3
     reachable mask; this includes cyclic paths without a bound on iterations. -/
 theorem FeatureFlowValid.path_reachable {layouts : Array RawLayout}
     {constants : Nat → Option W32} {raw : RawMethod} {profile : FeatureProfile}
-    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Op}
+    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
     (valid : FeatureFlowValid layouts constants raw profile certificate reachable code)
     {pc : Nat} (path : FeaturePath layouts constants raw profile certificate code pc) :
     reachable[pc]? = some true := by

@@ -356,7 +356,7 @@ theorem feature_op_contract_steps (program : CIL.Program) (index : Nat) (profile
 def orderedWidenBody (signed scalarFirst reversed : Bool) : CIL.Method :=
   let first := if reversed then 1 else 0
   let second := if reversed then 0 else 1
-  let convert := if signed then CIL.Op.convI8 else CIL.Op.convU8
+  let convert := if signed then CIL.Instruction.convI8 else CIL.Instruction.convU8
   { returnsValue := true, locals := [], code :=
       (if scalarFirst then [.arg first, convert, .arg second]
        else [.arg first, .arg second, convert]) ++ [.pop, .pop, .const32 0, .ret] }
@@ -497,7 +497,7 @@ theorem symbolic_branch_splits (program : CIL.Program) (index : Nat)
 error: cil_lookup: undecided branch if ¬left = 0#64 then 6 else 4; split on its condition
 -/
 #guard_msgs in
-example (left : CIL.W64) (operation : CIL.Op) :
+example (left : CIL.W64) (operation : CIL.Instruction) :
     symbolicBranchBody.code[if ¬left = 0#64 then 6 else 4]? = some operation := by
   cil_lookup []
 

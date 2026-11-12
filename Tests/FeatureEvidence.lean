@@ -47,7 +47,8 @@ private def state (stack : List (Option W32)) (locals : List (Option W32) := [])
   some ⟨stack, locals⟩
 private def branchRaw := raw [i 40 (.call getter), i 45 (.target 4), i 22, i 42, i 23, i 42]
 private def branchStates : FeatureCertificate := [state [], state [some 0], state [], state [some 0], none, none]
-private def branchCode : List Op := [.feature .sse2, .brnonzero 4, .const32 0, .ret, .unsupported "pruned", .unsupported "pruned"]
+private def branchCode : List Instruction :=
+  [.feature .sse2, .brnonzero 4, .const32 0, .ret, .unsupported "pruned", .unsupported "pruned"]
 private def branchMask := [true, true, true, true, false, false]
 
 example : FeatureFlowValid #[] (fun _ => none)
@@ -77,8 +78,8 @@ private def loopStates : FeatureCertificate := [state [] [none], state [some 0] 
   state [] [none], state [none] [none], state [some 0, none] [none],
   state [] [none], state [some 1] [none],
   state [] [some 1], state [] [none]]
-private def loopCode : List Op := [.const32 0, .setLocal 0, .local 0, .const32 0, .bne 8,
-  .const32 1, .setLocal 0, .branch 2, .ret]
+private def loopCode : List Instruction :=
+  [.const32 0, .setLocal 0, .local 0, .const32 0, .bne 8, .const32 1, .setLocal 0, .branch 2, .ret]
 example : FeatureFlowValid #[] (fun _ => none) loopRaw .scalar loopStates
     (List.replicate 9 true) loopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none)
@@ -96,7 +97,8 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
 private def switchRaw := raw [i 2, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 42, i 25, i 42]
 private def switchStates : FeatureCertificate := [state [], state [none], state [], state [some 1],
   state [], state [some 2], state [], state [some 3]]
-private def switchCode : List Op := [.arg 0, .switch [4, 6], .const32 1, .ret, .const32 2, .ret, .const32 3, .ret]
+private def switchCode : List Instruction :=
+  [.arg 0, .switch [4, 6], .const32 1, .ret, .const32 2, .ret, .const32 3, .ret]
 example : FeatureFlowValid #[] (fun _ => none) switchRaw .scalar switchStates
     (List.replicate 8 true) switchCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) switchRaw .scalar (switchStates.set 6 none)
@@ -119,8 +121,8 @@ example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.nativeBinary (.bgt
 private def nopRaw := raw [i 22, i 0, i 45 (.target 5), i 22, i 42, i 23, i 42]
 private def nopStates : FeatureCertificate := [state [], state [some 0], state [some 0],
   state [], state [some 0], none, none]
-private def nopCode : List Op := [.const32 0, .nop, .brnonzero 5, .const32 0, .ret,
-  .unsupported "pruned", .unsupported "pruned"]
+private def nopCode : List Instruction :=
+  [.const32 0, .nop, .brnonzero 5, .const32 0, .ret, .unsupported "pruned", .unsupported "pruned"]
 example : FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates
     [true, true, true, true, true, false, false] nopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates

@@ -29,14 +29,14 @@ def AgreesOn (program other : CIL.Program) (region : Nat → Nat → Prop) : Pro
         body'.code[pc]? = body.code[pc]?
 
 /-- A non-tail instruction that calls a method falls through to the next pc. -/
-theorem Op.continues_of_callee {op : CIL.Op} {callee : Nat}
+theorem Instruction.continues_of_callee {op : CIL.Instruction} {callee : Nat}
     (h : callee ∈ op.callees)
     (notTail : ∀ argc, op ≠ .tailCall callee argc)
     (notManagedTail : ∀ signature catalog, op ≠ .managed (.call signature catalog true)) :
     op.continues = true := by
-  cases op <;> simp_all [CIL.Op.callees, CIL.Op.continues]
+  cases op <;> simp_all [CIL.Instruction.callees, CIL.Instruction.continues]
 
-#print axioms Op.continues_of_callee
+#print axioms Instruction.continues_of_callee
 
 private theorem AgreesOn.found {program other : CIL.Program} {region : Nat → Nat → Prop}
     (agrees : AgreesOn program other region) {method pc : Nat} (inside : region method pc) :
@@ -87,7 +87,7 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
         | call callee arguments rest m' =>
           have entered := step_callee hs rfl
           have child := callees callee entered
-          have resume := continues (Op.continues_of_callee entered (by
+          have resume := continues (Instruction.continues_of_callee entered (by
             intro argc equal
             subst op
             obtain ⟨_, _, impossible⟩ := step_tailCall_action hs
@@ -130,7 +130,7 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
         | construct callee arguments rest frame' temporary kind m' =>
           have entered := step_callee hs rfl
           have child := callees callee entered
-          have resume := continues (Op.continues_of_callee entered (by
+          have resume := continues (Instruction.continues_of_callee entered (by
             intro argc equal
             subst op
             obtain ⟨_, _, impossible⟩ := step_tailCall_action hs
@@ -161,7 +161,7 @@ theorem run_congr_region {program other : CIL.Program} {region : Nat → Nat →
 /-- Replacing one method's code keeps agreement where the new code matches the old. -/
 theorem AgreesOn.set {program : CIL.Program} {region : Nat → Nat → Prop} {index : Nat}
     {body : CIL.Method}
-    (found : program[index]? = some body) (code : List CIL.Op)
+    (found : program[index]? = some body) (code : List CIL.Instruction)
     (agree : ∀ pc, region index pc → code[pc]? = body.code[pc]?) :
     AgreesOn program (program.set index { body with code := code }) region := by
   refine ⟨List.length_set .., fun method pc candidate inside fetched => ?_⟩
@@ -174,7 +174,7 @@ theorem AgreesOn.set {program : CIL.Program} {region : Nat → Nat → Prop} {in
   · exact ⟨candidate, by rw [List.getElem?_set_ne (Ne.symm same), fetched], rfl, rfl⟩
 
 /-- Code that agrees from `lower` on agrees at every pc at or after it. -/
-theorem code_agrees_of_drop {a b : List CIL.Op} {lower pc : Nat}
+theorem code_agrees_of_drop {a b : List CIL.Instruction} {lower pc : Nat}
     (same : a.drop lower = b.drop lower) (after : lower ≤ pc) : a[pc]? = b[pc]? := by
   have := congrArg (·[pc - lower]?) same
   simpa only [List.getElem?_drop, Nat.add_sub_cancel' after] using this
@@ -225,7 +225,8 @@ theorem indexedInStarts_eq (starts : List (Nat × Nat)) (method pc : Nat) :
 #print axioms indexedInStarts_eq
 
 /-- Skip absent methods and check each instruction using the earliest included pc. -/
-def regionBodyCheck (index : Std.TreeMap Nat Nat) (method : Nat) (code : List CIL.Op) : Bool :=
+def regionBodyCheck (index : Std.TreeMap Nat Nat) (method : Nat) (code : List CIL.Instruction) :
+    Bool :=
   match index[method]? with
   | none => true
   | some lower => code.zipIdx.all fun (op, pc) =>
@@ -233,7 +234,8 @@ def regionBodyCheck (index : Std.TreeMap Nat Nat) (method : Nat) (code : List CI
       op.callees.all (indexedInStarts index · 0))
 
 /-- Skipping absent methods agrees with testing membership at each instruction. -/
-theorem regionBodyCheck_eq (index : Std.TreeMap Nat Nat) (method : Nat) (code : List CIL.Op) :
+theorem regionBodyCheck_eq (index : Std.TreeMap Nat Nat) (method : Nat)
+    (code : List CIL.Instruction) :
     regionBodyCheck index method code = (code.zipIdx.all fun (op, pc) =>
       !indexedInStarts index method pc ||
         ((!op.continues || indexedInStarts index method (pc + 1)) &&

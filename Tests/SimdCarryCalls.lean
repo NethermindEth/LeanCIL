@@ -44,7 +44,7 @@ def cascade (subtract : Bool) (left right : V256) : W32 :=
     (propagate subtract left right + (generate subtract left right <<< 1))
 
 /-- CIL evaluates both by-value operands before applying their lane arithmetic. -/
-@[cil_code] def laneCode (subtract : Bool) : List Op :=
+@[cil_code] def laneCode (subtract : Bool) : List Instruction :=
   [.arg 0, .arg 1,
     .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2]
 
@@ -106,7 +106,7 @@ theorem flag_lanes (flags : W32) :
 #print axioms flag_lanes
 
 /-- The CIL scalar extraction uses an unsigned shift, masks one bit and widens it. -/
-@[cil_code] def flagCode (index : W32) : List Op :=
+@[cil_code] def flagCode (index : W32) : List Instruction :=
   [.arg 0, .const32 index, .shrUn, .const32 1, .band, .convU8]
 
 /-- The repair helper adds or subtracts all three incoming flags in their own lanes. -/

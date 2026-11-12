@@ -3,7 +3,7 @@ import CIL.Safety.StepFlow
 /-! The pc a step resumes at and the action shape it produces, read off the instruction alone. -/
 namespace Tests.StepFlow
 
-open CIL (Method Op)
+open CIL (Method Instruction)
 open CIL.Safety
 
 variable {body : Method} {pc : Nat} {args stack stack' : List Value} {frame frame' : Frame} {m m' : Memory}
@@ -11,24 +11,24 @@ variable {body : Method} {pc : Nat} {args stack stack' : List Value} {frame fram
 
 example (h : step body (.bge 7) pc args frame stack m = .ok (.next target stack' frame' m')) :
     target = pc + 1 ∨ target = 7 := by
-  simpa [Op.continues, Op.targets] using step_next_target h
+  simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 /-- An unconditional branch does not continue, so it can only resume at its target. -/
 example (h : step body (.branch 9) pc args frame stack m = .ok (.next target stack' frame' m')) : target = 9 := by
-  simpa [Op.continues, Op.targets] using step_next_target h
+  simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 /-- An out-of-range switch index falls through, so the fallthrough stays possible. -/
 example (h : step body (.switch [3, 5]) pc args frame stack m = .ok (.next target stack' frame' m')) :
     target = pc + 1 ∨ target = 3 ∨ target = 5 := by
-  simpa [Op.continues, Op.targets] using step_next_target h
+  simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 example (h : step body (.nativeBinary (.blt 4)) pc args frame stack m = .ok (.next target stack' frame' m')) :
     target = pc + 1 ∨ target = 4 := by
-  simpa [Op.continues, Op.targets] using step_next_target h
+  simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 /-- A return never resumes in the frame. -/
 example : step body (.ret none) pc args frame stack m ≠ .ok (.next target stack' frame' m') := fun h => by
-  simpa [Op.continues, Op.targets] using step_next_target h
+  simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 /-- Both branch outcomes occur, so the disjunction above is not vacuous. -/
 example : step body (.bge 7) 3 args frame [.scalar (.i32 0), .scalar (.i32 1)] m = .ok (.next 7 [] frame m) := by

@@ -151,7 +151,7 @@ theorem field_store_literal_conversion (left right : CIL.W64)
 #print axioms field_store_literal_conversion
 
 /-- A truth-tested branch selects one of two distinct scalar results. -/
-@[cil_code] def truthBranchBody (branch : CIL.Op) : CIL.Method := {
+@[cil_code] def truthBranchBody (branch : CIL.Instruction) : CIL.Method := {
   locals := [], returnsValue := true,
   code := [.arg 0, branch, .const64 1, .ret, .const64 2, .ret] }
 

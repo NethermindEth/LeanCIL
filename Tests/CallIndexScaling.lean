@@ -15,7 +15,8 @@ def raw (code : List RawInstruction) : RawMethod := {
 /-- No constrained opcodes; every instruction still requires reachability and opcode lookup. -/
 def nops (count : Nat) := raw (List.replicate count ⟨0, 0, .none⟩)
 /-- A minimal emitted method. -/
-def emitted (code : List Op) : Method := { locals := [], returnsValue := false, code := code }
+def emitted (code : List Instruction) : Method :=
+  { locals := [], returnsValue := false, code := code }
 /-- A managed call to the identical scalar-free signature at a chosen table index. -/
 def call : RawInstruction := ⟨0, 40, .call {
   declaringType := .atom "Tests" "Scaling", target := .managed 1, typeArguments := [], parameterCount := 0, hasThis := false,

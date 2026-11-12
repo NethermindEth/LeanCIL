@@ -15,7 +15,7 @@ namespace CIL.Safety
     The invocation includes child setup and teardown; no helper body is assumed, and the
     caller's later outcome, normal or faulting, carries over unchanged. -/
 theorem run_call_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest returned : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest returned : List Value}
     {frame : Frame} {memory updated childResult : Memory}
     {outcome : Except LocatedFault (Memory × List Value)}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
@@ -42,7 +42,8 @@ theorem run_call_of_invoke {program : CIL.Program} {fuel method pc callee : Nat}
 
 /-- Independently sufficient budgets combine without requiring equal proof fuel. -/
 theorem run_call_exists {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest returned values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction}
+    {args stack arguments rest returned values : List Value}
     {frame : Frame} {memory updated childResult result : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.call callee arguments rest updated))
@@ -65,7 +66,7 @@ theorem run_call_exists {program : CIL.Program} {method pc callee : Nat}
 
 /-- Compose a separately proved child invocation with a caller postcondition. -/
 theorem run_call_post {program : CIL.Program} {method pc callee : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest values : List Value}
     {frame : Frame} {memory updated final : Memory} {post : Memory → List Value → Prop}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =

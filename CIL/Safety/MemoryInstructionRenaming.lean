@@ -1187,34 +1187,25 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
   · cases observable
   · rename_i observed
     simp only [observed, Bool.false_eq_true, ite_false]
-    split at observable
-    · exact related.referenceAddInstructionResult _ _ _ bounds observable
-    · exact related.pointerTransferInstructionResult _ _ _ _ bounds observable
-    · exact related.vector128UnsafeInstructionResult _ _ _ bounds observable
-    · exact related.arrayTransferInstructionResult formed _ _ _ bounds observable
-    · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
-    · exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
-    · exact related.singleSpanInstructionResult _ _ _ bounds observable
-    · exact related.viewObservationInstructionResult _ _ bounds observable
-    · exact related.spanCopyInstructionResult _ _ _ bounds observable
-    · exact related.spanFillInstructionResult _ _ _ bounds observable
-    · exact related.arrayFillInstructionResult formed _ _ _ bounds observable
-    · exact related.wideArithmeticInstructionResult _ _ bounds observable
-    · exact related.wideArithmeticInstructionResult _ _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.objectFieldInstructionResult _ formed _ bounds observable
-    · exact related.stringLiteralInstructionResult formed _ _ observable
-    · exact related.throwIfNullInstructionResult _ observable
-    · exact related.zeroGuardInstructionResult _ _ _ _ observable
-    · exact related.comparisonGuardInstructionResult _ _ _ _ observable
-    · exact related.otherMemoryInstructionResult _ formed _ bounds observable
+    -- Each arm is routed by the helper it calls, so arm order does not matter.
+    split at observable <;> first
+      | with_reducible exact related.referenceAddInstructionResult _ _ _ bounds observable
+      | with_reducible exact related.pointerTransferInstructionResult _ _ _ _ bounds observable
+      | with_reducible exact related.vector128UnsafeInstructionResult _ _ _ bounds observable
+      | with_reducible exact related.arrayTransferInstructionResult formed _ _ _ bounds observable
+      | with_reducible exact related.binaryTransferInstructionResult _ _ _ _ _ _ bounds observable
+      | with_reducible exact related.singleSpanInstructionResult _ _ _ bounds observable
+      | with_reducible exact related.viewObservationInstructionResult _ _ bounds observable
+      | with_reducible exact related.spanCopyInstructionResult _ _ _ bounds observable
+      | with_reducible exact related.spanFillInstructionResult _ _ _ bounds observable
+      | with_reducible exact related.arrayFillInstructionResult formed _ _ _ bounds observable
+      | with_reducible exact related.wideArithmeticInstructionResult _ _ bounds observable
+      | with_reducible exact related.objectFieldInstructionResult _ formed _ bounds observable
+      | with_reducible exact related.stringLiteralInstructionResult formed _ _ observable
+      | with_reducible exact related.throwIfNullInstructionResult _ observable
+      | with_reducible exact related.zeroGuardInstructionResult _ _ _ _ observable
+      | with_reducible exact related.comparisonGuardInstructionResult _ _ _ _ observable
+      | with_reducible exact related.otherMemoryInstructionResult _ formed _ bounds observable
 
 #print axioms Memory.Renamed.memoryInstructionResult
 

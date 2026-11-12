@@ -20,7 +20,7 @@ namespace CIL.Embedding
 open CIL
 
 /-- A mixed native operation resumes at the relabeled successor. -/
-theorem nativeBinaryValues_relabel (r : Nat → Nat) (op : Op) (pc q : Nat) (x y : Value)
+theorem nativeBinaryValues_relabel (r : Nat → Nat) (op : Instruction) (pc q : Nat) (x y : Value)
     (next : r (pc + 1) = q + 1) (target : Nat) (values : List Value)
     (h : nativeBinaryValues op pc x y = .ok (target, values)) :
     nativeBinaryValues (op.relabel r) q x y = .ok (r target, values) := by
@@ -32,7 +32,7 @@ theorem nativeBinaryValues_relabel (r : Nat → Nat) (op : Op) (pc q : Nat) (x y
   · cases h
   all_goals
     try simp only at h ⊢
-    cases op <;> simp only [Op.relabel, nativePureBinary, Bool.false_eq_true, ↓reduceIte,
+    cases op <;> simp only [Instruction.relabel, nativePureBinary, Bool.false_eq_true, ↓reduceIte,
       reduceCtorEq] at h ⊢
     all_goals (split at h <;> (try (cases h; done)))
     all_goals rename_i found
@@ -43,7 +43,7 @@ theorem nativeBinaryValues_relabel (r : Nat → Nat) (op : Op) (pc q : Nat) (x y
          rw [next]
          done)
       | (have stepped := base_relabel_of_nativePure _ rfl r pc q _ _ _ _ _ (fun _ => next) found
-         simp only [Op.relabel] at stepped
+         simp only [Instruction.relabel] at stepped
          rw [stepped]
          cases h
          rfl)
@@ -60,7 +60,8 @@ def FrameAction.relabel (r : Nat → Nat) : FrameAction → FrameAction
   | action => action
 
 /-- What one expected step at `pc` and its actual counterpart at `q` must share. -/
-structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL.Op) (pc q : Nat) :
+structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL.Instruction)
+    (pc q : Nat) :
     Prop where
   profile : actual.profile = expected.profile
   returnsValue : actual.returnsValue = expected.returnsValue
@@ -68,7 +69,7 @@ structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL
   next : op.continues = true → r (pc + 1) = q + 1
 
 /-- A successful expected step is matched by the relabeled step at the renamed pc. -/
-def StepRelabel (op : CIL.Op) : Prop :=
+def StepRelabel (op : CIL.Instruction) : Prop :=
   ∀ (expected actual : CIL.Method) (r : Nat → Nat) (pc q : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) (action : FrameAction),
     StepContext expected actual r op pc q →
@@ -94,7 +95,7 @@ theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
 
 /-- The shared tail of `step` for instructions without a dedicated case. -/
 theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
-    {stack : List Value} {frame : Frame} {m : Memory} {action : FrameAction} (op : CIL.Op)
+    {stack : List Value} {frame : Frame} {m : Memory} {action : FrameAction} (op : CIL.Instruction)
     (arity : pureArity (op.relabel r) = pureArity op)
     (base : pureArity op ≠ none → BaseRelabel op)
     (plain : pureArity op = none → ∀ result, instruction op stack m = .ok result →
@@ -200,7 +201,7 @@ set_option hygiene false in
 macro "step_relabel_fallback" base:term:max plain:term:max : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rw [context.profile]
   refine fallback_relabel (profile := expected.profile) _ rfl ?_ ?_ context.next h
@@ -230,7 +231,7 @@ set_option hygiene false in
 macro "explicit_intro" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers))
 
 theorem mapError_ok {x : Except ε α} {f : ε → ε'} {a : α} (h : x.mapError f = .ok a) :
@@ -245,15 +246,15 @@ set_option hygiene false in
 local macro "stack_cases" " => " close:tacticSeq : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rcases stack with _ | ⟨v1, rest⟩ <;> (try cases v1)
-  all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+  all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
   all_goals (try rw [context.profile])
   all_goals first
     | (($close); done)
     | (rcases rest with _ | ⟨v2, rest⟩ <;> (try cases v2)
-       all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+       all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
        all_goals (try rw [context.profile])
        all_goals ($close))))
 
@@ -269,7 +270,7 @@ set_option hygiene false in
 macro "plain_cases" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   (try rw [context.profile])
   (try rw [context.returnsValue])))
@@ -285,7 +286,8 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
-theorem step_relabel_nativeBinary (operation : Op) : StepRelabel (.nativeBinary operation) := by
+theorem step_relabel_nativeBinary (operation : Instruction) :
+    StepRelabel (.nativeBinary operation) := by
   stack_cases =>
     first
       | fallback_vacuous
@@ -458,10 +460,10 @@ theorem step_relabel_memory (operation : MemoryOp) : StepRelabel (.memory operat
 theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow) := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   cases narrow
-  · dsimp only [CIL.Op.relabel] at h ⊢
+  · dsimp only [CIL.Instruction.relabel] at h ⊢
     rw [context.returnsValue]
     by_cases sized : stack.length = (if expected.returnsValue then 1 else 0)
     · rw [ite_eq_left sized] at h ⊢
@@ -469,12 +471,12 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
     · rw [ite_eq_right sized] at h
       cases h
   · rcases stack with _ | ⟨v, rest⟩
-    · dsimp only [CIL.Op.relabel] at h ⊢
+    · dsimp only [CIL.Instruction.relabel] at h ⊢
       fallback_vacuous
     · cases v with
       | scalar value =>
         cases value <;> cases rest
-        all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+        all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
         all_goals (try rw [context.returnsValue])
         all_goals first
           | fallback_vacuous
@@ -678,7 +680,7 @@ set_option maxHeartbeats 300000 in
 /-- Every instruction steps in lockstep with its relabeled form. Pure operations
     share the base-step contract; ordinary memory operations share an unchanged
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
-theorem step_relabel (op : CIL.Op) : StepRelabel op := by
+theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   cases op
   case managed operation =>
     cases operation
@@ -821,7 +823,7 @@ theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_
 
 /-- An expected step that throws is matched by the same throw from the relabeled step at the
     renamed pc. -/
-def StepRaise (op : CIL.Op) : Prop :=
+def StepRaise (op : CIL.Instruction) : Prop :=
   ∀ (expected actual : CIL.Method) (r : Nat → Nat) (pc q : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) (exception : String),
     StepContext expected actual r op pc q →
@@ -845,7 +847,7 @@ theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α} {excep
 
 /-- The shared tail of `step` throws only from `instruction`, which both steps share. -/
 theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
-    {stack : List Value} {frame : Frame} {m : Memory} {exception : String} (op : CIL.Op)
+    {stack : List Value} {frame : Frame} {m : Memory} {exception : String} (op : CIL.Instruction)
     (arity : pureArity (op.relabel r) = pureArity op)
     (base : pureArity op ≠ none → BaseRelabel op)
     (plain : pureArity op = none → instruction op stack m = .error (.thrown exception) →
@@ -917,7 +919,7 @@ set_option hygiene false in
 macro "step_raise_fallback" base:term:max plain:term:max : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rw [context.profile]
   refine fallback_raise (profile := expected.profile) _ rfl ?_ ?_ context.next h
@@ -950,7 +952,8 @@ macro "lookup_raise" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
-theorem step_raise_nativeBinary (operation : Op) : StepRaise (.nativeBinary operation) := by
+theorem step_raise_nativeBinary (operation : Instruction) :
+    StepRaise (.nativeBinary operation) := by
   stack_cases =>
     first
       | fallback_raise_vacuous
@@ -1049,10 +1052,10 @@ theorem step_raise_intrinsic (operation : Intrinsic) (argc : Nat) :
 theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   cases narrow
-  · dsimp only [CIL.Op.relabel] at h ⊢
+  · dsimp only [CIL.Instruction.relabel] at h ⊢
     rw [context.returnsValue]
     by_cases sized : stack.length = (if expected.returnsValue then 1 else 0)
     · rw [ite_eq_left sized] at h ⊢
@@ -1060,12 +1063,12 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
     · rw [ite_eq_right sized] at h
       cases h
   · rcases stack with _ | ⟨v, rest⟩
-    · dsimp only [CIL.Op.relabel] at h ⊢
+    · dsimp only [CIL.Instruction.relabel] at h ⊢
       fallback_raise_vacuous
     · cases v with
       | scalar value =>
         cases value <;> cases rest
-        all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+        all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
         all_goals (try rw [context.returnsValue])
         all_goals first
           | fallback_raise_vacuous
@@ -1214,7 +1217,7 @@ theorem step_raise_bleu (target : Nat) : StepRaise (.bleu target) := by
 #print axioms step_raise_bleu
 
 /-- Instructions dispatched directly to the memory evaluator preserve its faults. -/
-theorem step_raise_instruction (op : CIL.Op)
+theorem step_raise_instruction (op : CIL.Instruction)
     (relabels : ∀ r, op.relabel r = op)
     (dispatch : ∀ body pc args frame stack memory,
       step body op pc args frame stack memory =
@@ -1240,7 +1243,7 @@ theorem step_raise_instruction (op : CIL.Op)
 
 set_option maxHeartbeats 400000 in
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/
-theorem step_raise (op : CIL.Op) : StepRaise op := by
+theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   cases op
   case managed operation =>
     plain_cases
