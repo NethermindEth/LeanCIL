@@ -323,10 +323,12 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
     | some goals => MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n"
     | none => m!"no step equation or fact rewrites it"
   let hint ← loopMissingHint (residual.getD #[obligation])
-  throwError "{tactic}: cannot step pc {position} ({op}) at memory{indentExpr memory}\n\
-    The step is{indentExpr obligation}\n\
-    With the step equations and facts it reduces to{indentD shown}\n\
-    Supply {hint}."
+  -- Unassigned parts print as `?_`, so the text does not depend on metavariable numbering.
+  withOptions (pp.mvars.set · false) do
+    throwError "{tactic}: cannot step pc {position} ({op}) at memory{indentExpr memory}\n\
+      The step is{indentExpr obligation}\n\
+      With the step equations and facts it reduces to{indentD shown}\n\
+      Supply {hint}."
 
 open Lean Elab Tactic Meta in
 /-- Fail, as `tactic`, for a `LoopReaches` goal that has stepped back to its target's pc in
