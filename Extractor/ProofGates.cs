@@ -354,7 +354,7 @@ partial class Program
             return new(path, project.assembly, properties, Path.Combine(outputRoot, "builds", key[..16]));
         }
 
-        // A template names an entry of `templates`, whose values the use's own override, or else a file.
+        // A template is a key of `templates` or a file path; values given at the use override the entry's.
         (string Path, Dictionary<string, string> Values)? Template(string owner, string? template,
             Dictionary<string, string>? values)
         {
