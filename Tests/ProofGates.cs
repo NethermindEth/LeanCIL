@@ -91,9 +91,45 @@ File.WriteAllText(Path.Combine(package, "Panicking.lean"),
 File.WriteAllText(Path.Combine(package, "Trivial.lean"), """
     import Extracted
     /-- States nothing about the extracted program, so it verifies against any extraction. -/
-    theorem Trivial.refuted : True := True.intro
-    #print axioms Trivial.refuted
+    theorem Trivial.holds : True := True.intro
+    #print axioms Trivial.holds
 
+    """);
+// Production's statement with an extra premise, which the kernel must not accept as production's.
+File.WriteAllText(Path.Combine(package, "Weaker.lean"), Correctness("Weaker", "First", "+")
+    .Replace("(memory : Memory) :", "(memory : Memory) (_small : left = 0) :"));
+// Production's statement through a definition equal to its `0`, which the kernel accepts by unfolding it.
+File.WriteAllText(Path.Combine(package, "Definitional.lean"), """
+    import Extracted
+    import CIL.Safety.SymbolicExecution
+    import FirstSupport
+    open CIL.Safety
+    /-- The entry method's index. -/
+    def Definitional.entry : Nat := 0
+    /-- Production's statement, proved directly. -/
+    theorem Definitional.original (left right : CIL.W64) (memory : Memory) :
+        ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i64 left), .scalar (.i64 right)]
+          memory = .ok (memory, [.scalar (.i64 (left + right))]) := by
+      cil_checked_steps []
+      all_goals simp only [BitVec.add_comm]
+    /-- Production's statement with the entry index named by `Definitional.entry`. -/
+    theorem Definitional.correctness (left right : CIL.W64) (memory : Memory) :
+        ∃ fuel, invoke Extracted.program fuel Definitional.entry
+          [.scalar (.i64 left), .scalar (.i64 right)]
+          memory = .ok (memory, [.scalar (.i64 (left + right))]) :=
+      Definitional.original left right memory
+    #print axioms Definitional.correctness
+
+    """);
+// A named template whose entry values the variant's own override; NOTE is multi-line and PREFIX empty.
+File.WriteAllText(Path.Combine(package, "Correctness.lean.in"),
+    Correctness("Templated", "First", "@OPERATION@", prefix: "-- @NOTE@@PREFIX@"));
+File.WriteAllText(Path.Combine(directory, "plain.json"), """
+    { "name": "plain-file", "architecture": "scalar", "nativeWidth": 64, "littleEndian": true,
+      "advSimd": false, "sse2": false, "ssse3": false, "sse42": false, "avx": false, "avx2": false,
+      "avx512F": false, "avx512FVL": false, "bmi1": false, "sse41": false, "avx512DQ": false,
+      "avx512DQVL": false, "bmi2": false, "armBase64": false, "vector256Accelerated": false,
+      "x86Base64": false, "vector128Accelerated": false, "avx512Vbmi": false, "aes": false, "armAes": false }
     """);
 // A recorded witness gives inputs whose wrong result differs from the wrapping sum.
 var template = Path.Combine(package, "Refutation.lean.in");
@@ -136,7 +172,8 @@ var scalar = new[] { "scalar" };
 var manifest = Path.Combine(directory, "gates.json");
 var results = Path.Combine(directory, "results.json");
 var outputs = Path.Combine(directory, "Outputs");
-void Manifest(bool controls)
+object Trivial = new { proof = "Trivial.lean", theorem = "Trivial.holds" };
+void Manifest(bool controls, params object[] extra)
 {
     var variants = new List<object>
     {
@@ -146,8 +183,19 @@ void Manifest(bool controls)
         new { name = "wrong-xor", build = Build("WrongXor"), expect = "rejected", program = "different",
             refutation = Refute("WrongXor") },
         new { name = "wrong-sub", build = Build("WrongSub"), profiles = scalar, expect = "rejected",
-            program = "different", refutation = Refute("WrongSub") }
+            program = "different", refutation = Refute("WrongSub") },
+        new { name = "definitional", build = Build("Baseline"), profiles = scalar, expect = "certifies",
+            proof = "Definitional.lean", theorem = "Definitional.correctness" },
+        new { name = "templated", build = Build("Baseline"), profiles = scalar, expect = "certifies",
+            proof = new { template = "correctness", values = new Dictionary<string, string>
+                { ["OPERATION"] = "+", ["NOTE"] = "Generated from\n-- the correctness template." } },
+            theorem = "Templated.correctness" },
+        new { name = "witness-accepted", build = Build("Baseline"), profiles = scalar, expect = "certifies",
+            proof = "Trivial.lean", theorem = "Trivial.holds", statement = "independent" },
+        new { name = "unchanged-reordered", build = Build("Reordered"), profiles = scalar, expect = "unchanged",
+            program = "same", programOf = "reordered" }
     };
+    variants.AddRange(extra);
     // Each control fails on one leg; none of these failures may count as a rejection.
     if (controls)
         variants.AddRange(
@@ -155,7 +203,11 @@ void Manifest(bool controls)
             new { name = "refutation-fails", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
                 refutation = Refute("Agreeing") },
             new { name = "production-verifies", build = Build("Reordered"), profiles = scalar, expect = "rejected",
-                refutation = new { proof = "Trivial.lean", theorem = "Trivial.refuted" } },
+                refutation = Trivial },
+            new { name = "unrelated-refutation", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
+                refutation = Trivial },
+            new { name = "weaker-statement", build = Build("Baseline"), profiles = scalar, expect = "certifies",
+                proof = "Weaker.lean", theorem = "Weaker.correctness" },
             new { name = "program-differs", build = Build("WrongXor"), profiles = scalar, expect = "certifies",
                 program = "same" },
             new { name = "not-renamed", build = Build("Baseline"), profiles = scalar, expect = "certifies",
@@ -177,6 +229,12 @@ void Manifest(bool controls)
     File.WriteAllText(manifest, JsonSerializer.Serialize(new
     {
         schema = 1, proofRoot = "Package", outputRoot = "Outputs", generatedRoot = "Generated",
+        templates = new Dictionary<string, object>
+        {
+            ["correctness"] = new { path = "Correctness.lean.in", values = new Dictionary<string, string>
+                { ["OPERATION"] = "-", ["NOTE"] = "replaced", ["PREFIX"] = "" } }
+        },
+        profiles = new Dictionary<string, string> { ["plain"] = "@plain.json" },
         projects = new Dictionary<string, object>
         {
             ["fixture"] = new { path = "Fixture/Gates.csproj", assembly = "Gates.dll",
@@ -191,7 +249,8 @@ void Manifest(bool controls)
                 profiles = new[] { "scalar", "x64-v3" }, proof = "First.lean", theorem = "First.correctness",
                 variants },
             new { name = "second", assembly = "Second/output/Second.dll", method = "Methods::Second(ulong,ulong)",
-                profiles = new[] { "scalar", "x64-v3" }, proof = "Second.lean", theorem = "Second.correctness" }
+                profiles = new[] { "scalar", "x64-v3", "plain" }, proof = "Second.lean",
+                theorem = "Second.correctness" }
         }
     }));
 }
@@ -223,22 +282,37 @@ string Assembly(JsonElement row)
     return Path.GetFullPath(identity.GetProperty("assemblyPath").GetString()!, output);
 }
 
+string? StatementStatus(JsonElement row) =>
+    row.GetProperty("statement") is { ValueKind: JsonValueKind.Object } statement
+    ? statement.GetProperty("status").GetString() : null;
 Manifest(controls: false);
 var all = Gates(0);
-Expect(all.Length == 11 && all.Count(row => Text(row, "status") == "rejected") == 3,
-    "Expected two methods, two profiles and every variant from one manifest");
+Expect(all.Length == 16 && all.Count(row => Text(row, "status") == "rejected") == 3,
+    "Expected two methods, three profiles and every variant from one manifest");
+string[] programmed = ["baseline", "reordered", "wrong-xor", "wrong-sub", "unchanged-reordered"];
 foreach (var row in all)
 {
     var variant = Text(row, "variant")!;
     var rejected = variant.StartsWith("wrong-", StringComparison.Ordinal);
-    Expect(Text(row, "status") == (rejected ? "rejected" : "verified") &&
+    // The kernel accepts reordered structurally and definitional only by unfolding Definitional.entry.
+    var statement = variant is "production" or "unchanged-reordered" ? null
+        : variant == "witness-accepted" ? "independent" : "same";
+    var status = rejected ? "rejected" : variant == "unchanged-reordered" ? "unchanged" : "verified";
+    Expect(Text(row, "status") == status &&
         Text(row, "build") == (Text(row, "gate") == "first" ? "built" : null) &&
         Text(row, "extraction") == "extracted" &&
-        Text(row, "program") == (variant == "production" ? null : "passed") &&
+        Text(row, "program") == (programmed.Contains(variant) ? "passed" : null) &&
         (rejected ? row.GetProperty("refutation").GetProperty("status").GetString() == "verified"
-            : row.GetProperty("refutation").ValueKind == JsonValueKind.Null),
-        "A variant did not report its build, extraction, program, refutation and proof outcomes", row);
+            : row.GetProperty("refutation").ValueKind == JsonValueKind.Null) &&
+        StatementStatus(row) == statement,
+        "A variant did not report its build, extraction, program, refutation, proof and statement outcomes", row);
 }
+var requestedOutputs = File.ReadAllText(Path.Combine(outputs, "requests.json"));
+Expect(!requestedOutputs.Contains(JsonSerializer.Serialize(Text(Row(all, "unchanged-reordered"), "output"))),
+    "An unchanged variant requested a proof");
+var templated = File.ReadAllText(Path.Combine(package, "Generated", "first", "scalar", "templated", "Proof.lean"));
+Expect(templated.Contains("(left + right)") && templated.Contains("-- Generated from\n-- the correctness template.") &&
+    !templated.Contains("replaced"), "A named template did not merge the variant's values over its own:\n" + templated);
 Expect(!all.Any(row => Text(row, "variant") == "wrong-sub" && Text(row, "profile") == "x64-v3"),
     "A variant restricted to one profile ran under another");
 NoRejectedCertificates(all);
@@ -248,14 +322,14 @@ Expect(Directory.GetDirectories(Path.Combine(outputs, "builds")).Length == 4 &&
 foreach (var (variant, profile, witness) in
     new[] { ("wrong-xor", "x64-v3", "WrongXor"), ("wrong-sub", "scalar", "WrongSub") })
 {
-    var generated = File.ReadAllText(Path.Combine(package, "Generated", "first", profile, variant + ".lean"));
+    var generated = File.ReadAllText(Path.Combine(package, "Generated", "first", profile, variant, "Refutation.lean"));
     Expect(!generated.Contains('@') && !generated.Contains('\r') &&
         generated.Contains($"holds {witnesses[witness].Left} {witnesses[witness].Right} Memory.empty"),
         "A template was not instantiated with its witness: " + variant);
 }
 
 var proofChanged = Gates(0, "--changed", Path.Combine(package, "FirstSupport.lean"), "--profile", "scalar");
-Expect(proofChanged.Length == 5 && proofChanged.All(row => Text(row, "gate") == "first"),
+Expect(proofChanged.Length == 7 && proofChanged.All(row => Text(row, "gate") == "first"),
     "Proof closure selection included the unrelated second method");
 var sourceChanged = Gates(0, "--changed", Path.Combine(second, "Second.cs"));
 Expect(sourceChanged.Length == 2 && sourceChanged.All(row => Text(row, "theorem") == "Second.correctness"),
@@ -268,12 +342,19 @@ var templateChanged = Gates(0, "--changed", template, "--profile", "scalar");
 Expect(templateChanged.Select(row => Text(row, "variant")).Order().SequenceEqual(["wrong-sub", "wrong-xor"]),
     "A changed template did not select exactly the variants instantiated from it");
 var fixtureChanged = Gates(0, "--changed", Path.Combine(fixture, "First.cs"), "--profile", "scalar");
-Expect(fixtureChanged.Length == 5 && fixtureChanged.All(row => Text(row, "gate") == "first"),
+Expect(fixtureChanged.Length == 9 && fixtureChanged.All(row => Text(row, "gate") == "first"),
     "A changed fixture source did not select exactly the variants built from its project");
 var filtered = Gates(0, "--method", "Second", "--profile", "scalar", "--check");
 Expect(filtered.Length == 1 && Text(filtered[0], "status") == "checked" &&
     !File.Exists(Path.Combine(Text(filtered[0], "output")!, "verified.json")),
     "Catalog filters or compile-only results were incorrect");
+// A named profile is its name in ids and --profile, and its file in extraction.
+var named = Gates(0, "--method", "Second", "--profile", "plain", "--check");
+var namedIdentity = JsonDocument.Parse(File.ReadAllText(Path.Combine(Text(named.Single(), "output")!, "identity.json")))
+    .RootElement.EnumerateObject().Single(property => property.Name == "profile").Value;
+Expect(Text(named.Single(), "profile") == "plain" && namedIdentity.EnumerateObject().Any(property =>
+        property.Name.Equals("name", StringComparison.OrdinalIgnoreCase) && property.Value.GetString() == "plain-file"),
+    "A named profile did not extract with its file", named.Single());
 var json = Execute([.. cli, "gates", manifest, "--method", "Second", "--profile", "scalar", "--check",
     "--format", "json"]);
 var document = JsonDocument.Parse(json.Stdout).RootElement;
@@ -287,7 +368,8 @@ Console.WriteLine("PASS project builds, per-variant proofs and profiles, witness
 
 Manifest(controls: true);
 var controls = Gates(1, "--method", "First", "--profile", "scalar");
-foreach (var variant in new[] { "production", "baseline", "reordered", "wrong-xor", "wrong-sub" })
+foreach (var variant in new[] { "production", "baseline", "reordered", "wrong-xor", "wrong-sub", "definitional",
+    "templated", "witness-accepted", "unchanged-reordered" })
     Expect(Text(Row(controls, variant), "status") != "failed", "A failing control failed another variant: " + variant,
         Row(controls, variant));
 var requested = JsonDocument.Parse(File.ReadAllText(Path.Combine(outputs, "requests.json"))).RootElement
@@ -301,7 +383,19 @@ Failed("refutation-fails", "A refutation that does not verify passed or was misr
     Text(row, "error") is null && row.GetProperty("refutation").GetProperty("status").GetString() == "failed");
 Failed("production-verifies", "A proof that verifies counted as a rejection", row =>
     Text(row, "error")!.Contains("but the proof checked", StringComparison.Ordinal) &&
-    row.GetProperty("refutation").GetProperty("status").GetString() == "verified");
+    row.GetProperty("refutation").GetProperty("status").GetString() == "verified" &&
+    StatementStatus(row) == "different");
+// The refutation and the rejection both hold, so only the statement comparison fails these rows.
+Failed("unrelated-refutation", "A refutation of an unrelated statement counted as a rejection", row =>
+    Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
+    Text(row, "error")!.Contains("does not state the negation", StringComparison.Ordinal) &&
+    row.GetProperty("statement").GetProperty("variant").GetString()!.StartsWith("Trivial.holds : True"));
+Failed("weaker-statement", "A weaker own statement certified the variant", row =>
+    Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
+    !File.Exists(Path.Combine(Text(row, "output")!, "verified.json")));
+if (Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE") != "true")
+    Expect(Text(Row(controls, "production"), "libraryBuild") == "consumer-proof-cache",
+        "Production's statement was not compared from its cached result", Row(controls, "production"));
 foreach (var variant in new[] { "program-differs", "not-renamed" })
     Failed(variant, "A program comparison that does not hold passed or reached verification", row =>
         Text(row, "stage") == "program comparison" && Text(row, "program") == "failed" &&
@@ -313,7 +407,7 @@ Failed("missing-proof", "A missing proof counted as a rejection", row =>
 foreach (var variant in new[] { "missing-template", "unused-value" })
     Failed(variant, "A template that cannot be instantiated counted as a rejection", row =>
         Text(row, "stage") == "refutation template" && !requested.Contains(Text(row, "output")) &&
-        !File.Exists(Path.Combine(package, "Generated", "first", "scalar", variant + ".lean")));
+        !File.Exists(Path.Combine(package, "Generated", "first", "scalar", variant, "Refutation.lean")));
 Failed("build-fails", "A failed build counted as a rejection", row =>
     Text(row, "stage") == "build" && Text(row, "build") == "failed");
 Failed("extraction-fails", "A failed extraction counted as a rejection", row =>
@@ -328,4 +422,21 @@ File.WriteAllText(manifest, File.ReadAllText(manifest)
 var invalid = Execute([.. cli, "gates", manifest]);
 Expect(invalid.Code != 0 && invalid.Output.Contains("lists a profile its gate does not", StringComparison.Ordinal),
     "A variant profile outside its gate's was accepted");
+void Invalid(string message, string expected)
+{
+    var result = Execute([.. cli, "gates", manifest]);
+    Expect(result.Code != 0 && result.Output.Contains(expected, StringComparison.Ordinal),
+        message + ":\n" + result.Output);
+}
+Manifest(false, new { name = "loop-a", build = Build("Baseline"), expect = "unchanged", program = "same",
+    programOf = "loop-b" }, new { name = "loop-b", build = Build("Baseline"), expect = "unchanged", program = "same",
+    programOf = "loop-a" });
+Invalid("A programOf cycle was accepted", "through a cycle: loop-a");
+Manifest(false);
+void Edit(string from, string to) => File.WriteAllText(manifest, File.ReadAllText(manifest).Replace(from, to));
+Edit("\"programOf\":\"reordered\"", "\"programOf\":\"absent\"");
+Invalid("An unknown programOf variant was accepted", "unknown variant or through a cycle: absent");
+Manifest(false);
+Edit("\"plain\":\"@plain.json\"", "\"scalar\":\"@plain.json\"");
+Invalid("A named profile shadowed a built-in profile", "Profile scalar has the name of a built-in profile.");
 Console.WriteLine("PASS build, extraction, program, template, proof and internal failures never count as rejections");

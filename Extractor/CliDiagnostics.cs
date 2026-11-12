@@ -80,7 +80,10 @@ internal static class CliDiagnostics
             "build" => "Read the build output, then fix the project or its build properties in the manifest.",
             "extraction" => "Run leancil extract on the built assembly, method and profile to see why.",
             "program comparison" => "Fix the fixture case, or the variant's program if the change is intended.",
-            "refutation template" => "Give every template placeholder a value and every value a placeholder.",
+            "refutation template" or "proof template" =>
+                "Give every template placeholder a value and every value a placeholder.",
+            "statement identity" => "State the variant's theorem as production's statement, or its refutation as " +
+                "that statement's negation; name only declarations both proofs import.",
             _ => "Check the diagnostic and the input paths, then retry."
         };
 

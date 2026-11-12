@@ -11,20 +11,33 @@ partial class Program
 {
     sealed record GateProject(string path, string assembly, Dictionary<string, string>? properties = null);
     sealed record GateBuild(string project, Dictionary<string, string>? properties = null);
+    sealed record GateTemplate(string path, Dictionary<string, string>? values = null);
+    sealed record GateTemplateUse(string template, Dictionary<string, string>? values = null);
     sealed record GateRefutation(string theorem, string? proof = null, string? template = null,
         Dictionary<string, string>? values = null);
     sealed record GateVariant(string name, string expect, string? assembly = null, GateBuild? build = null,
-        string[]? profiles = null, string? proof = null, string? theorem = null,
-        string[]? initializedTypes = null, string? program = null, GateRefutation? refutation = null);
+        string[]? profiles = null, JsonElement? proof = null, string? theorem = null,
+        string[]? initializedTypes = null, string? program = null, string? programOf = null,
+        GateRefutation? refutation = null, string? statement = null);
     sealed record ProofGateEntry(string name, string method, string[] profiles, string proof, string theorem,
         string? assembly = null, GateBuild? build = null, GateVariant[]? variants = null,
         string[]? initializedTypes = null, string[]? typeArguments = null);
     sealed record GateManifest(int schema, string proofRoot, string outputRoot, ProofGateEntry[] gates,
-        Dictionary<string, GateProject>? projects = null, string? generatedRoot = null);
+        Dictionary<string, GateProject>? projects = null, string? generatedRoot = null,
+        Dictionary<string, GateTemplate>? templates = null, Dictionary<string, string>? profiles = null);
+
+    static readonly JsonSerializerOptions GateManifestJson =
+        new() { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
 
     /// <summary>One project build: the project, its merged properties and its private output tree.</summary>
     sealed record GateBuildPlan(string Project, string AssemblyName, SortedDictionary<string, string> Properties,
         string Directory);
+
+    /// <summary>
+    /// A proof the tool writes to `Path` from `Template` and its `Values` before anything reads the consumer
+    /// sources; a template that cannot be instantiated fails its row at `Stage`.
+    /// </summary>
+    sealed record GateGenerated(string Template, Dictionary<string, string> Values, string Path, string Stage);
 
     /// <summary>The outcome of the refutation a `rejected` variant gives, checked against its extraction.</summary>
     sealed record GateRefutationResult(string proof, string theorem, string status, string stage, string? error,
@@ -37,21 +50,34 @@ partial class Program
     sealed record GateResult(string output, string proof, string theorem, string expect, string status, string stage,
         string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure,
         double elapsedSeconds, string gate, string profile, string variant, string? build, string? extraction,
-        string? program, GateRefutationResult? refutation);
+        string? program, GateRefutationResult? refutation, GateStatement? statement);
+
+    /// <summary>
+    /// How a variant's verified statement relates to production's `T`, both as the theorem audits print them:
+    /// `same` when the kernel accepts the variant's theorem at `T`, or its refutation at `¬ T`; `different` when it
+    /// does not; `unavailable` when there was nothing to compare; `independent` when the manifest says so.
+    /// </summary>
+    sealed record GateStatement(string status, string? production, string? variant);
+
+    const string StatementIdentityStage = "statement identity";
 
     /// <summary>One variant of a gate under one profile, and the first stage at which it failed.</summary>
     sealed class GateRow
     {
         internal required string Gate, Profile, Variant, Expect, Output, Proof, Theorem;
-        internal required string? Assembly, ExpectedProgram, RefutationProof, RefutationTheorem, Template;
+        internal required string? Assembly, ExpectedProgram, ProgramOf, RefutationProof, RefutationTheorem, Statement;
         internal required GateBuildPlan? Build;
-        internal required Dictionary<string, string>? Values;
+        internal required GateGenerated[] Generated;
         internal required string[]? InitializedTypes, TypeArguments;
         internal required string Method, ExtractionProfile;
+        internal GateRow? ProgramBase;
         internal GeneratedExtraction? Extraction;
         internal string? BuildStatus, ExtractionStatus, ProgramStatus, Stage, Error;
         internal bool Failed => Error is not null;
         internal string Name => $"{Gate}/{Profile}/{Variant}";
+
+        /// <summary>Whether the statement this row verifies must be production's, or its negation.</summary>
+        internal bool ComparesStatement => Variant != "production" && Expect != "unchanged" && Statement is null;
 
         internal void Fail(string stage, string error)
         {
@@ -73,7 +99,8 @@ partial class Program
 
     /// <summary>
     /// Builds, extracts and verifies an explicit catalog of gates and their variants. A `rejected` variant
-    /// passes only when its refutation verifies and its proof fails at proof checking.
+    /// passes only when its refutation verifies at the negation of production's statement and its proof fails
+    /// at proof checking; a certifying variant's theorem must verify at production's statement.
     /// </summary>
     internal static int RunGates(string[] args)
     {
@@ -81,8 +108,7 @@ partial class Program
             throw new ArgumentException(GatesUsage);
         var manifestPath = Path.GetFullPath(args[0]);
         var directory = Path.GetDirectoryName(manifestPath)!;
-        var manifest = JsonSerializer.Deserialize<GateManifest>(File.ReadAllText(manifestPath),
-            new JsonSerializerOptions { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow })
+        var manifest = JsonSerializer.Deserialize<GateManifest>(File.ReadAllText(manifestPath), GateManifestJson)
             ?? throw new InvalidDataException("Missing gate manifest.");
         if (manifest.schema != 1 || string.IsNullOrWhiteSpace(manifest.proofRoot) ||
             string.IsNullOrWhiteSpace(manifest.outputRoot) || manifest.gates is not { Length: > 0 })
@@ -120,8 +146,8 @@ partial class Program
         if (rows.Count == 0) throw new ArgumentException("No gates match the requested selection.");
 
         // Generated proofs exist before any selection or request reads or hashes the consumer sources.
-        foreach (var row in rows.Where(row => row.Template is not null))
-            InstantiateRefutation(row, proofRoot);
+        foreach (var row in rows)
+            foreach (var generated in row.Generated) InstantiateGenerated(row, generated, proofRoot);
 
         var affectedProofs = new Dictionary<string, bool>(pathComparer);
         bool ProofAffected(string proof)
@@ -131,10 +157,12 @@ partial class Program
                     .Any(path => changed.Contains(Path.GetFullPath(path, proofRoot)));
             return affected;
         }
-        var templates = rows.Where(row => row.Template is not null).Select(row => row.Template!)
+        var templates = rows.SelectMany(row => row.Generated).Select(generated => generated.Template)
             .ToHashSet(pathComparer);
         bool InputAffected(GateRow row) => changed.Contains(manifestPath) ||
-            (row.Template is not null && changed.Contains(row.Template)) || ProofAffected(row.Proof) ||
+            row.Generated.Any(generated => changed.Contains(generated.Template)) ||
+            (row.ExtractionProfile.StartsWith('@') && changed.Contains(row.ExtractionProfile[1..])) ||
+            (row.Expect != "unchanged" && ProofAffected(row.Proof)) ||
             (row.RefutationProof is not null && ProofAffected(row.RefutationProof));
         var selected = rows;
         // Changes to proofs, templates and the manifest select without building or extracting anything else.
@@ -142,11 +170,12 @@ partial class Program
             Path.GetExtension(path) == ".lean" || templates.Contains(path) || pathComparer.Equals(path, manifestPath)))
             selected = [.. rows.Where(InputAffected)];
         if (selected.Count == 0) throw new ArgumentException("No gates depend on the changed paths.");
-        // A program comparison needs the production extraction even when production itself is not selected.
-        var compared = selected.Where(row => row.ExpectedProgram is not null).Select(row => (row.Gate, row.Profile))
-            .ToHashSet();
-        var prepared = rows.Where(row => selected.Contains(row) ||
-            (row.Variant == "production" && compared.Contains((row.Gate, row.Profile)))).ToList();
+        var production = rows.Where(row => row.Variant == "production").ToDictionary(row => (row.Gate, row.Profile));
+        // Program and statement comparisons need the rows they compare with, even when those are not selected.
+        GateRow?[] Compared(GateRow row) =>
+            [row.ProgramBase, row.ComparesStatement ? production[(row.Gate, row.Profile)] : null];
+        var needed = selected.SelectMany(Compared).OfType<GateRow>().ToHashSet();
+        var prepared = rows.Where(row => selected.Contains(row) || needed.Contains(row)).ToList();
         BuildGateProjects(prepared);
         ExtractGateRows(prepared);
         if (changed.Count > 0)
@@ -156,9 +185,8 @@ partial class Program
         if (selected.Count == 0) throw new ArgumentException("No gates depend on the changed paths.");
         if (options.CheckOnly && selected.Any(row => row.Expect == "rejected"))
             throw new ArgumentException("--check cannot evaluate mutation rejection expectations.");
-        foreach (var row in selected.Where(row => row.ExpectedProgram is not null && !row.Failed))
-            CompareGateProgram(row, rows.Single(production => production.Variant == "production" &&
-                production.Gate == row.Gate && production.Profile == row.Profile));
+        foreach (var row in selected.Where(row => row.ProgramBase is not null && !row.Failed))
+            CompareGateProgram(row, row.ProgramBase!);
 
         foreach (var row in selected.Where(row => row.Failed))
         {
@@ -169,10 +197,17 @@ partial class Program
             CliDiagnostics.Write(new CliFailure(row.Stage!, new InvalidOperationException(row.Error)), row.Stage!,
                 invalid: true);
         }
-        // A refutation precedes the proof it accompanies, so the proof's request owns the output.
+        foreach (var row in selected.Where(row => row.Expect == "unchanged" && !row.Failed && !options.Json))
+            Console.WriteLine($"PASS unchanged {row.Name} (program {row.ExpectedProgram})");
+
+        // Production verifies first and reports its statement; variants compared with it verify in a second batch.
+        // Compile-only runs audit no statement, so they compare none.
+        var compared = options.CheckOnly ? [] : selected.Where(row => row.ComparesStatement && !row.Failed).ToList();
+        var origins = compared.Select(row => production[(row.Gate, row.Profile)]).Where(row => !selected.Contains(row));
         var requests = new List<BatchRequest>();
         var requestIndex = new Dictionary<GateRow, (int? Refutation, int Proof)>();
-        foreach (var row in selected.Where(row => !row.Failed))
+        // A refutation precedes the proof it accompanies, so the proof's request owns the output.
+        void Request(GateRow row)
         {
             int? refutation = null;
             if (row.RefutationProof is not null)
@@ -183,15 +218,61 @@ partial class Program
             requestIndex[row] = (refutation, requests.Count);
             requests.Add(new(row.Output, row.Proof, row.Theorem, row.Expect));
         }
+        foreach (var row in selected.Except(compared).Concat(origins.Distinct())
+            .Where(row => !row.Failed && row.Expect != "unchanged"))
+            Request(row);
+        var firstCount = requests.Count;
+        foreach (var row in compared) Request(row);
         Directory.CreateDirectory(outputRoot);
-        var requestsPath = Path.Combine(outputRoot, "requests.json");
-        var batch = new BatchManifest(1, proofRoot, [.. requests]);
-        File.WriteAllText(requestsPath, JsonSerializer.Serialize(batch, Json) + "\n");
-        var run = requests.Count == 0 ? new BatchRun([], []) : RunBatch(batch, outputRoot, options);
+        File.WriteAllText(Path.Combine(outputRoot, "requests.json"),
+            JsonSerializer.Serialize(new BatchManifest(1, proofRoot, [.. requests]), Json) + "\n");
+        var statements = new StatementRequest?[requests.Count];
+        foreach (var (row, index) in requestIndex.Where(pair => pair.Key.Variant == "production" && !options.CheckOnly))
+            statements[index.Proof] = new(Term: true);
+        var first = Run(0, firstCount);
+        foreach (var row in compared)
+        {
+            var origin = requestIndex.TryGetValue(production[(row.Gate, row.Profile)], out var at)
+                ? first.Verified[at.Proof]?.statementIdentity?.term : null;
+            var index = requestIndex[row];
+            // Without production's statement the variant still verifies, and its statement is unavailable.
+            if (origin is { } term)
+                statements[row.Expect == "rejected" ? index.Refutation!.Value : index.Proof] =
+                    new(false, term.GetRawText(), row.Expect == "rejected");
+        }
+        var second = Run(firstCount, requests.Count);
+        var run = new BatchRun([.. first.Results, .. second.Results],
+            [.. first.Reports.Concat(second.Reports).Select(node => node?.DeepClone())],
+            [.. first.Verified, .. second.Verified]);
 
+        BatchRun Run(int start, int end) => start == end ? new([], [], [])
+            : RunBatch(new BatchManifest(1, proofRoot, [.. requests.Skip(start).Take(end - start)]), outputRoot,
+                options, [.. statements.Skip(start).Take(end - start)]);
+        Report? Verified(int? index) => index is { } at ? run.Verified[at] : null;
+        (GateStatement?, string?) Statement(GateRow row)
+        {
+            if (options.CheckOnly || row.Variant == "production" || !requestIndex.TryGetValue(row, out var index))
+                return (null, null);
+            var own = Verified(row.Expect == "rejected" ? index.Refutation : index.Proof);
+            if (row.Statement == "independent")
+                return (new("independent", null, own is null ? null : StatementOf(own)), null);
+            var origin = production[(row.Gate, row.Profile)];
+            var verified = requestIndex.TryGetValue(origin, out var at);
+            return CompareGateStatement(row, origin, origin.Stage ?? (verified ? run.Results[at.Proof].stage : "build"),
+                verified ? Verified(at.Proof) : null, own);
+        }
         var results = selected.Select(row => GateOutcome(row, options.CheckOnly,
-            requestIndex.TryGetValue(row, out var index) ? index : null, run.Results)).ToArray();
+            requestIndex.TryGetValue(row, out var index) ? index : null, run.Results, Statement(row))).ToArray();
         var failed = results.Count(result => result.status == "failed");
+        foreach (var (row, result) in selected.Zip(results).Where(pair => pair.Second.stage == StatementIdentityStage))
+        {
+            // A certificate stands only for the statement production states.
+            if (row.Expect == "verified") File.Delete(Path.Combine(row.Output, "verified.json"));
+            if (options.Json) continue;
+            Console.WriteLine($"FAIL {row.Name} (stage: {StatementIdentityStage})");
+            CliDiagnostics.Write(new CliFailure(StatementIdentityStage, new InvalidOperationException(result.error)),
+                StatementIdentityStage, invalid: true);
+        }
         foreach (var result in results.Where(result => result.status == "failed" && result.error is null))
             if (!options.Json)
                 Console.WriteLine($"FAIL {result.gate}/{result.profile}/{result.variant} (refutation " +
@@ -239,6 +320,24 @@ partial class Program
                 part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) ||
             Path.IsPathRooted(manifest.generatedRoot) || manifest.generatedRoot!.Contains(':')))
             throw new InvalidDataException("generatedRoot must be a relative path of `/`-separated names.");
+        var templates = new Dictionary<string, GateTemplate>(StringComparer.Ordinal);
+        foreach (var (name, template) in manifest.templates ?? [])
+        {
+            if (!SafeGateName(name) || template is null || string.IsNullOrWhiteSpace(template.path) ||
+                template.values?.Values.Any(value => value is null) == true)
+                throw new InvalidDataException("Invalid template " + name + ": expected a path and string values.");
+            templates[name] = template;
+        }
+        // A named profile is a file; ids, paths and --profile use its name, extraction its file.
+        var profileFiles = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (name, file) in manifest.profiles ?? [])
+        {
+            if (!SafeGateName(name) || file is not ['@', _, ..])
+                throw new InvalidDataException("Invalid profile " + name + ": expected a name and an @file.");
+            if (BuiltInProfile(name))
+                throw new InvalidDataException("Profile " + name + " has the name of a built-in profile.");
+            profileFiles[name] = "@" + Path.GetFullPath(file[1..], directory);
+        }
 
         GateBuildPlan? Plan(string owner, GateBuild? build)
         {
@@ -255,6 +354,26 @@ partial class Program
             return new(path, project.assembly, properties, Path.Combine(outputRoot, "builds", key[..16]));
         }
 
+        // A template names an entry of `templates`, whose values the use's own override, or else a file.
+        (string Path, Dictionary<string, string> Values)? Template(string owner, string? template,
+            Dictionary<string, string>? values)
+        {
+            if (template is null)
+                return values is null ? null
+                    : throw new InvalidDataException(owner + " gives values without a template.");
+            if (generatedRoot is null) throw new InvalidDataException("Templates need generatedRoot: " + owner);
+            var merged = new Dictionary<string, string>(StringComparer.Ordinal);
+            var path = template;
+            if (templates.TryGetValue(template, out var entry))
+            {
+                path = entry.path;
+                foreach (var (name, value) in entry.values ?? []) merged[name] = value;
+            }
+            foreach (var (name, value) in values ?? [])
+                merged[name] = value ?? throw new InvalidDataException(owner + " gives a null value for " + name);
+            return (Within(proofRoot, path), merged);
+        }
+
         var rows = new List<GateRow>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var gate in manifest.gates)
@@ -269,21 +388,27 @@ partial class Program
             var gatePlan = Plan(gate.name, gate.build);
             var gateRows = new List<GateRow>();
             foreach (var profile in gate.profiles)
-                gateRows.Add(Row("production", "verified", gate.assembly, gatePlan, profile, gate.proof, gate.theorem,
-                    gate.initializedTypes, null, null));
-            var variants = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "production" };
+                gateRows.Add(Row("production", "verified", gate.assembly, gatePlan, profile, gate.proof, null,
+                    gate.theorem, gate.initializedTypes, null, null, null, null, null));
+            var variants = new Dictionary<string, GateVariant>(StringComparer.OrdinalIgnoreCase);
             foreach (var variant in gate.variants ?? [])
             {
                 var owner = gate.name + "/" + variant?.name;
-                if (variant is null || !SafeGateName(variant.name) || !variants.Add(variant.name) ||
+                if (variant is null || !SafeGateName(variant.name) || variant.name.Equals("production",
+                        StringComparison.OrdinalIgnoreCase) || !variants.TryAdd(variant.name, variant) ||
                     (variant.assembly is null) == (variant.build is null) ||
-                    variant.expect is not ("certifies" or "rejected") ||
+                    variant.expect is not ("certifies" or "rejected" or "unchanged") ||
                     variant.program is not (null or "same" or "different" or "renamed") ||
                     (variant.proof is null) != (variant.theorem is null) ||
-                    (variant.refutation is null) == (variant.expect == "rejected"))
+                    (variant.refutation is null) == (variant.expect == "rejected") ||
+                    variant.statement is not (null or "independent") ||
+                    (variant.statement is not null && variant.expect != "certifies") ||
+                    (variant.expect == "unchanged" && (variant.program is null || variant.proof is not null)) ||
+                    (variant.programOf is not null && variant.program is null))
                     throw new InvalidDataException("Invalid or duplicate variant " + owner + ": it gives one of " +
-                        "assembly or build, proof and theorem together, and a refutation exactly when it expects " +
-                        "rejection.");
+                        "assembly or build, proof and theorem together, a refutation exactly when it expects " +
+                        "rejection, a statement only when it certifies, and a program when it expects unchanged or " +
+                        "names programOf; an unchanged variant gives no proof.");
                 var profiles = variant.profiles ?? gate.profiles;
                 if (profiles.Length == 0 || profiles.Distinct(StringComparer.Ordinal).Count() != profiles.Length ||
                     profiles.Any(profile => !gate.profiles.Contains(profile, StringComparer.Ordinal)))
@@ -291,57 +416,100 @@ partial class Program
                         " lists a profile its gate does not, or none.");
                 var refutation = variant.refutation;
                 if (refutation is not null && (string.IsNullOrWhiteSpace(refutation.theorem) ||
-                    (refutation.proof is null) == (refutation.template is null) ||
-                    (refutation.template is null) != (refutation.values is null)))
+                    (refutation.proof is null) == (refutation.template is null)))
                     throw new InvalidDataException("Refutation of " + owner + " gives a theorem and either a proof " +
-                        "or a template with values.");
-                if (refutation?.template is not null && generatedRoot is null)
-                    throw new InvalidDataException("Refutation templates need generatedRoot: " + owner);
+                        "or a template.");
+                var refutationTemplate = Template("Refutation of " + owner, refutation?.template, refutation?.values);
+                string? proofPath = null;
+                (string, Dictionary<string, string>)? proofTemplate = null;
+                if (variant.proof is { } proof)
+                {
+                    if (proof.ValueKind == JsonValueKind.String) proofPath = proof.GetString();
+                    else if (proof.ValueKind == JsonValueKind.Object &&
+                        proof.Deserialize<GateTemplateUse>(GateManifestJson) is { } use)
+                        proofTemplate = Template("Proof of " + owner, use.template, use.values ?? []);
+                    if (string.IsNullOrWhiteSpace(proofPath) && proofTemplate is null)
+                        throw new InvalidDataException("Proof of " + owner + " gives a path or a template.");
+                }
                 var plan = Plan(owner, variant.build);
                 foreach (var profile in profiles)
-                {
-                    var row = Row(variant.name, variant.expect == "rejected" ? "rejected" : "verified",
-                        variant.assembly, plan, profile, variant.proof ?? gate.proof, variant.theorem ?? gate.theorem,
-                        variant.initializedTypes ?? gate.initializedTypes, variant.program, refutation);
-                    gateRows.Add(row);
-                }
+                    gateRows.Add(Row(variant.name, variant.expect == "certifies" ? "verified" : variant.expect,
+                        variant.assembly, plan, profile, proofPath ?? gate.proof, proofTemplate,
+                        variant.theorem ?? gate.theorem, variant.initializedTypes ?? gate.initializedTypes,
+                        variant.program, variant.programOf, refutation, refutationTemplate, variant.statement));
             }
+            foreach (var (name, variant) in variants.Where(pair => pair.Value.programOf is not null))
+            {
+                // Following programOf from any variant must end at production.
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { name };
+                for (var next = variant.programOf; next is not null and not "production";
+                    next = variants[next].programOf)
+                    if (!variants.ContainsKey(next) || !seen.Add(next))
+                        throw new InvalidDataException("Variant " + gate.name + "/" + name + " compares its program " +
+                            "with an unknown variant or through a cycle: " + next);
+            }
+            foreach (var row in gateRows.Where(row => row.ExpectedProgram is not null))
+                row.ProgramBase = gateRows.SingleOrDefault(other => other.Profile == row.Profile &&
+                    other.Variant.Equals(row.ProgramOf ?? "production", StringComparison.OrdinalIgnoreCase)) ??
+                    throw new InvalidDataException("Variant " + row.Name + " compares its program with " +
+                        row.ProgramOf + ", which does not run under profile " + row.Profile + ".");
             if (methodFilter is not null && !gate.method.Contains(methodFilter, StringComparison.Ordinal)) continue;
             rows.AddRange(gateRows.Where(row => profileFilter is null || row.Profile == profileFilter));
 
             GateRow Row(string variant, string expect, string? assembly, GateBuildPlan? plan, string profile,
-                string proof, string theorem, string[]? initializedTypes, string? program, GateRefutation? refutation)
+                string proof, (string Path, Dictionary<string, string> Values)? proofTemplate, string theorem,
+                string[]? initializedTypes, string? program, string? programOf, GateRefutation? refutation,
+                (string Path, Dictionary<string, string> Values)? refutationTemplate, string? statement)
             {
-                string? template = null, refutationProof = null;
-                if (refutation?.template is not null)
+                var generated = new List<GateGenerated>();
+                string Generate(string kind, (string Path, Dictionary<string, string> Values) template)
                 {
-                    template = Within(proofRoot, refutation.template);
-                    // Built-in profile names are path segments; a custom profile file is named by its content key.
+                    // Built-in and named profiles are path segments; a profile file is named by its content key.
                     string[] directories = [.. generatedRoot!, gate.name,
-                        SafeGateName(profile) ? profile : ContentKey(profile)[..12]];
+                        SafeGateName(profile) ? profile : ContentKey(profile)[..12], variant];
                     if (directories.Any(ExcludedConsumerDirectory))
-                        throw new InvalidDataException("Generated refutation of " + gate.name + "/" + variant +
+                        throw new InvalidDataException("Generated proofs of " + gate.name + "/" + variant +
                             " would lie in a directory verification skips: " + string.Join('/', directories));
-                    var relative = string.Join('/', directories) + "/" + variant + ".lean";
+                    var relative = string.Join('/', directories) + "/" + kind + ".lean";
                     ProofBindingCatalog.CheckPath(relative);
-                    refutationProof = Within(proofRoot, relative);
+                    var path = Within(proofRoot, relative);
+                    generated.Add(new(template.Path, template.Values, path, kind.ToLowerInvariant() + " template"));
+                    return path;
                 }
-                else if (refutation?.proof is not null) refutationProof = Within(proofRoot, refutation.proof);
+                var proofPath = proofTemplate is { } own ? Generate("Proof", own) : Within(proofRoot, proof);
+                var refutationProof = refutationTemplate is { } negation ? Generate("Refutation", negation)
+                    : refutation?.proof is { } given ? Within(proofRoot, given) : null;
                 return new()
                 {
                     Gate = gate.name, Profile = profile, Variant = variant, Expect = expect,
                     Output = Path.Combine(outputRoot, gate.name, ContentKey(profile)[..12], variant),
-                    Proof = Within(proofRoot, proof), Theorem = theorem,
+                    Proof = proofPath, Theorem = theorem,
                     Assembly = assembly is null ? null : Path.GetFullPath(assembly, directory), Build = plan,
-                    ExpectedProgram = program, RefutationProof = refutationProof,
-                    RefutationTheorem = refutation?.theorem, Template = template, Values = refutation?.values,
+                    ExpectedProgram = program, ProgramOf = programOf, RefutationProof = refutationProof,
+                    RefutationTheorem = refutation?.theorem, Statement = statement, Generated = [.. generated],
                     InitializedTypes = initializedTypes, TypeArguments = gate.typeArguments, Method = gate.method,
-                    ExtractionProfile = profile.StartsWith('@') ? "@" + Path.GetFullPath(profile[1..], directory)
-                        : profile
+                    ExtractionProfile = profileFiles.TryGetValue(profile, out var file) ? file
+                        : profile.StartsWith('@') ? "@" + Path.GetFullPath(profile[1..], directory) : profile
                 };
             }
         }
         return rows;
+    }
+
+    /// <summary>Whether `name` selects a built-in execution profile, including a retired one.</summary>
+    static bool BuiltInProfile(string name)
+    {
+        try
+        {
+            FeatureProfile.Select(name);
+            return true;
+        }
+        catch (ArgumentException error) when (error.Message.StartsWith("Unknown execution profile",
+            StringComparison.Ordinal))
+        {
+            return false;
+        }
+        catch (ArgumentException) { return true; }
     }
 
     /// <summary>Rejects build properties that are not plain MSBuild names and values, or that the tool owns.</summary>
@@ -355,26 +523,26 @@ partial class Program
     }
 
     /// <summary>
-    /// Writes the row's refutation from its template, or removes the stale file and fails the row when
-    /// the template is missing or its placeholders and values differ.
+    /// Writes `generated` from its template, or removes the stale file and fails the row when the template is
+    /// missing or its placeholders and values differ.
     /// </summary>
-    static void InstantiateRefutation(GateRow row, string proofRoot)
+    static void InstantiateGenerated(GateRow row, GateGenerated generated, string proofRoot)
     {
-        var path = row.RefutationProof!;
-        ProofBindingCatalog.CheckLinks(proofRoot, path);
+        ProofBindingCatalog.CheckLinks(proofRoot, generated.Path);
         try
         {
-            if (!File.Exists(row.Template))
-                throw new FileNotFoundException("Refutation template not found: " + CliPaths.Display(row.Template!));
-            var bytes = new UTF8Encoding(false).GetBytes(Instantiate(File.ReadAllText(row.Template!), row.Values!));
-            if (File.Exists(path) && File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes)) return;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, bytes);
+            if (!File.Exists(generated.Template))
+                throw new FileNotFoundException("Template not found: " + CliPaths.Display(generated.Template));
+            var bytes = new UTF8Encoding(false).GetBytes(
+                Instantiate(File.ReadAllText(generated.Template), generated.Values));
+            if (File.Exists(generated.Path) && File.ReadAllBytes(generated.Path).AsSpan().SequenceEqual(bytes)) return;
+            Directory.CreateDirectory(Path.GetDirectoryName(generated.Path)!);
+            File.WriteAllBytes(generated.Path, bytes);
         }
         catch (Exception error) when (error is IOException or InvalidDataException)
         {
-            File.Delete(path);
-            row.Fail("refutation template", error.Message);
+            File.Delete(generated.Path);
+            row.Fail(generated.Stage, error.Message);
         }
     }
 
@@ -488,18 +656,18 @@ partial class Program
         }
     }
 
-    /// <summary>Fails `row` unless its program relates to production's as the manifest says.</summary>
-    static void CompareGateProgram(GateRow row, GateRow production)
+    /// <summary>Fails `row` unless its program relates to its base row's as the manifest says.</summary>
+    static void CompareGateProgram(GateRow row, GateRow origin)
     {
         try
         {
-            if (production.Failed)
-                throw new InvalidDataException($"The production extraction of {row.Gate}/{row.Profile} is " +
-                    $"unavailable: {production.Stage} failed.");
-            var relation = ProgramRelation(production.Output, row.Output);
+            if (origin.Failed)
+                throw new InvalidDataException($"The extraction of {origin.Name} is unavailable: {origin.Stage} " +
+                    "failed.");
+            var relation = ProgramRelation(origin.Output, row.Output);
             if (relation != row.ExpectedProgram)
                 throw new InvalidDataException($"Expected the program to be {row.ExpectedProgram} with respect " +
-                    $"to production, but it is {relation}.");
+                    $"to {origin.Variant}, but it is {relation}.");
             row.ProgramStatus = "passed";
         }
         catch (Exception error) when (error is IOException or InvalidDataException)
@@ -537,22 +705,60 @@ partial class Program
     [GeneratedRegex(@"^def method\d+Signature : String := .*$", RegexOptions.Multiline)]
     private static partial Regex MethodSignature();
 
-    /// <summary>The result of `row`: its verdict, its proof's outcome and its refutation's, when it has one.</summary>
+    /// <summary>
+    /// The result of `row`: its verdict, its proof's outcome, its refutation's when it has one, and how its
+    /// statement relates to production's. A statement that fails to match fails a variant whose legs all passed,
+    /// at its own stage. An `unchanged` variant passes on its program comparison alone.
+    /// </summary>
     static GateResult GateOutcome(GateRow row, bool checkOnly, (int? Refutation, int Proof)? index,
-        BatchResult[] results)
+        BatchResult[] results, (GateStatement? Statement, string? Error) statement)
     {
-        var expect = checkOnly ? "checked" : row.Expect;
         if (index is not { } requested)
-            return new(row.Output, row.Proof, row.Theorem, expect, "failed", row.Stage!, row.Error, null, null, null,
-                0, row.Gate, row.Profile, row.Variant, row.BuildStatus, row.ExtractionStatus, row.ProgramStatus, null);
+        {
+            var unchanged = row.Expect == "unchanged" && !row.Failed;
+            return new(row.Output, row.Proof, row.Theorem, checkOnly && !unchanged ? "checked" : row.Expect,
+                unchanged ? "unchanged" : "failed", unchanged ? "program comparison" : row.Stage!, row.Error, null,
+                null, null, 0, row.Gate, row.Profile, row.Variant, row.BuildStatus, row.ExtractionStatus,
+                row.ProgramStatus, null, null);
+        }
         var proof = results[requested.Proof];
         var refutation = requested.Refutation is { } at ? results[at] : null;
         var passed = proof.status != "failed" && refutation?.status is null or "verified";
-        return new(proof.output, proof.proof, proof.theorem, proof.expect, passed ? proof.status : "failed",
-            proof.stage, proof.error, proof.axioms, proof.libraryBuild, proof.failure, proof.elapsedSeconds, row.Gate,
-            row.Profile, row.Variant, row.BuildStatus, row.ExtractionStatus, row.ProgramStatus,
-            refutation is null ? null : new(refutation.proof, refutation.theorem, refutation.status, refutation.stage,
-                refutation.error, refutation.axioms));
+        var mismatch = passed && statement.Error is not null;
+        return new(proof.output, proof.proof, proof.theorem, proof.expect,
+            passed && !mismatch ? proof.status : "failed", mismatch ? StatementIdentityStage : proof.stage,
+            mismatch ? statement.Error : proof.error, proof.axioms, proof.libraryBuild, proof.failure,
+            proof.elapsedSeconds, row.Gate, row.Profile, row.Variant, row.BuildStatus, row.ExtractionStatus,
+            row.ProgramStatus, refutation is null ? null : new(refutation.proof, refutation.theorem, refutation.status,
+                refutation.stage, refutation.error, refutation.axioms), statement.Statement);
+    }
+
+    /// <summary>
+    /// How the statement `row` verified relates to production's statement `T`: the kernel must accept a `rejected`
+    /// variant's refutation at `¬ T` and any other variant's theorem at `T`, in the variant's own environment. No
+    /// statement is compared when the variant's own leg did not verify; that leg reports why.
+    /// </summary>
+    static (GateStatement?, string?) CompareGateStatement(GateRow row, GateRow production, string productionStage,
+        Report? productionReport, Report? variantReport)
+    {
+        if (variantReport is null) return (null, null);
+        var refutes = row.Expect == "rejected";
+        var shown = StatementOf(variantReport);
+        var expected = productionReport?.statementIdentity;
+        var identity = variantReport.statementIdentity;
+        var reason = productionReport is null
+            ? $"Production {production.Name} did not verify (stage: {productionStage}), so the statement of " +
+                $"{row.Name} has nothing to match."
+            : expected?.term is null
+            ? $"Production {production.Name} has no statement to compare: {expected?.termError ?? "none reported"}"
+            : identity?.matches is null ? $"{variantReport.theorem} was not compared with production's statement."
+            : identity.matches == true ? null
+            : (refutes ? $"Refutation {variantReport.theorem} does not state the negation of production's statement"
+                : $"{variantReport.theorem} does not state production's statement") + ": " + identity.mismatch;
+        var productionText = productionReport is null ? null : StatementOf(productionReport);
+        var status = reason is null ? "same" : identity?.matches == false ? "different" : "unavailable";
+        return (new(status, productionText, shown), reason is null ? null : reason + "\n  Production: " +
+            (productionText ?? "unavailable") + "\n  " + (refutes ? "Refutation: " : "Variant: ") + shown);
     }
 
     static bool SafeGateName(string? name) => name is not (null or "" or "." or "..") &&

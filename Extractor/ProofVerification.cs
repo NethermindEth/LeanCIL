@@ -64,8 +64,11 @@ partial class Program
     sealed record BatchOptions(bool Fresh, bool RebuildLibrary, bool Trace, bool CheckOnly, bool Json,
         int? Parallelism, string? ResultsPath);
 
-    /// <summary>The outcome of each request in request order, and its JSON report under `--format json`.</summary>
-    sealed record BatchRun(BatchResult[] Results, JsonArray Reports);
+    /// <summary>
+    /// The outcome of each request in request order, its JSON report under `--format json`, and the report of
+    /// each request that verified.
+    /// </summary>
+    sealed record BatchRun(BatchResult[] Results, JsonArray Reports, Report?[] Verified);
 
     internal static int VerifyBatch(string[] args)
     {
@@ -157,8 +160,10 @@ partial class Program
     /// <summary>
     /// Verifies every request of `manifest`, whose paths are relative to `directory`, in one session.
     /// Prints each request's text outcome as soon as it is final, unless the options ask for JSON.
+    /// `statements`, parallel to the requests, says what each request's theorem audit reports of its statement.
     /// </summary>
-    static BatchRun RunBatch(BatchManifest manifest, string directory, BatchOptions options)
+    static BatchRun RunBatch(BatchManifest manifest, string directory, BatchOptions options,
+        StatementRequest?[]? statements = null)
     {
         var (fresh, rebuildLibrary, trace, checkOnly, json) =
             (options.Fresh, options.RebuildLibrary, options.Trace, options.CheckOnly, options.Json);
@@ -205,7 +210,7 @@ partial class Program
                 var identity = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(outputs[i], "identity.json")));
                 var assembly = Path.GetFullPath(identity.GetProperty("assemblyPath").GetString()!, outputs[i]);
                 requests.Add(new(assembly, outputs[i], proofs[i], request.theorem, lastForOutput.Contains(i) ? settingsPath : null,
-                    request.expect == "rejected"));
+                    request.expect == "rejected", Statement: statements?[i]));
                 indices.Add(i);
             }
             catch (Exception error)
@@ -289,7 +294,8 @@ partial class Program
                 outcome.Report?.axioms, outcome.Report?.libraryBuild, failure, outcome.ElapsedSeconds));
             if (json) reports.Add(BatchEntry(outcome, failure, expect, status, request.theorem, proofs[i], outputs[i]));
         }
-        return new([.. results], reports);
+        return new([.. results], reports,
+            [.. outcomes.Select(outcome => outcome!.Error is null ? outcome.Report : null)]);
 
         // A request's expectation and status, with the report `verify --format json` gives for it.
         JsonObject BatchEntry(ConsumerOutcome outcome, FailureReports.Report? failure, string expect, string status,

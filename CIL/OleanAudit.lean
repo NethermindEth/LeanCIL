@@ -22,7 +22,8 @@ library precedes `LEAN_PATH`, so a user module cannot shadow `Init`, `Std` or `L
 REQUEST (JSON):
   { "modules":   ["Proof", ...],
     "theorems":  [{ "name": N, "type": E?, "levelParams": [u, ...]?, "axioms": [N, ...],
-                    "statement": bool?, "refutation": bool?, "allowedModules": [M, ...]? }],
+                    "statement": bool?, "refutation": bool?, "term": bool?,
+                    "expected": { "term": T, "negated": bool? }?, "allowedModules": [M, ...]? }],
     "constants": [{ "name": N, "value": E, "type": E?, "axioms": [N, ...]? }],
     "interfaces": [M, ...]?, "closures": [{ "name": N }]?, "replayTargets": [M, ...]?,
     "namespaces": { "prefixes": [P, ...], "axioms": [N, ...] }? }
@@ -47,11 +48,15 @@ Expected expressions `E`:
 Levels L: n (the n-th successor of zero), {"param": u}, {"succ": L}, {"max": [L, L]},
 {"imax": [L, L]}.
 Comparison is structural after removing metadata: no unfolding, instances or elaboration.
+`term` reports the theorem's type as a `statementTerm` T, for another audit's `expected`: there the
+theorem `matches` when the kernel accepts it at type T (or `¬ T` when `negated`), structurally or by
+definitional unfolding within `statementHeartbeats`; otherwise `mismatch` says why.
 
 RESULT (JSON):
   { "modules": { N: olean path },
     "theorems":  [{ "name": N, "error": string?, "axioms": [N, ...], "statement": string?,
-                    "refutes": { "contract": N, "line": n, "column": n }? }],
+                    "refutes": { "contract": N, "line": n, "column": n }?,
+                    "term": T?, "termError": string?, "matches": bool?, "mismatch": string? }],
     "constants": [{ "name": N, "error": string?, "axioms": [N, ...] }],
     "interfaces": { "error": string? },
     "closures": [{ "name": N, "error": string?, "kind": string?, "canonical": string? }],
@@ -216,6 +221,160 @@ def refutation (env : Environment) (thm : Name) (type : Expr) : IO (Option Json)
     ("line", toJson ranges.selectionRange.pos.line),
     ("column", toJson ranges.selectionRange.pos.column)]
 
+/-- `n` as JSON: its components from the root, strings as strings and numbers as numbers. -/
+def nameJson (n : Name) : Json :=
+  .arr (n.components.toArray.map fun
+    | .str _ part => .str part
+    | .num _ index => toJson index
+    | .anonymous => .null)
+
+/-- The name `nameJson` encodes. -/
+def jsonName (j : Json) : Except String Name := do
+  (← j.getArr?).foldlM (init := .anonymous) fun parent part => match part.getStr? with
+    | .ok text => pure (.str parent text)
+    | .error _ => return .num parent (← part.getNat?)
+
+/-- A universe level of a kernel term as JSON; metavariables have none. -/
+def levelJson : Level → Except String Json
+  | .zero => pure (.arr #[.str "zero"])
+  | .succ level => return .arr #[.str "succ", ← levelJson level]
+  | .max left right => return .arr #[.str "max", ← levelJson left, ← levelJson right]
+  | .imax left right => return .arr #[.str "imax", ← levelJson left, ← levelJson right]
+  | .param parameter => pure (.arr #[.str "param", nameJson parameter])
+  | .mvar _ => throw "Statement contains a universe metavariable"
+
+/-- The level `levelJson` encodes. -/
+partial def jsonLevel (j : Json) : Except String Level := do
+  match ← j.getArr? with
+  | #[.str "zero"] => pure .zero
+  | #[.str "succ", level] => return .succ (← jsonLevel level)
+  | #[.str "max", left, right] => return .max (← jsonLevel left) (← jsonLevel right)
+  | #[.str "imax", left, right] => return .imax (← jsonLevel left) (← jsonLevel right)
+  | #[.str "param", parameter] => return .param (← jsonName parameter)
+  | _ => throw s!"Invalid statement level {j.compress}"
+
+/-- The JSON nodes of a statement so far, and the subterms already given one. -/
+structure StatementNodes where
+  nodes : Array Json := #[]
+  numbers : Std.HashMap Expr Nat := {}
+
+/-- A kernel term `type` with universe parameters `levelParams` as JSON nodes, children first,
+    that `decodeStatement` rebuilds in another environment. A constant carries its module, so a
+    same-named declaration of another module cannot stand in for it. A definition or theorem of
+    `home`, the proof's own module whose name varies by session, is replaced by its value. -/
+partial def statementTerm (env : Kernel.Environment) (ownerOf : Name → Option Name) (home : Name)
+    (levelParams : List Name) (type : Expr) : Except String Json := do
+  let (root, state) ← (node type).run {}
+  return Json.mkObj [("levelParams", .arr (levelParams.toArray.map nameJson)),
+    ("nodes", .arr state.nodes), ("root", toJson root)]
+where
+  /-- The node number of `e`. -/
+  node (e : Expr) : StateT StatementNodes (Except String) Nat := do
+    if let .mdata _ body := e then return ← node body
+    if let .const name levels := e then
+      if ownerOf name == some home then return ← node (← inlined name levels)
+    if let some number := (← get).numbers[e]? then return number
+    let entry : Json ← match e with
+      | .bvar index => pure (.arr #[.str "bvar", toJson index])
+      | .sort level => do pure (.arr #[.str "sort", ← levelJson level])
+      | .const name levels => do
+        let levels ← (levels.toArray.mapM levelJson : Except String _)
+        pure (.arr #[.str "const", ← owner name, nameJson name, .arr levels])
+      | .app function argument => do
+        pure (.arr #[.str "app", toJson (← node function), toJson (← node argument)])
+      | .lam _ binder body _ => do
+        pure (.arr #[.str "lam", toJson (← node binder), toJson (← node body)])
+      | .forallE _ binder body _ => do
+        pure (.arr #[.str "forall", toJson (← node binder), toJson (← node body)])
+      | .letE _ binder value body _ => do
+        pure (.arr #[.str "let", toJson (← node binder), toJson (← node value),
+          toJson (← node body)])
+      | .lit (.natVal value) => pure (.arr #[.str "nat", toJson value])
+      | .lit (.strVal value) => pure (.arr #[.str "str", .str value])
+      | .proj typeName index body => do
+        if ownerOf typeName == some home then
+          throw s!"Statement projects from {typeName}, a structure of its own proof module; \
+            declare it in a module the proofs import"
+        pure (.arr #[.str "proj", ← owner typeName, nameJson typeName, toJson index,
+          toJson (← node body)])
+      | .mdata _ _ | .fvar _ | .mvar _ => throw "Statement contains a free or meta variable"
+    let state ← get
+    let number := state.nodes.size
+    set { state with nodes := state.nodes.push entry, numbers := state.numbers.insert e number }
+    return number
+  /-- The module of `name`, as JSON. -/
+  owner (name : Name) : StateT StatementNodes (Except String) Json := do
+    let some module := ownerOf name | throw s!"Statement names an unknown constant {name}"
+    return nameJson module
+  /-- The value of `name`, a declaration of the proof's own module, at `levels`. -/
+  inlined (name : Name) (levels : List Level) : StateT StatementNodes (Except String) Expr :=
+    match env.find? name with
+    | some (.defnInfo info) => pure (info.value.instantiateLevelParams info.levelParams levels)
+    | some (.thmInfo info) => pure (info.value.instantiateLevelParams info.levelParams levels)
+    | _ => throw s!"Statement names {name}, a declaration of its own proof module that is \
+        neither a definition nor a theorem; declare it in a module the proofs import"
+
+/-- The term `statementTerm` encoded, with its universe parameters renamed to `levelParams`. Each
+    constant must be declared in `env` by the module that declared it where it was encoded. -/
+def decodeStatement (env : Kernel.Environment) (ownerOf : Name → Option Name)
+    (levelParams : List Name) (j : Json) : Except String Expr := do
+  let encoded ← (← j.getObjValAs? (Array Json) "levelParams").mapM jsonName
+  unless encoded.size == levelParams.length do
+    throw s!"Production's statement has {encoded.size} universe parameters, this theorem \
+      {levelParams.length}"
+  let declared (module constant : Json) : Except String Name := do
+    let name ← jsonName constant
+    let module ← jsonName module
+    unless (env.find? name).isSome do
+      throw s!"This proof's environment does not declare {name}, which production's statement names"
+    unless ownerOf name == some module do
+      throw s!"Production's statement names {name} from {module}, but this proof's environment \
+        declares it in {(ownerOf name).getD .anonymous}"
+    return name
+  let mut terms : Array Expr := #[]
+  for entry in ← j.getObjValAs? (Array Json) "nodes" do
+    let child (index : Json) : Except String Expr := do
+      let some term := terms[← index.getNat?]? | throw "Invalid statement node reference"
+      return term
+    let term : Expr ← match ← entry.getArr? with
+      | #[.str "bvar", index] => do pure (.bvar (← index.getNat?))
+      | #[.str "sort", level] => do pure (.sort (← jsonLevel level))
+      | #[.str "const", module, constant, levels] => do
+        pure (.const (← declared module constant) (← (← levels.getArr?).toList.mapM jsonLevel))
+      | #[.str "app", function, argument] => do pure (.app (← child function) (← child argument))
+      | #[.str "lam", binder, body] => do pure (.lam `x (← child binder) (← child body) .default)
+      | #[.str "forall", binder, body] => do
+        pure (.forallE `x (← child binder) (← child body) .default)
+      | #[.str "let", binder, value, body] => do
+        pure (.letE `x (← child binder) (← child value) (← child body) false)
+      | #[.str "nat", value] => do pure (.lit (.natVal (← value.getNat?)))
+      | #[.str "str", value] => do pure (.lit (.strVal (← value.getStr?)))
+      | #[.str "proj", module, typeName, index, body] => do
+        pure (.proj (← declared module typeName) (← index.getNat?) (← child body))
+      | _ => throw s!"Invalid statement node {entry.compress}"
+    terms := terms.push term
+  let some root := terms[← j.getObjValAs? Nat "root"]? | throw "Invalid statement root"
+  return root.instantiateLevelParams encoded.toList (levelParams.map .param)
+
+/-- Kernel heartbeats one statement comparison may spend, counted as `maxHeartbeats 200000`. -/
+def statementHeartbeats : Nat := 200000 * 1000
+
+/-- `none` when the kernel accepts theorem `thm`, of stripped `type`, at `target`: structurally
+    up to binder names, or by definitional unfolding within `statementHeartbeats`; otherwise why
+    not. -/
+def acceptsAt (env : Kernel.Environment) (thm : Name) (levelParams : List Name)
+    (type target : Expr) : Option String :=
+  if type == target then none else
+  let value := Expr.const thm (levelParams.map .param)
+  let check := Declaration.thmDecl
+    { name := `_leancil_statement_identity, levelParams := levelParams, type := target, value }
+  match env.addDeclCore statementHeartbeats.toUSize coreContext.maxRecDepth.toUSize check none with
+  | .ok _ => none
+  | .error .deterministicTimeout =>
+    some s!"The kernel exceeded {statementHeartbeats} heartbeats comparing the statement of {thm}"
+  | .error (.declTypeMismatch ..) => some s!"The kernel does not accept {thm} at that statement"
+  | .error (.other message) => some message
+  | .error _ => some s!"The kernel rejected the statement comparison of {thm}"
 /-- The names listed under `key`; empty when it is absent or not a string array. -/
 def names (j : Json) (key : String) : Array Name :=
   (j.getObjValAs? (Array String) key).toOption.getD #[] |>.map name
@@ -252,6 +411,21 @@ def theorem? (env : Environment) (req : Json)
     fields := fields ++ [("statement", toJson (← statement env thm info.type))]
   if req.getObjValAs? Bool "refutation" matches .ok true then
     if let some r ← refutation env thm type then fields := fields ++ [("refutes", r)]
+  if req.getObjValAs? Bool "term" matches .ok true then
+    let term := (ownerOf thm).map (statementTerm kernel ownerOf · info.levelParams type)
+    fields := fields ++ match term with
+      | some (.ok term) => [("term", term)]
+      | some (.error error) => [("termError", toJson error)]
+      | none => [("termError", toJson s!"Theorem has no declaring module: {thm}")]
+  if let .ok expected := req.getObjVal? "expected" then
+    let negated := (expected.getObjValAs? Bool "negated").toOption.getD false
+    let target := (expected.getObjVal? "term").bind
+      (decodeStatement kernel ownerOf info.levelParams)
+    fields := fields ++ match target.map (if negated then mkApp (.const ``Not []) else id) with
+      | .ok target => match acceptsAt kernel thm info.levelParams type target with
+        | none => [("matches", toJson true)]
+        | some error => [("matches", toJson false), ("mismatch", toJson error)]
+      | .error error => [("matches", toJson false), ("mismatch", toJson error)]
   if let .ok spec := req.getObjVal? "type" then
     unless info.levelParams == (names req "levelParams").toList &&
         (← IO.ofExcept (fits spec type)) do
