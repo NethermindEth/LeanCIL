@@ -138,7 +138,7 @@ var mixSource = File.ReadAllText(Path.Combine(mix, "Extracted.lean"));
 const string seedBytes = "SeededHash::Seed0\", bytes := [(BitVec.ofNat 8 0)";
 if (!mixSource.Contains(seedBytes, StringComparison.Ordinal)) throw new Exception("Missing unknown seed descriptor");
 var guessedProof = Path.Combine(root, "Opaque-guessed.lean");
-// The zero placeholder is not a value: without a caller binding the load faults instead of reading it.
+// A load from the zero placeholder faults unless the caller supplies a binding.
 File.WriteAllText(guessedProof, mixSource + """
 
     theorem guessed_seed : (CIL.Safety.invoke Extracted.program 16 0 [.scalar (.i64 0)]

@@ -375,8 +375,8 @@ def loadsAtLiteralWidth (type : Expr) : Bool :=
   (type.find? fun e => e.isAppOfArity `CIL.Safety.numericOfWidth 2 &&
     (argument? e 0).any fun width => (width.nat? <|> width.rawNatLit?).isSome).isSome
 
-/-- The facts a loop tactic steps with: `core` at every instruction, and groups that speak only
-    to some instructions, so each step's simp set holds only facts it can use. -/
+/-- Facts used by loop stepping: `core` applies at every instruction, while the other groups
+    apply to specific instructions. Each step's simp set includes only applicable facts. -/
 structure LoopFacts where
   /-- The explicit facts, unfolds and gathered facts for every instruction. -/
   core : Array Lean.Syntax.Term

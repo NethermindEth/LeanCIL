@@ -58,7 +58,7 @@ internal static class VerificationGroupRunner
                 failed = true;
             }
             Console.WriteLine("::endgroup::");
-            // A job of several suites names the one that failed, as a job of one suite does by its name.
+            // Identify the failed suite in multi-suite jobs; a single-suite job has its suite name.
             if (exitCode != 0)
                 Console.WriteLine($"::error title=Suite {suite} failed::{suite} " +
                     (exitCode is { } code ? $"exited with code {code}" : "could not start") +

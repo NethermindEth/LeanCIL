@@ -608,7 +608,7 @@ internal static partial class ProofOutline
         var numericHomes = HasNumericObjectHomes(spec.Method) || body.Ops.Select(op =>
             Regex.Match(op, @"\A\.call(?:Instance)? (\d+) (\d+)\z")).Where(match => match.Success)
             .Any(match => summarized(int.Parse(match.Groups[1].Value))?.Walk.NumericHomes == true);
-        // Local homes lie in the memory the method is entered in, so the statement speaks of any well-formed one.
+        // Local homes belong to the entry memory, so the statement accepts any well-formed entry memory.
         if (numericHomes && !spec.Symbolic) spec = spec.InMemory();
         var walk = new ObjectWalk(spec, body.Ops, views, summarized, numericHomes: numericHomes, stubs: Stubbed);
         var stepped = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or

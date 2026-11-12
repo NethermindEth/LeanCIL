@@ -8,7 +8,7 @@ import CIL.Safety.HeapObjectFacts
 `VirtualCalls.LoudnessOf(animal)` calls the virtual `Animal.Loudness()`, whose own body returns
 one. `Dog` overrides it to return ten; `Bird` does not, so its table entry is the base body.
 Lean rechecked both entries against the catalog: walking `Bird`'s class chain finds no override
-before `Animal`, so the inherited body is the one the runtime selects.
+before `Animal`, so the runtime selects the inherited body.
 -/
 
 open CIL CIL.Safety

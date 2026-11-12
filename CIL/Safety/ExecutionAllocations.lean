@@ -6,7 +6,7 @@ import CIL.Safety.FrameOwnership
 
 Checked writes, value stores, instructions and whole steps each yield an
 `AllocationExtension`: no existing allocation changes its lifetime or layout, and identities
-are never reused. Teardown is the one exception, handled in `ExecutionLifetime`. The
+are never reused. `ExecutionLifetime` handles teardown, which can end an allocation. The
 watermark predicates `OwnedAbove` record that a frame owns only allocations made after a
 given identity, which `ExecutionLifetime` uses to protect a caller's storage.
 -/

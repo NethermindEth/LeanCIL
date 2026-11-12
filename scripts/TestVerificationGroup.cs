@@ -25,7 +25,7 @@ var result = await VerificationGroupRunner.Run(command, ["fails", "passes", "out
 Console.SetOut(console);
 Environment.SetEnvironmentVariable("GITHUB_STEP_SUMMARY", null);
 if (result != 1) throw new InvalidOperationException("A failed member must fail the group");
-// A job of several suites must name the one that failed, in an annotation and in its summary.
+// A multi-suite job must identify the failed suite in its annotation and summary.
 var annotations = printed.ToString().Split('\n').Where(line => line.StartsWith("::error", StringComparison.Ordinal))
     .ToArray();
 var rows = File.ReadAllLines(summary);

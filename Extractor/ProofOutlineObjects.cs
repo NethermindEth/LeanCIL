@@ -1193,7 +1193,7 @@ internal static partial class ProofOutline
         var inputs = spec.Parameters;
         string Pattern(string body) => inputs.Length == 1 ? Used(inputs[0].Name, body)
             : "(" + string.Join(", ", inputs.Select(input => Used(input.Name, body))) + ")";
-        // The author's part of an open contract may speak of every input.
+        // An open contract may refer to any input in its author-supplied body.
         string Used(string name, string body) =>
             body.Contains("sorry", StringComparison.Ordinal) || Regex.IsMatch(body, $@"(?<![\w.]){name}(?!\w)")
                 ? name : "_";
@@ -1202,8 +1202,8 @@ internal static partial class ProofOutline
         var outputType = spec.Result?.Lean ?? "Unit";
         var arguments = "[" + string.Join(", ", inputs.Select(input => input.Shape == ParameterShape.Object
             ? $".object (.address {input.Name})" : $".scalar ({ScalarConstructor(input.Width)} {input.Name})")) + "]";
-        // An object a reference field holds is not an argument: `pre` asks that one exists, and `post` speaks of
-        // whichever the field holds, so a caller names it by the fact that its own field holds it.
+        // `pre` requires a reference field to hold an object. `post` describes that object, which the
+        // caller identifies through its own field relation.
         var targets = callee.Targets;
         var premises = callee.Walk.NumericHomes
             ? new List<(string Name, string Statement)> { ("wellFormed", "initial.WellFormed") }
@@ -1286,7 +1286,7 @@ internal static partial class ProofOutline
             callee.Name + "Entry");
         if (callee.Walk.Returned is not null && targets.Length > 0)
         {
-            // The field holds one object, so each one `post` names is the one the proof obtained.
+            // Each field relation identifies the same object in `post` and the body proof.
             lean.Line("  intro " + string.Join(" ", targets.Select((_, position) => $"_ found{position + 1}")));
             for (var position = 0; position < targets.Length; position++)
                 lean.Line($"  cases {targets[position].Held}.symm.trans found{position + 1}");

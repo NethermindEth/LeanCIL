@@ -47,7 +47,7 @@ try
     if (!Unchanged()) throw new Exception("A restored cache entry was rejected");
     Console.WriteLine("PASS a cache entry is accepted only while its files hash to the receipted manifest");
 
-    // A library read in place is the one that was opened: a build that wrote into it must not pass for it.
+    // Reject in-place reuse if another build changes the library after it was opened.
     using (var opened = new Program { library = directory, libraryStamps = FileStamps(directory) })
     {
         opened.RequireUnchangedLibrary();

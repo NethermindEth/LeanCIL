@@ -3,8 +3,8 @@ import CIL.Safety.StaticBindingBounds
 /-!
 # String literal bindings are fixed for a whole run
 
-No checked step, frame entry, frame exit or nested call rebinds `Memory.literals`, so the object
-an `ldstr` loads after a call is the one the caller bound before it (`invoke_literals`).
+No checked step, frame entry, frame exit or nested call rebinds `Memory.literals`. An `ldstr`
+after a call therefore loads the object bound by the caller (`invoke_literals`).
 -/
 
 namespace CIL.Safety

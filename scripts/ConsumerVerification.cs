@@ -773,7 +773,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, session)))
             .Where(path => !path.Equals(trusted, comparison))
-            // The certified base is the one import directory outside the session.
+            // Keep the certified base in place; map other imports into the session.
             .Select(path => path.Equals(certified, comparison) ? path : Within(session, Path.GetRelativePath(session, path)))
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray(), leanPath);
     }
