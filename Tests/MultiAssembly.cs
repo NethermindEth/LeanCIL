@@ -105,7 +105,7 @@ string Extract(string name, string selector, bool referencedBody, string[] extra
         throw new InvalidOperationException("Artifact did not record the pinned reference: " + pin);
     string extracted = File.ReadAllText(Path.Combine(artifact, "Extracted.lean"));
     if (!extracted.Contains("def assembly1 : Extraction.AssemblyPin", StringComparison.Ordinal) ||
-        extracted.Contains("assembly := assembly1", StringComparison.Ordinal) != referencedBody)
+        extracted.Contains("assembly := assembly1 }", StringComparison.Ordinal) != referencedBody)
         throw new InvalidOperationException("Certificate misattributes the referenced assembly's bodies: " + name);
     // The certificate depends on the program alone; byte hashes and MVIDs stay in identity.json.
     string[] rebuildSensitive = [libSha, Sha(app), pin.GetProperty("mvid").GetString()!,
@@ -276,7 +276,7 @@ if (!extractedSource.Contains($"identity := \"{libIdentity}\"", StringComparison
     throw new InvalidOperationException("Precondition: the certificate must pin " + libIdentity);
 foreach ((string name, string from, string to) in new[]
 {
-    ("misattributed body", "assembly := assembly1", "assembly := assembly0"),
+    ("misattributed body", "assembly := assembly1 }", "assembly := assembly0 }"),
     ("duplicate certificate identity", $"identity := \"{libIdentity}\"", $"identity := \"{appIdentity}\"")
 })
 {

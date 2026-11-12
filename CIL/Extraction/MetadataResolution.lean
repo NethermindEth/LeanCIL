@@ -359,8 +359,13 @@ def aggregateSpelling (corlib : List Nat) : Nat → ResolvedType → Option (Lis
     some (corlib ++ [58, 58] ++ name)
   | _ + 1, .named named => some (named.scope ++ [58, 58] ++ named.name)
   | fuel + 1, .genericInst head arguments => do
-    let inner ← aggregateSpellings corlib fuel arguments
-    some (head.scope ++ [58, 58] ++ head.name ++ [60] ++ inner ++ [62])
+    if head.pinned then
+      let inner ← aggregateSpellings corlib fuel arguments
+      some (head.scope ++ [58, 58] ++ head.name ++ [60] ++ inner ++ [62])
+    else
+      -- An instance of a type outside the carried slices, such as a tuple, keeps Cecil's spelling.
+      let inner ← cecilNames fuel arguments
+      some (head.scope ++ [58, 58] ++ head.name ++ [60] ++ inner ++ [62])
   | _ + 1, _ => none
 
 /-- The identities of a chain of types, separated by commas. -/
