@@ -301,7 +301,7 @@ internal static class LeanEmitter
         // feature obligations read callee certificates through it.
         lean.AppendLine("def methodEvidence : List Extraction.MethodEvidence := [" + string.Join(", ",
             Enumerable.Range(0, methods.Length).Select(n =>
-                $"{{ original := method{n}Original, arguments := method{n}TypeArgumentsRaw, " +
+                $"{{ original := method{n}Original, body := method{n}Body, arguments := method{n}TypeArgumentsRaw, " +
                 $"closed := method{n}Closed, parameterInput := method{n}RawArguments, " +
                 $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
                 $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
@@ -334,7 +334,7 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
-            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_intrinsics_validated, method{n}_opaque_validated, method{n}_vector_initializations_validated, method{n}_scalars_validated, method{n}_constrained_validated⟩");
+            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_intrinsics_validated, method{n}_opaque_validated, method{n}_vector_initializations_validated, method{n}_scalars_validated, method{n}_constrained_validated, method{n}_body_validated⟩");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");

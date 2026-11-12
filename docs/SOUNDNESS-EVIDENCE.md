@@ -14,7 +14,8 @@ cannot substitute for it.
 | Layouts | Recompute layouts from raw fields, packing and size; check required use sites and bounds | Faithful metadata/serialization and runtime layout correspondence |
 | Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
-| Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque; decoding is not proved |
+| Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image, the PE and metadata readers, every token's resolution and the local types stay trusted; bodies with exception sections are rejected |
+| Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
 | Managed/imported calls | Target slot, scoped identity, full signature, argument count, receiver and result | An import slot does not prove its implementation contract |
 | Constrained calls | Resolve serialized interface/override declarations to the emitted closed direct target | Complete metadata serialization; no general vtable/boxing model |
@@ -34,6 +35,41 @@ and returns does not justify arithmetic interchange. Native shift counts use the
 the normalization theorem does not establish behavior on arbitrary CLI implementations.
 See [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).
 
+### Method body decoding
+
+Each method's evidence holds the bytes the extractor emitted for its body (the header and the
+code, not extra sections) and a token table. `BodyDecodes` decodes the bytes in the kernel
+([BodyDecoding](../CIL/Extraction/BodyDecoding.lean)) and requires the result to equal the
+original definition's `maxStack`, `initLocals`, locals and `code`:
+
+- The header is a tiny header or a fat header of three words that sets at most the init-locals
+  flag. A body with extra sections (exception handlers) is rejected, and the supplied bytes must
+  be exactly the header and the declared code size.
+- Every opcode of the ECMA-335 table has one operand encoding. The table is transcribed from the
+  standard; `operand_kinds_agree_with_cecil` in `Tests/BodyDecoding.lean` compares it with a
+  static list generated once from `Mono.Cecil.Cil.OpCodes`. An unknown opcode byte, a truncated
+  operand or a token missing from the table is an error.
+- A branch must land on the first byte of an instruction inside the body, and its operand
+  becomes that instruction's index. A target outside the body, inside an instruction or on the
+  instruction after a prefix opcode (`unaligned.`, `volatile.`, `tail.`, `constrained.`, `no.`,
+  `readonly.`) is an error.
+- A token operand is read from the four bytes in the body, looked up in the table, and must
+  belong to a metadata table the opcode accepts. The header's local signature token must equal
+  the table's.
+
+Lean does not establish that the emitted bytes are the method's body in the assembly image, nor
+that a token resolves to the operand the table gives it. Mono.Cecil resolves the tokens and
+System.Reflection.Metadata locates the body in the PE image; both stay trusted. The local types
+are the extractor's: one call produces them for the definition and for the table, so comparing
+them can only fail if the two were edited apart. Decoding the local signature blob and checking
+tokens against the emitted metadata rows are open items.
+
+A closed generic instantiation carries the bytes of its open definition, so it shares the
+`method{n}Bytes` definition of the first method that uses them. A token used at several sites
+has one table entry, and the extractor refuses a token whose sites resolve to different operands.
+An external call spells its identity as a materialized name at a reachable site and as a literal
+at an unreachable one; the kernel decides that the two are equal strings, so one entry serves
+both.
 ### Folded instruction patterns
 
 A fold applies only to its recognized raw sequence with checked entry edges. Different compiler
@@ -49,7 +85,7 @@ output can lose admission without invalidating a theorem over an already admitte
 
 The [compiler corpus](COMPILER-COVERAGE.md) checks admission changes, not compiler correctness or
 every possible folded pattern. The runtime-call inventory does not count these folds.
-[OPCODES](OPCODES.md) records the admitted forms. Metadata decoding, raw-input fidelity,
+[OPCODES](OPCODES.md) records the admitted forms. Metadata table decoding, token resolution,
 static-data serialization and runtime-helper correspondence remain trusted even when evidence
 validates.
 

@@ -32,6 +32,8 @@ library and tactic regressions kernel-check the resulting proofs.
   store, with the exact unsolved goal asserted. It also counts exactly 12
   `trace.CIL.factNormalize` events for a 27-instruction run.
 - `Tests.AggregateSetup` and `Tests.Semantics` cover frame setup and interpreter behavior.
+- `Tests.BodyDecoding` checks the method body decoder against hand-made bodies, one rejection per
+  failure kind and the operand table against a static list generated from Mono.Cecil.
 - `Tests.InterpreterEquations` checks that each shared equation lemma is stored by its LeanCIL
   module, not rebuilt by the importer, and that a tactic macro naming `CIL.step.eq_def`
   elaborates.

@@ -99,8 +99,8 @@ requirement still applies to ongoing or hostile producer processes.
 
 Reports retain the original conditional caller theorem and add the composed
 theorem and audit, source bundle identities, and `acceptedVia:
-independently-verified`. Faithful DLL decoding and CIL/runtime correspondence
-remain trust boundaries. These checks establish CIL theorems. They do not establish
+independently-verified`. Metadata and token resolution, the PE container, the extractor's translation of instructions
+outside the checked families and CIL/runtime correspondence remain trust boundaries. These checks establish CIL theorems. They do not establish
 correctness of CoreCLR or a JIT.
 
 Imported libraries may depend on each other in any acyclic graph, such as a chain (a caller
