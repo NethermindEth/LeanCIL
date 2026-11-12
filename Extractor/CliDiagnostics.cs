@@ -84,6 +84,7 @@ internal static class CliDiagnostics
                 "Give every template placeholder a value and every value a placeholder.",
             "statement identity" => "State the variant's theorem as production's statement, or its refutation as " +
                 "that statement's negation; name only declarations both proofs import.",
+            "binding generation" => "Correct the catalog entry the diagnostic names, then rerun leancil bindings.",
             _ => "Check the diagnostic and the input paths, then retry."
         };
 

@@ -12,7 +12,6 @@
 #:include ConsumerComponents.cs
 #:include ConsumerFingerprintReuse.cs
 #:include CertifiedFingerprints.cs
-#:include ../scripts/ProofBindingCatalog.cs
 
 using System.Text.Json;
 
@@ -82,11 +81,9 @@ theorem correctness (x y : CIL.W64) (memory : CIL.Safety.Memory) :
       .ok (memory, [.scalar (.i64 (x + y))]) := Client.execution x y memory
 end ExampleProof
 """;
-LeanCIL.ProofGate bindingGate = new("InitializedTypes::Add(ulong,ulong)", "scalar", "Proof.lean",
-    "ExampleProof.correctness");
-LeanCIL.ProofBinding[] bindingRecipes = [new(bindingGate, proofSource)];
-LeanCIL.ProofBindingCatalog.Materialize(root, [bindingGate], bindingRecipes);
-LeanCIL.ProofBindingCatalog.Materialize(root, [bindingGate], bindingRecipes, check: true);
+var bindingGate = (Method: "InitializedTypes::Add(ulong,ulong)", Profile: "scalar",
+    Theorem: "ExampleProof.correctness");
+File.WriteAllText(proof, proofSource);
 Run(["lake", "update"], root);
 var staleCache = Path.Combine(root, ".lake", "build", "lib", "lean", "Client");
 Directory.CreateDirectory(staleCache);

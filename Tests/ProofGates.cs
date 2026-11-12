@@ -49,6 +49,9 @@ File.WriteAllText(Path.Combine(second, "Second.cs"),
 // Spare.cs holds a method of the same assembly that no gate reaches, so changing it selects nothing.
 File.WriteAllText(Path.Combine(second, "Spare.cs"),
     "public static class Spare { public static ulong Unused(ulong x) => x; }");
+// A binding catalog generates the gates of Third, one per profile.
+File.WriteAllText(Path.Combine(second, "Third.cs"),
+    "public static class Thirds { public static ulong Third(ulong x, ulong y) => unchecked(x * y); }");
 Run(["dotnet", "build", second, "-c", "Release", "-o", Path.Combine(second, "output")]);
 
 File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
@@ -85,6 +88,14 @@ foreach (var name in new[] { "First", "Second" })
         $"theorem {name}.support : True := True.intro\n#print axioms {name}.support\n");
 File.WriteAllText(Path.Combine(package, "First.lean"), Correctness("First", "First", "+"));
 File.WriteAllText(Path.Combine(package, "Second.lean"), Correctness("Second", "Second", "-"));
+File.WriteAllText(Path.Combine(package, "Third.lean.in"), Correctness("Third.@name@", "Second", "*"));
+File.WriteAllText(Path.Combine(package, "Third.json"), """
+    { "schema": 1, "generatedRoot": "Bindings", "families": [ {
+      "template": "Third.lean.in",
+      "dimensions": [ [ { "profile": "scalar", "name": "Scalar" }, { "profile": "x64-v3", "name": "Vector" } ] ],
+      "gate": { "name": "third-@profile@", "method": "Thirds::Third(ulong,ulong)", "profiles": [ "@profile@" ],
+                "proof": "Third@name@.lean", "theorem": "Third.@name@.correctness" } } ] }
+    """);
 File.WriteAllText(Path.Combine(package, "Reordered.lean"), Correctness("Reordered", "First", "+"));
 File.WriteAllText(Path.Combine(package, "Panicking.lean"),
     Correctness("Panicking", "First", "+", PastEnd, "read_past_end\n  "));
@@ -229,6 +240,7 @@ void Manifest(bool controls, params object[] extra)
     File.WriteAllText(manifest, JsonSerializer.Serialize(new
     {
         schema = 1, proofRoot = "Package", outputRoot = "Outputs", generatedRoot = "Generated",
+        defaults = new { assembly = "Second/output/Second.dll" }, catalogs = new[] { "Package/Third.json" },
         templates = new Dictionary<string, object>
         {
             ["correctness"] = new { path = "Correctness.lean.in", values = new Dictionary<string, string>
@@ -258,7 +270,7 @@ JsonElement[] Gates(int expectedCode, params string[] options)
 {
     var result = Execute([.. cli, "gates", manifest, "--results", results, .. options]);
     if (result.Code != expectedCode) throw new Exception("Unexpected gates exit:\n" + result.Output);
-    return JsonSerializer.Deserialize<JsonElement[]>(File.ReadAllText(results))!;
+    return [.. JsonDocument.Parse(File.ReadAllText(results)).RootElement.GetProperty("rows").EnumerateArray()];
 }
 string? Text(JsonElement row, string name) =>
     row.GetProperty(name).ValueKind == JsonValueKind.Null ? null : row.GetProperty(name).GetString();
@@ -286,9 +298,15 @@ string? StatementStatus(JsonElement row) =>
     row.GetProperty("statement") is { ValueKind: JsonValueKind.Object } statement
     ? statement.GetProperty("status").GetString() : null;
 Manifest(controls: false);
+var bindings = Path.Combine(package, "Bindings");
+Expect(!Directory.Exists(bindings), "A catalog's sources existed before the first run");
 var all = Gates(0);
-Expect(all.Length == 16 && all.Count(row => Text(row, "status") == "rejected") == 3,
-    "Expected two methods, three profiles and every variant from one manifest");
+Expect(all.Length == 18 && all.Count(row => Text(row, "status") == "rejected") == 3,
+    "Expected three methods, three profiles, every variant and the catalog's gates from one manifest");
+Expect(all.Where(row => Text(row, "gate")!.StartsWith("third-", StringComparison.Ordinal))
+    .Select(row => Text(row, "id")).Order().SequenceEqual(["third-scalar/scalar/production",
+        "third-x64-v3/x64-v3/production"]) && File.Exists(Path.Combine(bindings, "ThirdVector.lean")),
+    "The catalog's gates were not generated and verified with the manifest's");
 string[] programmed = ["baseline", "reordered", "wrong-xor", "wrong-sub", "unchanged-reordered"];
 foreach (var row in all)
 {
@@ -364,7 +382,22 @@ Expect(json.Code == 0 && document.GetProperty("failed").GetInt32() == 0 &&
 var checkRejected = Execute([.. cli, "gates", manifest, "--method", "First", "--profile", "scalar", "--check"]);
 Expect(checkRejected.Code != 0 && checkRejected.Output.Contains("--check cannot evaluate", StringComparison.Ordinal),
     "--check accepted a rejection expectation");
-Console.WriteLine("PASS project builds, per-variant proofs and profiles, witness refutations and selection");
+// A plan of the catalog's gates runs one group per job, and the required results then pass.
+var plan = Execute([.. cli, "gates", manifest, "--plan", "2", "--method", "Third", "--format", "json"]);
+Expect(plan.Code == 0, "Planning the catalog's gates failed:\n" + plan.Output);
+var planPath = Path.Combine(directory, "plan.json");
+File.WriteAllText(planPath, plan.Stdout);
+var jobs = Path.Combine(directory, "Jobs");
+foreach (var job in new[] { "job-1", "job-2" })
+{
+    var run = Execute([.. cli, "gates", manifest, "--plan-group", planPath, job, "--results",
+        Path.Combine(jobs, job, "results.json")]);
+    Expect(run.Code == 0, "A planned group failed:\n" + run.Output);
+}
+var required = Execute([.. cli, "gates", manifest, "--require-results", jobs, "--plan", planPath]);
+Expect(required.Code == 0 && required.Output.Contains("all 2 planned rows passed"),
+    "The results of every planned group did not satisfy the plan:\n" + required.Output);
+Console.WriteLine("PASS project builds, per-variant proofs and profiles, witness refutations, catalogs and selection");
 
 Manifest(controls: true);
 var controls = Gates(1, "--method", "First", "--profile", "scalar");

@@ -32,9 +32,14 @@ internal static partial class Program
         "[--format text|json] [--trace] [--goals]\n" +
         "       leancil verify-batch requests.json [--fresh] [--rebuild-library] [--parallel count] " +
         "[--results results.json] [--format text|json] [--trace] [--check]\n" +
-        "       leancil gates manifest.json [--method name] [--profile name] [--changed path]... " +
-        "[--check] [--fresh] [--rebuild-library] [--trace] [--parallel count] [--results results.json] " +
+        "       leancil gates manifest.json [--method name] [--profile name] [--only id-prefix]... " +
+        "[--changed path]... [--check] [--fresh] [--rebuild-library] [--trace] [--parallel count] " +
+        "[--results results.json] [--format text|json]\n" +
+        "       leancil gates manifest.json --plan count [--costs results.json]... [selection options] " +
         "[--format text|json]\n" +
+        "       leancil gates manifest.json --plan-group plan.json group [verification options]\n" +
+        "       leancil gates manifest.json --require-results directory --plan plan.json\n" +
+        "       leancil bindings catalog.json [--check]\n" +
         "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +
         "[--results results.json]\n" +
         "       leancil --version";
@@ -150,6 +155,11 @@ internal static partial class Program
             {
                 stage = "proof selection";
                 return global::Program.VerifyBatch(args[1..]);
+            }
+            if (args[0] == "bindings")
+            {
+                stage = "binding generation";
+                return global::Program.RunBindings(args[1..]);
             }
             if (args[0] == "gates")
             {

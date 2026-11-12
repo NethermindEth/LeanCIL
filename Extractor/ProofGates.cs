@@ -22,9 +22,13 @@ partial class Program
     sealed record ProofGateEntry(string name, string method, string[] profiles, string proof, string theorem,
         string? assembly = null, GateBuild? build = null, GateVariant[]? variants = null,
         string[]? initializedTypes = null, string[]? typeArguments = null);
+    sealed record GateDefaults(string? assembly = null, GateBuild? build = null, string[]? initializedTypes = null,
+        string[]? typeArguments = null);
+    sealed record GateSelectionRules(string[]? all = null, string[]? ignore = null);
     sealed record GateManifest(int schema, string proofRoot, string outputRoot, ProofGateEntry[] gates,
         Dictionary<string, GateProject>? projects = null, string? generatedRoot = null,
-        Dictionary<string, GateTemplate>? templates = null, Dictionary<string, string>? profiles = null);
+        Dictionary<string, GateTemplate>? templates = null, Dictionary<string, string>? profiles = null,
+        GateDefaults? defaults = null, GateSelectionRules? selection = null, string[]? catalogs = null);
 
     static readonly JsonSerializerOptions GateManifestJson =
         new() { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
@@ -44,20 +48,40 @@ partial class Program
         string[]? axioms);
 
     /// <summary>
-    /// One variant under one profile. `status` is the variant's verdict; the fields from `proof` to
-    /// `elapsedSeconds` describe its proof, or the stage that failed before its proof was checked.
+    /// One variant under one profile, named by `id`, `gate/profile/variant`. `status` is the variant's verdict; the
+    /// fields from `proof` to `elapsedSeconds` describe its proof, or the stage that failed before its proof was
+    /// checked.
     /// </summary>
-    sealed record GateResult(string output, string proof, string theorem, string expect, string status, string stage,
-        string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure,
+    sealed record GateResult(string id, string output, string proof, string theorem, string expect, string status,
+        string stage, string? error, string[]? axioms, string? libraryBuild, FailureReports.Report? failure,
         double elapsedSeconds, string gate, string profile, string variant, string? build, string? extraction,
         string? program, GateRefutationResult? refutation, GateStatement? statement);
 
     /// <summary>
+    /// The results of one run: the digest of the manifest and catalogs that defined the rows, the consumer's
+    /// `git rev-parse HEAD` or null, and one result per selected row in manifest order.
+    /// </summary>
+    sealed record GateResults(string manifest, string? revision, GateResult[] rows);
+
+    /// <summary>
     /// How a variant's verified statement relates to production's `T`, both as the theorem audits print them:
-    /// `same` when the kernel accepts the variant's theorem at `T`, or its refutation at `¬ T`; `different` when it
-    /// does not; `unavailable` when there was nothing to compare; `independent` when the manifest says so.
+    /// `same` when the kernel accepts the variant's theorem at `T`, or its refutation at `Not T`; `different` when
+    /// it does not; `unavailable` when there was nothing to compare; `independent` when the manifest says so.
     /// </summary>
     sealed record GateStatement(string status, string? production, string? variant);
+
+    /// <summary>A job of a plan: its row ids in manifest order and their estimated seconds.</summary>
+    sealed record GatePlanGroup(string id, string[] rows, double cost);
+
+    /// <summary>What selected a plan's rows: filters, changed paths relative to the manifest, the count.</summary>
+    sealed record GatePlanSelection(string? method, string? profile, string[] only, string[] changed, int count);
+
+    /// <summary>
+    /// A partition of the selected rows into jobs. Every row of one gate and profile is in one group, and the
+    /// plan names the manifest digest and revision the results of its groups must carry.
+    /// </summary>
+    sealed record GatePlan(string manifest, string? revision, GatePlanSelection selection, string[] selected,
+        GatePlanGroup[] groups);
 
     const string StatementIdentityStage = "statement identity";
 
@@ -70,6 +94,7 @@ partial class Program
         internal required GateGenerated[] Generated;
         internal required string[]? InitializedTypes, TypeArguments;
         internal required string Method, ExtractionProfile;
+        internal required string[] Inputs;
         internal GateRow? ProgramBase;
         internal GeneratedExtraction? Extraction;
         internal string? BuildStatus, ExtractionStatus, ProgramStatus, Stage, Error;
@@ -86,9 +111,31 @@ partial class Program
         }
     }
 
+    /// <summary>
+    /// A loaded manifest: its rows in manifest order with paths resolved, its catalogs, the digest of the manifest
+    /// and catalog files, and the `selection` prefixes as full paths.
+    /// </summary>
+    sealed record LoadedGates(string Path, string Directory, string ProofRoot, string OutputRoot, List<GateRow> Rows,
+        string Digest, string[] All, string[] Ignore);
+
+    /// <summary>The options of `gates` after its manifest.</summary>
+    sealed class GateOptions
+    {
+        internal string? Method, Profile, Plan, RequireResults;
+        internal (string Plan, string Group)? PlanGroup;
+        internal readonly List<string> Only = [], Costs = [], Verification = [];
+        internal HashSet<string> Changed = null!;
+        internal BatchOptions Batch = null!;
+        internal int? PlanCount;
+    }
+
     const string GatesUsage = "Usage: leancil gates manifest.json [--method name] [--profile name] " +
-        "[--changed path]... [--check] [--fresh] [--rebuild-library] [--trace] [--parallel count] " +
-        "[--results results.json] [--format text|json]";
+        "[--only id-prefix]... [--changed path]... [--check] [--fresh] [--rebuild-library] [--trace] " +
+        "[--parallel count] [--results results.json] [--format text|json]\n" +
+        "       leancil gates manifest.json --plan count [--costs results.json]... [selection options] " +
+        "[--format text|json]\n" +
+        "       leancil gates manifest.json --plan-group plan.json group [verification options]\n" +
+        "       leancil gates manifest.json --require-results directory --plan plan.json";
 
     // Build settings the tool owns, so a manifest cannot point two builds at one output.
     static readonly HashSet<string> ReservedBuildProperties = new(StringComparer.OrdinalIgnoreCase)
@@ -97,102 +144,397 @@ partial class Program
         "IntermediateOutputPath", "OutDir"
     };
 
+    static readonly StringComparer GatePathComparer =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
     /// <summary>
-    /// Builds, extracts and verifies an explicit catalog of gates and their variants. A `rejected` variant
-    /// passes only when its refutation verifies at the negation of production's statement and its proof fails
-    /// at proof checking; a certifying variant's theorem must verify at production's statement.
+    /// Builds, extracts and verifies an explicit catalog of gates and their variants, plans the selected rows
+    /// into balanced jobs, runs one job of a plan, or checks that the results of every job passed. A `rejected`
+    /// variant passes only when its refutation verifies at the negation of production's statement and its proof
+    /// fails at proof checking; a certifying variant's theorem must verify at production's statement.
     /// </summary>
     internal static int RunGates(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
             throw new ArgumentException(GatesUsage);
-        var manifestPath = Path.GetFullPath(args[0]);
-        var directory = Path.GetDirectoryName(manifestPath)!;
-        var manifest = JsonSerializer.Deserialize<GateManifest>(File.ReadAllText(manifestPath), GateManifestJson)
-            ?? throw new InvalidDataException("Missing gate manifest.");
-        if (manifest.schema != 1 || string.IsNullOrWhiteSpace(manifest.proofRoot) ||
-            string.IsNullOrWhiteSpace(manifest.outputRoot) || manifest.gates is not { Length: > 0 })
-            throw new InvalidDataException("Expected schema 1, proofRoot, outputRoot and nonempty gates.");
-        string? methodFilter = null;
-        string? profileFilter = null;
-        var pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        var changed = new HashSet<string>(pathComparer);
-        var verification = new List<string>();
+        var options = ParseGateOptions(args);
+        var gates = LoadGates(Path.GetFullPath(args[0]), materialize: options.RequireResults is null);
+        if (options.RequireResults is not null) return RequireGateResults(gates, options);
+        var selected = options.PlanGroup is { } group ? PlannedRows(gates, group.Plan, group.Group)
+            : SelectGates(gates, options);
+        if (selected is null)
+        {
+            if (options.PlanCount is null)
+                throw new ArgumentException(options.Changed.Count > 0 ? "No gates depend on the changed paths."
+                    : "No gates match the requested selection.");
+            return PrintGatePlan(gates, options, []);
+        }
+        return options.PlanCount is null ? RunGateRows(gates, selected, options.Batch)
+            : PrintGatePlan(gates, options, selected);
+    }
+
+    /// <summary>Parses the options of `gates`, rejecting combinations that one mode does not use.</summary>
+    static GateOptions ParseGateOptions(string[] args)
+    {
+        var options = new GateOptions { Changed = new(GatePathComparer) };
         for (var index = 1; index < args.Length; index++)
         {
             var option = args[index];
             if (option is "--check" or "--fresh" or "--rebuild-library" or "--trace")
             {
-                verification.Add(option);
+                options.Verification.Add(option);
                 continue;
             }
-            if (++index == args.Length || args[index].StartsWith("--", StringComparison.Ordinal))
-                throw new ArgumentException("Missing value for " + option);
+            string Value() => ++index < args.Length && !args[index].StartsWith("--", StringComparison.Ordinal)
+                ? args[index] : throw new ArgumentException("Missing value for " + option);
             switch (option)
             {
-                case "--method" when methodFilter is null: methodFilter = args[index]; break;
-                case "--profile" when profileFilter is null: profileFilter = args[index]; break;
-                case "--changed": changed.Add(Path.GetFullPath(args[index])); break;
+                case "--method" when options.Method is null: options.Method = Value(); break;
+                case "--profile" when options.Profile is null: options.Profile = Value(); break;
+                case "--only": options.Only.Add(Value()); break;
+                case "--changed": options.Changed.Add(Path.GetFullPath(Value())); break;
+                case "--costs": options.Costs.Add(Path.GetFullPath(Value())); break;
+                case "--plan" when options.Plan is null: options.Plan = Value(); break;
+                case "--plan-group" when options.PlanGroup is null:
+                    options.PlanGroup = (Path.GetFullPath(Value()), Value());
+                    break;
+                case "--require-results" when options.RequireResults is null:
+                    options.RequireResults = Path.GetFullPath(Value());
+                    break;
                 case "--parallel" or "--results" or "--format":
-                    verification.AddRange([option, args[index]]);
+                    options.Verification.AddRange([option, Value()]);
                     break;
                 default: throw new ArgumentException("Unknown or duplicate option: " + option);
             }
         }
-        var options = ParseBatchOptions([.. verification]);
+        options.Batch = ParseBatchOptions([.. options.Verification]);
+        var selects = options.Method is not null || options.Profile is not null || options.Only.Count > 0 ||
+            options.Changed.Count > 0;
+        var verifies = options.Verification.Any(option => option is not ("--format" or "text" or "json"));
+        if (options.RequireResults is not null)
+        {
+            if (options.Plan is null || selects || verifies || options.PlanGroup is not null || options.Costs.Count > 0)
+                throw new ArgumentException("--require-results takes only --plan plan.json and --format.");
+            options.Plan = Path.GetFullPath(options.Plan);
+        }
+        else if (options.Plan is not null)
+        {
+            if (!int.TryParse(options.Plan, out var count) || count < 1)
+                throw new ArgumentException("--plan takes a positive group count, or a plan file with " +
+                    "--require-results.");
+            if (verifies || options.PlanGroup is not null)
+                throw new ArgumentException("--plan selects and plans only; it takes no verification options.");
+            options.PlanCount = count;
+        }
+        else if (options.Costs.Count > 0) throw new ArgumentException("--costs needs --plan.");
+        if (options.PlanGroup is not null && selects)
+            throw new ArgumentException("--plan-group runs the rows of its group; it takes no selection options.");
+        return options;
+    }
+
+    /// <summary>
+    /// Reads and checks the whole manifest and its catalogs. With `materialize`, first writes every catalog's
+    /// sources and every template-generated proof, before anything reads or hashes a proof source.
+    /// </summary>
+    static LoadedGates LoadGates(string manifestPath, bool materialize)
+    {
+        var directory = Path.GetDirectoryName(manifestPath)!;
+        var manifest = JsonSerializer.Deserialize<GateManifest>(File.ReadAllText(manifestPath), GateManifestJson)
+            ?? throw new InvalidDataException("Missing gate manifest.");
+        if (manifest.schema != 1 || string.IsNullOrWhiteSpace(manifest.proofRoot) ||
+            string.IsNullOrWhiteSpace(manifest.outputRoot) || manifest.gates is null ||
+            manifest.gates.Length + (manifest.catalogs?.Length ?? 0) == 0)
+            throw new InvalidDataException("Expected schema 1, proofRoot, outputRoot, and gates or catalogs.");
         var proofRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(manifest.proofRoot, directory));
         var outputRoot = Path.GetFullPath(manifest.outputRoot, directory);
-        var rows = GateRows(manifest, directory, proofRoot, outputRoot, methodFilter, profileFilter);
-        if (rows.Count == 0) throw new ArgumentException("No gates match the requested selection.");
+        var catalogPaths = (manifest.catalogs ?? []).Select(path => string.IsNullOrWhiteSpace(path)
+            ? throw new InvalidDataException("A catalog path is empty.") : Path.GetFullPath(path, directory)).ToArray();
+        if (catalogPaths.Distinct(GatePathComparer).Count() != catalogPaths.Length)
+            throw new InvalidDataException("The manifest lists a catalog twice.");
+        var catalogs = catalogPaths.Select(LoadBindingCatalog).ToArray();
+        string[] Prefixes(string[]? paths) => [.. (paths ?? []).Select(path => string.IsNullOrWhiteSpace(path)
+            ? throw new InvalidDataException("A selection prefix is empty.")
+            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, directory)))];
+        var all = Prefixes(manifest.selection?.all);
+        var ignore = Prefixes(manifest.selection?.ignore);
+        if (all.FirstOrDefault(prefix => ignore.Any(other => Under(prefix, other) || Under(other, prefix))) is
+            { } overlap)
+            throw new InvalidDataException("Selection prefix " + CliPaths.Display(overlap) +
+                " overlaps between all and ignore.");
+        var rows = GateRows(manifest, directory, proofRoot, outputRoot, catalogs);
+        if (materialize)
+        {
+            foreach (var catalog in catalogs)
+            {
+                var (_, strays) = MaterializeBindings(catalog, check: false);
+                foreach (var stray in strays) Console.Error.WriteLine("WARNING " + stray);
+            }
+            foreach (var row in rows)
+                foreach (var generated in row.Generated) InstantiateGenerated(row, generated, proofRoot);
+        }
+        // The digest covers what defines the rows; proof and template contents are bound by the revision.
+        var defining = new StringBuilder(File.ReadAllText(manifestPath).ReplaceLineEndings("\n"));
+        foreach (var path in catalogPaths)
+            defining.Append("\n\0").Append(Path.GetRelativePath(directory, path).Replace('\\', '/')).Append('\n')
+                .Append(File.ReadAllText(path).ReplaceLineEndings("\n"));
+        return new(manifestPath, directory, proofRoot, outputRoot, rows, ContentKey(defining.ToString()), all, ignore);
+    }
 
-        // Generated proofs exist before any selection or request reads or hashes the consumer sources.
-        foreach (var row in rows)
-            foreach (var generated in row.Generated) InstantiateGenerated(row, generated, proofRoot);
+    /// <summary>
+    /// The rows the filters and changed paths select, in manifest order, or null when none is selected. A changed
+    /// path outside proofs, templates, catalogs and the manifest builds and extracts the candidates to select
+    /// by their method's sources, which is the only build or extraction selection performs.
+    /// </summary>
+    static List<GateRow>? SelectGates(LoadedGates gates, GateOptions options)
+    {
+        var rows = gates.Rows;
+        foreach (var prefix in options.Only)
+            if (!rows.Any(row => OnlySelects(prefix, row)))
+                throw new ArgumentException("--only " + prefix + " names no row of the manifest.");
+        var selected = rows.Where(row =>
+            (options.Method is null || row.Method.Contains(options.Method, StringComparison.Ordinal)) &&
+            (options.Profile is null || row.Profile == options.Profile) &&
+            (options.Only.Count == 0 || options.Only.Any(prefix => OnlySelects(prefix, row)))).ToList();
+        if (options.Changed.Count == 0) return selected.Count == 0 ? null : selected;
 
-        var affectedProofs = new Dictionary<string, bool>(pathComparer);
+        var changed = options.Changed.Where(path => !gates.Ignore.Any(prefix => Under(path, prefix)))
+            .ToHashSet(GatePathComparer);
+        if (changed.Any(path => gates.All.Any(prefix => Under(path, prefix))))
+            return selected.Count == 0 ? null : selected;
+        var affectedProofs = new Dictionary<string, bool>(GatePathComparer);
         bool ProofAffected(string proof)
         {
             if (!affectedProofs.TryGetValue(proof, out var affected))
-                affectedProofs[proof] = affected = ProofSources(proofRoot, proof).Keys
-                    .Any(path => changed.Contains(Path.GetFullPath(path, proofRoot)));
+                affectedProofs[proof] = affected = ProofSources(gates.ProofRoot, proof).Keys
+                    .Any(path => changed.Contains(Path.GetFullPath(path, gates.ProofRoot)));
             return affected;
         }
-        var templates = rows.SelectMany(row => row.Generated).Select(generated => generated.Template)
-            .ToHashSet(pathComparer);
-        bool InputAffected(GateRow row) => changed.Contains(manifestPath) ||
+        var inputs = rows.SelectMany(row => row.Generated.Select(generated => generated.Template).Concat(row.Inputs))
+            .ToHashSet(GatePathComparer);
+        bool InputAffected(GateRow row) => changed.Contains(gates.Path) ||
             row.Generated.Any(generated => changed.Contains(generated.Template)) ||
+            row.Inputs.Any(changed.Contains) ||
             (row.ExtractionProfile.StartsWith('@') && changed.Contains(row.ExtractionProfile[1..])) ||
             (row.Expect != "unchanged" && ProofAffected(row.Proof)) ||
             (row.RefutationProof is not null && ProofAffected(row.RefutationProof));
-        var selected = rows;
-        // Changes to proofs, templates and the manifest select without building or extracting anything else.
-        if (changed.Count > 0 && changed.All(path =>
-            Path.GetExtension(path) == ".lean" || templates.Contains(path) || pathComparer.Equals(path, manifestPath)))
-            selected = [.. rows.Where(InputAffected)];
-        if (selected.Count == 0) throw new ArgumentException("No gates depend on the changed paths.");
-        var production = rows.Where(row => row.Variant == "production").ToDictionary(row => (row.Gate, row.Profile));
-        // Program and statement comparisons need the rows they compare with, even when those are not selected.
-        GateRow?[] Compared(GateRow row) =>
-            [row.ProgramBase, row.ComparesStatement ? production[(row.Gate, row.Profile)] : null];
-        var needed = selected.SelectMany(Compared).OfType<GateRow>().ToHashSet();
-        var prepared = rows.Where(row => selected.Contains(row) || needed.Contains(row)).ToList();
-        BuildGateProjects(prepared);
-        ExtractGateRows(prepared);
-        if (changed.Count > 0)
+        // Changes to proofs, templates, catalogs and the manifest select without building or extracting anything.
+        if (changed.All(path => Path.GetExtension(path) == ".lean" || inputs.Contains(path) ||
+            GatePathComparer.Equals(path, gates.Path)))
+            selected = [.. selected.Where(InputAffected)];
+        else if (selected.Count > 0)
+        {
+            PrepareGateRows(gates, selected);
             selected = [.. selected.Where(row => row.Failed || InputAffected(row) ||
                 (row.Build is { } build && changed.Any(path => Under(path, Path.GetDirectoryName(build.Project)!))) ||
                 GateMethodAffected(row.Extraction!, changed))];
-        if (selected.Count == 0) throw new ArgumentException("No gates depend on the changed paths.");
+        }
+        return selected.Count == 0 ? null : selected;
+    }
+
+    /// <summary>Whether `--only prefix` selects `row`: its id is the prefix or starts with it and `/`.</summary>
+    static bool OnlySelects(string prefix, GateRow row) =>
+        row.Name == prefix || row.Name.StartsWith(prefix + "/", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Builds and extracts `selected` and the rows their program and statement comparisons need, once each, after
+    /// removing each such row's earlier certificate and failure report.
+    /// </summary>
+    static void PrepareGateRows(LoadedGates gates, List<GateRow> selected)
+    {
+        var production = gates.Rows.Where(row => row.Variant == "production")
+            .ToDictionary(row => (row.Gate, row.Profile));
+        var needed = selected.SelectMany(row => new[]
+        {
+            row.ProgramBase, row.ComparesStatement ? production[(row.Gate, row.Profile)] : null
+        }).OfType<GateRow>().ToHashSet();
+        var prepared = gates.Rows.Where(row => (selected.Contains(row) || needed.Contains(row)) &&
+            row.Extraction is null && row.ExtractionStatus is null && row.BuildStatus is null).ToList();
+        // A row that fails before verification must keep no certificate or failure report from an earlier run.
+        foreach (var row in prepared.Where(row => Directory.Exists(row.Output)))
+            foreach (var name in new[] { "verified.json", FailureReports.FileName })
+                if (File.Exists(Path.Combine(row.Output, name))) File.Delete(Path.Combine(row.Output, name));
+        BuildGateProjects(prepared);
+        ExtractGateRows(prepared);
+    }
+
+    /// <summary>The rows of group `group` of the plan at `planPath`, which must be a plan of this manifest.</summary>
+    static List<GateRow> PlannedRows(LoadedGates gates, string planPath, string group)
+    {
+        var plan = ReadGatePlan(planPath);
+        if (plan.manifest != gates.Digest)
+            throw new InvalidDataException($"The plan was made for manifest {plan.manifest}, but the manifest and " +
+                $"its catalogs are now {gates.Digest}.");
+        var rows = gates.Rows.ToDictionary(row => row.Name, StringComparer.Ordinal);
+        var planned = plan.groups.SingleOrDefault(candidate => candidate.id == group) ??
+            throw new ArgumentException("The plan has no group " + group + ".");
+        return [.. planned.rows.Select(id => rows.TryGetValue(id, out var row) ? row
+            : throw new InvalidDataException("The plan names row " + id + ", which the manifest does not have."))
+            .OrderBy(row => gates.Rows.IndexOf(row))];
+    }
+
+    static GatePlan ReadGatePlan(string path)
+    {
+        try
+        {
+            var plan = JsonSerializer.Deserialize<GatePlan>(File.ReadAllText(path), GateManifestJson);
+            if (plan is { manifest: not null, selected: not null, groups: not null, selection: not null } &&
+                !plan.groups.Any(group => group?.id is null || group.rows is null))
+                return plan;
+        }
+        catch (JsonException) { }
+        throw new InvalidDataException("Not a gate plan: " + CliPaths.Display(path));
+    }
+
+    /// <summary>
+    /// Prints a plan of at most `--plan` groups for `selected`. Each gate and profile is one unit, priced from the
+    /// `--costs` results: its recorded rows' mean seconds, scaled to its selected rows, else its method's median
+    /// unit, else the median of all recorded units, else 1. Units are assigned largest first, ties by id, each to
+    /// the lightest group, ties by group number, so the same inputs give the same plan.
+    /// </summary>
+    static int PrintGatePlan(LoadedGates gates, GateOptions options, List<GateRow> selected)
+    {
+        var seconds = new Dictionary<string, List<double>>(StringComparer.Ordinal);
+        foreach (var path in options.Costs)
+            foreach (var row in ReadGateResults(path).rows)
+                if (row?.id is not null && double.IsFinite(row.elapsedSeconds) && row.elapsedSeconds >= 0)
+                    (seconds.TryGetValue(row.id, out var list) ? list : seconds[row.id] = []).Add(row.elapsedSeconds);
+        double? Recorded(IEnumerable<GateRow> rows)
+        {
+            var known = rows.Where(row => seconds.ContainsKey(row.Name)).ToArray();
+            return known.Length == 0 ? null
+                : known.Sum(row => seconds[row.Name].Average()) * rows.Count() / known.Length;
+        }
+        static double? Median(IEnumerable<double> values)
+        {
+            var sorted = values.Order().ToArray();
+            return sorted.Length == 0 ? null : sorted.Length % 2 == 1 ? sorted[sorted.Length / 2]
+                : (sorted[sorted.Length / 2 - 1] + sorted[sorted.Length / 2]) / 2;
+        }
+        var recordedUnits = gates.Rows.GroupBy(row => (row.Gate, row.Profile))
+            .Select(unit => (unit.First().Method, Cost: Recorded(unit)))
+            .Where(unit => unit.Cost is not null).ToArray();
+        var overall = Median(recordedUnits.Select(unit => unit.Cost!.Value));
+        var units = selected.GroupBy(row => (row.Gate, row.Profile)).Select(unit =>
+        {
+            var method = unit.First().Method;
+            var cost = Recorded(unit) ?? Median(recordedUnits.Where(other => other.Method == method)
+                .Select(other => other.Cost!.Value)) ?? overall ?? 1;
+            return (Id: unit.Key.Gate + "/" + unit.Key.Profile, Rows: unit.ToList(), Cost: cost);
+        }).OrderByDescending(unit => unit.Cost).ThenBy(unit => unit.Id, StringComparer.Ordinal).ToArray();
+        var count = Math.Min(options.PlanCount!.Value, units.Length);
+        var loads = new double[count];
+        var members = Enumerable.Range(0, count).Select(_ => new List<GateRow>()).ToArray();
+        foreach (var unit in units)
+        {
+            var lightest = Array.IndexOf(loads, loads.Min());
+            loads[lightest] += unit.Cost;
+            members[lightest].AddRange(unit.Rows);
+        }
+        var order = selected.Select((row, index) => (row, index)).ToDictionary(pair => pair.row, pair => pair.index);
+        var plan = new GatePlan(gates.Digest, GitRevision(gates.Directory),
+            new(options.Method, options.Profile, [.. options.Only],
+                [.. options.Changed.Select(path => Path.GetRelativePath(gates.Directory, path).Replace('\\', '/'))
+                    .Order(StringComparer.Ordinal)], options.PlanCount.Value),
+            [.. selected.Select(row => row.Name)],
+            [.. members.Select((rows, index) => new GatePlanGroup("job-" + (index + 1),
+                [.. rows.OrderBy(row => order[row]).Select(row => row.Name)], Math.Round(loads[index], 3)))]);
+        if (options.Batch.Json)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(plan, Json).ReplaceLineEndings("\n"));
+            return 0;
+        }
+        foreach (var group in plan.groups)
+            Console.WriteLine($"{group.id} ({group.cost:F3}s): {string.Join(' ', group.rows)}");
+        Console.WriteLine($"Plan: {plan.groups.Length} groups of {plan.selected.Length} rows for manifest " +
+            plan.manifest + ".");
+        return 0;
+    }
+
+    /// <summary>
+    /// Checks that the results files under `--require-results` hold exactly one passing result for each row the
+    /// plan selected, all made from the plan's manifest digest and revision, and reports each row that does not.
+    /// </summary>
+    static int RequireGateResults(LoadedGates gates, GateOptions options)
+    {
+        var plan = ReadGatePlan(options.Plan!);
+        if (plan.manifest != gates.Digest)
+            throw new InvalidDataException($"The plan was made for manifest {plan.manifest}, but the manifest and " +
+                $"its catalogs are now {gates.Digest}.");
+        var directory = options.RequireResults!;
+        var files = Directory.Exists(directory)
+            ? Directory.EnumerateFiles(directory, "*.json", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
+                .ToArray() : [];
+        var planned = plan.selected.ToHashSet(StringComparer.Ordinal);
+        var found = new Dictionary<string, List<(string File, GateResult Row)>>(StringComparer.Ordinal);
+        var problems = new List<string>();
+        foreach (var file in files)
+        {
+            var results = ReadGateResults(file);
+            var foreign = results.manifest != plan.manifest || results.revision != plan.revision;
+            foreach (var row in results.rows)
+            {
+                if (foreign)
+                    problems.Add($"FOREIGN {row.id} in {CliPaths.Display(file)} (manifest {results.manifest}, " +
+                        $"revision {results.revision ?? "none"})");
+                else if (!planned.Contains(row.id))
+                    problems.Add($"FOREIGN {row.id} in {CliPaths.Display(file)} (not in the plan)");
+                else (found.TryGetValue(row.id, out var list) ? list : found[row.id] = []).Add((file, row));
+            }
+        }
+        string[] passing = ["verified", "rejected", "unchanged"];
+        foreach (var id in plan.selected)
+        {
+            if (!found.TryGetValue(id, out var results)) problems.Add("MISSING " + id);
+            else if (results.Count > 1)
+                problems.Add($"DUPLICATE {id} in " + string.Join(", ", results.Select(result =>
+                    CliPaths.Display(result.File))));
+            else if (!passing.Contains(results[0].Row.status))
+                problems.Add($"FAILED {id} (status: {results[0].Row.status}, stage: {results[0].Row.stage})");
+        }
+        foreach (var problem in problems) Console.WriteLine(problem);
+        Console.WriteLine(problems.Count == 0
+            ? $"Results: all {plan.selected.Length} planned rows passed, from {files.Length} results files."
+            : $"Results: {problems.Count} problems for {plan.selected.Length} planned rows in {files.Length} files.");
+        return problems.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>Reads a results file that `gates --results` wrote; any other JSON is an error.</summary>
+    static GateResults ReadGateResults(string path)
+    {
+        try
+        {
+            var results = JsonSerializer.Deserialize<GateResults>(File.ReadAllText(path));
+            if (results is { manifest: not null, rows: not null } && !results.rows.Any(row => row?.id is null))
+                return results;
+        }
+        catch (JsonException) { }
+        throw new InvalidDataException("Not a gates results file: " + CliPaths.Display(path));
+    }
+
+    /// <summary>The commit `git rev-parse HEAD` names in `directory`, or null when there is none.</summary>
+    static string? GitRevision(string directory)
+    {
+        try
+        {
+            var result = Execute(["git", "rev-parse", "HEAD"], directory);
+            return result.Code == 0 ? result.Stdout.Trim() : null;
+        }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    /// <summary>Builds, extracts and verifies `selected`, and reports one result per row.</summary>
+    static int RunGateRows(LoadedGates gates, List<GateRow> selected, BatchOptions options)
+    {
+        var rows = gates.Rows;
+        var production = rows.Where(row => row.Variant == "production").ToDictionary(row => (row.Gate, row.Profile));
+        PrepareGateRows(gates, selected);
         if (options.CheckOnly && selected.Any(row => row.Expect == "rejected"))
             throw new ArgumentException("--check cannot evaluate mutation rejection expectations.");
         foreach (var row in selected.Where(row => row.ProgramBase is not null && !row.Failed))
             CompareGateProgram(row, row.ProgramBase!);
 
-        foreach (var row in selected.Where(row => row.Failed))
+        foreach (var row in selected.Where(row => row.Failed && !options.Json))
         {
-            // A variant that failed before verification keeps no certificate from an earlier run.
-            if (Directory.Exists(row.Output)) File.Delete(Path.Combine(row.Output, "verified.json"));
-            if (options.Json) continue;
             Console.WriteLine($"FAIL {row.Name} (stage: {row.Stage})");
             CliDiagnostics.Write(new CliFailure(row.Stage!, new InvalidOperationException(row.Error)), row.Stage!,
                 invalid: true);
@@ -223,9 +565,9 @@ partial class Program
             Request(row);
         var firstCount = requests.Count;
         foreach (var row in compared) Request(row);
-        Directory.CreateDirectory(outputRoot);
-        File.WriteAllText(Path.Combine(outputRoot, "requests.json"),
-            JsonSerializer.Serialize(new BatchManifest(1, proofRoot, [.. requests]), Json) + "\n");
+        Directory.CreateDirectory(gates.OutputRoot);
+        File.WriteAllText(Path.Combine(gates.OutputRoot, "requests.json"),
+            JsonSerializer.Serialize(new BatchManifest(1, gates.ProofRoot, [.. requests]), Json) + "\n");
         var statements = new StatementRequest?[requests.Count];
         foreach (var (row, index) in requestIndex.Where(pair => pair.Key.Variant == "production" && !options.CheckOnly))
             statements[index.Proof] = new(Term: true);
@@ -246,8 +588,8 @@ partial class Program
             [.. first.Verified, .. second.Verified]);
 
         BatchRun Run(int start, int end) => start == end ? new([], [], [])
-            : RunBatch(new BatchManifest(1, proofRoot, [.. requests.Skip(start).Take(end - start)]), outputRoot,
-                options, [.. statements.Skip(start).Take(end - start)]);
+            : RunBatch(new BatchManifest(1, gates.ProofRoot, [.. requests.Skip(start).Take(end - start)]),
+                gates.OutputRoot, options, [.. statements.Skip(start).Take(end - start)]);
         Report? Verified(int? index) => index is { } at ? run.Verified[at] : null;
         (GateStatement?, string?) Statement(GateRow row)
         {
@@ -275,12 +617,13 @@ partial class Program
         }
         foreach (var result in results.Where(result => result.status == "failed" && result.error is null))
             if (!options.Json)
-                Console.WriteLine($"FAIL {result.gate}/{result.profile}/{result.variant} (refutation " +
-                    $"{result.refutation!.theorem}, stage: {result.refutation.stage})");
+                Console.WriteLine($"FAIL {result.id} (refutation {result.refutation!.theorem}, " +
+                    $"stage: {result.refutation.stage})");
         if (options.ResultsPath is not null)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(options.ResultsPath)!);
-            File.WriteAllText(options.ResultsPath, JsonSerializer.Serialize(results, Json) + "\n");
+            File.WriteAllText(options.ResultsPath, JsonSerializer.Serialize(
+                new GateResults(gates.Digest, GitRevision(gates.Directory), results), Json) + "\n");
         }
         if (options.Json)
             Console.Write(VerifyReports.Serialize(new JsonObject
@@ -297,11 +640,12 @@ partial class Program
     }
 
     /// <summary>
-    /// The production row and variant rows of every gate the filters select, in manifest order, after
-    /// checking the whole manifest. Paths are resolved; nothing is built, written or extracted.
+    /// The production row and variant rows of every gate of the manifest and its catalogs, in manifest order
+    /// with catalog gates last, after checking all of them. Paths are resolved; nothing is built, written or
+    /// extracted.
     /// </summary>
     static List<GateRow> GateRows(GateManifest manifest, string directory, string proofRoot, string outputRoot,
-        string? methodFilter, string? profileFilter)
+        BindingCatalog[] catalogs)
     {
         var projects = new Dictionary<string, GateProject>(StringComparer.Ordinal);
         foreach (var (name, project) in manifest.projects ?? [])
@@ -315,11 +659,39 @@ partial class Program
             CheckBuildProperties(name, project.properties);
             projects[name] = project;
         }
-        string[]? generatedRoot = manifest.generatedRoot?.Split('/');
-        if (generatedRoot is not null && (generatedRoot.Any(part => part is "" or "." or ".." ||
-                part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) ||
-            Path.IsPathRooted(manifest.generatedRoot) || manifest.generatedRoot!.Contains(':')))
-            throw new InvalidDataException("generatedRoot must be a relative path of `/`-separated names.");
+        string[]? generatedRoot = null;
+        if (manifest.generatedRoot is not null)
+        {
+            CheckRelativeDirectory("generatedRoot", manifest.generatedRoot);
+            generatedRoot = manifest.generatedRoot.Split('/');
+        }
+        // Each generated root belongs to one writer, so no catalog reports another's files as strays.
+        var roots = catalogs.Select(catalog => (Owner: CliPaths.Display(catalog.Path), Root: catalog.GeneratedRoot))
+            .ToList();
+        if (generatedRoot is not null)
+            roots.Add(("the manifest", Path.GetFullPath(manifest.generatedRoot!, proofRoot)));
+        foreach (var (owner, root) in roots)
+        {
+            var relative = Path.GetRelativePath(proofRoot, root);
+            if (!Under(root, proofRoot) || relative == "." ||
+                relative.Split(Path.DirectorySeparatorChar).Any(ExcludedConsumerDirectory))
+                throw new InvalidDataException($"The generatedRoot of {owner} must lie under proofRoot, in no " +
+                    "directory verification skips.");
+            if (roots.FirstOrDefault(other => other.Owner != owner && (Under(root, other.Root) ||
+                Under(other.Root, root))) is { Owner: not null } overlap)
+                throw new InvalidDataException($"The generatedRoot of {owner} overlaps that of {overlap.Owner}.");
+        }
+        var manifestMethods = manifest.gates.Where(gate => gate is not null).Select(gate => gate.method)
+            .ToHashSet(StringComparer.Ordinal);
+        var catalogGates = catalogs.SelectMany(catalog => catalog.Gates.Select(gate =>
+            manifestMethods.Contains(gate.Method)
+            ? throw new InvalidDataException($"The manifest lists a gate for {gate.Method}, which " +
+                $"{CliPaths.Display(catalog.Path)} also generates; give that proof as a handwritten catalog entry.")
+            : (Entry: new ProofGateEntry(gate.Name, gate.Method, gate.Profiles, gate.Proof, gate.Theorem),
+                gate.Inputs))).ToArray();
+        var defaults = manifest.defaults ?? new();
+        if (defaults.assembly is not null && defaults.build is not null)
+            throw new InvalidDataException("defaults gives at most one of assembly or build.");
         var templates = new Dictionary<string, GateTemplate>(StringComparer.Ordinal);
         foreach (var (name, template) in manifest.templates ?? [])
         {
@@ -376,15 +748,24 @@ partial class Program
 
         var rows = new List<GateRow>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var gate in manifest.gates)
+        foreach (var (listed, inputs) in manifest.gates.Select(gate => (gate, Inputs: Array.Empty<string>()))
+            .Concat(catalogGates))
         {
-            if (gate is null || !SafeGateName(gate.name) || !names.Add(gate.name) ||
+            if (listed is null) throw new InvalidDataException("A gate entry is null.");
+            var gate = listed.assembly is null && listed.build is null
+                ? listed with { assembly = defaults.assembly, build = defaults.build } : listed;
+            gate = gate with
+            {
+                initializedTypes = gate.initializedTypes ?? defaults.initializedTypes,
+                typeArguments = gate.typeArguments ?? defaults.typeArguments
+            };
+            if (!SafeGateName(gate.name) || !names.Add(gate.name) ||
                 (gate.assembly is null) == (gate.build is null) || string.IsNullOrWhiteSpace(gate.method) ||
                 string.IsNullOrWhiteSpace(gate.proof) || string.IsNullOrWhiteSpace(gate.theorem) ||
                 gate.profiles is not { Length: > 0 } || gate.profiles.Any(string.IsNullOrWhiteSpace) ||
                 gate.profiles.Distinct(StringComparer.Ordinal).Count() != gate.profiles.Length)
-                throw new InvalidDataException(
-                    "Invalid or duplicate gate entry; a gate gives one of assembly or build.");
+                throw new InvalidDataException("Invalid or duplicate gate entry " + gate.name + "; a gate gives " +
+                    "one of assembly or build, or takes it from defaults.");
             var gatePlan = Plan(gate.name, gate.build);
             var gateRows = new List<GateRow>();
             foreach (var profile in gate.profiles)
@@ -453,8 +834,7 @@ partial class Program
                     other.Variant.Equals(row.ProgramOf ?? "production", StringComparison.OrdinalIgnoreCase)) ??
                     throw new InvalidDataException("Variant " + row.Name + " compares its program with " +
                         row.ProgramOf + ", which does not run under profile " + row.Profile + ".");
-            if (methodFilter is not null && !gate.method.Contains(methodFilter, StringComparison.Ordinal)) continue;
-            rows.AddRange(gateRows.Where(row => profileFilter is null || row.Profile == profileFilter));
+            rows.AddRange(gateRows);
 
             GateRow Row(string variant, string expect, string? assembly, GateBuildPlan? plan, string profile,
                 string proof, (string Path, Dictionary<string, string> Values)? proofTemplate, string theorem,
@@ -488,6 +868,7 @@ partial class Program
                     ExpectedProgram = program, ProgramOf = programOf, RefutationProof = refutationProof,
                     RefutationTheorem = refutation?.theorem, Statement = statement, Generated = [.. generated],
                     InitializedTypes = initializedTypes, TypeArguments = gate.typeArguments, Method = gate.method,
+                    Inputs = inputs,
                     ExtractionProfile = profileFiles.TryGetValue(profile, out var file) ? file
                         : profile.StartsWith('@') ? "@" + Path.GetFullPath(profile[1..], directory) : profile
                 };
@@ -495,7 +876,6 @@ partial class Program
         }
         return rows;
     }
-
     /// <summary>Whether `name` selects a built-in execution profile, including a retired one.</summary>
     static bool BuiltInProfile(string name)
     {
@@ -546,36 +926,6 @@ partial class Program
             row.Fail(generated.Stage, error.Message);
         }
     }
-
-    /// <summary>
-    /// `template` with each `@NAME@` replaced by `values[NAME]` and LF line endings; nothing else changes.
-    /// A placeholder without a value, or a value no placeholder uses, is an error.
-    /// </summary>
-    static string Instantiate(string template, IReadOnlyDictionary<string, string> values)
-    {
-        var used = new HashSet<string>(StringComparer.Ordinal);
-        var missing = new SortedSet<string>(StringComparer.Ordinal);
-        var text = TemplatePlaceholder().Replace(template, match =>
-        {
-            var name = match.Groups[1].Value;
-            if (!values.TryGetValue(name, out var value))
-            {
-                missing.Add(name);
-                return match.Value;
-            }
-            used.Add(name);
-            return value;
-        });
-        if (missing.Count > 0)
-            throw new InvalidDataException("Template placeholders without a value: " + string.Join(", ", missing));
-        var unused = values.Keys.Where(name => !used.Contains(name)).Order(StringComparer.Ordinal).ToArray();
-        if (unused.Length > 0)
-            throw new InvalidDataException("Template values no placeholder uses: " + string.Join(", ", unused));
-        return text.ReplaceLineEndings("\n");
-    }
-
-    [GeneratedRegex(@"@([A-Za-z_][A-Za-z0-9_]*)@")]
-    private static partial Regex TemplatePlaceholder();
 
     /// <summary>
     /// Builds each distinct project and property set the rows use once, and gives each row its assembly. A
@@ -717,7 +1067,7 @@ partial class Program
         if (index is not { } requested)
         {
             var unchanged = row.Expect == "unchanged" && !row.Failed;
-            return new(row.Output, row.Proof, row.Theorem, checkOnly && !unchanged ? "checked" : row.Expect,
+            return new(row.Name, row.Output, row.Proof, row.Theorem, checkOnly && !unchanged ? "checked" : row.Expect,
                 unchanged ? "unchanged" : "failed", unchanged ? "program comparison" : row.Stage!, row.Error, null,
                 null, null, 0, row.Gate, row.Profile, row.Variant, row.BuildStatus, row.ExtractionStatus,
                 row.ProgramStatus, null, null);
@@ -726,7 +1076,7 @@ partial class Program
         var refutation = requested.Refutation is { } at ? results[at] : null;
         var passed = proof.status != "failed" && refutation?.status is null or "verified";
         var mismatch = passed && statement.Error is not null;
-        return new(proof.output, proof.proof, proof.theorem, proof.expect,
+        return new(row.Name, proof.output, proof.proof, proof.theorem, proof.expect,
             passed && !mismatch ? proof.status : "failed", mismatch ? StatementIdentityStage : proof.stage,
             mismatch ? statement.Error : proof.error, proof.axioms, proof.libraryBuild, proof.failure,
             proof.elapsedSeconds, row.Gate, row.Profile, row.Variant, row.BuildStatus, row.ExtractionStatus,

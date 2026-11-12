@@ -202,7 +202,9 @@ Passed("explicit type initialization assumptions and identity");
 RunFixture("Tests/ConsumerVerification.cs", [], streamOutput: true, progress: "Consumer proof packages");
 Passed("external consumer proof package and transitive source identity");
 RunFixture("Tests/ProofBindingCatalog.cs", [], streamOutput: true, progress: "Consumer binding catalogs");
-Passed("exact binding catalogs and deterministic source materialization");
+Passed("binding catalogs as data, exact LF sources and check mode without writes");
+RunFixture("Tests/GatePlans.cs", [], streamOutput: true, progress: "Gate plans and required results");
+Passed("deterministic gate plans, plan groups and required results");
 RunFixture("Tests/ProofCostFrontend.cs", [], streamOutput: true, progress: "Proof measurement imports");
 Passed("proof measurements reject missing imports before diagnostic assertions");
 RunFixture("Tests/ConsumerSupportCandidates.cs", ["--lake"], streamOutput: true,
