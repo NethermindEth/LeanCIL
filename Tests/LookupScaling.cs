@@ -203,7 +203,8 @@ foreach (var (kind, few, many, pattern) in new[]
     ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", @"\(\d+, \.call ")
 })
 {
-    var tokenGrowth = TokenCost(kind + "Many", many, ManyTokens, pattern) /`n        TokenCost(kind + "Few", few, FewTokens, pattern);
+    var tokenGrowth = TokenCost(kind + "Many", many, ManyTokens, pattern) /
+        TokenCost(kind + "Few", few, FewTokens, pattern);
     Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
         $"PASS metadata check of {FewTokens} and {ManyTokens} distinct {kind.ToLowerInvariant()} tokens: " +
         $"{tokenGrowth:F2} times the cost per token"));
