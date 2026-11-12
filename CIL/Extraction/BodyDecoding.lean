@@ -1,4 +1,5 @@
 import CIL.Extraction.Generics
+import CIL.Extraction.MetadataBytes
 import Std.Data.TreeMap
 
 /-!
@@ -164,6 +165,10 @@ structure TokenTable where
 structure BodyEvidence where
   bytes : List Nat
   tokens : TokenTable
+  /-- The metadata rows and heap entries the body's tokens, locals and method reach. -/
+  metadata : MethodMetadata := {}
+  /-- The relative virtual address the body was read at. -/
+  rva : Nat := 0
   deriving DecidableEq, Repr
 
 /-- What a body's bytes say about its method: the fields `RawMethod` takes from the body. -/
@@ -191,9 +196,6 @@ inductive BodyError where
   | branchIntoInstruction (offset target : Nat)
   | branchIntoPrefixed (offset target : Nat)
   deriving DecidableEq, Repr
-
-/-- The metadata table number a token belongs to: its top byte. -/
-def metadataTableOf (token : Nat) : Nat := token / 0x1000000
 
 /-- Tokens naming a method: MethodDef, MemberRef or MethodSpec. -/
 private def methodTable (table : Nat) : Bool := table == 0x06 || table == 0x0A || table == 0x2B

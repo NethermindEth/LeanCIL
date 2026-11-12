@@ -31,6 +31,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly Dictionary<ModuleDefinition, ModuleDefinition> originals = [];
     readonly Dictionary<ModuleDefinition, byte[]> images = [];
     readonly Dictionary<byte[], PEReader> readers = [];
+    readonly Dictionary<PEReader, MetadataImage> metadata = [];
     readonly List<(Pin Pin, string Path, ModuleDefinition Module)> references = [];
 
     internal ModuleDefinition Selected { get; }
@@ -42,6 +43,9 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
 
     /// <summary>Every pin, the selected assembly first; certificate assembly indices refer to this order.</summary>
     internal IEnumerable<Pin> Pins => [SelectedPin, .. references.Select(reference => reference.Pin)];
+
+    /// <summary>Every pinned module, the selected assembly first, in the order of <see cref="Pins"/>.</summary>
+    internal IEnumerable<ModuleDefinition> Modules => [Selected, .. references.Select(reference => reference.Module)];
 
     internal PinnedAssemblies(byte[] selected, string selectedHash, IEnumerable<Source> sources)
     {
@@ -118,13 +122,30 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>The header and code bytes of a method's body, read from the image of its module.</summary>
     internal MethodBodyBytes.Body Body(MethodDefinition method)
     {
-        if (!images.TryGetValue(method.Module, out byte[]? image)) throw Outside(method.Module);
         if (!method.HasBody || method.RVA == 0)
             throw new InvalidDataException("Method has no body in its image: " + method.FullName);
+        return MethodBodyBytes.Read(Image(method.Module), (int)method.RVA);
+    }
+
+    PEReader Image(ModuleDefinition module)
+    {
+        if (!images.TryGetValue(module, out byte[]? image)) throw Outside(module);
         if (!readers.TryGetValue(image, out PEReader? reader))
             readers.Add(image, reader = new(ImmutableCollectionsMarshal.AsImmutableArray(image)));
-        return MethodBodyBytes.Read(reader, (int)method.RVA);
+        return reader;
     }
+
+    /// <summary>The metadata tables and heaps of a pinned module's image, read once per image.</summary>
+    internal MetadataImage Metadata(ModuleDefinition module)
+    {
+        var reader = Image(module);
+        if (!metadata.TryGetValue(reader, out MetadataImage? image)) metadata.Add(reader, image = new(reader));
+        return image;
+    }
+
+    /// <summary>The working module that <paramref name="module"/> is the untouched copy of, or the module itself.</summary>
+    internal ModuleDefinition Working(ModuleDefinition module) =>
+        originals.FirstOrDefault(pair => pair.Value == module).Key ?? module;
     /// <summary>The index of a pinned module in <see cref="Pins"/>.</summary>
     internal int Index(ModuleDefinition module) => module == Selected ? 0 :
         references.FindIndex(reference => reference.Module == module) is >= 0 and var index ? index + 1 :

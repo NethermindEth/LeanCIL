@@ -15,6 +15,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     // Closed instantiations share their definition's bytes; the first method to use a body names them.
     readonly Dictionary<(ModuleDefinition Module, uint Token), int> bodyBytes = [];
     readonly ExternalIdentityEvidence externalIdentities = new();
+    readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
     int methodParameterCount;
 
     // Type serialization needs no method bodies; only method and dispatch evidence read originals.
@@ -287,6 +288,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         externalIdentities.Emit(lean);
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
         lean.AppendLine(body.Bytes);
+        lean.AppendLine(body.Metadata);
         lean.AppendLine(body.Definition);
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
         lean.AppendLine($"def method{number}Closed : Extraction.RawMethod := {closedEvidence}");
@@ -309,7 +311,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// The body bytes of an original method and its token table: each token read from the body, with the operand
     /// the extractor resolved it to. The Lean decoder reads the same bytes and checks them against the code.
     /// </summary>
-    (string Bytes, string Definition) Body(MethodDefinition original, MethodDefinition admitted,
+    (string Bytes, string Metadata, string Definition) Body(MethodDefinition original, MethodDefinition admitted,
         IReadOnlySet<Instruction> reachable, int number)
     {
         var body = Pinned.Body(original);
@@ -341,14 +343,28 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             else if (reachable.Contains(site)) operands[known] = (token, key, operand);
         }
         var definition = (original.Module, original.MetadataToken.ToUInt32());
-        var data = bodyBytes.TryGetValue(definition, out var first)
+        var shared = bodyBytes.TryGetValue(definition, out var first);
+        var data = shared
             ? $"method{first}Bytes" : List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        var rows = shared ? $"method{first}Metadata" : (metadata ?? throw new InvalidOperationException(
+                "Method evidence requires the pinned assemblies.")).Method(original,
+            operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32()).Where(token => token != 0),
+            original.HasThis && ObjectTypes.Is(original.DeclaringType));
         bodyBytes.TryAdd(definition, number);
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
         return ($"def method{number}Bytes : List Nat := {data}",
+            $"def method{number}Metadata : Extraction.MethodMetadata := {rows}",
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
             $"tokens := {{ operands := {table}, localSignature := {original.Body.LocalVarToken.ToUInt32()}, " +
-            $"locals := {Locals(original)} }} }}");
+            $"locals := {Locals(original)} }}, metadata := method{number}Metadata, rva := {original.RVA} }}");
+    }
+
+    /// <summary>The identity block of each pinned assembly: its table header and <c>Assembly</c> row.</summary>
+    internal void EmitAssemblyMetadata(StringBuilder lean)
+    {
+        var slices = metadata ?? throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
+        foreach (var (module, index) in Pinned.Modules.Select((module, index) => (module, index)))
+            lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := {slices.AssemblyBlock(module)}");
     }
 
     string DispatchTypes(MethodDefinition method)
