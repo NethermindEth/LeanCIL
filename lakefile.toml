@@ -30,7 +30,13 @@ name = "Tests.BodyEncoding"
 name = "Tests.BodyDecoding"
 
 [[lean_lib]]
+name = "Tests.MetadataBuilder"
+
+[[lean_lib]]
 name = "Tests.MetadataDecoding"
+
+[[lean_lib]]
+name = "Tests.MetadataBinding"
 
 [[lean_lib]]
 name = "Tests.LiteralDisplay"

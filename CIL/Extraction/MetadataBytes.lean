@@ -32,9 +32,29 @@ structure AssemblyMetadata where
   blobs : List ByteEntry := []
   deriving DecidableEq, Repr
 
+/-- A fact the extractor states about a token of a slice, which the checker verifies against
+    the carried rows: `kind` says what `target` is, in the slice with index `slice`. -/
+structure MetadataLink where
+  kind : Nat
+  source : Nat
+  slice : Nat
+  target : Nat
+  deriving DecidableEq, Repr
+
+/-- A link names the definition a `TypeRef` or `MemberRef` token resolves to. -/
+def linkDefinition : Nat := 0
+
+/-- A link names the `TypeDef` that declares a `Field` or `MethodDef` token. -/
+def linkDeclaring : Nat := 1
+
+/-- A link names the `NestedClass` row of a nested `TypeDef` token. -/
+def linkNesting : Nat := 2
+
+/-- A link names the first `GenericParam` row of a `TypeDef` or `MethodDef` token. -/
+def linkGenericParams : Nat := 3
+
 /-- The rows and heap entries one method's tokens, definition and locals reach in one
-    assembly. `definitions` lists, for a token of this slice that names a type or member
-    defined in a carried slice, the index of that slice and the token of the definition. -/
+    assembly, with the links that locate definitions among them. -/
 structure MetadataSlice where
   assembly : AssemblyMetadata := {}
   /-- Table rows keyed by token: the table number times `2 ^ 24` plus the row number. -/
@@ -47,8 +67,7 @@ structure MetadataSlice where
   userStrings : List ByteEntry := []
   /-- The `AssemblyRef` row of the assembly that defines the primitive types, or 0. -/
   corlib : Nat := 0
-  /-- Reference token, slice index and definition token. -/
-  definitions : List (Nat × Nat × Nat) := []
+  links : List MetadataLink := []
   deriving DecidableEq, Repr
 
 /-- The metadata of one method body: the slice of its own assembly, which comes first, and the
@@ -408,7 +427,8 @@ structure MetadataIndex where
   corlib : Nat
   /-- The identity of the assembly the slice is cut from, as the `Assembly` row spells it. -/
   identity : List Nat
-  definitions : Std.TreeMap Nat (Nat × Nat) compare
+  /-- Links keyed by `kind * 2 ^ 32 + source`, giving the slice index and target token. -/
+  links : Std.TreeMap Nat (Nat × Nat) compare
 
 /-- Insert entries into a map, refusing duplicate keys and values that are not bytes. -/
 private def insertEntries : List ByteEntry → Std.TreeMap Nat (List Nat) compare →
@@ -711,6 +731,15 @@ def AssemblyMetadata.spelling (assembly : AssemblyMetadata) :
   .ok (assemblySpelling (← stringBytes strings name) major minor build revision
     (← stringBytes strings culture) spelled)
 
+/-- Insert links into a map keyed by kind and source, refusing a second link for one key. -/
+private def indexLinks : List MetadataLink → Std.TreeMap Nat (Nat × Nat) compare →
+    Except MetadataError (Std.TreeMap Nat (Nat × Nat) compare)
+  | [], map => .ok map
+  | link :: rest, map =>
+    let key := link.kind * 0x100000000 + link.source
+    if map.contains key then .error (.duplicateEntry link.source)
+    else indexLinks rest (map.insert key (link.slice, link.target))
+
 /-- Build the index of a slice: its header, its identity, and one map per kind of entry. The
     identity the `Assembly` row spells must be the one the assembly block claims. -/
 def MetadataSlice.index (slice : MetadataSlice) : Except MetadataError MetadataIndex := do
@@ -721,9 +750,9 @@ def MetadataSlice.index (slice : MetadataSlice) : Except MetadataError MetadataI
   let strings ← indexEntries slice.strings
   let blobs ← indexEntries slice.blobs
   let userStrings ← indexEntries slice.userStrings
+  let links ← indexLinks slice.links ∅
   .ok { header := header, rows := rows, strings := strings, blobs := blobs,
         userStrings := userStrings, corlib := slice.corlib, identity := identity,
-        definitions := slice.definitions.foldl (fun map (token, slice, definition) =>
-          map.insert token (slice, definition)) ∅ }
+        links := links }
 
 end CIL.Extraction
