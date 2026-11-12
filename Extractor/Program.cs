@@ -9,7 +9,8 @@ internal static partial class Program
 {
     const string Usage =
         "Usage: leancil list assembly.dll\n" +
-        "       leancil templates output-directory extraction-directory...\n" +
+        "       leancil templates output-directory extraction-directory... [--check] [--namespace name] " +
+        "[--omit-equations] [--module file.lean]\n" +
         "       leancil lint-exceptions output-directory --documentation assembly.xml\n" +
         "       leancil extract assembly.dll '[return-type ]Type::Method(parameter-types)' output-directory " +
         "[profile|@profile.json] [--assembly 'assembly name or full identity'] [--type-argument System.UInt64]... " +

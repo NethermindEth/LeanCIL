@@ -181,7 +181,8 @@ issues no certificate. A request or variant that expects `rejected` is an error 
 List every deployment profile in `profiles`. A method whose body differs by hardware profile
 needs a proof that holds for each extraction.
 `leancil templates output-directory extraction-directory...` generates one shared body with a
-profile parameter and a binding per input extraction
+profile parameter and a binding per input extraction; `--check` compares committed output,
+`--namespace`, `--module` and `--omit-equations` shape the shared module
 ([profile templates](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-BINDING.md#generated-profile-templates)).
 
 ## Further tools

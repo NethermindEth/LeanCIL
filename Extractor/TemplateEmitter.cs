@@ -1,10 +1,11 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace Nethermind.LeanCIL;
 
 // Templates are proof inputs. Only the generated, kernel-checked bindings connect them to CIL.
-internal static class TemplateEmitter
+internal static partial class TemplateEmitter
 {
     internal sealed record Method(string Identity, string Metadata, string[] Ops, bool HasStaticSites);
     internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods);
@@ -12,14 +13,64 @@ internal static class TemplateEmitter
     sealed record Template(string Identity, string Metadata, Feature[] Features, string[] Callees, Row[] Rows);
 
     const string MissingProfile = ".unsupported \"Profile combination not selected for template\"";
-    const string Usage = "Usage: leancil templates output-directory extraction-directory...";
+    const string Usage = "Usage: leancil templates output-directory extraction-directory... [--check] " +
+        "[--namespace name] [--omit-equations] [--module file.lean]";
 
+    /// <summary>
+    /// The options of <c>templates</c>: the namespace of the shared bodies, whether to omit their per-position
+    /// equations, the template module's path and Lean name, and whether to compare instead of write.
+    /// </summary>
+    sealed record Options(string Output, string[] Extractions, string Namespace, bool OmitEquations,
+        string ModulePath, string ModuleName, bool Check);
+
+    static Options Parse(string[] args)
+    {
+        var positional = new List<string>();
+        string? name = null, module = null;
+        bool check = false, omit = false;
+        for (var index = 0; index < args.Length; index++)
+        {
+            string Value() => ++index < args.Length && !args[index].StartsWith("--", StringComparison.Ordinal)
+                ? args[index] : throw new ArgumentException(Usage);
+            switch (args[index])
+            {
+                case "--check" when !check: check = true; break;
+                case "--omit-equations" when !omit: omit = true; break;
+                case "--namespace" when name is null: name = Value(); break;
+                case "--module" when module is null: module = Value(); break;
+                case var option when option.StartsWith("--", StringComparison.Ordinal):
+                    throw new ArgumentException("Unknown or duplicate option: " + option + "\n" + Usage);
+                case var path: positional.Add(path); break;
+            }
+        }
+        if (positional.Count < 2) throw new ArgumentException(Usage);
+        if (name is not null && !LeanName().IsMatch(name))
+            throw new ArgumentException("--namespace takes a Lean name such as Proofs.Generated: " + name);
+        var output = Path.GetFullPath(positional[0]);
+        var modulePath = Path.GetFullPath(module ?? Path.Combine(output, "Templates.lean"));
+        var relative = Path.GetRelativePath(output, modulePath).Replace('\\', '/');
+        // The bindings import the module by its path under the output directory, a Lean source root.
+        var moduleName = relative.EndsWith(".lean", StringComparison.Ordinal) ? relative[..^".lean".Length]
+            .Replace('/', '.') : "";
+        if (!LeanName().IsMatch(moduleName))
+            throw new ArgumentException("--module takes a .lean file under the output directory whose path " +
+                "names a Lean module: " + module);
+        return new(output, [.. positional.Skip(1).Select(Path.GetFullPath)], name ?? "Templates", omit, modulePath,
+            moduleName, check);
+    }
+
+    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*(\.[A-Za-z_][A-Za-z0-9_']*)*\z")]
+    private static partial Regex LeanName();
+
+    /// <summary>
+    /// Writes the shared template module, one binding per extraction and <c>templates.json</c>, with LF line endings,
+    /// or under <c>--check</c> fails unless the files hold exactly what it would write.
+    /// </summary>
     internal static void Run(string[] args, Func<string, Variant> read)
     {
-        if (args.Length < 2 || args.Any(argument => argument.StartsWith("--", StringComparison.Ordinal)))
-            throw new ArgumentException(Usage);
-        var output = Path.GetFullPath(args[0]);
-        var variants = args[1..].Select(path => read(Path.GetFullPath(path))).ToArray();
+        var options = Parse(args);
+        var output = options.Output;
+        var variants = options.Extractions.Select(read).ToArray();
         if (variants.Select(variant => variant.AssemblyHash).Distinct(StringComparer.Ordinal).Count() != 1)
             throw new InvalidDataException("Template inputs must come from the same exact assembly.");
         if (variants.Any(variant => variant.Methods.Select(method => method.Identity)
@@ -33,17 +84,19 @@ internal static class TemplateEmitter
             .Select(group => Prepare(group.Key, group.ToArray())).ToArray();
         var templateIndices = templates.Select((template, index) => (template.Identity, index))
             .ToDictionary(pair => pair.Identity, pair => pair.index, StringComparer.Ordinal);
-        var source = EmitTemplates(templates);
-        var bindings = variants.Select(variant => EmitBindings(templates, templateIndices, variant)).ToArray();
-        Directory.CreateDirectory(output);
-        File.WriteAllText(Path.Combine(output, "Templates.lean"), source, new UTF8Encoding(false));
+        var files = new SortedDictionary<string, string>(StringComparer.Ordinal)
+        {
+            [options.ModulePath] = EmitTemplates(templates, options.Namespace, options.OmitEquations)
+        };
         for (var index = 0; index < variants.Length; index++)
-            File.WriteAllText(Path.Combine(output, $"TemplateBindings{index}.lean"), bindings[index],
-                new UTF8Encoding(false));
-        File.WriteAllText(Path.Combine(output, "templates.json"), JsonSerializer.Serialize(new
+            files[Path.Combine(output, $"TemplateBindings{index}.lean")] =
+                EmitBindings(templates, templateIndices, variants[index], options);
+        files[Path.Combine(output, "templates.json")] = JsonSerializer.Serialize(new
         {
             schema = 1,
             assemblySha256 = variants[0].AssemblyHash,
+            module = options.ModuleName,
+            instructionEquations = !options.OmitEquations,
             profiles = variants.Select((variant, index) => new
             {
                 module = $"TemplateBindings{index}",
@@ -52,13 +105,45 @@ internal static class TemplateEmitter
             }),
             methods = templates.Select((template, index) => new
             {
-                name = $"Templates.method{index}", signature = template.Identity,
+                name = $"{options.Namespace}.method{index}", signature = template.Identity,
                 flags = template.Features.Select(Flag), callees = template.Callees
             })
-        }, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
-        Console.WriteLine($"Emitted {templates.Length} shared templates and {bindings.Length} profile bindings.");
+        }, new JsonSerializerOptions { WriteIndented = true, NewLine = "\n" });
+        if (options.Check)
+        {
+            Check(output, files);
+            Console.WriteLine($"Checked {templates.Length} shared templates and {variants.Length} profile bindings.");
+            return;
+        }
+        foreach (var (path, text) in files)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text, new UTF8Encoding(false));
+        }
+        Console.WriteLine($"Emitted {templates.Length} shared templates and {variants.Length} profile bindings.");
         Console.WriteLine("Compile each binding against its recorded extraction; " +
             "templates alone certify no extraction.");
+    }
+
+    /// <summary>
+    /// Fails, naming each file, unless every file of `files` holds exactly its text and the output directory holds
+    /// no binding beyond them.
+    /// </summary>
+    static void Check(string output, SortedDictionary<string, string> files)
+    {
+        var problems = new List<string>();
+        foreach (var (path, text) in files)
+        {
+            var exists = File.Exists(path);
+            if (!exists || !File.ReadAllBytes(path).AsSpan().SequenceEqual(new UTF8Encoding(false).GetBytes(text)))
+                problems.Add((exists ? "Template output differs: " : "Template output missing: ") + path);
+        }
+        if (Directory.Exists(output))
+            problems.AddRange(Directory.EnumerateFiles(output, "TemplateBindings*.lean")
+                .Where(path => Regex.IsMatch(Path.GetFileName(path), @"\ATemplateBindings[0-9]+\.lean\z") &&
+                    !files.ContainsKey(Path.GetFullPath(path)))
+                .Order(StringComparer.Ordinal).Select(path => "Template output has no input: " + path));
+        if (problems.Count > 0) throw new InvalidDataException(string.Join("\n", problems));
     }
 
     static string Flag(Feature feature) => FeatureProfile.LeanFeature(feature)[1..];
@@ -122,40 +207,46 @@ internal static class TemplateEmitter
         return enabled == disabled ? enabled : $"if {Flag(feature)} then ({enabled}) else ({disabled})";
     }
 
-    static string EmitTemplates(Template[] templates)
+    // Lines end in LF on every platform, so committed output compares equal wherever it was generated.
+    static string EmitTemplates(Template[] templates, string space, bool omitEquations)
     {
         var depth = LeanEmitter.RecursionDepth(templates.Max(template => template.Rows[0].Ops.Length));
         var lean = new StringBuilder("import CIL.InstructionEquations\n\n" +
             "/-! Shared bodies for the selected extraction profiles; bindings establish their CIL identity. -/\n\n" +
-            $"namespace Templates\nopen CIL\n\nset_option maxRecDepth {depth}\n\n");
+            $"namespace {space}\nopen CIL\n\nset_option maxRecDepth {depth}\n\n");
+        void Line(string text = "") => lean.Append(text).Append('\n');
         for (var index = 0; index < templates.Length; index++)
         {
             var template = templates[index];
-            lean.AppendLine($"/-- The stable managed identity of `method{index}`. -/");
-            lean.AppendLine($"def method{index}Signature : String := {JsonSerializer.Serialize(template.Identity)}");
-            lean.AppendLine("/-- A fixed-PC template for the selected flag combinations, " +
-                "with explicit callee indices. -/");
+            Line($"/-- The stable managed identity of `method{index}`. -/");
+            Line($"def method{index}Signature : String := {JsonSerializer.Serialize(template.Identity)}");
+            Line("/-- A fixed-PC template for the selected flag combinations, with explicit callee indices. -/");
             lean.Append($"@[cil_code] def method{index} (profile : FeatureProfile)");
             foreach (var feature in template.Features) lean.Append($" ({Flag(feature)} : Bool)");
             for (var callee = 0; callee < template.Callees.Length; callee++) lean.Append($" (callee{callee} : Nat)");
-            lean.AppendLine($" : Method := {{ profile, {template.Metadata}, code := [");
-            lean.AppendLine(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
+            Line($" : Method := {{ profile, {template.Metadata}, code := [");
+            Line(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
                 .Select(pc => "  " + Instruction(template, template.Rows, pc))) + "] }");
-            lean.AppendLine($"cil_instruction_equations method{index}");
-            // The last equation's proof reaches every code suffix, so its axioms include every equation's.
-            if (template.Rows[0].Ops.Length is > 0 and var length)
-                lean.AppendLine($"#print axioms method{index}_instruction{length - 1}");
-            lean.AppendLine();
+            if (!omitEquations)
+            {
+                Line($"cil_instruction_equations method{index}");
+                // The last equation's proof reaches every code suffix, so its axioms include every equation's.
+                if (template.Rows[0].Ops.Length is > 0 and var length)
+                    Line($"#print axioms method{index}_instruction{length - 1}");
+            }
+            Line();
         }
-        lean.AppendLine("end Templates");
+        Line($"end {space}");
         return lean.ToString();
     }
 
-    static string EmitBindings(Template[] templates, Dictionary<string, int> templateIndices, Variant variant)
+    static string EmitBindings(Template[] templates, Dictionary<string, int> templateIndices, Variant variant,
+        Options options)
     {
-        var lean = new StringBuilder("import Extracted\nimport Templates\n\n" +
+        var lean = new StringBuilder($"import Extracted\nimport {options.ModuleName}\n\n" +
             "/-! Exact bindings for one checked profile extraction; recheck with that extraction. -/\n\n" +
             "namespace TemplateBindings\nopen CIL\n\n");
+        void Line(string text) => lean.Append(text).Append('\n');
         var methodIndices = variant.Methods.Select((method, index) => (method.Identity, index))
             .ToDictionary(pair => pair.Identity, pair => pair.index, StringComparer.Ordinal);
         for (var index = 0; index < variant.Methods.Length; index++)
@@ -170,12 +261,12 @@ internal static class TemplateEmitter
                 // A callee absent from this extraction can occur only under an excluded branch.
                 arguments.Add(Math.Max(0, target).ToString(System.Globalization.CultureInfo.InvariantCulture));
             }
-            lean.AppendLine("/-- This extracted method is exactly the instantiated shared template. -/");
-            lean.AppendLine($"@[cil_code] theorem method{index}_template : Extracted.program[{index}]? =");
-            lean.AppendLine($"    some (Templates.method{templateIndex} {string.Join(' ', arguments)}) := rfl");
-            lean.AppendLine($"#print axioms method{index}_template");
+            Line("/-- This extracted method is exactly the instantiated shared template. -/");
+            Line($"@[cil_code] theorem method{index}_template : Extracted.program[{index}]? =");
+            Line($"    some ({options.Namespace}.method{templateIndex} {string.Join(' ', arguments)}) := rfl");
+            Line($"#print axioms method{index}_template");
         }
-        lean.AppendLine("end TemplateBindings");
+        Line("end TemplateBindings");
         return lean.ToString();
     }
 }

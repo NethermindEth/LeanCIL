@@ -18,7 +18,7 @@ modes. For one complete verification, read the [getting-started guide](GETTING-S
 | `leancil export-contracts` | Publish verified contracts as a sidecar | [Export contracts](#export-contracts) |
 | `leancil resolve-imports` | Locate contract sidecars and implementations from SDK output | [Resolving imports](CONTRACT-INTERFACES.md#resolving-imports-from-sdk-assets) |
 | `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library | [Library audits](CONSUMERS.md#library-audits) |
-| `leancil templates` | Generate shared proof templates from extractions of several profiles | [Generated profile templates](PROOFS-BINDING.md#generated-profile-templates) |
+| `leancil templates` | Generate shared proof templates from extractions of several profiles, or check generated ones | [Generated profile templates](PROOFS-BINDING.md#generated-profile-templates) |
 | `leancil lint-exceptions` | Compare modeled throw sites with XML documentation | [Exception documentation lint experiment](#exception-documentation-lint-experiment) |
 | `leancil --version` | Print the tool, framework and toolchain versions | [Version](#version) |
 
