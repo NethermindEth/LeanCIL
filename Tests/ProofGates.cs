@@ -46,6 +46,9 @@ File.WriteAllText(Path.Combine(second, "Second.csproj"), """
     """);
 File.WriteAllText(Path.Combine(second, "Second.cs"),
     "public static class Methods { public static ulong Second(ulong x, ulong y) => unchecked(x - y); }");
+// A method no gate reaches, in the same assembly: changing it selects nothing.
+File.WriteAllText(Path.Combine(second, "Spare.cs"),
+    "public static class Spare { public static ulong Unused(ulong x) => x; }");
 Run(["dotnet", "build", second, "-c", "Release", "-o", Path.Combine(second, "output")]);
 
 File.Copy(At("lean-toolchain"), Path.Combine(package, "lean-toolchain"));
@@ -157,8 +160,8 @@ void Manifest(bool controls)
                 program = "same" },
             new { name = "not-renamed", build = Build("Baseline"), profiles = scalar, expect = "certifies",
                 program = "renamed" },
-            new { name = "missing-proof", build = Build("Baseline"), profiles = scalar, expect = "certifies",
-                proof = "Missing.lean", theorem = "Missing.correctness" },
+            new { name = "missing-proof", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
+                proof = "Missing.lean", theorem = "Missing.correctness", refutation = Refute("WrongXor") },
             new { name = "missing-template", build = Build("WrongXor"), profiles = scalar, expect = "rejected",
                 refutation = new { template = "Missing.lean.in", theorem = "FixtureWitness.refuted",
                     values = new Dictionary<string, string> { ["LEFT"] = "1" } } },
@@ -257,6 +260,10 @@ Expect(proofChanged.Length == 5 && proofChanged.All(row => Text(row, "gate") == 
 var sourceChanged = Gates(0, "--changed", Path.Combine(second, "Second.cs"));
 Expect(sourceChanged.Length == 2 && sourceChanged.All(row => Text(row, "theorem") == "Second.correctness"),
     "Method source selection did not follow the extracted method metadata");
+var spareChanged = Execute([.. cli, "gates", manifest, "--changed", Path.Combine(second, "Spare.cs")]);
+Expect(spareChanged.Code != 0 &&
+    spareChanged.Output.Contains("No gates depend on the changed paths.", StringComparison.Ordinal),
+    "A source no extracted method reaches selected its assembly's gates");
 var templateChanged = Gates(0, "--changed", template, "--profile", "scalar");
 Expect(templateChanged.Select(row => Text(row, "variant")).Order().SequenceEqual(["wrong-sub", "wrong-xor"]),
     "A changed template did not select exactly the variants instantiated from it");
@@ -267,6 +274,12 @@ var filtered = Gates(0, "--method", "Second", "--profile", "scalar", "--check");
 Expect(filtered.Length == 1 && Text(filtered[0], "status") == "checked" &&
     !File.Exists(Path.Combine(Text(filtered[0], "output")!, "verified.json")),
     "Catalog filters or compile-only results were incorrect");
+var json = Execute([.. cli, "gates", manifest, "--method", "Second", "--profile", "scalar", "--check",
+    "--format", "json"]);
+var document = JsonDocument.Parse(json.Stdout).RootElement;
+Expect(json.Code == 0 && document.GetProperty("failed").GetInt32() == 0 &&
+    document.GetProperty("variants").EnumerateArray().Single().GetProperty("status").GetString() == "checked",
+    "The JSON report did not hold one document with the variant results:\n" + json.Output);
 var checkRejected = Execute([.. cli, "gates", manifest, "--method", "First", "--profile", "scalar", "--check"]);
 Expect(checkRejected.Code != 0 && checkRejected.Output.Contains("--check cannot evaluate", StringComparison.Ordinal),
     "--check accepted a rejection expectation");
@@ -293,8 +306,10 @@ foreach (var variant in new[] { "program-differs", "not-renamed" })
     Failed(variant, "A program comparison that does not hold passed or reached verification", row =>
         Text(row, "stage") == "program comparison" && Text(row, "program") == "failed" &&
         !requested.Contains(Text(row, "output")));
-Failed("missing-proof", "A missing proof was not a proof selection failure", row =>
-    Text(row, "stage") == "proof selection" && Text(row, "error")!.Contains("not found", StringComparison.Ordinal));
+// The refutation is then the output's last checked request, so it must not leave its certificate.
+Failed("missing-proof", "A missing proof counted as a rejection", row =>
+    Text(row, "stage") == "proof selection" && Text(row, "error")!.Contains("not found", StringComparison.Ordinal) &&
+    row.GetProperty("refutation").GetProperty("status").GetString() == "verified");
 foreach (var variant in new[] { "missing-template", "unused-value" })
     Failed(variant, "A template that cannot be instantiated counted as a rejection", row =>
         Text(row, "stage") == "refutation template" && !requested.Contains(Text(row, "output")) &&

@@ -36,7 +36,7 @@ starts it with `Error:`. Each Lean error cites `file:line:column` in the file yo
 | `compile check` | A proof did not elaborate under `--check` | Fix the elaboration errors |
 | `proof outline` | `new-proof` cannot state a starting proof for this method's shape, or the proof path exists | Write the proof by hand from the closest example; choose a new path |
 
-`gates` reports these stages in a variant's result, in place of a printed `Stage:` line:
+`gates` also reports these stages, for a variant that fails before its proof is checked:
 
 | `stage` | Meaning | Next action |
 | --- | --- | --- |

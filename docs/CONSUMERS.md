@@ -101,7 +101,8 @@ directory's `bin/`, and `BaseIntermediateOutputPath`, `IntermediateOutputPath` a
 `Directory.Build.props` cannot override, and uses the project's `assembly` from `bin/`. Property
 names are MSBuild identifiers other than those paths, and values hold no `;`, `,`, `%` or quote.
 Global properties also reach referenced projects, so a project built this way should not
-reference other projects. A build failure fails every variant that uses it; the other variants
+reference other projects, and a multi-targeted project should select one framework with a
+`TargetFramework` property. A build failure fails every variant that uses it; the other variants
 still run. The build runs the consumer's project, which is executable code like its Lake package.
 
 `program` compares the method bodies of the variant's `Extracted.lean` with those of production's
