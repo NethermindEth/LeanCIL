@@ -362,6 +362,10 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
   [public proof surface](PROOFS.md#public-proof-surface).
 - A document declares at most one audience, `users` or `maintainers`, and closes every code
   fence. A Lean block's info string starts with exactly `lean`; another spelling of it fails.
+- No file that git tracks with the extension `.lean`, `.cs`, `.md`, `.toml`, `.json`, `.yml`,
+  `.txt`, `.tsv` or `.csv` holds a byte below 0x20 other than tab, line feed and carriage return;
+  the failure names the file, line and byte. A shell that expands a backtick escape writes such a
+  byte into a docstring, and git then treats the file as binary.
 
 ### Lean blocks
 
