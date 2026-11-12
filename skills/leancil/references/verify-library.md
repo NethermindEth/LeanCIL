@@ -103,7 +103,7 @@ entry uses that entry, otherwise a file. The result is written to
 verification hashes the sources, and is verified like any other proof.
 
 Each result goes to `<outputRoot>/<gate name>/<profile hash>/<variant name>`, where the gate's
-own assembly is the variant `production`. `gates` writes the batch manifest it runs to
+own assembly is the variant `production`. `gates` writes the requests of both its batches to
 `<outputRoot>/requests.json`. Each `--results` entry has the `verify-batch` fields of the
 variant's proof, with `status` the variant's verdict, plus `gate`, `profile`, `variant`,
 `build`, `extraction`, `program`, `refutation` (the refutation's `status`, `stage`, `error`

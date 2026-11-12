@@ -26,12 +26,14 @@ leancil gates manifest.json [--method name] [--profile name] [--changed path]...
 ```
 
 `leancil gates` builds, extracts and verifies an explicit catalog of methods, their proofs and
-regression variants in one run, verifying every proof as one [batch](#batch-verification).
+regression variants in one run. It verifies production and the variants not compared with it as
+one [batch](#batch-verification), then the variants whose statements are compared with production's
+as a second batch.
 Assembly, project, `proofRoot`, `outputRoot` and custom `@profile.json` paths are relative to the
 manifest; proof and template paths are relative to `proofRoot`. Each profile of each variant gets
 its own extraction and result in `<outputRoot>/<gate name>/<profile hash>/<variant name>`, where
-the gate's own assembly is the variant `production`. The generated batch manifest is
-`<outputRoot>/requests.json`.
+the gate's own assembly is the variant `production`. `<outputRoot>/requests.json` lists the
+requests of both batches; the statement each compared request is checked at is not part of it.
 
 ```json
 {
@@ -185,7 +187,8 @@ import; a structure or inductive type declared in production's own proof file ca
 compared. A failed comparison fails the variant at stage `statement identity`, removes a
 certifying variant's `verified.json`, and the result shows both statements. When production does
 not verify, its variants' statements are `unavailable` and they fail at that stage. `--check`
-audits no statement, so it compares none.
+audits no statement, so it compares none. `verified.json` records production's term, and a
+certifying variant's comparison, as `statementIdentity`.
 
 | Option | Meaning |
 | --- | --- |
