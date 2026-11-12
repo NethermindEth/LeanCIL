@@ -266,7 +266,7 @@ partial class Program
         var failed = results.Count(result => result.status == "failed");
         foreach (var (row, result) in selected.Zip(results).Where(pair => pair.Second.stage == StatementIdentityStage))
         {
-            // A certificate stands only for the statement production states.
+            // A certifying variant whose statement differs from production's keeps no certificate.
             if (row.Expect == "verified") File.Delete(Path.Combine(row.Output, "verified.json"));
             if (options.Json) continue;
             Console.WriteLine($"FAIL {row.Name} (stage: {StatementIdentityStage})");
@@ -328,7 +328,7 @@ partial class Program
                 throw new InvalidDataException("Invalid template " + name + ": expected a path and string values.");
             templates[name] = template;
         }
-        // A named profile is a file; ids, paths and --profile use its name, extraction its file.
+        // Results, generated paths and --profile use a named profile's name; extraction reads its file.
         var profileFiles = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (name, file) in manifest.profiles ?? [])
         {
@@ -541,7 +541,8 @@ partial class Program
         }
         catch (Exception error) when (error is IOException or InvalidDataException)
         {
-            File.Delete(generated.Path);
+            // A variant's directory may not exist yet; a stale file from an earlier run must not be checked.
+            if (File.Exists(generated.Path)) File.Delete(generated.Path);
             row.Fail(generated.Stage, error.Message);
         }
     }

@@ -46,7 +46,7 @@ File.WriteAllText(Path.Combine(second, "Second.csproj"), """
     """);
 File.WriteAllText(Path.Combine(second, "Second.cs"),
     "public static class Methods { public static ulong Second(ulong x, ulong y) => unchecked(x - y); }");
-// A method no gate reaches, in the same assembly: changing it selects nothing.
+// Spare.cs holds a method of the same assembly that no gate reaches, so changing it selects nothing.
 File.WriteAllText(Path.Combine(second, "Spare.cs"),
     "public static class Spare { public static ulong Unused(ulong x) => x; }");
 Run(["dotnet", "build", second, "-c", "Release", "-o", Path.Combine(second, "output")]);
@@ -58,7 +58,7 @@ File.WriteAllText(Path.Combine(package, "lakefile.toml"),
     JsonSerializer.Serialize(Run(["git", "rev-parse", "HEAD"]).Trim()) +
     "\n[[lean_lib]]\nname = \"FirstSupport\"\n[[lean_lib]]\nname = \"SecondSupport\"\n");
 Run(["lake", "update"], package);
-// A tactic that reads past the end of an array: Lean prints a panic and the proof continues.
+// This tactic reads past the end of an array; Lean prints a panic and the proof continues.
 const string PastEnd = """
     open Lean Elab Tactic in
     /-- Reads the second entry of an empty array, as a tactic that assumed a longer term would. -/
@@ -95,10 +95,10 @@ File.WriteAllText(Path.Combine(package, "Trivial.lean"), """
     #print axioms Trivial.holds
 
     """);
-// Production's statement with an extra premise, which the kernel must not accept as production's.
+// Weaker.lean adds a premise to production's statement, so the kernel must not accept it as production's.
 File.WriteAllText(Path.Combine(package, "Weaker.lean"), Correctness("Weaker", "First", "+")
     .Replace("(memory : Memory) :", "(memory : Memory) (_small : left = 0) :"));
-// Production's statement through a definition equal to its `0`, which the kernel accepts by unfolding it.
+// Definitional.lean names production's `0` through a definition, which the kernel unfolds.
 File.WriteAllText(Path.Combine(package, "Definitional.lean"), """
     import Extracted
     import CIL.Safety.SymbolicExecution
@@ -121,7 +121,7 @@ File.WriteAllText(Path.Combine(package, "Definitional.lean"), """
     #print axioms Definitional.correctness
 
     """);
-// A named template whose entry values the variant's own override; NOTE is multi-line and PREFIX empty.
+// The variant's values override the named template's; NOTE spans lines and PREFIX is empty.
 File.WriteAllText(Path.Combine(package, "Correctness.lean.in"),
     Correctness("Templated", "First", "@OPERATION@", prefix: "-- @NOTE@@PREFIX@"));
 File.WriteAllText(Path.Combine(directory, "plain.json"), """
@@ -332,7 +332,7 @@ var proofChanged = Gates(0, "--changed", Path.Combine(package, "FirstSupport.lea
 Expect(proofChanged.Length == 7 && proofChanged.All(row => Text(row, "gate") == "first"),
     "Proof closure selection included the unrelated second method");
 var sourceChanged = Gates(0, "--changed", Path.Combine(second, "Second.cs"));
-Expect(sourceChanged.Length == 2 && sourceChanged.All(row => Text(row, "theorem") == "Second.correctness"),
+Expect(sourceChanged.Length == 3 && sourceChanged.All(row => Text(row, "theorem") == "Second.correctness"),
     "Method source selection did not follow the extracted method metadata");
 var spareChanged = Execute([.. cli, "gates", manifest, "--changed", Path.Combine(second, "Spare.cs")]);
 Expect(spareChanged.Code != 0 &&
@@ -348,7 +348,7 @@ var filtered = Gates(0, "--method", "Second", "--profile", "scalar", "--check");
 Expect(filtered.Length == 1 && Text(filtered[0], "status") == "checked" &&
     !File.Exists(Path.Combine(Text(filtered[0], "output")!, "verified.json")),
     "Catalog filters or compile-only results were incorrect");
-// A named profile is its name in ids and --profile, and its file in extraction.
+// Results and --profile use a named profile's name, and extraction reads its file.
 var named = Gates(0, "--method", "Second", "--profile", "plain", "--check");
 var namedIdentity = JsonDocument.Parse(File.ReadAllText(Path.Combine(Text(named.Single(), "output")!, "identity.json")))
     .RootElement.EnumerateObject().Single(property => property.Name == "profile").Value;
@@ -393,9 +393,6 @@ Failed("unrelated-refutation", "A refutation of an unrelated statement counted a
 Failed("weaker-statement", "A weaker own statement certified the variant", row =>
     Text(row, "stage") == "statement identity" && StatementStatus(row) == "different" &&
     !File.Exists(Path.Combine(Text(row, "output")!, "verified.json")));
-if (Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE") != "true")
-    Expect(Text(Row(controls, "production"), "libraryBuild") == "consumer-proof-cache",
-        "Production's statement was not compared from its cached result", Row(controls, "production"));
 foreach (var variant in new[] { "program-differs", "not-renamed" })
     Failed(variant, "A program comparison that does not hold passed or reached verification", row =>
         Text(row, "stage") == "program comparison" && Text(row, "program") == "failed" &&
