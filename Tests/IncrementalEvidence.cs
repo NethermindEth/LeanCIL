@@ -145,3 +145,40 @@ foreach (var argument in new[] { "System.UInt32", "System.UInt64" })
             "in another order.");
 Console.WriteLine("PASS a generic helper's instantiations have identical components in extractions " +
     "that close it in opposite orders");
+
+// A string literal is a `#US` heap entry whose offset the image fixes by the order of the literals. A literal added to
+// an earlier method moves every later literal's offset, which changes the `ldstr` operand bytes of the methods that
+// use them and nothing in a method that uses none: that evidence stays byte-identical, and the evidence of a method
+// whose operand moved is refreshed with its new token, so its body bytes and carried user string differ.
+string BuildLiteral(string name, string earlyStatement)
+{
+    var assembly = Build(name, "Twice", "x + x");
+    File.WriteAllText(Path.Combine(directory, name, "Lit.cs"), $$"""
+        namespace Workspace;
+        public static class Lit
+        {
+            static void Use(string text) { }
+            public static ulong Early(ulong x) { {{earlyStatement}} return x + 1UL; }
+            public static ulong Late(ulong x) { Use("late"); return x; }
+            public static ulong Plain(ulong x) => x + 2UL;
+        }
+        """);
+    Run(["dotnet", "build", Path.Combine(directory, name, "Incremental.csproj"), "-c", "Release"]);
+    return assembly;
+}
+var withoutLiteral = BuildLiteral("NoEarlyLiteral", "");
+var withLiteral = BuildLiteral("EarlyLiteral", "Use(\"an earlier literal\");");
+var plainBefore = Component(Extracted(withoutLiteral, "Workspace.Lit::Plain(ulong)", "PlainBefore"), 0, "Plain");
+var plainAfter = Component(Extracted(withLiteral, "Workspace.Lit::Plain(ulong)", "PlainAfter"), 0, "Plain");
+if (plainBefore != plainAfter)
+    throw new InvalidOperationException(
+        "A literal added to another method changed the evidence of a method that has none.");
+var lateBefore = Component(Extracted(withoutLiteral, "Workspace.Lit::Late(ulong)", "LateBefore"), 0, "Late");
+var lateAfter = Component(Extracted(withLiteral, "Workspace.Lit::Late(ulong)", "LateAfter"), 0, "Late");
+if (lateBefore == lateAfter)
+    throw new InvalidOperationException(
+        "A literal added to an earlier method did not move the `ldstr` operand of a later one: the case tests nothing.");
+if (!Regex.IsMatch(lateAfter, @"(?m)^def method0Body :"))
+    throw new InvalidOperationException("The refreshed component of Late has no body definition.");
+Console.WriteLine("PASS a literal added to one method leaves a method without literals byte-identical and refreshes " +
+    "the evidence of a method whose ldstr operand moved");
