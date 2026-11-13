@@ -511,7 +511,10 @@ open Lean Elab Tactic Meta in
     stepping step reads the index its record holds for its local context, which the step's
     start built once; any other call builds it. -/
 private def equationCandidates (wanted : Expr) : TacticM (Array FVarId) := do
-  if let some record ← usableNormalNodes then return record.equations.candidates wanted
+  -- The index may still name a hypothesis that a store cleared.
+  if let some record ← usableNormalNodes then
+    let context ← getLCtx
+    return (record.equations.candidates wanted).filter context.contains
   return ((← ({} : EquationIndex).extend (← getLCtx)).candidates wanted)
 
 open Lean Elab Tactic Meta in

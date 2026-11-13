@@ -712,22 +712,29 @@ instruction takes up to four.
 The record holds one set of terms for each list of supplied facts the run steps with, so a loop
 walk whose instructions read different groups of facts keeps them all. Each set is keyed by the
 facts as elaborated, a lemma with implicit arguments or universe parameters included, and by the
-hypotheses in scope when it was made. A step that only adds hypotheses, as a store or a call
-does, keeps the set; a step that rewrites, renames or clears a hypothesis, a step that fails and
-the end of the tactic drop it. A fact that does not elaborate makes its step run without the
+hypotheses in scope when it was made. A step that only adds hypotheses, as a call does, keeps the
+set; a step that rewrites, renames or clears a hypothesis, which a snapshot or loop-frame store
+does when it supersedes a fact, a step that fails and the end of the tactic drop it. A fact that does not elaborate makes its step run without the
 record, which `trace.CIL.record` reports. A step run outside these tactics, such as a single
 `cil_checked_step`, keeps none.
 
 The simplifications of a step prove an equation theorem's side conditions from the simp set and
-never from a hypothesis, so a simplification gives the same result whatever else is in scope. The
-cost of a step does not grow with the number of hypotheses in scope: a run builds its
-simplification contexts once, indexes the equation hypotheses that `cil_lookup` tries by the head
-of their left side once, and runs the tactics of a step on goals of their own instead of inside
-`by` blocks of a term, which Lean would rebuild the whole local context for. A tactic of this
-library that adds hypotheses at each step, as the snapshot walks do, clears the facts that its new
-facts supersede, so the context does not grow with the number of steps either. On a body whose
-values grow, each step still unifies the step lemma with the whole state, which adds under ten
-percent to the cost of an instruction between a 256-instruction and a 1,024-instruction body.
+never from a hypothesis, so a simplification gives the same result whatever else is in scope. A
+run builds its simplification contexts once, indexes the equation hypotheses that `cil_lookup`
+tries by the head of their left side once, and runs the tactics of a step on goals of their own
+instead of inside `by` blocks of a term, which Lean would rebuild the whole local context for.
+Each step still compares the context with the one the record was made for and tries the equation
+hypotheses headed by a value that is not a variable, so the work of a step is linear in the
+hypotheses in scope with a small constant. The `stepping` suite bounds that constant at 100
+heartbeats per hypothesis per instruction and the cost per instruction between sizes at 1.35
+times.
+
+A snapshot or loop-frame walk adds the same hypotheses at every store: the store's own seven
+named hypotheses, or its memory, step and frame facts, and the memory variable, with a number of
+restated facts that does not depend on the stores before it. Each restated fact replaces the one
+at a memory the walk made, which the walk clears; a fact at the caller's memory stays. On a body
+whose values grow, each step also unifies the step lemma with the whole state, so the cost per
+instruction rises slowly with the program counter.
 
 To compare the cost of two versions of a proof, measure each with fresh Lean processes and
 prebuilt dependencies, alternating the runs serially on the same machine. Record elapsed time, CPU

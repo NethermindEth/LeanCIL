@@ -8,6 +8,10 @@ using System.Text.Json;
 
 const double WorkGrowthLimit = 1.35;
 const double TimeGrowthLimit = 2.0;
+// Most heartbeats one more hypothesis in scope may add to the cost of one instruction. A step that
+// unified a side condition with each hypothesis, or rebuilt the local context for each `by`
+// block, added several hundred; the limit is a quarter of the cost of an ordinary instruction.
+const double HypothesisCostLimit = 100.0;
 const int Repetitions = 3;
 const int LocalCount = 8;
 const int HypothesisBodyCycles = 30;
@@ -42,7 +46,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
     ("hypothesescontract", [16, 64, 256], false), ("hypothesesloop", [16, 64, 256], false),
-    ("snapshots", [10, 20, 40], false)
+    ("snapshots", [10, 20, 40, 80], false)
 };
 foreach (var (workload, sizes, full) in workloads)
     foreach (var requested in sizes)
@@ -75,6 +79,8 @@ foreach (var workload in rows.GroupBy(row => row.Workload))
     var measurements = workload.OrderBy(row => row.Size).ToArray();
     for (var index = 1; index < measurements.Length; index++)
         CheckGrowth(measurements[index - 1], measurements[index]);
+    if (workload.Key.StartsWith("hypotheses"))
+        CheckHypothesisCost(measurements[0], measurements[^1]);
 }
 Console.WriteLine("PASS stepping growth budgets for scalar, memory, accumulate, locals, contract, loop, " +
     "loopfacts, outcome, lemma, depth, hypotheses and snapshot bodies; results: " + reportPath);
@@ -169,8 +175,13 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         set_option maxHeartbeats 800000
         {{bodyDefinition}}
         """ + "\n";
+    // Odd hypotheses are equations headed by an operator and even ones by a local variable, which
+    // every lookup of an equation hypothesis must consider.
     var hypothesisLines = string.Join("\n", Enumerable.Range(1, hypotheses ? requested : 0).Select(index =>
-        $"  have hypothesis{index} : right + {index} = right + {index} := rfl"));
+        index % 2 == 1
+            ? $"  have hypothesis{index} : right + {index} = right + {index} := rfl"
+            : $"  obtain ⟨witness{index}, hypothesis{index}⟩ : ∃ witness : CIL.W64, " +
+              $"witness = right + {index} := ⟨_, rfl⟩"));
     var runningSum = $"left{string.Concat(Enumerable.Repeat(" + right", cycles))}";
     // The tactic that steps a hypotheses body; the setup measurement replaces it by `sorry`.
     string HypothesesStatement(bool setup) => workload switch
@@ -315,7 +326,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
               cil_checked_steps
             """
     };
-    // The snapshot lemmas rest on choice, as `LocalSnapshots.store_at` does.
+    // The snapshot lemmas rest on choice, as `LocalSnapshots.store_at` and `LocalSnapshots.load` do.
     var axioms = snapshots ? "propext, Classical.choice, Quot.sound" : "propext, Quot.sound";
     var Audit = $$"""
 
@@ -416,8 +427,28 @@ static void CheckGrowth(SteppingMeasurement shorter, SteppingMeasurement longer)
     }
 }
 
+// Heartbeats per hypothesis per instruction between the smallest and the largest number of
+// hypotheses, which the limit bounds absolutely so that a cost far under the ratio limit still shows.
+static void CheckHypothesisCost(SteppingMeasurement fewest, SteppingMeasurement most)
+{
+    var added = (double)(most.FrontendHeartbeats - fewest.FrontendHeartbeats) /
+        ((most.Size - fewest.Size) * most.Instructions);
+    if (added > HypothesisCostLimit)
+        throw new InvalidOperationException(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"{most.Workload}: each hypothesis in scope added {added:F0} heartbeats to each instruction " +
+            $"between {fewest.Size} and {most.Size} hypotheses; limit {HypothesisCostLimit:F0}."));
+}
+
 static void ScalingChecks()
 {
+    var few = new SteppingMeasurement("test", 62, 30, 0, 7_900_000, 1, 0, 0, 0, 0, [], 0) { Size = 16 };
+    CheckHypothesisCost(few, few with { Size = 256, FrontendHeartbeats = 7_900_000 + 240L * 62 * 40 });
+    var costly = few with { Size = 256, FrontendHeartbeats = 7_900_000 + 240L * 62 * 380 };
+    var rejected = false;
+    try { CheckHypothesisCost(few, costly); }
+    catch (InvalidOperationException) { rejected = true; }
+    if (!rejected)
+        throw new InvalidOperationException("The hypothesis limit accepted a cost of 380 heartbeats per hypothesis.");
     var baseline = new SteppingMeasurement("test", 16, 4, 0,
         16000, 1600, 32000, 160, 16, 200, [], 1);
     var linear = baseline with { Instructions = 64, FrontendHeartbeats = 64000, KernelHeartbeats = 6400,

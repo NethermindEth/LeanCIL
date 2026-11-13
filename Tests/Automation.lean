@@ -1284,7 +1284,8 @@ open Lean Elab Tactic in
 /-- Whether a record is active or kept. -/
 def recordIsLeft : TacticM Bool := do
   let record ← getNormalNodes
-  return record.driven || record.active || !record.nodes.isEmpty || record.equations.covered != 0 ||
+  return record.driven || record.active || !record.nodes.isEmpty ||
+    record.equations.covered != 0 ||
     !record.contexts.isEmpty || !record.others.isEmpty
 
 open Lean Elab Tactic in
@@ -1671,6 +1672,25 @@ example (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
   run_tac sameGoals (← `(tactic| cil_contract_steps (snapshots := snapshots) 2 []))
   cil_contract_steps (snapshots := snapshots) []
   exact rfl
+
+open Lean Elab Tactic Meta in
+/-- A loop walk restates a caller buffer fact at the memory a store made and clears the one it
+    restated, and keeps the caller's own fact, which the restatement does not give back. -/
+example (stored entry : Memory) (base : Reference) (x : BitVec 32)
+    (producedFact : Contents stored base 4 [x]) (callerFact : Contents entry base 4 [x]) :
+    True := by
+  run_tac withMainContext do
+    let count (memory : Name) : TacticM Nat := withMainContext do
+      let memory ← elabTerm (mkIdent memory) none
+      return (← getLCtx).foldl (init := 0) fun found declaration =>
+        if declaration.type.isAppOf ``Contents &&
+            (declaration.type.getAppArgs[0]? == some memory) then found + 1 else found
+    let carry : LoopCarried → Ident → TacticM (Option Term) := fun _ fact => pure (some fact)
+    for memory in [`stored, `entry] do
+      loopCarryFacts (← elabTerm (mkIdent memory) none) carry
+    unless (← count `stored) == 1 do throwError "the fact at the walk's memory was not replaced"
+    unless (← count `entry) == 2 do throwError "the caller's fact was cleared"
+  trivial
 
 open Lean Elab Tactic Meta in
 /-- A step that runs out of heartbeats leaves no record behind. The exception is a runtime

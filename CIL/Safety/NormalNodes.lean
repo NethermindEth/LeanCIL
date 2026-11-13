@@ -61,6 +61,18 @@ def contextExtendedBy (earlier current : LocalContext) : Bool := Id.run do
     | _, _ => return false
   return true
 
+/-- Whether every hypothesis of `earlier` that `current` still holds is unchanged and in the same
+    position, so that an index of `earlier`'s equations is right for `current` once the entries of
+    cleared hypotheses are skipped. A store that clears the facts it supersedes keeps it true. -/
+def contextKeeps (earlier current : LocalContext) : Bool := Id.run do
+  if current.numIndices < earlier.numIndices then return false
+  for position in [:earlier.numIndices] do
+    match earlier.decls[position]!, current.decls[position]! with
+    | _, none => pure ()
+    | some old, some new => unless sameDeclaration old new do return false
+    | none, some _ => return false
+  return true
+
 /-- The head of the left side of the equation `type` states, under any quantifiers. -/
 def equationHead? : Expr → Option Expr
   | .forallE _ _ body _ => equationHead? body
@@ -76,7 +88,8 @@ structure EquationIndex where
   all : Array (Nat × FVarId) := #[]
   /-- The equation hypotheses whose left side is headed by the constant. -/
   byHead : Std.HashMap Name (Array (Nat × FVarId)) := {}
-  /-- The equation hypotheses whose left side has no constant head, which may unify with any. -/
+  /-- The equation hypotheses whose left side has no constant head and may unify with a lookup
+      headed by a constant: not those headed by a variable without a value. -/
   anyHead : Array (Nat × FVarId) := #[]
 
 instance : Inhabited EquationIndex := ⟨{}⟩
@@ -86,8 +99,8 @@ def EquationIndex.extend (index : EquationIndex) (context : LocalContext) :
     MetaM EquationIndex := do
   if index.covered == context.numIndices then return index
   let mut index := index
-  for declaration in context.decls.toArray.extract index.covered context.numIndices do
-    let some declaration := declaration | continue
+  for position in [index.covered:context.numIndices] do
+    let some declaration := context.decls[position]! | continue
     if declaration.isImplementationDetail then continue
     let some head := equationHead? (← instantiateMVars declaration.type) | continue
     let entry := (declaration.index, declaration.fvarId)
@@ -96,7 +109,15 @@ def EquationIndex.extend (index : EquationIndex) (context : LocalContext) :
     | some name =>
       index := { index with
         byHead := index.byHead.insert name ((index.byHead.getD name #[]).push entry) }
-    | none => index := { index with anyHead := index.anyHead.push entry }
+    | none =>
+      -- A variable without a value is rigid, so a lookup headed by a constant never unifies with
+      -- it; only `all` offers it, for a lookup that is itself headed by a variable.
+      let rigid : Bool := match head with
+        | .fvar headId => match context.find? headId with
+          | some owner => owner.value?.isNone
+          | none => false
+        | _ => false
+      if !rigid then index := { index with anyHead := index.anyHead.push entry }
   return { index with covered := context.numIndices }
 
 /-- The equation hypotheses that can state a lookup whose left side has head `wanted`, in
@@ -170,7 +191,7 @@ def setNormalNodes (record : NormalNodes) : CoreM Unit :=
     and the record was made for this context. A record from another goal or declaration is
     never used. -/
 def NormalNodes.usable (record : NormalNodes) (context : LocalContext) : Bool :=
-  record.active && record.context == contextId context
+  record.active && record.context == contextId context && contextExtendedBy record.locals context
 
 /-- Whether stepping drivers use the record. Turning it off makes every simplification visit the
     whole goal, which leaves the same goals and costs more per step the longer the run. -/
@@ -329,7 +350,7 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
   let shared := currentKept && index == some 0 && outer.count < normalNodeLimit
   -- Looking the equation hypotheses up is a failed attempt's work, which a backtrack discards,
   -- so the step starts with them.
-  let known := if contextExtendedBy outer.equationLocals localContext then outer.equations else {}
+  let known := if contextKeeps outer.equationLocals localContext then outer.equations else {}
   let equations ← known.extend localContext
   let current : NormalNodes :=
     { selected with
@@ -348,7 +369,8 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
   return result
 
 /-- `simp only [arguments]` on the goal that leaves alone what the running stepping driver
-    already visited and left unchanged. Outside a step it is `simp only`. -/
+    already visited and left unchanged. It discharges side conditions with `steppingDischarge?`,
+    so a hypothesis outside `arguments` never proves one. -/
 syntax (name := cilSimpOnly) "cil_simp_only " " ["
   withoutPosition((Lean.Parser.Tactic.simpStar <|> Lean.Parser.Tactic.simpErase <|>
     Lean.Parser.Tactic.simpLemma),*,?) "]" : tactic
@@ -356,19 +378,19 @@ syntax (name := cilSimpOnly) "cil_simp_only " " ["
 /-- Simp's default discharger without its search of the hypotheses for a side condition of an
     equation theorem. Each hypothesis tried costs a unification, so the default cost grows with
     the hypotheses in scope; this one decides a side condition by the simp set alone, and the
-    result of a simplification no longer depends on the hypotheses outside it. -/
-def steppingDischarge? (e : Expr) : Simp.SimpM (Option Expr) := do
-  let e := e.cleanupAnnotations
-  if Simp.isEqnThmHypothesis e then
-    if let some proof ← Simp.dischargeEqnThmHypothesis? e then return some proof
-  let result ← Simp.simp e
-  if let some proof ← Simp.dischargeRfl result.expr then
-    return some (mkApp4 (mkConst ``Eq.mpr [Level.zero]) e result.expr (← result.getProof) proof)
-  else if result.expr.isTrue then
-    return some (← mkOfEqTrue (← result.getProof))
+    result of a simplification does not depend on the hypotheses outside it. -/
+def steppingDischarge? (condition : Expr) : Simp.SimpM (Option Expr) := do
+  let condition := condition.cleanupAnnotations
+  if Simp.isEqnThmHypothesis condition then
+    if let some proof ← Simp.dischargeEqnThmHypothesis? condition then return some proof
+  let simplified ← Simp.simp condition
+  if let some proof ← Simp.dischargeRfl simplified.expr then
+    return some (mkApp4 (mkConst ``Eq.mpr [Level.zero]) condition simplified.expr
+      (← simplified.getProof) proof)
+  else if simplified.expr.isTrue then
+    return some (← mkOfEqTrue (← simplified.getProof))
   else
     return none
-
 /-- Simplify `target` with `ctx`. When the record is usable, a term the simplification `name`
     left unchanged in an earlier step is returned as it is, and the terms this call visited and
     left unchanged are recorded. -/

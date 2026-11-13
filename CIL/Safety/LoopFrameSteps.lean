@@ -143,19 +143,40 @@ def memoryMatches (left right : Expr) : MetaM Bool := do
     if !leftDeclaration.isLet && !rightDeclaration.isLet then return false
   withNewMCtxDepth (isDefEq left right)
 
-/-- The declarations of `context` that a user name reaches: the last declaration of each name, in
-    context order, found in one pass. -/
-def accessibleDeclarations (context : LocalContext) : Array LocalDecl := Id.run do
+/-- Whether `memory` is one a stepping walk produced, a variable that a store names `stored`,
+    `stored_1`, `storedLocal` and so on. A fact at any other memory belongs to the caller. -/
+def producedByWalk (memory : Expr) : MetaM Bool := do
+  let .fvar produced := memory | return false
+  return match (← produced.getDecl).userName.eraseMacroScopes with
+    | .str .anonymous text => text.startsWith "stored"
+    | _ => false
+
+/-- Where the facts about `memory` can start in the context: at the variable a walk made, since
+    every fact about it was introduced after it, and at the start for any other memory. A
+    store that reads only the facts from there reads a number that does not grow with the walk. -/
+def memoryWindowStart (memory : Expr) : MetaM Nat := do
+  if ← producedByWalk memory then
+    if let .fvar produced := memory then return (← produced.getDecl).index
+  return 0
+
+/-- The declarations of `context` from position `start` on, without the implementation details. -/
+def declarationsFrom (context : LocalContext) (start : Nat) : Array LocalDecl := Id.run do
+  let mut found := #[]
+  for position in [start:context.numIndices] do
+    if let some declaration := context.decls[position]! then
+      unless declaration.isImplementationDetail do found := found.push declaration
+  return found
+
+/-- The declarations of `context` from position `start` that a user name reaches: the last
+    declaration of each name, in context order, found in one pass. -/
+def accessibleDeclarations (context : LocalContext) (start : Nat := 0) : Array LocalDecl :=
+  Id.run do
+  let declarations := declarationsFrom context start
   let mut latest : Std.HashMap Name FVarId := {}
-  for declaration in context do
-    if declaration.isImplementationDetail then continue
+  for declaration in declarations do
     latest := latest.insert declaration.userName declaration.fvarId
-  let mut reached := #[]
-  for declaration in context do
-    if declaration.isImplementationDetail then continue
-    if latest[declaration.userName]? == some declaration.fvarId then
-      reached := reached.push declaration
-  return reached
+  return declarations.filter fun declaration =>
+    latest[declaration.userName]? == some declaration.fvarId
 
 /-- Re-state each named hypothesis about a caller buffer or class instance at `memory` through
     `carry`, a term from its predicate and name, under the same name; a fact `carry` gives nothing
@@ -164,7 +185,7 @@ def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (O
     (superseded : Option (IO.Ref (Array FVarId)) := none) : TacticM Unit := do
   let carried ← withMainContext do
     let mut found : Array (LoopCarried × LocalDecl) := #[]
-    for declaration in accessibleDeclarations (← getLCtx) do
+    for declaration in accessibleDeclarations (← getLCtx) (← memoryWindowStart memory) do
       if declaration.userName.hasMacroScopes then continue
       let type := (← instantiateMVars declaration.type).consumeMData
       let some head := type.getAppFn.constName? | continue
@@ -174,17 +195,20 @@ def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (O
       unless ← memoryMatches carriedMemory memory do continue
       found := found.push (carried, declaration)
     return found
-  for (head, old) in carried do
-    let some term ← carry head (mkIdent old.userName) | continue
+  let produced ← producedByWalk memory
+  for (head, earlier) in carried do
+    let some term ← carry head (mkIdent earlier.userName) | continue
     let saved ← saveState
     -- A failed side proof inside `term` is logged, not thrown; `cil_strict` makes it fail here.
     try
-      evalTactic (← `(tactic| cil_strict cil_have_by $(mkIdent old.userName):ident := $term))
-      -- The restated fact has the name, so the one it restates is out of reach; clearing it keeps
-      -- the context from growing with each store, now or when the caller clears `superseded`.
-      match superseded with
-      | some pending => pending.modify (·.push old.fvarId)
-      | none => replaceMainGoal [← (← getMainGoal).tryClear old.fvarId]
+      evalTactic (← `(tactic| cil_strict cil_have_by $(mkIdent earlier.userName):ident := $term))
+      -- A fact at a memory the walk made is out of reach once restated, and clearing it keeps the
+      -- context from growing with each store. A fact at the caller's memory stays, since the
+      -- restatement does not give it back.
+      if produced then
+        match superseded with
+        | some pending => pending.modify (·.push earlier.fvarId)
+        | none => replaceMainGoal [← (← getMainGoal).tryClear earlier.fvarId]
     catch _ => saved.restore
 
 /-- Carry the caller-buffer facts at `memory` across `below`, a store that keeps everything below

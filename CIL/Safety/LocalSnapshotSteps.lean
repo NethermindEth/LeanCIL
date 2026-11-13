@@ -104,23 +104,15 @@ initialize Lean.registerTraceClass `CIL.snapshots
 /-- The reader the snapshot forms name when a term does not have the shape they read. -/
 private def snapshotReader : String := "snapshot stepping (cil_checked_steps, cil_contract_steps)"
 
-/-- What one store keeps while it restates facts at the memory it produces: the statements of the
-    hypotheses in scope, found once by one pass over the context, so that restating a fact asks
-    whether it is already there instead of scanning the context again, and the hypotheses the
+/-- What one store keeps while it restates facts at the memory it produces: the hypotheses the
     restated facts supersede, cleared together by one pass at the end of the store. -/
 private structure SnapshotScope where
-  /-- The first hypothesis that states each type. -/
-  known : IO.Ref (Std.HashMap Expr FVarId)
   /-- The hypotheses to clear once the store is done. -/
   superseded : IO.Ref (Array FVarId)
 
 /-- The scope of a store that starts now. -/
-private def SnapshotScope.start : TacticM SnapshotScope := withMainContext do
-  let mut known : Std.HashMap Expr FVarId := {}
-  for declaration in ← getLCtx do
-    unless declaration.isImplementationDetail || known.contains declaration.type do
-      known := known.insert declaration.type declaration.fvarId
-  return { known := ← IO.mkRef known, superseded := ← IO.mkRef #[] }
+private def SnapshotScope.start : TacticM SnapshotScope :=
+  return { superseded := ← IO.mkRef #[] }
 
 /-- Clear the superseded hypotheses that nothing else mentions, in one pass over the context. A
     hypothesis a remaining hypothesis or the goal mentions stays. -/
@@ -133,9 +125,18 @@ private def SnapshotScope.clearSuperseded (scope : SnapshotScope) : TacticM Unit
   let mentions (expression : Expr) : Array FVarId :=
     (CollectFVars.main expression {}).fvarIds
   for free in mentions target do doomed := doomed.erase free
-  for declaration in ← getLCtx do
+  -- Latest first, so a hypothesis that stays keeps what it mentions, which may itself be doomed.
+  for declaration in (← getLCtx).decls.toArray.reverse do
+    let some declaration := declaration | continue
     if declaration.isImplementationDetail || doomed.contains declaration.fvarId then continue
-    for free in mentions (← instantiateMVars declaration.type) do doomed := doomed.erase free
+    -- Looking for a doomed variable allocates nothing; the variables are collected only on a hit.
+    let type ← instantiateMVars declaration.type
+    if type.hasAnyFVar doomed.contains then
+      for free in mentions type do doomed := doomed.erase free
+    if let some value := declaration.value? then
+      let value ← instantiateMVars value
+      if value.hasAnyFVar doomed.contains then
+        for free in mentions value do doomed := doomed.erase free
   let declaration ← goal.getDecl
   let context := doomed.fold (·.erase ·) declaration.lctx
   let replacement ← mkFreshExprMVarAt context declaration.localInstances target
@@ -144,21 +145,29 @@ private def SnapshotScope.clearSuperseded (scope : SnapshotScope) : TacticM Unit
   replaceMainGoal [replacement.mvarId!]
 
 /-- Whether `left` and `right` may still be made equal by assigning metavariables: false when
-    they are applications of one constant to arguments that differ at two distinct local
-    variables. Unification would settle these only after unfolding what mentions them, which
-    costs more with every memory a walk has passed. -/
-private partial def mayUnify (left right : Expr) : Bool :=
-  if left == right then true
-  else match left, right with
-    | .fvar _, .fvar _ => false
-    | .app .., .app .. =>
-      let function := left.getAppFn
-      if function.isConst && function == right.getAppFn &&
-          left.getAppNumArgs == right.getAppNumArgs then
-        (left.getAppArgs.zip right.getAppArgs).all fun (leftArgument, rightArgument) =>
-          mayUnify leftArgument rightArgument
-      else true
-    | _, _ => true
+    they are statements headed by different predicates, or applications of one constant to
+    arguments that differ at two distinct memory variables. Unification would settle these only
+    after unfolding what mentions them, which costs more with every memory a walk has passed. -/
+private partial def mayUnify (left right : Expr) (statement := false) : MetaM Bool := do
+  if left == right then return true
+  match left, right with
+  | .fvar _, .fvar _ =>
+    -- Variables of other types, such as two proofs of one statement, may be equal.
+    if (← instantiateMVars (← inferType left)).isConstOf ``Memory then memoryMatches left right
+    else return true
+  | .app .., .app .. =>
+    let function := left.getAppFn
+    if function.isConst && function == right.getAppFn &&
+        left.getAppNumArgs == right.getAppNumArgs then
+      -- Reading the arguments in place allocates nothing, and the check runs on every hypothesis.
+      for position in [:left.getAppNumArgs] do
+        unless ← mayUnify (left.getArg! position) (right.getArg! position) do return false
+      return true
+    else
+      -- Two statements headed by different predicates are not the same statement, whereas two
+      -- terms with different heads, such as `localWidth kind` and `16`, may be equal.
+      return !(statement && function.isConst && right.getAppFn.isConst)
+  | _, _ => return true
 
 /-- `assumption` that tries only the hypotheses `mayUnify` leaves, since unifying a statement
     about one memory with a hypothesis about another unfolds the accesses and writes in both,
@@ -166,10 +175,11 @@ private partial def mayUnify (left right : Expr) : Bool :=
 elab "cil_cheap_assumption" : tactic => withMainContext do
   let goal ← getMainGoal
   let type ← instantiateMVars (← goal.getType)
-  for declaration in (← getLCtx).decls.toArray.reverse do
-    let some declaration := declaration | continue
+  let context ← getLCtx
+  for step in [:context.numIndices] do
+    let some declaration := context.decls[context.numIndices - 1 - step]! | continue
     if declaration.isImplementationDetail then continue
-    unless mayUnify type (← instantiateMVars declaration.type) do continue
+    unless ← mayUnify type (← instantiateMVars declaration.type) (statement := true) do continue
     if ← isDefEq type declaration.type then
       goal.assign declaration.toExpr
       replaceMainGoal []
@@ -201,18 +211,20 @@ private def assertSnapshotFact (scope : SnapshotScope) (base : Name) (proof : Ex
   let type ← inferType proof
   let named := named && !base.hasMacroScopes
   unless named do
-    if let some present := (← scope.known.get)[type]? then
-      return ← Term.exprToSyntax (.fvar present)
+    -- A scan that compares types allocates nothing, so it costs no heartbeats however long it is.
+    let present? := (← getLCtx).findDeclRev? fun declaration =>
+      if !declaration.isImplementationDetail && declaration.type == type then some declaration
+      else none
+    if let some present := present? then return ← Term.exprToSyntax present.toExpr
   let name ← if named then pure base else mkFreshUserName base
-  let (fact, goal) ← (← (← getMainGoal).assert name type proof).intro1P
+  let (_, goal) ← (← (← getMainGoal).assert name type proof).intro1P
   replaceMainGoal [goal]
-  scope.known.modify fun known => if known.contains type then known else known.insert type fact
   return mkIdent name
 
 /-- Whether a hypothesis of this name is one a store made for itself, so that no supplied fact
     names it and it can be cleared once a later memory supersedes it. -/
 private def isSnapshotOwnName (name : Name) : Bool :=
-  [`snapshotAccess, `snapshotRetained, `snapshotHomes, `snapshotHome, `snapshotSlot, `snapshotBound,
+  [`snapshotAccess, `snapshotRetained, `snapshotHomes, `snapshotSlot, `snapshotBound,
     `snapshotReady].contains name.eraseMacroScopes
 
 /-- Whether `reference` is the home a store found for itself, a variable under the name
@@ -232,8 +244,7 @@ private def preserveSnapshotAccess (scope : SnapshotScope) (written : Term) :
     TacticM Unit := withMainContext do
   let writeProof ← Term.elabTerm written none
   let before ← snapshotWrittenMemory writeProof
-  let declarations := (← getLCtx).decls.toArray.filterMap id
-  for declaration in declarations do
+  for declaration in declarationsFrom (← getLCtx) (← memoryWindowStart before) do
     let some (_, accessTerm, _) := (← instantiateMVars declaration.type).consumeMData.eq?
       | continue
     unless accessTerm.isAppOf ``access do continue
@@ -266,17 +277,11 @@ private def isSnapshotStoreName : Name → Bool
   | _ => false
 
 /-- Whether the hypothesis `name` may be cleared when a restatement supersedes it: a fact the
-    store made for itself, or a named fact the restatement shadows, except a store's evidence. -/
-private def isSupersededBy (name : Name) : Bool :=
-  isSnapshotOwnName name || (!name.hasMacroScopes && !isSnapshotStoreName name)
-
-/-- Whether `memory` is the memory a store of this walk produced, a variable under a store's
-    name `storedLocal`, `storedLocal_1`, and so on. -/
-private def producedByStore (memory : Expr) : MetaM Bool := do
-  let .fvar produced := memory | return false
-  return match (← produced.getDecl).userName with
-    | .str .anonymous text => text == "storedLocal" || text.startsWith "storedLocal_"
-    | _ => false
+    store made for itself, or, when it is stated at a memory the walk produced, a named fact the
+    restatement shadows, except a store's evidence. A fact at the caller's memory stays. -/
+private def isSupersededBy (producedMemory : Bool) (name : Name) : Bool :=
+  isSnapshotOwnName name ||
+    (producedMemory && !name.hasMacroScopes && !isSnapshotStoreName name)
 
 /-- Retain only generic facts whose exact current memory is the source of this write, each
     restated after the write under the name it has. One store's own evidence keeps its name
@@ -286,8 +291,16 @@ private def preserveSnapshotFacts (scope : SnapshotScope) (written below : Term)
   let writeProof ← Term.elabTerm written none
   let belowProof ← Term.elabTerm below none
   let before ← snapshotWrittenMemory writeProof
-  let declarations := (← getLCtx).decls.toArray.filterMap id
-  for declaration in declarations do
+  let producedMemory ← producedByWalk before
+  -- The memories homes are stated at, whose chains to the current memory a later store reads.
+  -- Looking for them allocates only for a hit.
+  let homeMemories := (← getLCtx).foldl (init := #[]) fun found declaration =>
+    let type := declaration.type
+    if !declaration.isImplementationDetail &&
+        (type.isAppOfArity ``CompleteWritableHomes 4 || type.isAppOfArity ``NumericHomes 4) then
+      found.push type.appFn!.appFn!.appFn!.appArg!
+    else found
+  for declaration in declarationsFrom (← getLCtx) (← memoryWindowStart before) do
     let saved ← saveState
     try
       let type := (← instantiateMVars declaration.type).consumeMData
@@ -301,12 +314,14 @@ private def preserveSnapshotFacts (scope : SnapshotScope) (written below : Term)
         else none
       let some position := aboutMemory? | continue
       unless ← memoryMatches (← argumentAt snapshotReader type position) before do continue
-      -- A chain from a memory an earlier store produced adds one fact per store and no
-      -- consumer reads it; only the chains from memories the caller supplied are carried.
-      if position == 2 && (← producedByStore (← argumentAt snapshotReader type 1)) then
-        if isSupersededBy declaration.userName then
-          scope.superseded.modify (·.push declaration.fvarId)
-        continue
+      -- A chain from a memory an earlier store produced adds one fact per store, and a store reads
+      -- it only when homes are stated at that memory; the others are not carried.
+      if position == 2 then
+        let source ← argumentAt snapshotReader type 1
+        if (← producedByWalk source) && !homeMemories.contains source then
+          if isSupersededBy producedMemory declaration.userName then
+            scope.superseded.modify (·.push declaration.fvarId)
+          continue
       let proof ← if type.isAppOfArity ``CompleteWritableHomes 4 then
           mkAppM ``CompleteWritableHomes.after_write #[declaration.toExpr, writeProof]
         else if type.isAppOfArity ``ValidCall 3 then
@@ -321,7 +336,7 @@ private def preserveSnapshotFacts (scope : SnapshotScope) (written below : Term)
         (named := !isSnapshotStoreName declaration.userName)
       -- The fact now stated at the new memory supersedes this one, except a store's own evidence,
       -- which keeps its name; clearing the rest keeps the context from growing with each store.
-      if isSupersededBy declaration.userName then
+      if isSupersededBy producedMemory declaration.userName then
         scope.superseded.modify (·.push declaration.fvarId)
     catch error =>
       saved.restore
@@ -347,19 +362,22 @@ private def carrySnapshotReads (scope : SnapshotScope) (memory : Expr) (below : 
     TacticM Unit := do
   let carried ← withMainContext do
     let mut found : Array (LocalDecl × Term) := #[]
-    for declaration in accessibleDeclarations (← getLCtx) do
+    for declaration in accessibleDeclarations (← getLCtx) (← memoryWindowStart memory) do
       if declaration.userName.hasMacroScopes then continue
       let fact := mkIdent declaration.userName
       let type ← instantiateMVars declaration.type
       if let some transport ← snapshotCarried? memory below fact type then
         found := found.push (declaration, transport)
     return found
-  for (old, transport) in carried do
+  let produced ← producedByWalk memory
+  for (earlier, transport) in carried do
     let saved ← saveState
     try
-      evalTactic (← `(tactic| cil_strict cil_have_by $(mkIdent old.userName):ident := $transport))
-      -- The restated fact has the name, so the one it restates is out of reach and is cleared.
-      scope.superseded.modify (·.push old.fvarId)
+      evalTactic (← `(tactic| cil_strict cil_have_by $(mkIdent earlier.userName):ident :=
+        $transport))
+      -- The restated fact has the name, so one at a memory the walk made is out of reach and is
+      -- cleared; one at the caller's memory stays.
+      if produced then scope.superseded.modify (·.push earlier.fvarId)
     catch _ => saved.restore
 
 /-- The slots a frame's locals list before `slots`, with the layout equation that states
@@ -388,7 +406,7 @@ private def snapshotLeadingSlots (locals slots : Expr) :
 /-- Evidence in scope that `current` retains the access of `entered`, as `AccessBelow`. -/
 private def snapshotRetainedAccess (scope : SnapshotScope) (entered current : Expr) :
     TacticM Term := withMainContext do
-  let declarations := (← getLCtx).decls.toArray.filterMap id
+  let declarations := declarationsFrom (← getLCtx) (← memoryWindowStart entered)
   let linked (head : Name) : MetaM (Option Expr) := do
     for declaration in declarations.reverse do
       let type := (← instantiateMVars declaration.type).consumeMData
@@ -403,6 +421,34 @@ private def snapshotRetainedAccess (scope : SnapshotScope) (entered current : Ex
   -- Stated as `AccessBelow`, the link follows each later store under one watermark.
   assertSnapshotFact scope `snapshotRetained (← mkAppM ``MemoryBelow.accessBelow #[preserved])
 
+/-- Introduces the conjuncts of `proof`, a chain `a ∧ b ∧ c`, as hypotheses under `names` by
+    projection. `obtain` splits each conjunct by cases, which searches the whole context for
+    the hypotheses that depend on it. -/
+private def introConjuncts (proof : Expr) (names : Array Ident) : TacticM Unit :=
+    withMainContext do
+  let mut rest := proof
+  for position in [:names.size] do
+    let last := position + 1 == names.size
+    let component ← if last then pure rest else mkAppM ``And.left #[rest]
+    let name := names[position]!
+    let (_, goal) ← (← (← getMainGoal).assert name.getId (← inferType component) component).intro1P
+    replaceMainGoal [goal]
+    unless last do rest ← mkAppM ``And.right #[rest]
+
+/-- Introduces the witness and the conjuncts of the hypothesis `located : ∃ witness, a ∧ b ∧ c`,
+    as `obtain` does, without its search of the whole context for hypotheses that depend on the
+    case split. The hypotheses that only carry the split are left for `scope` to clear. -/
+private def introWitness (scope : SnapshotScope) (located witness : Ident)
+    (conjuncts : Array Ident) : TacticM Unit := do
+  let rest := mkIdent (← mkFreshUserName `snapshotRest)
+  evalTactic (← `(tactic| refine Exists.elim $located (fun $witness $rest => ?_)))
+  let some carried := (← withMainContext getLCtx).findFromUserName? rest.getId
+    | throwError "{snapshotReader}: the store's evidence was not introduced"
+  introConjuncts carried.toExpr conjuncts
+  scope.superseded.modify (·.push carried.fvarId)
+  withMainContext do
+    if let some source := (← getLCtx).findFromUserName? located.getId then
+      scope.superseded.modify (·.push source.fvarId)
 /-- Close a home's kind lookup `kinds[index]? = some _` with a supplied fact that states it, or
     that states the numeric spec at that index. -/
 syntax "cil_snapshot_kind" "[" term,* "]" : tactic
@@ -432,8 +478,15 @@ private def prepareSnapshotHome (scope : SnapshotScope) (memory frame index : Ex
       if let some declaration := (← getLCtx).findFromUserName? name.getId then
         scope.superseded.modify (·.push declaration.fvarId)
   let locals ← mkAppM ``Frame.locals #[frame]
-  let declarations := (← getLCtx).decls.toArray.filterMap id
-  for declaration in declarations.reverse do
+  let context ← getLCtx
+  for step in [:context.numIndices] do
+    let some declaration := context.decls[context.numIndices - 1 - step]! | continue
+    if declaration.isImplementationDetail then continue
+    -- A hypothesis that is not about homes, and has no metavariable to instantiate, is skipped
+    -- without allocating, since the context holds one for each store.
+    let stated := declaration.type.consumeMData
+    unless declaration.type.hasMVar || stated.isAppOfArity ``NumericHomes 4 ||
+        stated.isAppOfArity ``CompleteWritableHomes 4 do continue
     let saved ← saveState
     try
       let type := (← instantiateMVars declaration.type).consumeMData
@@ -455,10 +508,9 @@ private def prepareSnapshotHome (scope : SnapshotScope) (memory frame index : Ex
         let homes ← assertSnapshotFact scope `snapshotHomes proof
         let index ← Term.exprToSyntax index
         let located := mkIdent (← mkFreshUserName `snapshotLocated)
-        evalTactic (← `(tactic| (
-          cil_have_by $located := CompleteWritableHomes.home_at $homes $index _
-            (by first | rfl | cil_snapshot_kind [$facts,*])
-          obtain ⟨$home, $slot, $bound, $ready⟩ := $located)))
+        evalTactic (← `(tactic| cil_have_by $located := CompleteWritableHomes.home_at $homes
+          $index _ (by first | rfl | cil_snapshot_kind [$facts,*])))
+        introWitness scope located home #[slot, bound, ready]
         supersede #[slot, bound, ready]
         return
       let (skipped, layout) ← snapshotLeadingSlots locals slots
@@ -494,12 +546,11 @@ private def prepareSnapshotHome (scope : SnapshotScope) (memory frame index : Ex
       let localsTerm ← Term.exprToSyntax locals
       let raw := mkIdent (← mkFreshUserName `snapshotSlot)
       let located := mkIdent (← mkFreshUserName `snapshotLocated)
-      evalTactic (← `(tactic| cil_strict (
-        cil_have_by $located := CompleteWritableHomes.home_retained $homes
-          (by cil_cheap_assumption) $retained
-          (by first | exact Nat.le_refl _ | cil_cheap_assumption | omega) [$skippedTerms,*] $inner _
-          (by first | rfl | cil_snapshot_kind [$facts,*])
-        obtain ⟨$home, $raw, $bound, $ready⟩ := $located)))
+      evalTactic (← `(tactic| cil_strict cil_have_by $located :=
+        CompleteWritableHomes.home_retained $homes (by cil_cheap_assumption) $retained
+          (by first | exact Nat.le_refl _ | cil_cheap_assumption | omega) [$skippedTerms,*]
+          $inner _ (by first | rfl | cil_snapshot_kind [$facts,*])))
+      introWitness scope located home #[raw, bound, ready]
       let kind ← withMainContext do
         let found ← instantiateMVars (← inferType (← Term.elabTerm raw none))
         let some (_, _, selected) := found.eq? | throwError "Unexpected home lookup"
@@ -548,19 +599,6 @@ private structure SnapshotStored where
   source : Expr
   /-- The name of the store's `MemoryBelow` evidence from `source`. -/
   below : Ident
-
-/-- Introduces the conjuncts of `proof`, a chain `a ∧ b ∧ c`, as hypotheses under `names` by
-    projection. `obtain` splits each conjunct by cases, which searches the whole context for
-    the hypotheses that depend on it. -/
-private def introConjuncts (proof : Expr) (names : Array Ident) : TacticM Unit := withMainContext do
-  let mut rest := proof
-  for position in [:names.size] do
-    let last := position + 1 == names.size
-    let component ← if last then pure rest else mkAppM ``And.left #[rest]
-    let name := names[position]!
-    let (_, goal) ← (← (← getMainGoal).assert name.getId (← inferType component) component).intro1P
-    replaceMainGoal [goal]
-    unless last do rest ← mkAppM ``And.right #[rest]
 
 /-- Store one numeric local and return its updated snapshot collection with the step taken.
     With `supplied`, the step is the one `facts` prove, to the memory they state, and the
@@ -638,13 +676,10 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
       introConjuncts proof #[updated, formed, below, retained, written]
       pure known
     | none =>
-      -- The conjuncts follow the memory the store produced, which is split off by cases.
-      let conjuncts := mkIdent (← mkFreshUserName `snapshotStored)
-      evalTactic (← `(tactic| obtain ⟨$after, $conjuncts⟩ := $(← Term.exprToSyntax proof)))
-      let some remaining := (← withMainContext getLCtx).findFromUserName? conjuncts.getId
-        | throwError "{snapshotReader}: the store's evidence was not introduced"
-      introConjuncts remaining.toExpr #[taken, updated, formed, below, retained, written]
-      scope.superseded.modify (·.push remaining.fvarId)
+      -- The conjuncts follow the memory the store produced.
+      let located := mkIdent (← mkFreshUserName `snapshotStored)
+      evalTactic (← `(tactic| cil_have_by $located := $(← Term.exprToSyntax proof)))
+      introWitness scope located after #[taken, updated, formed, below, retained, written]
       pure (taken : Term)
   -- The remembered value is stated as the value a load pushes, not as its `localResult`.
   withMainContext do
@@ -661,6 +696,16 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
     carrySnapshotReads scope memory below
   scope.clearSuperseded
   return { snapshots := updated, stepped, source := memory, below }
+
+/-- The value the chain of updates `known` remembers at `index`: the result of the latest
+    `rememberLocal` at that index, when `known` is a chain of them over a closed index. -/
+private partial def rememberedAt? (known : Expr) (index : Nat) : MetaM (Option Expr) := do
+  unless known.isAppOfArity ``rememberLocal 3 do return none
+  let some updated ← getNatValue? (known.getArg! 1) | return none
+  if updated == index then
+    -- `rememberLocal known index result` is `fun slot => if slot = index then some result ...`.
+    return some (known.getArg! 2)
+  rememberedAt? (known.getArg! 0) index
 
 /-- Read the remembered value at the current run's exact frame and stack. -/
 private def snapshotLoad (snapshot methodFound instructionFound : Term)
@@ -687,6 +732,15 @@ private def snapshotLoad (snapshot methodFound instructionFound : Term)
   let snapshotType ← instantiateMVars (← inferType snapshotProof)
   let some #[_, _, known] := argumentsOf? snapshotType ``LocalSnapshots 3
     | throwError "Expected local snapshots at the current memory"
+  -- A value remembered by a store is read from the chain of updates itself, which a simp over the
+  -- whole chain would unfold at each load.
+  if let some position ← getNatValue? (← whnfR loadedIndex) then
+    if let some stored ← rememberedAt? known position then
+      if (stored.find? (·.isConstOf ``localResult)).isNone then
+        let value ← Term.exprToSyntax stored
+        let index ← Term.exprToSyntax loadedIndex
+        return ← `(term| LocalSnapshots.load (body := $body) (pc := $pc) (args := $args)
+          (frame := $frame) (stack := $stack) (index := $index) $snapshot $value rfl)
   let selected := mkApp known loadedIndex
   if (← whnfD selected).isAppOf ``Option.none then
     throwError "The snapshots do not establish a value at this local index"
@@ -808,8 +862,7 @@ private def snapshotEvidenceAt (memory : Expr) (facts : Array Term) : TacticM Bo
   withMainContext do
     let mentions (type : Expr) : Bool := (type.find? (· == memory)).isSome
     let context ← getLCtx
-    for declaration in context do
-      if declaration.isImplementationDetail then continue
+    for declaration in declarationsFrom context (← memoryWindowStart memory) do
       let type := (← instantiateMVars declaration.type).consumeMData
       unless mentions type do continue
       if type.isAppOfArity ``ValidCall 3 || !(objectEvidenceIn type).isEmpty then return true

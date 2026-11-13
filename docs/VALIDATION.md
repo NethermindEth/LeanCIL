@@ -175,32 +175,34 @@ dotnet run --file scripts/Test.cs -- --suite stepping
 
 The `stepping` suite generates explicit scalar, checked-memory, accumulate, locals, contract,
 loop, loop-facts, outcome, lemma, depth, hypotheses and snapshot bodies and proves each end to
-end. The
-scalar, memory, accumulate and locals bodies have 16, 64 and 256 instructions, and the accumulate
-body also 1,024. The memory bodies repeat an idempotent checked store and reload, so the
+end. The scalar, memory, accumulate and locals bodies have 16, 64 and 256 instructions, and the
+accumulate body also 1,024. The memory bodies repeat an idempotent checked store and reload, so the
 operation facts stay constant as the instruction count grows. The accumulate, contract, loop,
 loop-facts, outcome and lemma bodies keep a running sum on the stack, so the symbolic value a step
 reads grows with the program counter. The contract body is proved by `cil_contract_steps`, the
 loop body by `cil_loop_steps` along a path, the loop-facts body by the same with a case fact in
 the context that every instruction reads, the outcome body by `cil_loop_outcome_advance`, and the
 lemma body by `cil_checked_steps` with a universe-polymorphic lemma among its facts. The locals
-bodies store a
-reference into each of eight locals of a literal frame per cycle. The depth bodies push 8, 32 and
-128 values and add them all. The hypotheses bodies are 62-instruction accumulate, contract and loop
-bodies proved with 16, 64 and 256 equations in scope. The snapshot bodies store into eight numeric
-locals and then update one local per store from its remembered value, with 10, 20 and 40 stores,
-proved by `cil_contract_steps (snapshots := ..)` with caller memory facts in the context. The
-suite uses the proof-cost measuring frontend, with three
-sequential proof compilations and a header-only baseline per scalar, memory, accumulate and locals
-body up to 256 instructions, and one compilation for every other body.
+bodies store a reference into each of eight locals of a literal frame per cycle. The depth bodies
+push 8, 32 and 128 values and add them all. The hypotheses bodies are 62-instruction accumulate,
+contract and loop bodies proved with 16, 64 and 256 hypotheses in scope. The snapshot bodies store
+into eight numeric locals and then update one local per store from its remembered value, with 10,
+20, 40 and 80 stores, proved by `cil_contract_steps (snapshots := ..)` with caller memory facts in
+the context; the value a store writes grows with the number of updates to its local, so the cost
+per instruction rises slowly with the stores. The suite uses the proof-cost measuring frontend,
+with three sequential proof compilations and a header-only baseline per scalar, memory, accumulate
+and locals body up to 256 instructions, and one compilation for every other body.
 
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. For the bodies with three compilations, compiled proof bytes per instruction may
   also grow by at most 1.35 times, and median frontend milliseconds by at most twice.
-- For the hypotheses bodies the sizes are the numbers of hypotheses, and the heartbeats counted
-  are those of the proof less those of the same statement closed by `sorry`, so that elaborating
-  the hypotheses does not count as stepping. The same limit applies, so a step that scans or
-  compares the hypotheses in scope fails it.
+- For the hypotheses bodies the sizes are the numbers of hypotheses, half of them equations headed
+  by an operator and half by a local variable, and the heartbeats counted are those of the proof
+  less those of the same statement closed by `sorry`, so that elaborating the hypotheses does not
+  count as stepping. The same ratio limit applies, and one more hypothesis in scope may add at most
+  100 heartbeats to the cost of an instruction between the smallest and the largest size. A step
+  that unifies a side condition with each hypothesis or rebuilds the local context for each `by`
+  block adds several hundred and fails the second limit; a scan that adds less passes it.
 - Heartbeats and bytes must repeat exactly across the three runs.
 - Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
   recheck. Compiled proof bytes subtract the same module containing only the body and its lookup
