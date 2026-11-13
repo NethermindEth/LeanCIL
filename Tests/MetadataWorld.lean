@@ -4,8 +4,9 @@ import Tests.MetadataBuilder
 # A hand-built world of two pinned assemblies
 
 `T` carries the operands under test: references to `System.Runtime`, calls into `Lib`, instance
-and static fields, a generic method specification, a string, a locals signature and a standalone
-call signature. `Lib` defines the class `Lib.Box` and the struct `Lib.Pair` that `T` uses. Tests
+and static fields, fields of generic instances, a generic method specification, a string, a
+locals signature and a standalone call signature. `Lib` defines the class `Lib.Box`, the struct
+`Lib.Pair` and the generic class `Lib.Holder<T>` that `T` uses. Tests
 check each operand against the slices, then change one fact and assert the exact error.
 -/
 
@@ -47,6 +48,16 @@ def libWorld : Step Unit := do
   let sum ← row Table.methodDef [0x2060, 0, 0x0096, sumName, getSignature, 1]
   link linkDeclaring first 1 pair
   link linkDeclaring sum 1 pair
+  -- The generic class `Lib.Holder<T>` with the static field `Value : T`.
+  let holderName ← string "Holder`1"
+  let holderValueName ← string "Value"
+  let parameterName ← string "T"
+  let holder ← row Table.typeDef [0x1, holderName, libName, 1 * 4 + 1, 3, 3]
+  let parameterSignature ← blob [0x06, 0x13, 0x00]
+  let holderValue ← row Table.field [0x0016, holderValueName, parameterSignature]
+  let parameter ← row Table.genericParam [0, 0, (holder - 0x02000000) * 2, parameterName]
+  link linkDeclaring holderValue 1 holder
+  link linkGenericParams holder 1 parameter
 
 /-- The tokens of the `T` world that the tests name. -/
 structure OwnTokens where
@@ -69,6 +80,10 @@ structure OwnTokens where
   /-- The references to the field `Lib.Pair.first` and the method `Lib.Pair.Sum`. -/
   firstRef : Nat
   sumRef : Nat
+  /-- `Value` of `Lib.Holder<!!0>`, a pinned generic class, and of `System.Lazy<!!0>`, an
+      external one, as a generic method reads them. -/
+  holderValueRef : Nat
+  lazyValueRef : Nat
 
 /-- The `T` assembly: the references and members its operands name. -/
 def ownWorld : Step OwnTokens := do
@@ -128,9 +143,27 @@ def ownWorld : Step OwnTokens := do
   let sumRef ← row Table.memberRef [pairParent, sumName, getSignature]
   link linkDefinition firstRef 1 (tokenOf Table.field 2)
   link linkDefinition sumRef 1 (tokenOf Table.methodDef 2)
+  -- `Holder<!!0>` and `Lazy<!!0>` as type specifications, each with a member `Value : !0`.
+  let holderName ← string "Holder`1"
+  let lazyName ← string "Lazy`1"
+  let valueName ← string "Value"
+  let holderRef ← row Table.typeRef [2 * 4 + 2, holderName, libName]
+  let lazyRef ← row Table.typeRef [1 * 4 + 2, lazyName, systemName]
+  link linkDefinition holderRef 1 (tokenOf Table.typeDef 4)
+  let holderBlob ← blob [0x15, 0x12, (holderRef - 0x01000000) * 4 + 1, 1, 0x1E, 0x00]
+  let lazyBlob ← blob [0x15, 0x12, (lazyRef - 0x01000000) * 4 + 1, 1, 0x1E, 0x00]
+  let holderSpec ← row Table.typeSpec [holderBlob]
+  let lazySpec ← row Table.typeSpec [lazyBlob]
+  let parameterField ← blob [0x06, 0x13, 0x00]
+  let holderValueRef ←
+    row Table.memberRef [(holderSpec - 0x1B000000) * 8 + 4, valueName, parameterField]
+  let lazyValueRef ←
+    row Table.memberRef [(lazySpec - 0x1B000000) * 8 + 4, valueName, parameterField]
+  link linkDefinition holderValueRef 1 (tokenOf Table.field 3)
   pure { pairRef := pairRef, firstRef := firstRef, sumRef := sumRef, objectRef := objectRef,
-         consoleRef := consoleRef, boxRef := boxRef,
-         writeLine := writeLine, getRef := getRef, idRef := idRef, idSpec := idSpec,
+         consoleRef := consoleRef, boxRef := boxRef, holderValueRef := holderValueRef,
+         lazyValueRef := lazyValueRef, writeLine := writeLine, getRef := getRef, idRef := idRef,
+         idSpec := idSpec,
          countField := countField, totalField := totalField, main := main,
          localsSignature := localsSignature, hello := 0x70000000 + hello,
          indirect := indirect, extra := 0 }

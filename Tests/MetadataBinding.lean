@@ -283,6 +283,28 @@ theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :
       (.operandMismatch tokens.sumRef) = true := by decide +kernel
 #print axioms rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number
 
+/-- `Lib.Holder<!!0>` and `System.Lazy<!!0>` as a method with one type parameter names them. -/
+private def holderOfMethodParameter : TypeExpr :=
+  .apply (.constructor libScope "Lib.Holder`1") (.parameter 0)
+private def lazyOfMethodParameter : TypeExpr :=
+  .apply (.constructor runtimeScope "System.Lazy`1") (.parameter 0)
+
+/-- A field typed `!0` holds the declaring instance's first argument, here the method's own type
+    parameter `!!0`, not the reading method's owner parameter: for a static field of a pinned
+    generic class and for a field of an external generic class. -/
+theorem reads_a_field_parameter_against_the_declaring_instance :
+    passes own.1 lib tokens.holderValueRef
+      (.field holderOfMethodParameter 0 (.parameter 0) true) (arity := 1) = true ∧
+    rejects own.1 lib tokens.holderValueRef
+      (.field holderOfMethodParameter 0 (.parameter 1) true)
+      (.operandMismatch tokens.holderValueRef) (arity := 1) = true ∧
+    passes own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 0 (.parameter 0) false) (arity := 1) = true ∧
+    rejects own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 0 (.parameter 1) false)
+      (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
+#print axioms reads_a_field_parameter_against_the_declaring_instance
+
 /-! ## The use of a token -/
 
 theorem rejects_a_field_access_that_disagrees_with_the_field_row :

@@ -176,7 +176,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             case FieldReference field:
                 var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
                 var index = 0;
-                var fieldType = field.FieldType;
+                // A field signature's `!n` is the declaring type's parameter: the declaring instance's argument.
+                var fieldType = field.FieldType.ContainsGenericParameter &&
+                    field.DeclaringType is GenericInstanceType instance
+                    ? GenericStructs.Substitute(field.Resolve().FieldType, instance) : field.FieldType;
                 if (field.DeclaringType.Scope is ModuleDefinition ||
                     PinnedAssemblies.Active?.ModuleOf(field.DeclaringType) is not null)
                 {
