@@ -41,6 +41,10 @@ string Build(string name, string method, string body)
             public static ulong Helper(ulong x) => x * 7UL + 1UL;
             public static ulong EntryA(ulong x) => Helper(x) + 1UL;
             public static ulong EntryB(ulong x) => Helper(x) ^ 3UL;
+            public static ulong Size<T>(ulong x) where T : unmanaged =>
+                x + (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+            public static ulong EntryGenericA(ulong x) => Size<ulong>(x) + Size<uint>(x);
+            public static ulong EntryGenericB(ulong x) => Size<uint>(x) ^ Size<ulong>(x);
         }
         """);
     File.WriteAllText(Path.Combine(source, "Wide.cs"), """
@@ -70,9 +74,14 @@ string Extracted(string assembly, string selector, string name)
 string Component(string text, int method, string name)
 {
     var lines = Regex.Matches(text, @"(?m)^(?:def assembly\d+Metadata |(?:@\[[^\r\n]*\] )?(?:def|theorem) method" +
-            method + @"(?![0-9]))[^\n]*$").Select(match => match.Value.TrimEnd('\r')).ToArray();
-    foreach (var required in new[] { $"def method{method}Metadata :", $"def method{method}Tables :",
-        $"theorem method{method}_tables_valid :", $"def method{method}Body :", $"theorem method{method}_body_validated :" })
+            method + @"(?![0-9]))[^\n]*$").Select(match => match.Value.TrimEnd('\r'))
+        // The composed theorem names the method's position in the whole program, which is not part of its component.
+        .Where(line => !line.Contains("_evidence_validated", StringComparison.Ordinal)).ToArray();
+    // A closed instantiation of a generic method shares its open definition's slice, which another component holds.
+    var ownSlice = lines.Any(line => line.Contains($"metadata := method{method}Metadata,", StringComparison.Ordinal));
+    foreach (var required in (ownSlice
+        ? new[] { $"def method{method}Metadata :", $"def method{method}Tables :", $"theorem method{method}_tables_valid :" }
+        : []).Concat([$"def method{method}Body :", $"theorem method{method}_body_validated :"]))
         if (!lines.Any(line => line.StartsWith(required, StringComparison.Ordinal)))
             throw new InvalidOperationException($"No `{required}` in the component of method {method}: {name}");
     if (Regex.IsMatch(string.Concat(lines), @"\brva\b"))
@@ -106,3 +115,26 @@ if (Component(entryA, int.Parse(helperA), "EntryA") != Component(entryB, int.Par
     throw new InvalidOperationException(
         "The helper's component differs between two extractions that share it: its evidence depends on the entry.");
 Console.WriteLine("PASS a helper's metadata, tables, body and validity theorems are identical in two extractions that share it");
+
+// A generic helper closed twice: the second instantiation names the first one's metadata, which is a function of the
+// open definition and the assembly, so both components are the same in two extractions that hold the same helper.
+// The two entries close the helper in opposite orders, so each instantiation has another index in the second
+// extraction: the component, with its own index named `#`, must be the same text.
+var genericA = Extracted(baseline, "Workspace.Shared::EntryGenericA(ulong)", "EntryGenericA");
+var genericB = Extracted(baseline, "Workspace.Shared::EntryGenericB(ulong)", "EntryGenericB");
+string Instantiation(string text, string argument, string name)
+{
+    var index = Regex.Match(text, @"(?m)^def method(\d+)Signature : String := ""[^""]*Shared::Size\\u003C" + argument +
+        @"\\u003E").Groups[1].Value;
+    if (index.Length == 0) throw new InvalidOperationException($"No Size<{argument}> in {name}.");
+    return Regex.Replace(Component(text, int.Parse(index), name), "method" + index + "(?![0-9])", "method#");
+}
+var (uintIndexA, uintIndexB) = (Regex.Match(genericA, @"(?m)^def method(\d+)Signature[^\r\n]*Size\\u003CSystem.UInt32").Groups[1].Value,
+    Regex.Match(genericB, @"(?m)^def method(\d+)Signature[^\r\n]*Size\\u003CSystem.UInt32").Groups[1].Value);
+if (uintIndexA == uintIndexB)
+    throw new InvalidOperationException("The two extractions close the helper in the same order; the case tests nothing.");
+foreach (var argument in new[] { "System.UInt32", "System.UInt64" })
+    if (Instantiation(genericA, argument, "EntryGenericA") != Instantiation(genericB, argument, "EntryGenericB"))
+        throw new InvalidOperationException(
+            $"The component of Size<{argument}> differs between two extractions that close the helper in another order.");
+Console.WriteLine("PASS a generic helper's instantiations have identical components in extractions that close it in opposite orders");
