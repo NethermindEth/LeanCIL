@@ -115,9 +115,10 @@ private def SnapshotScope.start : TacticM SnapshotScope :=
   return { superseded := ← IO.mkRef #[] }
 
 /-- Whether `left` and `right` may still be made equal by assigning metavariables: false when
-    they are statements headed by different predicates, or applications of one constant to
-    arguments that differ at two distinct memory variables. Unification would settle these only
-    after unfolding what mentions them, which costs more with every memory a walk has passed. -/
+    they are statements headed by different predicates once their reducible heads are unfolded,
+    or applications of one constant to arguments that differ at two distinct memory variables.
+    Unification would settle these only after unfolding what mentions them, which costs more
+    with every memory a walk has passed. -/
 private partial def mayUnify (left right : Expr) (statement := false) : MetaM Bool := do
   if left == right then return true
   match left, right with
@@ -134,9 +135,13 @@ private partial def mayUnify (left right : Expr) (statement := false) : MetaM Bo
         unless ← mayUnify (left.getArg! position) (right.getArg! position) do return false
       return true
     else
-      -- Two statements headed by different predicates are not the same statement, whereas two
-      -- terms with different heads, such as `localWidth kind` and `16`, may be equal.
-      return !(statement && function.isConst && right.getAppFn.isConst)
+      -- Two terms with different heads, such as `localWidth kind` and `16`, may be equal.
+      unless statement && function.isConst && right.getAppFn.isConst do return true
+      -- A reducible head, as `>` is `<` swapped and `≠` is `¬ =`, may state the other one.
+      let leftUnfolded ← whnfR left
+      let rightUnfolded ← whnfR right
+      if leftUnfolded == left && rightUnfolded == right then return false
+      mayUnify leftUnfolded rightUnfolded (statement := true)
   | _, _ => return true
 
 /-- `assumption` that tries only the hypotheses `mayUnify` leaves, since unifying a statement

@@ -755,4 +755,13 @@ theorem caller_memory_named_stored (stored : Memory) (slots : List LocalSlot) (b
   trivial
 
 #print axioms caller_memory_named_stored
+
+-- `cil_cheap_assumption` closes what `assumption` closes when the hypothesis states the goal
+-- through a head that unfolds at reducible transparency, in either direction.
+example (left right : Nat) (greater : left > right) : right < left := by cil_cheap_assumption
+example (left right : Nat) (less : right < left) : left > right := by cil_cheap_assumption
+example (left right : Nat) (atLeast : left ≥ right) : right ≤ left := by cil_cheap_assumption
+example (left right : Nat) (atMost : right ≤ left) : left ≥ right := by cil_cheap_assumption
+example (left right : Nat) (apart : left ≠ right) : ¬ left = right := by cil_cheap_assumption
+example (left right : Nat) (apart : ¬ left = right) : left ≠ right := by cil_cheap_assumption
 end Tests.LocalSnapshotSteps
