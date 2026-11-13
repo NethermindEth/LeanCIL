@@ -78,6 +78,8 @@ structure OwnTokens where
   extra : Nat
   /-- The reference to the struct `Lib.Pair`. -/
   pairRef : Nat
+  /-- The second instance field of `T.Program`, after the static `total`. -/
+  secondField : Nat
   /-- The references to the field `Lib.Pair.first` and the method `Lib.Pair.Sum`. -/
   firstRef : Nat
   sumRef : Nat
@@ -102,6 +104,7 @@ def ownWorld : Step OwnTokens := do
   let writeLineName ← string "WriteLine"
   let getName ← string "Get"
   let idName ← string "Id"
+  let secondName ← string "second"
   let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
   let _ ← row Table.assemblyRef [10, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
   let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, libName, 0, 0]
@@ -114,6 +117,7 @@ def ownWorld : Step OwnTokens := do
   let intField ← blob [0x06, 0x08]
   let countField ← row Table.field [0x0006, countName, intField]
   let totalField ← row Table.field [0x0016, totalName, intField]
+  let secondField ← row Table.field [0x0006, secondName, intField]
   let mainSignature ← blob [0x00, 0x00, 0x01]
   let main ← row Table.methodDef [0x2050, 0, 0x0096, mainName, mainSignature, 1]
   let writeLineSignature ← blob [0x00, 0x01, 0x01, 0x08]
@@ -131,6 +135,7 @@ def ownWorld : Step OwnTokens := do
   let indirect ← row Table.standAloneSig [indirectBlob]
   link linkDeclaring countField 0 program
   link linkDeclaring totalField 0 program
+  link linkDeclaring secondField 0 program
   link linkDeclaring main 0 program
   link linkDefinition boxRef 1 (tokenOf Table.typeDef 2)
   link linkDefinition getRef 1 (tokenOf Table.methodDef 1)
@@ -161,7 +166,7 @@ def ownWorld : Step OwnTokens := do
   let lazyValueRef ←
     row Table.memberRef [(lazySpec - 0x1B000000) * 8 + 4, valueName, parameterField]
   link linkDefinition holderValueRef 1 (tokenOf Table.field 3)
-  pure { pairRef := pairRef, firstRef := firstRef, sumRef := sumRef, objectRef := objectRef,
+  pure { pairRef := pairRef, secondField := secondField, firstRef := firstRef, sumRef := sumRef, objectRef := objectRef,
          consoleRef := consoleRef, boxRef := boxRef, holderValueRef := holderValueRef,
          lazyValueRef := lazyValueRef, writeLine := writeLine, getRef := getRef, idRef := idRef,
          idSpec := idSpec,
