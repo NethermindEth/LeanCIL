@@ -95,6 +95,21 @@ internal sealed class MetadataImage
         return bytes.AsSpan(start, header + length).ToArray();
     }
 
+    /// <summary>
+    /// The decoded table stream header as a Lean <c>TableHeader</c>: the heap sizes and each present table's row
+    /// count, in table order. Lean proves once per assembly that <see cref="TableHeader"/> decodes to it.
+    /// </summary>
+    internal string DecodedHeader()
+    {
+        var counts = Enumerable.Range(0, 64).Where(table => Count(table) > 0)
+            .Select(table => string.Create(CultureInfo.InvariantCulture, $"({table}, {Count(table)})"));
+        return string.Create(CultureInfo.InvariantCulture,
+            $".ofCounts {TableHeader()[HeapSizesOffset]} [{string.Join(", ", counts)}]");
+    }
+
+    // The `HeapSizes` byte's offset in the table stream header (II.24.2.6).
+    const int HeapSizesOffset = 6;
+
     /// <summary>The table stream header: the bytes from the reserved word through the last row count.</summary>
     internal byte[] TableHeader()
     {
@@ -160,7 +175,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         var keyToken = !hasKey ? ""
             : $"keyToken := {Bytes(System.Text.Encoding.ASCII.GetBytes(token))}, ";
         return $"{{ identity := {System.Text.Json.JsonSerializer.Serialize(identity)}, {keyToken}" +
-            $"tableHeader := {Bytes(image.TableHeader())}, assemblyRow := {Bytes(row)}, " +
+            $"tableHeader := {Bytes(image.TableHeader())}, header := {image.DecodedHeader()}, " +
+            $"assemblyRow := {Bytes(row)}, " +
             $"strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])} }}";
     }
 

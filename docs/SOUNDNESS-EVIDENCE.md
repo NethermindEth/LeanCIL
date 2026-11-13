@@ -89,7 +89,10 @@ Each method carries its own `method{n}Metadata`, a `MethodMetadata`
 ([MetadataBytes](../CIL/Extraction/MetadataBytes.lean)): the raw bytes of the table rows and heap
 entries that its own tokens, definition, signature and locals reach, with one slice per assembly it
 reaches. Each pinned assembly has one small block, `assembly{k}Metadata`, with its table stream header
-and `Assembly` row, a function of that assembly alone, so every extraction of it writes the same bytes.
+bytes, the header they decode to (heap sizes and the row count of each present table) and its `Assembly`
+row, a function of that assembly alone, so every extraction of it writes the same bytes.
+`assembly{k}_identified` proves once per assembly that the bytes decode to the stated header, which every
+method's checks then read without decoding it again.
 A method's evidence is a function of the method and its assemblies and of nothing else in the extraction,
 so a verified method's component is reused by every extraction that holds the method. The `RVA` column of every carried `MethodDef` row is zero: where a
 body sits in the image moves whenever an earlier body changes length, so no method's evidence may depend
