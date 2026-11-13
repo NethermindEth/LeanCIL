@@ -86,6 +86,7 @@ generic methods, loops, memory access and compiled F#.
 | `leancil bindings` | Generate the proof sources of a binding catalog, or check them |
 | `leancil export-contracts` | Publish verified method contracts for separately compiled callers |
 | `leancil audit-library` | Kernel-replay and axiom-audit the theorems of a Lean library |
+| `leancil audit-binding` | Reconfirm in the kernel that an extraction's method bodies are the bytes of assembly files with stated digests |
 
 `verify --goals` prints the goal at each `sorry` and failing tactic of an unfinished proof. A
 failing command returns a nonzero exit code. See the [CLI reference](docs/CLI.md) for every
