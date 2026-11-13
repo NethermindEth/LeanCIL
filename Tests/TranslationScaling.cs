@@ -43,18 +43,19 @@ if (args.Contains("--measure", StringComparer.Ordinal))
     var trace = Path.Combine(directory, "Trace-" + Guid.NewGuid().ToString("N"));
     Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
     Console.WriteLine("Fixed-workload prefix measurements: " + trace);
-    Run(["lake", "env", "lean", Path.Combine(output, "Extracted.lean")], cwd: FixturePackage(),
+    Run(["lake", "env", "lean", "-DElab.async=false", Path.Combine(output, "Extracted.lean")], cwd: FixturePackage(),
         progress: "Baseline complete compositional extraction");
     var original = Path.Combine(directory, "FullMonolithic.lean");
     File.WriteAllText(original, monolithicSource);
-    var result = Execute(["lake", "env", "lean", original], cwd: FixturePackage(), progress: "Baseline complete monolithic refusal");
+    var result = Execute(["lake", "env", "lean", "-DElab.async=false", original], cwd: FixturePackage(),
+        progress: "Baseline complete monolithic refusal");
     RequireElaboratorRefusal(result.Code, result.Output);
 }
 var old = Path.Combine(directory, "Monolithic.lean");
 // The monolithic decision uses the raw definitions, not the already-proved component lemmas.
 // The production consumer below checks the complete unchanged positive certificate once.
 File.WriteAllText(old, NarrowEvidence(monolithicSource, "translation_valid"));
-var monolithic = Execute(["lake", "env", "lean", old], cwd: FixturePackage(),
+var monolithic = Execute(["lake", "env", "lean", "-DElab.async=false", old], cwd: FixturePackage(),
     progress: "Checking monolithic certificate refusal");
 RequireElaboratorRefusal(monolithic.Code, monolithic.Output);
 Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the monolithic certificate");
@@ -112,27 +113,30 @@ if (timeGrowth > AllowedKernelGrowth || memoryGrowth > AllowedKernelGrowth)
 Console.WriteLine(FormattableString.Invariant(
     $"PASS the kernel check grows {timeGrowth:F2} times in time and {memoryGrowth:F2} times in memory per method from {smallCount} to {largeCount} methods"));
 
-// Peak working set of a command's process tree in gigabytes, sampled while it runs.
+// Peak working set of `lean` on a file in gigabytes. Lean runs directly, in the environment `lake env` prints,
+// so the measured process is the one that holds the memory on every platform.
 static double MeasurePeakGigabytes(string[] command, string cwd, string? sourceText = null)
 {
     var path = command[^1];
     if (sourceText is not null) File.WriteAllText(path, sourceText);
-    var info = new System.Diagnostics.ProcessStartInfo(command[0]) { WorkingDirectory = cwd, UseShellExecute = false,
+    var environment = Run(["lake", "env"], cwd: cwd).ReplaceLineEndings("\n").Split('\n')
+        .Select(line => line.Split('=', 2)).Where(pair => pair.Length == 2).ToDictionary(pair => pair[0], pair => pair[1]);
+    var lean = Path.Combine(environment["LEAN_SYSROOT"], "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
+    var info = new System.Diagnostics.ProcessStartInfo(lean) { WorkingDirectory = cwd, UseShellExecute = false,
         RedirectStandardOutput = true, RedirectStandardError = true };
-    foreach (var argument in command.Skip(1)) info.ArgumentList.Add(argument);
+    foreach (var (name, value) in environment) info.Environment[name] = value;
+    info.ArgumentList.Add(path);
     using var process = System.Diagnostics.Process.Start(info)!;
     var output = process.StandardOutput.ReadToEndAsync();
     var errors = process.StandardError.ReadToEndAsync();
     long peak = 0;
     while (!process.WaitForExit(200))
     {
-        long tree = 0;
-        foreach (var id in ProcessTree.Of(process.Id))
-            try { tree = Math.Max(tree, System.Diagnostics.Process.GetProcessById(id).WorkingSet64); } catch (ArgumentException) { }
-        peak = Math.Max(peak, tree);
+        process.Refresh();
+        peak = Math.Max(peak, process.PeakWorkingSet64);
     }
     if (process.ExitCode != 0 || output.Result.Contains("sorryAx", StringComparison.Ordinal))
-        throw new InvalidOperationException($"{string.Join(' ', command)} failed ({process.ExitCode}):\n{output.Result}\n{errors.Result}");
+        throw new InvalidOperationException($"{lean} {path} failed ({process.ExitCode}):\n{output.Result}\n{errors.Result}");
     return peak / (1024.0 * 1024 * 1024);
 }
 var consumer = Path.Combine(directory, "Consumer");
@@ -157,48 +161,3 @@ if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.tran
     !report.GetProperty("theoremAudit").GetString()!.Contains("ExampleProof.correctness"))
     throw new InvalidOperationException("Missing independent certificate/theorem audits.");
 Console.WriteLine("PASS fresh consumer proof-root verifies the multi-method certificate with kernel replay and restricted axioms");
-
-// The descendants of a process, from a snapshot of the machine's process list.
-static class ProcessTree
-{
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential,
-        CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    struct Entry
-    {
-        public uint Size, Usage, ProcessId;
-        public nint DefaultHeap;
-        public uint ModuleId, Threads, ParentProcessId;
-        public int PriorityClassBase;
-        public uint Flags;
-        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr,
-            SizeConst = 260)]
-        public string ExeFile;
-    }
-
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern nint CreateToolhelp32Snapshot(uint flags,
-        uint process);
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    static extern bool Process32First(nint snapshot, ref Entry entry);
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    static extern bool Process32Next(nint snapshot, ref Entry entry);
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern bool CloseHandle(nint handle);
-
-    internal static IEnumerable<int> Of(int root)
-    {
-        var parents = new Dictionary<int, List<int>>();
-        var snapshot = CreateToolhelp32Snapshot(2, 0);
-        var entry = new Entry { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Entry>() };
-        for (var more = Process32First(snapshot, ref entry); more; more = Process32Next(snapshot, ref entry))
-        {
-            if (!parents.TryGetValue((int)entry.ParentProcessId,
-                out var children)) parents[(int)entry.ParentProcessId] = children = [];
-            children.Add((int)entry.ProcessId);
-        }
-        CloseHandle(snapshot);
-        var found = new List<int> { root };
-        for (var index = 0; index < found.Count; index++)
-            if (parents.TryGetValue(found[index],
-                out var children)) found.AddRange(children.Where(child => !found.Contains(child)));
-        return found;
-    }
-}
