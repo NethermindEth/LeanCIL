@@ -562,4 +562,50 @@ theorem refuses_a_method_parameter_past_the_arity :
       pairFrame.admits (.mvar 0) (.parameter 0) := by
   decide +kernel
 #print axioms refuses_a_method_parameter_past_the_arity
+
+/-! ## Each reason a reference or type is refused -/
+
+/-- A type reference scoped by a module reference, which the checker does not read. -/
+private def consoleInModuleReference : MetadataSlice :=
+  mutateRow own.1 tokens.consoleRef fun bytes => [5, 0] ++ bytes.drop 2
+
+theorem refuses_a_type_reference_scoped_by_a_module_reference :
+    rejects consoleInModuleReference lib tokens.consoleRef
+      (.type (.atom runtimeScope "System.Console")) (.unsupportedScope tokens.consoleRef) =
+      true := by decide +kernel
+#print axioms refuses_a_type_reference_scoped_by_a_module_reference
+
+/-- The links of `T` with the one from `Lib.Box`'s reference removed, or aimed at `T` itself. -/
+private def ownWithoutBoxLink : MetadataSlice :=
+  { own.1 with links := own.1.links.filter fun link => link.kind != linkDefinition ||
+      link.source != tokens.boxRef }
+
+private def ownWithBoxLinkIntoItself : MetadataSlice :=
+  { own.1 with links := own.1.links.map fun link =>
+      if link.kind == linkDefinition && link.source == tokens.boxRef then
+        { link with slice := 0 } else link }
+
+theorem refuses_a_reference_into_a_pinned_slice_without_its_definition_link :
+    rejects ownWithoutBoxLink lib tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.unresolvedType tokens.boxRef) = true ∧
+    rejects ownWithBoxLinkIntoItself lib tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.unresolvedType tokens.boxRef) = true := by decide +kernel
+#print axioms refuses_a_reference_into_a_pinned_slice_without_its_definition_link
+
+/-- `Program` extending a type specification, and extending `Console` instead of `Object`: the
+    chain of base classes ends only at `System.Object`. -/
+private def programExtends (coded : Nat) : MetadataSlice :=
+  mutateRow own.1 (tokenOf Table.typeDef 2) fun bytes =>
+    bytes.take 8 ++ [coded, 0] ++ bytes.drop 10
+
+private def objectFieldOperand : RawOperand :=
+  .field (.object ownIdentity "Program") 0 int32 false
+
+theorem refuses_a_base_class_chain_that_does_not_end_at_object :
+    passes own.1 lib tokens.countField objectFieldOperand = true ∧
+    rejects (programExtends 6) lib tokens.countField objectFieldOperand
+      (.unsupportedBase (tokenOf Table.typeDef 2)) = true ∧
+    rejects (programExtends 9) lib tokens.countField objectFieldOperand
+      (.unsupportedBase (tokenOf Table.typeDef 2)) = true := by decide +kernel
+#print axioms refuses_a_base_class_chain_that_does_not_end_at_object
 end Tests.MetadataBinding

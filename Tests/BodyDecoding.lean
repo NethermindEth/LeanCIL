@@ -541,4 +541,12 @@ theorem operand_kinds_agree_with_cecil :
   decide +kernel
 #print axioms operand_kinds_agree_with_cecil
 
+/-- Tables that do not match the slices in number are refused before any decoding. -/
+theorem rejects_tables_that_do_not_match_the_slices_in_number :
+    failsWith { evidence tinyBytes with tables := [] } (.metadata .tablesMismatch) tinyMethod =
+      true ∧
+    failsWith { evidence tinyBytes with identities := [] } (.metadata .tablesMismatch)
+      tinyMethod = true := by decide +kernel
+#print axioms rejects_tables_that_do_not_match_the_slices_in_number
+
 end Tests.BodyDecoding
