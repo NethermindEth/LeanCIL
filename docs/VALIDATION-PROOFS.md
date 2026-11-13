@@ -308,7 +308,9 @@ These checks cover the behavior that [binding and transport](PROOFS-BINDING.md) 
   changes the managed callee numbering through a wrapper entry point. The suite replays the
   generated equations, extraction certificates, bindings and consumer proofs in the kernel, and
   rejects changed flag values, callees, branch targets, instruction equations, stale extraction
-  source and incompatible profile-dependent parameter homes.
+  source and incompatible profile-dependent parameter homes. It also compiles a template and
+  both profile bindings for a virtual call, a method address, a callable pointer call and a
+  static initializer, each of whose method indices differs between the two profiles.
 
 ## Store view reuse
 

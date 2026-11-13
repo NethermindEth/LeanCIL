@@ -244,6 +244,8 @@ Examples:System.Int16& Examples.UnsafeLayouts::Add4nint(System.Int16&,System.Int
 Examples:System.Int16& Examples.UnsafeLayouts::Add4nuint(System.Int16&,System.UIntPtr)	A	A	A	A	A	A	A	A
 Examples:System.Int16[] Examples.PrimitiveArrays::AllocateShorts(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.AggregateArrays::ConstructedLength(Examples.AggregateArrays/Pair[],System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Arithmetic::AtLeastFive(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Arithmetic::FiveToOne(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Arithmetic::Larger(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Arithmetic::Unsupported(System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.ArrayElementReferences::Read(System.Int32[],System.Int32)	A	A	A	A	A	A	A	A
@@ -306,6 +308,7 @@ Examples:System.Int32 Examples.ExceptionDocumentation::CheckedNarrow(System.Int6
 Examples:System.Int32 Examples.ExceptionDocumentation::Clamp(System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ExplicitCounterValue::Examples.ICounterValue.Read()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ExplicitGenericCounterValue`1::Examples.ICounterValue.Read()	B	B	B	B	B	B	B	B
+Examples:System.Int32 Examples.Gauge::BelowFive()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::Blend(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::Blended(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::Bounded(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
@@ -318,7 +321,10 @@ Examples:System.Int32 Examples.Gauge::Clamp(System.Int32,System.Int32,System.Int
 Examples:System.Int32 Examples.Gauge::Clamped(System.Int32,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::Current()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::Doubled(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Floor(System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::Floored(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::Gap(System.Int32,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Gauge::IsFive()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::Margin()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::Raise(Examples.Gauge,System.Int32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Gauge::RaisedLevel()	A	A	A	A	A	A	A	A
@@ -358,6 +364,7 @@ Examples:System.Int32 Examples.ItemPool::Trim(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ItemPool::get_Available()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ItemPool::get_Capacity()	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ItemPool::get_Rented()	A	A	A	A	A	A	A	A
+Examples:System.Int32 Examples.Loops::CountToFive(System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.Loops::Drain(System.ReadOnlySpan`1<System.Int32>)	A	A	A	A	A	A	A	A
 Examples:System.Int32 Examples.ManagedDispatch::Address(System.Int32)	B	B	B	B	B	B	B	B
 Examples:System.Int32 Examples.ManagedDispatch::Dispatch(method System.Int32 *(System.Int32)[],System.Int32,System.Int32)	B	B	B	B	B	B	B	B
@@ -722,6 +729,7 @@ Examples:System.UInt32 Examples.Arguments::Alias(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Arguments::CallerIsolation(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Arguments::Overwrite(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Arguments::ReassignReference(System.UInt32&,System.UInt32&)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Arithmetic::AtMostFive(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::Left32(System.UInt32,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::PrimitiveLeadingU32(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Bits::PrimitiveLeftU32(System.UInt32,System.Int32)	A	A	A	A	A	A	A	A
@@ -759,10 +767,13 @@ Examples:System.UInt32 Examples.Loops::Bump(System.UInt32,System.UInt32)	A	A	A	A
 Examples:System.UInt32 Examples.Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,System.UInt32&)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::CountCalls(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::CountUntil(System.UInt32,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Loops::CountUpToFive(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::Countdown(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::Decrement(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::DownThenUp(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::FeatureCountdown(System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Loops::InnerCount(Examples.Loops/Outer,System.UInt32)	A	A	A	A	A	A	A	A
+Examples:System.UInt32 Examples.Loops::ReachFive(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::TallyTwice(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.Loops::WrongCountdown(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt32 Examples.NarrowTotals::ReadSum()	A	A	A	A	A	A	A	A
@@ -923,6 +934,7 @@ Examples:System.UInt64 Examples.Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)
 Examples:System.UInt64 Examples.Loops::SumIndexed(System.UInt64[])	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Loops::SumThroughLocal(System.ReadOnlySpan`1<System.UInt64>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Loops::SumThroughSpan(System.UInt64[])	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Loops::TwoStructs(System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.MarshaledMemory::Read(System.ReadOnlySpan`1<System.Byte>)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Measured`1::Width(System.UInt64)	B	B	B	B	B	B	B	B
 Examples:System.UInt64 Examples.MostSpecificBodies::Five(System.UInt64)	A	A	A	A	A	A	A	A
@@ -952,6 +964,7 @@ Examples:System.UInt64 Examples.Objects::IdOf(Examples.Shape)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::LinkedValue(Examples.Node,Examples.Node)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::Replace(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::SecondValue(Examples.Node)	A	A	A	A	A	A	A	A
+Examples:System.UInt64 Examples.Objects::UnderFive(Examples.Account)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Objects::Withdraw(Examples.Account,System.UInt64)	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.Odometer::Next()	A	A	A	A	A	A	A	A
 Examples:System.UInt64 Examples.OutlineCountdown::Drain()	A	A	A	A	A	A	A	A
@@ -1138,6 +1151,7 @@ Examples:System.Void Examples.Loops::FillIndexed(System.UInt32[],System.UInt32)	
 Examples:System.Void Examples.Loops::FillThrough(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::FillThroughSpan(System.UInt32[],System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::FillWords(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
+Examples:System.Void Examples.Loops::FillWordsDown(System.UInt64&,System.UInt64,System.Int32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Put(System.Span`1<System.UInt32>,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.Loops::Stamp(System.UInt32&,System.UInt32)	A	A	A	A	A	A	A	A
 Examples:System.Void Examples.ManagedDispatch::Targets(method System.Int32 *(System.Int32)[])	B	B	B	B	B	B	B	B
