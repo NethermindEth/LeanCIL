@@ -38,6 +38,9 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("SpanAllZero", "Loops::AllZero(System.ReadOnlySpan`1<System.UInt32>)", "control"),
     ("SpanSum", "Loops::Sum(System.ReadOnlySpan`1<System.UInt64>)", "control"),
     ("TallyTwice", "Loops::TallyTwice(uint)", "control"),
+    ("TwoStructs", "Loops::TwoStructs(uint)", "control"),
+    ("InnerCount", "Loops::InnerCount(Examples.Loops/Outer,uint)", "control"),
+    ("FillWordsDown", "Loops::FillWordsDown(ulong&,ulong,int)", "control"),
     ("CopyUntilZero", "Loops::CopyUntilZero(System.ReadOnlySpan`1<System.UInt32>,uint&)", "control"),
     ("Choose", "Arithmetic::Choose(bool,ulong,ulong)", "control"),
     ("Narrow", "Arguments::Narrow(byte)", "control"),
@@ -59,6 +62,18 @@ var catalog = new (string Name, string Selector, string Group)[]
     ("Withdraw", "Objects::Withdraw(Examples.Account,System.UInt64)", "objects"),
     ("LinkedValue", "Objects::LinkedValue(Examples.Node,Examples.Node)", "objects"),
     ("IsIdle", "ItemPool::IsIdle(Examples.PooledItem)", "objects"),
+    // A field tested against a small constant, in a signed, an equality and an unsigned branch.
+    ("BelowFive", "Gauge::BelowFive()", "objects"),
+    ("IsFive", "Gauge::IsFive()", "objects"),
+    ("UnderFive", "Objects::UnderFive(Examples.Account)", "objects"),
+    // The same tests of words over a loop, a branching helper and straight-line code.
+    ("CountToFive", "Loops::CountToFive(int)", "control"),
+    ("CountUpToFive", "Loops::CountUpToFive(uint)", "control"),
+    ("ReachFive", "Loops::ReachFive(uint)", "control"),
+    ("AtLeastFive", "Arithmetic::AtLeastFive(int)", "control"),
+    ("AtMostFive", "Arithmetic::AtMostFive(uint)", "control"),
+    ("FiveToOne", "Arithmetic::FiveToOne(int)", "control"),
+    ("Floored", "Gauge::Floored(int)", "control"),
     // A static helper that tests its word arguments gets a contract stub: its result returned, stored into a
     // field after the call, and returned by a caller over words alone.
     ("HelperResult", "Gauge::Current()", "objects"),
@@ -230,6 +245,35 @@ if (Selected("DepositFrom"))
             depositFrom);
     Console.WriteLine("PASS a loop outline asks Owned only of the object its callee stores and " +
         "Readable of the one it reads");
+}
+
+{
+    // A literal operand is written as `simp` normalizes it, so the split's fact rewrites the simplified goal:
+    // by its word for an equality or an unsigned order, and by its value for a signed one.
+    (string Case, string Fact)[] branches =
+    [
+        ("BelowFive", "branch1 : (Gauge.Level.of initial gauge).toInt < 5"),
+        ("IsFive", "branch1 : (Gauge.Level.of initial gauge) = 5#32"),
+        ("UnderFive", "branch1 : (Account.Limit.of initial account) < 5#32"),
+        ("CountToFive", "guard : count.toInt < 5"),
+        ("CountUpToFive", "guard : count < 5#32"),
+        ("ReachFive", "guard : count = 5#32"),
+        ("AtLeastFive", "branch1 : x.toInt < 5"),
+        ("AtMostFive", "branch1 : 5#32 < x"),
+        ("FiveToOne", "branch1 : x = 5#32"),
+        ("Floored", "branch1 : value.toInt < 5")
+    ];
+    var checkedBranches = 0;
+    foreach (var (name, fact) in branches.Where(branch => Selected(branch.Case)))
+    {
+        checkedBranches++;
+        if (!File.ReadAllText(Path.Combine(outlineRoot, name, "Proof.lean"))
+                .Contains($"by_cases {fact}\n", StringComparison.Ordinal))
+            throw new InvalidOperationException($"The {name} outline does not split on `{fact}`");
+    }
+    if (checkedBranches > 0)
+        Console.WriteLine($"PASS {checkedBranches} outlines write a branch against a small constant as simp " +
+            "normalizes it");
 }
 
 if (Selected("IsIdle"))

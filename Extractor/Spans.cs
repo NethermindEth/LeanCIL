@@ -8,7 +8,7 @@ namespace Nethermind.LeanCIL;
 internal static class Spans
 {
     internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior,
-        Dictionary<Instruction, string> Constructors);
+        Dictionary<Instruction, Operation> Constructors);
 
     // Shape checks do not select an architecture or recompute aggregate layouts.
     internal static bool Is(TypeReference type) =>
@@ -88,7 +88,7 @@ internal static class Spans
                 {
                     analysis.Interior.Add(interior);
                     if (interior != constructor.Call) continue;
-                    analysis.Constructors.Add(interior, $".initializeSpanLocal {local} ({constructor.Descriptor})");
+                    analysis.Constructors.Add(interior, new InitializeSpanLocal(local, constructor.Source));
                     break;
                 }
                 continue;
@@ -107,7 +107,7 @@ internal static class Spans
     }
 
     // The local address cannot escape: only bounded single-value pushes precede its exact constructor.
-    static (Instruction Call, string Descriptor)? Constructor(Instruction address, TypeReference localType,
+    static (Instruction Call, SpanSource Source)? Constructor(Instruction address, TypeReference localType,
         FeatureProfile profile)
     {
         if (address.Next is { OpCode.Code: Code.Initobj, Operand: TypeReference initialized } reset)
@@ -115,7 +115,7 @@ internal static class Spans
             if (MethodSpecialization.SignatureType(initialized) != MethodSpecialization.SignatureType(localType))
                 throw new InvalidDataException("Span default type does not match its local");
             return Width(localType, profile.Architecture) is int width
-                ? (reset, $".empty {width} {Writable(localType).ToString().ToLowerInvariant()}") : null;
+                ? (reset, new SpanEmpty(width, Writable(localType))) : null;
         }
         var call = address.Next;
         var count = 0;
@@ -128,17 +128,12 @@ internal static class Spans
             reference.Name != ".ctor" || reference.DeclaringType.FullName != localType.FullName ||
             reference.Parameters.Count != count)
             return null;
-        var operation = InstructionTranslation.RuntimeModel(reference, profile);
-        if (operation == ".memory .spanCreate") return (call, ".reference 1 false");
-        const string array = ".memory (.arraySpan ";
-        const string pointer = ".memory (.spanFromReference ";
-        const string single = ".memory (.spanSingleReference ";
-        if (operation?.StartsWith(array, StringComparison.Ordinal) == true)
-            return (call, ".array " + operation[array.Length..^1]);
-        if (operation?.StartsWith(pointer, StringComparison.Ordinal) == true)
-            return (call, ".reference " + operation[pointer.Length..^1]);
-        if (operation?.StartsWith(single, StringComparison.Ordinal) == true)
-            return (call, ".singleReference " + operation[single.Length..^1]);
-        return null;
+        return InstructionTranslation.RuntimeModel(reference, profile) is Memory { Operation: var model }
+            ? model switch
+        {
+            SpanCreate => (call, new SpanFromReference(1, false)),
+            SpanSource source and not SpanEmpty => (call, source),
+            _ => null
+        } : null;
     }
 }

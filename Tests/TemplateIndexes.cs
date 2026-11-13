@@ -13,18 +13,41 @@ var root = Path.GetFullPath(At("artifacts/TemplateIndexes"));
 var first = Path.Combine(root, "First");
 var second = Path.Combine(root, "Second");
 var output = Path.Combine(root, "Shared");
-object Variant(string path, bool avx, object[] methods) => JsonSerializer.Deserialize(JsonSerializer.Serialize(new
+Type Model(string name) => assembly.GetType("Nethermind.LeanCIL." + name, true)!;
+object Create(string name, params object?[] arguments) => Activator.CreateInstance(Model(name), arguments)!;
+Array Typed(Type element, IEnumerable<object> items)
 {
-    Directory = path, AssemblyHash = "same", Profile = new
+    var values = items.ToArray();
+    var array = Array.CreateInstance(element, values.Length);
+    for (var index = 0; index < values.Length; index++) array.SetValue(values[index], index);
+    return array;
+}
+object Listed(Type element, IEnumerable<object> items) =>
+    Activator.CreateInstance(Model("ValueList`1").MakeGenericType(element), Typed(element, items))!;
+object Variant(string path, bool avx, object[] methods) => Activator.CreateInstance(variantType, path, "same",
+    JsonSerializer.Deserialize(JsonSerializer.Serialize(new
     {
         Name = avx ? "x64-v3" : "scalar", Architecture = avx ? "x64" : "scalar", NativeWidth = 64,
         LittleEndian = true, Avx2 = avx
-    }, Methods = methods
-}), variantType)!;
-object Method(string identity, params string[] ops) => new
+    }), Model("FeatureProfile"))!, Typed(emitter.GetNestedType("Method", BindingFlags.NonPublic)!, methods))!;
+// The only operations the fixtures need: a feature test, a nop, a return and a static call.
+object Operation(object operation) => operation is not string text ? operation : text switch
 {
-    Identity = identity, Metadata = "locals := [], returnsValue := false", Ops = ops, HasStaticSites = false
+    ".feature .avx2" => Create("FeatureTest", Enum.Parse(Model("Feature"), "Avx2")),
+    ".nop" => Create("StackOperation", Enum.Parse(Model("StackOpcode"), "Nop")),
+    ".ret" => Create("Return", [null]),
+    ".call 0 0" => Create("Call", Enum.Parse(Model("CallKind"), "Static"), 0, 0),
+    ".tailCall 0 0" => Create("Call", Enum.Parse(Model("CallKind"), "Tail"), 0, 0),
+    ".tailCall 1 0" => Create("Call", Enum.Parse(Model("CallKind"), "Tail"), 1, 0),
+    _ => throw new ArgumentException("Unmodelled fixture operation: " + text)
 };
+object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadata", returnsValue,
+    Listed(Model("InitialValue"), []), Listed(Model("LocalKind"), []), Listed(typeof(int), []),
+    Listed(Model("ParameterHome"), []), Listed(Model("StaticSite"), sites));
+object MethodIn(string identity, object frame, params object[] ops) => Activator.CreateInstance(
+    emitter.GetNestedType("Method", BindingFlags.NonPublic)!, identity, frame,
+    Typed(Model("Operation"), ops.Select(Operation)))!;
+object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), ops);
 var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 {
     [first] = Variant(first, false, [Method("Caller", ".feature .avx2", ".nop", ".ret")]),
@@ -108,6 +131,128 @@ try { Emit(); throw new Exception("Duplicate managed identity was accepted"); }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
     rejected.Message == "Template inputs contain ambiguous managed method identities.") { }
 Console.WriteLine("PASS template order, reordered callees, absent-callee placeholders and duplicate rejection");
+
+// A tail call names its callee by the template's parameter too, whatever index each profile gives it.
+var tailRoot = Path.Combine(root, "Tail");
+var (tailFirst, tailSecond, tailOutput) = (Path.Combine(tailRoot, "First"), Path.Combine(tailRoot, "Second"),
+    Path.Combine(tailRoot, "Shared"));
+variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Method("Tail", ".tailCall 0 0")]);
+variants[tailSecond] = Variant(tailSecond, true, [Method("Tail", ".tailCall 1 0"), Method("Target", ".ret")]);
+run.Invoke(null, [(string[])[tailOutput, tailFirst, tailSecond], read]);
+if (!File.ReadAllText(Path.Combine(tailOutput, "Templates.lean")).Contains(".tailCall callee0 0",
+    StringComparison.Ordinal))
+    throw new Exception("A tail call kept its profile's callee index in the template");
+Console.WriteLine("PASS template tail calls take the callee parameter of the profile-specific index");
+
+// A virtual dispatch, a callable pointer and a static initializer name their methods by the template's callee
+// parameters too, whatever index each profile gives them.
+object Entry(string identity, int method) => Create("ManagedTarget", identity, method);
+object InitializedSite(int initializer) => Create("StaticSite", 0, Create("StaticIdentityRecord", "id", "asm", "fld"),
+    "fld", Listed(typeof(byte), []), Create("InitializedStaticValue", null, initializer, Listed(typeof(string), []),
+        null, false));
+string SharedBody(string name, Func<int, object> caller)
+{
+    var directory = Path.Combine(root, name);
+    var (one, two, shared) = (Path.Combine(directory, "First"), Path.Combine(directory, "Second"),
+        Path.Combine(directory, "Shared"));
+    variants[one] = Variant(one, false, [Method("Target", ".ret"), caller(0)]);
+    variants[two] = Variant(two, true, [caller(1), Method("Target", ".ret")]);
+    run.Invoke(null, [(string[])[shared, one, two], read]);
+    return File.ReadAllText(Path.Combine(shared, "Templates.lean"));
+}
+var numbered = new (string Name, Func<int, object> Caller, string Expected)[]
+{
+    ("CallVirtual", target => Method("Caller", Create("CallVirtual", Listed(typeof((string, int)),
+        [("Class", target)]), 1), ".ret"), ".callVirtual [(Class, callee0)] 1"),
+    ("MethodAddress", target => Method("Caller", Create("MethodAddress", Entry("ID", target), "SIG"), ".ret"),
+        ".managed (.address { identity := ID, method := callee0 } SIG)"),
+    ("IndirectCall", target => Method("Caller", Create("IndirectCall", "SIG", Listed(Model("ManagedTarget"),
+        [Entry("ID", target)]), false), ".ret"), ".managed (.call SIG [{ identity := ID, method := callee0 }] false)"),
+    ("Initializer", target => MethodIn("Caller", FrameOf(false, InitializedSite(target)), ".ret"),
+        "initializer := some { method := callee0, arguments := []")
+};
+foreach (var (name, caller, spelling) in numbered)
+    if (!SharedBody("Numbered" + name, caller).Contains(spelling, StringComparison.Ordinal))
+        throw new Exception($"A {name} kept its profile's method index in the template");
+Console.WriteLine("PASS template dispatch, callable pointer and initializer methods take callee parameters");
+
+// Records that render the same Lean are equal, so profiles whose instructions differ only in what the text
+// leaves out merge; a real difference still fails at its instruction.
+string Merge(string identity, object[] left, object[] right)
+{
+    var directory = Path.Combine(root, "Merge" + identity);
+    var (one, two, shared) = (Path.Combine(directory, "First"), Path.Combine(directory, "Second"),
+        Path.Combine(directory, "Shared"));
+    variants[one] = Variant(one, false, [Method(identity, left)]);
+    variants[two] = Variant(two, true, [Method(identity, right)]);
+    run.Invoke(null, [(string[])[shared, one, two], read]);
+    return File.ReadAllText(Path.Combine(shared, "Templates.lean"));
+}
+object Scalar(string function, int width, bool signed, int result, int arguments) => Create("ScalarIntrinsic",
+    Named(Model("ScalarFunction"), function), width, signed, result, arguments);
+object Named(Type type, string value) => Enum.Parse(type, value);
+object ClassWord(bool store, int width, bool signed) => Create("ClassField", Create("ClassViews+FieldOperation",
+    store, "T", 0, Named(Model("ClassViews+FieldKind"), "Word"), width, signed, null));
+var merged = new (string Identity, object Left, object Right, string Expected)[]
+{
+    ("BigMul", Scalar("BigMul32", 32, true, 32, 2), Scalar("BigMul32", 64, true, 32, 2),
+        ".intrinsic (.scalar (.bigMul32 true)) 2"),
+    ("PopCount", Scalar("PopCount", 32, true, 32, 1), Scalar("PopCount", 32, false, 32, 1),
+        ".intrinsic (.scalar (.popCount 32 .word32)) 1"),
+    ("Store", ClassWord(true, 4, true), ClassWord(true, 4, false), ".memory (.setObjectField (T) 0 4)")
+};
+foreach (var (identity, left, right, spelling) in merged)
+    if (!Merge(identity, [left, ".ret"], [right, ".ret"]).Contains(spelling, StringComparison.Ordinal))
+        throw new Exception($"A {identity} instruction that renders the same in both profiles did not merge");
+if (!Rejected(() => Merge("Rotate", [Scalar("RotateLeft", 32, false, 32, 2), ".ret"],
+        [Scalar("RotateLeft", 64, false, 32, 2), ".ret"]))
+    .Contains("Profiles with identical observed flags emit different instructions: Rotate at pc 0"))
+    throw new Exception("Profiles that render a rotate differently merged");
+Console.WriteLine("PASS template merge accepts what the Lean text equates and names the instruction that differs");
+
+// Profiles must agree on the frame and the instruction count before any instruction is compared.
+string Differing(string identity, object leftFrame, object[] left, object rightFrame, object[] right)
+{
+    var directory = Path.Combine(root, "Differing" + identity);
+    var (one, two, shared) = (Path.Combine(directory, "First"), Path.Combine(directory, "Second"),
+        Path.Combine(directory, "Shared"));
+    variants[one] = Variant(one, false, [MethodIn(identity, leftFrame, left)]);
+    variants[two] = Variant(two, true, [MethodIn(identity, rightFrame, right)]);
+    return Rejected(() => run.Invoke(null, [(string[])[shared, one, two], read]));
+}
+if (!Differing("Frame", FrameOf(false), [".ret"], FrameOf(true), [".ret"])
+        .Contains("Template metadata or instruction count differs between profiles: Frame") ||
+    !Differing("Count", FrameOf(false), [".ret"], FrameOf(false), [".nop", ".ret"])
+        .Contains("Template metadata or instruction count differs between profiles: Count") ||
+    !Differing("Leaf", FrameOf(false), [".nop", ".ret"], FrameOf(false), [".ret", ".ret"])
+        .Contains("Profiles with identical observed flags emit different instructions: Leaf at pc 0"))
+    throw new Exception("Profiles that differ in frame, length or an unflagged instruction were merged");
+Console.WriteLine("PASS template merge rejects differing frames, lengths and unflagged instructions");
+
+// The template merge and renderer are linear in a method's instructions: four times the code must cost far less
+// than the sixteen times a quadratic pass over it would.
+TimeSpan EmitTime(int length)
+{
+    var scaleRoot = Path.Combine(root, "Scale" + length);
+    var (one, two) = (Path.Combine(scaleRoot, "First"), Path.Combine(scaleRoot, "Second"));
+    string[] ops = [.. Enumerable.Repeat(".nop", length), ".ret"];
+    variants[one] = Variant(one, false, [Method("Long", ops)]);
+    variants[two] = Variant(two, true, [Method("Long", ops)]);
+    var best = TimeSpan.MaxValue;
+    for (var attempt = 0; attempt < 3; attempt++)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        run.Invoke(null, [(string[])[Path.Combine(scaleRoot, "Out" + attempt), one, two], read]);
+        best = TimeSpan.FromTicks(Math.Min(best.Ticks, clock.Elapsed.Ticks));
+    }
+    return best;
+}
+var (small, large) = (EmitTime(20_000), EmitTime(80_000));
+if (large.TotalMilliseconds > 8 * Math.Max(small.TotalMilliseconds, 5))
+    throw new Exception($"Template emission grew faster than linearly: {small.TotalMilliseconds:F0} ms for 20000 " +
+        $"instructions, {large.TotalMilliseconds:F0} ms for 80000");
+Console.WriteLine("PASS template emission is linear in the instructions " +
+    $"({small.TotalMilliseconds:F0} ms, {large.TotalMilliseconds:F0} ms)");
 
 partial class Program
 {

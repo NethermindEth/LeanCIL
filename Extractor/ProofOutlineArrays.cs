@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
@@ -18,40 +17,43 @@ internal static partial class ProofOutline
 
     /// <summary>The access of a body that loads an array argument and an `int` argument, reads that element and
     /// returns it, or null for any other body.</summary>
-    static ArrayAccess? ArrayRead(Extraction extraction, Specification spec, string[] all)
+    static ArrayAccess? ArrayRead(Extraction extraction, Specification spec, Operation[] all)
     {
-        var ops = all.Where(op => op != ".nop").ToArray();
+        var ops = all.Where(op => !op.IsNop).ToArray();
         if (spec.Method.HasThis || spec.Result is not { Boolean: false, Object: false } || ops.Length < 4 ||
             Argument(ops[0]) is not { Shape: ParameterShape.WordArray } array ||
             Argument(ops[1]) is not { Shape: ParameterShape.Scalar, Width: 4 } index ||
-            spec.Result.Lean != WordType(array.Width) || ops[^1] != ".ret")
+            spec.Result.Lean != WordType(array.Width) || ops[^1] is not Return { Narrow: null })
             return null;
-        if (ops.Length == 4 && ops[2] == $".memory (.arrayLoad {array.Width} false)") return new(array, index, null);
+        if (ops.Length == 4 &&
+            ops[2] is Memory { Operation: ArrayLoad { Signed: false } load } && load.Width == array.Width)
+            return new(array, index, null);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.
-        if (ops.Length != 5 || array.Width != 4 || ops[3] != ".loadScalar 4" ||
-            Regex.Match(ops[2], @"\A\.call (\d+) 2\z") is not { Success: true } call)
+        if (ops.Length != 5 || array.Width != 4 ||
+            ops[3] is not LoadScalar { Width: 4, Signed: false } ||
+            ops[2] is not Call { Kind: CallKind.Static, Arguments: 2 } call)
             return null;
-        var callee = int.Parse(call.Groups[1].Value, CultureInfo.InvariantCulture);
-        return ElementAddress(extraction, callee, array.ArrayElement) is { } method
-            ? new(array, index, new(callee, method, "")) : null;
+        return ElementAddress(extraction, call.Method, array.Element!) is { } method
+            ? new(array, index, new(call.Method, method, "")) : null;
 
-        Parameter? Argument(string op) =>
-            Regex.Match(op, @"\A\.arg (\d+)\z") is { Success: true } load
-                ? spec.Parameters[int.Parse(load.Groups[1].Value, CultureInfo.InvariantCulture)] : null;
+        Parameter? Argument(Operation op) =>
+            op is Arg { Narrow: null } load ? spec.Parameters[load.Index] : null;
     }
 
     /// <summary>Method `index` when it is static `(T[] values, int index)` returning `ref values[index]` of
     /// arrays of `element`, and nothing else.</summary>
-    static MethodDefinition? ElementAddress(Extraction extraction, int index, string element)
+    static MethodDefinition? ElementAddress(Extraction extraction, int index, Arrays.Element element)
     {
         var method = extraction.Methods[index];
-        var ops = extraction.Emitted[index].Ops.Where(op => op != ".nop").ToArray();
+        var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
         return !method.HasThis && method.Parameters.Count == 2 && method.ReturnType is ByReferenceType &&
             method.Parameters[0].ParameterType is ArrayType { Rank: 1 } array &&
             WordArrayElement(array.ElementType) == element &&
             method.Parameters[1].ParameterType.FullName is "System.Int32" &&
-            extraction.Emitted[index].Metadata.Contains("locals := [],") &&
-            ops.SequenceEqual([".arg 0", ".arg 1", $".memory (.arrayAddress {element})", ".ret"])
+            extraction.Emitted[index].Frame.HasNoLocals && ops is
+                [Arg { Index: 0, Narrow: null }, Arg { Index: 1, Narrow: null },
+                    Memory { Operation: ArrayAddress { ReadOnly: false } address }, Return { Narrow: null }] &&
+            address.Element == element
             ? method : null;
     }
 

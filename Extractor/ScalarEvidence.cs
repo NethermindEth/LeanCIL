@@ -5,7 +5,7 @@ namespace Nethermind.LeanCIL;
 
 internal static class ScalarEvidence
 {
-    static string Kind(NativeOperands.StackType value) => value.Metadata ?? value.Kind switch
+    static string Kind(NativeOperands.StackType value) => value.Metadata?.ToLean() ?? value.Kind switch
     {
         NativeOperands.Kind.Word32 => ".word32",
         NativeOperands.Kind.Word64 => ".word64",
@@ -13,7 +13,7 @@ internal static class ScalarEvidence
         NativeOperands.Kind.Reference => ".reference",
         NativeOperands.Kind.NullObject => ".nullObject",
         NativeOperands.Kind.Object => ".object",
-        _ => Arrays.StackKind(value.Kind) ?? ".other"
+        _ => Arrays.StackKind(value.Kind)?.ToLean() ?? ".other"
     };
 
     internal static void Emit(StringBuilder lean, MethodDefinition method, int number,

@@ -230,4 +230,77 @@ public static class Loops
             rest = rest.Slice(1);
         }
     }
+
+    // Struct names that sort in the opposite order to the locals that hold them, so layout numbers follow
+    // the order the extraction emits them, not the order of their identities.
+    struct Zulu
+    {
+        public uint Count;
+        public uint Spare;
+    }
+
+    struct Alpha
+    {
+        public ulong Sum;
+    }
+
+    public static ulong TwoStructs(uint value)
+    {
+        Zulu zulu = default;
+        Alpha alpha = default;
+        while (zulu.Count != value)
+        {
+            zulu.Count = unchecked(zulu.Count + 1);
+            alpha.Sum = unchecked(alpha.Sum + 2);
+        }
+        return alpha.Sum;
+    }
+
+    public struct Inner
+    {
+        public uint Count;
+    }
+
+    public struct Outer
+    {
+        public Inner Part;
+        public uint Other;
+    }
+
+    // `outer` is named first in the extraction, and `Inner` nests in it, so the two orders of layouts disagree.
+    public static uint InnerCount(Outer outer, uint value)
+    {
+        Inner inner = default;
+        while (inner.Count != value) inner.Count = unchecked(inner.Count + 1);
+        return inner.Count;
+    }
+
+    // Walks down from the reference: the offset of each store is a negative stride, which no loop step names.
+    public static void FillWordsDown(ref ulong destination, ulong value, int count)
+    {
+        for (int i = 0; i < count; i++)
+            System.Runtime.CompilerServices.Unsafe.Subtract(ref destination, i) = value;
+    }
+
+    // Loop tests against a small constant: signed and unsigned order, and equality.
+    public static int CountToFive(int start)
+    {
+        var count = start;
+        while (count < 5) count = unchecked(count + 1);
+        return count;
+    }
+
+    public static uint CountUpToFive(uint start)
+    {
+        var count = start;
+        while (count < 5u) count = unchecked(count + 1);
+        return count;
+    }
+
+    public static uint ReachFive(uint start)
+    {
+        var count = start;
+        while (count != 5) count = unchecked(count + 1);
+        return count;
+    }
 }

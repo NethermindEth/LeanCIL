@@ -5,7 +5,7 @@ namespace Nethermind.LeanCIL;
 // Value reinterpretation is distinct from Unsafe.As<TFrom,TTo>'s byref identity.
 internal static class ValueBitCasts
 {
-    internal static string? Translate(MethodReference reference, string architecture = "scalar")
+    internal static Operation? Translate(MethodReference reference, string architecture = "scalar")
     {
         if (reference.Name != "BitCast" || reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
@@ -42,6 +42,6 @@ internal static class ValueBitCasts
         if (source is null || target is null || source.Value.Width != target.Value.Width)
             throw new InvalidDataException($"Unsupported Unsafe.BitCast value layouts: {reference.FullName}");
         RuntimeModels.ValidateSignature(reference, architecture);
-        return $".memory (.bitcastValue {source.Value.Shape} {target.Value.Shape})";
+        return MemoryOperation.Other($"(.bitcastValue {source.Value.Shape} {target.Value.Shape})");
     }
 }

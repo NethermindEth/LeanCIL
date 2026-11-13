@@ -10,7 +10,7 @@ var shared = Path.Combine(directory, "Shared");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Dispatch.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>
-<TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize>
+<TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize><AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 </PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(source, "Dispatch.cs"), """
@@ -38,6 +38,38 @@ public static class StaticDispatch
 {
     public static readonly uint Bias = 7;
     public static uint Read() => Bias;
+}
+public abstract class Slot { public abstract uint Value(); }
+public sealed class Single : Slot { public override uint Value() => 1; }
+public sealed class Double : Slot { public override uint Value() => 2; }
+// Each method names other methods only on the branch of one feature, so a profile without it leaves them out.
+public static unsafe class Kinds
+{
+    static uint Bump(uint value) => value + 1;
+    static uint Twice(uint value) => value * 2;
+    public static void Register(delegate* managed<uint, uint>[] table) { table[0] = &Bump; table[1] = &Twice; }
+    public static uint Virtual(Slot slot) { if (Avx2.IsSupported) return slot.Value(); return 0; }
+    public static uint Address(uint value)
+    {
+        if (Avx2.IsSupported) return ((delegate* managed<uint, uint>)&Bump)(value);
+        return value;
+    }
+    public static uint Indirect(delegate* managed<uint, uint>[] table, int index, uint value)
+    {
+        if (Avx2.IsSupported) return table[index](value);
+        return value;
+    }
+    public static uint Initial()
+    {
+        var scaled = Scaling.Scaled;
+        if (Avx2.IsSupported) return Bump(scaled);
+        return scaled;
+    }
+}
+public static class Scaling
+{
+    static uint Scale(uint value) => value;
+    public static readonly uint Scaled = Scale(3);
 }
 """);
 Run(["dotnet", "build", Path.Combine(source, "Dispatch.csproj"), "-c", "Release"]);
@@ -129,6 +161,45 @@ run_cmd do
 """);
     Compile(extracted, "Replay", path);
     Console.WriteLine("PASS exact binding, consumer theorem and independent kernel replay: " + extracted);
+}
+
+// Calls through a virtual slot, a method address, a callable pointer catalog and a static initializer name their
+// methods by the template's callee parameters, which must elaborate and bind to each profile's own indices.
+var kinds = new (string Name, string Selector, string Spelling)[]
+{
+    ("Virtual", "Kinds::Virtual(Slot)", ".callVirtual [("),
+    ("Address", "Kinds::Address(uint)", ".managed (.address { identity := "),
+    ("Indirect", "Kinds::Indirect(method System.UInt32 *(System.UInt32)[],System.Int32,System.UInt32)",
+        ".managed (.call "),
+    ("Initial", "Kinds::Initial()", "initializer := some { method := callee1")
+};
+foreach (var (name, selector, spelling) in kinds)
+{
+    var kindProfiles = new[] { "scalar", "x64-v3" };
+    var kindExtractions = kindProfiles.Select(profile => Path.Combine(directory, name + "-" + profile)).ToArray();
+    for (var index = 0; index < kindProfiles.Length; index++)
+        Run([.. Extract("extract", assembly, "Dispatch", selector, kindExtractions[index], kindProfiles[index]),
+            "--assume-initialized", "Scaling"]);
+    var kindShared = Path.Combine(directory, name + "Shared");
+    Run(["dotnet", ExtractorPath, "templates", kindShared, .. kindExtractions]);
+    var kindTemplates = File.ReadAllText(Path.Combine(kindShared, "Templates.lean"));
+    if (!kindTemplates.Contains(spelling, StringComparison.Ordinal) ||
+        !kindTemplates.Contains("(callee0 : Nat)", StringComparison.Ordinal))
+        throw new InvalidOperationException($"The {name} template does not name its method by a callee parameter:\n" +
+            kindTemplates);
+    var kindPath = kindShared + Path.PathSeparator + library;
+    Compile(kindShared, "Templates", kindPath);
+    for (var index = 0; index < kindProfiles.Length; index++)
+    {
+        var extracted = kindExtractions[index];
+        var path = extracted + Path.PathSeparator + kindPath;
+        Compile(extracted, "Extracted", path);
+        var binding = "TemplateBindings" + index;
+        File.Copy(Path.Combine(kindShared, binding + ".lean"), Path.Combine(extracted, binding + ".lean"),
+            overwrite: true);
+        Compile(extracted, binding, path);
+    }
+    Console.WriteLine($"PASS a {name} template elaborates and binds to each profile's own method indices");
 }
 
 void RejectLean(string name, string text, string path)

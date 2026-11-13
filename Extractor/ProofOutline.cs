@@ -10,10 +10,23 @@ namespace Nethermind.LeanCIL;
 internal static partial class ProofOutline
 {
     /// <summary>A checked extraction: its methods while still loaded, their emitted operations and
-    /// the layout identities in emission order, the checked `Extracted.lean` source, its named class fields, and
+    /// its computed layouts in emission order, each with its identity, its named class fields, and
     /// the architecture that sizes its struct array elements.</summary>
     internal sealed record Extraction(MethodDefinition[] Methods, TemplateEmitter.Method[] Emitted,
-        string[] LayoutIdentities, string Source, ClassViews.View[] Views, string Architecture);
+        ClassViews.View[] Views, string Architecture,
+        ComputedLayout[] Layouts);
+
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ComputedLayout[],
+        Dictionary<string, int>> LayoutIndices = new();
+
+    /// <summary>The index of the first computed layout with this identity, or -1 when none has it.</summary>
+    internal static int LayoutIndex(Extraction extraction, string identity) =>
+        LayoutIndices.GetValue(extraction.Layouts, static layouts =>
+        {
+            var indices = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (var index = 0; index < layouts.Length; index++) indices.TryAdd(layouts[index].Identity, index);
+            return indices;
+        }).GetValueOrDefault(identity, -1);
 
     const string Usage = "Usage: leancil new-proof extraction-directory proof.lean";
 

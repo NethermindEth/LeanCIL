@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using Mono.Cecil;
@@ -378,19 +379,20 @@ internal sealed class ImportResolution : IDisposable
 
     internal static string LeanSlot(Binding binding) =>
         "{ identity := " + JsonSerializer.Serialize(binding.Identity) + ", closureDigest := " + JsonSerializer.Serialize(binding.ClosureDigest) +
-        ", parameterCount := " + binding.ParameterCount + ", hasThis := false, returnsValue := " + (binding.ReturnsValue ? "true" : "false") +
+        ", parameterCount := " + binding.ParameterCount + ", hasThis := false, returnsValue := " +
+        LeanText.Bool(binding.ReturnsValue) +
         (binding.TypedSignature is null ? "" : ", signature := some (" + binding.TypedSignature.Lean + "), layouts := { published := " +
             ImportedLayoutMetadata.RawLean(binding.PublishedLayouts) + ", actual := " + ImportedLayoutMetadata.RawLean(binding.ActualLayouts) +
             ", computed := " + binding.ComputedLayouts + " }") + " }";
 
-    internal bool TryTranslate(Instruction instruction, int methodCount, out string translated)
+    internal bool TryTranslate(Instruction instruction, int methodCount, [NotNullWhen(true)] out Operation? translated)
     {
         if (sites.TryGetValue(instruction, out int slot))
         {
-            translated = $".call {methodCount + slot} {bindings[slot].ParameterCount}";
+            translated = new Call(CallKind.Static, methodCount + slot, bindings[slot].ParameterCount);
             return true;
         }
-        translated = "";
+        translated = null;
         return false;
     }
 

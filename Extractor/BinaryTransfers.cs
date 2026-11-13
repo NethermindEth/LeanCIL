@@ -5,9 +5,9 @@ namespace Nethermind.LeanCIL;
 // Exact fixed-width overloads share checked transfers and the scalar byte-reversal model.
 internal static class BinaryTransfers
 {
-    private static readonly Dictionary<string, string> Operations = BuildOperations();
+    private static readonly Dictionary<string, Operation> Operations = BuildOperations();
 
-    internal static string? Translate(MethodReference reference)
+    internal static Operation? Translate(MethodReference reference)
     {
         if (reference.DeclaringType.FullName != "System.Buffers.Binary.BinaryPrimitives" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Memory") ||
@@ -17,9 +17,9 @@ internal static class BinaryTransfers
         return Operations.GetValueOrDefault(reference.FullName);
     }
 
-    private static Dictionary<string, string> BuildOperations()
+    private static Dictionary<string, Operation> BuildOperations()
     {
-        var operations = new Dictionary<string, string>(StringComparer.Ordinal);
+        var operations = new Dictionary<string, Operation>(StringComparer.Ordinal);
         foreach (var (type, width, signed) in new[]
         {
             ("Int16", 2, true), ("UInt16", 2, false), ("Int32", 4, true), ("UInt32", 4, false),
@@ -38,8 +38,8 @@ internal static class BinaryTransfers
                 ? $".binaryRead {width} {signed.ToString().ToLowerInvariant()}"
                 : $".binaryWrite {width}";
             operations.Add($"{result} System.Buffers.Binary.BinaryPrimitives::{name}({parameters})",
-                $".memory ({operation} {bigEndian.ToString().ToLowerInvariant()} " +
-                $"{trying.ToString().ToLowerInvariant()})");
+                MemoryOperation.Other($"({operation} {bigEndian.ToString().ToLowerInvariant()} " +
+                $"{trying.ToString().ToLowerInvariant()})"));
         }
         return operations;
     }

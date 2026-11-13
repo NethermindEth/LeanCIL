@@ -64,8 +64,8 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
             }
             foreach (var profile in profiles)
             {
-                string? operation;
-                try { operation = (string?)translate.Invoke(null, [method, profile]); }
+                object? operation;
+                try { operation = translate.Invoke(null, [method, profile]); }
                 catch (TargetInvocationException exception) when (exception.InnerException is
                     InvalidDataException or NotSupportedException or AssemblyResolutionException) { continue; }
                 if (operation is null) continue;

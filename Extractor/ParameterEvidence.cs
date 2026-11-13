@@ -21,9 +21,9 @@ internal static class ParameterEvidence
         if (Arrays.Of(type) is { } element) return $".array {element.Expression}";
         if (type is GenericInstanceType span && Spans.Is(type) &&
             MetadataValidation.IsAggregate(span.GenericArguments[0], module))
-            return $".aggregateSpan {layouts.Index(span.GenericArguments[0])} {(Spans.Writable(type) ? "true" : "false")}";
+            return $".aggregateSpan {layouts.Index(span.GenericArguments[0])} {LeanText.Bool(Spans.Writable(type))}";
         if (Spans.Width(type, layouts.Metadata.Architecture) is { } width)
-            return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
+            return $".span {width} {LeanText.Bool(Spans.Writable(type))}";
         if (type is GenericInstanceType vector && !MetadataValidation.IsAggregate(type, module))
             return vector.ElementType.FullName switch
             {
@@ -49,8 +49,8 @@ internal static class ParameterEvidence
         var arguments = new List<string>();
         if (method.HasThis) arguments.Add(ObjectTypes.Is(method.DeclaringType) ? ".object" : ".reference");
         arguments.AddRange(method.Parameters.Select(parameter => InReferences.Parameter(parameter.ParameterType))
-            .Select(type => dispatch.Kind(type) ?? Type(type, method.Module, layouts)));
-        var locals = method.Body.Variables.Select(local => dispatch.Kind(local.VariableType, local.Index) ??
+            .Select(type => dispatch.Kind(type)?.ToLean() ?? Type(type, method.Module, layouts)));
+        var locals = method.Body.Variables.Select(local => dispatch.Kind(local.VariableType, local.Index)?.ToLean() ??
             Type(local.VariableType, method.Module, layouts));
         var code = method.Body.Instructions.Select(instruction => instruction.OpCode.Code switch
         {
