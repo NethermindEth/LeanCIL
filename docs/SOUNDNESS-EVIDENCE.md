@@ -76,8 +76,8 @@ The carried rows have that RVA column zeroed, so the audit's comparison of a car
 image's masks it. What the tokens, the locals and the method definition mean is checked against the
 metadata rows the body carries, as the next section describes.
 
-A closed generic instantiation carries the bytes of its open definition, so it shares the
-`method{n}Bytes` definition of the first method that uses them. A token used at several sites
+A closed generic instantiation carries the bytes of its open definition, in its own `method{n}Bytes`,
+and its own metadata slice, so its component names no other method. A token used at several sites
 has one table entry, and the extractor refuses a token whose sites resolve to different operands.
 An external call spells its identity as a materialized name at a reachable site and as a literal
 at an unreachable one; the kernel decides that the two are equal strings, so one entry serves
@@ -108,8 +108,9 @@ Building the lookup trees of a slice costs its size, and the kernel keeps no cac
 extractor therefore writes them out as the literal `method{n}Tables` (balanced search trees of the rows, heap
 entries, links and instance field counts), and `method{n}_tables_valid` states that `tablesMatch`: the decoder
 builds exactly that literal from `method{n}Metadata`. That decision costs the method's carried rows times a
-logarithm; `method{n}_body_validated` uses it as a premise. A closed generic instantiation shares the slice of
-the open definition whose bytes it shares.
+logarithm; `method{n}_body_validated` uses it as a premise. Each closed instantiation of a generic method has
+its own copy, built from the open definition and the assembly, so reuse does not depend on which
+instantiations an extraction holds or in which order.
 
 What `MetadataResolution` and `MetadataBinding` check:
 

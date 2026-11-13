@@ -13,7 +13,6 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     ImportResolution? imports = null)
 {
     // Closed instantiations share their definition's bytes; the first method to use a body names them.
-    readonly Dictionary<(ModuleDefinition Module, uint Token), int> bodyBytes = [];
     readonly ExternalIdentityEvidence externalIdentities = new();
     readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
     int methodParameterCount;
@@ -350,32 +349,25 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             // either; the name spares the reachable site a conversion.
             else if (reachable.Contains(site)) operands[known] = (token, key, operand);
         }
-        var definition = (original.Module, original.MetadataToken.ToUInt32());
-        var shared = bodyBytes.TryGetValue(definition, out var first);
-        var data = shared
-            ? $"method{first}Bytes" : List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
-        // The slices hold what this body reaches; a closed instantiation shares its open definition's.
-        var owner = shared ? first : number;
-        var slices = "";
-        if (!shared)
-        {
-            var (rows, tables) = (metadata ?? throw new InvalidOperationException(
-                "Method evidence requires the pinned assemblies.")).Method(original,
-                operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32())
-                    .Where(token => token != 0),
-                original.HasThis && ObjectTypes.Is(original.DeclaringType));
-            // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
-            slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
-                $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
-                $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
-                $"method{number}Tables = true := by decide +kernel";
-        }
-        bodyBytes.TryAdd(definition, number);
+        // Each closed instantiation carries its own bytes and metadata slice, built from the open definition and the
+        // assembly, so a method's component names no other method and does not depend on which instantiations the
+        // extraction holds or in which order.
+        var data = List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        var (rows, tables) = (metadata ?? throw new InvalidOperationException(
+            "Method evidence requires the pinned assemblies.")).Method(original,
+            operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32())
+                .Where(token => token != 0),
+            original.HasThis && ObjectTypes.Is(original.DeclaringType));
+        // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
+        var slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
+            $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
+            $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
+            $"method{number}Tables = true := by decide +kernel";
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
         return ($"def method{number}Bytes : List Nat := {data}", slices,
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
-            $"tokens := {{ operands := {table} }}, metadata := method{owner}Metadata, tables := method{owner}Tables }}",
-            $"method{owner}_tables_valid");
+            $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, tables := method{number}Tables }}",
+            $"method{number}_tables_valid");
     }
 
     static uint TokenOperand(MethodDefinition original, MethodBodyBytes.Body body, Instruction instruction)
