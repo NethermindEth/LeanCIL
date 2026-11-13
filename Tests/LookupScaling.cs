@@ -333,3 +333,34 @@ foreach (var (label, costs) in new[] { ("body", fieldBody), ("tables", fieldTabl
             $"The {label} check costs {growth:F2} times as much with {fieldCounts[1]} fields ") +
             FormattableString.Invariant($"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth * fieldRatio:F1}."));
 }
+
+// `spelled?` reads a name's bytes in one pass, and `cil_kernel_rfl` equates the result with the name's literal:
+// the cost grows with the length of the name and no faster. Each file is measured against the same file with
+// the proof left open, so the statement's own elaboration is not counted.
+const double AllowedSpellingGrowth = 1.25;
+var spellingLengths = new[] { 20, 80, 320 };
+long SpellingCheck(int length)
+{
+    var name = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
+    var bytes = string.Join(", ", name.Select(character => (int)character));
+    var statement = $"theorem spells : CIL.Extraction.spelled? [{bytes}] = some \"{name}\"";
+    var header = "import CIL.Extraction.KernelEquation\n";
+    return Heartbeats(Path.Combine(directory, $"Spelling{length}Checked.lean"),
+            $"{header}{statement} := by cil_kernel_rfl\n", equations: false) -
+        Heartbeats(Path.Combine(directory, $"Spelling{length}Open.lean"),
+            $"{header}{statement} := sorry\n", equations: false);
+}
+var spellingCosts = spellingLengths.Select(length => (double)SpellingCheck(length)).ToArray();
+for (var step = 1; step < spellingLengths.Length; step++)
+{
+    var lengthRatio = spellingLengths[step] / (double)spellingLengths[step - 1];
+    var growth = spellingCosts[step] / spellingCosts[step - 1];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS spelling a name of {spellingLengths[step - 1]} and {spellingLengths[step]} bytes: ") +
+        FormattableString.Invariant($"{spellingCosts[step - 1]:F0} and {spellingCosts[step]:F0} heartbeats, ") +
+        FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
+    if (growth > AllowedSpellingGrowth * lengthRatio)
+        throw new Exception(FormattableString.Invariant(
+            $"Spelling {spellingLengths[step]} bytes costs {growth:F2} times as much as {spellingLengths[step - 1]}; ") +
+            FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+}

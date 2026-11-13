@@ -20,15 +20,6 @@ open CIL CIL.Extraction Tests.BodyEncoding Tests.MetadataBuilder Tests.MetadataW
 /-- The assembly whose metadata the bodies are checked against. -/
 private def pin : AssemblyPin := { identity := ownIdentity }
 
-/-- A body with the given bytes and token claims, with the metadata of the world's `Main`. -/
-private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := []) :
-    BodyEvidence :=
-  let metadata : MethodMetadata := { own := own.1, others := [lib] }
-  { bytes := bytes, tokens := { operands := operands }, metadata,
-    tables := match metadata.tables with
-      | .ok built => built
-      | .error _ => [] }
-
 /-- A decoded method with the given body fields: the world's `Main`, a public static method
     with no parameters. -/
 private def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
@@ -37,6 +28,12 @@ private def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
     explicitThis := false, callingConvention := 0, attributes := 0x96, implementation := 0,
     returnType := .void, parameters := [], locals := locals, initLocals := initLocals,
     maxStack := maxStack, genericParameters := [], code := code }
+
+/-- A body with the given bytes and token claims, with the metadata of the world's `Main`; its
+    names are those of every test method, which all sit in `Main`'s class. -/
+private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := []) :
+    BodyEvidence :=
+  evidenceOf bytes operands { own := own.1, others := [lib] } (method 8 false [] [])
 
 /-- One decoded instruction. -/
 private def instr (offset opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
@@ -54,7 +51,7 @@ private def tinyBytes : List Nat := [0x12, 0x02, 0x03, 0x58, 0x2A]
 private def tinyMethod : RawMethod :=
   method 8 false [] [instr 0 0x02, instr 1 0x03, instr 2 0x58, instr 3 0x2A]
 
-theorem tiny_header_decodes : bodyMatches pin (evidence tinyBytes) tinyMethod = true := by
+theorem tiny_header_decodes : bodyMatches (evidence tinyBytes) tinyMethod = true := by
   decide +kernel
 #print axioms tiny_header_decodes
 
@@ -71,7 +68,7 @@ private def fatMethod : RawMethod :=
 /-- `fatBytes`, whose signature token `0x11000001` names the world's one `uint64` local. -/
 private def fatEvidence : BodyEvidence := evidence fatBytes
 
-theorem fat_header_decodes : bodyMatches pin fatEvidence fatMethod = true := by decide +kernel
+theorem fat_header_decodes : bodyMatches fatEvidence fatMethod = true := by decide +kernel
 #print axioms fat_header_decodes
 
 /-- Short and long branches, forward and backward; targets are instruction indices. -/
@@ -84,7 +81,7 @@ private def branchMethod : RawMethod :=
     instr 5 0x2B (.target 3), instr 7 0x16, instr 8 0x38 (.target 0), instr 13 0x2A]
 
 theorem branches_decode_to_instruction_indices :
-    bodyMatches pin (evidence branchBytes) branchMethod = true := by decide +kernel
+    bodyMatches (evidence branchBytes) branchMethod = true := by decide +kernel
 #print axioms branches_decode_to_instruction_indices
 
 /-- A `switch` whose targets are measured from the end of its table. -/
@@ -96,7 +93,7 @@ private def switchMethod : RawMethod :=
   method 8 false [] [instr 0 0x02, instr 1 0x45 (.targets [2, 3, 1]), instr 18 0x2A, instr 19 0x2A]
 
 theorem switch_decodes_to_instruction_indices :
-    bodyMatches pin (evidence switchBytes) switchMethod = true := by decide +kernel
+    bodyMatches (evidence switchBytes) switchMethod = true := by decide +kernel
 #print axioms switch_decodes_to_instruction_indices
 
 /-- Two-byte opcodes `0xFE nn`: `ceq`, a long local and the unsigned `unaligned.` prefix. -/
@@ -109,7 +106,7 @@ private def twoByteMethod : RawMethod :=
     instr 8 0xFE12 (.integer 255), instr 11 0x2A, instr 12 0x2A]
 
 theorem two_byte_opcodes_decode :
-    bodyMatches pin (evidence twoByteBytes) twoByteMethod = true := by decide +kernel
+    bodyMatches (evidence twoByteBytes) twoByteMethod = true := by decide +kernel
 #print axioms two_byte_opcodes_decode
 
 /-- A method token, a user string, a type token, and float constants of both widths:
@@ -134,7 +131,7 @@ private def tokenMethod : RawMethod :=
     instr 29 0x2A]
 
 theorem token_operands_resolve_through_the_table :
-    bodyMatches pin (evidence tokenBytes tokenOperands) tokenMethod = true := by decide +kernel
+    bodyMatches (evidence tokenBytes tokenOperands) tokenMethod = true := by decide +kernel
 #print axioms token_operands_resolve_through_the_table
 
 /-- The other operand encodings: long argument, `ldc.i8`, `no.`, `calli`, an instance field and
@@ -166,12 +163,12 @@ private def formsMethod : RawMethod :=
     instr 38 0x2A]
 
 theorem other_operand_forms_decode :
-    bodyMatches pin (evidence formsBytes formsOperands) formsMethod = true := by decide +kernel
+    bodyMatches (evidence formsBytes formsOperands) formsMethod = true := by decide +kernel
 #print axioms other_operand_forms_decode
 
 /-- A branch to a `volatile.` prefix enters the prefixed instruction at its first prefix. -/
 theorem branch_to_a_prefix_decodes :
-    bodyMatches pin (evidence [0x1A, 0x2B, 0x00, 0xFE, 0x13, 0x4A, 0x2A])
+    bodyMatches (evidence [0x1A, 0x2B, 0x00, 0xFE, 0x13, 0x4A, 0x2A])
       (method 8 false [] [instr 0 0x2B (.target 1), instr 2 0xFE13, instr 4 0x4A,
         instr 5 0x2A]) = true := by decide +kernel
 #print axioms branch_to_a_prefix_decodes
@@ -186,9 +183,9 @@ theorem encoder_reproduces_the_hand_written_bodies :
     (encodeBody pin branchMethod).map (·.bytes) = some branchBytes ∧
     (encodeBody pin switchMethod).map (·.bytes) = some switchBytes ∧
     (encodeBody pin twoByteMethod).map (·.bytes) = some twoByteBytes ∧
-    (encodeBody pin tinyMethod).any (bodyMatches pin · tinyMethod) = true ∧
-    (encodeBody pin fatMethod).any (bodyMatches pin · fatMethod) = true ∧
-    (encodeBody pin twoByteMethod).any (bodyMatches pin · twoByteMethod) = true := by
+    (encodeBody pin tinyMethod).any (bodyMatches · tinyMethod) = true ∧
+    (encodeBody pin fatMethod).any (bodyMatches · fatMethod) = true ∧
+    (encodeBody pin twoByteMethod).any (bodyMatches · twoByteMethod) = true := by
   decide +kernel
 #print axioms encoder_reproduces_the_hand_written_bodies
 
@@ -200,15 +197,15 @@ private def plain : RawMethod := method 8 false [] []
 /-- Whether the body fails to decode with exactly this error. -/
 private def failsWith (body : BodyEvidence) (error : BodyError) (method : RawMethod := plain) :
     Bool :=
-  match checkBody pin body method with
+  match checkBody body method with
   | .error found => found == error
   | .ok _ => false
 
 /-- Whether the body decodes but to something other than the method: the failure is the
     mismatch, not a decoding error. -/
 private def mismatches (body : BodyEvidence) (method : RawMethod) : Bool :=
-  match checkBody pin body method with
-  | .ok _ => !bodyMatches pin body method
+  match checkBody body method with
+  | .ok _ => !bodyMatches body method
   | .error _ => false
 
 /-- One opcode byte changed: `sub` where the decoded method says `add`. -/
@@ -247,7 +244,7 @@ theorem rejects_branch_into_an_instruction :
 
 /-- The check is `false` for the same body, whatever instructions the method claims. -/
 theorem branch_into_an_instruction_does_not_match :
-    bodyMatches pin (evidence midInstructionBytes)
+    bodyMatches (evidence midInstructionBytes)
       (method 8 false [] [instr 0 0x2C (.target 1), instr 2 0x2A]) = false := by decide +kernel
 #print axioms branch_into_an_instruction_does_not_match
 
@@ -395,7 +392,7 @@ theorem rejects_body_with_exception_section :
 
 /-- A body with an exception section does not match the method that has the same code. -/
 theorem body_with_exception_section_does_not_match :
-    bodyMatches pin (evidence (0x1B :: fatBytes.tail)) fatMethod = false := by
+    bodyMatches (evidence (0x1B :: fatBytes.tail)) fatMethod = false := by
   decide +kernel
 #print axioms body_with_exception_section_does_not_match
 
@@ -426,13 +423,28 @@ theorem rejects_a_method_with_other_attributes :
       { tinyMethod with attributes := 0x97 } = true := by decide +kernel
 #print axioms rejects_a_method_with_other_attributes
 
-/-- A pin of another version than the `Assembly` row spells. -/
+/-- A pin of another version than the method's own assembly states: `BodyDecodes` equates the
+    two strings, so the pin the method is attributed to must be the assembly its rows came from. -/
 theorem rejects_a_pin_of_another_version :
-    (match checkBody { identity := "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" }
-        (evidence tinyBytes) tinyMethod with
-      | .error found => found == .metadata .identityMismatch
-      | .ok _ => false) = true := by decide +kernel
+    (evidence tinyBytes).metadata.own.assembly.identity ≠
+      "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" := by decide
 #print axioms rejects_a_pin_of_another_version
+
+/-- Names the metadata does not resolve to: the body check refuses an owner or base class the
+    evidence lists that the rows do not give. -/
+theorem rejects_names_the_metadata_does_not_give :
+    failsWith { evidence tinyBytes with names := { owner := [65] } }
+      (.metadata (.methodMismatch tokens.main)) tinyMethod = true ∧
+    failsWith { evidence tinyBytes with names := { (evidence tinyBytes).names with bases := [([65], [66])] } }
+      (.metadata (.methodMismatch tokens.main)) tinyMethod = true := by decide +kernel
+#print axioms rejects_names_the_metadata_does_not_give
+
+/-- The names the metadata gives are tied to the strings the method states: another owner string
+    is not what the bytes spell. -/
+theorem rejects_an_owner_string_the_names_do_not_spell :
+    ¬ (evidence tinyBytes).names.Spell { tinyMethod with owner := ownIdentity ++ "::Other" } := by
+  decide
+#print axioms rejects_an_owner_string_the_names_do_not_spell
 
 /-- Byte `0x24` is not an opcode. -/
 theorem rejects_unknown_opcode :

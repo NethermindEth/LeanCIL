@@ -163,8 +163,13 @@ structure BodyEvidence where
   bytes : List Nat
   tokens : TokenTable
   metadata : MethodMetadata
+  /-- The identity each slice's assembly spells, in the slices' order; `AssembliesIdentified`
+      ties them to the assemblies' bytes once per assembly. -/
+  identities : List (List Nat)
   /-- `MetadataSlice.tables` of each slice of `metadata`, built once for the extraction. -/
   tables : List IndexTables
+  /-- The owner and base class names the method's definition resolves to. -/
+  names : MethodNames
   deriving DecidableEq, Repr
 
 /-- What a body's bytes say about its method: the fields `RawMethod` takes from the body, and
@@ -407,18 +412,19 @@ private def checkTable (env : MetadataEnv) (frame : Frame) :
     checkTable env frame rest (table.insert token (operand, facts))
 
 /-- The metadata of a body as an environment of indexed slices, its own first, over the given
-    tables: independent of the number of rows. -/
-def MethodMetadata.environmentWith (metadata : MethodMetadata) (tables : List IndexTables) :
-    Except MetadataError MetadataEnv :=
-  if tables.length != metadata.others.length + 1 then .error .tablesMismatch
+    identities and tables: independent of the number of rows. -/
+def MethodMetadata.environmentWith (metadata : MethodMetadata) (identities : List (List Nat))
+    (tables : List IndexTables) : Except MetadataError MetadataEnv :=
+  if tables.length != metadata.others.length + 1 || identities.length != tables.length then
+    .error .tablesMismatch
   else do
-    let indexed ← ((metadata.own :: metadata.others).zip tables).mapM
-      fun (slice, sliceTables) => slice.indexWith sliceTables
+    let indexed ← (metadata.slices.zip (identities.zip tables)).mapM
+      fun (slice, identity, sliceTables) => slice.indexWith sliceTables identity
     .ok { slices := indexed }
 
 /-- The metadata of a body as an environment of indexed slices, built from its bytes alone. -/
 def MethodMetadata.environment (metadata : MethodMetadata) : Except MetadataError MetadataEnv := do
-  metadata.environmentWith (← metadata.tables)
+  .ok { slices := ← metadata.slices.mapM MetadataSlice.index }
 
 /-- Decode a method body: its header and its instructions, with branch operands as instruction
     indices and every token operand checked against the metadata. `arity` is the number of
@@ -440,10 +446,11 @@ def decodeBody (env : MetadataEnv) (arity : Nat) (body : BodyEvidence) :
 
 /-- The method's definition, its locals and its body, each checked against the metadata the
     body carries: the decoded body, when everything agrees with the method. -/
-def checkBody (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) :
-    Except BodyError DecodedBody := do
-  let env ← (body.metadata.environmentWith body.tables).mapError BodyError.metadata
-  (methodIdentityValid env pin method).mapError BodyError.metadata
+def checkBody (body : BodyEvidence) (method : RawMethod) : Except BodyError DecodedBody := do
+  let env ← (body.metadata.environmentWith body.identities body.tables).mapError
+    BodyError.metadata
+  let names ← (methodIdentityValid env method).mapError BodyError.metadata
+  if names != body.names then throw (.metadata (.methodMismatch method.token))
   let decoded ← decodeBody env method.genericParameters.length body
   (checkLocals env method.genericParameters.length decoded.localSignature method.locals).mapError
     BodyError.metadata
@@ -454,17 +461,23 @@ def checkBody (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) :
     the elaborator's default reduction evaluates a call by name and would unfold the decoder,
     the metadata slices and every token's resolution without sharing, so the definition is
     irreducible and `decide` fails at once; `decide +kernel` evaluates it. -/
-@[irreducible] def bodyMatches (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) : Bool :=
-  match checkBody pin body method with
+@[irreducible] def bodyMatches (body : BodyEvidence) (method : RawMethod) : Bool :=
+  match checkBody body method with
   | .ok decoded => decoded.maxStack == method.maxStack &&
       decoded.initLocals == method.initLocals && decoded.code == method.code
   | .error _ => false
 
 /-- The body's tables are what its metadata bytes give, and the method's definition, locals,
     `maxStack`, `initLocals` and `code` are what the body bytes and the metadata say, through the
-    body's token table. -/
+    body's token table. Names are tied to bytes by equations, so no decision evaluates a string:
+    each slice's assembly spells the identity the body lists, the method's own assembly is the
+    pin, and the owner and base class names the metadata resolves are the ones the method
+    states. -/
 abbrev BodyDecodes (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) : Prop :=
-  tablesMatch body.metadata body.tables = true ∧ bodyMatches pin body method = true
+  AssembliesIdentified body.metadata body.identities ∧
+    tablesMatch body.metadata body.tables = true ∧
+    body.metadata.own.assembly.identity = pin.identity ∧
+    body.names.Spell method ∧ bodyMatches body method = true
 
 
 

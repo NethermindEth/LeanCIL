@@ -152,7 +152,14 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Array.Copy(BitConverter.GetBytes(numbers[heap][offset]), 0, row, at, width);
             at += width;
         }
-        return $"{{ identity := {System.Text.Json.JsonSerializer.Serialize(identity)}, " +
+        // The token is the SHA-1 of the public key, which Lean does not compute: it is stated, and checked only
+        // to be sixteen hexadecimal digits when the row has a key.
+        const string TokenMarker = "PublicKeyToken=";
+        var token = identity[(identity.LastIndexOf(TokenMarker, StringComparison.Ordinal) + TokenMarker.Length)..];
+        var hasKey = !assembly.PublicKey.IsNil && reader.GetBlobBytes(assembly.PublicKey).Length > 0;
+        var keyToken = !hasKey ? ""
+            : $"keyToken := {Bytes(System.Text.Encoding.ASCII.GetBytes(token))}, ";
+        return $"{{ identity := {System.Text.Json.JsonSerializer.Serialize(identity)}, {keyToken}" +
             $"tableHeader := {Bytes(image.TableHeader())}, assemblyRow := {Bytes(row)}, " +
             $"strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])} }}";
     }
@@ -162,15 +169,15 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
     /// They hold what this method reaches and nothing else, with heap entries numbered by rank among the entries
     /// carried, so the method's evidence is a function of the method and its assemblies alone.
     /// </summary>
-    internal (string Metadata, string Tables) Method(MethodDefinition original, IEnumerable<uint> tokens,
-        bool classOwner)
+    internal (string Metadata, string Tables, int[] Assemblies) Method(MethodDefinition original,
+        IEnumerable<uint> tokens, bool classOwner)
     {
         var collection = new Collection(pinned);
         var own = collection.SliceOf(original.Module);
         own.Method(original, classOwner);
         foreach (var token in tokens) own.Token(token);
         var metadata = collection.Lean();
-        return (metadata, collection.Tables());
+        return (metadata, collection.Tables(), collection.Assemblies());
     }
 
     internal static string Bytes(IEnumerable<byte> bytes) =>
@@ -206,6 +213,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             foreach (var slice in slices) slice.Canonicalize();
             return $"{{ own := {slices[0].Lean()}, others := [{string.Join(", ", slices.Skip(1).Select(slice => slice.Lean()))}] }}";
         }
+
+        /// <summary>The pinned assembly index of each slice, in slice order.</summary>
+        internal int[] Assemblies() => [.. slices.Select(slice => slice.AssemblyIndex())];
 
         /// <summary>The lookup tables of each slice, in slice order; read after <see cref="Lean"/> has closed them.</summary>
         internal string Tables() => "[" + string.Join(", ", slices.Select(slice => slice.Tables())) + "]";
@@ -722,9 +732,11 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             foreach (var (key, value) in entries) heap[numbers[key]] = value;
         }
 
+        internal int AssemblyIndex() => collection.Pinned.Index(collection.Pinned.Working(module));
+
         internal string Lean()
         {
-            var assembly = $"assembly{collection.Pinned.Index(collection.Pinned.Working(module))}Metadata";
+            var assembly = $"assembly{AssemblyIndex()}Metadata";
             var linkList = string.Join(", ", SortedLinks().Select(link => $"⟨{link.Kind}, {link.Source}, {link.Slice}, {link.Target}⟩"));
             return $"{{ assembly := {assembly}, rows := {Entries(rows)}, strings := {Entries(strings)}, " +
                 $"blobs := {Entries(blobs)}, userStrings := {Entries(userStrings)}, corlib := {corlib}, " +

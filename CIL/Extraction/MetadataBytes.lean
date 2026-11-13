@@ -1,4 +1,5 @@
 import Std.Data.TreeMap
+import CIL.Extraction.KernelEquation
 
 /-!
 # Metadata tables and heaps
@@ -24,6 +25,9 @@ abbrev ByteEntry := Nat × List Nat
 structure AssemblyMetadata where
   /-- The pin identity the bytes must spell, with the public key token as the pin writes it. -/
   identity : String := ""
+  /-- The public key token the pin writes, as sixteen lowercase hexadecimal digits, when the
+      `Assembly` row has a public key; empty otherwise. -/
+  keyToken : List Nat := []
   /-- The table stream bytes from the version fields through the last row count. -/
   tableHeader : List Nat := []
   /-- Row 1 of the `Assembly` table. -/
@@ -737,15 +741,24 @@ def hexDigits : List Nat → List Nat
     let digit (value : Nat) : Nat := if value < 10 then 48 + value else 87 + value
     digit (byte / 16) :: digit (byte % 16) :: hexDigits rest
 
+/-- The fixed words of an assembly identity as bytes: `, Version=`, `, Culture=`, `neutral`,
+    `, PublicKeyToken=` and `null`. They are byte lists, not strings, so the kernel never
+    evaluates a string literal to read an identity. -/
+def versionMarker : List Nat := [44, 32, 86, 101, 114, 115, 105, 111, 110, 61]
+def cultureMarker : List Nat := [44, 32, 67, 117, 108, 116, 117, 114, 101, 61]
+def neutralCulture : List Nat := [110, 101, 117, 116, 114, 97, 108]
+def tokenMarker : List Nat :=
+  [44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61]
+def nullToken : List Nat := [110, 117, 108, 108]
+
 /-- The text of an assembly name as Cecil writes it:
     `Name, Version=a.b.c.d, Culture=culture, PublicKeyToken=token`. -/
 def assemblySpelling (name : List Nat) (major minor build revision : Nat)
     (culture token : List Nat) :
     List Nat :=
-  name ++ bytesOf ", Version=" ++ decimalDigits 5 major ++ [46] ++ decimalDigits 5 minor ++ [46] ++
-    decimalDigits 5 build ++ [46] ++ decimalDigits 5 revision ++ bytesOf ", Culture=" ++
-    (if culture.isEmpty then bytesOf "neutral" else culture) ++ bytesOf ", PublicKeyToken=" ++
-    token
+  name ++ versionMarker ++ decimalDigits 5 major ++ [46] ++ decimalDigits 5 minor ++ [46] ++
+    decimalDigits 5 build ++ [46] ++ decimalDigits 5 revision ++ cultureMarker ++
+    (if culture.isEmpty then neutralCulture else culture) ++ tokenMarker ++ token
 
 /-- The `AssemblyRef` row's identity. A flag other than 0 means a full public key (whose token
     needs SHA-1) or a retargetable reference (which Cecil spells apart): both are unsupported. -/
@@ -757,14 +770,15 @@ def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
   let culture ← index.string row.culture
   let publicToken ← index.blob row.publicKeyOrToken
   let spelled ←
-    if publicToken.isEmpty then pure (bytesOf "null")
+    if publicToken.isEmpty then pure nullToken
     else if publicToken.length == 8 then pure (hexDigits publicToken)
     else throw (.unsupportedAssemblyRef token)
   .ok (assemblySpelling name row.major row.minor row.build row.revision culture spelled)
 
-/-- The identity an `Assembly` row spells, with the key token of the claimed identity. A key
-    token is the SHA-1 of the public key, which the kernel does not compute: it is read from the
-    claim when the row has a key and must be `null` when it has none. -/
+/-- The identity an `Assembly` row spells, with the key token the assembly states. A key token is
+    the SHA-1 of the public key, which the kernel does not compute: it is the stated token when
+    the row has a key, and the stated token must then be sixteen lowercase hexadecimal digits;
+    with no key the identity says `null` and no token is stated. -/
 def AssemblyMetadata.spelling (assembly : AssemblyMetadata) :
     Except MetadataError (List Nat) := do
   let header ← decodeTableHeader assembly.tableHeader
@@ -780,17 +794,22 @@ def AssemblyMetadata.spelling (assembly : AssemblyMetadata) :
   let [_, major, minor, build, revision, _, key, name, culture] := columns
     | throw (.unsupportedTable (tokenOf Table.assembly 1))
   let publicKey ← blobBytes blobs key
-  let claimed := bytesOf assembly.identity
-  let prefixLength := (assemblySpelling (← stringBytes strings name) major minor build revision
-    (← stringBytes strings culture) []).length
-  let tokenBytes := claimed.drop prefixLength
+  let tokenBytes := assembly.keyToken
   let spelled ←
-    if publicKey.isEmpty then pure (bytesOf "null")
+    if publicKey.isEmpty then
+      if tokenBytes.isEmpty then pure nullToken else throw .identityMismatch
     else if tokenBytes.length == 16 && tokenBytes.all (fun digit =>
         (48 ≤ digit && digit ≤ 57) || (97 ≤ digit && digit ≤ 102)) then pure tokenBytes
     else throw .identityMismatch
   .ok (assemblySpelling (← stringBytes strings name) major minor build revision
     (← stringBytes strings culture) spelled)
+
+/-- `identity` is the text the assembly's `Assembly` row spells, and it is the identity the
+    assembly states. It costs the same for every method of the assembly, so an extraction proves
+    it once and each method's evidence names the bytes. The second part is an equation between a
+    string and bytes, so it is proved with `cil_kernel_rfl` and never evaluates the string. -/
+abbrev AssemblyIdentified (assembly : AssemblyMetadata) (identity : List Nat) : Prop :=
+  assembly.spelling.toOption = some identity ∧ spelled? identity = some assembly.identity
 
 /-- The running instance field count before each of up to `count` consecutive `Field` rows from
     `row`, as far as the rows are carried, with the total and whether every row was carried. A
@@ -865,31 +884,60 @@ def MetadataSlice.tables (slice : MetadataSlice) : Except MetadataError IndexTab
     fieldCountEntries { toIndexTables := bare, header := header, corlib := slice.corlib, identity := [] }
   .ok { bare with instanceBefore := before, instanceTotal := total }
 
-/-- The index of a slice given its tables: its header and its identity, which the `Assembly` row
-    must spell as the assembly block claims. Cheap: independent of the number of rows. -/
-def MetadataSlice.indexWith (slice : MetadataSlice) (tables : IndexTables) :
-    Except MetadataError MetadataIndex := do
+/-- The index of a slice given its tables and the identity its assembly spells, which an
+    `AssemblyIdentified` fact ties to the assembly's bytes and to the string it states. Cheap:
+    independent of the number of rows. -/
+def MetadataSlice.indexWith (slice : MetadataSlice) (tables : IndexTables)
+    (identity : List Nat) : Except MetadataError MetadataIndex := do
   let header ← decodeTableHeader slice.assembly.tableHeader
-  let identity ← slice.assembly.spelling
-  if identity != bytesOf slice.assembly.identity then throw .identityMismatch
   .ok { toIndexTables := tables, header := header, corlib := slice.corlib, identity := identity }
 
-/-- Build the index of a slice from its bytes alone. -/
+/-- Build the index of a slice from its bytes alone, refusing an identity the `Assembly` row does
+    not spell as the assembly states it. -/
 def MetadataSlice.index (slice : MetadataSlice) : Except MetadataError MetadataIndex := do
-  let empty : IndexTables :=
-    { rows := .leaf
-      strings := .leaf
-      blobs := .leaf
-      userStrings := .leaf
-      links := .leaf
-      instanceBefore := .leaf
-      instanceTotal := .leaf }
-  let bare ← slice.indexWith empty
-  .ok { bare with toIndexTables := ← slice.tables }
+  let identity ← slice.assembly.spelling
+  if spelled? identity != some slice.assembly.identity then throw .identityMismatch
+  slice.indexWith (← slice.tables) identity
+
+/-- The slices of one method's metadata, its own first. -/
+def MethodMetadata.slices (metadata : MethodMetadata) : List MetadataSlice :=
+  metadata.own :: metadata.others
+
+/-- Each assembly spells the identity listed at its position. -/
+def AllIdentified : List AssemblyMetadata → List (List Nat) → Prop
+  | [], [] => True
+  | assembly :: assemblies, identity :: identities =>
+    AssemblyIdentified assembly identity ∧ AllIdentified assemblies identities
+  | _, _ => False
+
+instance (assembly : AssemblyMetadata) (identity : List Nat) :
+    Decidable (AssemblyIdentified assembly identity) :=
+  inferInstanceAs (Decidable (_ ∧ _))
+
+instance decideAllIdentified : (assemblies : List AssemblyMetadata) →
+    (identities : List (List Nat)) → Decidable (AllIdentified assemblies identities)
+  | [], [] => isTrue trivial
+  | [], _ :: _ => isFalse fun impossible => impossible
+  | _ :: _, [] => isFalse fun impossible => impossible
+  | assembly :: assemblies, identity :: identities =>
+    haveI := decideAllIdentified assemblies identities
+    inferInstanceAs (Decidable (AssemblyIdentified assembly identity ∧
+      AllIdentified assemblies identities))
+
+theorem AllIdentified.nil : AllIdentified [] [] := trivial
+
+theorem AllIdentified.cons {assembly : AssemblyMetadata} {identity : List Nat}
+    {assemblies : List AssemblyMetadata} {identities : List (List Nat)}
+    (first : AssemblyIdentified assembly identity) (rest : AllIdentified assemblies identities) :
+    AllIdentified (assembly :: assemblies) (identity :: identities) := ⟨first, rest⟩
+
+/-- Each slice's assembly spells the identity listed for it, in the slices' order. -/
+abbrev AssembliesIdentified (metadata : MethodMetadata) (identities : List (List Nat)) : Prop :=
+  AllIdentified (metadata.slices.map (·.assembly)) identities
 
 /-- The tables of the slices of one method's metadata, its own first. -/
 def MethodMetadata.tables (metadata : MethodMetadata) : Except MetadataError (List IndexTables) :=
-  (metadata.own :: metadata.others).mapM MetadataSlice.tables
+  metadata.slices.mapM MetadataSlice.tables
 
 /-- Whether `tables` are what the decoder builds from the metadata's bytes. Only the kernel
     decides it, like `bodyMatches`. -/

@@ -303,7 +303,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
         lean.AppendLine($"theorem method{number}_body_validated :" +
             $" Extraction.BodyDecodes ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
-            $" method{number}Original := ⟨{body.TablesValid}, by cil_body_decodes⟩");
+            $" method{number}Original := ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, " +
+            "by cil_kernel_rfl, by cil_body_decodes⟩");
     }
 
     static readonly HashSet<Instruction> EmptySet = [];
@@ -316,7 +317,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// The body bytes of an original method and its token table: each token read from the body, with the operand
     /// the extractor resolved it to. The Lean decoder reads the same bytes and checks them against the code.
     /// </summary>
-    (string Bytes, string Slices, string Definition, string TablesValid) Body(MethodDefinition original, MethodDefinition admitted,
+    (string Bytes, string Slices, string Definition, string Identified, string TablesValid) Body(
+        MethodDefinition original, MethodDefinition admitted,
         IReadOnlySet<Instruction> reachable, int number)
     {
         var body = Pinned.Body(original);
@@ -353,21 +355,40 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // assembly, so a method's component names no other method and does not depend on which instantiations the
         // extraction holds or in which order.
         var data = List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
-        var (rows, tables) = (metadata ?? throw new InvalidOperationException(
+        var classOwner = original.HasThis && ObjectTypes.Is(original.DeclaringType);
+        var (rows, tables, assemblies) = (metadata ?? throw new InvalidOperationException(
             "Method evidence requires the pinned assemblies.")).Method(original,
             operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32())
-                .Where(token => token != 0),
-            original.HasThis && ObjectTypes.Is(original.DeclaringType));
+                .Where(token => token != 0), classOwner);
         // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
         var slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
             $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
+            $"def method{number}Names : Extraction.MethodNames := {Names(original, classOwner)}\n" +
             $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
             $"method{number}Tables = true := by decide +kernel";
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
+        var identities = List(assemblies.Select(index => $"assembly{index}Identity"));
+        var identified = assemblies.Reverse().Aggregate("Extraction.AllIdentified.nil",
+            (rest, index) => $"(Extraction.AllIdentified.cons assembly{index}_identified {rest})");
         return ($"def method{number}Bytes : List Nat := {data}", slices,
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
-            $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, tables := method{number}Tables }}",
-            $"method{number}_tables_valid");
+            $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, " +
+            $"identities := {identities}, tables := method{number}Tables, names := method{number}Names }}",
+            identified, $"method{number}_tables_valid");
+    }
+
+    /// <summary>
+    /// The owner and base class names the method's metadata spells, as UTF-8 bytes: Lean reads the same names from
+    /// the carried rows and proves by <c>cil_kernel_rfl</c> that they spell the strings the evidence states.
+    /// </summary>
+    static string Names(MethodDefinition original, bool classOwner)
+    {
+        static string Utf8(string text) => MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(text));
+        var bases = classOwner
+            ? ObjectTypes.Bases(original.DeclaringType)
+                .Select(type => $"({Utf8(LayoutEvidence.Scope(type))}, {Utf8(type.FullName)})")
+            : [];
+        return $"{{ owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)} }}";
     }
 
     static uint TokenOperand(MethodDefinition original, MethodBodyBytes.Body body, Instruction instruction)
@@ -386,7 +407,16 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     {
         var slices = metadata ?? throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
         foreach (var (module, index) in Pinned.Modules.Select((module, index) => (module, index)))
+        {
+            var identity = Pinned.Original(module).Assembly.Name.FullName;
             lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := {slices.AssemblyBlock(module)}");
+            lean.AppendLine($"def assembly{index}Identity : List Nat := " +
+                MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(identity)));
+            // The assembly's bytes spell this identity, and it is the string the block states: one proof for
+            // every method of the assembly.
+            lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +
+                $"assembly{index}Metadata assembly{index}Identity := ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩");
+        }
     }
 
     string DispatchTypes(MethodDefinition method)
