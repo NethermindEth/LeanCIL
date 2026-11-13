@@ -64,9 +64,10 @@ theorem wrong_literal_character :
     spelled? arithmeticBytes = some "Examples.Arithmetid" := by cil_kernel_rfl
 
 open Lean Elab Tactic Meta in
-/-- Run `cil_kernel_rfl` on the equation `type` under the options this module is compiled with and
-    require its own refusal. `#guard_msgs` checks declarations synchronously, so a tactic that left
-    the kernel check to an asynchronous task would pass there and assign an unchecked proof here. -/
+/-- Run `cil_kernel_rfl` on the equation `type` under the options this module is compiled with
+    and require its own refusal. `#guard_msgs` checks declarations synchronously, so a tactic that
+    left the kernel check to an asynchronous task would pass there and assign an unchecked proof
+    here. -/
 elab "refused_under_module_options " type:term : tactic => do
   unless Elab.async.get (← getOptions) do
     throwError "the module must be elaborated with the default asynchronous kernel checks"
@@ -82,7 +83,8 @@ elab "refused_under_module_options " type:term : tactic => do
   match refusal with
   | none => throwError "cil_kernel_rfl accepted a wrong equation{indentExpr equation}"
   | some message =>
-    unless message.startsWith "cil_kernel_rfl: the kernel does not accept the two sides as equal" do
+    let refused := "cil_kernel_rfl: the kernel does not accept the two sides as equal"
+    unless message.startsWith refused do
       throwError "cil_kernel_rfl failed with another message:\n{message}"
 
 /-- A wrong character on the literal side and a wrong byte on the heap side are refused by the

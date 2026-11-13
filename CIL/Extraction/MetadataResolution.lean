@@ -249,8 +249,9 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
       if named.scope != scope || named.parts != parts then throw (.operandMismatch token)
       .ok named
 
-/-- The named type of a custom modifier. A modifier is read by its scope and name alone, so it needs
-    no link to a definition, whether or not its scope is a carried slice or the type resolves. -/
+/-- The named type of a custom modifier. A modifier is read by its scope and name alone, so it
+    needs no link to a definition, whether or not its scope is a carried slice or the type
+    resolves. -/
 def modifierNamed (env : MetadataEnv) (position token : Nat) : Except MetadataError NamedType := do
   match metadataTableOf token with
   | 0x01 =>

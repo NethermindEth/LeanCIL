@@ -399,8 +399,10 @@ private def withFlags (flags implementation : Nat) : MetadataSlice × RawMethod 
 /-- A row whose flags say it has no IL body is refused, so no body bytes are taken for it: an
     abstract method, a platform invoke and an internal call. -/
 theorem rejects_body_bytes_for_a_row_without_a_body :
-    identityFails (withFlags 0x0496 0).1 (withFlags 0x0496 0).2 (.bodyLocation tokens.main) = true ∧
-    identityFails (withFlags 0x2096 0).1 (withFlags 0x2096 0).2 (.bodyLocation tokens.main) = true ∧
+    identityFails (withFlags 0x0496 0).1 (withFlags 0x0496 0).2
+      (.bodyLocation tokens.main) = true ∧
+    identityFails (withFlags 0x2096 0).1 (withFlags 0x2096 0).2
+      (.bodyLocation tokens.main) = true ∧
     identityFails (withFlags 0x0096 0x1000).1 (withFlags 0x0096 0x1000).2
       (.bodyLocation tokens.main) = true := by decide +kernel
 #print axioms rejects_body_bytes_for_a_row_without_a_body

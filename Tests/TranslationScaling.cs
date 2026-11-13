@@ -60,8 +60,8 @@ var monolithic = Execute(["lake", "env", "lean", "-DElab.async=false", old], cwd
 RequireElaboratorRefusal(monolithic.Code, monolithic.Output);
 Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the monolithic certificate");
 
-// The kernel decides the monolithic certificate. Its time and the memory it adds to the import floor, per method of the
-// call graph, may not grow with the number of methods: superlinear growth would make the check unusable on large
+// The kernel decides the monolithic certificate. Its time and the memory it adds to the import floor, per method of
+// the call graph, may not grow with the number of methods: superlinear growth would make the check unusable on large
 // extractions even though only the kernel may run it.
 const double AllowedKernelGrowth = 1.5;
 (double Seconds, double Gigabytes) KernelCost(int methodCount)
@@ -81,7 +81,8 @@ const double AllowedKernelGrowth = 1.5;
         kernelMethods) + " }");
     Run(["dotnet", "build", Path.Combine(kernelSource, "Scaling.csproj"), "-c", "Release"]);
     var extraction = Path.Combine(work, "Extraction");
-    Run(Extract("extract", Path.Combine(kernelSource, "bin/Scaling.dll"), "Scaling", "Scaling::M0(ulong)", extraction));
+    Run(Extract("extract", Path.Combine(kernelSource, "bin/Scaling.dll"), "Scaling", "Scaling::M0(ulong)",
+        extraction));
     var full = File.ReadAllText(Path.Combine(extraction, "Extracted.lean"));
     var from = full.IndexOf("theorem translation_valid :", StringComparison.Ordinal);
     var to = full.IndexOf("@[cil_code] theorem lookup0", from, StringComparison.Ordinal);

@@ -568,7 +568,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Row(token);
             var member = Reader.GetMemberReference(MetadataTokens.MemberReferenceHandle(RowOf(token)));
             Text(member.Name);
-            Signature(member.Signature, member.GetKind() == MemberReferenceKind.Field ? Form.Field : Form.Method, true);
+            Signature(member.Signature,
+                member.GetKind() == MemberReferenceKind.Field ? Form.Field : Form.Method, true);
             Token(TokenOf(member.Parent));
             var reference = (MemberReference)module.LookupToken(new MetadataToken(token));
             var declaring = reference.DeclaringType is GenericInstanceType generic

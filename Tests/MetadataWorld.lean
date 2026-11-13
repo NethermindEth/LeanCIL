@@ -40,7 +40,8 @@ def libWorld : Step Unit := do
   let pairName ← string "Pair"
   let valueTypeName ← string "ValueType"
   let valueTypeRef ← row Table.typeRef [1 * 4 + 2, valueTypeName, systemName]
-  let pair ← row Table.typeDef [0x101, pairName, libName, (valueTypeRef - 0x01000000) * 4 + 1, 2, 2]
+  let pair ← row Table.typeDef
+    [0x101, pairName, libName, (valueTypeRef - 0x01000000) * 4 + 1, 2, 2]
   -- Its instance field `first` and its static method `Sum`.
   let firstName ← string "first"
   let sumName ← string "Sum"
