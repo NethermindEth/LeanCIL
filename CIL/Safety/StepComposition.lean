@@ -165,21 +165,6 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       instructionStep (.setAggregateFieldAt offset size) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
-@[cil_step] theorem step_lane_eq {index} (stack : List Value) :
-    step body (.lane index) pc args frame stack memory =
-      instructionStep (.lane index) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_laneAddress_eq {index} (stack : List Value) :
-    step body (.laneAddress index) pc args frame stack memory =
-      instructionStep (.laneAddress index) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_setLane_eq {index} (stack : List Value) :
-    step body (.setLane index) pc args frame stack memory =
-      instructionStep (.setLane index) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_const32_eq {word} (stack : List Value) :
     step body (.const32 word) pc args frame stack memory =
       instructionStep (.const32 word) pc frame stack memory := rfl
@@ -207,21 +192,10 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       instructionStep .skipInit pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_asRef_eq (stack : List Value) :
-    step body .asRef pc args frame stack memory =
-      instructionStep .asRef pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
-
 -- Locals go through the frame's slot for `index`.
 @[cil_step] theorem step_local_eq (index : Nat) (narrow : Option CIL.NarrowKind)
     (stack : List Value) :
     step body (.local index narrow) pc args frame stack memory = do
-      let some slot := frame.locals[index]? | .error .invalidState
-      return FrameAction.next (pc + 1) ((← loadLocal memory slot) :: stack) frame memory := rfl
-
-@[cil_step] theorem step_vectorLocal_eq (index : Nat) (stack : List Value) :
-    step body (.vectorLocal index) pc args frame stack memory = do
       let some slot := frame.locals[index]? | .error .invalidState
       return FrameAction.next (pc + 1) ((← loadLocal memory slot) :: stack) frame memory := rfl
 
@@ -233,13 +207,6 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
 @[cil_step] theorem step_setLocal_eq (index : Nat) (narrow : Option CIL.NarrowKind)
     (value : Value) (rest : List Value) :
     step body (.setLocal index narrow) pc args frame (value :: rest) memory = do
-      let some slot := frame.locals[index]? | .error .invalidState
-      let (slot, memory) ← storeLocal memory slot value
-      return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }
-        memory := rfl
-
-@[cil_step] theorem step_setVectorLocal_eq (index : Nat) (value : Value) (rest : List Value) :
-    step body (.setVectorLocal index) pc args frame (value :: rest) memory = do
       let some slot := frame.locals[index]? | .error .invalidState
       let (slot, memory) ← storeLocal memory slot value
       return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }

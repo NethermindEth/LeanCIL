@@ -247,7 +247,7 @@ theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind
         (by simp [valid] <;> rfl) trivial) (by simp [valid] <;> rfl)
     exact ⟨Confined.refl [] memory, (), rfl, rfl⟩
   exact helperHolds.forward (loads := plainLoads [0, 1]) (narrow := narrow)
-    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => by simpa only [viewResult, List.any_cons, List.any_nil,

@@ -150,8 +150,6 @@ internal static partial class TemplateEmitter
 
     static (string Identity, string Prefix, string Tail)? Callee(Variant variant, string op)
     {
-        if (op.StartsWith(".newVector256 ", StringComparison.Ordinal))
-            throw new InvalidDataException("Templates do not yet support vector constructor calls: " + op);
         var prefix = new[] { ".call ", ".callInstance ", ".newAggregate ", ".newObject " }
             .FirstOrDefault(prefix => op.StartsWith(prefix, StringComparison.Ordinal));
         if (prefix is null) return null;

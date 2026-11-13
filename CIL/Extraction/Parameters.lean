@@ -204,9 +204,8 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
           | .span .. | .aggregateSpan .. => true | _ => false
       | _ => return false).getD false
   | .other => match emitted with
-      | .arg .. | .vectorArg .. | .vectorArgAddr .. => false
-      | .local index _ | .setLocal index _ | .localAddr index | .initializeSpanLocal index _
-      | .vectorLocal index | .vectorLocalAddr index | .setVectorLocal index =>
+      | .arg .. => false
+      | .local index _ | .setLocal index _ | .localAddr index | .initializeSpanLocal index _ =>
         index < localCount
       | _ => true
 

@@ -5,7 +5,7 @@ import CIL.Safety.AllocationExtension
 # Frame ownership
 
 A frame owns only allocations created after it was entered, during setup or by temporaries
-that `newVector256` and `newAggregate` allocate, so leaving it expires nothing the caller
+that `newAggregate` allocates, so leaving it expires nothing the caller
 already had. The headline results are `frame_entry_exit_preserves_caller` and
 `frame_entry_exit_preserves_reference`: entering and then leaving a frame keeps every older
 allocation, and every reference the caller could form, unchanged.
@@ -26,12 +26,6 @@ theorem makeLocals_fresh (m result : Memory) (activation : Nat) (kinds : List CI
     (h : makeLocals activation kinds initializers m = .ok (slots, owned, result)) :
     FreshOwned m result owned := by
   exact (makeLocals_setup _ _ _ _ _ _ _ h).fresh
-
-theorem makeArgumentHomes_fresh (m result : Memory) (activation : Nat) (indices : List Nat)
-    (args : List Value) (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
-    (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
-    FreshOwned m result owned := by
-  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).fresh
 
 theorem makeParameterHomes_fresh (m result : Memory) (activation : Nat)
     (parameters : List (Nat × CIL.LocalKind)) (args : List Value)

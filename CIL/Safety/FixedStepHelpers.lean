@@ -92,8 +92,7 @@ inductive FixedStepFamily where
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
-  | .local .. | .localAddr _ | .setLocal .. | .vectorLocal _ | .vectorLocalAddr _
-  | .setVectorLocal _ | .initializeSpanLocal .. | .stackAlloc _ | .newArray _ | .newVector256 ..
+  | .local .. | .localAddr _ | .setLocal .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
   | .sub => .reference
   | .ltu | .gtu | .eq => .reference
@@ -101,8 +100,8 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .brzero _ | .brnonzero _ | .beq _ | .bne _ => .reference
   | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
   | .divide .. => .numeric
-  | .managed _ | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .callInstance ..
-  | .callVirtual .. | .objectTest .. | .tailCall ..
+  | .managed _ | .arg .. | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
+  | .tailCall ..
   | .throw _ | .ret _ => .boundary
   | _ => .other
 
@@ -227,9 +226,6 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          have noArg : ∀ position, operation = .arg position none → False := by assumption
          have noNarrowArg : ∀ position kind, operation = .arg position (some kind) → False :=
            by assumption
-         have noVectorArg : ∀ position, operation = .vectorArg position → False := by assumption
-         have noVectorAddress : ∀ position, operation = .vectorArgAddr position → False :=
-           by assumption
          have noCall : ∀ callee argc, operation = .call callee argc → False := by assumption
          have noTailCall : ∀ callee argc, operation = .tailCall callee argc → False := by assumption
          have noThrow : ∀ exception, operation = .throw exception → False := by assumption
@@ -242,8 +238,6 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          cases operation <;> try cases boundary
          all_goals try exact False.elim (noManaged _ rfl)
          all_goals try exact False.elim (noArgument _ _ rfl)
-         all_goals try exact False.elim (noVectorArg _ rfl)
-         all_goals try exact False.elim (noVectorAddress _ rfl)
          all_goals try exact False.elim (noCall _ _ rfl)
          all_goals try exact False.elim (noTailCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)

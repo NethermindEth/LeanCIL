@@ -530,7 +530,6 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
       instruction.opcode == 88 && offset ∈ [.word32, .native]
     | .tableLoad signature, .nativeMethodTable actual :: _ =>
       instruction.opcode == 77 && signature == actual
-    | .tableAddress .., _ => false
     | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
     | .tableElement signature, index :: .methodTable actual :: _ =>
       index ∈ [.word32, .native] && signature == actual &&

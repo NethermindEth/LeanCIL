@@ -174,9 +174,9 @@ theorem initialized_helper_frames :
       Memory.Renamed later (enterScopes Eq 1 1) sourceAfter targetAfter ∧
       Frame.Renamed indices later (enterScopes Eq 1 1) sourceFrame targetFrame := by
   have sourceReady : OrdinaryFrame initializedSource :=
-    ⟨rfl, rfl, rfl, entry_ready.1.layouts⟩
+    ⟨rfl, rfl, entry_ready.1.layouts⟩
   have targetReady : OrdinaryFrame initializedTarget :=
-    ⟨rfl, rfl, rfl, entry_ready.2.layouts⟩
+    ⟨rfl, rfl, entry_ready.2.layouts⟩
   have selected : LocalDeclarations indices initializedSource.localKinds initializedSource.locals
       initializedTarget.localKinds initializedTarget.locals :=
     .skip .word32 .unmodeled (by simp [InitializerFits])

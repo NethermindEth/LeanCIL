@@ -38,7 +38,6 @@ def Instruction.relocate (f : Nat → Nat) : Instruction → Instruction
   | .callVirtual targets argc =>
     .callVirtual (targets.map fun (type, method) => (type, f method)) argc
   | .tailCall method argc => .tailCall (f method) argc
-  | .newVector256 method argc => .newVector256 (f method) argc
   | .newAggregate method argc size => .newAggregate (f method) argc size
   | .newObject method argc owner bases size => .newObject (f method) argc owner bases size
   | .managed (.call signature catalog tail) =>

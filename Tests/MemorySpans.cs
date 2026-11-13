@@ -129,13 +129,13 @@ foreach (var (name, signature, arguments, expected) in new[]
 
             theorem uninitialized_span_local_rejected :
                 CIL.Safety.step Extracted.method0 (.local 0) 0 []
-                  ⟨0, [.span 4 false none], [], [], 0⟩ [] spanMemory = .error .invalidState := rfl
+                  ⟨0, [.span 4 false none], [], 0⟩ [] spanMemory = .error .invalidState := rfl
             #print axioms uninitialized_span_local_rejected
 
             theorem constructor_expired_storage_rejected :
                 CIL.Safety.step Extracted.method0
                   (.initializeSpanLocal 0 (.array .signed32 false .counted)) 4 []
-                  ⟨0, [.span 4 false none], [], [], 0⟩
+                  ⟨0, [.span 4 false none], [], 0⟩
                   [.scalar (.i32 0), .scalar (.i32 0), .array ⟨.address ⟨0, 0⟩, 3, .signed32⟩]
                   { spanMemory with
                     allocations := fun _ => some ⟨.callerStack, ⟨12, 1, []⟩, false, []⟩ } =

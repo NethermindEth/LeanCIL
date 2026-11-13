@@ -456,28 +456,6 @@ theorem step_appendLocals_arg (index : Nat) (narrow : Option NarrowKind) :
 
 #print axioms step_appendLocals_arg
 
-/-- `vectorArg` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_vectorArg (index : Nat) :
-    StepAppendLocals (.vectorArg index) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  frame_natural
-
-#print axioms step_appendLocals_vectorArg
-
-/-- `vectorArgAddr` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_vectorArgAddr (index : Nat) :
-    StepAppendLocals (.vectorArgAddr index) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  frame_natural
-
-#print axioms step_appendLocals_vectorArgAddr
-
 /-- `local` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_local (index : Nat) (narrow : Option NarrowKind) :
     StepAppendLocals (.local index narrow) := by
@@ -494,58 +472,6 @@ theorem step_appendLocals_local (index : Nat) (narrow : Option NarrowKind) :
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
 #print axioms step_appendLocals_local
-
-/-- `vectorLocal` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_vectorLocal (index : Nat) :
-    StepAppendLocals (.vectorLocal index) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  cases found : frame.locals[index]? with
-  | some slot =>
-    cases stack <;>
-      simp only [step, found, Frame.appendLocals_getElem? found] <;>
-      frame_natural
-  | none =>
-    revert kept
-    cases stack <;> simp only [step, found] <;> repeat' split
-    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
-
-#print axioms step_appendLocals_vectorLocal
-
-/-- `vectorLocalAddr` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_vectorLocalAddr (index : Nat) :
-    StepAppendLocals (.vectorLocalAddr index) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  cases found : frame.locals[index]? with
-  | some slot =>
-    cases stack <;>
-      simp only [step, found, Frame.appendLocals_getElem? found] <;>
-      frame_natural
-  | none =>
-    revert kept
-    cases stack <;> simp only [step, found] <;> repeat' split
-    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
-
-#print axioms step_appendLocals_vectorLocalAddr
-
-/-- `setVectorLocal` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_setVectorLocal (index : Nat) :
-    StepAppendLocals (.setVectorLocal index) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  cases found : frame.locals[index]? with
-  | some slot =>
-    cases stack <;>
-      simp only [step, found, Frame.appendLocals_getElem? found,
-        Frame.appendLocals_set found] <;>
-      frame_natural
-  | none =>
-    revert kept
-    cases stack <;> simp only [step, found] <;> repeat' split
-    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
-
-#print axioms step_appendLocals_setVectorLocal
 
 /-- `localAddr` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_localAddr (index : Nat) :
@@ -598,42 +524,6 @@ theorem step_appendLocals_initializeSpanLocal (index : Nat) (constructor : CIL.S
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
 #print axioms step_appendLocals_initializeSpanLocal
-
-/-- `lane` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_lane (index : Fin 4) :
-    StepAppendLocals (.lane index) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.lane index) pc stack frame extra memory
-
-#print axioms step_appendLocals_lane
-
-/-- `laneAddress` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_laneAddress (index : Fin 4) :
-    StepAppendLocals (.laneAddress index) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.laneAddress index) pc stack frame extra memory
-
-#print axioms step_appendLocals_laneAddress
-
-/-- `setLane` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_setLane (index : Fin 4) :
-    StepAppendLocals (.setLane index) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.setLane index) pc stack frame extra memory
-
-#print axioms step_appendLocals_setLane
 
 /-- `const32` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_const32 (word : W32) :
@@ -1183,17 +1073,6 @@ theorem step_appendLocals_tailCall (method : Nat) (argc : Nat) :
 
 #print axioms step_appendLocals_tailCall
 
-/-- `newVector256` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_newVector256 (constructor : Nat) (argc : Nat) :
-    StepAppendLocals (.newVector256 constructor argc) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  frame_natural
-
-#print axioms step_appendLocals_newVector256
-
 /-- `newAggregate` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64)) :
     StepAppendLocals (.newAggregate constructor argc size) := by
@@ -1228,18 +1107,6 @@ theorem step_appendLocals_skipInit :
   exact fallback_appendLocals body.profile .skipInit pc stack frame extra memory
 
 #print axioms step_appendLocals_skipInit
-
-/-- `asRef` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_asRef :
-    StepAppendLocals .asRef := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  exact fallback_appendLocals body.profile .asRef pc stack frame extra memory
-
-#print axioms step_appendLocals_asRef
 
 /-- `feature` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_feature (id : Feature) :
@@ -1385,30 +1252,14 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_setAggregateFieldAt offset size
     case arg index narrow =>
       exact step_appendLocals_arg index narrow
-    case vectorArg index =>
-      exact step_appendLocals_vectorArg index
-    case vectorArgAddr index =>
-      exact step_appendLocals_vectorArgAddr index
     case «local» index narrow =>
       exact step_appendLocals_local index narrow
-    case vectorLocal index =>
-      exact step_appendLocals_vectorLocal index
-    case vectorLocalAddr index =>
-      exact step_appendLocals_vectorLocalAddr index
-    case setVectorLocal index =>
-      exact step_appendLocals_setVectorLocal index
     case initializeSpanLocal index constructor =>
       exact step_appendLocals_initializeSpanLocal index constructor
     case localAddr index =>
       exact step_appendLocals_localAddr index
     case setLocal index narrow =>
       exact step_appendLocals_setLocal index narrow
-    case lane index =>
-      exact step_appendLocals_lane index
-    case laneAddress index =>
-      exact step_appendLocals_laneAddress index
-    case setLane index =>
-      exact step_appendLocals_setLane index
     case const32 word =>
       exact step_appendLocals_const32 word
     case const64 word =>
@@ -1499,16 +1350,12 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_callVirtual targets argc
     case tailCall method argc =>
       exact step_appendLocals_tailCall method argc
-    case newVector256 constructor argc =>
-      exact step_appendLocals_newVector256 constructor argc
     case newAggregate constructor argc size =>
       exact step_appendLocals_newAggregate constructor argc size
     case newObject constructor argc owner bases size =>
       exact step_appendLocals_newObject constructor argc owner bases size
     case skipInit =>
       exact step_appendLocals_skipInit
-    case asRef =>
-      exact step_appendLocals_asRef
     case feature id =>
       exact step_appendLocals_feature id
     case intrinsic operation argc =>

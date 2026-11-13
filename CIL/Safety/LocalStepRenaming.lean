@@ -158,46 +158,4 @@ theorem Frame.Renamed.stepSetLocal {indices : LocalIndexMap} {mapping : Allocati
     exact .ok (.next memories updated)
 #print axioms Frame.Renamed.stepSetLocal
 
-/-- Vector local loads use the same relocation as ordinary local loads. -/
-theorem Frame.Renamed.stepVectorLocal {indices : LocalIndexMap} {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
-    (memories : Memory.Renamed mapping scopes source target)
-    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceBody targetBody : CIL.Method) (position pc : Nat) (arguments stack : List Value) :
-    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.vectorLocal position) pc arguments sourceFrame stack source)
-      (step targetBody (.vectorLocal (indices.index position)) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) :=
-  frames.stepLocal memories sourceBody targetBody position pc none arguments stack
-#print axioms Frame.Renamed.stepVectorLocal
-
-/-- Vector local addresses retain the same relocated byte-home address. -/
-theorem Frame.Renamed.stepVectorLocalAddress {indices : LocalIndexMap}
-    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop}
-    {source target : Memory} {sourceFrame targetFrame : Frame}
-    (memories : Memory.Renamed mapping scopes source target)
-    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceBody targetBody : CIL.Method) (position pc : Nat) (arguments stack : List Value) :
-    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.vectorLocalAddr position) pc arguments sourceFrame stack source)
-      (step targetBody (.vectorLocalAddr (indices.index position)) pc (arguments.map mapping.value)
-        targetFrame (stack.map mapping.value) target) :=
-  frames.stepLocalAddress memories sourceBody targetBody position pc arguments stack
-#print axioms Frame.Renamed.stepVectorLocalAddress
-
-/-- Vector local stores update the retained slot through the same index map. -/
-theorem Frame.Renamed.stepSetVectorLocal {indices : LocalIndexMap} {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
-    (memories : Memory.Renamed mapping scopes source target)
-    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceBody targetBody : CIL.Method) (position pc : Nat) (arguments rest : List Value)
-    (value : Value) (valueBound : value.Below mapping.sourceLimit) :
-    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.setVectorLocal position) pc arguments sourceFrame (value :: rest) source)
-      (step targetBody (.setVectorLocal (indices.index position)) pc
-        (arguments.map mapping.value) targetFrame ((value :: rest).map mapping.value) target) :=
-  frames.stepSetLocal memories sourceBody targetBody position pc none arguments rest value
-    valueBound
-#print axioms Frame.Renamed.stepSetVectorLocal
-
 end CIL.Safety

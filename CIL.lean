@@ -2,7 +2,6 @@
 -- modules are tried in every consumer, so regrouping could change proof behaviour.
 
 -- Reference semantics, feature profiles, method embeddings and extraction metadata
-import CIL.AggregateMemory
 import CIL.CodeSuffix
 import CIL.ExecutionLemmas
 import CIL.Embedding.Basic
@@ -48,7 +47,6 @@ import CIL.Safety.AccessRequirements
 import CIL.Safety.AccessSlices
 import CIL.Safety.AllocationExtension
 import CIL.Safety.ArgumentEquivalence
-import CIL.Safety.ArgumentHomeValues
 import CIL.Safety.AggregateHomeValues
 import CIL.Safety.AggregateLocals
 import CIL.Safety.ValueBitCasts

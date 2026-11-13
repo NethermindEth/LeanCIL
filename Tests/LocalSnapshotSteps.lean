@@ -163,10 +163,10 @@ theorem unknown_load (memory : Memory) (frame : Frame) (vector : BitVec 128) :
 
 #print axioms unknown_load
 
-/-- Mixed private homes include a narrowed byte and a vector addressed by vector opcodes. -/
+/-- Mixed private homes include a narrowed byte and a vector. -/
 @[cil_code] def mixedHomes : CIL.Method := {
   code := [.arg 0, .setLocal 0, .const32 0x1FF, .setLocal 1 (some .unsigned8),
-    .arg 1, .setVectorLocal 2, .vectorLocal 2, .pop, .local 1 (some .unsigned8), .pop,
+    .arg 1, .setLocal 2, .local 2, .pop, .local 1 (some .unsigned8), .pop,
     .local 0, .ret]
   locals := [.i64 0, .i32 0, .v128 0]
   localKinds := [.word64, .narrow .unsigned8, .vector128], returnsValue := true }
@@ -177,7 +177,7 @@ theorem mixed_homes_wp (memory : Memory) (slots : List LocalSlot) (boundary : Na
     (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
     (word : BitVec 64) (vector : BitVec 128) :
     WP (Execution (fun fuel => run [mixedHomes] fuel 0 0
-      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], [], 0⟩ [] memory))
+      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0⟩ [] memory))
       (fun result => result.2 = [.scalar (.i64 word)] ∧ ValidCall result.1 inputs outputs ∧
         MemoryBelow boundary memory result.1 ∧
         AccessBelow memory.nextIdentity memory result.1) := by
@@ -341,7 +341,7 @@ theorem entry_homes_wp (entered memory : Memory) (slots : List LocalSlot) (bound
     (retained : AccessBelow entered.nextIdentity entered memory)
     (word : BitVec 64) (vector : BitVec 128) :
     WP (Execution (fun fuel => run [mixedHomes] fuel 0 0
-      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], [], 0⟩ [] memory))
+      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0⟩ [] memory))
       (fun result => result.2 = [.scalar (.i64 word)] ∧
         AccessBelow entered.nextIdentity entered result.1 ∧
         MemoryBelow boundary memory result.1) := by
@@ -518,7 +518,7 @@ theorem store_evidence (memory : Memory) (slots : List LocalSlot) (boundary : Na
     (unrelated : read memory other 8 1 = .ok unknown) (room : Writable memory caller 8 0 2)
     (word : BitVec 64) :
     WP (Execution (fun fuel => run [wordStore] fuel 0 0 [.scalar (.i64 word)]
-      ⟨0, slots, [], [], 0⟩ [] memory))
+      ⟨0, slots, [], 0⟩ [] memory))
       (fun result => result.2 = [] ∧ read result.1 caller 8 1 = .ok bytes ∧
         Writable result.1 caller 8 0 2 ∧ result.1.WellFormed ∧
         MemoryBelow boundary memory result.1 ∧
@@ -568,7 +568,7 @@ theorem caller_reads_after_stores (memory : Memory) (slots : List LocalSlot) (bo
     WP (Execution (fun fuel => run [callerReads] fuel 0 0
       [.scalar (.i64 word), .reference (.address input), .reference (.address output),
         .reference (.address limb), .reference (.address other)]
-      ⟨0, slots, [], [], 0⟩ [] memory))
+      ⟨0, slots, [], 0⟩ [] memory))
       (fun result => result.2 = [.scalar (.i64 ((pair input).word memory 8 + first))]) := by
   have formed := valid.wellFormed
   have snapshots := LocalSnapshots.empty memory slots
@@ -592,7 +592,7 @@ theorem counted_walk (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
     (homes : CompleteWritableHomes memory boundary mixedHomes.localKinds slots)
     (formed : memory.WellFormed) (word : BitVec 64) (vector : BitVec 128) :
     WP (Execution (fun fuel => run [mixedHomes] fuel 0 0
-      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], [], 0⟩ [] memory))
+      [.scalar (.i64 word), .scalar (.v128 vector)] ⟨0, slots, [], 0⟩ [] memory))
       (fun result => result.2 = [.scalar (.i64 word)]) := by
   have snapshots := LocalSnapshots.empty memory slots
   cil_contract_steps (snapshots := snapshots) 2 []

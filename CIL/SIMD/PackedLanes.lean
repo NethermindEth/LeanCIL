@@ -837,12 +837,6 @@ theorem intrinsic_avx512dq_mul256 (x y : V256) :
   rfl
 #print axioms intrinsic_avx512dq_mul256
 
-/-- Portable `Vector256` multiplication keeps the low 64 bits of each lane product. -/
-theorem intrinsic_mul256 (x y : V256) :
-    evalIntrinsic (.vector (.mul64 256)) [.v256 x, .v256 y] =
-      some (.v256 (zip256 (· * ·) x y)) := rfl
-#print axioms intrinsic_mul256
-
 /-- AVX-512DQ `MoveMask` gives the lane sign bits, like the AVX form. -/
 theorem intrinsic_avx512dq_movemask256 (x : V256) :
     evalIntrinsic (.avx512DQ .moveMask64) [.v256 x] = some (.i32 (moveMask64 x)) := rfl

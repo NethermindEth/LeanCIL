@@ -138,7 +138,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var binders = $"({string.Join(" ", variables)} : CIL.W{stackWidth})";
     var evaluation = $"CIL.evalIntegerMath .{operation} {width} {signed} [{string.Join(", ", loaded)}]";
     var invocation = $"CIL.Safety.invoke Extracted.program 8 0 [{inputsLean}] CIL.Safety.Memory.empty";
-    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], [], 0⟩ [{stack}] CIL.Safety.Memory.empty = _\n";
+    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], 0⟩ [{stack}] CIL.Safety.Memory.empty = _\n";
     var instruction = $"(body := Extracted.method0) (op := .intrinsic (.scalar (.math .{operation} {width} {signed})) {argc})";
     var argumentsLean = string.Join(" ", variables);
     var caseArguments = string.Join(" ", variables.Select(variable => "test." + variable));
@@ -153,7 +153,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
         $"    {invocation} = .ok (CIL.Safety.Memory.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + prefix +
         $"  refine (CIL.Safety.run_next {instruction} (by rfl) (by rfl)\n" +
-        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], [], 0⟩ CIL.Safety.Memory.empty) from ?_)).trans (by rfl)\n" +
+        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], 0⟩ CIL.Safety.Memory.empty) from ?_)).trans (by rfl)\n" +
         "  math_wrapper_step evaluated\n" +
         $"theorem wrapper_fault_full {binders} (fault : CIL.ArithmeticFault)\n" +
         $"    (evaluated : {evaluation} = .error fault) :\n" +

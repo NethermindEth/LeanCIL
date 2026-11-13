@@ -50,7 +50,6 @@ example : validateManagedCall methods [] (call site) true (.call 1 3) = false :=
 -- Only a plain `call` of a closed method may target an import; constructors and generic sites may not.
 example : validateManagedCall methods imports ⟨8, 115, .call site⟩ true (.call 1 3) = false := by decide +kernel
 example : validateManagedCall methods imports ⟨8, 115, .call site⟩ true (.newAggregate 1 3 0) = false := by decide +kernel
-example : validateManagedCall methods imports (call site) true (.newVector256 1 3) = false := by decide +kernel
 example : validateManagedCall methods imports (call { site with typeArguments := [word] }) true (.call 1 3) = false := by decide +kernel
 
 -- A managed site or a non-call instruction cannot reach the import range either.

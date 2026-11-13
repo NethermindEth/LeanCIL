@@ -53,10 +53,10 @@ theorem read_holds : readContract.Holds Extracted.program 1 := by
       Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]
   have entered : enterFrame Extracted.method1
       [.bufferSpan input.view, .scalar (.i32 input.index)] memory =
-      .ok (⟨memory.nextIdentity, [.span 4 false (some input.view)], [], [], 0⟩, memory) := by
+      .ok (⟨memory.nextIdentity, [.span 4 false (some input.view)], [], 0⟩, memory) := by
     have checked := valid
     dsimp only [ReadInput.view] at checked
-    simp [enterFrame, Extracted.method1, makeLocals, makeArgumentHomes, makeParameterHomes,
+    simp [enterFrame, Extracted.method1, makeLocals, makeParameterHomes,
       makeLocal, storeLocal, Safety.Value.hasUnspecified, ReadInput.view, checked,
       checkedAt, Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]
   refine MethodContract.Holds.intro (c := readContract) (input := input)
@@ -93,9 +93,9 @@ theorem slice_read_composes (program : Program)
   let args : List Safety.Value :=
     [.bufferSpan source, .scalar (.i32 start), .scalar (.i32 length), .scalar (.i32 input.index)]
   let frame : Frame := ⟨memory.nextIdentity,
-    [.span 4 false (some ⟨.null, 0, 4, false⟩), .span 4 false (some source)], [], [], 0⟩
+    [.span 4 false (some ⟨.null, 0, 4, false⟩), .span 4 false (some source)], [], 0⟩
   have entered : enterFrame Extracted.method0 args memory = .ok (frame, memory) := by
-    simp [enterFrame, Extracted.method0, args, frame, makeLocals, makeArgumentHomes,
+    simp [enterFrame, Extracted.method0, args, frame, makeLocals,
       makeParameterHomes, makeLocal, storeLocal, sourceWidth, sourceReadonly, sourceValid,
       Safety.Value.hasUnspecified, checkedAt, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure]

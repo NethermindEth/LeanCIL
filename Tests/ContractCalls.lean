@@ -15,7 +15,7 @@ theorem child_exists (program : Program) (memory final : Safety.Memory) (value :
     (child : ∃ fuel, Safety.invoke program fuel 1 [] memory =
       .ok (final, [.scalar (.i32 value)])) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (result, returned) ∧
         result = final ∧ returned = [.scalar (.i32 value)] := by
   cil_contract_steps [found, child]
   exact ⟨rfl, rfl⟩
@@ -26,7 +26,7 @@ theorem child_certificate (program : Program) (memory final : Safety.Memory) (va
     (fuel : Nat) (found : program[0]? = some caller)
     (child : InvocationCertificate program 1 [] memory fuel final [.scalar (.i32 value)]) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (result, returned) ∧
         result = final ∧ returned = [.scalar (.i32 value)] := by
   cil_contract_steps [found, child]
   exact ⟨rfl, rfl⟩
@@ -37,7 +37,7 @@ theorem child_fixed (program : Program) (memory final : Safety.Memory) (value : 
     (fuel : Nat) (found : program[0]? = some caller)
     (child : Safety.invoke program fuel 1 [] memory = .ok (final, [.scalar (.i32 value)])) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (result, returned) ∧
         result = final ∧ returned = [.scalar (.i32 value)] := by
   cil_contract_steps [found, child]
   exact ⟨rfl, rfl⟩
@@ -47,7 +47,7 @@ theorem child_fixed (program : Program) (memory final : Safety.Memory) (value : 
 theorem checked_child (program : Program) (memory final : Safety.Memory) (value : W32)
     (found : program[0]? = some caller)
     (child : Safety.invoke program 2 1 [] memory = .ok (final, [.scalar (.i32 value)])) :
-    Safety.run program 3 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+    Safety.run program 3 0 0 [] ⟨0, [], [], 0⟩ [] memory =
       .ok (final, [.scalar (.i32 value)]) := by
   cil_checked_steps [found, child]
 #print axioms checked_child
@@ -68,10 +68,10 @@ theorem wrong_callee (program : Program) (memory final : Safety.Memory) (value :
     (wrong : ∃ fuel, Safety.invoke program fuel 2 [] memory =
       .ok (final, [.scalar (.i32 value)]))
     (remaining : ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (result, returned) ∧
         result = final ∧ returned = [.scalar (.i32 value)]) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (result, returned) ∧
         result = final ∧ returned = [.scalar (.i32 value)] := by
   fail_if_success cil_contract_step [found, wrong]
   exact remaining
@@ -89,7 +89,7 @@ def seven : MethodContract Unit W32 where
 theorem supplied_contract (program : Program) (memory : Safety.Memory)
     (found : program[0]? = some caller) (holds : seven.Holds program 1) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory = .ok (result, returned) ∧
         returned = [.scalar (.i32 7)] := by
   cil_contract_steps [found, holds, seven]
   obtain rfl := call.post
@@ -113,7 +113,7 @@ def successor : MethodContract W32 W32 where
 theorem word_input (program : Program) (memory : Safety.Memory) (value : W32)
     (found : program[0]? = some forwarder) (holds : successor.Holds program 1) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [.scalar (.i32 value)] ⟨0, [], [], [], 0⟩ [] memory =
+      Safety.run program fuel 0 0 [.scalar (.i32 value)] ⟨0, [], [], 0⟩ [] memory =
           .ok (result, returned) ∧
         returned = [.scalar (.i32 (value + 1))] := by
   cil_contract_steps [found, holds, successor]
@@ -182,20 +182,20 @@ example (memory final : Safety.Memory) (returned : seven.Returns () memory final
 /-- Leaving a literal frame that owns nothing is stated as the memory it left; a frame that
     owns an allocation, or is a variable, keeps `leaveFrame`. -/
 example (memory : Safety.Memory) (frame : Safety.Frame)
-    (kept : memory.WellFormed ∧ (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+    (kept : memory.WellFormed ∧ (Safety.leaveFrame ⟨0, [], [3], 0⟩ memory).WellFormed ∧
       (Safety.leaveFrame frame memory).WellFormed) :
-    (Safety.leaveFrame ⟨0, [], [], [], 0⟩ memory).WellFormed ∧
-      (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+    (Safety.leaveFrame ⟨0, [], [], 0⟩ memory).WellFormed ∧
+      (Safety.leaveFrame ⟨0, [], [3], 0⟩ memory).WellFormed ∧
       (Safety.leaveFrame frame memory).WellFormed := by
   cil_frame_exit
-  show memory.WellFormed ∧ (Safety.leaveFrame ⟨0, [], [3], [], 0⟩ memory).WellFormed ∧
+  show memory.WellFormed ∧ (Safety.leaveFrame ⟨0, [], [3], 0⟩ memory).WellFormed ∧
     (Safety.leaveFrame frame memory).WellFormed
   exact kept
 
 /-- Registration supplies the callee contract without an explicit holds fact. -/
 theorem registered_caller (memory : Safety.Memory) :
     ∃ fuel result returned,
-      Safety.run boundProgram fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+      Safety.run boundProgram fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)] := by
   cil_contract_steps [seven]
   obtain rfl := call.post
@@ -206,7 +206,7 @@ theorem registered_caller (memory : Safety.Memory) :
     is never stepped, so only the fact can give `value`. -/
 theorem checked_child_concrete (memory final : Safety.Memory) (value : W32)
     (child : Safety.invoke boundProgram 2 1 [] memory = .ok (final, [.scalar (.i32 value)])) :
-    Safety.run boundProgram 3 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+    Safety.run boundProgram 3 0 0 [] ⟨0, [], [], 0⟩ [] memory =
       .ok (final, [.scalar (.i32 value)]) := by
   cil_checked_steps [child]
 #print axioms checked_child_concrete
@@ -229,7 +229,7 @@ theorem tuple_input (program : Program) (memory : Safety.Memory) (left right : W
     (ordered : left < right) :
     ∃ fuel result returned,
       Safety.run program fuel 0 0 [.scalar (.i32 left), .scalar (.i32 right)]
-        ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
+        ⟨0, [], [], 0⟩ [] memory = .ok (result, returned) ∧
         returned = [.scalar (.i32 (left + right))] := by
   cil_contract_steps [found, holds, orderedPair, ordered]
   obtain rfl := call.post
@@ -242,7 +242,7 @@ theorem explicit_precondition (program : Program) (memory : Safety.Memory) (left
     (later : Unit → left < right) :
     ∃ fuel result returned,
       Safety.run program fuel 0 0 [.scalar (.i32 left), .scalar (.i32 right)]
-        ⟨0, [], [], [], 0⟩ [] memory = .ok (result, returned) ∧
+        ⟨0, [], [], 0⟩ [] memory = .ok (result, returned) ∧
         returned = [.scalar (.i32 (left + right))] := by
   cil_contract_steps [found, holds, orderedPair]
   case precondition =>
@@ -268,7 +268,7 @@ theorem explicit_precondition (program : Program) (memory : Safety.Memory) (left
 theorem parameterized_registration (program : Program) (memory : Safety.Memory)
     (found : program[0]? = some caller) (helperFound : program[1]? = some helper) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)] := by
   cil_contract_steps [found, helperFound, seven]
   obtain rfl := call.post
@@ -278,7 +278,7 @@ theorem parameterized_registration (program : Program) (memory : Safety.Memory)
 /-- Automatic call composition preserves an unrelated sibling obligation. -/
 theorem sibling_goal (memory : Safety.Memory) :
     (∃ fuel result returned,
-      Safety.run boundProgram fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+      Safety.run boundProgram fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)]) ∧ (7 : Nat) = 7 := by
   constructor
   cil_contract_steps [seven]
@@ -291,10 +291,10 @@ theorem sibling_goal (memory : Safety.Memory) :
 theorem missing_binding (program : Program) (memory : Safety.Memory)
     (found : program[0]? = some caller)
     (remaining : ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)]) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)] := by
   fail_if_success cil_contract_step [found, seven]
   exact remaining
@@ -330,10 +330,10 @@ def ghostContract : MethodContract GhostInput W32 where
 theorem ambiguous_input (program : Program) (memory : Safety.Memory)
     (found : program[0]? = some caller) (holds : ghostContract.Holds program 1)
     (remaining : ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)]) :
     ∃ fuel result returned,
-      Safety.run program fuel 0 0 [] ⟨0, [], [], [], 0⟩ [] memory =
+      Safety.run program fuel 0 0 [] ⟨0, [], [], 0⟩ [] memory =
         .ok (result, returned) ∧ returned = [.scalar (.i32 7)] := by
   fail_if_success cil_contract_step [found, holds, ghostContract]
   exact remaining

@@ -678,13 +678,11 @@ private def snapshotContractWalk (initial : Term) (facts : Array Term)
       withMainContext do
         let (found, instruction, operation) ←
           cilFetchedOp ``run_next_exists some 4 stepFacts
-        let (updated, checked, stored) ← if operation == ``CIL.Instruction.setLocal ||
-            operation == ``CIL.Instruction.setVectorLocal then do
+        let (updated, checked, stored) ← if operation == ``CIL.Instruction.setLocal then do
             let stored ← snapshotStore snapshot found instruction stepFacts true supplied
             pure (stored.snapshots, stored.stepped, some stored)
           else if supplied then throwError "The instruction is not a numeric store"
-          else if operation == ``CIL.Instruction.local ||
-              operation == ``CIL.Instruction.vectorLocal then do
+          else if operation == ``CIL.Instruction.local then do
             pure (snapshot, ← snapshotLoad snapshot found instruction stepFacts, none)
           else throwError "The instruction is not a numeric local"
         evalTactic (← `(tactic| (

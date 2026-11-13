@@ -1,6 +1,5 @@
 import CIL.Memory
 import CIL.Instructions
-import CIL.AggregateMemory
 import CIL.IntegerArithmetic
 
 /-!
@@ -115,8 +114,6 @@ inductive Action where
   | next (pc : Nat) (stack : List Value) (memory : Memory)
   /-- Call `callee` with `args`; its results are pushed onto `rest`. -/
   | call (callee : Nat) (args rest : List Value) (memory : Memory)
-  /-- Run constructor `callee`, then push the vector it built in a kind-2 home onto `rest`. -/
-  | construct (callee : Nat) (args rest : List Value) (memory : Memory)
   /-- The method returned `result`. -/
   | returned (result : List Value) (memory : Memory)
 
@@ -157,28 +154,6 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
   | .localAddr i, _ => return .next (pc + 1) (.ref (.local frame i) :: stack) memory
   | .setLocal i narrow, v :: rest =>
     return .next (pc + 1) rest (write memory (.local frame i) (← narrowValue narrow v))
-  -- Vector homes: kind 1 for arguments, kind 0 for locals.
-  | .vectorArg i, _ => return .next (pc + 1) ((← readVectorHome memory frame 1 i) :: stack) memory
-  | .vectorArgAddr i, _ => return .next (pc + 1) (.ref (.home frame 1 i 0) :: stack) memory
-  | .vectorLocal i, _ => return .next (pc + 1) ((← readVectorHome memory frame 0 i) :: stack) memory
-  | .vectorLocalAddr i, _ => return .next (pc + 1) (.ref (.home frame 0 i 0) :: stack) memory
-  | .setVectorLocal i, .v256 bits :: rest =>
-    return .next (pc + 1) rest (writeVectorHome memory frame 0 i bits)
-  -- 64-bit lanes of an object, a reference or a vector value.
-  | .lane i, .object id :: rest =>
-    return .next (pc + 1) ((← read64 memory (.byte (id + 8 * i.val))) :: rest) memory
-  | .lane i, .ref address :: rest =>
-    return .next (pc + 1) ((← read64 memory (← unsafeAdd 8 i.val address)) :: rest) memory
-  | .lane i, .v256 bits :: rest =>
-    return .next (pc + 1) (.i64 (Vector.lane64 bits i.val) :: rest) memory
-  | .laneAddress i, .object id :: rest =>
-    return .next (pc + 1) (.ref (.byte (id + 8 * i.val)) :: rest) memory
-  | .laneAddress i, .ref address :: rest =>
-    return .next (pc + 1) (.ref (← unsafeAdd 8 i.val address) :: rest) memory
-  | .setLane i, .i64 word :: .object base :: rest =>
-    return .next (pc + 1) rest (← write64 memory (.byte (base + 8 * i.val)) word)
-  | .setLane i, .i64 word :: .ref address :: rest =>
-    return .next (pc + 1) rest (← write64 memory (← unsafeAdd 8 i.val address) word)
   -- Arithmetic, through `unary` and `binary`.
   | .neg, v :: rest | .bnot, v :: rest
   | .checkedConvert _ _ _, v :: rest
@@ -236,15 +211,10 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
   | .bgtu target, .i64 b :: .i64 a :: rest => return .next (if b < a then target else pc + 1) rest memory
   | .bgeu target, .i32 b :: .i32 a :: rest => return .next (if b ≤ a then target else pc + 1) rest memory
   | .bgeu target, .i64 b :: .i64 a :: rest => return .next (if b ≤ a then target else pc + 1) rest memory
-  -- Calls; every argument must be initialized. A vector constructor writes into a kind-2 home.
+  -- Calls; every argument must be initialized.
   | .call callee argc, _ =>
     if stack.length < argc || (stack.take argc).any (! ·.initialized) then none else
       return .call callee (stack.take argc).reverse (stack.drop argc) memory
-  | .newVector256 callee argc, _ =>
-    if stack.length < argc || (stack.take argc).any (! ·.initialized) then none else
-      return .construct callee
-        (.ref (.home frame 2 pc 0) :: (stack.take argc).reverse) (stack.drop argc)
-        (writeVectorHome memory frame 2 pc 0)
   -- Hardware features, intrinsics and memory operations.
   | .feature id, _ =>
     return .next (pc + 1) (.i32 (if profile.evaluate id then 1 else 0) :: stack) memory
@@ -257,7 +227,6 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
     return .next (pc + 1) values updated
   | .skipInit, .object _ :: rest => return .next (pc + 1) rest memory
   | .skipInit, .ref _ :: rest => return .next (pc + 1) rest memory
-  | .asRef, .ref a :: rest => return .next (pc + 1) (.ref a :: rest) memory
   -- Return.
   | .ret narrow, _ => returnFromStack narrow returns stack memory
   | _, _ => none

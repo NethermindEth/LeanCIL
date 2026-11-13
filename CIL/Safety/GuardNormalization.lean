@@ -75,8 +75,6 @@ namespace CIL.Safety
     observerCount (.arg index narrow) = 0 := rfl
 @[cil_guard] theorem guard_call (callee argc : Nat) :
     observerCount (.call callee argc) = argc := rfl
-@[cil_guard] theorem guard_newVector256 (callee argc : Nat) :
-    observerCount (.newVector256 callee argc) = argc := rfl
 @[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     observerCount (.newAggregate callee argc size) = argc := rfl
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :
@@ -107,14 +105,9 @@ namespace CIL.Safety
     observerCount (.aggregateFieldAt offset size) = 1 := rfl
 @[cil_guard] theorem guard_setAggregateFieldAt (offset size : Nat) :
     observerCount (.setAggregateFieldAt offset size) = 2 := rfl
-@[cil_guard] theorem guard_lane (index : Fin 4) : observerCount (.lane index) = 1 := rfl
-@[cil_guard] theorem guard_laneAddress (index : Fin 4) :
-    observerCount (.laneAddress index) = 1 := rfl
-@[cil_guard] theorem guard_setLane (index : Fin 4) : observerCount (.setLane index) = 2 := rfl
 @[cil_guard] theorem guard_load64 : observerCount .load64 = 1 := rfl
 @[cil_guard] theorem guard_store64 : observerCount .store64 = 2 := rfl
 @[cil_guard] theorem guard_skipInit : observerCount .skipInit = 1 := rfl
-@[cil_guard] theorem guard_asRef : observerCount .asRef = 1 := rfl
 
 -- Operand counts of memory instructions, which `observerCount` defers to.
 @[cil_guard] theorem guard_count_bigMul64 (signed : Bool) :
@@ -131,7 +124,6 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_count_store128 : CIL.MemoryOp.store128.argumentCount = 2 := rfl
 @[cil_guard] theorem guard_count_store256 : CIL.MemoryOp.store256.argumentCount = 2 := rfl
 @[cil_guard] theorem guard_count_store512 : CIL.MemoryOp.store512.argumentCount = 2 := rfl
-@[cil_guard] theorem guard_count_init256 : CIL.MemoryOp.init256.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_vector128Load :
     (CIL.MemoryOp.vector128Unsafe false false).argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_vector128LoadAt :
@@ -143,12 +135,10 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_count_asRef : CIL.MemoryOp.asRef.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_add (size : Nat) (signed : Bool) :
     (CIL.MemoryOp.add size signed).argumentCount = 2 := rfl
-@[cil_guard] theorem guard_count_bitcast256 : CIL.MemoryOp.bitcast256.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_bitcastByteBool :
     CIL.MemoryOp.bitcastByteBool.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_bitcastValue (source target : CIL.SnapshotShape) :
     (CIL.MemoryOp.bitcastValue source target).argumentCount = 1 := rfl
-@[cil_guard] theorem guard_count_skipInit : CIL.MemoryOp.skipInit.argumentCount = 1 := rfl
 @[cil_guard] theorem guard_count_staticAddress (bytes : List (BitVec 8)) :
     (CIL.MemoryOp.staticAddress bytes).argumentCount = 0 := rfl
 @[cil_guard] theorem guard_count_staticValue (bytes : List (BitVec 8)) :

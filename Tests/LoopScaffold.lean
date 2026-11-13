@@ -31,9 +31,9 @@ bind_cutpoint absent := body matching (fun _ => false) with entry.frame
 #guard_msgs in
 bind_cutpoint ambiguous := body matching (fun _ => true) with entry.frame
 
-/-- Missing vector arguments cannot supply a frame witness. -/
+/-- A parameter home with no matching argument cannot supply a frame witness. -/
 def missingArgument : CIL.Method := {
-  code := [.ret], locals := [], returnsValue := false, vectorArgs := [0] }
+  code := [.ret], locals := [], returnsValue := false, parameterHomes := [(0, .word32)] }
 
 /-- error: Frame entry must reduce to a successful checked allocation -/
 #guard_msgs in
@@ -86,19 +86,6 @@ theorem parameter_entry (value : CIL.W32) :
     enterFrame addressed [.scalar (.i32 value)] Memory.empty =
       .ok (parameter.frame value, parameter.memory value) := parameter.checked value
 #print axioms parameter_entry
-
-/-- Vector argument homes preserve a symbolic vector's bytes. -/
-def vectorBody : CIL.Method := {
-  code := [.ret], locals := [], returnsValue := false, vectorArgs := [0] }
-
-bind_entry vector (bits : BitVec 256) := vectorBody
-  with [.scalar (.v256 bits)] from Memory.empty
-
-/-- Vector entry uses the supplied bits and is checked for every vector. -/
-theorem vector_entry (bits : BitVec 256) :
-    enterFrame vectorBody [.scalar (.v256 bits)] Memory.empty =
-      .ok (vector.frame bits, vector.memory bits) := vector.checked bits
-#print axioms vector_entry
 
 end Tests.SymbolicLoopScaffold
 

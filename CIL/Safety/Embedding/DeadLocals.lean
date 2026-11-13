@@ -186,7 +186,6 @@ theorem enterFrame_deadLocals {expected actual : CIL.Method} {map : List Nat}
   simp only [enterFrame, Method.withLocalsOf, selected, embeds.parameterHomes, bind_map_left,
     map_bind]
   refine bind_congr fun ⟨slots, owned, entered⟩ => ?_
-  refine bind_congr fun ⟨arguments, argumentIds, entered⟩ => ?_
   simp [makeParameterHomes, padSlots, deadSlots, Frame.appendLocals]
 
 #print axioms enterFrame_deadLocals

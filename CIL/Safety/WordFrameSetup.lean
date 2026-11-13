@@ -15,7 +15,7 @@ namespace CIL.Safety
 theorem word_frame_setup (body : CIL.Method) (specs : List (Option (BitVec 64)))
     (kinds : body.localKinds = wordKinds specs)
     (initializers : body.locals = wordInitializers specs)
-    (arguments : body.vectorArgs = []) (parameters : body.parameterHomes = [])
+    (parameters : body.parameterHomes = [])
     (opaqueLocals : body.opaqueVectorLocals = []) (memory : Memory) (args : List Value)
     (wellFormed : memory.WellFormed) :
     ∃ frame result,
@@ -24,10 +24,10 @@ theorem word_frame_setup (body : CIL.Method) (specs : List (Option (BitVec 64)))
       MemoryBelow memory.nextIdentity memory result ∧ result.WellFormed := by
   obtain ⟨slots, owned, result, made, homes⟩ :=
     make_word_locals memory memory.nextIdentity specs wellFormed
-  let frame : Frame := ⟨memory.nextIdentity, slots, owned, [], 0⟩
+  let frame : Frame := ⟨memory.nextIdentity, slots, owned, 0⟩
   have setup : enterFrame body args memory = .ok (frame, result) := by
     simp only [enterFrame, opaqueLocals, makeSelectedLocals, List.isEmpty_nil, ite_true,
-      kinds, initializers, made, arguments, makeArgumentHomes, parameters, makeParameterHomes,
+      kinds, initializers, made, parameters, makeParameterHomes,
       List.map_nil,
       Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
     rfl

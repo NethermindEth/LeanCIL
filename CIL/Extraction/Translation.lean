@@ -162,12 +162,11 @@ def MethodShapeValid (layouts : List RawLayout) (closed : RawMethod) (method : M
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
   method.locals = method.localKinds.map (fun kind =>
     if closed.initLocals then initialLocal kind else .unmodeled) ∧
-  method.vectorLocals = [] ∧ method.vectorArgs = [] ∧
   methodShapeInstructions layouts closed method = true
 
 instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) :
     Decidable (MethodShapeValid layouts closed method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
 /-- One emitted method against its evidence record: every per-method validator, in the
     order generated modules supply their proofs. -/

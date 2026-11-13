@@ -257,6 +257,21 @@ try
     PublicProofCheck("a public fixture missing its axiom check",
         "import CIL\ntheorem unchecked : True := trivial\n", "has no `#print axioms`");
 
+    // A shell that expands a backtick escape leaves a form feed, NUL or backspace where the backtick belonged.
+    ControlsPass("text with tabs, line feeds and carriage returns", "def a := 1\r\n\tdef b := 2\n");
+    ControlsFail("a form feed in a docstring", "/-- Opens \f this -/\ndef a := 1\n",
+        "Control.lean:1: control byte 0x0C");
+    ControlsFail("a NUL on a later line", "def a := 1\n\ndef b := \0\n", "Control.lean:3: control byte 0x00");
+    ControlsFail("a backspace after a carriage return", "def a := 1\r\n/-- \b -/\r\n",
+        "Control.lean:2: control byte 0x08");
+    Write("Control.bin", "\0");
+    Write("Missing.lean", "def a := 1\n");
+    File.Delete(Path.Combine(root, "Missing.lean"));
+    if (Documentation.ControlCharacterProblems(root, ["Control.bin", "Missing.lean"]).Count != 0)
+        throw new InvalidOperationException("A binary file or a path that is no longer on disk was reported.");
+    checks++;
+    Console.WriteLine("PASS binary files and removed paths are not scanned");
+
     // A suite the runner gained without a row would be invisible to anyone choosing what to run.
     const string Table = "## Suites\n\n| Suite | Checks |\n| --- | --- |\n";
     SuitesPass("a suite table listing every suite", Table + "| `core` | runner checks |\n| `loops` | loops |");
@@ -344,6 +359,30 @@ void SuitesPass(string name, string text)
 void SuitesFail(string name, string text, string reason)
 {
     var failures = SuiteCheck(text);
+    if (!failures.Any(failure => failure.Contains(reason, StringComparison.Ordinal)))
+        throw new InvalidOperationException($"{name} did not fail with `{reason}`:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name} fails");
+}
+
+List<string> ControlCheck(string text)
+{
+    Write("Control.lean", text);
+    return Documentation.ControlCharacterProblems(root, ["Control.lean"]);
+}
+
+void ControlsPass(string name, string text)
+{
+    var failures = ControlCheck(text);
+    if (failures.Count != 0)
+        throw new InvalidOperationException($"{name} was rejected:\n{string.Join('\n', failures)}");
+    checks++;
+    Console.WriteLine($"PASS {name}");
+}
+
+void ControlsFail(string name, string text, string reason)
+{
+    var failures = ControlCheck(text);
     if (!failures.Any(failure => failure.Contains(reason, StringComparison.Ordinal)))
         throw new InvalidOperationException($"{name} did not fail with `{reason}`:\n{string.Join('\n', failures)}");
     checks++;

@@ -226,7 +226,7 @@ Reference and field instructions have one `@[cil_instruction_step]` equation per
 [InstructionSteps](../CIL/Safety/InstructionSteps.lean), which rewrites a step to checked memory
 and formation operations. They cover the `instruction` arms of `load64`, `store64` and
 `storeScalar` through a reference, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
-width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `asRef`, `skipInit` and `initobj`.
+width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and `initobj`.
 
 - Supply successful encoded byte reads and writes directly: the stepper derives the scalar or
   vector bridge before stepping. Narrow scalar reads support signed and unsigned results. Facts
@@ -684,7 +684,7 @@ unfolding it.
 continuing instruction or at one of `op.targets`. Given a successful action and its selected
 callee, `step_callee` proves membership in `Instruction.callees`: a singleton for a direct call or
 construction, or all authenticated targets for an indirect call. Tail transfers enter a callee
-without continuing in the current frame. `step_call_action` and `step_newVector256_action` /
+without continuing in the current frame. `step_call_action` and
 `step_newAggregate_action` separate a call from a construction. The module imports only the step
 simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
 layers.

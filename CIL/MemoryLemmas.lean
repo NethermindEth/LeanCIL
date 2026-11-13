@@ -3,8 +3,8 @@ import CIL.Semantics
 /-!
 # Scalar memory lemmas
 
-Frame facts for the reference interpreter's memory: caller bytes, scalar locals and vector
-homes are separate address spaces, so a write to one leaves reads of the others unchanged.
+Frame facts for the reference interpreter's memory: caller bytes and scalar locals
+are separate address spaces, so a write to one leaves reads of the others unchanged.
 Stepping proofs use these to carry facts about caller memory across local updates.
 -/
 
@@ -13,14 +13,6 @@ set_option maxRecDepth 8192
 set_option maxHeartbeats 2000000
 
 namespace CIL
-
-@[simp] theorem writeBytes_home (m : Memory)
-    (base word count frame kind index offset : Nat) :
-    writeBytes m base word count (.home frame kind index offset) =
-      m (.home frame kind index offset) := by
-  induction count generalizing m base word with
-  | zero => rfl
-  | succ count ih => rw [writeBytes, ih]; simp [write]
 
 /-- A caller-byte read depends only on caller bytes. -/
 theorem readBytes_congr (m n : Memory)

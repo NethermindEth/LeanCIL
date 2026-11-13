@@ -73,7 +73,7 @@ theorem read_holds : readContract.Holds Extracted.program 0 := by
   dsimp only [readContract]
   simp only [Safety.invoke, Extracted.lookup0]
   simp [checkedValue, numericValue, valid, enterFrame, Extracted.method0, makeLocals,
-    makeArgumentHomes, makeParameterHomes, checkedAt, Except.mapError, Bind.bind, Except.bind,
+    makeParameterHomes, checkedAt, Except.mapError, Bind.bind, Except.bind,
     Pure.pure, Except.pure, List.mapM_cons, List.mapM_nil]
   cil_checked_steps [readContract, ReadInput.view, valid, element, scalar, bound, numericOfWidth,
     formed, item, extend_byte]

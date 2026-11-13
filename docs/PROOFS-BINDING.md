@@ -112,8 +112,7 @@ Open it with `obtain ⟨home0, entered, enter⟩ := entry.checked ...` and read 
 `madeN` and `kept`. A fact `valid : view.validate memory = .ok ()` is also supplied in the memory
 after the homes through [`SpanView.validate_below`](../CIL/Safety/FrameMemoryBelow.lean), so an
 assigned span parameter stores without restating its validity. A local that allocates a home
-needs a fitting initializer or `.unmodeled`, and a vector argument home or a numeric parameter
-home is rejected.
+needs a fitting initializer or `.unmodeled`, and a numeric parameter home is rejected.
 [SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean),
 [Struct](../Examples/Proofs/Struct.lean), [Countdown](../Examples/Proofs/Countdown.lean),
 [CountCalls](../Examples/Proofs/CountCalls.lean) and
@@ -482,7 +481,7 @@ call targets, profiles, return metadata and static sites stay exact. `ProgramRen
 correspondence for every source method. The target is the extraction with the additional dead
 declarations.
 
-This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals`, `vectorArgs` and
+This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals` and
 `parameterHomes` are empty. Retained initializers stay exact, including initialized numeric helpers;
 their successful setup is derived from the actual source execution. Local widths must fit the native
 range; span element widths must be positive and less than `2^64`. These metadata conditions are
@@ -558,8 +557,7 @@ relate its feature fields to the flag arguments it uses. Profiles that produce d
 different instruction counts, or different instructions under identical observed flags are rejected.
 Static descriptors are retained when their complete metadata agrees across the selected profiles,
 including field identities, bytes, initializer indices and arguments. Different static metadata is
-rejected rather than remapped. Imported callee slots and the model's `newVector256` constructor form
-are not supported in template generation.
+rejected rather than remapped. Imported callee slots are not supported in template generation.
 
 ### Instruction equations for parametric bodies
 

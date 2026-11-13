@@ -17,11 +17,10 @@ theorem stored_frame_references_valid (m result : Memory) (frame : Frame) (index
     Frame.ReferencesValid result { frame with locals := frame.locals.set index final } := by
   have retained := valid.preserve hm (storeLocal_extends_allocations _ _ _ _ _ h)
   have stored := storeLocal_preserves_reference_validity _ _ _ _ _ hm
-    (valid.1 slot (List.mem_of_getElem? present)) h
-  refine ⟨?_, retained.2⟩
+    (valid slot (List.mem_of_getElem? present)) h
   intro other member
   rcases List.mem_or_eq_of_mem_set member with old | same
-  · exact retained.1 other old
+  · exact retained other old
   · subst other
     exact stored
 

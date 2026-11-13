@@ -142,16 +142,6 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
       let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
       return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
     return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
-  | .tableAddress signature, .scalar index :: .methodTable table :: rest =>
-    if table.signature != signature then .error .invalidState else pure ()
-    let some index := arrayIndex index | .error .invalidState
-    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
-    if index >= targets.size then .error (.thrown "System.IndexOutOfRangeException") else pure ()
-    let some backing := table.backing | .error .invalidState
-    let base := { table with backing := some { backing with byteOffset := 0 } }
-    let selected ← checkedAt .null nativeMethodWidth
-      (addNativeTable base memory (BitVec.ofNat 64 (nativeMethodWidth * index)))
-    return .next (pc + 1) (.methodTable selected :: rest) frame memory
   | .tableOffset, .scalar offset :: .methodTable table :: rest
   | .tableOffset, .methodTable table :: .scalar offset :: rest =>
     let offset ← match offset with
@@ -333,19 +323,13 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .arg i (some kind), _ =>
     let some (.scalar (.i32 bits)) := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m (.scalar (.i32 (kind.extend bits)))) :: stack) frame m
-  | .vectorArg i, _ =>
-    let home ← argumentHome frame i
-    return .next (pc + 1) ((← loadLocal m home) :: stack) frame m
-  | .vectorArgAddr i, _ =>
-    let home ← argumentHome frame i
-    return .next (pc + 1) ((← localAddress m home) :: stack) frame m
-  | .local i _, _ | .vectorLocal i, _ =>
+  | .local i _, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← loadLocal m slot) :: stack) frame m
-  | .localAddr i, _ | .vectorLocalAddr i, _ =>
+  | .localAddr i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← localAddress m slot) :: stack) frame m
-  | .setLocal i _, value :: rest | .setVectorLocal i, value :: rest =>
+  | .setLocal i _, value :: rest =>
     let some slot := frame.locals[i]? | .error .invalidState
     let (slot, memory) ← storeLocal m slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set i slot } memory
@@ -378,14 +362,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
         return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
       | .object .null :: _ => .error (.thrown "System.NullReferenceException")
       | _ => .error .invalidState
-  | .newVector256 callee argc, _ =>
-    if stack.length < argc then .error .invalidState else
-      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
-      let (temporary, memory) ← allocateHome m frame.activation (localWidth .vector256)
-      let memory ← storeValue memory (.address temporary) (.v256 0)
-      let frame := { frame with owned := temporary.allocation :: frame.owned }
-      return .construct callee (.reference (.address temporary) :: arguments)
-        (stack.drop argc) frame temporary .vector256 memory
   | .newAggregate callee argc size, _ =>
     if size = 0 || stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)

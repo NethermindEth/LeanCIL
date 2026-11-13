@@ -36,7 +36,7 @@ theorem unknown_scalar_vector_homes (memory : Memory) (formed : memory.WellForme
   obtain ⟨frame, entered, setup, homes, _, _⟩ := unknown_frame_setup unknownMixedBody rfl
     (by simp [unknownMixedBody]) (by simp [unknownMixedBody]) (by simp [unknownMixedBody])
     (by simp [unknownMixedBody]) (by simp [unknownMixedBody]) (by simp [unknownMixedBody])
-    rfl rfl rfl memory [] formed
+    rfl rfl memory [] formed
   obtain ⟨scalar, scalarSlot, _, scalarAccess⟩ := homes.home_at 0 .word64 rfl
   obtain ⟨vector, vectorSlot, _, vectorAccess⟩ := homes.home_at 1 .vector256 rfl
   exact ⟨frame, entered, scalar, vector, setup, scalarSlot, vectorSlot,
