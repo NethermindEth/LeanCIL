@@ -697,6 +697,29 @@ splitting operand constructors, and close definitionally equal cases early. Shar
 family-level reasoning. For concrete execution, compose steps first and simplify the resulting value
 equation separately when needed.
 
+`cil_checked_steps` in every form (including the snapshot forms), `cil_contract_steps` in every
+form, `cil_raise_steps`, `cil_loop_steps`, `cil_loop_advance`, `cil_loop_finish`,
+`cil_loop_recurse` and `cil_loop_outcome_advance` keep, for each simplification of a run, the
+terms that simplification visited and left unchanged. A later step of the same run returns such a
+term as it is instead of visiting it again, so the simplifications of a step visit the terms it
+produced and not the values the run has built. The goals a step leaves are those that plain
+simplification leaves. `set_option cil.stepping.record false` turns the record off; the
+simplifications then still run through `cil_simp_only`, so their messages and info trees differ
+from those of `simp only`. A run starts to use the record after `cil.stepping.warmup` steps (12
+by default), since the goal of a short run is small; a step is one stepping call, and a loop
+instruction takes up to three.
+
+The record holds one set of terms for each list of supplied facts the run steps with, so a loop
+walk whose instructions read different groups of facts keeps them all. Each set is keyed by the
+facts as elaborated, a lemma with implicit arguments or universe parameters included, and by the
+hypotheses in scope. It is dropped when either changes, when a step fails, and when the tactic
+ends. A fact that does not elaborate makes its step run without the record, which
+`trace.CIL.record` reports. A step run outside these tactics, such as a single
+`cil_checked_step`, keeps none. A run also builds its simplification contexts and the list of
+equation hypotheses that `cil_lookup` tries once. Each step still unifies the step lemma with the
+whole state, so on a body whose values grow, the cost per instruction rises slowly with the
+program counter.
+
 To compare the cost of two versions of a proof, measure each with fresh Lean processes and
 prebuilt dependencies, alternating the runs serially on the same machine. Record elapsed time, CPU
 time, `.olean` bytes, peak process memory and kernel replay separately. A smaller artifact can

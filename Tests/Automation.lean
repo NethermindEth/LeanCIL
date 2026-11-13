@@ -1206,4 +1206,341 @@ theorem inferred_read_load (memory : Memory) (limb : Reference) (word : CIL.W64)
 
 #print axioms inferred_read_load
 
+open Lean in
+/-- A step names its hypotheses from the first suffix that leaves every base unused, found in
+    one pass: suffixes in use are skipped, and spellings no step produces are not counted. -/
+example : True := by
+  run_tac do
+    let declare (context : LocalContext) (name : String) : MetaM LocalContext :=
+      return context.mkLocalDecl (← mkFreshFVarId) (Name.mkSimple name) (mkConst ``Nat)
+    let bases := #["stored", "written"]
+    let mut context : LocalContext := {}
+    unless CIL.firstUnusedSuffix context bases == 0 do throwError "an empty context uses no suffix"
+    for name in
+        ["stored_1", "written_2", "stored_01", "stored_0", "other", "other_1", "stored1"] do
+      context ← declare context name
+    unless CIL.firstUnusedSuffix context bases == 0 do
+      throwError "names that no step produces made suffix 0 look used"
+    context ← declare context "written"
+    unless CIL.firstUnusedSuffix context bases == 3 do
+      throwError "suffixes 0, 1 and 2 are in use, so the first free suffix is 3"
+  trivial
+
+open Lean in
+/-- Choosing a suffix against a context takes one pass over it, so four times as many names cost
+    about four times as many heartbeats; a probe per suffix costs sixteen times as many. -/
+example : True := by
+  run_tac do
+    let cost (names : Nat) : MetaM Nat := do
+      let mut context : LocalContext := {}
+      for index in [:names] do
+        let name := if index == 0 then "stored" else s!"stored_{index}"
+        context := context.mkLocalDecl (← mkFreshFVarId) (Name.mkSimple name) (mkConst ``Nat)
+      let started ← IO.getNumHeartbeats
+      let suffix ← IO.lazyPure fun _ => CIL.firstUnusedSuffix context #["stored", "written"]
+      unless suffix == names do throwError "expected suffix {names}, found {suffix}"
+      return (← IO.getNumHeartbeats) - started
+    let small ← cost 2000
+    let large ← cost 8000
+    unless large * 10 < small * 54 do
+      throwError "choosing a suffix cost {small} heartbeats at 2000 names and {large} at 8000"
+  trivial
+
+/-! ### The record of normal-form nodes
+
+A stepping driver skips the terms that earlier steps of the run left unchanged. These tests check
+what the record keeps, when it is dropped, and that skipping never changes the goal a step
+leaves. `cil.stepping.record` turns it off to give the goal that plain simplification reaches. -/
+
+open CIL.Safety
+
+-- The record is used from the first step here; a driver uses it after a dozen steps.
+set_option cil.stepping.warmup 0
+
+open Lean Elab Tactic Meta in
+/-- The goal that `steps` leaves, with the record of normal-form nodes on or off. The state is
+    restored afterwards. -/
+def steppedTarget (record : Bool) (steps : TSyntax `tactic) : TacticM Expr := do
+  let saved ← saveState
+  try
+    withOptions (fun options => cil.stepping.record.set options record) (evalTactic steps)
+    instantiateMVars (← getMainTarget)
+  finally saved.restore
+
+open Lean Elab Tactic Meta in
+/-- Fails unless `steps` leaves the same goal with the record and without it. -/
+def sameGoal (steps : TSyntax `tactic) : TacticM Unit := do
+  let recorded ← steppedTarget true steps
+  let plain ← steppedTarget false steps
+  unless recorded == plain do
+    throwError "the record changed the goal:{indentExpr recorded}\n\
+      against plain:{indentExpr plain}"
+
+open Lean Elab Tactic in
+/-- Fails unless no record is active or kept. -/
+def recordIsEmpty : TacticM Unit := do
+  let record ← getNormalNodes
+  unless !record.active && record.nodes.isEmpty && record.equations.isNone &&
+      record.contexts.isEmpty && record.others.isEmpty do
+    throwError "a stepping record outlived its run"
+
+/-- Adds two arguments. -/
+@[cil_code] def recordBody : CIL.Method := {
+  code := [.arg 0, .arg 1, .add, .ret], locals := [], returnsValue := true }
+
+/-- The program of `recordBody`. -/
+@[cil_code] def recordProgram : CIL.Program := [recordBody]
+
+/-- Adds the arguments in the other order, so its goals differ from those of `recordBody`. -/
+@[cil_code] def otherBody : CIL.Method := {
+  code := [.arg 1, .arg 0, .add, .ret], locals := [], returnsValue := true }
+
+/-- The program of `otherBody`. -/
+@[cil_code] def otherProgram : CIL.Program := [otherBody]
+
+section
+-- Declarations rather than theorems, elaborated on the main branch, keep what a failure leaves.
+set_option Elab.async false
+
+-- A step that cannot fetch its instruction fails inside the run, which leaves no record.
+#guard_msgs (drop all) in
+theorem failedRun (memory : Memory) (frame : Frame) :
+    ∃ result, run recordProgram 5 7 0 [] frame [] memory = result :=
+  ⟨_, by cil_checked_steps 1 []⟩
+
+/-- The declaration after a failed run finds no record, and steps to the goal that plain
+    simplification gives for a different body. -/
+theorem runAfterFailure (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run otherProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run otherProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 left), .scalar (.i64 right)] memory := by
+  run_tac recordIsEmpty
+  run_tac sameGoal (← `(tactic| cil_checked_steps 1 []))
+  cil_checked_steps 2 []
+  all_goals rfl
+
+-- A bare step that fails drops the record it started.
+#guard_msgs (drop all) in
+theorem failedBareStep (memory : Memory) (frame : Frame) :
+    ∃ result, run recordProgram 5 7 0 [] frame [] memory = result :=
+  ⟨_, by cil_checked_run_step []⟩
+
+/-- The declaration after a failed bare step finds no record. -/
+theorem runAfterBareFailure : True := by
+  run_tac recordIsEmpty
+  trivial
+
+/-- A `first` alternative that steps and then fails leaves no record to the next alternative. -/
+theorem backtracked (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run recordProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run recordProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 right), .scalar (.i64 left)] memory := by
+  first
+  | (cil_checked_steps 2 []; fail "undone")
+  | (cil_checked_run_step []; fail "undone")
+  | run_tac recordIsEmpty
+  cil_checked_steps 2 []
+  all_goals rfl
+
+open Lean Elab Tactic in
+/-- A diagnostic that steps and restores its state leaves no record behind. -/
+theorem diagnosed (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run recordProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run recordProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 right), .scalar (.i64 left)] memory := by
+  run_tac do
+    let saved ← saveState
+    evalTactic (← `(tactic| cil_checked_run_step []))
+    saved.restore
+  run_tac recordIsEmpty
+  cil_checked_steps 2 []
+  all_goals rfl
+
+open Lean Elab Tactic in
+/-- A completed bare step leaves no step running, so a later simplification is plain. -/
+theorem completedBareStep (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run recordProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run recordProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 right), .scalar (.i64 left)] memory := by
+  cil_checked_run_step []
+  run_tac do unless !(← getNormalNodes).active do throwError "a step is still marked running"
+  cil_checked_steps 1 []
+  all_goals rfl
+
+end
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- Facts that print alike but state different things are keyed apart, and a record made for one
+    is not used for the other or after a hypothesis is added. -/
+example (one : (1 : Nat) = 1) (two : (2 : Nat) = 2) : True := by
+  run_tac withMainContext do
+    -- Unhygienic names, since a quoted `one` would carry a macro scope no hypothesis has.
+    let first ← factsKey #[mkIdent `one]
+    let second ← factsKey #[mkIdent `two]
+    unless first.isSome && second.isSome && first != second do
+      throwError "different facts were keyed alike"
+    let hole (name : Ident) : TacticM Term := do
+      Term.exprToSyntax (← elabTerm name none)
+    let holeFirst ← hole (mkIdent `one)
+    let holeSecond ← hole (mkIdent `two)
+    unless (← factsKey #[holeFirst]) != (← factsKey #[holeSecond]) do
+      throwError "facts that print alike were keyed alike"
+    withNormalRun do
+      let remember (facts : Array Term) : TacticM Unit :=
+        withNormalNodes facts <| withMainContext <| liftM (recordNormalNodes "probe" #[mkNatLit 7])
+      let recorded (facts : Array Term) : TacticM Bool :=
+        withNormalNodes facts <| withMainContext <| liftM do
+          return (← normalNodesFor "probe").contains (mkNatLit 7)
+      remember #[holeFirst]
+      unless ← recorded #[holeFirst] do
+        throwError "a record was not kept between steps with the same facts"
+      if ← recorded #[holeSecond] then throwError "a record was used for different facts"
+      remember #[holeSecond]
+      unless ← recorded #[holeFirst] do
+        throwError "the record of the earlier facts was dropped when a step read other facts"
+      -- A hypothesis outside the facts, rewritten in place, keeps its name and identity but not
+      -- what it states, and a simplification may use it.
+      let goal ← getMainGoal
+      let declaration ← withMainContext (getLocalDeclFromUserName `one)
+      let sum ← mkAppM ``HAdd.hAdd #[mkNatLit 1, mkNatLit 0]
+      replaceMainGoal [← goal.replaceLocalDeclDefEq declaration.fvarId
+        (← mkEq (mkNatLit 1) sum)]
+      if ← recorded #[holeSecond] then throwError "a record was used after a hypothesis changed"
+      evalTactic (← `(tactic| have extra : True := trivial))
+      if ← recorded #[holeSecond] then throwError "a record was used after a hypothesis was added"
+    recordIsEmpty
+  trivial
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- Lemmas with implicit arguments and universe parameters among the facts are keyed, so the
+    run keeps the record and finds it again when the same lemmas elaborate anew. -/
+example : True := by
+  run_tac withMainContext do
+    let facts : Array Term := #[← `(List.length_append), ← `(List.map_map)]
+    withNormalRun do
+      let probed : TacticM Bool := withNormalNodes facts <| withMainContext <| liftM do
+        return (← normalNodesFor "probe").contains (mkNatLit 7)
+      withNormalNodes facts <| withMainContext do
+        unless (← getNormalNodes).active do
+          throwError "lemma facts with metavariables switched the record off"
+        liftM (recordNormalNodes "probe" #[mkNatLit 7])
+      unless ← probed do throwError "the record was not found again for the same lemma facts"
+    recordIsEmpty
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- The goals `cil_try_simp_only` leaves for a sequence of statements run one after another in
+    one record, with the record on or off. -/
+def simpSequence (record : Bool) (statements : Array Term) : TacticM (Array Expr) := do
+  let saved ← saveState
+  let seen ← IO.mkRef (#[] : Array Expr)
+  try
+    withOptions (fun options => cil.stepping.record.set options record) do
+      withNormalRun do
+        for statement in statements do
+          let goal ← mkFreshExprMVar (← elabTerm statement none)
+          setGoals [goal.mvarId!]
+          withNormalNodes #[] do
+            withMainContext do
+              evalTactic (← `(tactic| cil_try_simp_only [Nat.reduceAdd, id_eq, Nat.add_zero]))
+          seen.modify (·.push (← instantiateMVars (← getMainTarget)))
+  finally saved.restore
+  seen.get
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- Terms that appear first where simplification does not enter them and later where it does,
+    under a binder, as a dependent argument and as an instance argument, simplify as without the
+    record. -/
+example (p : Nat → Prop) : True := by
+  run_tac withMainContext do
+    let p := mkIdent `p
+    let statements : Array Term := #[← `($p (id (2 + 3))),
+      ← `($p ((fun x : Nat => x + (2 + 3)) 1)),
+      ← `($p (((2 + 3, 1 + 1) : Nat × Nat).1 + (2 + 3))),
+      ← `($p ((⟨2 + 3, by omega⟩ : { n : Nat // n < 10 }).val + (2 + 3 + 0))),
+      ← `($p (Nat.succ (2 + 3) + id (id (2 + 3))))]
+    let recorded ← simpSequence true statements
+    let plain ← simpSequence false statements
+    for (kept, reference) in recorded.zip plain do
+      unless kept == reference do
+        throwError "the record changed a simplification:{indentExpr kept}\nagainst:\
+          {indentExpr reference}"
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- The goals `cil_literal_operands` leaves for a persistent operand it cannot evaluate and an
+    operand that appears later and can be evaluated, with the record on or off. -/
+def literalSequence (record : Bool) : TacticM (Array Expr) := do
+  let saved ← saveState
+  let seen ← IO.mkRef (#[] : Array Expr)
+  try
+    withOptions (fun options => cil.stepping.record.set options record) do
+      withNormalRun do
+        let (w, a, b) := (mkIdent `w, mkIdent `a, mkIdent `b)
+        for statement in #[← `(BitVec.signExtend $w (5#4) = $a),
+            ← `(BitVec.signExtend $w (5#4) = $a ∧ BitVec.setWidth 8 (3#4) = $b)] do
+          let goal ← mkFreshExprMVar (← elabTerm statement none)
+          setGoals [goal.mvarId!]
+          withNormalNodes #[] (withMainContext (evalTactic (← `(tactic| cil_literal_operands))))
+          seen.modify (·.push (← instantiateMVars (← getMainTarget)))
+  finally saved.restore
+  seen.get
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- A persistent literal operand that cannot be evaluated does not stop a later one from being
+    evaluated, and the goal is the one without the record. -/
+example (w : Nat) (a : BitVec w) (b : BitVec 8) : True := by
+  run_tac withMainContext do
+    let recorded ← literalSequence true
+    let plain ← literalSequence false
+    unless recorded == plain do throwError "the record changed the literal operands"
+    let [_, evaluated] := recorded.toList | throwError "expected two goals"
+    unless (evaluated.find? (·.isConstOf ``BitVec.setWidth)).isNone do
+      throwError "the later operand was not evaluated:{indentExpr evaluated}"
+  trivial
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- The detector flags the operands the `cil_literal` simprocs evaluate and no others: a width
+    conversion to a symbolic width stays, and `BitVec.ofInt` of literals is evaluated. -/
+example (w : Nat) (a : BitVec w) (b : BitVec 8) : True := by
+  run_tac withMainContext do
+    let symbolic ← elabTerm (← `(BitVec.signExtend $(mkIdent `w) (5#4))) none
+    if closedLiteralOperand symbolic then
+      throwError "a conversion to a symbolic width was taken for a literal operand"
+    let statement ← elabTerm (← `(BitVec.ofInt 8 (-3) = $(mkIdent `b))) none
+    unless (statement.find? closedLiteralOperand).isSome do
+      throwError "BitVec.ofInt of literals was not found"
+    let goals ← getGoals
+    setGoals [(← mkFreshExprMVar statement).mvarId!]
+    evalTactic (← `(tactic| cil_literal_operands))
+    let reduced ← instantiateMVars (← getMainTarget)
+    unless (reduced.find? (·.isConstOf ``BitVec.ofInt)).isNone do
+      throwError "BitVec.ofInt of literals was not evaluated:{indentExpr reduced}"
+    setGoals goals
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- A term whose tree doubles at each of sixty levels, as `.dup` then `.add` build it, has sixty
+    nodes as a DAG. Recording it visits each node once and costs heartbeats in proportion. -/
+example : True := by
+  run_tac do
+    let mut shared := mkNatLit 1
+    for _ in [:60] do
+      shared := mkApp2 (mkConst ``Nat.add) shared shared
+    let (found, (_, clean)) := (cleanWalk (fun _ => false) {} shared).run ({}, #[])
+    -- Two applications per level, and the nodes of the base: far fewer than the tree's 2^60.
+    unless !found && clean.size < 200 do
+      throwError "expected a node count linear in the depth, found {clean.size}"
+    withNormalRun do
+      withNormalNodes #[] do
+        recordNormalNodes "probe" clean
+        unless (← getNormalNodes).count == clean.size do
+          throwError "a node was recorded twice"
+  trivial
+
 end Tests.Automation

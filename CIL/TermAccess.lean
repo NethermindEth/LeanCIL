@@ -78,4 +78,28 @@ def entryAt {α : Type} (reader : String) (entries : Array α) (index : Nat) : m
 
 end Committed
 
+/-- The name `base`, or `base_index` from the first suffix on, for the hypotheses a step
+    introduces. -/
+def suffixedName (index : Nat) (base : String) : Name :=
+  Name.mkSimple (if index == 0 then base else s!"{base}_{index}")
+
+/-- The least suffix at which no name of `bases` is in use in `context`, found in one pass over
+    the context; probing each suffix in turn would scan the context once per suffix. -/
+def firstUnusedSuffix (context : LocalContext) (bases : Array String) : Nat := Id.run do
+  let mut used : Std.HashSet Nat := {}
+  for declaration in context do
+    let .str .anonymous text := declaration.userName | continue
+    for base in bases do
+      if text == base then
+        used := used.insert 0
+      else if let some digits := text.dropPrefix? (base ++ "_") then
+        let digits := digits.toString
+        -- Only the spelling `suffixedName` produces counts, not `base_01`.
+        if let some suffix := digits.toNat? then
+          if suffix != 0 && toString suffix == digits then used := used.insert suffix
+  let mut index := 0
+  while used.contains index do
+    index := index + 1
+  return index
+
 end CIL

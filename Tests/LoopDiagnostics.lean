@@ -929,4 +929,19 @@ example (memory : Memory) (home : Reference) : True := by
       throwError "The missing-authority diagnostic asserted a violation: {message}"
   trivial
 
+/-- Two operands added on the stack, then a `nop` at the state the path reaches. -/
+@[cil_code] def addPair : CIL.Method := {
+  returnsValue := true, locals := [], code := [.arg 0, .arg 1, .add, .nop] }
+
+/-- The program holding only `addPair`. -/
+@[cil_code] def addPairProgram : CIL.Program := [addPair]
+
+-- A fact that is no simp lemma fails the whole-goal rewrite without a message: the walk goes on
+-- and the step takes the facts it can use.
+#guard_msgs in
+example (memory : Memory) (left right : CIL.W64) (frame : Frame) :
+    LoopReaches addPairProgram 0 [.scalar (.i64 left), .scalar (.i64 right)]
+      ⟨0, frame, [], memory⟩ ⟨3, frame, [.scalar (.i64 (left + right))], memory⟩ := by
+  cil_loop_steps [(0 : Nat)]
+
 end Tests.LoopDiagnostics

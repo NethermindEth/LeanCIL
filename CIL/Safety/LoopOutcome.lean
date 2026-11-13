@@ -222,15 +222,31 @@ theorem ensures_outcome_of_loop (program : CIL.Program) (method : Nat)
     apply; the goal keeps its tag. -/
 syntax "cil_loop_outcome_advance" "[" term,* "]" : tactic
 
+open Lean Elab Tactic Meta in
 elab_rules : tactic
-  | `(tactic| cil_loop_outcome_advance [$facts:term,*]) => keepingTag <|
-    cilWithNormalisedFacts facts.getElems fun facts prepared =>
-    `(tactic| repeat first
-      | (simp only [$[$facts:term],*])
-      | (apply CIL.Safety.loop_outcome_next
-         · cil_lookup [$[$facts:term],*]
-         · cil_lookup [$[$facts:term],*]
-         · cil_checked_step_normalized [$[$prepared:term],*]))
+  | `(tactic| cil_loop_outcome_advance [$facts:term,*]) => keepingTag do
+    let facts := facts.getElems
+    let prepared ← cilNormalisedFacts facts
+    let rewrite ← `(tactic| cil_simp_only [$[$facts:term],*])
+    let next ← `(tactic| (
+      apply CIL.Safety.loop_outcome_next
+      · cil_lookup [$[$facts:term],*]
+      · cil_lookup [$[$facts:term],*]
+      · cil_checked_step_normalized [$[$prepared:term],*]))
+    -- Rewrite the whole goal while that makes progress, else take one step; the record keeps
+    -- each instruction's rewrite to the terms it produced. As under `repeat first`, a failure
+    -- throws instead of logging an error and admitting the goal.
+    withNormalRun <| withoutRecover do
+      repeat
+        let saved ← saveState
+        let rewrote ← withNormalNodes facts do
+          try cilSimpProgress rewrite catch _ => saved.restore; pure false
+        if rewrote then continue
+        let stepped ← withNormalNodes prepared do
+          let beforeStep ← saveState
+          try withMainContext (evalTactic next); pure true
+          catch _ => beforeStep.restore; pure false
+        unless stepped do break
 
 /-- Continue past a returning callee at a `bind_call` site; leaves the `precondition`, the
     `raises` equation, then the continuation. -/
