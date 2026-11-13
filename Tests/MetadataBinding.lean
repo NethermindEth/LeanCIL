@@ -305,6 +305,22 @@ theorem reads_a_field_parameter_against_the_declaring_instance :
       (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
 #print axioms reads_a_field_parameter_against_the_declaring_instance
 
+/-- The own slice without the row of the static field between the first and the second instance
+    field of `Program`: the carried rows of the type leave a gap. -/
+private def ownWithGappedFields : MetadataSlice :=
+  { own.1 with rows := own.1.rows.filter (·.1 != tokens.totalField) }
+
+/-- The second instance field is index 1 when every field row before it is carried. A prefix of
+    the type's fields with a missing row cannot give the count of instance fields before it, so
+    the token is refused, not read as the first instance field. -/
+theorem rejects_a_field_after_a_gap_in_the_carried_field_rows :
+    passes own.1 lib tokens.secondField (.field (.atom ownIdentity "Program") 1 int32 false) =
+      true ∧
+    rejects ownWithGappedFields lib tokens.secondField
+      (.field (.atom ownIdentity "Program") 1 int32 false)
+      (.unresolvedMember tokens.secondField) = true := by decide +kernel
+#print axioms rejects_a_field_after_a_gap_in_the_carried_field_rows
+
 /-! ## The use of a token -/
 
 theorem rejects_a_field_access_that_disagrees_with_the_field_row :
