@@ -173,6 +173,9 @@ structure BodyEvidence where
   /-- The identity of every assembly the extraction pins, as bytes; `BodyDecodes` ties them to
       the pins. A reference into one of them needs its slice among `metadata`. -/
   pinned : List (List Nat)
+  /-- The type arguments of a generic instance, method arguments first, as the types its
+      signature names; empty for a method that is not an instance. -/
+  instantiation : List ResolvedType := []
   deriving DecidableEq, Repr
 
 /-- What a body's bytes say about its method: the fields `RawMethod` takes from the body, and
@@ -449,11 +452,14 @@ def decodeBody (env : MetadataEnv) (arity : Nat) (body : BodyEvidence) :
         localSignature := header.localSignature, code := instructions }
 
 /-- The method's definition, its locals and its body, each checked against the metadata the
-    body carries: the decoded body, when everything agrees with the method. -/
-def checkBody (body : BodyEvidence) (method : RawMethod) : Except BodyError DecodedBody := do
+    body carries: the decoded body, when everything agrees with the method instantiated at
+    `arguments`. -/
+def checkBody (body : BodyEvidence) (method : RawMethod) (arguments : List TypeExpr) :
+    Except BodyError DecodedBody := do
   let env ← (body.metadata.environmentWith body.identities body.tables body.pinned).mapError
     BodyError.metadata
-  let names ← (methodIdentityValid env method).mapError BodyError.metadata
+  let names ← (methodIdentityValid env method body.instantiation arguments).mapError
+    BodyError.metadata
   if names != body.names then throw (.metadata (.methodMismatch method.token))
   let decoded ← decodeBody env method.genericParameters.length body
   (checkLocals env method.genericParameters.length decoded.localSignature method.locals).mapError
@@ -465,8 +471,9 @@ def checkBody (body : BodyEvidence) (method : RawMethod) : Except BodyError Deco
     the elaborator's default reduction evaluates a call by name and would unfold the decoder,
     the metadata slices and every token's resolution without sharing, so the definition is
     irreducible and `decide` fails at once; `decide +kernel` evaluates it. -/
-@[irreducible] def bodyMatches (body : BodyEvidence) (method : RawMethod) : Bool :=
-  match checkBody body method with
+@[irreducible] def bodyMatches (body : BodyEvidence) (method : RawMethod)
+    (arguments : List TypeExpr) : Bool :=
+  match checkBody body method arguments with
   | .ok decoded => decoded.maxStack == method.maxStack &&
       decoded.initLocals == method.initLocals && decoded.code == method.code
   | .error _ => false
@@ -475,15 +482,18 @@ def checkBody (body : BodyEvidence) (method : RawMethod) : Except BodyError Deco
     `maxStack`, `initLocals` and `code` are what the body bytes and the metadata say, through the
     body's token table. Names are tied to bytes by equations, so no decision evaluates a string:
     each slice's assembly spells the identity the body lists, the method's own assembly is the
-    pin, the pinned identities the body lists are those of the extraction's pins, and the
-    owner and base class names the metadata resolves are the ones the method states. -/
+    pin, the pinned identities the body lists are those of the extraction's pins, the owner and
+    base class names the metadata resolves are the ones the method states, and `signature`, the
+    string a proof selects the method by, is Cecil's full name of the method the row defines,
+    instantiated at `arguments`. -/
 abbrev BodyDecodes (pins : List AssemblyPin) (pin : AssemblyPin) (body : BodyEvidence)
-    (method : RawMethod) : Prop :=
+    (method : RawMethod) (arguments : List TypeExpr) (signature : String) : Prop :=
   AssembliesIdentified body.metadata body.identities ∧
     tablesMatch body.metadata body.tables = true ∧
     body.metadata.own.assembly.identity = pin.identity ∧
     body.pinned.mapM spelled? = some (pins.map (·.identity)) ∧
-    body.names.Spell method ∧ bodyMatches body method = true
+    body.names.Spell method ∧ body.names.Selects signature ∧
+    bodyMatches body method arguments = true
 
 
 

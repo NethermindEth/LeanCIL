@@ -303,8 +303,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
         lean.AppendLine($"theorem method{number}_body_validated :" +
             $" Extraction.BodyDecodes assemblies ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
-            $" method{number}Original := ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, " +
-            "by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩");
+            $" method{number}Original method{number}TypeArgumentsRaw method{number}Signature :=" +
+            $" ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl," +
+            " by cil_kernel_rfl, by cil_body_decodes⟩");
     }
 
     static readonly HashSet<Instruction> EmptySet = [];
@@ -363,34 +364,57 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
         var slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
             $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
-            $"def method{number}Names : Extraction.MethodNames := {Names(original, classOwner)}\n" +
+            $"def method{number}Names : Extraction.MethodNames := {Names(original, classOwner, admitted.FullName)}\n" +
             $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
             $"method{number}Tables = true := by decide +kernel";
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
         var identities = List(assemblies.Select(index => $"assembly{index}Identity"));
         var identified = assemblies.Reverse().Aggregate("Extraction.AllIdentified.nil",
             (rest, index) => $"(Extraction.AllIdentified.cons assembly{index}_identified {rest})");
+        var arguments = MethodSpecialization.Arguments(admitted);
+        var instantiation = arguments.Count == 0 ? "" : $", instantiation := {List(arguments.Select(Resolved))}";
         return ($"def method{number}Bytes : List Nat := {data}", slices,
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
             $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, " +
             $"identities := {identities}, tables := method{number}Tables, names := method{number}Names, " +
-            $"pinned := {List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity"))} }}",
+            $"pinned := {List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity"))}{instantiation} }}",
             identified, $"method{number}_tables_valid");
     }
 
+    static string Utf8(string text) => MetadataSlices.Bytes(Encoding.UTF8.GetBytes(text));
+
     /// <summary>
-    /// The owner and base class names the method's metadata spells, as UTF-8 bytes: Lean reads the same names from
-    /// the carried rows and proves by <c>cil_kernel_rfl</c> that they spell the strings the evidence states.
+    /// The owner and base class names the method's metadata spells and the signature the extraction selects it by,
+    /// as UTF-8 bytes: Lean reads the same names from the carried rows and proves by <c>cil_kernel_rfl</c> that they
+    /// spell the strings the evidence states.
     /// </summary>
-    static string Names(MethodDefinition original, bool classOwner)
+    static string Names(MethodDefinition original, bool classOwner, string signature)
     {
-        static string Utf8(string text) => MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(text));
         var bases = classOwner
             ? ObjectTypes.Bases(original.DeclaringType)
                 .Select(type => $"({Utf8(LayoutEvidence.Scope(type))}, {Utf8(type.FullName)})")
             : [];
-        return $"{{ owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)} }}";
+        return $"{{ owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
+            $"signature := {Utf8(signature)} }}";
     }
+
+    // A type argument of a generic instance as the resolved type the instance's signature names. Lean admits it
+    // against the argument's type expression and spells the instance's full name from it, so only the element type
+    // code or the scope and name, and whether a generic head spells scoped arguments, are stated.
+    static string Resolved(TypeReference type) => type switch
+    {
+        _ when type.IsPrimitive || type.MetadataType is MetadataType.String or MetadataType.Object =>
+            $".primitive {(int)type.MetadataType}",
+        ArrayType { IsVector: true } array => $".szarray ({Resolved(array.ElementType)})",
+        GenericInstanceType generic => $".genericInst {Named(generic.ElementType, GenericStructs.Is(generic))} " +
+            generic.GenericArguments.Reverse().Aggregate(".nil",
+                (rest, argument) => $"(.cons ({Resolved(argument)}) {rest})"),
+        _ => $".named {Named(type, false)}"
+    };
+
+    static string Named(TypeReference type, bool scopedArguments) =>
+        $"{{ scope := {Utf8(LayoutEvidence.Scope(type))}, name := {Utf8(type.FullName)}, parts := [], " +
+        $"kind := .external none, pinned := {Bool(scopedArguments)} }}";
 
     static uint TokenOperand(MethodDefinition original, MethodBodyBytes.Body body, Instruction instruction)
     {

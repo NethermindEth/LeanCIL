@@ -324,15 +324,20 @@ def MetadataEnv.methodSite (env : MetadataEnv) (token : Nat) :
     .ok { site with methodArguments := some (← env.resolveAll 0 arguments) }
   else env.memberSite token
 
+/-- Cecil's full name of a method, `result Owner::name(parameters)`, from the full names of its
+    parts. -/
+def methodFullName (result owner name : List Nat) (parameters : List (List Nat)) : List Nat :=
+  result ++ [32] ++ owner ++ [58, 58] ++ name ++ [40] ++ (parameters.intersperse [44]).flatten ++
+    [41]
+
 /-- The identity an external call target spells: the declaring type's scope, then Cecil's full
-    name of the method, `result Owner::name(parameters)`. -/
+    name of the method. -/
 def MethodSite.externalName (site : MethodSite) : Option (List Nat) := do
   let head ← site.owner.head
   let result ← cecilName resolveFuel site.result
   let owner ← cecilName resolveFuel site.owner
   let parameters ← site.parameters.mapM (cecilName resolveFuel)
-  some (head.scope ++ [58, 58] ++ result ++ [32] ++ owner ++ [58, 58] ++ site.name ++ [40] ++
-    (parameters.intersperse [44]).flatten ++ [41])
+  some (head.scope ++ [58, 58] ++ methodFullName result owner site.name parameters)
 
 /-- Whether an external identity is exactly the one the member spells. -/
 def MethodSite.externalMatches (site : MethodSite) (identity : String) : Bool :=
@@ -491,12 +496,14 @@ def flagsAgree (rows : List GenericParamRow) (claimed : List GenericConstraint) 
     row.flags == constraint.flags
 
 /-- The names of a method's definition as its metadata spells them: the scoped name of its owner
-    type, `scope::name`, and the scope and name of each base class of an object receiver's type,
-    from the nearest. The extractor states them as strings, which `MethodNames.spelling` reads
-    from the bytes. -/
+    type, `scope::name`, the scope and name of each base class of an object receiver's type, from
+    the nearest, and the signature a proof selects the method by. The extractor states them as
+    strings, which `MethodNames.spelling` and `MethodNames.Selects` read from the bytes. -/
 structure MethodNames where
   owner : List Nat := []
   bases : List (List Nat × List Nat) := []
+  /-- Cecil's full name of the extracted method: the instance's, for a generic instance. -/
+  signature : List Nat := []
   deriving DecidableEq, Repr
 
 /-- The owner string and base class types these names spell, or `none` when a name is not
@@ -512,12 +519,48 @@ def MethodNames.spelling (names : MethodNames) : Option (String × List TypeExpr
 abbrev MethodNames.Spell (names : MethodNames) (method : RawMethod) : Prop :=
   names.spelling = some (method.owner, method.objectBases)
 
-/-- Check the method definition against its `MethodDef` row: flags, signature, generic
+/-- The names spell `signature`, the string a proof selects the method by. An equation between a
+    string and bytes, so an extraction proves it with `cil_kernel_rfl`. -/
+abbrev MethodNames.Selects (names : MethodNames) (signature : String) : Prop :=
+  spelled? names.signature = some signature
+
+/-- `.ctor` and `.cctor` as bytes. -/
+def constructorName : List Nat := [46, 99, 116, 111, 114]
+def classConstructorName : List Nat := [46, 99, 99, 116, 111, 114]
+
+/-- Whether a `MethodDef` row is a constructor as Cecil reads one: its special-name and
+    runtime-special-name flags are set and it is named `.ctor` or `.cctor`. -/
+def isConstructorRow (flags : Nat) (name : List Nat) : Bool :=
+  flags / 0x800 % 2 == 1 && flags / 0x1000 % 2 == 1 &&
+    (name == constructorName || name == classConstructorName)
+
+/-- Cecil's full name of the method a `MethodDef` row defines, instantiated at `instantiation`,
+    method arguments first: the result and parameters substituted as Cecil substitutes them, and
+    an instantiated method other than a constructor named with its arguments. An empty
+    instantiation leaves the declared types, which then must name no generic parameter. -/
+def instanceSignature (owner name : List Nat) (constructor : Bool) (arity : Nat)
+    (instantiation : List ResolvedType) (returned : ResolvedType)
+    (parameters : List ResolvedType) : Option (List Nat) := do
+  let methodArguments := instantiation.take arity
+  let ownerArguments := instantiation.drop arity
+  let spell (type : ResolvedType) : Option (List Nat) :=
+    instanceType methodArguments ownerArguments type >>= cecilName resolveFuel
+  let result ← spell returned
+  let spelledParameters ← parameters.mapM spell
+  let named ←
+    if instantiation.isEmpty || constructor then pure name
+    else (fun spelled => name ++ [60] ++ spelled ++ [62]) <$>
+      cecilNames resolveFuel (ResolvedList.ofList instantiation)
+  pure (methodFullName result owner named spelledParameters)
+
+/-- Check the method definition against its `MethodDef` row: flags, name, signature, generic
     parameters, owner and class layout facts, and return the names it resolves, which the caller
-    ties to the extractor's strings. Every column of the row is compared but its relative
-    virtual address, which the extractor zeroes in the rows it carries: where a body sits in the
-    image is the strict audit's to confirm. -/
-def methodIdentityValid (env : MetadataEnv) (method : RawMethod) :
+    ties to the extractor's strings. A generic instance names its type arguments in
+    `instantiation`, which must be the types `arguments` name. The row's relative virtual
+    address, which the extractor zeroes in the rows it carries, and its parameter list are not
+    read: where a body sits in the image is the strict audit's to confirm. -/
+def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
+    (instantiation : List ResolvedType) (arguments : List TypeExpr) :
     Except MetadataError MethodNames := do
   let index ← env.slice 0 method.token
   if metadataTableOf method.token != Table.methodDef then
@@ -547,6 +590,14 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod) :
       !(parameters.zip method.parameters).all
         (fun (type, claimed) => frame.admits (declaredParameter type) claimed) then
     throw (.methodMismatch method.token)
+  if instantiation.length != arguments.length || (!instantiation.isEmpty &&
+        instantiation.length != methodParameters.length + ownerParameters.length) ||
+      !(instantiation.zip arguments).all (fun (type, claimed) => frame.admits type claimed) then
+    throw (.genericMismatch method.token)
+  let name ← index.string row.name
+  let some selected := instanceSignature owner.name name (isConstructorRow row.flags name)
+      signature.genericArity instantiation returned parameters
+    | throw (.methodMismatch method.token)
   let ownerName := owner.scope ++ [58, 58] ++ owner.name
   if method.objectReceiver then
     if !method.hasThis || owner.kind != .classType then throw (.methodMismatch method.token)
@@ -555,8 +606,9 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod) :
     let bases ← chain.mapM fun (position, token) => typeDefNamed env position resolveFuel token
     if method.objectFieldCount != (← env.chainFieldCount chain) + own then
       throw (.methodMismatch method.token)
-    .ok { owner := ownerName, bases := bases.map fun base => (base.scope, base.name) }
+    .ok { owner := ownerName, bases := bases.map fun base => (base.scope, base.name),
+          signature := selected }
   else if method.objectFieldCount != 0 then throw (.methodMismatch method.token)
-  else .ok { owner := ownerName }
+  else .ok { owner := ownerName, signature := selected }
 
 end CIL.Extraction

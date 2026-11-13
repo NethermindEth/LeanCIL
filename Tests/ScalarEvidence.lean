@@ -865,7 +865,8 @@ theorem fixtures_carry_their_bodies :
       localEvidence, argumentEvidence, faultLocalEvidence, nativeHomeEvidence,
       nativeReturnEvidence, holeEvidence 88 holeStates, holeEvidence 149 holeStates] ++
       (arithmeticFlagCases ++ arithmeticFlagMutations).map fun entry =>
-        binaryEvidence entry.1).all (fun item => bodyMatches item.body item.original) = true := by
+        binaryEvidence entry.1).all (fun item => bodyMatches item.body item.original []) =
+      true := by
   decide +kernel
 #print axioms fixtures_carry_their_bodies
 
@@ -878,7 +879,8 @@ refuses at once, within a small heartbeat budget, and `decide +kernel` decides. 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
 #guard_msgs (substring := true) in
-example : BodyDecodes [] scope addEvidence.body addEvidence.original := by decide
+example : BodyDecodes [] scope addEvidence.body addEvidence.original [] addEvidence.signature := by
+  decide
 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
@@ -901,6 +903,7 @@ example : (encodeBody scope addRaw).isSome = true := by decide
 set_option maxHeartbeats 100000 in
 example : (encodeBody scope wideRaw).isSome = true := by decide
 example : (encodeBody scope addRaw).isSome = true := by decide +kernel
-example : BodyDecodes [] scope addEvidence.body addEvidence.original := by decide +kernel
+example : BodyDecodes [] scope addEvidence.body addEvidence.original [] addEvidence.signature := by
+  decide +kernel
 example : MethodEvidenceValid [] #[] [addEvidence] [] addEvidence addMethod := by decide +kernel
 end Tests.ScalarEvidence

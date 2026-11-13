@@ -153,7 +153,7 @@ var falseBody = Path.Combine(auditOutput, "FalseBody.lean");
 File.WriteAllText(falseBody, """
     import Extracted
     theorem ExampleProof.falseBody : CIL.Extraction.bodyMatches Extracted.method0Body
-        { Extracted.method0Original with maxStack := 99 } = true := by
+        { Extracted.method0Original with maxStack := 99 } [] = true := by
       cil_body_decodes
     """.ReplaceLineEndings("\n") + "\n");
 var falseCertificate = Execute([.. cli, "verify", auditOutput, "--proof", falseBody, "--theorem",

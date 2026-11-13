@@ -215,6 +215,18 @@ Reject(0, "omitted-method-evidence", source => ChangeDefinition(source, "methodE
     _ => "def methodEvidence : List Extraction.MethodEvidence := []"), null);
 Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "methodEvidence",
     line => line.Replace("method0", "swapped").Replace("method1", "method0").Replace("swapped", "method1")), null);
+// Identity64(ulong) and its callee Identity<UInt64>(ulong) have the same shape; with their signature strings swapped,
+// each body check refutes the string a proof would select the method by.
+string SwapSignatures(string source)
+{
+    string Value(string name) => Regex.Match(source, "(?m)^def " + name + " : String := (.*)$").Groups[1].Value;
+    var (first, second) = (Value("method0Signature"), Value("method1Signature"));
+    return ChangeDefinition(ChangeDefinition(source, "method0Signature", line => line.Replace(first, second)),
+        "method1Signature", line => line.Replace(second, first));
+}
+const string equationRefused = "cil_kernel_rfl: the kernel does not accept the two sides as equal";
+Reject(0, "swapped-signature-of-a-method", SwapSignatures, bodyTheorem, equationRefused);
+Reject(0, "swapped-signature-of-an-instance", SwapSignatures, "method1_body_validated", equationRefused);
 Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1",
     line => line.Replace("returnsValue := true", "returnsValue := false"))
         .Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"), "method1_shape_validated");

@@ -65,13 +65,21 @@ def assembly0Identity : List Nat :=
 theorem assembly0_identified : AssemblyIdentified assembly0Metadata assembly0Identity :=
   ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
 
-/-- The owner name the metadata gives `Add`, as bytes. -/
+/-- The owner name and the full name the metadata gives `Add`, as bytes. -/
 def method0Names : Extraction.MethodNames :=
   { owner := [69, 120, 97, 109, 112, 108, 101, 115, 44, 32, 86, 101, 114, 115, 105, 111, 110, 61,
       49, 46, 48, 46, 48, 46, 48, 44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116,
       114, 97, 108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61,
       110, 117, 108, 108, 58, 58, 69, 120, 97, 109, 112, 108, 101, 115, 46, 65, 114, 105, 116, 104,
-      109, 101, 116, 105, 99] }
+      109, 101, 116, 105, 99],
+    signature := [83, 121, 115, 116, 101, 109, 46, 85, 73, 110, 116, 54, 52, 32, 69, 120, 97, 109,
+      112, 108, 101, 115, 46, 65, 114, 105, 116, 104, 109, 101, 116, 105, 99, 58, 58, 65, 100, 100,
+      40, 83, 121, 115, 116, 101, 109, 46, 85, 73, 110, 116, 54, 52, 44, 83, 121, 115, 116, 101,
+      109, 46, 85, 73, 110, 116, 54, 52, 41] }
+
+/-- The signature a proof selects `Add` by. -/
+def method0Signature : String :=
+  "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)"
 
 def method0Body : Extraction.BodyEvidence :=
   { bytes := method0Bytes, tokens := { operands := [] }, metadata := method0Metadata,
@@ -81,20 +89,29 @@ def method0Body : Extraction.BodyEvidence :=
 /-- The pin of the assembly the method was extracted from. -/
 def pin : AssemblyPin := ⟨"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"⟩
 
-theorem add_body_decodes : BodyDecodes [pin] pin method0Body method0Original :=
+theorem add_body_decodes :
+    BodyDecodes [pin] pin method0Body method0Original [] method0Signature :=
   ⟨AllIdentified.cons assembly0_identified AllIdentified.nil, by decide +kernel,
-    by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by decide +kernel⟩
+    by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by decide +kernel⟩
 #print axioms add_body_decodes
 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
 #guard_msgs (substring := true) in
-example : bodyMatches method0Body method0Original = true := by decide
+example : bodyMatches method0Body method0Original [] = true := by decide
 
 /-- A changed body byte fails the kernel's decision. -/
 theorem changed_byte_is_rejected :
-    bodyMatches { method0Body with bytes := method0Bytes.set 1 3 } method0Original = false := by
+    bodyMatches { method0Body with bytes := method0Bytes.set 1 3 } method0Original [] = false := by
   decide +kernel
 #print axioms changed_byte_is_rejected
+
+/-- A full name the row does not spell fails the kernel's decision: `Add` read as `Sub`. -/
+theorem other_full_name_is_rejected :
+    bodyMatches { method0Body with names := { method0Names with
+      signature := method0Names.signature.set 35 83 |>.set 36 117 |>.set 37 98 } }
+      method0Original [] = false := by
+  decide +kernel
+#print axioms other_full_name_is_rejected
 
 end Tests.BodyLiteral

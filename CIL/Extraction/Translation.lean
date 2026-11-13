@@ -47,6 +47,9 @@ structure MethodEvidence where
   /-- Every assembly the extraction pins, so a reference into one whose slice the body does not
       carry is refused. -/
   pins : List AssemblyPin := []
+  /-- The string a proof selects the method by: an extraction's `signatures` table lists these,
+      and `BodyDecodes` equates each with Cecil's full name of the method its row defines. -/
+  signature : String := ""
 
 /-- The pin and owner identity of every original and closed body, for attribution checks. -/
 def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :=
@@ -193,7 +196,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
-  BodyDecodes item.pins item.assembly item.body item.original
+  BodyDecodes item.pins item.assembly item.body item.original item.arguments item.signature
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)

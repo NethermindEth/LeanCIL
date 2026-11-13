@@ -51,7 +51,7 @@ private def tinyBytes : List Nat := [0x12, 0x02, 0x03, 0x58, 0x2A]
 private def tinyMethod : RawMethod :=
   method 8 false [] [instr 0 0x02, instr 1 0x03, instr 2 0x58, instr 3 0x2A]
 
-theorem tiny_header_decodes : bodyMatches (evidence tinyBytes) tinyMethod = true := by
+theorem tiny_header_decodes : bodyMatches (evidence tinyBytes) tinyMethod [] = true := by
   decide +kernel
 #print axioms tiny_header_decodes
 
@@ -68,7 +68,7 @@ private def fatMethod : RawMethod :=
 /-- `fatBytes`, whose signature token `0x11000001` names the world's one `uint64` local. -/
 private def fatEvidence : BodyEvidence := evidence fatBytes
 
-theorem fat_header_decodes : bodyMatches fatEvidence fatMethod = true := by decide +kernel
+theorem fat_header_decodes : bodyMatches fatEvidence fatMethod [] = true := by decide +kernel
 #print axioms fat_header_decodes
 
 /-- Short and long branches, forward and backward; targets are instruction indices. -/
@@ -81,7 +81,7 @@ private def branchMethod : RawMethod :=
     instr 5 0x2B (.target 3), instr 7 0x16, instr 8 0x38 (.target 0), instr 13 0x2A]
 
 theorem branches_decode_to_instruction_indices :
-    bodyMatches (evidence branchBytes) branchMethod = true := by decide +kernel
+    bodyMatches (evidence branchBytes) branchMethod [] = true := by decide +kernel
 #print axioms branches_decode_to_instruction_indices
 
 /-- A `switch` whose targets are measured from the end of its table. -/
@@ -93,7 +93,7 @@ private def switchMethod : RawMethod :=
   method 8 false [] [instr 0 0x02, instr 1 0x45 (.targets [2, 3, 1]), instr 18 0x2A, instr 19 0x2A]
 
 theorem switch_decodes_to_instruction_indices :
-    bodyMatches (evidence switchBytes) switchMethod = true := by decide +kernel
+    bodyMatches (evidence switchBytes) switchMethod [] = true := by decide +kernel
 #print axioms switch_decodes_to_instruction_indices
 
 /-- Two-byte opcodes `0xFE nn`: `ceq`, a long local and the unsigned `unaligned.` prefix. -/
@@ -106,7 +106,7 @@ private def twoByteMethod : RawMethod :=
     instr 8 0xFE12 (.integer 255), instr 11 0x2A, instr 12 0x2A]
 
 theorem two_byte_opcodes_decode :
-    bodyMatches (evidence twoByteBytes) twoByteMethod = true := by decide +kernel
+    bodyMatches (evidence twoByteBytes) twoByteMethod [] = true := by decide +kernel
 #print axioms two_byte_opcodes_decode
 
 /-- A method token, a user string, a type token, and float constants of both widths:
@@ -131,7 +131,7 @@ private def tokenMethod : RawMethod :=
     instr 29 0x2A]
 
 theorem token_operands_resolve_through_the_table :
-    bodyMatches (evidence tokenBytes tokenOperands) tokenMethod = true := by decide +kernel
+    bodyMatches (evidence tokenBytes tokenOperands) tokenMethod [] = true := by decide +kernel
 #print axioms token_operands_resolve_through_the_table
 
 /-- The other operand encodings: long argument, `ldc.i8`, `no.`, `calli`, an instance field and
@@ -163,14 +163,14 @@ private def formsMethod : RawMethod :=
     instr 38 0x2A]
 
 theorem other_operand_forms_decode :
-    bodyMatches (evidence formsBytes formsOperands) formsMethod = true := by decide +kernel
+    bodyMatches (evidence formsBytes formsOperands) formsMethod [] = true := by decide +kernel
 #print axioms other_operand_forms_decode
 
 /-- A branch to a `volatile.` prefix enters the prefixed instruction at its first prefix. -/
 theorem branch_to_a_prefix_decodes :
     bodyMatches (evidence [0x1A, 0x2B, 0x00, 0xFE, 0x13, 0x4A, 0x2A])
       (method 8 false [] [instr 0 0x2B (.target 1), instr 2 0xFE13, instr 4 0x4A,
-        instr 5 0x2A]) = true := by decide +kernel
+        instr 5 0x2A]) [] = true := by decide +kernel
 #print axioms branch_to_a_prefix_decodes
 
 /-! ## The test encoder agrees with the hand-written bytes -/
@@ -183,9 +183,9 @@ theorem encoder_reproduces_the_hand_written_bodies :
     (encodeBody pin branchMethod).map (·.bytes) = some branchBytes ∧
     (encodeBody pin switchMethod).map (·.bytes) = some switchBytes ∧
     (encodeBody pin twoByteMethod).map (·.bytes) = some twoByteBytes ∧
-    (encodeBody pin tinyMethod).any (bodyMatches · tinyMethod) = true ∧
-    (encodeBody pin fatMethod).any (bodyMatches · fatMethod) = true ∧
-    (encodeBody pin twoByteMethod).any (bodyMatches · twoByteMethod) = true := by
+    (encodeBody pin tinyMethod).any (bodyMatches · tinyMethod []) = true ∧
+    (encodeBody pin fatMethod).any (bodyMatches · fatMethod []) = true ∧
+    (encodeBody pin twoByteMethod).any (bodyMatches · twoByteMethod []) = true := by
   decide +kernel
 #print axioms encoder_reproduces_the_hand_written_bodies
 
@@ -197,15 +197,15 @@ private def plain : RawMethod := method 8 false [] []
 /-- Whether the body fails to decode with exactly this error. -/
 private def failsWith (body : BodyEvidence) (error : BodyError) (method : RawMethod := plain) :
     Bool :=
-  match checkBody body method with
+  match checkBody body method [] with
   | .error found => found == error
   | .ok _ => false
 
 /-- Whether the body decodes but to something other than the method: the failure is the
     mismatch, not a decoding error. -/
 private def mismatches (body : BodyEvidence) (method : RawMethod) : Bool :=
-  match checkBody body method with
-  | .ok _ => !bodyMatches body method
+  match checkBody body method [] with
+  | .ok _ => !bodyMatches body method []
   | .error _ => false
 
 /-- One opcode byte changed: `sub` where the decoded method says `add`. -/
@@ -245,7 +245,8 @@ theorem rejects_branch_into_an_instruction :
 /-- The check is `false` for the same body, whatever instructions the method claims. -/
 theorem branch_into_an_instruction_does_not_match :
     bodyMatches (evidence midInstructionBytes)
-      (method 8 false [] [instr 0 0x2C (.target 1), instr 2 0x2A]) = false := by decide +kernel
+      (method 8 false [] [instr 0 0x2C (.target 1), instr 2 0x2A]) [] = false := by
+  decide +kernel
 #print axioms branch_into_an_instruction_does_not_match
 
 /-- A branch to the end of the code reaches no instruction. -/
@@ -392,7 +393,7 @@ theorem rejects_body_with_exception_section :
 
 /-- A body with an exception section does not match the method that has the same code. -/
 theorem body_with_exception_section_does_not_match :
-    bodyMatches (evidence (0x1B :: fatBytes.tail)) fatMethod = false := by
+    bodyMatches (evidence (0x1B :: fatBytes.tail)) fatMethod [] = false := by
   decide +kernel
 #print axioms body_with_exception_section_does_not_match
 
