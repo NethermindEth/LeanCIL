@@ -28,7 +28,8 @@ def word : TypeExpr := .atom runtimeScope "System.UInt64"
 
 def method0Original : RawMethod :=
   { token := 100663796,
-    owner := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Examples.Arithmetic",
+    owner :=
+      "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Examples.Arithmetic",
     hasThis := false, explicitThis := false, callingConvention := 0, attributes := 150,
     implementation := 0, returnType := word, parameters := [word, word], locals := [],
     initLocals := false, maxStack := 8, genericParameters := [],

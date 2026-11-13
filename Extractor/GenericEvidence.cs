@@ -434,7 +434,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// </summary>
     internal void EmitAssemblyMetadata(StringBuilder lean)
     {
-        var slices = metadata ?? throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
+        var slices = metadata ??
+            throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
         foreach (var (module, index) in Pinned.Modules.Select((module, index) => (module, index)))
         {
             var identity = Pinned.Original(module).Assembly.Name.FullName;
@@ -451,7 +452,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
         var pins = Pinned.Pins.ToArray();
         for (var k = 0; k < pins.Length; k++)
-            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := {{ identity := {Quote(pins[k].Identity)} }}");
+            lean.AppendLine(
+                $"def assembly{k} : Extraction.AssemblyPin := {{ identity := {Quote(pins[k].Identity)} }}");
         lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
             string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
     }

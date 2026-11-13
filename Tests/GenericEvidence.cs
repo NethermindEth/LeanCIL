@@ -156,8 +156,8 @@ const string bodyTheorem = "method0_body_validated";
 // The tactic that proves a body obligation names the method and the failure when the kernel refutes it; a mutation
 // that only breaks parsing prints other text, and the unmutated obligation is the positive control.
 const string decisionFailed = "the decoded method does not match its body bytes or metadata";
-// A mutated body obligation must fail to elaborate and its negation must be proved by the kernel: the second file keeps
-// the mutated definitions and replaces the obligation by `bodyMatches ... = false`.
+// A mutated body obligation must fail to elaborate and its negation must be proved by the kernel: the second file
+// keeps the mutated definitions and replaces the obligation by `bodyMatches ... = false`.
 void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change)
 {
     Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, decisionFailed);
@@ -195,7 +195,8 @@ void RejectTables(string name, string definition, Func<string, string> change)
     var refuted = KernelRefutation(mutated, theorem, "method0_tables_refuted");
     var path = Path.Combine(output, "RefutedTables-" + name + ".lean");
     File.WriteAllText(path, NarrowEvidence(refuted, "method0_tables_refuted"));
-    evidence.Add(path, "PASS the kernel proves the mutated tables obligation false: " + name, "method0_tables_refuted");
+    evidence.Add(path, "PASS the kernel proves the mutated tables obligation false: " + name,
+        "method0_tables_refuted");
 }
 RejectTables("altered-metadata-row", "method0Metadata",
     line => ChangeByte(line, @"(rows := \[\(\d+, \[)(\d+)(,)", 1));

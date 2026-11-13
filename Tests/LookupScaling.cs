@@ -158,9 +158,10 @@ Console.WriteLine(FormattableString.Invariant(
 if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
     throw new Exception("Computed lookup cost per case grows with the segment count.");
 
-// Each distinct metadata token of a body adds a row lookup and a decode to the kernel's metadata check, so the cost per
-// token may not grow with the number of tokens, whichever table the token names: user strings, instance fields of a
-// class, and methods (whose count also grows the number of methods of the extraction and so the metadata carried).
+// Each distinct metadata token of a body adds a row lookup and a decode to the kernel's metadata check, so the cost
+// per token may not grow with the number of tokens, whichever table the token names: user strings, instance fields
+// of a class, and methods (whose count also grows the number of methods of the extraction and so the metadata
+// carried).
 const int FewTokens = 125;
 const int ManyTokens = 500;
 // Each called method is an extracted method with a certificate of its own, and composing the certificate of an
@@ -254,7 +255,8 @@ string MethodNumber(string extracted, string method, string name)
 {
     var number = Regex.Match(extracted, @"def method(\d+)Signature : String := ""[^""]*Bodies::" +
         Regex.Escape(method) + @"\(").Groups[1].Value;
-    return number.Length == 0 ? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.")
+    return number.Length == 0
+        ? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.")
         : number;
 }
 // Heartbeats of the method's `method{n}_body_validated`, less the same file with its proof left open.
