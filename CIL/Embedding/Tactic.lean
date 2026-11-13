@@ -93,8 +93,8 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option (String ×
     listField "parameterHomes" expected.parameterHomes actual.parameterHomes,
     valueField "declared" expected.declared actual.declared,
     environmentField expected.environment actual.environment,
-    listField "static descriptors" (expected.staticSites.map Prod.snd)
-      (actual.staticSites.map Prod.snd) ].filterMap id
+    (listField "static descriptors" (expected.staticSites.map Prod.snd)
+      (actual.staticSites.map Prod.snd)).map (· ++ staticSitesHint) ].filterMap id
   if let some field := fields.head? then
     return some (s!"non-code field differs (left: expected, right: actual)\n{field}", none)
   let limit := actual.code.length
@@ -144,7 +144,7 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option (String ×
     if staticAt actual q != staticAt expected p then
       return some (s!"expected pc {p} (actual pc {q}) resolves a different static descriptor\n  \
         expected: {reprStr (staticAt expected p)}\n  \
-        actual:   {reprStr (staticAt actual q)}", some q)
+        actual:   {reprStr (staticAt actual q)}{staticSitesHint}", some q)
     if actualLinks[q]? != expectedLinks[p]? then
       return some (s!"expected pc {p} (actual pc {q}) has a different call link\n  \
         expected: {reprStr expectedLinks[p]?}\n  \
@@ -220,7 +220,8 @@ private def reflFields (ctor : Name) (prefixArgs : Array Expr) : MetaM Expr := d
   return mkAppN (mkConst ctor) (prefixArgs ++ fields)
 
 /-- Elaborates `cil_embed`: evaluates the goal's terms, aligns the bodies, reports the first
-    failure, or builds the `Embeds` proof from `Eq.refl` fields as an auxiliary lemma. -/
+    failure, or builds the `Embeds` proof as an auxiliary lemma, from `Eq.refl` fields and a
+    decision of the links field. -/
 @[tactic cilEmbed] def evalCilEmbed : Tactic := fun stx => focus <| withMainContext do
   let checkShape (type : Expr) : TacticM Unit := do
     unless type.isAppOfArity ``CIL.MethodEmbeds 3 ||

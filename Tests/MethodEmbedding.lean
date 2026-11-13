@@ -639,6 +639,39 @@ theorem update_rejected : ¬ Embeds viaUpdate moved [0, 1, 3, 4] :=
 #guard ((MethodBinding.methodDifferences moved viaWithCode).map fun line =>
     (line.splitOn "withCode").length) == [1, 2]
 
+/-- The static field the fixtures below read. -/
+def staticField : StaticDescriptor :=
+  { identity := 1, fieldName := "Fixture::Value", bytes := List.replicate 8 0 }
+
+/-- What an extraction emits when a dead block puts a static read at pc 2. -/
+def staticMoved : Method := {
+  code := [.branch 2, .unsupported "Unreachable under selected profile",
+    .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
+  locals := [], returnsValue := false, staticSites := [(2, staticField)] }
+
+/-- The body a proof uses, with its static read at pc 1; `withCode` leaves it no static sites. -/
+def staticWritten : Method :=
+  staticMoved.withCode [.branch 1, .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
+
+/-- Whether the first embedding failure of `expected` contains each of `phrases`. -/
+def failureMentions (expected : Method) (phrases : List String) : Bool :=
+  match MethodBinding.embedFailure expected staticMoved [0, 2, 3, 4] with
+  | some (message, _) => phrases.all fun phrase => (message.splitOn phrase).length > 1
+  | none => false
+
+-- Without sites the descriptor lists differ, and the message says what to supply.
+#guard failureMentions staticWritten ["static descriptors", "staticSites :="]
+
+-- A site kept at the extraction's pc resolves no descriptor at the body's read.
+#guard failureMentions { staticWritten with staticSites := [(2, staticField)] }
+  ["different static descriptor", "staticSites :="]
+
+theorem static_sites_embed :
+    MethodEmbeds [staticMoved] 0 { staticWritten with staticSites := [(1, staticField)] } := by
+  cil_embed
+
+#print axioms static_sites_embed
+
 /-- A table whose keys do not ascend, with a repeated pc whose first entry wins. -/
 def unsortedTable : List (Nat × Link) := [(3, .direct 1), (1, .direct 2), (3, .direct 9)]
 
@@ -649,13 +682,47 @@ example : Extraction.linkKeysAscend 0 unsortedTable = false := by decide
 example : Extraction.linkReads unsortedTable [1, 3, 2] =
     [some (.direct 2), some (.direct 1), none] := by decide
 
-/-- An ascending table read with decreasing queries, as a map that reorders blocks gives. -/
-example : Extraction.queriesAscend 0 [3, 1, 2] = false := by decide
+/-- The walk over this table would stop at `(3, .direct 1)` for pc 1 and miss `(1, .direct 2)`,
+    which is why a table whose keys do not ascend takes the scan. -/
+example : Extraction.linkWalk unsortedTable unsortedTable 0 [1] ≠
+    [1].map (linkLookup unsortedTable) := by decide
 
+/-- An ascending table read with decreasing queries, as a map that reorders blocks gives: the
+    walk starts again from the head at pc 1, below pc 3, and finds the entry it had passed. -/
 example : Extraction.linkReads [(1, .direct 2), (3, .direct 1)] [3, 1, 2] =
     [some (.direct 1), some (.direct 2), none] := by decide
 
-/-- Where the walk applies it answers as the scan does. -/
+/-- A table with a link at every even pc. -/
+def evenTable : List (Nat × Link) := (List.range 20).map fun index => (2 * index, .direct index)
+
+/-- Queries that descend at every other step, below and above each key, read as scans would. -/
+example : Extraction.linkWalk evenTable evenTable 0
+      [7, 2, 30, 0, 39, 38, 1, 12, 11, 40, 5, 4] =
+    [7, 2, 30, 0, 39, 38, 1, 12, 11, 40, 5, 4].map (linkLookup evenTable) := by decide
+
+/-- Fully descending queries read as scans would. -/
+example : Extraction.linkWalk evenTable evenTable 0 (List.range 42).reverse =
+    (List.range 42).reverse.map (linkLookup evenTable) := by decide
+
+/-- An extraction that places the block the head branches to before the block after the head. -/
+def reorderedExtraction : Method := {
+  code := [.branch 1, .arg 1, .call 2 1, .pop, .ret, .arg 0, .call 1 1, .pop, .ret]
+  locals := [], returnsValue := false }
+
+/-- The body a proof uses, with the blocks in source order. -/
+def reorderedWritten : Method :=
+  reorderedExtraction.withCode
+    [.branch 5, .arg 0, .call 1 1, .pop, .ret, .arg 1, .call 2 1, .pop, .ret]
+
+-- The map sends the second block back to pc 1, so the link reads descend once.
+#guard MethodBinding.alignLive reorderedWritten.code.toArray reorderedExtraction.code.toArray ==
+  #[0, 5, 6, 7, 8, 1, 2, 3, 4]
+
+theorem reordered_embeds : MethodEmbeds [reorderedExtraction] 0 reorderedWritten := by cil_embed
+
+#print axioms reordered_embeds
+
+/-- Where the walk never descends it answers as the scan does. -/
 example : Extraction.linkReads [(1, .direct 2), (3, .direct 1)] [1, 2, 3] =
     [1, 2, 3].map (linkLookup [(1, .direct 2), (3, .direct 1)]) := by decide
 

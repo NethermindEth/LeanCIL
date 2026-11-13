@@ -70,6 +70,16 @@ instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, bo
 per body, and measures 1.02 for plain and 1.09 for prefixed addresses. A rule that scans the body
 at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
 
+The suite embeds a hand-written body built with `Method.withCode`, one call per segment, into an
+extraction with a dead block after each return, at 512 and 2,048 calls, and reads the kernel
+heartbeats to recheck the lemma `cil_embed` states. It fails when the heartbeats per call grow
+more than 1.15 times. The recheck costs about 56,800 heartbeats per call at both sizes, 1.00
+times; link reads whose cost grows with the square of the calls measure 1.29. The suite also
+embeds a body whose head branches over its first block to its second into an extraction that
+places the second block first, at 256 and 1,024 calls, under the same limit. Its pc map descends
+once, and the link reads and code lookups start again from the head of the table and the code
+there; it costs about 53,800 heartbeats per call at both sizes.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the

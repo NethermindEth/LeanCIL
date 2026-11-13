@@ -14,10 +14,15 @@ const int LongStatements = 500;
 const double AllowedGrowth = 1.25;
 const int FewCalls = 100;
 const int ManyCalls = 400;
-// The recheck of an embedding with a link scan per call grows by about 1.9 times per doubling and a body of
-// 1,024 calls exhausts the kernel's stack, so these sizes separate it from the one-pass read.
-const int EmbedFewCalls = 256;
-const int EmbedManyCalls = 1024;
+// Link reads whose cost grows with the square of the calls make the recheck of an embedding cost 1.29 times as
+// much per call at 2,048 calls as at 512; linear reads cost the same.
+const int EmbedFewCalls = 512;
+const int EmbedManyCalls = 2048;
+// Segments in each of the two blocks of an embedding whose pc map puts the second block first.
+const int ReorderFewSegments = 128;
+const int ReorderManySegments = 512;
+// Four times the calls of an embedding may cost at most this much more per call.
+const double AllowedEmbedGrowth = 1.15;
 // Two calls in bodies of these many statements: the link output must not grow with the body.
 const int SparseShortStatements = 250;
 const int SparseLongStatements = 1000;
@@ -241,32 +246,20 @@ if (callGrowth > AllowedCallGrowth)
         $"Extracting a body with many calls costs {callsMeasured}; the limit is {AllowedCallGrowth}."));
 Console.WriteLine($"PASS extracting a body with many calls costs {callsMeasured}");
 
-// The kernel heartbeats to recheck the proof that a hand-written body embeds into an extraction with a dead
-// block before each of its many calls. The two link tables differ and their call sites sit at different pcs, so
-// the kernel cannot close the link clause by comparing equal arguments: it must read both tables, and a read
-// that scans the table per call grows with the call count. `cil_embed` states the proof as an auxiliary lemma,
-// so that lemma is rechecked.
-long EmbeddingCost(int calls)
+// The kernel heartbeats to recheck the proof that `written` embeds into `extraction`, both defined by
+// `definitions`. The two link tables differ and their call sites sit at different pcs, so the kernel cannot close
+// the link clause by comparing equal arguments: it must read both tables, and a read that scans the table per
+// call grows with the call count. `cil_embed` states the proof as an auxiliary lemma, so that lemma is rechecked.
+long EmbeddingCost(string name, string definitions)
 {
-    var path = Path.Combine(directory, "Embedding" + calls + ".lean");
+    var path = Path.Combine(directory, name + ".lean");
     File.WriteAllText(path, $$"""
         import CIL.Embedding.Tactic
         set_option maxHeartbeats 0
         set_option maxRecDepth 100000
         open CIL
         namespace Embedded
-        /-- What an extraction emits for one call followed by a dead block. -/
-        def extractedSegment : List Instruction :=
-          [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
-        /-- The hand-written segment without the dead block. -/
-        def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
-        /-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
-        def extraction : Method :=
-          { locals := [], returnsValue := false,
-            code := (List.replicate {{calls}} extractedSegment).flatten ++ [.ret] }
-        /-- The proof's body, built with the links its own code implies, with calls at pcs 1, 5, 9. -/
-        def written : Method :=
-          extraction.withCode ((List.replicate {{calls}} writtenSegment).flatten ++ [.ret])
+        {{definitions}}
         theorem embeds : MethodEmbeds [extraction] 0 written := by cil_embed
         end Embedded
         open Lean in
@@ -284,22 +277,68 @@ long EmbeddingCost(int calls)
           let beats := (← IO.getNumHeartbeats) - start
           logInfo m!"{count} lemmas rechecked, {beats} kernel heartbeats"
         """ + "\n");
-    var output = Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var cost = LookupPatterns.EmbeddingRecheck().Match(output);
     if (!cost.Success || cost.Groups[1].Value == "0")
         throw new InvalidOperationException("Missing the embedding recheck cost:\n" + output);
     return long.Parse(cost.Groups[2].Value, CultureInfo.InvariantCulture);
 }
-var embedFewCost = (double)EmbeddingCost(EmbedFewCalls) / EmbedFewCalls;
-var embedManyCost = (double)EmbeddingCost(EmbedManyCalls) / EmbedManyCalls;
-var embedGrowth = embedManyCost / embedFewCost;
-var embedMeasured = string.Create(CultureInfo.InvariantCulture,
-    $"{embedFewCost:F0} kernel heartbeats per call at {EmbedFewCalls} calls and {embedManyCost:F0} at " +
-    $"{EmbedManyCalls}, {embedGrowth:F2} times as many");
-if (embedGrowth > AllowedCallGrowth)
-    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Embedding a body with many calls costs {embedMeasured}; the limit is {AllowedCallGrowth}."));
-Console.WriteLine($"PASS embedding a body with many calls costs {embedMeasured}");
+
+// A hand-written body embedded into an extraction with a dead block after each return.
+string DeadBlocks(int calls) => $$"""
+/-- What an extraction emits for one call followed by a dead block. -/
+def extractedSegment : List Instruction :=
+  [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
+/-- The hand-written segment without the dead block. -/
+def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+/-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
+def extraction : Method :=
+  { locals := [], returnsValue := false,
+    code := (List.replicate {{calls}} extractedSegment).flatten ++ [.ret] }
+/-- The proof's body, built with the links its own code implies, with calls at pcs 1, 5, 9. -/
+def written : Method :=
+  extraction.withCode ((List.replicate {{calls}} writtenSegment).flatten ++ [.ret])
+""";
+
+// A body whose head branches over its first block to its second, embedded into an extraction that places the
+// second block first, so the pc map descends once at every size.
+string Reordered(int segments) => $$"""
+/-- The block after the head. -/
+def first : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+/-- The block the head branches to. -/
+def second : List Instruction := [.arg 1, .call 2 1, .pop, .ret]
+/-- The extraction, with the second block first. -/
+def extraction : Method :=
+  { locals := [], returnsValue := false,
+    code := [.branch 1] ++ (List.replicate {{segments}} second).flatten ++
+      (List.replicate {{segments}} first).flatten ++ [.ret] }
+/-- The proof's body, with the blocks in source order. -/
+def written : Method :=
+  extraction.withCode ([.branch {{1 + 4 * segments}}] ++ (List.replicate {{segments}} first).flatten ++
+    (List.replicate {{segments}} second).flatten ++ [.ret])
+#guard let map := (MethodBinding.alignLive written.code.toArray extraction.code.toArray).toList
+  (map.zip map.tail).countP (fun (left, right) => right < left) == 1
+""";
+
+// Fails when a fixture at the larger size costs more per call to embed than the allowed growth.
+void CheckEmbeddingGrowth(string fixture, string description, Func<int, string> definitions, int callsPerSize,
+    int few, int many)
+{
+    double Cost(int size) => (double)EmbeddingCost(fixture + size, definitions(size)) / (callsPerSize * size);
+    var fewCost = Cost(few);
+    var manyCost = Cost(many);
+    var growth = manyCost / fewCost;
+    var measured = string.Create(CultureInfo.InvariantCulture,
+        $"{fewCost:F0} kernel heartbeats per call at {callsPerSize * few} calls and {manyCost:F0} at " +
+        $"{callsPerSize * many}, {growth:F2} times as many");
+    if (growth > AllowedEmbedGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Embedding {description} costs {measured}; the limit is {AllowedEmbedGrowth}."));
+    Console.WriteLine($"PASS embedding {description} costs {measured}");
+}
+CheckEmbeddingGrowth("Embedding", "a body with many calls", DeadBlocks, 1, EmbedFewCalls, EmbedManyCalls);
+CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders", Reordered, 2,
+    ReorderFewSegments, ReorderManySegments);
 
 // The text a method emits for its links and the kernel heartbeats to recheck its link index, for a body
 // with two calls: both depend on the calls, not on the length of the body.

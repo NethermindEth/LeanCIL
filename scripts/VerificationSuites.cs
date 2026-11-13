@@ -130,6 +130,7 @@ internal static class VerificationSuites
         new("lookups", "Tests/LookupScaling.cs",
             "lookup equations of extracted methods, hand-written bodies and templates, and the scalar " +
             "certificate of array element addresses, at a per-instruction cost that does not grow with the method, " +
+            "embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, " +
             "and type identity equality at a cost that does not grow with the name"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +

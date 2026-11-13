@@ -78,13 +78,12 @@ theorem pick_eq (code : List Instruction) (qs : List Nat) (start : Nat) :
   induction qs generalizing start with
   | nil => rfl
   | cons q qs ih =>
-    unfold pick
-    split
-    · rename_i ordered
-      have dropped : (code.drop start).drop (q - start) = code.drop q := by
-        rw [List.drop_drop]; congr 1; omega
-      simp only [dropped, List.head?_drop, ih, List.map_cons]
-    · simp only [ih, List.map_cons]
+    have dropped : (if start ≤ q then (code.drop start).drop (q - start) else code.drop q) =
+        code.drop q := by
+      split
+      · rw [List.drop_drop]; congr 1; omega
+      · rfl
+    simp only [pick, dropped, List.head?_drop, ih, List.map_cons]
 
 /-- The decidable `Embeds` check yields the per-method facts the simulation consumes. -/
 theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat}

@@ -293,9 +293,13 @@ def Instruction.link? (op : Instruction) : Option Link := by
     all_goals exact none
   all_goals exact none
 
-/-- The link table a code list implies: each linking instruction's pc with its link. -/
+/-- The link table a code list implies: each linking instruction's pc with its link. The pcs come
+    from `List.range`, which the kernel reduces to literals. Numbered by `zipIdx`, each pc would be
+    a chain of `+ 1` terms shaped like the pcs `Embeds` reads at, and the kernel would pay a
+    chain's length at every read, so an embedding would cost the square of its calls. -/
 def linksOfCode (code : List Instruction) : List (Nat × Link) :=
-  code.zipIdx.filterMap fun entry => entry.1.link?.map fun link => (entry.2, link)
+  (code.zip (List.range code.length)).filterMap fun entry =>
+    entry.1.link?.map fun link => (entry.2, link)
 
 /-- An extracted method body with the frame layout the interpreter needs. -/
 structure Method where
@@ -335,6 +339,14 @@ def Method.linkAt (body : Method) (pc : Nat) : Option Link :=
     code. -/
 def Method.withCode (method : Method) (code : List Instruction) : Method :=
   { method with code := code, links := linksOfCode code, staticSites := [] }
+
+/-- The implied table, with the code numbered by `zipIdx`. -/
+theorem linksOfCode_eq_zipIdx (code : List Instruction) :
+    linksOfCode code =
+      code.zipIdx.filterMap fun entry => entry.1.link?.map fun link => (entry.2, link) := by
+  simp only [linksOfCode, List.zipIdx_eq_zip_range', List.range_eq_range']
+
+#print axioms linksOfCode_eq_zipIdx
 
 /-- Reading the table implied by code that starts at pc `start` gives the code's own link at each
     pc from `start` on, and none before it. -/
@@ -392,7 +404,7 @@ theorem linksOfCode_find (code : List Instruction) (start pc : Nat) :
     instructions. -/
 theorem Method.linkAt_of_implied {body : Method} (implied : body.links = linksOfCode body.code)
     (pc : Nat) : body.linkAt pc = (body.code[pc]?).bind Instruction.link? := by
-  simp only [Method.linkAt, linkLookup, implied, linksOfCode]
+  simp only [Method.linkAt, linkLookup, implied, linksOfCode_eq_zipIdx]
   rw [linksOfCode_find body.code 0 pc]
   simp
 
