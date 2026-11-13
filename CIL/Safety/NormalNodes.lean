@@ -10,8 +10,9 @@ simp visited and left unchanged (the entries of its cache whose result is the ke
 steps of the same run, and `cil_simp_only` and `cil_try_simp_only` return such a term without
 visiting it again. The literal-operand and local-result passes record the terms below which
 their detectors find nothing, which depends on the term alone. The record also keeps the
-simplification contexts of the run, which every step would otherwise rebuild, and an index of
-the equation hypotheses by the head of their left side, which the lookups of every step read.
+simplification contexts of the run, which every step would otherwise rebuild, and a
+discrimination tree of the equation hypotheses by their left sides, which the lookups of every
+step read.
 
 Invariant for a tactic that reads the record: it runs inside `withNormalNodes`, on a goal whose
 local context is the one the record was made for (`NormalNodes.usable` checks this), and the
@@ -27,8 +28,10 @@ options that change what simp does must stay fixed during a driver for the same 
 
 At the start of each step `withNormalNodes` keeps each shelf whose local context the step's
 context extends without changing a hypothesis, and drops the others, so a driver that rewrites,
-renames or clears a hypothesis in place cannot reach a stale record while a step that only adds
-hypotheses, as a store or a call does, keeps it. A step in a longer context elaborates its facts
+renames or clears a hypothesis, as a snapshot or loop-frame store that clears the facts it
+supersedes does, cannot reach a stale record while a step that only adds hypotheses, as a call
+does, keeps it. The equation index outlives a cleared hypothesis and skips its entries. A step
+in a longer context elaborates its facts
 again, since a name may now refer to a new hypothesis. The record lives in the environment, so a
 backtracked step forgets what it recorded. `withNormalRun` opens it for one driver and restores
 the earlier record when the driver ends, however it ends, `withNormalNodes` drops it when a step
@@ -79,56 +82,85 @@ def equationHead? : Expr → Option Expr
   | .mdata _ body => equationHead? body
   | type => type.eq?.map fun (_, lhs, _) => lhs.consumeMData.getAppFn
 
-/-- The hypotheses of a local context that state an equation, by the head of the left side, in
-    context order. Extending it for a longer context reads only the added hypotheses. -/
+/-- The hypotheses of a local context that state an equation, indexed by their left sides so that
+    a lookup reads only those that may unify with it at reducible transparency, as
+    `cil_lookup_assumption` unifies. Extending it for a longer context reads only the added
+    hypotheses. -/
 structure EquationIndex where
   /-- How many declarations of the context it covers. -/
   covered : Nat := 0
   /-- Every equation hypothesis, with its position in the context. -/
   all : Array (Nat × FVarId) := #[]
-  /-- The equation hypotheses whose left side is headed by the constant. -/
-  byHead : Std.HashMap Name (Array (Nat × FVarId)) := {}
-  /-- The equation hypotheses whose left side has no constant head and may unify with a lookup
-      headed by a constant: not those headed by a variable without a value. -/
-  anyHead : Array (Nat × FVarId) := #[]
+  /-- The equation hypotheses by the discrimination-tree keys of their left sides, which tell
+      apart two terms that differ at a constant, a literal or a variable that reducible
+      unfolding does not change. -/
+  tree : DiscrTree (Nat × FVarId) := {}
+  /-- The equation hypotheses whose left side the tree cannot key, which every lookup reads. -/
+  unkeyed : Array (Nat × FVarId) := #[]
 
 instance : Inhabited EquationIndex := ⟨{}⟩
 
-/-- The index extended to the hypotheses of `context` that it does not cover. -/
+/-- Whether `term` is arithmetic on natural numbers, which unification evaluates, so that
+    `2 + 1`, `Nat.add 2 1` and `3` are equal although the tree keys them apart. -/
+def naturalArithmetic (term : Expr) : Bool :=
+  let onNatural := term.getAppNumArgs > 0 && (term.getArg! 0).isConstOf ``Nat
+  ([``HAdd.hAdd, ``HSub.hSub, ``HMul.hMul, ``HDiv.hDiv, ``HMod.hMod, ``HPow.hPow].any
+      (term.isAppOfArity · 6) && onNatural) ||
+    ([``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.div, ``Nat.mod, ``Nat.pow].any
+      (term.isAppOfArity · 2)) ||
+    term.isAppOfArity ``Nat.succ 1 || term.isAppOfArity ``Nat.pred 1
+
+/-- `term` with its natural-number arithmetic replaced by a metavariable, which the tree keys as
+    matching anything; both the indexed left sides and the lookups are read this way. The tree
+    unfolds local definitions itself. -/
+def wildcardArithmetic (term : Expr) : MetaM Expr := do
+  let wildcard ← mkFreshExprMVar (mkConst ``Nat)
+  return term.replace fun part => if naturalArithmetic part then some wildcard else none
+
+/-- The index extended to the hypotheses of `context` that it does not cover. A quantified
+    variable of a hypothesis becomes a metavariable, which the tree keys as matching anything. -/
 def EquationIndex.extend (index : EquationIndex) (context : LocalContext) :
     MetaM EquationIndex := do
   if index.covered == context.numIndices then return index
+  withLCtx context (← getLocalInstances) do
   let mut index := index
   for position in [index.covered:context.numIndices] do
     let some declaration := context.decls[position]! | continue
     if declaration.isImplementationDetail then continue
-    let some head := equationHead? (← instantiateMVars declaration.type) | continue
+    let type ← instantiateMVars declaration.type
+    unless (equationHead? type).isSome do continue
     let entry := (declaration.index, declaration.fvarId)
     index := { index with all := index.all.push entry }
-    match head.constName? with
-    | some name =>
-      index := { index with
-        byHead := index.byHead.insert name ((index.byHead.getD name #[]).push entry) }
-    | none =>
-      -- A variable without a value is rigid, so a lookup headed by a constant never unifies with
-      -- it; only `all` offers it, for a lookup that is itself headed by a variable.
-      let rigid : Bool := match head with
-        | .fvar headId => match context.find? headId with
-          | some owner => owner.value?.isNone
-          | none => false
-        | _ => false
-      if !rigid then index := { index with anyHead := index.anyHead.push entry }
+    -- At the caller's depth a metavariable left in a hypothesis is keyed as a wildcard.
+    let keyed? ← withoutModifyingState do
+      let (_, _, body) ← forallMetaTelescope type
+      let some (_, left, _) := body.consumeMData.eq? | return none
+      try return some (← index.tree.insert (← wildcardArithmetic left) entry)
+      catch _ => return none
+    index := match keyed? with
+      | some tree => { index with tree }
+      | none => { index with unkeyed := index.unkeyed.push entry }
   return { index with covered := context.numIndices }
 
-/-- The equation hypotheses that can state a lookup whose left side has head `wanted`, in
-    context order. -/
-def EquationIndex.candidates (index : EquationIndex) (wanted : Expr) : Array FVarId :=
-  let entries := match wanted.constName? with
-    | none => index.all
-    | some name =>
-      let named := index.byHead.getD name #[]
-      if index.anyHead.isEmpty then named else (named ++ index.anyHead).qsort (·.1 < ·.1)
-  entries.map (·.2)
+/-- The index rebuilt for `context` once more than half of its entries name hypotheses that
+    `context` no longer holds, as after stores that clear the facts they supersede; the tree
+    cannot drop an entry, so a walk would otherwise read every cleared one at each lookup. -/
+def EquationIndex.prune (index : EquationIndex) (context : LocalContext) :
+    MetaM EquationIndex := do
+  let live := index.all.foldl (init := 0) fun count (_, free) =>
+    if context.contains free then count + 1 else count
+  if 2 * live >= index.all.size then return index
+  ({} : EquationIndex).extend context
+
+/-- The equation hypotheses that may state the lookup whose left side is `lookup`, in context
+    order; all of them when the tree cannot read the lookup. -/
+def EquationIndex.candidates (index : EquationIndex) (lookup : Expr) : MetaM (Array FVarId) := do
+  -- At the caller's depth a metavariable of the lookup is a wildcard: unification may assign it.
+  let keyed? ← withoutModifyingState do
+    try return some (← index.tree.getUnify (← wildcardArithmetic lookup))
+    catch _ => return none
+  let some keyed := keyed? | return index.all.map (·.2)
+  return ((keyed ++ index.unkeyed).qsort (·.1 < ·.1)).map (·.2)
 
 /-- What a stepping run has established for one local context and one set of facts. -/
 structure NormalShelf where
@@ -192,6 +224,13 @@ def setNormalNodes (record : NormalNodes) : CoreM Unit :=
     never used. -/
 def NormalNodes.usable (record : NormalNodes) (context : LocalContext) : Bool :=
   record.active && record.context == contextId context && contextExtendedBy record.locals context
+
+/-- The equation index of `record` for `context`: the one it holds, extended, when `context` still
+    has every hypothesis it indexed unchanged, and built again otherwise. -/
+def NormalNodes.equationsFor (record : NormalNodes) (context : LocalContext) :
+    MetaM EquationIndex := do
+  let known := if contextKeeps record.equationLocals context then record.equations else {}
+  (← known.prune context).extend context
 
 /-- Whether stepping drivers use the record. Turning it off makes every simplification visit the
     whole goal, which leaves the same goals and costs more per step the longer the run. -/
@@ -318,11 +357,15 @@ elab "cil_normal_run " steps:tacticSeq : tactic => withNormalRun (evalTactic ste
 def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : TacticM α := do
   let outer ← getNormalNodes
   if !outer.driven || !cil.stepping.record.get (← getOptions) then return ← step
-  if outer.steps < cil.stepping.warmup.get (← getOptions) then
-    setNormalNodes { outer with steps := outer.steps + 1 }
-    return ← step
   let noGoals := (← getGoals).isEmpty
   let localContext ← if noGoals then getLCtx else withMainContext getLCtx
+  -- Looking the equation hypotheses up is a failed attempt's work, which a backtrack discards,
+  -- so every step of a driver starts with them, those before the record is used included.
+  let equations ← outer.equationsFor localContext
+  if outer.steps < cil.stepping.warmup.get (← getOptions) then
+    setNormalNodes { outer with
+      steps := outer.steps + 1, equations, equationLocals := localContext }
+    return ← step
   let context := contextId localContext
   -- A shelf stays valid while the hypotheses it was made for are unchanged, so a step that only
   -- adds hypotheses keeps it; one that rewrites, renames or clears a hypothesis does not.
@@ -348,10 +391,6 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
   let remaining := (shelves.eraseIdxIfInBounds (index.getD shelves.size)).extract 0
     (normalShelfLimit - 1)
   let shared := currentKept && index == some 0 && outer.count < normalNodeLimit
-  -- Looking the equation hypotheses up is a failed attempt's work, which a backtrack discards,
-  -- so the step starts with them.
-  let known := if contextKeeps outer.equationLocals localContext then outer.equations else {}
-  let equations ← known.extend localContext
   let current : NormalNodes :=
     { selected with
       factsSeen := raw, driven := true, steps := outer.steps, others := remaining,
@@ -365,7 +404,10 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
       setNormalNodes (if outer.active && !shared then outer
         else { after with active := outer.active })
     else
-      setNormalNodes (if outer.active then outer else { driven := true, steps := outer.steps })
+      -- The equation index depends on the hypotheses alone, so it outlives a failed step.
+      setNormalNodes (if outer.active then outer else
+        { driven := true, steps := outer.steps, equations,
+          equationLocals := localContext })
   return result
 
 /-- `simp only [arguments]` on the goal that leaves alone what the running stepping driver

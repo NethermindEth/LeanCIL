@@ -723,10 +723,13 @@ record, which `trace.CIL.record` reports. A step run outside these tactics, such
 The simplifications of a step prove an equation theorem's side conditions from the simp set and
 never from a hypothesis, so a simplification gives the same result whatever else is in scope. A
 run builds its simplification contexts once, indexes the equation hypotheses that `cil_lookup`
-tries by the head of their left side once, and runs the tactics of a step on goals of their own
-instead of inside `by` blocks of a term, which Lean would rebuild the whole local context for.
-Each step still compares the context with the one the record was made for and tries the equation
-hypotheses headed by a value that is not a variable, so the work of a step is linear in the
+tries in a discrimination tree over their left sides as each is added, and runs the tactics of a
+step on goals of their own instead of inside `by` blocks of a term, which Lean would rebuild the
+whole local context for. A lookup tries only the hypotheses whose left side may unify with it at
+reducible transparency: the tree unfolds reducible definitions and local definitions as
+unification does, and reads natural-number arithmetic on either side as a wildcard, since
+unification evaluates it. Each step still
+compares the context with the one the record was made for, so the work of a step is linear in the
 hypotheses in scope with a small constant. The `stepping` suite bounds that constant at 100
 heartbeats per hypothesis per instruction and the cost per instruction between sizes at 1.35
 times.

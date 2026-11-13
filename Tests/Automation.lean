@@ -1696,6 +1696,39 @@ example (produced stored entry : Memory) (base : Reference) (x : BitVec 32)
     unless (← count `entry) == 2 do throwError "the caller's fact was cleared"
   trivial
 
+/-- The lookup it is given, under a name that reducible unfolding removes. -/
+abbrev sameLookup (found : Option Nat) : Option Nat := found
+
+-- A lookup whose left side unfolds at reducible transparency to a variable is stated by an
+-- equation about that variable, although the lookup is written with a constant head.
+example (found : Option Nat) (stated : found = some 3) : sameLookup found = some 3 := by
+  cil_lookup_assumption
+
+/-- A list that reducible unfolding spells out. -/
+abbrev lookupList : List Nat := [1, 2]
+
+-- The candidate index keeps every hypothesis that unification may equate with the lookup: an
+-- abbreviation of a list literal meets an equation about the literal, and arithmetic on natural
+-- numbers meets its result whichever side writes the arithmetic.
+example (stated : ([1, 2] : List Nat)[0]? = some 1) : lookupList[0]? = some 1 := by
+  cil_lookup_assumption
+example (entries : List Nat) (stated : entries[Nat.succ 1]? = some 3) :
+    entries[Nat.add 1 1]? = some 3 := by
+  cil_lookup_assumption
+example (entries : List Nat) (stated : entries[2 * 1]? = some 3) : entries[2]? = some 3 := by
+  cil_lookup_assumption
+example (entries : List Nat) (stated : entries[2]? = some 3) : entries[2 * 1]? = some 3 := by
+  cil_lookup_assumption
+-- A local definition unfolds during unification, in a lookup and in a hypothesis alike.
+example (entries : List Nat) (stated : entries[1]? = some 3) :
+    let position := 1; entries[position]? = some 3 := by
+  intro position
+  cil_lookup_assumption
+example (entries : List Nat) :
+    let found := entries[1]?; found = some 3 → entries[1]? = some 3 := by
+  intro found stated
+  cil_lookup_assumption
+
 open Lean Elab Tactic Meta in
 /-- A step that runs out of heartbeats leaves no record behind. The exception is a runtime
     exception, which `try` does not catch, so the cleanup must not depend on a handler. -/

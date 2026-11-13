@@ -8,9 +8,8 @@ using System.Text.Json;
 
 const double WorkGrowthLimit = 1.35;
 const double TimeGrowthLimit = 2.0;
-// Most heartbeats one more hypothesis in scope may add to the cost of one instruction. A step that
-// unified a side condition with each hypothesis, or rebuilt the local context for each `by`
-// block, added several hundred; the limit is a quarter of the cost of an ordinary instruction.
+// Most heartbeats one more hypothesis in scope may add to one instruction, which costs about 120,000.
+// Unifying each lookup with every equation hypothesis added 600 to 1,900.
 const double HypothesisCostLimit = 100.0;
 const int Repetitions = 3;
 const int LocalCount = 8;
@@ -46,7 +45,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
     ("hypothesescontract", [16, 64, 256], false), ("hypothesesloop", [16, 64, 256], false),
-    ("snapshots", [10, 20, 40, 80], false)
+    ("hypotheseslookup", [16, 64, 256], false), ("snapshots", [10, 20, 40, 80], false)
 };
 foreach (var (workload, sizes, full) in workloads)
     foreach (var requested in sizes)
@@ -88,13 +87,13 @@ Console.WriteLine("PASS stepping growth budgets for scalar, memory, accumulate, 
 // The instructions that open a body, repeat per cycle and end it. The accumulate, contract, lemma,
 // outcome and loop bodies keep one value on the stack that grows by an operand per cycle, and the
 // loop bodies end in a `nop` at the state their path reaches. The locals body stores a reference
-// into each of eight reference locals per cycle. The hypotheses body is an accumulate body of
+// into each of eight reference locals per cycle. The hypotheses bodies are accumulate bodies of
 // fixed length.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".arg 0", ".arg 1", ".store64", ".arg 0", ".load64", ".pop"], [".arg 0", ".load64", ".ret"]),
-    "accumulate" or "contract" or "hypotheses" or "hypothesescontract" or "lemma" or "outcome" =>
-        ([".arg 0"], [".arg 1", ".add"], [".ret"]),
+    "accumulate" or "contract" or "hypotheses" or "hypothesescontract" or "hypotheseslookup" or "lemma"
+        or "outcome" => ([".arg 0"], [".arg 1", ".add"], [".ret"]),
     "loop" or "loopfacts" or "hypothesesloop" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
     "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".arg 0", $".setLocal {slot}" })
         .ToArray(), [".local 0", ".ret"]),
@@ -145,7 +144,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
     {
-        "contract" or "loop" or "loopfacts" or "hypothesescontract" or "hypothesesloop" =>
+        "contract" or "loop" or "loopfacts" or "hypothesescontract" or "hypothesesloop" or "hypotheseslookup" =>
             "import CIL.Safety.MethodContract\nimport CIL.Safety.LoopAutomation\n",
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
         "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
@@ -175,10 +174,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         set_option maxHeartbeats 800000
         {{bodyDefinition}}
         """ + "\n";
-    // Odd hypotheses are equations headed by an operator and even ones by a local variable, which
-    // every lookup of an equation hypothesis must consider.
+    // Odd hypotheses are equations headed by an operator and even ones by a local variable. The
+    // lookup hypotheses are instruction lookups like those stepping makes, which a lookup that unified
+    // with every equation hypothesis would try at each instruction.
     var hypothesisLines = string.Join("\n", Enumerable.Range(1, hypotheses ? requested : 0).Select(index =>
-        index % 2 == 1
+        workload == "hypotheseslookup"
+            ? $"  have hypothesis{index} : ([.const32 {index}] : List CIL.Instruction)[0]? = " +
+              $"some (.const32 {index}) := rfl"
+        : index % 2 == 1
             ? $"  have hypothesis{index} : right + {index} = right + {index} := rfl"
             : $"  obtain ⟨witness{index}, hypothesis{index}⟩ : ∃ witness : CIL.W64, " +
               $"witness = right + {index} := ⟨_, rfl⟩"));
@@ -186,7 +189,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     // The tactic that steps a hypotheses body; the setup measurement replaces it by `sorry`.
     string HypothesesStatement(bool setup) => workload switch
     {
-        "hypothesescontract" => $$"""
+        "hypothesescontract" or "hypotheseslookup" => $$"""
             /-- Equations in scope before contract stepping, which it must not scan at each step. -/
             theorem checked (memory : Memory) (left right : CIL.W64) :
                 WP (Execution (fun fuel => invoke [body] fuel 0
@@ -216,7 +219,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     };
     var statement = workload switch
     {
-        "hypotheses" or "hypothesescontract" or "hypothesesloop" => HypothesesStatement(false),
+        "hypotheses" or "hypothesescontract" or "hypothesesloop" or "hypotheseslookup" =>
+            HypothesesStatement(false),
         "snapshots" => $$"""
             /-- Numeric locals stored and reloaded through snapshots, each store updating one local. -/
             theorem checked (memory : Memory) (slots : List LocalSlot) (boundary : Nat)

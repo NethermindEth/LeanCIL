@@ -185,7 +185,8 @@ the context that every instruction reads, the outcome body by `cil_loop_outcome_
 lemma body by `cil_checked_steps` with a universe-polymorphic lemma among its facts. The locals
 bodies store a reference into each of eight locals of a literal frame per cycle. The depth bodies
 push 8, 32 and 128 values and add them all. The hypotheses bodies are 62-instruction accumulate,
-contract and loop bodies proved with 16, 64 and 256 hypotheses in scope. The snapshot bodies store
+contract and loop bodies proved with 16, 64 and 256 hypotheses in scope, and a contract body with
+as many instruction-lookup equations in scope. The snapshot bodies store
 into eight numeric locals and then update one local per store from its remembered value, with 10,
 20, 40 and 80 stores, proved by `cil_contract_steps (snapshots := ..)` with caller memory facts in
 the context; the value a store writes grows with the number of updates to its local, so the cost
@@ -196,13 +197,15 @@ and locals body up to 256 instructions, and one compilation for every other body
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. For the bodies with three compilations, compiled proof bytes per instruction may
   also grow by at most 1.35 times, and median frontend milliseconds by at most twice.
-- For the hypotheses bodies the sizes are the numbers of hypotheses, half of them equations headed
-  by an operator and half by a local variable, and the heartbeats counted are those of the proof
-  less those of the same statement closed by `sorry`, so that elaborating the hypotheses does not
-  count as stepping. The same ratio limit applies, and one more hypothesis in scope may add at most
-  100 heartbeats to the cost of an instruction between the smallest and the largest size. A step
-  that unifies a side condition with each hypothesis or rebuilds the local context for each `by`
-  block adds several hundred and fails the second limit; a scan that adds less passes it.
+- For the hypotheses bodies the sizes are the numbers of hypotheses: in the accumulate, contract
+  and loop bodies half of them are equations headed by an operator and half by a local variable,
+  and in the lookup body each is an instruction lookup like those stepping makes,
+  `([.const32 i] : List CIL.Instruction)[0]? = some (.const32 i)`. The heartbeats counted are
+  those of the proof less those of the same statement closed by `sorry`, so that elaborating the
+  hypotheses does not count as stepping. The same ratio limit applies, and one more hypothesis in
+  scope may add at most 100 heartbeats to an instruction, which costs about 120,000, between the
+  smallest and the largest size. A lookup that tries to unify with every equation hypothesis adds
+  600 to 1,900 and fails the second limit.
 - Heartbeats and bytes must repeat exactly across the three runs.
 - Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
   recheck. Compiled proof bytes subtract the same module containing only the body and its lookup

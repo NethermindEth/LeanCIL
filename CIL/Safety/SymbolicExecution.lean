@@ -500,28 +500,29 @@ elab "cil_lookup_equation" : tactic => withMainContext do
   replaceMainGoal []
 
 /-- Close a lookup goal `lookup = result` with a hypothesis, up to reducible unfolding, trying
-    only hypotheses that are equations whose left side has the goal's head; fails otherwise. -/
+    only equation hypotheses whose left side may unify with `lookup`; fails otherwise. -/
 syntax "cil_lookup_assumption" : tactic
 
 open Lean Elab Tactic Meta in
-/-- The equation hypotheses that can state a lookup headed by `wanted`, in context order. A
-    stepping step reads the index its record holds for its local context, which the step's
-    start built once; any other call builds it. -/
-private def equationCandidates (wanted : Expr) : TacticM (Array FVarId) := do
+/-- The equation hypotheses that may state the lookup `lookup`, in context order. A step of a
+    stepping driver extends the index the driver keeps for its hypotheses, which the step's
+    start brought up to date; any other call builds one. -/
+private def equationCandidates (lookup : Expr) : TacticM (Array FVarId) := do
+  let record ← getNormalNodes
+  let context ← getLCtx
+  let index ← if record.driven && contextKeeps record.equationLocals context then
+      record.equations.extend context
+    else ({} : EquationIndex).extend context
   -- The index may still name a hypothesis that a store cleared.
-  if let some record ← usableNormalNodes then
-    let context ← getLCtx
-    return (record.equations.candidates wanted).filter context.contains
-  return ((← ({} : EquationIndex).extend (← getLCtx)).candidates wanted)
+  return (← index.candidates lookup).filter context.contains
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_lookup_assumption) => withMainContext do
     let goal ← getMainGoal
-    let some wanted := equationHead? (← instantiateMVars (← goal.getType))
+    let some (_, lookup, _) := (← instantiateMVars (← goal.getType)).consumeMData.eq?
       | throwError "cil_lookup_assumption: the goal is not an equation"
-    -- A head that is not a constant may unify with anything, so every hypothesis is tried.
-    for hypothesis in ← equationCandidates wanted do
+    for hypothesis in ← equationCandidates lookup do
       let declaration ← hypothesis.getDecl
       let saved ← saveState
       if declaration.type.isForall then
