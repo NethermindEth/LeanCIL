@@ -50,9 +50,15 @@ def method0Metadata : Extraction.MethodMetadata :=
               106, 101, 99, 116, 0])], blobs := [(2612, [5, 0, 2, 11, 11, 11]), (4429, [8, 176,
               63, 95, 127, 17, 213, 10, 58])], userStrings := [], corlib := 1, links := [⟨1,
               100663796, 0, 33554505⟩] }, others := [] }
+/-- The lookup tables of `method0Metadata`, as the decoder builds them. -/
+def method0Tables : List Extraction.IndexTables :=
+  match method0Metadata.tables with
+  | .ok built => built
+  | .error _ => []
+
 def method0Body : Extraction.BodyEvidence :=
   { bytes := method0Bytes, tokens := { operands := [] }, metadata := method0Metadata,
-              rva := 17600 }
+              tables := method0Tables }
 
 /-- The pin of the assembly the method was extracted from. -/
 def pin : AssemblyPin := ⟨"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"⟩

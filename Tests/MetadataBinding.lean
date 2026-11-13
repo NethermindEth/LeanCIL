@@ -177,7 +177,7 @@ theorem rejects_row_zero :
 
 theorem rejects_a_duplicate_token :
     (match { own.1 with rows := own.1.rows ++ own.1.rows.take 1 }.index with
-      | .error found => found == .duplicateEntry 0x23000001
+      | .error found => found == .duplicateEntry (own.1.rows.headD (0, [])).1
       | .ok _ => false) = true := by decide +kernel
 #print axioms rejects_a_duplicate_token
 
@@ -241,48 +241,52 @@ private def mainMethod : RawMethod :=
     genericParameters := [], code := [] }
 
 /-- Whether the method definition is accepted, or refused with this error. -/
-private def identity (slice : MetadataSlice) (pin : String) (method : RawMethod) (rva : Nat) :
+private def identity (slice : MetadataSlice) (pin : String) (method : RawMethod) :
     Except MetadataError Unit := do
   let env : MetadataEnv := { slices := [← slice.index, ← lib.index] }
-  methodIdentityValid env { identity := pin } method rva
+  methodIdentityValid env { identity := pin } method
 
-private def identityFails (slice : MetadataSlice) (pin : String) (method : RawMethod) (rva : Nat)
+private def identityFails (slice : MetadataSlice) (pin : String) (method : RawMethod)
     (error : MetadataError) : Bool :=
-  match identity slice pin method rva with
+  match identity slice pin method with
   | .error found => found == error
   | .ok _ => false
 
 theorem accepts_the_method_definition_its_row_gives :
-    (match identity own.1 ownIdentity mainMethod 0x2050 with
+    (match identity own.1 ownIdentity mainMethod with
       | .ok _ => true
       | .error _ => false) = true := by decide +kernel
 #print axioms accepts_the_method_definition_its_row_gives
 
 theorem rejects_a_method_definition_that_differs_from_its_row :
-    identityFails own.1 ownIdentity { mainMethod with attributes := 0x97 } 0x2050
+    identityFails own.1 ownIdentity { mainMethod with attributes := 0x97 }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with implementation := 1 } 0x2050
+    identityFails own.1 ownIdentity { mainMethod with implementation := 1 }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with hasThis := true } 0x2050
+    identityFails own.1 ownIdentity { mainMethod with hasThis := true }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with returnType := int32 } 0x2050
+    identityFails own.1 ownIdentity { mainMethod with returnType := int32 }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with parameters := [int32] } 0x2050
+    identityFails own.1 ownIdentity { mainMethod with parameters := [int32] }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with owner := libScope ++ "::Program" } 0x2050
+    identityFails own.1 ownIdentity { mainMethod with owner := libScope ++ "::Program" }
       (.methodMismatch tokens.main) = true ∧
     identityFails own.1 ownIdentity
-      { mainMethod with genericParameters := [{ flags := 0, types := [] }] } 0x2050 (.methodMismatch tokens.main) = true := by decide +kernel
+      { mainMethod with genericParameters := [{ flags := 0, types := [] }] }
+      (.methodMismatch tokens.main) = true := by decide +kernel
 #print axioms rejects_a_method_definition_that_differs_from_its_row
 
 theorem rejects_a_pin_of_another_version :
     identityFails own.1 "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" mainMethod
-      0x2050 .identityMismatch = true := by decide +kernel
+      .identityMismatch = true := by decide +kernel
 #print axioms rejects_a_pin_of_another_version
 
-theorem rejects_a_body_at_another_address :
-    identityFails own.1 ownIdentity mainMethod 0x2051 (.bodyLocation tokens.main) = true ∧
-    identityFails own.1 ownIdentity mainMethod 0 (.bodyLocation tokens.main) = true := by
-  decide +kernel
-#print axioms rejects_a_body_at_another_address
+/-- A method row whose address differs from the one the body was read at is accepted: where a body
+    sits in the image is not part of the default check. -/
+theorem ignores_the_body_address :
+    (match identity { own.1 with rows := own.1.rows.map fun (token, bytes) =>
+        (token, if token == tokens.main then 7 :: bytes.drop 1 else bytes) } ownIdentity mainMethod with
+      | .ok _ => true
+      | .error _ => false) = true := by decide +kernel
+#print axioms ignores_the_body_address
 end Tests.MetadataBinding

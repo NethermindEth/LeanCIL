@@ -41,6 +41,11 @@ partial class Program
                 // Byte-backed identity definitions carry these checked UTF-8 witnesses.
                 if (Regex.IsMatch(match.Groups[1].Value, @"\AexternalIdentity(?:Chunk\d+|\d+Bytes)_valid\z"))
                     return match.Value;
+                // A body obligation reads its module's lookup tables through their equality with the metadata.
+                if (match.Groups[1].Value != theorem &&
+                    Regex.IsMatch(match.Groups[1].Value, @"\Amodule\d+_tables_valid\z") &&
+                    !theorem.StartsWith("module", StringComparison.Ordinal))
+                    return match.Value;
                 if (match.Groups[1].Value != theorem) return "";
                 found++;
                 return match.Value;

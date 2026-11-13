@@ -132,6 +132,15 @@ def assemblyBlock (builder : Builder) (name : List Nat) (identity : String) (ver
   (builder, { identity := identity, tableHeader := tableHeader counts, assemblyRow := row,
               strings := [(0, [0]), (nameOffset, name ++ [0])], blobs := [(0, [0])] })
 
+/-- Insert `item` before the first item whose key is not smaller, keeping equal keys in order. -/
+def insertByKey {α : Type} (key : α → Nat) (item : α) : List α → List α
+  | [] => [item]
+  | other :: rest => if key item ≤ key other then item :: other :: rest else other :: insertByKey key item rest
+
+/-- The items in ascending key order, as the extractor carries rows and links. -/
+def sortByKey {α : Type} (key : α → Nat) (items : List α) : List α :=
+  items.foldr (insertByKey key) []
+
 /-- The slice a builder describes, with the `Assembly` row of the given name and identity. -/
 def finish (builder : Builder) (name : List Nat) (identity : String) (version : Nat) :
     MetadataSlice :=
@@ -139,8 +148,9 @@ def finish (builder : Builder) (name : List Nat) (identity : String) (version : 
   { assembly := { assembly with
         tableHeader := tableHeader (builder.counts.filter (·.1 != Table.assembly) ++
           [(Table.assembly, 1)]) },
-    rows := builder.rows, strings := builder.strings, blobs := builder.blobs,
-    userStrings := builder.userStrings, corlib := builder.corlib, links := builder.links }
+    rows := sortByKey (·.1) builder.rows, strings := builder.strings, blobs := builder.blobs,
+    userStrings := builder.userStrings, corlib := builder.corlib,
+    links := sortByKey (fun link => link.kind * 0x100000000 + link.source) builder.links }
 
 /-- The slice that `step` builds, and what it returns. -/
 def build {α : Type} (step : Step α) (name : List Nat) (identity : String) (version : Nat := 1) :

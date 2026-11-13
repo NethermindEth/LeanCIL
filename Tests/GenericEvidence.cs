@@ -163,15 +163,8 @@ void RejectBody(int sample, string name, string theorem, string definition, Func
     Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, decisionFailed);
     var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")),
         definition, change);
-    var obligation = Regex.Match(mutated,
-        @"(?m)^theorem (" + Regex.Escape(theorem[..^"_body_validated".Length]) + @")_body_validated : " +
-        @"Extraction\.BodyDecodes (⟨[^⟩]*⟩) " +
-        @"(method\d+Body) (method\d+Original) := [^\r\n]*");
-    if (!obligation.Success) throw new InvalidOperationException("Missing body obligation to refute: " + name);
-    var refutation = obligation.Groups[1].Value + "_body_refuted";
-    var refuted = mutated.Replace(obligation.Value, $"theorem {refutation} : Extraction.bodyMatches " +
-        $"{obligation.Groups[2].Value} {obligation.Groups[3].Value} {obligation.Groups[4].Value} = false := " +
-        "by decide +kernel");
+    var refutation = theorem[..^"_body_validated".Length] + "_body_refuted";
+    var refuted = KernelRefutation(mutated, theorem, refutation);
     var path = Path.Combine(output, "Refuted-" + name + ".lean");
     File.WriteAllText(path, NarrowEvidence(refuted, refutation));
     evidence.Add(path, "PASS the kernel proves the mutated body obligation false: " + name, refutation);
@@ -192,6 +185,28 @@ RejectBody(0, "altered-instruction-offset", bodyTheorem, "method0Original",
     line => line.Replace("offset := 1, opcode := 40", "offset := 2, opcode := 40"));
 RejectBody(0, "altered-max-stack", bodyTheorem, "method0Original",
     line => line.Replace("maxStack := 8", "maxStack := 9"));
+// The module's lookup tables are decided once against its metadata; a changed row, heap entry or table is refuted there.
+void RejectTables(string name, string definition, Func<string, string> change)
+{
+    const string theorem = "module0_tables_valid";
+    Reject(0, name, source => ChangeDefinition(source, definition, change), theorem);
+    var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, "0", "Extracted.lean")), definition, change);
+    var refuted = KernelRefutation(mutated, theorem, "module0_tables_refuted");
+    var path = Path.Combine(output, "RefutedTables-" + name + ".lean");
+    File.WriteAllText(path, NarrowEvidence(refuted, "module0_tables_refuted"));
+    evidence.Add(path, "PASS the kernel proves the mutated tables obligation false: " + name, "module0_tables_refuted");
+}
+RejectTables("altered-metadata-row", "module0Metadata",
+    line => ChangeByte(line, @"(rows := \[\(\d+, \[)(\d+)(,)", 1));
+RejectTables("altered-metadata-string", "module0Metadata",
+    line => ChangeByte(line, @"(strings := \[\(0, \[0\]\), \(\d+, \[)(\d+)(,)", 1));
+RejectTables("altered-lookup-row", "module0Tables", line => ChangeByte(line, @"(rows := .*?\[)(\d+)(,)", 1));
+// A leaf entry of the rows tree removed, and one added before another.
+RejectTables("missing-lookup-row", "module0Tables",
+    line => new Regex(@"\(\.node \.leaf \d+ \[[^\]]*\] \.leaf\)").Replace(line, ".leaf", 1));
+RejectTables("extra-lookup-row", "module0Tables",
+    line => new Regex(@"\(\.node \.leaf (\d+) (\[[^\]]*\]) \.leaf\)").Replace(line,
+        "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
 RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",
     line => line.Replace("operand := .target 4", "operand := .target 3"));
 Console.WriteLine("PASS body bytes, token table and original definition reject changed bytes and operands");

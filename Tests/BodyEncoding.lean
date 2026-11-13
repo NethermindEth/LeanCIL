@@ -23,9 +23,6 @@ open CIL CIL.Extraction Tests.MetadataBuilder
 /-- The token of the first standalone signature, which a method with locals uses. -/
 def localSignatureToken : Nat := 0x11000001
 
-/-- The relative virtual address every encoded method body is read at. -/
-def bodyRva : Nat := 0x2050
-
 /-- The `width` little-endian bytes of the two's-complement encoding of `value`. -/
 def littleEndian (width : Nat) (value : Int) : List Nat :=
   let unsigned := (value % ((2 ^ (8 * width) : Nat) : Int)).toNat
@@ -159,7 +156,7 @@ def methodMetadata (pin : AssemblyPin) (method : RawMethod) : Option (MetadataSl
     let methodName ← string "M"
     let methodBlob ← blob signature
     let definition ← row Table.methodDef
-      [bodyRva, method.implementation, method.attributes, methodName, methodBlob, 1]
+      [0, method.implementation, method.attributes, methodName, methodBlob, 1]
     link linkDeclaring definition 0 owner
     let parameterName ← string "T"
     let ownerRows ← method.ownerParameters.zipIdx.mapM fun (parameter, number) =>
@@ -188,8 +185,11 @@ def encodeBody (pin : AssemblyPin) (method : RawMethod) : Option BodyEvidence :=
     if tiny then [code.length * 4 + 2]
     else [flags % 256, 0x30 + flags / 256] ++ littleEndian 2 method.maxStack ++
       littleEndian 4 code.length ++ littleEndian 4 signature
-  some { bytes := header ++ code, tokens := { operands := [] }, metadata := { own := slice },
-         rva := bodyRva }
+  let metadata : MethodMetadata := { own := slice }
+  let tables := match metadata.tables with
+    | .ok built => built
+    | .error _ => []
+  some { bytes := header ++ code, tokens := { operands := [] }, metadata, tables }
 
 /-- The method with the instruction offsets its encoded bytes imply; unchanged if it has no
     encoding. -/
@@ -210,6 +210,6 @@ def withBody (item : MethodEvidence) : MethodEvidence :=
 
 /-- The body of evidence that `withBody` has not yet filled in; it never decodes. -/
 def noBody : BodyEvidence :=
-  { bytes := [], tokens := { operands := [] }, metadata := {}, rva := 0 }
+  { bytes := [], tokens := { operands := [] }, metadata := {}, tables := [] }
 
 end Tests.BodyEncoding

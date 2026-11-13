@@ -196,6 +196,7 @@ internal static class LeanEmitter
         layoutEvidence.EmitLayouts(lean);
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
         genericEvidence.EmitAssemblyMetadata(lean);
+        genericEvidence.EmitModuleMetadata(lean, methods);
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {

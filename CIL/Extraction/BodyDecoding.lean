@@ -158,12 +158,13 @@ structure TokenTable where
 
 /-- The exact bytes of one method body, its header and code but not its extra sections, each
     byte a `Nat` below 256, with the token table its operands resolve through, the metadata
-    those tokens are checked against and the address the body was read at. -/
+    those tokens are checked against and the lookup tables of that metadata. -/
 structure BodyEvidence where
   bytes : List Nat
   tokens : TokenTable
   metadata : MethodMetadata
-  rva : Nat
+  /-- `MetadataSlice.tables` of each slice of `metadata`, built once for the extraction. -/
+  tables : List IndexTables
   deriving DecidableEq, Repr
 
 /-- What a body's bytes say about its method: the fields `RawMethod` takes from the body, and
@@ -405,10 +406,19 @@ private def checkTable (env : MetadataEnv) (frame : Frame) :
     let facts ← (checkEntryIn env frame token operand).mapError BodyError.metadata
     checkTable env frame rest (table.insert token (operand, facts))
 
-/-- The metadata of a body as an environment of indexed slices, its own first. -/
+/-- The metadata of a body as an environment of indexed slices, its own first, over the given
+    tables: independent of the number of rows. -/
+def MethodMetadata.environmentWith (metadata : MethodMetadata) (tables : List IndexTables) :
+    Except MetadataError MetadataEnv :=
+  if tables.length != metadata.others.length + 1 then .error .tablesMismatch
+  else do
+    let indexed ← ((metadata.own :: metadata.others).zip tables).mapM
+      fun (slice, sliceTables) => slice.indexWith sliceTables
+    .ok { slices := indexed }
+
+/-- The metadata of a body as an environment of indexed slices, built from its bytes alone. -/
 def MethodMetadata.environment (metadata : MethodMetadata) : Except MetadataError MetadataEnv := do
-  let own ← metadata.own.index
-  .ok { slices := own :: (← metadata.others.mapM MetadataSlice.index) }
+  metadata.environmentWith (← metadata.tables)
 
 /-- Decode a method body: its header and its instructions, with branch operands as instruction
     indices and every token operand checked against the metadata. `arity` is the number of
@@ -432,8 +442,8 @@ def decodeBody (env : MetadataEnv) (arity : Nat) (body : BodyEvidence) :
     body carries: the decoded body, when everything agrees with the method. -/
 def checkBody (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) :
     Except BodyError DecodedBody := do
-  let env ← body.metadata.environment.mapError BodyError.metadata
-  (methodIdentityValid env pin method body.rva).mapError BodyError.metadata
+  let env ← (body.metadata.environmentWith body.tables).mapError BodyError.metadata
+  (methodIdentityValid env pin method).mapError BodyError.metadata
   let decoded ← decodeBody env method.genericParameters.length body
   (checkLocals env method.genericParameters.length decoded.localSignature method.locals).mapError
     BodyError.metadata
@@ -450,13 +460,12 @@ def checkBody (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) :
       decoded.initLocals == method.initLocals && decoded.code == method.code
   | .error _ => false
 
-/-- The method's definition, locals, `maxStack`, `initLocals` and `code` are what the body bytes
-    and the metadata they carry say, through the body's token table. -/
-def BodyDecodes (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) : Prop :=
-  bodyMatches pin body method = true
+/-- The body's tables are what its metadata bytes give, and the method's definition, locals,
+    `maxStack`, `initLocals` and `code` are what the body bytes and the metadata say, through the
+    body's token table. -/
+abbrev BodyDecodes (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) : Prop :=
+  tablesMatch body.metadata body.tables = true ∧ bodyMatches pin body method = true
 
-instance (pin : AssemblyPin) (body : BodyEvidence) (method : RawMethod) :
-    Decidable (BodyDecodes pin body method) :=
-  inferInstanceAs (Decidable (_ = true))
+
 
 end CIL.Extraction
