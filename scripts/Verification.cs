@@ -46,8 +46,8 @@ partial class Program : IDisposable
     string[]? libraryModules;
     /// <summary>A report was written against a closure entry, so the whole library is still to be built.</summary>
     bool completesLibrary;
-    /// <summary>Open while this process reads a closure entry in place, so no other process removes it.</summary>
-    FileStream? closureUse;
+    /// <summary>The use locks of the cache entries this process reads in place, held until it is disposed.</summary>
+    readonly List<FileStream> entryUses = [];
     /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
     string? session;
     /// <summary>The base library's compiled module artifacts, taken from its validated manifest.</summary>
@@ -214,8 +214,12 @@ partial class Program : IDisposable
     bool UseSuccessCache => !referenceOnlyAuthoring && !freshProofs && !freshLibrary &&
         !string.Equals(Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE"), "true", StringComparison.OrdinalIgnoreCase);
 
-    static string SuccessCacheRoot => Path.Combine(Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries"), "success-v1");
+    /// <summary>The directory of certified library entries, each named by its key, and of the success cache.</summary>
+    static string LibraryCacheRoot => Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL",
+            "libraries");
+
+    static string SuccessCacheRoot => Path.Combine(LibraryCacheRoot, "success-v1");
 
     byte[] ReceiptKey
     {
@@ -301,7 +305,7 @@ partial class Program : IDisposable
         var cached = Path.Combine(SuccessCacheRoot, key);
         if (AuthenticatedSuccess(key) is not null)
         {
-            TouchSuccess(cached);
+            TouchEntry(cached);
             return;
         }
         var staging = cached + "." + Guid.NewGuid().ToString("N");
@@ -1088,8 +1092,7 @@ partial class Program : IDisposable
         var manifestBytes = File.ReadAllBytes(Path.Combine(staging, "cache-manifest.json"));
         File.WriteAllBytes(Path.Combine(staging, "cache-receipt.hmac"),
             HMACSHA256.HashData(ReceiptKey, Encoding.UTF8.GetBytes(key).Concat(manifestBytes).ToArray()));
-        if (Directory.Exists(cached)) Directory.Delete(cached, true);
-        Directory.Move(staging, cached);
+        PublishEntry(staging, cached);
     }
 
     static SortedDictionary<string, string> LibrarySources(SortedDictionary<string, string> snapshot) =>
@@ -1307,44 +1310,588 @@ partial class Program : IDisposable
     [DllImport("libc", CharSet = CharSet.Ansi)]
     static extern int link(string existing, string target);
 
-    // Recency is last use: restoring or republishing an entry renews it.
-    static void TouchSuccess(string entry)
+    // Recency is last use: opening, restoring or publishing a cache entry renews it.
+    static void TouchEntry(string entry)
     {
         try { Directory.SetLastWriteTimeUtc(entry, DateTime.UtcNow); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
     }
 
-    static readonly Regex SupportGeneration = new(@"^[0-9a-f]{64}-[0-9a-f]{64}$");
-    static readonly Regex AbandonedStaging = new(@"^[0-9a-f]{64}(?:-[0-9a-f]{64})?\.(?:(?:invalid|evicted)-)?[0-9a-f]{32}$");
-    static int supportEvicted;
+    /// <summary>Publishes the finished directory staging as the entry directory, replacing any entry there.</summary>
+    static void PublishEntry(string staging, string directory)
+    {
+        if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        Directory.Move(staging, directory);
+        TouchEntry(directory);
+    }
 
-    static TimeSpan SupportRetention => TimeSpan.FromDays(double.TryParse(Environment.GetEnvironmentVariable("LEANCIL_SUPPORT_RETENTION_DAYS"),
-        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var days) && days > 0 ? days : 7);
+    /// <summary>The name of a certified library entry: its key.</summary>
+    [GeneratedRegex(@"\A[0-9a-f]{64}\z")]
+    private static partial Regex KeyName();
+
+    [GeneratedRegex(@"\A[0-9a-f]{64}-[0-9a-f]{64}\z")]
+    private static partial Regex SupportGeneration();
+
+    [GeneratedRegex(@"\A[0-9a-f]{64}(?:-[0-9a-f]{64})?\.(?:(?:invalid|evicted)-)?[0-9a-f]{32}\z")]
+    private static partial Regex AbandonedStaging();
+
+    /// <summary>The names a library publisher gives a directory it is still filling or has set aside.</summary>
+    [GeneratedRegex(@"\A[0-9a-f]{64}\.(?:(?:evicted|download)-)?[0-9a-f]{32}\z")]
+    private static partial Regex LibraryStaging();
+
+    /// <summary>A file beside a library entry that goes with it: a closure record or an editor pin.</summary>
+    [GeneratedRegex(@"\A(?<key>[0-9a-f]{64})\.(?<kind>closure|pin-[0-9a-f]{32})\z")]
+    private static partial Regex LibrarySidecar();
+
+    /// <summary>A file a killed publisher leaves: a download archive or a pin being written.</summary>
+    [GeneratedRegex(@"\A[0-9a-f]{64}\.(?:download-[0-9a-f]{32}\.zip|pin-[0-9a-f]{32}\.tmp-[0-9a-f]{32})\z")]
+    private static partial Regex LibraryStagingFile();
+
+    /// <summary>A pin a pass set aside while it judged it, by the name it was given.</summary>
+    [GeneratedRegex(@"\A[0-9a-f]{64}\.pin-[0-9a-f]{32}\.dead-[0-9a-f]{32}\z")]
+    private static partial Regex RetiredPin();
+
+    /// <summary>The part of a retired pin's name that the pin's own name lacks.</summary>
+    [GeneratedRegex(@"\.dead-[0-9a-f]{32}\z")]
+    private static partial Regex DeadPinSuffix();
+
+    /// <summary>The line of a framework package's lakefile that names the directory of the library.</summary>
+    [GeneratedRegex(@"^srcDir = (?<path>"".*"")\r?$", RegexOptions.Multiline)]
+    private static partial Regex SourceDirectoryLine();
+
+    static int supportEvicted;
+    static int libraryEvicted;
+
+    /// <summary>A staging directory this old belongs to a publisher that was killed.</summary>
+    static readonly TimeSpan AbandonedAfter = TimeSpan.FromDays(1);
+
+    /// <summary>A library entry used within this time may be open in a concurrent run; no setting removes it.</summary>
+    static readonly TimeSpan RecentUse = TimeSpan.FromDays(1);
+
+    const int DefaultRetentionDays = 7;
+    const int DefaultLibraryEntries = 8;
+
+    /// <summary>
+    /// The positive number of days an environment variable holds, with infinity and a value too large for a
+    /// time span meaning for ever; the default for an unset, malformed, NaN or non-positive value.
+    /// </summary>
+    static TimeSpan RetentionFromEnvironment(string variable)
+    {
+        if (!double.TryParse(Environment.GetEnvironmentVariable(variable), System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var days) || double.IsNaN(days) || days <= 0)
+            return TimeSpan.FromDays(DefaultRetentionDays);
+        return days >= TimeSpan.MaxValue.TotalDays ? TimeSpan.MaxValue : TimeSpan.FromDays(days);
+    }
+
+    static TimeSpan SupportRetention => RetentionFromEnvironment("LEANCIL_SUPPORT_RETENTION_DAYS");
+
+    /// <summary>How long a library entry may go unused: `LEANCIL_LIBRARY_RETENTION_DAYS`, never below a day.</summary>
+    static TimeSpan LibraryRetention =>
+        TimeSpan.FromTicks(Math.Max(RetentionFromEnvironment("LEANCIL_LIBRARY_RETENTION_DAYS").Ticks, RecentUse.Ticks));
+
+    /// <summary>
+    /// The most certified library entries to keep, as `LEANCIL_LIBRARY_MAX_ENTRIES` sets it: a positive whole
+    /// number, with one too large for an int meaning that many; the default for any other value.
+    /// </summary>
+    static int LibraryEntryLimit =>
+        System.Numerics.BigInteger.TryParse(Environment.GetEnvironmentVariable("LEANCIL_LIBRARY_MAX_ENTRIES"),
+            System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture,
+            out var limit) && limit > 0
+            ? (int)System.Numerics.BigInteger.Min(limit, int.MaxValue) : DefaultLibraryEntries;
+
+    /// <summary>
+    /// Beside a library entry: a file that every process reading the entry in place holds open shared from
+    /// before it validates the entry until it ends, and that a pass must hold exclusively to remove the entry.
+    /// </summary>
+    static string EntryUse(string entry) => entry + ".use";
+
+    /// <summary>
+    /// Holds the use lock of `entry` shared, so no pass removes it. A pass holds the lock only while it renames
+    /// the entry away, so a short wait gets it. Only a file that exists can be held by another process, so a
+    /// failure to open a file that does not exist, such as a full disk or a missing directory, is not waited
+    /// for. Any failure names the file and carries the operating system's reason. Null where the lock file
+    /// cannot be created for want of permission, which leaves the entry protected only by its recent use.
+    /// Dispose the stream to release it.
+    /// </summary>
+    static FileStream? HoldEntry(string entry)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try { return new FileStream(EntryUse(entry), FileMode.OpenOrCreate, FileAccess.Read, FileShare.Read); }
+            catch (UnauthorizedAccessException) { return null; }
+            catch (IOException) when (attempt < 200 && File.Exists(EntryUse(entry))) { Thread.Sleep(50); }
+            catch (IOException error)
+            {
+                throw new IOException("The use lock file " + EntryUse(entry) + " of the certified library cache " +
+                    "entry could not be opened" + (attempt > 0 ? " after waiting for it" : "") + ": " + error.Message,
+                    error);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records that this process uses `entry` and holds its use lock until it is disposed, before anything
+    /// reads the entry, so that no pass removes it from under the process.
+    /// </summary>
+    void UseEntry(string entry)
+    {
+        if (HoldEntry(entry) is { } use) entryUses.Add(use);
+        TouchEntry(entry);
+    }
+
+    /// <summary>The use lock of `entry` held exclusively, or null at once when a reader holds it.</summary>
+    static FileStream? HoldEntryExclusively(string entry)
+    {
+        try { return new FileStream(EntryUse(entry), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    static void DeleteQuietly(string file)
+    {
+        try { File.Delete(file); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+    }
+
+    /// <summary>Renames `directory` to a dotted name, which readers skip, so none sees it half deleted.</summary>
+    static string MoveAside(string directory)
+    {
+        var aside = directory + ".evicted-" + Guid.NewGuid().ToString("N");
+        Directory.Move(directory, aside);
+        return aside;
+    }
+
+    /// <summary>Whether path names a directory directly under cacheRoot, however either is spelled.</summary>
+    static bool IsEntryOf(string cacheRoot, string path) =>
+        Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))) is { } parent &&
+        SamePath(parent, cacheRoot);
+
+    /// <summary>
+    /// Whether two spellings of a path made by one process name the same directory. It resolves relative
+    /// segments and separators only, so it is for paths this process derived from one setting, never for
+    /// paths another process wrote.
+    /// </summary>
+    static bool SamePath(string first, string second) => string.Equals(
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
+        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal);
+
+    /// <summary>Whether `entry` holds the manifest and receipt that only a library publisher writes.</summary>
+    static bool HoldsReceipt(DirectoryInfo entry) =>
+        File.Exists(Path.Combine(entry.FullName, "cache-manifest.json")) &&
+        File.Exists(Path.Combine(entry.FullName, "cache-receipt.hmac"));
+
+    /// <summary>
+    /// Records that the package at `package`, which requires the library entry `entry` by path, needs it:
+    /// beside the entry, so the entry's hashed files stay as certified. The pin is written under another
+    /// name and moved into place, so a pass never reads half of it. A pin that exists is renewed by touching
+    /// it, since its name is the hash of the content it holds, so a scanner holding it open cannot fail the
+    /// command. Does nothing for a library that is not an entry of the cache.
+    /// </summary>
+    static void PinEntry(string entry, string package)
+    {
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(entry));
+        if (Path.GetDirectoryName(full) is not { } parent || !KeyName().IsMatch(Path.GetFileName(full)) ||
+            !SamePath(parent, LibraryCacheRoot))
+            return;
+        var packageFull = Path.GetFullPath(package);
+        var pin = Path.Combine(parent, Path.GetFileName(full) + ".pin-" + ContentKey(packageFull)[..32]);
+        try
+        {
+            if (File.Exists(pin))
+            {
+                if (File.ReadAllText(pin) == packageFull) File.SetLastWriteTimeUtc(pin, DateTime.UtcNow);
+                else File.Delete(pin);
+                if (File.Exists(pin)) return;
+            }
+        }
+        // A pin another process holds briefly still names this package, and its lakefile keeps the entry; a pin
+        // a pass moved aside meanwhile is written again below.
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            if (File.Exists(pin)) return;
+        }
+        var writing = pin + ".tmp-" + Guid.NewGuid().ToString("N");
+        File.WriteAllText(writing, packageFull);
+        // A pass reading the old pin holds it for a moment, and Windows refuses to replace a file that is open.
+        for (var attempt = 0; ; attempt++)
+        {
+            try { File.Move(writing, pin, true); return; }
+            catch (Exception error) when (attempt < 40 && error is IOException or UnauthorizedAccessException)
+            {
+                Thread.Sleep(25);
+            }
+        }
+    }
+
+    /// <summary>The directory a framework lakefile reads the library from, or empty when it names none.</summary>
+    static string SourceDirectoryOf(string lakefile) => SourceDirectoryLine().Match(lakefile) is { Success: true } line
+        ? JsonSerializer.Deserialize<string>(line.Groups["path"].Value) ?? "" : "";
+
+    /// <summary>What a library pass did, for the stage that reports it.</summary>
+    sealed class PassReport
+    {
+        public int Removed;
+        public int Unjudged;
+        public bool GaveUp;
+        public string? Failure;
+    }
+
+    /// <summary>The longest a pass waits for one package's lakefile, which lies outside the cache.</summary>
+    internal static TimeSpan packageReadLimit = TimeSpan.FromSeconds(2);
+
+    /// <summary>The longest a library pass runs before it stops choosing and reading and reports.</summary>
+    internal static TimeSpan passLimit = TimeSpan.FromSeconds(60);
+
+    /// <summary>Reads a package's lakefile for a pass; tests replace it with a slow or blocking reader.</summary>
+    internal static Func<string, string> packageReader = ReadSmallFile;
+
+    /// <summary>
+    /// The clock a pass takes its time limit from. It counts from when the process first read it, so a change
+    /// of the system clock moves it neither forward nor back; tests replace it to jump past the limit.
+    /// </summary>
+    internal static Func<DateTime> passClock = () => PassClockOrigin + PassClockRun.Elapsed;
+
+    static readonly DateTime PassClockOrigin = DateTime.UtcNow;
+    static readonly Stopwatch PassClockRun = Stopwatch.StartNew();
+
+    /// <summary>Called with a pin's path just before a pass retires it; tests renew the pin here.</summary>
+    internal static Action<string>? beforePinRetired;
+
+    /// <summary>The largest lakefile a pass reads; the one a workspace writes is a few hundred bytes.</summary>
+    const int MaxLakefileBytes = 64 * 1024;
+
+    /// <summary>The text of `path`, which must hold at most <see cref="MaxLakefileBytes"/> bytes.</summary>
+    static string ReadSmallFile(string path)
+    {
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var buffer = new byte[MaxLakefileBytes + 1];
+        var length = 0;
+        int read;
+        while (length < buffer.Length && (read = file.Read(buffer, length, buffer.Length - length)) > 0)
+            length += read;
+        if (length > MaxLakefileBytes) throw new InvalidDataException(path + " is larger than a lakefile.");
+        return Encoding.UTF8.GetString(buffer, 0, length);
+    }
+
+    /// <summary>
+    /// Reads the lakefile in `package` on a background thread that is never waited for beyond the limit, since
+    /// a network mount that does not answer, or a named pipe, blocks a read without end. Finished is false
+    /// when the read was not attempted because the pass limit had passed, or did not complete in time, and the
+    /// caller must then keep what it cannot judge; with Finished, the text is null when the read failed.
+    /// </summary>
+    static (bool Finished, string? Text) ReadPackageLakefile(string package, DateTime deadline, PassReport? report)
+    {
+        var wait = deadline - passClock();
+        if (wait > packageReadLimit) wait = packageReadLimit;
+        if (wait <= TimeSpan.Zero)
+        {
+            if (report is not null) report.GaveUp = true;
+            return (false, null);
+        }
+        string? text = null;
+        var worker = new Thread(() =>
+        {
+            try { text = packageReader(Path.Combine(package, "lakefile.toml")); }
+            catch (Exception) { }
+        }) { IsBackground = true };
+        worker.Start();
+        if (worker.Join(wait)) return (true, text);
+        if (report is not null) report.Unjudged++;
+        return (false, null);
+    }
+
+    /// <summary>The last directory name of a path spelled with either separator.</summary>
+    static string LastSegment(string path)
+    {
+        var trimmed = path.TrimEnd('/', '\\');
+        return trimmed[(trimmed.LastIndexOfAny(['/', '\\']) + 1)..];
+    }
+
+    /// <summary>
+    /// Whether the package a pin names still needs the entry with key `key`. A pin renewed within a day is
+    /// live, so a package being set up is never caught between its pin and its lakefile. Otherwise the
+    /// package's framework lakefile decides when it can be read in time: the pin is dead when the directory it
+    /// names ends in another key or names none. Paths are not compared whole, since another process may have
+    /// reached the cache through a link, a drive letter or another spelling; keys are hashes, so the last
+    /// segment tells the entry. A lakefile that was not read, because the pass limit had passed or the read did
+    /// not finish in time, leaves the pin live whatever its age, since the pass cannot judge it. When a read
+    /// finished and found the package missing or unreadable, which an unmounted drive, a moved project and a
+    /// pin damaged by a crash all look like, the pin stays live until it has not been renewed for `retention`;
+    /// every `workspace` run renews it. Whatever reading the pin or the lakefile raises counts as unreadable.
+    /// </summary>
+    static bool PinLive(FileInfo pin, string key, TimeSpan retention, DateTime now, DateTime deadline,
+        PassReport? report)
+    {
+        var age = now - pin.LastWriteTimeUtc;
+        if (age <= RecentUse) return true;
+        bool? requires = null;
+        try
+        {
+            var package = File.ReadAllText(pin.FullName).Trim();
+            if (package.Length > 0)
+            {
+                var (finished, lakefile) = ReadPackageLakefile(package, deadline, report);
+                if (!finished) return true;
+                if (lakefile is not null)
+                    requires = string.Equals(LastSegment(SourceDirectoryOf(lakefile)), key,
+                        StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        catch (Exception) { }
+        return requires ?? age <= retention;
+    }
+
+    /// <summary>
+    /// Puts a pin that a pass set aside and did not finish with back under its name, whatever its age, so that
+    /// the pass judges it by the normal rules. A pin that took the name meanwhile makes the old one redundant.
+    /// Null when the file could not be restored.
+    /// </summary>
+    static FileInfo? RestorePin(FileInfo retired)
+    {
+        var restored = Path.Combine(retired.DirectoryName!, DeadPinSuffix().Replace(retired.Name, ""));
+        try
+        {
+            File.Move(retired.FullName, restored);
+            return new FileInfo(restored);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            if (File.Exists(restored)) DeleteQuietly(retired.FullName);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Deletes a pin that no longer protects its entry. The pin is renamed to a name no pin pattern matches,
+    /// and its age and liveness are read again from the renamed file; a pin that was renewed meanwhile is
+    /// renamed back, and one that cannot be renamed is left where it is. True when the pin is gone.
+    /// </summary>
+    static bool RetirePin(FileInfo pin, string key, TimeSpan retention, DateTime deadline, PassReport? report)
+    {
+        beforePinRetired?.Invoke(pin.FullName);
+        var aside = pin.FullName + ".dead-" + Guid.NewGuid().ToString("N");
+        try { File.Move(pin.FullName, aside); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+        if (!PinLive(new FileInfo(aside), key, retention, DateTime.UtcNow, deadline, report))
+        {
+            DeleteQuietly(aside);
+            return true;
+        }
+        // A pin written since takes the name, and then the old one is redundant.
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            try { File.Move(aside, pin.FullName); return false; }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                if (File.Exists(pin.FullName)) { DeleteQuietly(aside); return false; }
+                Thread.Sleep(25);
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Removes the directories directly under `root` that were not used for a long time: an entry (a name
+    /// `entries` matches) unused for `retention`; with `limit`, the least recently used entries beyond it that
+    /// were not used within a day; and staging (a name `staging` matches) abandoned for a day. Other names,
+    /// reparse points and `protectedName` are never touched. Each directory is renamed to a dotted name,
+    /// which readers skip, before it is deleted.
+    /// With `library`, which is for the certified library cache, an entry is also removed only if it holds
+    /// the files a publisher writes, and never while an editor package pinned to it still requires it or any
+    /// process holds its use lock, which a reader takes before it validates the entry. The lock is taken
+    /// exclusively without waiting, so the pass skips an entry in use on every platform. The lock files stay,
+    /// since a lock on a deleted file excludes nothing; the closure records and pins of a removed entry go
+    /// with it, and so do download archives and unfinished pins a killed publisher left for a day. A pin
+    /// that a pass set aside and did not finish with is put back and judged again.
+    /// `removing` is told how many directories are chosen, before the first is deleted, when there are any.
+    /// With `library` the pass stops choosing, reading and removing once <see cref="passLimit"/> has passed,
+    /// and a lakefile outside the cache is waited for at most <see cref="packageReadLimit"/>. A pin whose
+    /// lakefile was not read, for either reason, keeps its entry, so past the limit the pass removes no pin
+    /// and no entry; a deletion already under way finishes. `report` says what happened. Reads each
+    /// directory's name and write time once. Returns the names of the directories removed.
+    /// </summary>
+    static List<string> EvictUnused(string root, Regex entries, Regex staging, TimeSpan retention, int? limit = null,
+        string? protectedName = null, Action<int>? removing = null, bool library = false,
+        PassReport? report = null)
+    {
+        var now = DateTime.UtcNow;
+        var deadline = passClock() + passLimit;
+        var items = new DirectoryInfo(root).EnumerateFileSystemInfos().ToList();
+        var restoredPins = new List<FileInfo>();
+        if (library)
+        {
+            foreach (var file in items.OfType<FileInfo>().Where(file => LibraryStagingFile().IsMatch(file.Name) &&
+                         now - file.LastWriteTimeUtc > AbandonedAfter))
+                DeleteQuietly(file.FullName);
+            // A pin set aside by a pass that did not finish is judged again, by this pass's rules, at any age.
+            foreach (var file in items.OfType<FileInfo>().Where(file => RetiredPin().IsMatch(file.Name)))
+                if (RestorePin(file) is { } restored) restoredPins.Add(restored);
+        }
+        var sidecars = items.OfType<FileInfo>().Where(file => library && LibrarySidecar().IsMatch(file.Name))
+            .Concat(restoredPins).ToList();
+        var pins = sidecars.Where(file => file.Name.Contains(".pin-", StringComparison.Ordinal))
+            .ToLookup(file => file.Name[..64], StringComparer.Ordinal);
+        var directories = items.OfType<DirectoryInfo>().ToList();
+        var doomed = new List<(DirectoryInfo Directory, TimeSpan Unused)>();
+        var kept = new List<DirectoryInfo>();
+        var reserved = 0;
+        foreach (var entry in directories)
+        {
+            if (entry.Name == protectedName) { reserved++; continue; }
+            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
+            var isEntry = entries.IsMatch(entry.Name);
+            if (isEntry && library && !HoldsReceipt(entry)) continue;
+            if (isEntry && library && PinnedByPackage(entry, pins[entry.Name], retention, deadline, report))
+            {
+                reserved++;
+                continue;
+            }
+            var age = now - entry.LastWriteTimeUtc;
+            if (staging.IsMatch(entry.Name) && age > AbandonedAfter) doomed.Add((entry, AbandonedAfter));
+            else if (isEntry && age > retention) doomed.Add((entry, retention));
+            else if (isEntry) kept.Add(entry);
+        }
+        if (limit is { } most)
+            doomed.AddRange(kept.OrderByDescending(entry => entry.LastWriteTimeUtc)
+                .Skip(Math.Max(0, most - reserved))
+                .Where(entry => now - entry.LastWriteTimeUtc > RecentUse).Select(entry => (entry, RecentUse)));
+        if (doomed.Count > 0) removing?.Invoke(doomed.Count);
+        var removed = new List<string>();
+        foreach (var (entry, unused) in doomed)
+        {
+            if (library && passClock() > deadline)
+            {
+                if (report is not null) report.GaveUp = true;
+                break;
+            }
+            if (!Evict(entry, library && entries.IsMatch(entry.Name), unused)) continue;
+            removed.Add(entry.Name);
+            if (report is not null) report.Removed++;
+        }
+        if (library && passClock() <= deadline)
+            RemoveSidecars(sidecars, directories.Select(entry => entry.Name).ToHashSet(), removed, retention,
+                deadline, report);
+        else if (library && report is not null) report.GaveUp = true;
+        return removed;
+    }
+
+    /// <summary>Whether a package still requires `entry` by path; pins of packages that do not are retired.</summary>
+    static bool PinnedByPackage(DirectoryInfo entry, IEnumerable<FileInfo> pins, TimeSpan retention,
+        DateTime deadline, PassReport? report)
+    {
+        var live = false;
+        foreach (var pin in pins)
+            if (PinLive(pin, entry.Name, retention, DateTime.UtcNow, deadline, report) ||
+                !RetirePin(pin, entry.Name, retention, deadline, report))
+                live = true;
+        return live;
+    }
+
+    /// <summary>
+    /// Renames `entry` away and deletes it, unless it was used since it was chosen or, when `locked`, a
+    /// process holds its use lock; false then, and when the entry cannot be renamed or deleted.
+    /// </summary>
+    static bool Evict(DirectoryInfo entry, bool locked, TimeSpan unused)
+    {
+        FileStream? hold = null;
+        try
+        {
+            if (locked && (hold = HoldEntryExclusively(entry.FullName)) is null) return false;
+            // A reader records its use after taking the lock, so the write time is current once the lock is ours.
+            entry.Refresh();
+            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+                DateTime.UtcNow - entry.LastWriteTimeUtc <= unused)
+                return false;
+            var target = entry.Name.Contains('.') ? entry.FullName : MoveAside(entry.FullName);
+            hold?.Dispose();
+            hold = null;
+            Directory.Delete(target, true);
+            return true;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+        finally { hold?.Dispose(); }
+    }
+
+    /// <summary>
+    /// Deletes the pins of removed entries and the closure records that name an entry that is absent or was
+    /// removed. A pin renewed since the pass listed it stays. The `.use` and `.lock` files stay: a lock on a
+    /// file that was deleted excludes nothing, because the next process locks a new file of the same name.
+    /// </summary>
+    static void RemoveSidecars(List<FileInfo> sidecars, HashSet<string> present, List<string> removed,
+        TimeSpan retention, DateTime deadline, PassReport? report)
+    {
+        var gone = removed.ToHashSet(StringComparer.Ordinal);
+        foreach (var file in sidecars)
+        {
+            var match = LibrarySidecar().Match(file.Name);
+            var key = match.Groups["key"].Value;
+            if (match.Groups["kind"].Value == "closure")
+            {
+                if (ClosureNamesGone(file, present, gone)) DeleteQuietly(file.FullName);
+            }
+            else if (gone.Contains(key)) RetirePin(file, key, retention, deadline, report);
+        }
+    }
+
+    /// <summary>Whether the closure record `file` names an entry that was removed or is not there.</summary>
+    static bool ClosureNamesGone(FileInfo file, HashSet<string> present, HashSet<string> gone)
+    {
+        try
+        {
+            var named = File.ReadAllText(file.FullName).Trim();
+            return gone.Contains(named) || !present.Contains(named);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }
+    }
 
     // Once per process, removes support generations unused for the retention period and staging
     // left by killed publishers. Only exact cache entry names directly under the root are touched.
     static void EvictStaleSupport()
     {
         if (Interlocked.Exchange(ref supportEvicted, 1) != 0) return;
-        var now = DateTime.UtcNow;
-        var root = new DirectoryInfo(SuccessCacheRoot);
-        foreach (var entry in root.EnumerateDirectories())
+        EvictUnused(SuccessCacheRoot, SupportGeneration(), AbandonedStaging(), SupportRetention);
+    }
+
+    /// <summary>
+    /// Once per process, after this process published a library entry: removes certified library entries
+    /// that were not used for the retention period or fall beyond the entry limit, and staging left by killed
+    /// publishers, as a stage on stderr: START names how many directories it chose, and END how many it
+    /// removed, with the reason when it stopped early. `current` is the entry this process uses and is never
+    /// removed. Nothing the pass raises reaches the caller, whose verification has already published its
+    /// library; the failure is reported on the END line instead, with exit 1.
+    /// </summary>
+    static void EvictUnusedLibraries(string cacheRoot, string current)
+    {
+        if (Interlocked.Exchange(ref libraryEvicted, 1) != 0) return;
+        var elapsed = Stopwatch.StartNew();
+        string? stage = null;
+        var report = new PassReport();
+        try
         {
-            var age = now - entry.LastWriteTimeUtc;
-            if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
-                !(SupportGeneration.IsMatch(entry.Name) && age > SupportRetention ||
-                  AbandonedStaging.IsMatch(entry.Name) && age > TimeSpan.FromDays(1)))
-                continue;
-            try
-            {
-                // Readers skip dotted names, so a renamed generation is never restored half-deleted.
-                var doomed = entry.Name.Contains('.') ? entry.FullName
-                    : Path.Combine(root.FullName, entry.Name + ".evicted-" + Guid.NewGuid().ToString("N"));
-                if (doomed != entry.FullName) entry.MoveTo(doomed);
-                Directory.Delete(doomed, true);
-            }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
+            EvictUnused(cacheRoot, KeyName(), LibraryStaging(), LibraryRetention, LibraryEntryLimit, current,
+                count =>
+                {
+                    stage = $"Removing up to {count} unused certified library cache " +
+                        (count == 1 ? "directory" : "directories");
+                    Console.Error.WriteLine("START " + stage);
+                }, library: true, report: report);
         }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            report.Failure = (error.GetType().Name + ": " + error.Message).ReplaceLineEndings(" ");
+        }
+        if (stage is null && report.Failure is null && !report.GaveUp && report.Unjudged == 0) return;
+        if (stage is null)
+        {
+            stage = "Removing unused certified library cache directories";
+            Console.Error.WriteLine("START " + stage);
+        }
+        Console.Error.WriteLine($"END {stage}: removed {report.Removed}" +
+            (report.GaveUp ? $", stopped at the {passLimit.TotalSeconds:F0}s limit" : "") +
+            (report.Unjudged > 0 ? $", {report.Unjudged} lakefiles not read in time" : "") +
+            (report.Failure is null ? "" : ", stopped by " + report.Failure) +
+            $" (exit {(report.Failure is null ? 0 : 1)}, {elapsed.Elapsed.TotalSeconds:F1}s)");
     }
 
     (string Key, SortedDictionary<string, string> Sources) LibraryIdentity(SortedDictionary<string, string> common)
@@ -1379,9 +1926,9 @@ partial class Program : IDisposable
         static bool Set(string variable) => string.Equals(Environment.GetEnvironmentVariable(variable), "true",
             StringComparison.OrdinalIgnoreCase);
         var fresh = freshLibrary || !editorLibrary && (Set("CI") || Set("GITHUB_ACTIONS"));
-        var cacheRoot = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR") ??
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LeanCIL", "libraries");
+        var cacheRoot = LibraryCacheRoot;
         var cached = Path.Combine(cacheRoot, libraryKey);
+        var publishedEntry = false;
         SortedDictionary<string, string> manifest;
         FileStream? cacheLock = null;
         try
@@ -1410,6 +1957,11 @@ partial class Program : IDisposable
             }
             var supplied = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY");
             var suppliedDigest = Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256");
+            // Held, and recorded as used, before the entry is validated, so no pass removes it meanwhile.
+            if (!fresh && string.IsNullOrWhiteSpace(supplied))
+            {
+                UseEntry(cached);
+            }
             // A supplied certified library is not a local cache, so --rebuild-library still uses it.
             if (!string.IsNullOrWhiteSpace(supplied))
             {
@@ -1434,6 +1986,7 @@ partial class Program : IDisposable
             }
             else if (!fresh && DownloadReleasedLibrary(cached, libraryKey))
             {
+                publishedEntry = true;
                 library = cached;
                 manifest = ReadManifest(cached) ?? throw new InvalidDataException("Missing downloaded library manifest");
                 libraryBuild = "release";
@@ -1446,9 +1999,7 @@ partial class Program : IDisposable
                     (closure.Directory, closure.Manifest, closure.Key, closure.Modules);
                 libraryStamps = closure.Stamps;
                 libraryBuild = closure.Built ? "closure" : "closure-cache";
-                // Held under the library's lock, which a remover also holds, until this process is done.
-                closureUse = new FileStream(ClosureUse(closure.Directory), FileMode.OpenOrCreate, FileAccess.Read,
-                    FileShare.Read);
+                publishedEntry = closure.Built;
             }
             else
             {
@@ -1456,10 +2007,24 @@ partial class Program : IDisposable
                 ownsLibrary = true;
                 Directory.CreateDirectory(library);
                 if (incrementalLibrary is not null)
+                {
+                    // A donor that is a cache entry is held and recorded as used while it is copied.
+                    var donorInCache = IsEntryOf(cacheRoot, incrementalLibrary);
+                    using var donorUse = donorInCache ? HoldEntry(incrementalLibrary) : null;
+                    if (donorInCache) TouchEntry(incrementalLibrary);
                     StageIncrementalLibrary(library, incrementalLibrary, incrementalDigest, sources);
+                }
                 // Lake reuses a closure entry's modules by trace; every module is replayed below all the same.
                 else if (!fresh && CachedClosure(cacheRoot, libraryKey, sources) is { } built)
-                    CopyTree(Path.Combine(built, ".lake", "build"), Path.Combine(library, ".lake", "build"));
+                {
+                    // Held and recorded as used before the copy; an entry removed since it was validated is no seed.
+                    using var seedUse = HoldEntry(built);
+                    if (Directory.Exists(built))
+                    {
+                        TouchEntry(built);
+                        CopyTree(Path.Combine(built, ".lake", "build"), Path.Combine(library, ".lake", "build"));
+                    }
+                }
                 foreach (var (name, hash) in sources)
                 {
                     var destination = Path.Combine(library, name);
@@ -1495,9 +2060,9 @@ partial class Program : IDisposable
                     try
                     {
                         CopyTree(library, staging);
-                        if (Directory.Exists(cached)) Directory.Delete(cached, true);
-                        Directory.Move(staging, cached);
+                        PublishEntry(staging, cached);
                         publishedLibrary = cached;
+                        publishedEntry = true;
                         RemoveClosure(cacheRoot, libraryKey);
                     }
                     finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
@@ -1505,6 +2070,9 @@ partial class Program : IDisposable
             }
         }
         finally { cacheLock?.Dispose(); }
+        // Only a publication evicts, so opening a cached entry reads no other entry, and it runs after
+        // the key's lock is released so that a waiter is not held up by deleting other entries.
+        if (publishedEntry) EvictUnusedLibraries(cacheRoot, libraryKey!);
         const string compiledPrefix = ".lake/build/lib/lean/";
         // Lake compiles a dependency's missing modules into its own build directory, so a library
         // extended with uncompiled sources is read from a private copy; a complete one is never written.
@@ -1621,7 +2189,7 @@ partial class Program : IDisposable
         {
             var key = File.ReadAllText(ClosureRecord(cacheRoot, libraryKey)).Trim();
             var directory = Path.Combine(cacheRoot, key);
-            if (!Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") || !CertifiedLocalLibrary(directory, key) ||
+            if (!KeyName().IsMatch(key) || !CertifiedLocalLibrary(directory, key) ||
                 ReadManifest(directory) is not { } manifest) return null;
             const string extension = ".lean";
             string[] modules = [.. LibrarySources(manifest).Keys
@@ -1632,9 +2200,6 @@ partial class Program : IDisposable
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
-
-    /// <summary>Beside a closure entry: a file every process reading the entry in place holds open.</summary>
-    static string ClosureUse(string directory) => directory + ".use";
 
     /// <summary>
     /// Removes the closure entry recorded for a library whose whole entry is published, unless a process still
@@ -1649,12 +2214,14 @@ partial class Program : IDisposable
             if (!File.Exists(record)) return;
             var key = File.ReadAllText(record).Trim();
             var directory = Path.Combine(cacheRoot, key);
-            if (Regex.IsMatch(key, @"\A[0-9a-f]{64}\z") && Directory.Exists(directory))
+            if (KeyName().IsMatch(key) && Directory.Exists(directory) && HoldsReceipt(new DirectoryInfo(directory)))
             {
-                var doomed = directory + ".evicted-" + Guid.NewGuid().ToString("N");
-                using (new FileStream(ClosureUse(directory), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
-                    Directory.Move(directory, doomed);
-                File.Delete(ClosureUse(directory));
+                string doomed;
+                using (var hold = HoldEntryExclusively(directory))
+                {
+                    if (hold is null) return;
+                    doomed = MoveAside(directory);
+                }
                 File.Delete(record);
                 Directory.Delete(doomed, true);
             }
@@ -1677,9 +2244,13 @@ partial class Program : IDisposable
         var key = ClosureKey(libraryKey, modules);
         var record = ClosureRecord(cacheRoot, libraryKey);
         var directory = Path.Combine(cacheRoot, key);
+        var held = false;
         if (File.Exists(record))
         {
             if (File.ReadAllText(record).Trim() != key) return null;
+            // Held, and recorded as used, before the entry is validated, so no pass removes it meanwhile.
+            UseEntry(directory);
+            held = true;
             if (CertifiedLocalLibrary(directory, key) && ReadManifest(directory) is { } cached &&
                 ClosureManifest(cached, sources, modules) && HashedCacheEntry(directory, cached) is { } stamps)
                 return new(directory, key, modules, cached, stamps, Built: false);
@@ -1711,8 +2282,8 @@ partial class Program : IDisposable
             File.WriteAllBytes(Path.Combine(build, "cache-receipt.hmac"), HMACSHA256.HashData(ReceiptKey,
                 Encoding.UTF8.GetBytes(key).Concat(manifestBytes).ToArray()));
             CopyTree(build, staging);
-            if (Directory.Exists(directory)) Directory.Delete(directory, true);
-            Directory.Move(staging, directory);
+            PublishEntry(staging, directory);
+            if (!held) UseEntry(directory);
             File.WriteAllText(record, key);
             // The published copy, not the build, is what the session reads.
             var published = HashedCacheEntry(directory, manifest)
@@ -1861,10 +2432,12 @@ partial class Program : IDisposable
     /// `requirements` are further lakefile tables, such as a package this one brings into the workspace.
     /// </summary>
     // Lake's module traces name the package, so under another name it rebuilds every module into the library.
-    static string FrameworkPackage(string owner, string certified, string requirements = "")
+    static string FrameworkPackage(string owner, string certified, string requirements = "", bool pin = false)
     {
         var directory = Path.Combine(owner, ".lake", "leancil-framework");
         Directory.CreateDirectory(directory);
+        // A package that outlives this process keeps its cache entry from removal for as long as it requires it.
+        if (pin) PinEntry(certified, directory);
         var root = Path.GetFullPath(certified).Replace('\\', '/');
         WriteIfChanged(Path.Combine(directory, "lakefile.toml"),
             $"name = \"leancil\"\nsrcDir = {JsonSerializer.Serialize(root)}\nbuildDir = " +
@@ -1876,13 +2449,17 @@ partial class Program : IDisposable
     /// <summary>
     /// The certified library a package that outlives this process may require by path: the machine's cache
     /// entry, built and published first when absent, or a supplied library, either one with every file hashed
-    /// against its manifest. Never a directory a process deletes.
+    /// against its manifest. No process deletes a supplied library, and a cache entry stays while a package
+    /// that pinned it still requires it.
     /// </summary>
     static string EditorLibrary()
     {
         if (editorLibraryDirectory is not null) return editorLibraryDirectory;
         using var verification = new Program { editorLibrary = true };
         verification.Library(Inputs(At("CIL.lean")));
+        // This process runs Lake against the entry for as long as it lives, so the locks outlive this instance.
+        editorLibraryUses.AddRange(verification.entryUses);
+        verification.entryUses.Clear();
         // A cache entry was hashed when it was opened; a supplied library is not, and Lake may write into either.
         if (!verification.ownsLibrary && verification.libraryBuild == "certified-artifact" &&
             (ReadManifest(verification.library!) is not { } manifest ||
@@ -1898,6 +2475,9 @@ partial class Program : IDisposable
 
     /// <summary>The directory <see cref="EditorLibrary"/> resolved, once per process.</summary>
     static string? editorLibraryDirectory;
+
+    /// <summary>The use locks of the entry <see cref="EditorLibrary"/> resolved, held until the process ends.</summary>
+    static readonly List<FileStream> editorLibraryUses = [];
 
     /// <summary>
     /// Runs `build` in a package that requires the certified library at `library` by path, and fails unless
@@ -1916,9 +2496,9 @@ partial class Program : IDisposable
 
     /// <summary>The lakefile requirement of a package below owner on the certified framework.</summary>
     // Relative, so equal sessions have equal configurations wherever their directories are.
-    static string FrameworkRequirement(string owner, string certified) =>
-        "\n[[require]]\nname = \"leancil\"\npath = " +
-        JsonSerializer.Serialize(Path.GetRelativePath(owner, FrameworkPackage(owner, certified)).Replace('\\', '/')) + "\n";
+    static string FrameworkRequirement(string owner, string certified, bool pin = false) =>
+        "\n[[require]]\nname = \"leancil\"\npath = " + JsonSerializer.Serialize(
+            Path.GetRelativePath(owner, FrameworkPackage(owner, certified, pin: pin)).Replace('\\', '/')) + "\n";
 
     /// <summary>Declarations of every library in a lakefile except the framework's CIL and editor libraries.</summary>
     static string LibraryDeclarations(string lakefile) => string.Concat(
@@ -3614,7 +4194,7 @@ partial class Program : IDisposable
             Directory.Delete(session, true);
         if (ownsLibrary && library is not null && Directory.Exists(library))
             Directory.Delete(library, true);
-        closureUse?.Dispose();
+        foreach (var use in entryUses) use.Dispose();
     }
 
     /// <summary>

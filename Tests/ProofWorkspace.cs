@@ -132,6 +132,23 @@ if (!created.Contains("Editor checking is not a certificate", StringComparison.O
     !created.Contains("replace it with import Extracted." + key, StringComparison.Ordinal) || unkeyed.Code == 0)
     throw new InvalidOperationException("A proof importing plain Extracted resolved or got no advice: " + created +
         "\n" + unkeyed.Output);
+// A package that outlives the command keeps the cache entry it requires from removal by a pin beside the entry.
+// A library supplied from outside the cache is never removed, so it gets no pin.
+void RequirePinned(string owner)
+{
+    var frameworkPackage = Path.GetFullPath(Path.Combine(owner, ".lake", "leancil-framework"));
+    var required = Regex.Match(File.ReadAllText(Path.Combine(frameworkPackage, "lakefile.toml")),
+        "^srcDir = \"([^\"]+)\"$", RegexOptions.Multiline).Groups[1].Value;
+    var pins = Directory.EnumerateFiles(Path.GetDirectoryName(required)!, Path.GetFileName(required) + ".pin-*")
+        .Select(File.ReadAllText).ToArray();
+    var cached = KeyName().IsMatch(Path.GetFileName(required)) &&
+        SamePath(Path.GetDirectoryName(required)!, LibraryCacheRoot);
+    if (cached && !pins.Contains(frameworkPackage))
+        throw new InvalidOperationException("No pin beside " + required + " names the package " + frameworkPackage);
+    if (!cached && pins.Length != 0)
+        throw new InvalidOperationException("A library outside the cache was pinned: " + required);
+}
+RequirePinned(package);
 var helper = Path.Combine(package, "Client", "Support.lean");
 File.WriteAllText(helper, $"""
 import Extracted.{key}
@@ -453,6 +470,7 @@ try
         packageFiles.Sum(path => new FileInfo(path).Length) > largestScratchPackage)
         throw new InvalidOperationException("A standalone package holds framework sources or a framework build " +
             "instead of requiring the certified library at " + certified);
+    RequirePinned(standalone);
     // Lake rebuilds a required module it finds stale in place; a certified library is never written.
     var certifiedFiles = CacheFiles(certified);
     var certifiedStamps = FileStamps(certified);
