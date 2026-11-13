@@ -641,10 +641,16 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         /// </summary>
         internal void Canonicalize()
         {
+            // By content, not by image order: the image orders its heaps by a hash or a suffix sort, so one
+            // changed name can move the position of every other entry.
             Dictionary<int, int> Numbering(SortedDictionary<int, byte[]> heap)
             {
                 var next = 1;
-                return heap.Keys.ToDictionary(key => key, key => key == 0 ? 0 : next++);
+                var numbers = new Dictionary<int, int> { [0] = 0 };
+                foreach (var entry in heap.Where(entry => entry.Key != 0)
+                             .OrderBy(entry => Convert.ToHexString(entry.Value), StringComparer.Ordinal))
+                    numbers[entry.Key] = next++;
+                return numbers;
             }
             var textNumbers = Numbering(strings);
             var blobNumbers = Numbering(blobs);
