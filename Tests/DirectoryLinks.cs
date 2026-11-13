@@ -12,7 +12,9 @@ partial class Program
         // A junction needs no privilege.
         using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe",
             $"/c mklink /J \"{link}\" \"{target}\"")
-        { CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false })!;
+        {
+            CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false
+        })!;
         mklink.StandardOutput.ReadToEnd();
         mklink.StandardError.ReadToEnd();
         mklink.WaitForExit();

@@ -780,10 +780,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var certified = library is null ? null : CertifiedModuleDirectory(library);
         var resolvedCertified = certified is null ? null : ResolvedPath(certified);
         return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => Path.GetFullPath(path, session)).Select(path => (Spelled: path, Resolved: ResolvedPath(path)))
+            .Select(path => Path.GetFullPath(path, session))
+            .Select(path => (Spelled: path, Resolved: ResolvedPath(path)))
             .Where(path => !path.Resolved.Equals(trusted, comparison))
             // Keep the certified base in place; map other imports into the session, spelled as the session is.
-            .Select(path => path.Resolved.Equals(resolvedCertified, comparison) ? certified! : Within(session, path.Spelled))
+            .Select(path => path.Resolved.Equals(resolvedCertified, comparison)
+                ? certified! : Within(session, path.Spelled))
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray(), leanPath);
     }
 

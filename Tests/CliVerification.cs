@@ -590,7 +590,8 @@ if (outlineGoals.Code != 1 || outlineGoals.Stdout.Length != 0 || holes.Length !=
         outlineGoals.Output);
 if (!refusalStages.Any(ReplaysOrAudits) || goalsStages.Any(ReplaysOrAudits))
     throw new InvalidOperationException("verify --goals did not end at the proof check. After it, verify --goals " +
-        $"ran [{string.Join("; ", goalsStages)}] and the refused verification ran [{string.Join("; ", refusalStages)}].");
+        $"ran [{string.Join("; ", goalsStages)}] and the refused verification ran " +
+        $"[{string.Join("; ", refusalStages)}].");
 var outlineGoalsJson = JsonNode.Parse(Exited(Execute([.. cli, "verify", outlined, "--proof", addOutline, "--goals",
     "--format", "json"]), 1).Stdout) as JsonObject;
 var jsonGoals = outlineGoalsJson?["goals"]?.AsArray();

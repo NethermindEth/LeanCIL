@@ -476,7 +476,8 @@ partial class Program : IDisposable
                 if (++links > MaximumPathLinks)
                     throw new InvalidDataException($"Path expands through more than {MaximumPathLinks} links: {path}");
                 var targetRoot = Path.GetPathRoot(target);
-                if (!string.IsNullOrEmpty(targetRoot)) resolved = Path.GetPathRoot(Path.GetFullPath(targetRoot, resolved))!;
+                if (!string.IsNullOrEmpty(targetRoot))
+                    resolved = Path.GetPathRoot(Path.GetFullPath(targetRoot, resolved))!;
                 foreach (var part in target[(targetRoot?.Length ?? 0)..]
                     .Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse())
                     pending.Push(part);

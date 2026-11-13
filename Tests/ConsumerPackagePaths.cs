@@ -43,7 +43,8 @@ partial class Program
             Require(Within(linkedPackage, Path.GetRelativePath(linkedPackage, built)) == linkedBuilt &&
                 Within(linkedPackage, built) == linkedBuilt && Within(package, linkedBuilt) == built,
                 "A package reached through a directory link rejected or respelled its own directory.");
-            Require(ResolvedRelativePath(linkedPackage, built) == Path.Combine(".lake", "packages", "generated", "lib"),
+            var builtRelative = Path.Combine(".lake", "packages", "generated", "lib");
+            Require(ResolvedRelativePath(linkedPackage, built) == builtRelative,
                 "A directory reached through a link was not found inside its package.");
             Reject(linkedPackage, Path.GetRelativePath(linkedPackage, outside), "..");
             Reject(linkedPackage, Path.Combine(link, "..", "outside"), "an absolute path");
@@ -63,7 +64,7 @@ partial class Program
                 throw new Exception("An audited module elsewhere was taken for the checked one.");
             }
             catch (InvalidDataException) { }
-            Console.WriteLine("PASS an audited module reached through a link is the checked file, and a shadow is not");
+            Console.WriteLine("PASS an audited module reached through a link is the checked file; a shadow is not");
 
             var escape = Path.Combine(package, "escape");
             Require(TryLinkDirectory(escape, outside), "Could not link a package directory outside the package.");
