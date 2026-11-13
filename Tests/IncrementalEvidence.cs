@@ -18,7 +18,8 @@ string Build(string name, string method, string body)
     if (Directory.Exists(source)) Directory.Delete(source, true);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Incremental.csproj"), """
-        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>
+        <Optimize>true</Optimize></PropertyGroup></Project>
         """);
     File.WriteAllText(Path.Combine(source, "Arith.cs"), $$"""
         namespace Workspace;
@@ -80,7 +81,8 @@ string Component(string text, int method, string name)
     // A closed instantiation of a generic method shares its open definition's slice, which another component holds.
     var ownSlice = lines.Any(line => line.Contains($"metadata := method{method}Metadata,", StringComparison.Ordinal));
     foreach (var required in (ownSlice
-        ? new[] { $"def method{method}Metadata :", $"def method{method}Tables :", $"theorem method{method}_tables_valid :" }
+        ? new[] { $"def method{method}Metadata :", $"def method{method}Tables :",
+            $"theorem method{method}_tables_valid :" }
         : []).Concat([$"def method{method}Body :", $"theorem method{method}_body_validated :"]))
         if (!lines.Any(line => line.StartsWith(required, StringComparison.Ordinal)))
             throw new InvalidOperationException($"No `{required}` in the component of method {method}: {name}");
@@ -114,7 +116,8 @@ if (helperA.Length == 0 || helperA != helperB)
 if (Component(entryA, int.Parse(helperA), "EntryA") != Component(entryB, int.Parse(helperB), "EntryB"))
     throw new InvalidOperationException(
         "The helper's component differs between two extractions that share it: its evidence depends on the entry.");
-Console.WriteLine("PASS a helper's metadata, tables, body and validity theorems are identical in two extractions that share it");
+Console.WriteLine("PASS a helper's metadata, tables, body and validity theorems are identical in two " +
+    "extractions that share it");
 
 // A generic helper closed twice: the second instantiation names the first one's metadata, which is a function of the
 // open definition and the assembly, so both components are the same in two extractions that hold the same helper.
@@ -129,12 +132,16 @@ string Instantiation(string text, string argument, string name)
     if (index.Length == 0) throw new InvalidOperationException($"No Size<{argument}> in {name}.");
     return Regex.Replace(Component(text, int.Parse(index), name), "method" + index + "(?![0-9])", "method#");
 }
-var (uintIndexA, uintIndexB) = (Regex.Match(genericA, @"(?m)^def method(\d+)Signature[^\r\n]*Size\\u003CSystem.UInt32").Groups[1].Value,
-    Regex.Match(genericB, @"(?m)^def method(\d+)Signature[^\r\n]*Size\\u003CSystem.UInt32").Groups[1].Value);
+const string UIntSignature = @"(?m)^def method(\d+)Signature[^\r\n]*Size\\u003CSystem.UInt32";
+var (uintIndexA, uintIndexB) = (Regex.Match(genericA, UIntSignature).Groups[1].Value,
+    Regex.Match(genericB, UIntSignature).Groups[1].Value);
 if (uintIndexA == uintIndexB)
-    throw new InvalidOperationException("The two extractions close the helper in the same order; the case tests nothing.");
+    throw new InvalidOperationException(
+        "The two extractions close the helper in the same order; the case tests nothing.");
 foreach (var argument in new[] { "System.UInt32", "System.UInt64" })
     if (Instantiation(genericA, argument, "EntryGenericA") != Instantiation(genericB, argument, "EntryGenericB"))
         throw new InvalidOperationException(
-            $"The component of Size<{argument}> differs between two extractions that close the helper in another order.");
-Console.WriteLine("PASS a generic helper's instantiations have identical components in extractions that close it in opposite orders");
+            $"The component of Size<{argument}> differs between two extractions that close the helper " +
+            "in another order.");
+Console.WriteLine("PASS a generic helper's instantiations have identical components in extractions " +
+    "that close it in opposite orders");

@@ -202,7 +202,8 @@ double TokenCost(string name, string selector, int count, string distinctPattern
 }
 foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
 {
-    ("Strings", "Tokens::StringsFew(ulong)", "Tokens::StringsMany(ulong)", @"\(\d+, \.text ""[^""]*""\)", FewTokens, ManyTokens),
+    ("Strings", "Tokens::StringsFew(ulong)", "Tokens::StringsMany(ulong)",
+        @"\(\d+, \.text ""[^""]*""\)", FewTokens, ManyTokens),
     ("Fields", $"Tokens::FieldsFew(Tokens/Wide{FewTokens})", $"Tokens::FieldsMany(Tokens/Wide{ManyTokens})",
         @"\(\d+, \.field ", FewTokens, ManyTokens),
     ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", @"\(\d+, \.call ", FewCalls, ManyCalls)
@@ -228,9 +229,11 @@ int[] bulkSizes = [125, 500];
 int[] fieldCounts = [10, 200];
 var bodySource = Path.Combine(directory, "BodyAssembly");
 Directory.CreateDirectory(bodySource);
-File.WriteAllText(Path.Combine(bodySource, "Bodies.csproj"), File.ReadAllText(Path.Combine(tokenSource, "Tokens.csproj")));
+File.WriteAllText(Path.Combine(bodySource, "Bodies.csproj"),
+    File.ReadAllText(Path.Combine(tokenSource, "Tokens.csproj")));
 string Chain(int count) =>
-    $"public static ulong Chain{count}(ulong x) {{ " + Join(count, index => $"x = Chain{count}_{index}(x); ") + "return x; } " +
+    $"public static ulong Chain{count}(ulong x) {{ " +
+    Join(count, index => $"x = Chain{count}_{index}(x); ") + "return x; } " +
     Join(count, index => $"static ulong Chain{count}_{index}(ulong x) => x + {index + 1}UL; ");
 string Rows(int count) =>
     $"public static ulong Rows{count}(ulong x) {{ x = Small{count}(x); return Bulk{count}(x); }} " +
@@ -240,7 +243,8 @@ string Rows(int count) =>
 string Fields(int count) =>
     $"public sealed class Wide{count} {{ " + Join(count, index => $"public ulong F{index}; ") + "} " +
     $"public static ulong Read{count}(Wide{count} w) => w.F{count / 2}; ";
-File.WriteAllText(Path.Combine(bodySource, "Bodies.cs"), "public static class Bodies { public static void Use(string text) { } " +
+File.WriteAllText(Path.Combine(bodySource, "Bodies.cs"),
+    "public static class Bodies { public static void Use(string text) { } " +
     string.Concat(chainLengths.Select(Chain)) + string.Concat(bulkSizes.Select(Rows)) +
     string.Concat(fieldCounts.Select(Fields)) + "}");
 Run(["dotnet", "build", Path.Combine(bodySource, "Bodies.csproj"), "-c", "Release"]);
@@ -331,7 +335,8 @@ foreach (var (label, costs) in new[] { ("body", fieldBody), ("tables", fieldTabl
     if (growth > AllowedBodyGrowth * fieldRatio)
         throw new Exception(FormattableString.Invariant(
             $"The {label} check costs {growth:F2} times as much with {fieldCounts[1]} fields ") +
-            FormattableString.Invariant($"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth * fieldRatio:F1}."));
+            FormattableString.Invariant(
+                $"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth * fieldRatio:F1}."));
 }
 
 // `spelled?` reads a name's bytes in one pass, and `cil_kernel_rfl` equates the result with the name's literal:
@@ -361,6 +366,7 @@ for (var step = 1; step < spellingLengths.Length; step++)
         FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
     if (growth > AllowedSpellingGrowth * lengthRatio)
         throw new Exception(FormattableString.Invariant(
-            $"Spelling {spellingLengths[step]} bytes costs {growth:F2} times as much as {spellingLengths[step - 1]}; ") +
+            $"Spelling {spellingLengths[step]} bytes costs {growth:F2} times as much as ") +
+            FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
             FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
 }

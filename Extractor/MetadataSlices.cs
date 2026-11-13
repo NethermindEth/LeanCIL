@@ -211,13 +211,16 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             // Closing a slice can reach another module, so the list is read by index while it grows.
             for (var position = 0; position < slices.Count; position++) slices[position].Finish();
             foreach (var slice in slices) slice.Canonicalize();
-            return $"{{ own := {slices[0].Lean()}, others := [{string.Join(", ", slices.Skip(1).Select(slice => slice.Lean()))}] }}";
+            var others = string.Join(", ", slices.Skip(1).Select(slice => slice.Lean()));
+            return $"{{ own := {slices[0].Lean()}, others := [{others}] }}";
         }
 
         /// <summary>The pinned assembly index of each slice, in slice order.</summary>
         internal int[] Assemblies() => [.. slices.Select(slice => slice.AssemblyIndex())];
 
-        /// <summary>The lookup tables of each slice, in slice order; read after <see cref="Lean"/> has closed them.</summary>
+        /// <summary>
+        /// The lookup tables of each slice, in slice order; read after <see cref="Lean"/> has closed them.
+        /// </summary>
         internal string Tables() => "[" + string.Join(", ", slices.Select(slice => slice.Tables())) + "]";
     }
 
@@ -302,7 +305,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             }
 
             static InvalidDataException Unsupported(string form) =>
-                new($"Unsupported metadata signature: {form}. The metadata binding check reads neither this form nor its identity.");
+                new($"Unsupported metadata signature: {form}. " +
+                    "The metadata binding check reads neither this form nor its identity.");
 
             public int GetPrimitiveType(PrimitiveTypeCode typeCode) =>
                 typeCode == PrimitiveTypeCode.TypedReference ? throw Unsupported("typed reference") : 0;
@@ -389,7 +393,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 case 0x2B: MethodSpec(token); break;
                 case 0x70: UserString(RowOf(token)); break;
                 default:
-                    throw new InvalidDataException($"Unsupported metadata table of token 0x{token:X8} in {module.Name}.");
+                    throw new InvalidDataException(
+                        $"Unsupported metadata table of token 0x{token:X8} in {module.Name}.");
             }
         }
 
@@ -400,7 +405,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             if (reference.Flags != 0)
                 throw new InvalidDataException("Unsupported assembly reference flags 0x" +
                     ((int)reference.Flags).ToString("X", CultureInfo.InvariantCulture) + " on " +
-                    Reader.GetString(reference.Name) + ": a full public key or a retargetable reference has no kernel-checked identity.");
+                    Reader.GetString(reference.Name) +
+                    ": a full public key or a retargetable reference has no kernel-checked identity.");
             Text(reference.Name);
             Text(reference.Culture);
             Blob(reference.PublicKeyOrToken);
@@ -422,17 +428,21 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             var definition = typeReference.Resolve();
             if (definition is null)
                 throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
-            if (typeReference.Scope is AssemblyNameReference named && named.FullName != definition.Module.Assembly.Name.FullName)
+            var definedIn = definition.Module.Assembly.Name.FullName;
+            if (typeReference.Scope is AssemblyNameReference named && named.FullName != definedIn)
                 throw new InvalidDataException("Unsupported forwarded type: " + typeReference.FullName +
-                    " is defined in " + definition.Module.Assembly.Name.FullName + ", not in the assembly that names it.");
+                    " is defined in " + definedIn + ", not in the assembly that names it.");
             var target = collection.SliceOf(definition.Module);
             Link(0, token, target.PositionOf, definition.MetadataToken.ToUInt32());
             target.Token(definition.MetadataToken.ToUInt32());
         }
 
-        /// <summary>Whether a type is declared by a pinned module: a module-scoped type of the untouched copy counts.</summary>
+        /// <summary>
+        /// Whether a type is declared by a pinned module: a module-scoped type of the untouched copy counts.
+        /// </summary>
         bool IsPinned(TypeReference type) => type.Scope is ModuleDefinition scope
-            ? collection.Pinned.Contains(collection.Pinned.Working(scope)) : collection.Pinned.ModuleOf(type) is not null;
+            ? collection.Pinned.Contains(collection.Pinned.Working(scope))
+            : collection.Pinned.ModuleOf(type) is not null;
 
         bool Extends(SrmTypeDefinition definition, string name)
         {
@@ -482,7 +492,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Token(TokenOf(declaring));
         }
 
-        /// <summary>The base classes of a class definition, with their field rows, through any slice they live in.</summary>
+        /// <summary>
+        /// The base classes of a class definition, with their field rows, through any slice they live in.
+        /// </summary>
         void Chain(SrmTypeDefinition definition)
         {
             if (!IsClass(definition) || definition.BaseType.IsNil) return;
@@ -543,7 +555,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Signature(member.Signature, member.GetKind() == MemberReferenceKind.Field ? Form.Field : Form.Method, true);
             Token(TokenOf(member.Parent));
             var reference = (MemberReference)module.LookupToken(new MetadataToken(token));
-            var declaring = reference.DeclaringType is GenericInstanceType generic ? generic.ElementType : reference.DeclaringType;
+            var declaring = reference.DeclaringType is GenericInstanceType generic
+                ? generic.ElementType : reference.DeclaringType;
             if (!IsPinned(declaring)) return;
             (ModuleDefinition definingModule, uint definitionToken) = reference switch
             {
@@ -711,7 +724,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             RequireRanked(blobs, "#Blob");
         }
 
-        /// <summary>The emitted numbering is the rank by bytes; a change back to the image's order stops here.</summary>
+        /// <summary>
+        /// The emitted numbering is the rank by bytes; a change back to the image's order stops here.
+        /// </summary>
         static void RequireRanked(SortedDictionary<int, byte[]> heap, string name)
         {
             var rank = 1;
@@ -720,7 +735,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             {
                 var hex = Convert.ToHexString(value);
                 if (key != rank++ || previous is not null && string.CompareOrdinal(previous, hex) > 0)
-                    throw new InvalidDataException($"The carried {name} entries are not numbered by their rank in bytes.");
+                    throw new InvalidDataException(
+                        $"The carried {name} entries are not numbered by their rank in bytes.");
                 previous = hex;
             }
         }
@@ -737,7 +753,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         internal string Lean()
         {
             var assembly = $"assembly{AssemblyIndex()}Metadata";
-            var linkList = string.Join(", ", SortedLinks().Select(link => $"⟨{link.Kind}, {link.Source}, {link.Slice}, {link.Target}⟩"));
+            var linkList = string.Join(", ", SortedLinks().Select(link =>
+                $"⟨{link.Kind}, {link.Source}, {link.Slice}, {link.Target}⟩"));
             return $"{{ assembly := {assembly}, rows := {Entries(rows)}, strings := {Entries(strings)}, " +
                 $"blobs := {Entries(blobs)}, userStrings := {Entries(userStrings)}, corlib := {corlib}, " +
                 $"links := [{linkList}] }}";
@@ -757,7 +774,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 if (count == 0) return ".leaf";
                 var left = count / 2;
                 var root = entries[start + left];
-                return $"(.node {Build(start, left)} {root.Key} {root.Value} {Build(start + left + 1, count - 1 - left)})";
+                var right = Build(start + left + 1, count - 1 - left);
+                return $"(.node {Build(start, left)} {root.Key} {root.Value} {right})";
             }
             return Build(0, entries.Count);
         }
@@ -799,7 +817,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             return (Tree(before), Tree(total));
         }
 
-        /// <summary>The Lean <c>IndexTables</c> of this slice, equal to what the decoder builds from its bytes.</summary>
+        /// <summary>
+        /// The Lean <c>IndexTables</c> of this slice, equal to what the decoder builds from its bytes.
+        /// </summary>
         internal string Tables()
         {
             var (before, total) = FieldCounts();

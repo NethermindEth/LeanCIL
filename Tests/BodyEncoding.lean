@@ -9,8 +9,8 @@ it, since `MethodEvidenceValid` checks both. `encodeBody` writes the bytes of a 
 operands carry no token and the metadata slice its definition and locals are checked against,
 `realizeOffsets` gives its instructions the byte offsets those bytes imply, and `withBody`
 applies both to a `MethodEvidence`. The encoder serves tests only: nothing trusts it, because the
-decoder re-reads every byte it writes. It is irreducible: the elaborator would evaluate the state builder by name,
-unsharing its states exponentially, so only `decide +kernel` evaluates it.
+decoder re-reads every byte it writes. It is irreducible: the elaborator would evaluate the state
+builder by name, unsharing its states exponentially, so only `decide +kernel` evaluates it.
 
 The encoder handles integer, native integer, `string` and `object` types, references, pointers,
 vectors and generic parameters; any other type, a token operand or a float constant gives `none`.
@@ -131,8 +131,8 @@ def ownerName (identity owner : List Nat) : Option (List Nat) :=
   else none
 
 /-- The metadata of one method in an assembly of the given pin: `System.Runtime` for the primitive
-    types, the owner class `Fixture`-style, the method itself and its locals. The result is the slice
-    and the token of the locals signature, or 0. -/
+    types, the owner class `Fixture`-style, the method itself and its locals. The result is the
+    slice and the token of the locals signature, or 0. -/
 def methodMetadata (pin : AssemblyPin) (method : RawMethod) : Option (MetadataSlice × Nat) := do
   let identity := bytesOf pin.identity
   let typeName ← ownerName identity (bytesOf method.owner)

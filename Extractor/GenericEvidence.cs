@@ -410,7 +410,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         foreach (var (module, index) in Pinned.Modules.Select((module, index) => (module, index)))
         {
             var identity = Pinned.Original(module).Assembly.Name.FullName;
-            lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := {slices.AssemblyBlock(module)}");
+            lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := " +
+                slices.AssemblyBlock(module));
             lean.AppendLine($"def assembly{index}Identity : List Nat := " +
                 MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(identity)));
             // The assembly's bytes spell this identity, and it is the string the block states: one proof for

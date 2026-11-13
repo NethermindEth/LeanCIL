@@ -21,8 +21,8 @@ private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
 private def scope : AssemblyPin :=
   { identity := "Scope, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
 private def raw (code : List RawInstruction) (parameters : List TypeExpr := [word, word]) : RawMethod := {
-  token := 0x06000001, owner := scope.identity ++ "::Fixture", hasThis := false, explicitThis := false,
-  callingConvention := 0, attributes := 0, implementation := 0,
+  token := 0x06000001, owner := scope.identity ++ "::Fixture", hasThis := false,
+  explicitThis := false, callingConvention := 0, attributes := 0, implementation := 0,
   returnType := word, parameters, locals := [], initLocals := true, maxStack := 2,
   genericParameters := [], code }
 private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, []⟩
@@ -129,7 +129,8 @@ private def addEvidence : MethodEvidence := withBody {
 private def addMethod : Method := { locals := [], returnsValue := true, code := addCode }
 
 example : TranslationValid [] #[] [addEvidence] [] [addMethod] := by decide +kernel
-example : ¬ TranslationValid [] #[] [addEvidence] [] [{ addMethod with code := addCode.set 2 .sub }] := by decide +kernel
+example : ¬ TranslationValid [] #[] [addEvidence] []
+    [{ addMethod with code := addCode.set 2 .sub }] := by decide +kernel
 example : ¬ TranslationValid [] #[] [{ addEvidence with scalarStates := addStates.set 2 (some [.native, .word32]) }] []
     [{ addMethod with code := addCode.set 2 (.nativeBinary .add) }] := by decide +kernel
 example : ¬ ScalarFlowValid #[] { addRaw with maxStack := 1 } addFeatures addStates addCode := by decide
@@ -148,9 +149,11 @@ private def arithmeticFlagCases : List (Nat × Instruction) := [
   (216, .checkedArithmetic .mul true), (217, .checkedArithmetic .mul false),
   (218, .checkedArithmetic .sub true), (219, .checkedArithmetic .sub false)]
 example : arithmeticFlagCases.all (fun (opcode, operation) =>
-    decide (TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by decide +kernel
+    decide (TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by
+  decide +kernel
 example : arithmeticFlagMutations.all (fun (opcode, operation) =>
-    decide (¬ TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by decide +kernel
+    decide (¬ TranslationValid [] #[] [binaryEvidence opcode] []
+      [binaryMethod operation])) = true := by decide +kernel
 
 private def literalRaw := raw [i 33 (.integer (-9223372036854775808)), i 42] []
 private def literalFeatures : FeatureCertificate := [unknown 0, unknown 1]
@@ -174,9 +177,11 @@ private def convertEvidence : MethodEvidence := withBody {
 private def convertMethod : Method := { locals := [], returnsValue := true, code := [.arg 0, .checkedConvert 64 true true, .ret] }
 example : TranslationValid [] #[] [convertEvidence] [] [convertMethod] := by decide +kernel
 example : ¬ TranslationValid [] #[] [convertEvidence] []
-    [{ convertMethod with code := [.arg 0, .checkedConvert 64 false true, .ret] }] := by decide +kernel
+    [{ convertMethod with code := [.arg 0, .checkedConvert 64 false true, .ret] }] := by
+  decide +kernel
 example : ¬ TranslationValid [] #[] [convertEvidence] []
-    [{ convertMethod with code := [.arg 0, .checkedConvert 64 true false, .ret] }] := by decide +kernel
+    [{ convertMethod with code := [.arg 0, .checkedConvert 64 true false, .ret] }] := by
+  decide +kernel
 example : ¬ TranslationValid [] #[] [convertEvidence] []
     [{ convertMethod with code := [.arg 0, .convI8, .ret] }] := by decide +kernel
 
@@ -254,7 +259,8 @@ example : ¬ ScalarFlowValid #[] { mixedRaw with parameters := [nativeType, word
 
 private def site : CallSite := {
   declaringType := .atom scope.identity "Fixture",
-  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := word, parameterTypes := [word, word] }
+  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
+  returnsValue := true, returnType := word, parameterTypes := [word, word] }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call { site with returnType := intType })) true (.call 0 2) = false := by decide
 example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] [] (i 40 (.call site)) true (.call 0 2) = false := by decide
@@ -519,7 +525,8 @@ example : ¬ ScalarFlowValid #[] { loopRaw with code := [i 22, i 0, i 43 (.targe
 
 -- Defaulted signature fields are accepted only where they are the true signature.
 private def unsignedSite : CallSite := {
-  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true }
+  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
+  returnsValue := true }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
 /-- External unsigned signatures retain their exact parameter and return metadata. -/

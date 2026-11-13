@@ -49,7 +49,8 @@ void Blob(BlobHandle handle)
     var offset = reader.GetHeapOffset(handle);
     var start = reader.GetHeapMetadataOffset(HeapIndex.Blob) + offset;
     var first = meta[start];
-    var (header, length) = first < 0x80 ? (1, (int)first) : first < 0xC0 ? (2, ((first & 0x3F) << 8) | meta[start + 1]) :
+    var (header, length) = first < 0x80 ? (1, (int)first)
+        : first < 0xC0 ? (2, ((first & 0x3F) << 8) | meta[start + 1]) :
         (4, ((first & 0x1F) << 24) | (meta[start + 1] << 16) | (meta[start + 2] << 8) | meta[start + 3]);
     blobs[offset] = meta.AsSpan(start, header + length).ToArray();
 }
@@ -90,7 +91,8 @@ foreach (var handle in reader.MemberReferences)
     var token = MetadataTokens.GetToken(handle);
     if (module.LookupToken(token) is not MethodReference method) continue;
     var owner = method.DeclaringType;
-    // The extractor spells owners and signatures that mention generic parameters by position; only closed ones are compared.
+    // The extractor spells owners and signatures that mention generic parameters by position; only closed
+    // ones are compared.
     if (owner.ContainsGenericParameter || method.ReturnType.ContainsGenericParameter ||
         method.Parameters.Any(parameter => parameter.ParameterType.ContainsGenericParameter) ||
         method.FullName.Contains("modreq", StringComparison.Ordinal) ||
@@ -119,7 +121,8 @@ var lean = $$"""
     open CIL CIL.Extraction
 
     def slice : MetadataSlice :=
-      { assembly := { identity := {{JsonSerializer.Serialize(module.Assembly.Name.FullName)}}, tableHeader := {{Bytes(header)}},
+      { assembly := { identity := {{JsonSerializer.Serialize(module.Assembly.Name.FullName)}},
+        tableHeader := {{Bytes(header)}},
           assemblyRow := {{Bytes(assemblyRow)}}, strings := {{Entries(strings)}}, blobs := {{Entries(blobs)}} },
         rows := {{Entries(rows)}}, strings := {{Entries(strings)}}, blobs := {{Entries(blobs)}}, corlib := {{corlib}} }
 
@@ -143,7 +146,8 @@ var lean = $$"""
     """;
 var path = Path.Combine(output, name + ".lean");
 File.WriteAllText(path, lean.ReplaceLineEndings("\n"));
-Console.WriteLine($"{name}: {expected.Count} method references compared with Cecil, {skipped} open or modified ones skipped");
+Console.WriteLine($"{name}: {expected.Count} method references compared with Cecil, " +
+    $"{skipped} open or modified ones skipped");
 Run(["lake", "env", "lean", path], cwd: FixturePackage());
 Console.WriteLine($"PASS Lean spells every compared method reference of {name} as Cecil does");
 
