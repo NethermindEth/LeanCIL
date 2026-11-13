@@ -63,7 +63,28 @@ def assembly0Identity : List Nat :=
    44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61, 110, 117, 108, 108]
 
 theorem assembly0_identified : AssemblyIdentified assembly0Metadata assembly0Identity :=
-  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+
+/-- `assembly0Metadata` stating a header with one `TypeDef` row more than its bytes give. -/
+def miscountedAssembly : AssemblyMetadata :=
+  let counts := assembly0Metadata.header.rowCounts.map fun (table, count) =>
+    (table, if table == Table.typeDef then count + 1 else count)
+  { assembly0Metadata with
+    header := TableHeader.ofCounts assembly0Metadata.header.heapSizes counts }
+
+/-- `Add`'s slice of `miscountedAssembly`. -/
+def miscountedSlice : MetadataSlice := { method0Metadata.own with assembly := miscountedAssembly }
+
+/-- A stated header its bytes do not decode to is refused: the assembly is not identified with
+    it, and a slice of it has no index. -/
+theorem refuses_a_header_its_bytes_do_not_give :
+    (decodeTableHeader miscountedAssembly.tableHeader).toOption ≠
+        some miscountedAssembly.header ∧
+      (match miscountedSlice.index with
+        | .error .malformedTableHeader => true
+        | _ => false) = true := by
+  decide +kernel
+#print axioms refuses_a_header_its_bytes_do_not_give
 
 /-- The owner name and the full name the metadata gives `Add`, as bytes. -/
 def method0Names : Extraction.MethodNames :=

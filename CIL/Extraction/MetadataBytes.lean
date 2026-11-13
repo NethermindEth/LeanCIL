@@ -1,4 +1,3 @@
-import Std.Data.TreeMap
 import CIL.Extraction.KernelEquation
 
 /-!
@@ -19,67 +18,6 @@ namespace CIL.Extraction
 
 /-- A heap entry or table row: its key (a heap offset, or a token) and its bytes. -/
 abbrev ByteEntry := Nat × List Nat
-
-/-- The metadata an assembly's own identity is read from, shared by every method of the
-    assembly: its table stream header, its `Assembly` row and the heap entries the row names. -/
-structure AssemblyMetadata where
-  /-- The pin identity the bytes must spell, with the public key token as the pin writes it. -/
-  identity : String := ""
-  /-- The public key token the pin writes, as sixteen lowercase hexadecimal digits, when the
-      `Assembly` row has a public key; empty otherwise. -/
-  keyToken : List Nat := []
-  /-- The table stream bytes from the version fields through the last row count. -/
-  tableHeader : List Nat := []
-  /-- Row 1 of the `Assembly` table. -/
-  assemblyRow : List Nat := []
-  strings : List ByteEntry := []
-  blobs : List ByteEntry := []
-  deriving DecidableEq, Repr
-
-/-- A fact the extractor states about a token of a slice, which the checker verifies against
-    the carried rows: `kind` says what `target` is, in the slice with index `slice`. -/
-structure MetadataLink where
-  kind : Nat
-  source : Nat
-  slice : Nat
-  target : Nat
-  deriving DecidableEq, Repr
-
-/-- A link names the definition a `TypeRef` or `MemberRef` token resolves to. -/
-def linkDefinition : Nat := 0
-
-/-- A link names the `TypeDef` that declares a `Field` or `MethodDef` token. -/
-def linkDeclaring : Nat := 1
-
-/-- A link names the `NestedClass` row of a nested `TypeDef` token. -/
-def linkNesting : Nat := 2
-
-/-- A link names the first `GenericParam` row of a `TypeDef` or `MethodDef` token. -/
-def linkGenericParams : Nat := 3
-
-/-- The rows and heap entries one method's tokens, definition and locals reach in one
-    assembly, with the links that locate definitions among them. -/
-structure MetadataSlice where
-  assembly : AssemblyMetadata := {}
-  /-- Table rows keyed by token: the table number times `2 ^ 24` plus the row number. -/
-  rows : List ByteEntry := []
-  /-- `#Strings` entries keyed by offset, through the terminating zero. -/
-  strings : List ByteEntry := []
-  /-- `#Blob` entries keyed by offset, including the compressed length. -/
-  blobs : List ByteEntry := []
-  /-- `#US` entries keyed by offset, including the length and the terminal byte. -/
-  userStrings : List ByteEntry := []
-  /-- The `AssemblyRef` row of the assembly that defines the primitive types, or 0. -/
-  corlib : Nat := 0
-  links : List MetadataLink := []
-  deriving DecidableEq, Repr
-
-/-- The metadata of one method body: the slice of its own assembly, which comes first, and the
-    slices of the other pinned assemblies its tokens resolve into. -/
-structure MethodMetadata where
-  own : MetadataSlice := {}
-  others : List MetadataSlice := []
-  deriving DecidableEq, Repr
 
 /-- Why metadata bytes, or a claim about them, are refused. -/
 inductive MetadataError where
@@ -215,12 +153,14 @@ structure ColumnWidths where
     column widths they imply. -/
 structure TableHeader where
   heapSizes : Nat
-  rowCounts : Std.TreeMap Nat Nat compare
+  /-- The table number and row count of each present table, in table order. -/
+  rowCounts : List (Nat × Nat)
   widths : ColumnWidths
+  deriving DecidableEq, Repr
 
 /-- The row count of a table; an absent table has none. -/
 def TableHeader.rows (header : TableHeader) (table : Nat) : Nat :=
-  (header.rowCounts[table]?).getD 0
+  (header.rowCounts.lookup table).getD 0
 
 /-- The tables whose presence makes the header unsupported: the pointer tables of an
     uncompressed stream and the edit-and-continue tables. -/
@@ -262,10 +202,10 @@ private def readRowCounts (valid : Nat) :
       | none => .error .malformedTableHeader
     else readRowCounts valid fuel (table + 1) bytes
 
-/-- Insert the row counts of a header into a map. -/
-private def countMap : List (Nat × Nat) → Std.TreeMap Nat Nat compare → Std.TreeMap Nat Nat compare
-  | [], map => map
-  | (table, count) :: rest, map => countMap rest (map.insert table count)
+/-- The header with these heap sizes and present tables' row counts, and the widths they fix. -/
+def TableHeader.ofCounts (heapSizes : Nat) (rowCounts : List (Nat × Nat)) : TableHeader :=
+  { heapSizes := heapSizes, rowCounts := rowCounts,
+    widths := columnWidthsOf heapSizes fun table => (rowCounts.lookup table).getD 0 }
 
 /-- The number of tables in a 64-bit validity mask. -/
 private def tableSlots : Nat := 64
@@ -291,10 +231,72 @@ def decodeTableHeader (bytes : List Nat) : Except MetadataError TableHeader :=
         .error (.unsupportedTableStream 0x100)
       else do
         let present ← readRowCounts valid tableSlots 0 (bytes.drop tableHeaderFixedSize)
-        let rowCounts := countMap present ∅
-        .ok { heapSizes := heapSizes, rowCounts := rowCounts,
-              widths := columnWidthsOf heapSizes fun table => (rowCounts[table]?).getD 0 }
+        .ok (TableHeader.ofCounts heapSizes present)
     | none => .error .malformedTableHeader
+
+/-- The metadata an assembly's own identity is read from, shared by every method of the
+    assembly: its table stream header, its `Assembly` row and the heap entries the row names. -/
+structure AssemblyMetadata where
+  /-- The pin identity the bytes must spell, with the public key token as the pin writes it. -/
+  identity : String := ""
+  /-- The public key token the pin writes, as sixteen lowercase hexadecimal digits, when the
+      `Assembly` row has a public key; empty otherwise. -/
+  keyToken : List Nat := []
+  /-- The table stream bytes from the version fields through the last row count. -/
+  tableHeader : List Nat := []
+  /-- The header `tableHeader` decodes to, which every method of the assembly reads its rows
+      by; `AssemblyIdentified` proves it once per assembly. -/
+  header : TableHeader := (decodeTableHeader tableHeader).toOption.getD (.ofCounts 0 [])
+  /-- Row 1 of the `Assembly` table. -/
+  assemblyRow : List Nat := []
+  strings : List ByteEntry := []
+  blobs : List ByteEntry := []
+  deriving DecidableEq, Repr
+
+/-- A fact the extractor states about a token of a slice, which the checker verifies against
+    the carried rows: `kind` says what `target` is, in the slice with index `slice`. -/
+structure MetadataLink where
+  kind : Nat
+  source : Nat
+  slice : Nat
+  target : Nat
+  deriving DecidableEq, Repr
+
+/-- A link names the definition a `TypeRef` or `MemberRef` token resolves to. -/
+def linkDefinition : Nat := 0
+
+/-- A link names the `TypeDef` that declares a `Field` or `MethodDef` token. -/
+def linkDeclaring : Nat := 1
+
+/-- A link names the `NestedClass` row of a nested `TypeDef` token. -/
+def linkNesting : Nat := 2
+
+/-- A link names the first `GenericParam` row of a `TypeDef` or `MethodDef` token. -/
+def linkGenericParams : Nat := 3
+
+/-- The rows and heap entries one method's tokens, definition and locals reach in one
+    assembly, with the links that locate definitions among them. -/
+structure MetadataSlice where
+  assembly : AssemblyMetadata := {}
+  /-- Table rows keyed by token: the table number times `2 ^ 24` plus the row number. -/
+  rows : List ByteEntry := []
+  /-- `#Strings` entries keyed by offset, through the terminating zero. -/
+  strings : List ByteEntry := []
+  /-- `#Blob` entries keyed by offset, including the compressed length. -/
+  blobs : List ByteEntry := []
+  /-- `#US` entries keyed by offset, including the length and the terminal byte. -/
+  userStrings : List ByteEntry := []
+  /-- The `AssemblyRef` row of the assembly that defines the primitive types, or 0. -/
+  corlib : Nat := 0
+  links : List MetadataLink := []
+  deriving DecidableEq, Repr
+
+/-- The metadata of one method body: the slice of its own assembly, which comes first, and the
+    slices of the other pinned assemblies its tokens resolve into. -/
+structure MethodMetadata where
+  own : MetadataSlice := {}
+  others : List MetadataSlice := []
+  deriving DecidableEq, Repr
 
 /-! ## Rows -/
 
@@ -792,7 +794,7 @@ def MetadataIndex.assemblyRefIdentity (index : MetadataIndex) (token : Nat) :
     with no key the identity says `null` and no token is stated. -/
 def AssemblyMetadata.spelling (assembly : AssemblyMetadata) :
     Except MetadataError (List Nat) := do
-  let header ← decodeTableHeader assembly.tableHeader
+  let header := assembly.header
   let strings ← indexEntries assembly.strings
   let blobs ← indexEntries assembly.blobs
   let widths ← match columnWidths header.widths Table.assembly with
@@ -815,12 +817,14 @@ def AssemblyMetadata.spelling (assembly : AssemblyMetadata) :
   .ok (assemblySpelling (← stringBytes strings name) major minor build revision
     (← stringBytes strings culture) spelled)
 
-/-- `identity` is the text the assembly's `Assembly` row spells, and it is the identity the
-    assembly states. It costs the same for every method of the assembly, so an extraction proves
-    it once and each method's evidence names the bytes. The second part is an equation between a
-    string and bytes, so it is proved with `cil_kernel_rfl` and never evaluates the string. -/
+/-- The assembly's header is what its table header bytes decode to, `identity` is the text its
+    `Assembly` row spells, and it is the identity the assembly states. It costs the same for
+    every method of the assembly, so an extraction proves it once and each method's evidence
+    names the bytes. The last part is an equation between a string and bytes, so it is proved
+    with `cil_kernel_rfl` and never evaluates the string. -/
 abbrev AssemblyIdentified (assembly : AssemblyMetadata) (identity : List Nat) : Prop :=
-  assembly.spelling.toOption = some identity ∧ spelled? identity = some assembly.identity
+  (decodeTableHeader assembly.tableHeader).toOption = some assembly.header ∧
+    assembly.spelling.toOption = some identity ∧ spelled? identity = some assembly.identity
 
 /-- The running instance field count before each of up to `count` consecutive `Field` rows from
     `row`, as far as the rows are carried, with the total and whether every row was carried. A
@@ -879,7 +883,7 @@ private def linkEntries : List MetadataLink → List (Nat × (Nat × Nat))
 /-- The lookup structures of a slice, built from its bytes: its entries as trees, and the instance
     field counts of its carried types. -/
 def MetadataSlice.tables (slice : MetadataSlice) : Except MetadataError IndexTables := do
-  let header ← decodeTableHeader slice.assembly.tableHeader
+  let header := slice.assembly.header
   let rows ← indexEntries slice.rows
   let strings ← indexEntries slice.strings
   let blobs ← indexEntries slice.blobs
@@ -899,16 +903,18 @@ def MetadataSlice.tables (slice : MetadataSlice) : Except MetadataError IndexTab
   .ok { bare with instanceBefore := before, instanceTotal := total }
 
 /-- The index of a slice given its tables and the identity its assembly spells, which an
-    `AssemblyIdentified` fact ties to the assembly's bytes and to the string it states. Cheap:
-    independent of the number of rows. -/
+    `AssemblyIdentified` fact ties, with the assembly's header, to the assembly's bytes and to
+    the string it states. Cheap: independent of the number of rows. -/
 def MetadataSlice.indexWith (slice : MetadataSlice) (tables : IndexTables)
-    (identity : List Nat) : Except MetadataError MetadataIndex := do
-  let header ← decodeTableHeader slice.assembly.tableHeader
-  .ok { toIndexTables := tables, header := header, corlib := slice.corlib, identity := identity }
+    (identity : List Nat) : Except MetadataError MetadataIndex :=
+  .ok { toIndexTables := tables, header := slice.assembly.header, corlib := slice.corlib,
+        identity := identity }
 
-/-- Build the index of a slice from its bytes alone, refusing an identity the `Assembly` row does
-    not spell as the assembly states it. -/
+/-- Build the index of a slice from its bytes alone, refusing a header the table header bytes do
+    not decode to and an identity the `Assembly` row does not spell as the assembly states it. -/
 def MetadataSlice.index (slice : MetadataSlice) : Except MetadataError MetadataIndex := do
+  if (← decodeTableHeader slice.assembly.tableHeader) != slice.assembly.header then
+    throw .malformedTableHeader
   let identity ← slice.assembly.spelling
   if spelled? identity != some slice.assembly.identity then throw .identityMismatch
   slice.indexWith (← slice.tables) identity

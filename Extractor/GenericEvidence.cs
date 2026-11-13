@@ -442,10 +442,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 slices.AssemblyBlock(module));
             lean.AppendLine($"def assembly{index}Identity : List Nat := " +
                 MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(identity)));
-            // The assembly's bytes spell this identity, and it is the string the block states: one proof for
-            // every method of the assembly.
+            // The assembly's header bytes decode to the stated header, its bytes spell this identity, and it is the
+            // string the block states: one proof for every method of the assembly.
             lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +
-                $"assembly{index}Metadata assembly{index}Identity := ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩");
+                $"assembly{index}Metadata assembly{index}Identity := " +
+                "⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩");
         }
         // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
         var pins = Pinned.Pins.ToArray();
