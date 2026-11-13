@@ -100,7 +100,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `callers` | caller proofs that survive reimplemented helpers through their contracts |
 | `construction` | caller proofs that survive reimplemented constructors through their contracts |
 | `outcomes` | outcome contracts that name exactly when each exception is thrown |
-| `scaling` | compositional certificate for a six-method call graph and its consumer replay |
+| `scaling` | compositional certificate for a six-method call graph and its consumer replay, and the header and per-method struct layout checks at a per-layout cost that does not grow with the table |
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates at a per-instruction cost that does not grow with the method |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |

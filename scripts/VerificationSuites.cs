@@ -123,7 +123,8 @@ internal static class VerificationSuites
             "outcome contracts that name exactly when each exception is thrown"),
         // Split from evidence: each fixture alone runs for minutes, so they take separate runners.
         new("scaling", "Tests/TranslationScaling.cs",
-            "compositional certificate for a six-method call graph and its consumer replay"),
+            "compositional certificate for a six-method call graph and its consumer replay, and the header and " +
+            "per-method struct layout checks at a per-layout cost that does not grow with the table"),
         new("excluded", "Tests/ExcludedBranchScaling.cs",
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",
