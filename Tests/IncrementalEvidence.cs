@@ -4,10 +4,12 @@
 
 using System.Text.RegularExpressions;
 
-// An edit to one method moves things in the image that other methods' evidence could pick up: a longer body moves
-// every later body, and a changed name moves heap entries, whose order the image fixes by a hash or a suffix sort.
-// The evidence of the other methods must not notice. The fixture has the shape of the workspace test, whose refresh
-// of only the edited method rests on this: a static class, a second one and a struct with a static constructor.
+// A method's evidence, its metadata slice, lookup tables, body and validity theorems, must be a function of the
+// method and its assemblies and of nothing else in the extraction or the image. An edit to one method moves things
+// in the image that another method's evidence could pick up (a longer body moves every later body, a changed name
+// moves heap entries, whose order the image fixes by a hash or a suffix sort), and extracting a different entry
+// method changes which other methods the extraction holds. The fixture has the shape of the workspace test, whose
+// refresh of only the edited method rests on this, with a helper that two entry methods share.
 var directory = At("artifacts/IncrementalEvidence");
 string Build(string name, string method, string body)
 {
@@ -32,6 +34,15 @@ string Build(string name, string method, string body)
             public static ulong Thrice(ulong x) => x + x + x;
         }
         """);
+    File.WriteAllText(Path.Combine(source, "Shared.cs"), """
+        namespace Workspace;
+        public static class Shared
+        {
+            public static ulong Helper(ulong x) => x * 7UL + 1UL;
+            public static ulong EntryA(ulong x) => Helper(x) + 1UL;
+            public static ulong EntryB(ulong x) => Helper(x) ^ 3UL;
+        }
+        """);
     File.WriteAllText(Path.Combine(source, "Wide.cs"), """
         namespace Workspace;
         public readonly struct Wide(ulong u0, ulong u1, ulong u2, ulong u3)
@@ -48,28 +59,50 @@ string Build(string name, string method, string body)
 var baseline = Build("Baseline", "Twice", "x + x");
 var longer = Build("Longer", "Twice", "x + x + x + x + x + x");
 var renamed = Build("Renamed", "Doubled", "x + x");
-string Evidence(string assembly, string selector, string name)
+
+string Extracted(string assembly, string selector, string name)
 {
     var output = Path.Combine(directory, name);
     Run([.. Extract("extract", assembly, "Incremental", selector, output), "--assume-initialized", "Workspace.Wide"]);
-    var text = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var lines = Regex.Matches(text, @"(?m)^(?:def (?:assembly|module)\d+(?:Metadata|Tables) |def method0Body ).*$")
-        .Select(match => match.Value).ToArray();
-    if (lines.Length != 4)
-        throw new InvalidOperationException("Expected the assembly and module metadata, tables and body: " + name);
+    return File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+}
+// The assembly block and every definition and theorem of one method's component.
+string Component(string text, int method, string name)
+{
+    var lines = Regex.Matches(text, @"(?m)^(?:def assembly\d+Metadata |(?:@\[[^\r\n]*\] )?(?:def|theorem) method" +
+            method + @"(?![0-9]))[^\n]*$").Select(match => match.Value.TrimEnd('\r')).ToArray();
+    foreach (var required in new[] { $"def method{method}Metadata :", $"def method{method}Tables :",
+        $"theorem method{method}_tables_valid :", $"def method{method}Body :", $"theorem method{method}_body_validated :" })
+        if (!lines.Any(line => line.StartsWith(required, StringComparison.Ordinal)))
+            throw new InvalidOperationException($"No `{required}` in the component of method {method}: {name}");
     if (Regex.IsMatch(string.Concat(lines), @"\brva\b"))
         throw new InvalidOperationException("Evidence holds a body address: " + name);
     return string.Join('\n', lines);
 }
+
 foreach (var (method, label) in new[] { ("Workspace.Third::Thrice(ulong)", "Thrice"),
     ("Workspace.Wide::get_IsZeroOrOne()", "Wide") })
 {
-    var expected = Evidence(baseline, method, "Baseline" + label);
-    if (expected != Evidence(longer, method, "Longer" + label))
+    var expected = Component(Extracted(baseline, method, "Baseline" + label), 0, label);
+    if (expected != Component(Extracted(longer, method, "Longer" + label), 0, label))
         throw new InvalidOperationException(
             $"Lengthening Twice changed the evidence of {label}: the incremental refresh would redo it.");
-    if (expected != Evidence(renamed, method, "Renamed" + label))
+    if (expected != Component(Extracted(renamed, method, "Renamed" + label), 0, label))
         throw new InvalidOperationException(
             $"Renaming Twice changed the evidence of {label}: the image's heap order must not reach the evidence.");
 }
-Console.WriteLine("PASS lengthening or renaming one method leaves the metadata, tables and body evidence of the other methods byte-identical");
+Console.WriteLine("PASS lengthening or renaming one method leaves the evidence of the other methods byte-identical");
+
+// Two entry methods that share a helper: the helper's whole component is the same in both extractions, so a
+// consumer that verified it once reuses it.
+var entryA = Extracted(baseline, "Workspace.Shared::EntryA(ulong)", "EntryA");
+var entryB = Extracted(baseline, "Workspace.Shared::EntryB(ulong)", "EntryB");
+string HelperIndex(string text) => Regex.Match(text,
+    @"(?m)^def method(\d+)Signature : String := ""[^""]*Shared::Helper\(").Groups[1].Value;
+var (helperA, helperB) = (HelperIndex(entryA), HelperIndex(entryB));
+if (helperA.Length == 0 || helperA != helperB)
+    throw new InvalidOperationException($"Expected the helper at one index in both extractions: {helperA} {helperB}");
+if (Component(entryA, int.Parse(helperA), "EntryA") != Component(entryB, int.Parse(helperB), "EntryB"))
+    throw new InvalidOperationException(
+        "The helper's component differs between two extractions that share it: its evidence depends on the entry.");
+Console.WriteLine("PASS a helper's metadata, tables, body and validity theorems are identical in two extractions that share it");

@@ -63,9 +63,9 @@ Only the kernel decides `BodyDecodes`: the elaborator's `decide` is refused at o
 Extractions prove it per method as `method{n}_body_validated`, whose `bodyMatches` part uses `cil_body_decodes`:
 it runs `decide +kernel` and, when the kernel refutes it, reports the method and either the error the check
 raised or the part of the decoded body that differs from the emitted definition. The kernel keeps nothing between
-declarations, so the lookup tables of the metadata are written out once as a literal (see below) and each
-method's check reads them by name: its cost is its own bytes and tokens times a logarithm of the rows, whatever
-the number of methods or rows of the extraction.
+declarations, so the lookup tables of the method's own metadata slice are written out as a literal (see below)
+and the method's check reads them by name: its cost is its own bytes and tokens times a logarithm of its slice,
+whatever the number of methods or rows of the extraction.
 
 In the default flow Lean does not establish that the emitted bytes are the method's body in the
 assembly image: System.Reflection.Metadata locates the body in the PE image, and the PE container
@@ -85,11 +85,13 @@ both.
 
 ### Metadata binding
 
-Each module's methods share one `module{k}Metadata`, a `MethodMetadata`
+Each method carries its own `method{n}Metadata`, a `MethodMetadata`
 ([MetadataBytes](../CIL/Extraction/MetadataBytes.lean)): the raw bytes of the table rows and heap
-entries that the tokens, definitions and locals of all the module's methods reach, emitted once per
-extraction, with one slice per assembly it reaches, and each pinned assembly has one small block with its
-table stream header and `Assembly` row. The `RVA` column of every carried `MethodDef` row is zero: where a
+entries that its own tokens, definition, signature and locals reach, with one slice per assembly it
+reaches. Each pinned assembly has one small block, `assembly{k}Metadata`, with its table stream header
+and `Assembly` row, a function of that assembly alone, so every extraction of it writes the same bytes.
+A method's evidence is a function of the method and its assemblies and of nothing else in the extraction,
+so a verified method's component is reused by every extraction that holds the method. The `RVA` column of every carried `MethodDef` row is zero: where a
 body sits in the image moves whenever an earlier body changes length, so no method's evidence may depend
 on it. The same holds for `#Strings` and `#Blob` offsets, which move when an earlier name changes length:
 the extractor renumbers them, in the rows and the heap keys, to the rank of each carried entry among the
@@ -103,10 +105,11 @@ fixes, decodes strings, blobs and user strings, and decodes the signature blobs
 check what the extractor states.
 
 Building the lookup trees of a slice costs its size, and the kernel keeps no cache between declarations. The
-extractor therefore writes them out once per module as the literal `module{k}Tables` (balanced search trees of the
-rows, heap entries, links and instance field counts), and `module{k}_tables_valid` states that `tablesMatch`: the
-decoder builds exactly that literal from `module{k}Metadata`. That decision costs the carried rows times a
-logarithm and is made once per extraction; each `method{n}_body_validated` uses it as a premise.
+extractor therefore writes them out as the literal `method{n}Tables` (balanced search trees of the rows, heap
+entries, links and instance field counts), and `method{n}_tables_valid` states that `tablesMatch`: the decoder
+builds exactly that literal from `method{n}Metadata`. That decision costs the method's carried rows times a
+logarithm; `method{n}_body_validated` uses it as a premise. A closed generic instantiation shares the slice of
+the open definition whose bytes it shares.
 
 What `MetadataResolution` and `MetadataBinding` check:
 
