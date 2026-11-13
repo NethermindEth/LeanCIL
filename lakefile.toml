@@ -17,6 +17,10 @@ srcDir = ".lake/leancil"
 roots = ["Extracted", "ExtractedSymbols"]
 defaultFacets = []
 
+# Opt-in binding audit; no CIL module imports it.
+[[lean_lib]]
+name = "StrictBinding"
+
 [[lean_lib]]
 name = "Tests.Support"
 
@@ -345,3 +349,6 @@ name = "Tests.CallingFields"
 
 [[lean_lib]]
 name = "Tests.PublicProofSurface"
+
+[[lean_lib]]
+name = "Tests.StrictBinding"

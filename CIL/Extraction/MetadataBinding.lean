@@ -419,7 +419,7 @@ def checkEntryIn (env : MetadataEnv) (frame : Frame) (token : Nat) (operand : Ra
     if (← userStringMatches index token text) then .ok {} else .error (.operandMismatch token)
   | _ => .error (.operandMismatch token)
 
-/-- Check one token-table entry of a method with rity generic parameters. -/
+/-- Check one token-table entry of a method with arity generic parameters. -/
 def checkEntry (env : MetadataEnv) (arity : Nat) (token : Nat) (operand : RawOperand) :
     Except MetadataError TokenFacts := do
   checkEntryIn env (← env.frame arity) token operand

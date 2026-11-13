@@ -14,7 +14,7 @@ cannot substitute for it.
 | Layouts | Recompute layouts from raw fields, packing and size; check required use sites and bounds | Faithful metadata/serialization and runtime layout correspondence |
 | Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
-| Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals` and every instruction with the original definition | That the bytes are the method's body in the image and the PE container stay trusted; bodies with exception sections are rejected |
+| Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image (reconfirmed by the opt-in [strict binding audit](CLI.md#strict-binding-audit)) and the PE container stay trusted; bodies with exception sections are rejected |
 | Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them | That the carried bytes are the image's, platform definitions, public key tokens, the hashed part of generic import identities, raw layout content, dispatch catalogs, static data and generic parameter constraints |
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
@@ -67,10 +67,14 @@ declarations, so the lookup tables of the metadata are written out once as a lit
 method's check reads them by name: its cost is its own bytes and tokens times a logarithm of the rows, whatever
 the number of methods or rows of the extraction.
 
-Lean does not establish that the emitted bytes are the method's body in the assembly image;
-System.Reflection.Metadata locates the body in the PE image, and the PE container stays trusted.
-What the tokens, the locals and the method definition mean is checked against the metadata rows
-the body carries, as the next section describes.
+In the default flow Lean does not establish that the emitted bytes are the method's body in the
+assembly image: System.Reflection.Metadata locates the body in the PE image, and the PE container
+stays trusted. The opt-in [strict binding audit](CLI.md#strict-binding-audit) reconfirms it in the
+kernel for assemblies whose digests you state: each body's bytes must be the bytes at the file
+offset that the section table gives for the RVA in the image's own MethodDef row for that method.
+The carried rows have that RVA column zeroed, so the audit's comparison of a carried row with the
+image's masks it. What the tokens, the locals and the method definition mean is checked against the
+metadata rows the body carries, as the next section describes.
 
 A closed generic instantiation carries the bytes of its open definition, so it shares the
 `method{n}Bytes` definition of the first method that uses them. A token used at several sites
