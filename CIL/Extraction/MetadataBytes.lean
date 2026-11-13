@@ -514,6 +514,15 @@ def indexEntries (entries : List ByteEntry) : Except MetadataError (SearchTree (
 /-- The bytes of a string literal, for comparison with heap entries. -/
 def bytesOf (text : String) : List Nat := text.toByteArray.data.toList.map UInt8.toNat
 
+/-- A name tied to bytes by `spelled?` has exactly those bytes, so an equation
+    `spelled? bytes = some name` accepts the same names as comparing `bytesOf name` with them. -/
+theorem bytesOf_of_spelled {bytes : List Nat} {text : String}
+    (spelling : spelled? bytes = some text) : bytesOf text = bytes := by
+  obtain ⟨characters, decoded, rfl⟩ := Option.map_eq_some_iff.mp spelling
+  simp [bytesOf, String.toByteArray_ofList, List.utf8Encode, List.map_flatMap]
+  exact utf8Characters_encode _ _ _ decoded
+#print axioms bytesOf_of_spelled
+
 /-- The entry of a heap map: the bytes, or `missingHeap`. -/
 def heapEntry (heap : Nat) (entries : SearchTree (List Nat)) (offset : Nat) :
     Except MetadataError (List Nat) :=

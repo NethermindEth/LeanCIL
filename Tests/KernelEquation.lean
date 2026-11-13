@@ -26,6 +26,11 @@ theorem ascii_name_spelled :
 #guard_msgs in
 #print axioms ascii_name_spelled
 
+/-- A name accepted through `spelled?` has the bytes it was read from, as `bytesOf` spells them. -/
+theorem spelled_name_has_its_bytes : bytesOf "Examples.Arithmetic" = arithmeticBytes :=
+  bytesOf_of_spelled ascii_name_spelled
+#print axioms spelled_name_has_its_bytes
+
 /-- `café` and `日本` and `😀`: two, three and four byte characters. -/
 theorem non_ascii_name_spelled :
     spelled? [99, 97, 102, 195, 169, 230, 151, 165, 230, 156, 172, 240, 159, 152, 128] =
