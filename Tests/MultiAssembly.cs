@@ -24,7 +24,6 @@ const string unsigned = ", Culture=neutral, PublicKeyToken=null";
 const string libraryText = """
 namespace MultiFixture;
 public struct Cell { public ulong Value; }
-public sealed class Marker { }
 public static class Mix
 {
     public static ulong Step(ulong x) => x * STEP;
@@ -47,6 +46,8 @@ public interface IGet { ulong Get(); }
 public struct Holder : IGet { public ulong Value; public ulong Get() => Value + 1; }
 public struct GenericOn<T> : IFlag where T : unmanaged { public static bool IsActive => true; }
 public struct GenericPlain<T> : IScale where T : unmanaged { }
+// Last, so its constructor does not renumber the methods before it, whose tokens the strict audit cases name.
+public sealed class Marker { }
 """;
 
 string Library(string name, string step, string properties = "") =>
@@ -221,7 +222,7 @@ RejectedExtract("unpinned receiver interface", "Unpinned assembly reference: Mul
 // A pinned type its assembly does not define is refused (by the class check, ahead of the metadata slice's own
 // "Unresolved pinned type" backstop), unlike a custom modifier, which needs no definition at all.
 string gone = fixture.Build("Gone", libName, libraryText.Replace("STEP", "3 + 1")
-    .Replace("public sealed class Marker { }\n", ""));
+    .Replace("public sealed class Marker { }", ""));
 RejectedExtract("pinned type without definition", "Unresolved class: MultiFixture.Marker",
     "MultiFixture.Application::Take(MultiFixture.Marker,ulong)", Reference(gone));
 // No extraction reaches the metadata slice's own refusal, since the aggregate and class checks run first, so the
