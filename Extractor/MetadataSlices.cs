@@ -207,6 +207,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         readonly List<(int Kind, uint Source, int Slice, uint Target)> links = [];
         readonly Dictionary<(int Kind, uint Source), (int Slice, uint Target)> linked = [];
         readonly HashSet<uint> visited = [];
+        readonly HashSet<uint> modifierVisited = [];
         readonly HashSet<uint> fieldsAdded = [];
         readonly HashSet<uint> chained = [];
         int corlib;
@@ -256,11 +257,22 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         sealed class TokenCollector(MetadataReader reader, bool member) : ISignatureTypeProvider<int, object?>
         {
             internal readonly List<uint> Tokens = [];
+            readonly Dictionary<uint, int> uses = [];
+            readonly Dictionary<uint, int> modifierUses = [];
+
+            /// <summary>
+            /// Whether the signature names the type only as a custom modifier, which the checker reads by scope
+            /// and name alone, so the type needs no link to a definition.
+            /// </summary>
+            internal bool OnlyModifier(uint token) =>
+                modifierUses.TryGetValue(token, out var asModifier) && asModifier == uses[token];
 
             int Named(EntityHandle handle)
             {
-                Tokens.Add(TokenOf(handle));
-                return (int)TokenOf(handle);
+                var token = TokenOf(handle);
+                Tokens.Add(token);
+                uses[token] = uses.GetValueOrDefault(token) + 1;
+                return (int)token;
             }
 
             static InvalidDataException Unsupported(string form) =>
@@ -287,6 +299,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             public int GetModifiedType(int modifier, int unmodifiedType, bool isRequired)
             {
                 var handle = MetadataTokens.EntityHandle(modifier);
+                modifierUses[(uint)modifier] = modifierUses.GetValueOrDefault((uint)modifier) + 1;
                 var name = handle.Kind switch
                 {
                     HandleKind.TypeReference =>
@@ -324,16 +337,22 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 case Form.Type: decoder.DecodeType(ref blob); break;
                 default: decoder.DecodeMethodSpecificationSignature(ref blob); break;
             }
-            foreach (var token in collector.Tokens) Token(token);
+            foreach (var token in collector.Tokens) Token(token, collector.OnlyModifier(token));
         }
 
         /// <summary>Add a token with every row and heap entry the checker reads for it.</summary>
-        internal void Token(uint token)
+        internal void Token(uint token, bool onlyModifier = false)
         {
+            if (onlyModifier && token >> 24 == 0x01)
+            {
+                // Read by scope and name alone: its rows, and no link, whether or not the type resolves.
+                if (!visited.Contains(token) && modifierVisited.Add(token)) TypeRef(token, linked: false);
+                return;
+            }
             if (!visited.Add(token)) return;
             switch (token >> 24)
             {
-                case 0x01: TypeRef(token); break;
+                case 0x01: TypeRef(token, linked: true); break;
                 case 0x02: TypeDef(token); break;
                 case 0x04: Field(token); break;
                 case 0x06: MethodDef(token); break;
@@ -361,7 +380,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Blob(reference.PublicKeyOrToken);
         }
 
-        void TypeRef(uint token)
+        void TypeRef(uint token, bool linked)
         {
             Row(token);
             var reference = Reader.GetTypeReference(MetadataTokens.TypeReferenceHandle(RowOf(token)));
@@ -373,12 +392,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                     " is resolved through a module reference.");
             if (!scope.IsNil && scope.Kind != HandleKind.ModuleDefinition) Token(TokenOf(scope));
             var typeReference = (TypeReference)module.LookupToken(new MetadataToken(token));
-            if (!IsPinned(typeReference)) return;
+            if (!linked || !IsPinned(typeReference)) return;
             var definition = typeReference.Resolve();
-            // A modifier type is read by name and scope alone, so a polyfill that does not resolve needs no link.
-            if (definition is null && typeReference.FullName is
-                    "System.Runtime.CompilerServices.IsExternalInit" or "System.Runtime.InteropServices.InAttribute")
-                return;
             if (definition is null)
                 throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
             if (typeReference.Scope is AssemblyNameReference named && named.FullName != definition.Module.Assembly.Name.FullName)

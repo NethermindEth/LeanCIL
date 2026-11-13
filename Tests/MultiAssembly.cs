@@ -210,6 +210,13 @@ RejectedExtract("unpinned entry type argument", "no single pinned --reference as
 RejectedExtract("unpinned receiver interface", "Unpinned assembly reference: MultiFixture.Other",
     scaled, [.. Reference(lib), "--type-argument", "MultiFixture.Marked"]);
 
+// A pinned type its assembly does not define has no definition to link, unlike a custom modifier, which needs none.
+string gone = fixture.Build("Gone", libName, libraryText.Replace("STEP", "3 + 1")
+    .Replace("public struct Cell { public ulong Value; }\n", "")
+    .Replace("    public static void Bump(ref Cell cell) => cell.Value = Step(cell.Value);\n", ""));
+RejectedExtract("pinned type without definition", "Unresolved pinned type", "MultiFixture.Application::Local(ulong)",
+    Reference(gone));
+
 // Proofs bind bodies by unscoped signature, so a same-named type in two pinned assemblies is rejected.
 string aliasDirectory = fixture.Project("Alias", "MultiFixture.Alias", "",
     """<ProjectReference Include="../Lib/Lib.csproj" Aliases="lib" />""");

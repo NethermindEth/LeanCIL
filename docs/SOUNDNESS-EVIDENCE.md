@@ -121,6 +121,11 @@ What `MetadataResolution` and `MetadataBinding` check:
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
   `void` return, forwarded types, module references and `AssemblyRef` rows with a public key flag.
+- A type that a signature names only as a custom modifier is read by its scope and name alone, so it needs
+  no link to a definition, whether or not its assembly is pinned or the type resolves
+  (`modifierNamed` in [MetadataResolution](../CIL/Extraction/MetadataResolution.lean) and the extractor's
+  slice collector agree). A type used any other way keeps the link, and a pinned type that does not resolve
+  there stops the extraction with `Unresolved pinned type`.
 
 Trusted: that each carried row, heap entry and body is the image's bytes at that position (a wrong
 copy cannot be detected without the whole stream; every row must still have the length the header's
