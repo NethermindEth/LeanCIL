@@ -49,6 +49,22 @@ partial class Program
             Reject(linkedPackage, Path.Combine(link, "..", "outside"), "an absolute path");
             Console.WriteLine("PASS a package reached through a directory link holds its own directories");
 
+            // Lean reports an audited module with links followed; the check still names one file.
+            var olean = Path.Combine(built, "Proof.olean");
+            var shadow = Path.Combine(outside, "Proof.olean");
+            File.WriteAllText(olean, "");
+            File.WriteAllText(shadow, "");
+            AuditedOleans Audited(string path) => new(new() { ["Proof"] = path }, [], []);
+            RequireAuditedModule(Audited(olean), "Proof", Path.Combine(linkedBuilt, "Proof.olean"));
+            RequireAuditedModule(Audited(Path.Combine(linkedBuilt, "Proof.olean")), "Proof", olean);
+            try
+            {
+                RequireAuditedModule(Audited(shadow), "Proof", Path.Combine(linkedBuilt, "Proof.olean"));
+                throw new Exception("An audited module elsewhere was taken for the checked one.");
+            }
+            catch (InvalidDataException) { }
+            Console.WriteLine("PASS an audited module reached through a link is the checked file, and a shadow is not");
+
             var escape = Path.Combine(package, "escape");
             Require(TryLinkDirectory(escape, outside), "Could not link a package directory outside the package.");
             Reject(package, "escape/Secret.lean", "a link");

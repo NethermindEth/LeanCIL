@@ -3072,10 +3072,11 @@ partial class Program : IDisposable
     }
 
     // The audited module must be the artifact that was hashed and replayed, not a shadow on the search path.
+    // Lean reports the file with links followed, so both sides are compared that way.
     static void RequireAuditedModule(AuditedOleans audited, string module, string path)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!Path.GetFullPath(audited.modules[module]).Equals(Path.GetFullPath(path), comparison))
+        if (!ResolvedPath(audited.modules[module]).Equals(ResolvedPath(path), comparison))
             throw new InvalidDataException($"Audited module {module} resolved to {audited.modules[module]}, not {path}");
     }
 
