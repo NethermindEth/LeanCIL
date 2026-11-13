@@ -35,6 +35,11 @@ def libWorld : Step Unit := do
   let get ← row Table.methodDef [0x2050, 0, 0x0096, getName, getSignature, 1]
   link linkDeclaring field 1 box
   link linkDeclaring get 1 box
+  -- The struct `Lib.Pair`, which extends `System.ValueType` through a reference of its own.
+  let pairName ← string "Pair"
+  let valueTypeName ← string "ValueType"
+  let valueTypeRef ← row Table.typeRef [1 * 4 + 2, valueTypeName, systemName]
+  let _ ← row Table.typeDef [0x101, pairName, libName, (valueTypeRef - 0x01000000) * 4 + 1, 2, 2]
 
 /-- The tokens of the `T` world that the tests name. -/
 structure OwnTokens where
@@ -52,6 +57,8 @@ structure OwnTokens where
   hello : Nat
   indirect : Nat
   extra : Nat
+  /-- The reference to the struct `Lib.Pair`. -/
+  pairRef : Nat
 
 /-- The `T` assembly: the references and members its operands name. -/
 def ownWorld : Step OwnTokens := do
@@ -101,7 +108,10 @@ def ownWorld : Step OwnTokens := do
   link linkDeclaring main 0 program
   link linkDefinition boxRef 1 (tokenOf Table.typeDef 2)
   link linkDefinition getRef 1 (tokenOf Table.methodDef 1)
-  pure { objectRef := objectRef, consoleRef := consoleRef, boxRef := boxRef,
+  let pairName ← string "Pair"
+  let pairRef ← row Table.typeRef [2 * 4 + 2, pairName, libName]
+  link linkDefinition pairRef 1 (tokenOf Table.typeDef 3)
+  pure { pairRef := pairRef, objectRef := objectRef, consoleRef := consoleRef, boxRef := boxRef,
          writeLine := writeLine, getRef := getRef, idRef := idRef, idSpec := idSpec,
          countField := countField, totalField := totalField, main := main,
          localsSignature := localsSignature, hello := 0x70000000 + hello,
