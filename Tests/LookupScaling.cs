@@ -12,7 +12,7 @@ using System.Text.RegularExpressions;
 const int ShortStatements = 125;
 const int LongStatements = 500;
 // Compiling four times the instructions may cost at most this much more per instruction.
-const double AllowedGrowth = 1.25;
+const double AllowedGrowth = 1.15;
 
 var directory = At("artifacts/LookupScaling");
 var source = Path.Combine(directory, "Assembly");
@@ -224,10 +224,10 @@ foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
 // One method's body check reads the literal lookup tables of its own metadata slice by name, so its kernel cost is its
 // own slice and tokens times a logarithm: independent of the number of methods in the extraction and of the rows
 // that other methods carry.
-const double AllowedBodyGrowth = 1.35;
+const double AllowedBodyGrowth = 1.1;
 int[] chainLengths = [8, 32, 128];
 int[] bulkSizes = [125, 500];
-int[] fieldCounts = [10, 200];
+int[] fieldCounts = [10, 100, 200];
 var bodySource = Path.Combine(directory, "BodyAssembly");
 Directory.CreateDirectory(bodySource);
 File.WriteAllText(Path.Combine(bodySource, "Bodies.csproj"),
@@ -322,29 +322,38 @@ if (tablesGrowth > AllowedBodyGrowth * bulkSizes[1] / bulkSizes[0])
         $"The tables check costs {tablesGrowth:F2} times as much for {bulkSizes[1]} rows ") +
         FormattableString.Invariant($"as for {bulkSizes[0]}."));
 
-// A method reading one field of a class with 10 and with 200 fields carries those field rows: its body check and its
-// tables check grow with the slice, not faster than the rows it carries.
+// A method reading one field of a class with 10, 100 and 200 fields carries those field rows. Its body check does one
+// lookup of the field's index, so it stays flat. Its tables check is a fixed part plus a part linear in the rows
+// carried: the increment from 100 to 200 fields is 100/90 of the increment from 10 to 100, and a quadratic walk of the
+// rows makes it more than three times as large.
+const double AllowedFieldIncrementRatio = 1.5;
 var fieldBody = fieldCounts.Select(count => (double)BodyCheck("Fields" + count,
     $"Bodies::Read{count}(Bodies/Wide{count})", $"Read{count}")).ToArray();
 var fieldTables = fieldCounts.Select(count => (double)TablesCheck("Fields" + count, $"Read{count}")).ToArray();
-var fieldRatio = fieldCounts[1] / (double)fieldCounts[0];
-foreach (var (label, costs) in new[] { ("body", fieldBody), ("tables", fieldTables) })
-{
-    var growth = costs[1] / costs[0];
-    Console.WriteLine(FormattableString.Invariant(
-        $"PASS {label} check of a method reading one of {fieldCounts[0]} and {fieldCounts[1]} fields: ") +
-        FormattableString.Invariant($"{costs[0]:F0} and {costs[1]:F0} heartbeats, {growth:F2} times"));
-    if (growth > AllowedBodyGrowth * fieldRatio)
-        throw new Exception(FormattableString.Invariant(
-            $"The {label} check costs {growth:F2} times as much with {fieldCounts[1]} fields ") +
-            FormattableString.Invariant(
-                $"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth * fieldRatio:F1}."));
-}
+var fieldBodyGrowth = fieldBody[^1] / fieldBody[0];
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
+    FormattableString.Invariant($"{fieldBody[0]:F0}, {fieldBody[1]:F0} and {fieldBody[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"{fieldBodyGrowth:F2} times"));
+if (fieldBodyGrowth > AllowedBodyGrowth)
+    throw new Exception(FormattableString.Invariant(
+        $"The body check costs {fieldBodyGrowth:F2} times as much with {fieldCounts[2]} fields ") +
+        FormattableString.Invariant($"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth}."));
+var fieldIncrementRatio = (fieldTables[2] - fieldTables[1]) / (fieldTables[1] - fieldTables[0]);
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS tables check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
+    FormattableString.Invariant($"{fieldTables[0]:F0}, {fieldTables[1]:F0} and {fieldTables[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"increments in the ratio {fieldIncrementRatio:F2}"));
+if (fieldIncrementRatio > AllowedFieldIncrementRatio)
+    throw new Exception(FormattableString.Invariant(
+        $"The tables check grows by {fieldIncrementRatio:F2} times as much from {fieldCounts[1]} to ") +
+        FormattableString.Invariant(
+            $"{fieldCounts[2]} fields as from {fieldCounts[0]} to {fieldCounts[1]}; the limit is {AllowedFieldIncrementRatio}."));
 
 // `spelled?` reads a name's bytes in one pass, and `cil_kernel_rfl` equates the result with the name's literal:
 // the cost grows with the length of the name and no faster. Each file is measured against the same file with
 // the proof left open, so the statement's own elaboration is not counted.
-const double AllowedSpellingGrowth = 1.25;
+const double AllowedSpellingGrowth = 1.1;
 var spellingLengths = new[] { 20, 80, 320 };
 long SpellingCheck(int length)
 {
@@ -372,3 +381,36 @@ for (var step = 1; step < spellingLengths.Length; step++)
             FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
             FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
 }
+
+// A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
+// its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from
+// depth 8 to 16 is twice the increment from 4 to 8; a quadratic walk makes it four times.
+const double AllowedChainIncrementRatio = 2.5;
+int[] baseDepths = [4, 8, 16];
+var deepSource = Path.Combine(directory, "DeepAssembly");
+Directory.CreateDirectory(deepSource);
+File.WriteAllText(Path.Combine(deepSource, "Deep.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize><AssemblyName>Bodies</AssemblyName></PropertyGroup>
+</Project>
+""");
+string Deep(int depth) =>
+    $"public class Deep{depth}_0 {{ public ulong F; }} " +
+    Join(depth, index => $"public class Deep{depth}_{index + 1} : Deep{depth}_{index} {{ }} ") +
+    $"public static ulong ReadDeep{depth}(Deep{depth}_{depth} o) => o.F; ";
+File.WriteAllText(Path.Combine(deepSource, "Deep.cs"),
+    "public static class Bodies { " + string.Concat(baseDepths.Select(Deep)) + "}");
+Run(["dotnet", "build", Path.Combine(deepSource, "Deep.csproj"), "-c", "Release"]);
+bodyAssembly = Path.Combine(deepSource, "bin/Bodies.dll");
+var depthCosts = baseDepths.Select(depth => (double)BodyCheck("Deep" + depth,
+    $"Bodies::ReadDeep{depth}(Bodies/Deep{depth}_{depth})", $"ReadDeep{depth}")).ToArray();
+var incrementRatio = (depthCosts[2] - depthCosts[1]) / (depthCosts[1] - depthCosts[0]);
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of a field read through {baseDepths[0]}, {baseDepths[1]} and {baseDepths[2]} base classes: ") +
+    FormattableString.Invariant($"{depthCosts[0]:F0}, {depthCosts[1]:F0} and {depthCosts[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"increments in the ratio {incrementRatio:F2} (linear 2, quadratic 4)"));
+if (incrementRatio > AllowedChainIncrementRatio)
+    throw new Exception(FormattableString.Invariant(
+        $"The body check grows by {incrementRatio:F2} times as much from depth {baseDepths[1]} to {baseDepths[2]} ") +
+        FormattableString.Invariant(
+            $"as from {baseDepths[0]} to {baseDepths[1]}; the limit is {AllowedChainIncrementRatio}."));

@@ -9,6 +9,7 @@ using System.Reflection.PortableExecutable;
 using System.Text;
 using System.Text.Json;
 using Mono.Cecil;
+using ModuleDefinition = Mono.Cecil.ModuleDefinition;
 
 // Differential check of the Lean metadata decoder against System.Reflection.Metadata and Mono.Cecil: every row of the
 // reference, type, signature and instantiation tables of an assembly and the heap entries they name are written to
@@ -70,15 +71,15 @@ foreach (var handle in reader.AssemblyReferences)
     Text(reference.Culture);
     Blob(reference.PublicKeyOrToken);
 }
-foreach (var handle in reader.GetTypeSpecifications())
+for (var row = 1; row <= reader.GetTableRowCount(TableIndex.TypeSpec); row++)
 {
-    Row(TableIndex.TypeSpec, MetadataTokens.GetRowNumber(handle));
-    Blob(reader.GetTypeSpecification(handle).Signature);
+    Row(TableIndex.TypeSpec, row);
+    Blob(reader.GetTypeSpecification(MetadataTokens.TypeSpecificationHandle(row)).Signature);
 }
-foreach (var handle in reader.GetMethodSpecifications())
+for (var row = 1; row <= reader.GetTableRowCount(TableIndex.MethodSpec); row++)
 {
-    Row(TableIndex.MethodSpec, MetadataTokens.GetRowNumber(handle));
-    Blob(reader.GetMethodSpecification(handle).Signature);
+    Row(TableIndex.MethodSpec, row);
+    Blob(reader.GetMethodSpecification(MetadataTokens.MethodSpecificationHandle(row)).Signature);
 }
 var expected = new List<(int Token, string Name)>();
 var skipped = 0;
@@ -114,6 +115,7 @@ Text(assemblyDefinition.Culture);
 Blob(assemblyDefinition.PublicKey);
 var assemblyRowAt = reader.GetTableMetadataOffset(TableIndex.Assembly);
 var assemblyRow = meta.AsSpan(assemblyRowAt, reader.GetTableRowSize(TableIndex.Assembly)).ToArray();
+var identityText = JsonSerializer.Serialize(module.Assembly.Name.FullName);
 var lean = $$"""
     import CIL.Extraction.MetadataBinding
 
@@ -121,10 +123,11 @@ var lean = $$"""
     open CIL CIL.Extraction
 
     def slice : MetadataSlice :=
-      { assembly := { identity := {{JsonSerializer.Serialize(module.Assembly.Name.FullName)}},
-        tableHeader := {{Bytes(header)}},
-          assemblyRow := {{Bytes(assemblyRow)}}, strings := {{Entries(strings)}}, blobs := {{Entries(blobs)}} },
-        rows := {{Entries(rows)}}, strings := {{Entries(strings)}}, blobs := {{Entries(blobs)}}, corlib := {{corlib}} }
+      { assembly :=
+          { identity := {{identityText}}, tableHeader := {{Bytes(header)}},
+            assemblyRow := {{Bytes(assemblyRow)}}, strings := {{Entries(strings)}},
+            blobs := {{Entries(blobs)}} },
+        rows :={{Entries(rows)}}, strings := {{Entries(strings)}}, blobs := {{Entries(blobs)}}, corlib := {{corlib}} }
 
     def expected : List (Nat × String) := [{{string.Join(", ", expected.Select(entry =>
         $"({(uint)entry.Token}, {JsonSerializer.Serialize(entry.Name)})"))}}]
