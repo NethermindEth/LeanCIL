@@ -24,7 +24,18 @@ var getter = (MethodReference)owner.Methods.Single(method => method.Name == "Rea
 
 IDisposable Scope() => (IDisposable)begin.Invoke(null, null)!;
 object Describe() => descriptor.Invoke(null, [element, null])!;
-string Span() => (string)span.Invoke(null, [getter, "scalar"])!;
+object MemoryCase(object? operation)
+{
+    if (operation?.GetType().Name != "Memory") throw new InvalidOperationException("Not a memory operation");
+    return operation.GetType().GetProperty("Operation")!.GetValue(operation)!;
+}
+// The width of the span item the getter models, read from the operation and not from its rendering.
+int ItemWidth()
+{
+    var item = MemoryCase(span.Invoke(null, [getter, "scalar"]));
+    return item.GetType().Name == "SpanItem" ? (int)item.GetType().GetProperty("Width")!.GetValue(item)!
+        : throw new InvalidOperationException("The getter is not a span item");
+}
 int Width(object value) => (int)value.GetType().GetProperty("Width")!.GetValue(value)!;
 void Reject(string reason)
 {
@@ -45,7 +56,7 @@ using (Scope())
     for (var index = 0; index < 1000; index++)
         if (!ReferenceEquals(original, Describe()))
             throw new InvalidOperationException("Enum descriptor was not reused within a request");
-    if (Width(original) != 1 || Span() != ".memory (.spanItem 1)")
+    if (Width(original) != 1 || ItemWidth() != 1)
         throw new InvalidOperationException("Wrong initial enum storage");
 
     var aggregate = module.GetType("Examples.AggregateArrays").NestedTypes.Single(type => type.Name == "Pair");
@@ -54,11 +65,12 @@ using (Scope())
     foreach (var (type, admitted) in new[]
         { (module.TypeSystem.Int32, true), ((TypeReference)element, true), (aggregate, false), (vector, false) })
     {
-        var operations = (Dictionary<string, string>)spanOperations.Invoke(null, [type, "scalar"])!;
-        var createsStaticSpan = operations.Keys.Any(name =>
+        var operations = (System.Collections.IDictionary)spanOperations.Invoke(null, [type, "scalar"])!;
+        var createsStaticSpan = operations.Keys.Cast<string>().Any(name =>
             name.Contains("System.Runtime.CompilerServices.RuntimeHelpers::CreateSpan<", StringComparison.Ordinal));
         if (createsStaticSpan != admitted ||
-            !operations.Values.Any(operation => operation.StartsWith(".memory (.arraySpan ", StringComparison.Ordinal)))
+            !operations.Values.Cast<object>().Any(operation =>
+                operation.GetType().Name == "Memory" && MemoryCase(operation).GetType().Name == "ArraySpan"))
             throw new InvalidOperationException("Static and supplied array span admission were conflated: " + type.FullName);
     }
 }
@@ -66,7 +78,7 @@ field.FieldType = module.TypeSystem.Int32;
 using (Scope())
 {
     var changed = Describe();
-    if (ReferenceEquals(original, changed) || Width(changed) != 4 || Span() != ".memory (.spanItem 4)")
+    if (ReferenceEquals(original, changed) || Width(changed) != 4 || ItemWidth() != 4)
         throw new InvalidOperationException("New request reused an old enum width or span signature table");
 }
 field.FieldType = module.TypeSystem.Boolean;

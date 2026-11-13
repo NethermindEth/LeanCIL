@@ -28,12 +28,13 @@ internal sealed class NativeDispatch
 
     internal static NativeDispatch For(MethodDefinition method) => Cache.GetValue(method, static value => new(value));
 
-    internal string? Kind(TypeReference type, int? local = null)
+    internal LocalKind? Kind(TypeReference type, int? local = null)
     {
         if (signature is null) return null;
         var table = type is PointerType pointer && Native(pointer.ElementType);
         if (!table && !(local is { } index && pointerLocals.Contains(index) && Native(type))) return null;
-        return $".{(table ? "methodTable" : "methodPointer")} {ManagedPointers.SignatureEvidence(signature)}";
+        var evidence = ManagedPointers.SignatureEvidence(signature);
+        return table ? new LocalKind.MethodTable(evidence) : new LocalKind.MethodPointer(evidence);
     }
 
     static bool Native(TypeReference type) => type.MetadataType is MetadataType.IntPtr or MetadataType.UIntPtr;

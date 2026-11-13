@@ -138,9 +138,13 @@ These regressions cover the extractor's own C# indexes:
   mutations are visible. `Tests/InstructionIndexes.cs` includes those rejection and mutation
   cases.
 - Template emission writes templates and callees in sorted order and profiles in input order,
-  and rejects duplicate method identities before emission. An absent callee in an excluded
-  profile gets a zero placeholder. `Tests/TemplateIndexes.cs` checks reordered methods,
-  conditional absent callees, deterministic output and duplicate rejection without compiling Lean.
+  and rejects duplicate method identities before emission. Every method a body or frame names (calls,
+  tail calls, virtual dispatch targets, callable pointer targets and static initializers) becomes a callee
+  parameter, and an absent callee in an excluded profile gets a zero placeholder. Profiles merge when
+  every instruction renders the same Lean; differing frames, lengths or unflagged instructions are
+  rejected. `Tests/TemplateIndexes.cs` checks reordered methods, each kind of callee, conditional absent
+  callees, those merge rules, deterministic output, duplicate rejection and linear growth in the
+  instructions without compiling Lean.
 - Loaded contract libraries index exports by exact identity and certifications by exact
   (identity, profile). The production reader rejects duplicates before constructing either index.
   `Tests/ImportIndexes.cs` checks case-sensitive lookup, multiple profiles and the reader's exact

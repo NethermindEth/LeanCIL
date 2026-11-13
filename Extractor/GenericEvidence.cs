@@ -23,20 +23,24 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     ModuleDefinition Original(ModuleDefinition module) => Pinned.Original(module);
 
-    static string Quote(string value) => JsonSerializer.Serialize(value);
+    /// <summary>The Lean string literal of <paramref name="value"/>.</summary>
+    internal static string Quote(string value) => JsonSerializer.Serialize(value);
     static string Bool(bool value) => value.ToString().ToLowerInvariant();
     static string List(IEnumerable<string> entries) => "[" + string.Join(", ", entries) + "]";
 
-    static string Scope(TypeReference type)
-    {
-        var scope = LayoutEvidence.Scope(type);
-        return scope == TypeTests.RuntimeScope ? "Extraction.runtimeScope" : Quote(scope);
-    }
+    static string Scope(TypeReference type) => Scope(LayoutEvidence.Scope(type));
+
+    static string Scope(string assembly) =>
+        assembly == TypeTests.RuntimeScope ? "Extraction.runtimeScope" : Quote(assembly);
 
     internal string Type(TypeReference type) => Type(type, false);
 
     /// <summary>The type expression naming a class instance type, as field operations carry it.</summary>
-    internal static string ObjectType(TypeReference type) => $".object {Scope(type)} {Quote(type.FullName)}";
+    internal static string ObjectType(TypeReference type) => ObjectType(LayoutEvidence.Scope(type), type.FullName);
+
+    /// <summary>The type expression naming the class <paramref name="name"/> of the assembly
+    /// <paramref name="assembly"/>.</summary>
+    internal static string ObjectType(string assembly, string name) => $".object {Scope(assembly)} {Quote(name)}";
 
     // The kernel sees an `in` reference as the reference it is; the extractor compares the modifier exactly.
     string Parameter(TypeReference type) => Type(InReferences.Parameter(type));

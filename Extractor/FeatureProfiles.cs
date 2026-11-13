@@ -1,3 +1,4 @@
+using static Nethermind.LeanCIL.LeanText;
 using Mono.Cecil;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -123,8 +124,6 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
 
     internal static string LeanFeature(Feature feature) =>
         "." + char.ToLowerInvariant(feature.ToString()[0]) + feature.ToString()[1..];
-
-    private static string Bool(bool value) => value ? "true" : "false";
 
     internal static int? PlatformConstant(MethodReference reference)
     {

@@ -108,4 +108,15 @@ public sealed class Gauge
 
     /// <summary>The level raised to zero, through a helper that throws when its local passes the limit.</summary>
     public int RaisedLevel() => Raise(this, Level, 0);
+
+    static int Floor(int value) => value < 5 ? 5 : value;
+
+    /// <summary>A word raised to a small constant, through a helper that tests it against the constant.</summary>
+    public static int Floored(int value) => Floor(value);
+
+    /// <summary>The limit when the level is below a small constant, otherwise the level: a signed test.</summary>
+    public int BelowFive() => Level < 5 ? Limit : Level;
+
+    /// <summary>The level unless it equals a small constant, then the limit: an equality test.</summary>
+    public int IsFive() => Level == 5 ? Limit : Level;
 }

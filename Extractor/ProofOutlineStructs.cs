@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using Mono.Cecil;
 
 namespace Nethermind.LeanCIL;
@@ -10,7 +9,7 @@ internal static partial class ProofOutline
 {
     /// <summary>A scalar field of the receiver the body reaches: where it lives, the binder naming its value on
     /// entry when the body reads it first, and whether the body stores it.</summary>
-    sealed class StructField(string name, int offset, int width, string receiver)
+    sealed class StructScalar(string name, int offset, int width, string receiver)
     {
         internal string Name { get; } = name;
         internal int Offset { get; } = offset;
@@ -29,25 +28,32 @@ internal static partial class ProofOutline
     /// facts each needs; null `Stopped` when the walk reached the return.</summary>
     sealed class StructWalk
     {
-        internal List<StructField> Fields { get; } = [];
-        internal List<(StructField Field, string Value, string Source)> Stores { get; } = [];
+        internal List<StructScalar> Fields { get; } = [];
+        internal List<(StructScalar Field, string Value, string Source)> Stores { get; } = [];
         internal string? Returned { get; set; }
         internal string? Stopped { get; set; }
     }
 
     /// <summary>A scalar literal with its stack width in bytes; conversions preserve this source width.</summary>
-    static (string Term, int Width)? StructLiteral(string op)
+    static (string Term, int Width)? StructLiteral(Operation op) => op is Constant constant
+        ? (constant.Numeral ? $"({constant.Value}#{constant.Width})"
+            : $"(BitVec.ofInt {constant.Width} ({constant.Value}))",
+            constant.Width == 64 ? 8 : 4) : null;
+
+    /// <summary>The source width in bytes and signedness of a `conv.i1` to `conv.u8`, or null for another
+    /// operation, including the native-width `conv.u`.</summary>
+    static (int Bytes, bool Signed)? SizedConversion(Operation op) => op is StackOperation { Kind: var kind }
+        ? kind switch
     {
-        var match = Regex.Match(op,
-            @"\A\.const(32|64) (?:(\d+)|(\(BitVec\.ofInt \1 \(-?\d+\)\)))\z");
-        if (!match.Success) return null;
-        var term = match.Groups[2].Success ? $"({match.Groups[2].Value}#{match.Groups[1].Value})"
-            : match.Groups[3].Value;
-        return (term, match.Groups[1].Value == "64" ? 8 : 4);
-    }
+        StackOpcode.ConvI1 => (1, true), StackOpcode.ConvI2 => (2, true), StackOpcode.ConvI4 => (4, true),
+            StackOpcode.ConvI8 => (8, true),
+        StackOpcode.ConvU1 => (1, false), StackOpcode.ConvU2 => (2, false), StackOpcode.ConvU4 => (4, false),
+        StackOpcode.ConvU8 => (8, false),
+        _ => null
+    } : null;
 
     /// <summary>Walks a branch-free body over the receiver's disjoint scalar fields and integer arguments.</summary>
-    static StructWalk WalkStruct(Specification spec, string[] ops, Names names)
+    static StructWalk WalkStruct(Specification spec, Operation[] ops, Names names)
     {
         var walk = new StructWalk();
         var receiver = spec.Parameters[0];
@@ -58,24 +64,23 @@ internal static partial class ProofOutline
             walk.Stopped = $"{reason} at {Location(spec.Method, pc)}";
             return walk;
         }
-        StructField? Field(int pc, int offset, int width)
+        StructScalar? Field(int pc, int offset, int width)
         {
             if (spec.Method.Body.Instructions[pc].Operand is not FieldReference reference) return null;
             var field = walk.Fields.FirstOrDefault(known => known.Offset == offset);
             if (field is not null) return field.Width == width ? field : null;
             if (walk.Fields.Any(known => known.Offset < offset + width && offset < known.Offset + known.Width))
                 return null;
-            field = new StructField(reference.Name, offset, width, receiver.Name);
+            field = new StructScalar(reference.Name, offset, width, receiver.Name);
             walk.Fields.Add(field);
             return field;
         }
         for (var pc = 0; pc < ops.Length; pc++)
         {
             var op = ops[pc];
-            Match match;
-            if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
+            if (op is Arg { Narrow: null } argument)
             {
-                var parameter = spec.Parameters[int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)];
+                var parameter = spec.Parameters[argument.Index];
                 if (parameter.Shape == ParameterShape.StructReference) stack.Push(Receiver);
                 else if (parameter.Shape == ParameterShape.Scalar) stack.Push(parameter.Name);
                 else if (parameter.Shape == ParameterShape.Narrow)
@@ -83,32 +88,28 @@ internal static partial class ProofOutline
                 else return Stop($"the argument `{parameter.Name}`", pc);
             }
             else if (StructLiteral(op) is { } literal) stack.Push(literal.Term);
-            else if ((match = Regex.Match(op, @"\A\.conv([UI])([1248])\z")).Success)
+            else if (SizedConversion(op) is { } conversion)
             {
                 if (stack.Count == 0 || stack.Pop() is not { } value || value == Receiver)
                     return Stop("a conversion of a value the outline does not name", pc);
-                var bits = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture) * 8;
-                var extension = match.Groups[1].Value == "I" ? "signExtend" : "setWidth";
+                var bits = conversion.Bytes * 8;
+                var extension = conversion.Signed ? "signExtend" : "setWidth";
                 stack.Push(bits < 32 ? $"(({value}).setWidth {bits}).{extension} 32"
                     : $"({value}).{extension} {bits}");
             }
-            else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
+            else if (op is StackOperation { IsArithmetic: true } arithmetic)
             {
-                if (stack.Count < 2) return Stop($"`{op}` on a short stack", pc);
+                if (stack.Count < 2) return Stop($"`{op.ToLean()}` on a short stack", pc);
                 var (right, left) = (stack.Pop(), stack.Pop());
                 if (left is null or Receiver || right is null or Receiver)
-                    return Stop($"`{op}` on a value the outline does not name", pc);
-                var symbol = match.Groups[1].Value switch
-                {
-                    "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
-                };
+                    return Stop($"`{op.ToLean()}` on a value the outline does not name", pc);
+                var symbol = arithmetic.Symbol;
                 stack.Push($"{Operand(left)} {symbol} {Operand(right)}");
             }
-            else if ((match = Regex.Match(op, @"\A\.fieldAt (\d+) (1|2|4|8)(?: (false|true))?\z")).Success)
+            else if (op is StructField { Access: FieldAccess.Load, Width: 1 or 2 or 4 or 8 } load)
             {
                 if (stack.Count == 0 || stack.Pop() != Receiver) return Stop("a field load of another value", pc);
-                if (Field(pc, int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
-                        int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)) is not { } field)
+                if (Field(pc, load.Offset, load.Width) is not { } field)
                     return Stop("a field load the outline cannot name", pc);
                 var written = walk.Stores.LastOrDefault(store => store.Field == field);
                 if (written.Field is not null)
@@ -121,38 +122,37 @@ internal static partial class ProofOutline
                     stack.Push(Loaded(field.Initial));
                 }
                 string Loaded(string value) => field.Width < 4
-                    ? $"({value}).{(match.Groups[3].Value == "true" ? "signExtend" : "setWidth")} 32" : value;
+                    ? $"({value}).{(load.Signed ? "signExtend" : "setWidth")} 32" : value;
             }
-            else if ((match = Regex.Match(op, @"\A\.setFieldAt (\d+) (1|2|4|8)\z")).Success)
+            else if (op is StructField { Access: FieldAccess.Store, Width: 1 or 2 or 4 or 8 } store)
             {
                 if (stack.Count < 2) return Stop("a field store on a short stack", pc);
                 var value = stack.Pop();
                 if (stack.Pop() != Receiver) return Stop("a field store into another value", pc);
                 if (value is null or Receiver) return Stop("a field store of a value the outline does not name", pc);
-                if (Field(pc, int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
-                        int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)) is not { } field)
+                if (Field(pc, store.Offset, store.Width) is not { } field)
                     return Stop("a field store the outline cannot name", pc);
                 field.Stored = true;
                 walk.Stores.Add((field, field.Width < 4 ? $"({value}).setWidth {field.Width * 8}" : value, value));
             }
-            else if (op == ".dup")
+            else if (op is StackOperation { Kind: StackOpcode.Dup })
             {
                 if (stack.Count == 0) return Stop("a duplicate of an empty stack", pc);
                 stack.Push(stack.Peek());
             }
-            else if (op == ".nop") { }
-            else if (op == ".ret" && pc == ops.Length - 1)
+            else if (op.IsNop) { }
+            else if (op is Return { Narrow: null } && pc == ops.Length - 1)
             {
                 if (spec.Result is not null)
                 {
                     if (stack.Count == 0 || stack.Peek() is not { } result || result == Receiver ||
-                        spec.Result.Boolean || spec.Result.Constructor is not (".i64" or ".i32"))
+                        spec.Result.Boolean || spec.Result.Width is not (4 or 8))
                         return Stop("a result the outline does not name", pc);
                     walk.Returned = result;
                 }
                 return walk;
             }
-            else return Stop($"`{op}`, which the outline does not step through a struct", pc);
+            else return Stop($"`{op.ToLean()}`, which the outline does not step through a struct", pc);
         }
         return Stop("the end of the body without a return", ops.Length - 1);
     }
@@ -168,7 +168,7 @@ internal static partial class ProofOutline
     /// postcondition, or one hole naming where the walk stopped.</summary>
     static string StructStraightLine(Specification spec, Body body, Names names, Writer lean)
     {
-        var walk = WalkStruct(spec, body.Ops, names);
+        var walk = WalkStruct(spec, body.Operations, names);
         var stepped = walk.Stopped is null;
         Header(lean, spec, ["CIL.Verification", "CIL.Safety.SymbolicExecution", "CIL.Safety.BufferContents",
             "CIL.Safety.LoopCallerFacts", "CIL.Safety.AggregateFields"], stepped ? "`postcondition`" : null);
@@ -236,6 +236,8 @@ internal static partial class ProofOutline
             return lean.ToString();
         }
         var steps = new List<string> { receiverForm, "CIL.NarrowKind.extend" };
+        // The facts that load a field unsigned, which the proof simplifies at the element of the address.
+        var unsignedLoads = new List<string>();
         foreach (var width in walk.Fields.Select(field => field.Width).Where(width => width < 4).Distinct())
         {
             lean.Line($"  have loadSigned{width} (memory : Memory) (address : Reference) (value : BitVec {8 * width})");
@@ -260,6 +262,7 @@ internal static partial class ProofOutline
             {
                 LoadStructField(lean, field, field.Read!, "loaded" + field.Offset);
                 steps.Add("loaded" + field.Offset);
+                unsignedLoads.Add("loaded" + field.Offset);
                 if (field.Width < 4) steps.Add("loaded" + field.Offset + "Signed");
             }
         }
@@ -323,6 +326,7 @@ internal static partial class ProofOutline
                     var loaded = $"loaded{level}Field{field.Offset}";
                     LoadStructField(lean, field, held, loaded);
                     steps.Add(loaded);
+                    unsignedLoads.Add(loaded);
                     if (field.Width < 4) steps.Add(loaded + "Signed");
                 }
             }
@@ -334,9 +338,7 @@ internal static partial class ProofOutline
                 lean.Line($"  have combined{level} := {confined}.trans changed{level}");
             confined = index == 0 ? $"changed{level}" : $"combined{level}";
         }
-        var loads = steps.Where(step => step.StartsWith("loaded", StringComparison.Ordinal) &&
-            !step.EndsWith("Signed", StringComparison.Ordinal)).ToArray();
-        foreach (var load in loads) lean.Line($"  simp only [Reference.element_zero] at {load}");
+        foreach (var load in unsignedLoads) lean.Line($"  simp only [Reference.element_zero] at {load}");
         if (spec.Result is null)
             lean.Line($"  refine ⟨CIL.executionBound Extracted.program 0, {final}, [], ?run, rfl, {confined}, " +
                 "?postcondition⟩");
@@ -355,7 +357,7 @@ internal static partial class ProofOutline
     }
 
     /// <summary>A scalar field's loaded value, normalized to the stack's word width.</summary>
-    static void LoadStructField(Writer lean, StructField field, string contents, string name)
+    static void LoadStructField(Writer lean, StructScalar field, string contents, string name)
     {
         if (field.Width == 8)
             lean.Line($"  have {name} := {contents}.load_word (index := 0) rfl");
@@ -373,7 +375,7 @@ internal static partial class ProofOutline
 
     /// <summary>The fact that the field access's `add` of its offset to the receiver reaches the field.</summary>
     static void FieldAddress(Writer lean, string memory, string wellFormed, string form, string receiver,
-        StructField field, string access, string name)
+        StructScalar field, string access, string name)
     {
         lean.Line($"  have {name} : add {memory} {receiver} 1 (BitVec.ofNat 64 {field.Offset}) =");
         lean.Line($"      .ok {field.Address} := by");

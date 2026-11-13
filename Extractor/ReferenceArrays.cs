@@ -26,13 +26,13 @@ internal static class ReferenceArrays
     /// The checked operation for an array instruction over an array of class references, or null when the
     /// instruction is not one. <paramref name="arrayOperand"/> says whether <c>ldlen</c> reads such an array.
     /// </summary>
-    internal static string? Translate(Instruction instruction, bool arrayOperand) => instruction.OpCode.Code switch
+    internal static Operation? Translate(Instruction instruction, bool arrayOperand) => instruction.OpCode.Code switch
     {
         Code.Newarr when instruction.Operand is TypeReference element && Element(element) =>
-            $".newReferenceArray ({GenericEvidence.ObjectType(element)})",
-        Code.Ldlen when arrayOperand => ".memory .referenceArrayLength",
-        Code.Ldelem_Ref => ".memory .referenceArrayLoad",
-        Code.Stelem_Ref => ".memory .referenceArrayStore",
+            new NewReferenceArray(LayoutEvidence.Scope(element), element.FullName),
+        Code.Ldlen when arrayOperand => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Length)),
+        Code.Ldelem_Ref => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Load)),
+        Code.Stelem_Ref => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Store)),
         Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any
             when instruction.Operand is TypeReference element &&
                 (ObjectTypes.Candidate(element) || Element(element)) =>

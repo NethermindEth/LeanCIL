@@ -18,6 +18,9 @@ var extractor = Assembly.Load(File.ReadAllBytes(ExtractorPath));
 var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 var translate = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("Translate", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;
+string? Lean(object? operation) => (string?)operation?.GetType()
+    .GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, Type.EmptyTypes)!
+    .Invoke(operation, null);
 var profile = select.Invoke(null, ["scalar"]);
 var cases = 0;
 var pending = new List<(GeneratedVerification Request, string Name, int Count)>();
@@ -103,8 +106,8 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         alias.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
         math.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
     }
-    var originalModel = (string?)translate.Invoke(null, [math, profile]);
-    var aliasModel = (string?)translate.Invoke(null, [alias, profile]);
+    var originalModel = Lean(translate.Invoke(null, [math, profile]));
+    var aliasModel = Lean(translate.Invoke(null, [alias, profile]));
     if (originalModel is null || originalModel != aliasModel)
         throw new InvalidOperationException("Primitive helper must share its Math model: " + alias.FullName);
     var values = new ulong[] { 0, 1, 2, 127, 128, 255, 32767, 32768, 65535, int.MaxValue, 1UL << 31, uint.MaxValue, long.MaxValue, 1UL << 63, ulong.MaxValue }

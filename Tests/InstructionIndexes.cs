@@ -62,8 +62,11 @@ caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
 var translate = extractor.GetType("Nethermind.LeanCIL.InstructionTranslation", true)!
     .GetMethod("Translate", BindingFlags.Static | BindingFlags.NonPublic)!;
 var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1 };
-string Translate(Instruction instruction) => (string)translate.Invoke(null,
-    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!;
+string Lean(object operation) => (string)operation.GetType()
+    .GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, Type.EmptyTypes)!
+    .Invoke(operation, null)!;
+string Translate(Instruction instruction) => Lean(translate.Invoke(null,
+    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!);
 if (Translate(call) != ".call 1 0") throw new Exception("Incorrect call index");
 methods.Remove(callee);
 try
@@ -221,9 +224,9 @@ var addressArgument = Instruction.Create(OpCodes.Ldarga, argumentMethod.Paramete
 foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeArgument, loadArgument,
     Instruction.Create(OpCodes.Pop), addressArgument, Instruction.Create(OpCodes.Pop), Instruction.Create(OpCodes.Ret) })
     argumentMethod.Body.Instructions.Add(instruction);
-string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => (string)translate.Invoke(null,
+string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => Lean(translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
-        0, Index(argumentMethod), null, null, positions, null, null, null])!;
+        0, Index(argumentMethod), null, null, positions, null, null, null])!);
 if (TranslateArgument(storeArgument, homePositions) != ".setLocal 3" ||
     TranslateArgument(loadArgument, homePositions) != ".local 3" ||
     TranslateArgument(addressArgument, homePositions) != ".localAddr 3")
@@ -238,3 +241,63 @@ try
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
     rejected.Message == "Missing parameter storage") { }
 Console.WriteLine("PASS home lookup preserves first positions, local offsets and missing-store rejection");
+
+// The typed operation model: the cases the outline generators branch on keep the spellings they are told apart by.
+const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
+    BindingFlags.NonPublic;
+Type Model(string name) => extractor.GetType("Nethermind.LeanCIL." + name, true)!;
+object Make(string name, params object?[] arguments) => Activator.CreateInstance(Model(name), arguments)!;
+object Named(string type, string value) => Enum.Parse(Model(type), value);
+object Property(object value, string name) => value.GetType().GetProperty(name, Declared)!.GetValue(value)!;
+var bodyType = extractor.GetType("Nethermind.LeanCIL.ProofOutline", true)!.GetNestedType("Body",
+    BindingFlags.NonPublic)!;
+Array Operations(params object[] operations)
+{
+    var array = Array.CreateInstance(Model("Operation"), operations.Length);
+    for (var at = 0; at < operations.Length; at++) array.SetValue(operations[at], at);
+    return array;
+}
+object Body(params object[] operations) => Activator.CreateInstance(bodyType, Declared, null,
+    [Operations(operations)], null)!;
+int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
+bool Pure(object operation) => (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation")])!.Invoke(null,
+    [operation])!;
+var nop = Make("StackOperation", Named("StackOpcode", "Nop"));
+var backEdge = Make("Jump", Named("JumpKind", "Less"), 0);
+if (Loops(Body(nop, nop, backEdge)) != 1 || Loops(Body(nop, nop, Make("NativeBinary", backEdge))) != 1)
+    throw new Exception("A back edge the native-width analysis wrapped is not found as a loop");
+if (!Pure(Make("Arg", 0, null)) || Pure(Make("Arg", 0, Named("Narrowing", "Unsigned8"))) ||
+    !Pure(Make("Return", [null])) || Pure(Make("Return", Named("Narrowing", "Signed16"))) ||
+    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)) || Pure(Make("NativeBinary", nop)))
+    throw new Exception("The pure operations are no longer exactly the unnarrowed, unwrapped ones");
+if (Lean(Make("LoadScalar", 4, false)) != ".loadScalar 4" ||
+    Lean(Make("LoadScalar", 4, Named("LoadSign", "UnsignedSpelled"))) != ".loadScalar 4 false" ||
+    Lean(Make("LoadScalar", 1, true)) != ".loadScalar 1 true" ||
+    !Make("LoadScalar", 1, true).Equals(Make("LoadScalar", 1, Named("LoadSign", "Signed"))))
+    throw new Exception("Scalar loads lost the spelling that tells the unaligned load from the aligned one");
+if (Lean(Make("AddOffset", ulong.MaxValue - 7, true)) != "(.add 18446744073709551608 true)")
+    throw new Exception("A negative stride lost its two's complement spelling");
+var tail = Make("Call", Named("CallKind", "Tail"), 3, 0);
+var renumbered = tail.GetType().GetMethod("Renumber", Declared)!.Invoke(tail, [(Func<int, int>)(_ => 1)])!;
+if (!((IEnumerable<int>)Property(tail, "Methods")).SequenceEqual([3]) || Lean(renumbered) != ".tailCall 1 0")
+    throw new Exception("A tail call does not expose and renumber its callee");
+try
+{
+    Make("Constant", 32, -1L, true);
+    throw new Exception("A negative numeral constant was admitted");
+}
+catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
+// A `with` copy sets one member of an existing constant, so each member checks the other as well.
+void Assign(object value, string property, object newValue) =>
+    value.GetType().GetProperty(property, Declared)!.SetValue(value, newValue);
+foreach (var (constant, property, newValue) in new (object, string, object)[]
+{
+    (Make("Constant", 32, 5L, true), "Value", -1L), (Make("Constant", 32, -1L, false), "Numeral", true)
+})
+    try
+    {
+        Assign(constant, property, newValue);
+        throw new Exception("Changing " + property + " made a negative numeral constant");
+    }
+    catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
+Console.WriteLine("PASS typed operations keep the spellings and shapes the outline generators branch on");
