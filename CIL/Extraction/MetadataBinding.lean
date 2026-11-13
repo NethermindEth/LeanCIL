@@ -174,7 +174,7 @@ def MetadataEnv.classChain (env : MetadataEnv) :
         .ok ((linked, definition) :: (← env.classChain fuel linked definition))
       else
         let corlib ← index.corlibIdentity
-        if some named.scope == corlib && named.name == bytesOf "System.Object" then .ok []
+        if some named.scope == corlib && named.name == systemObjectName then .ok []
         else .error (.unsupportedBase token)
     | _ => .error (.unsupportedBase token)
 
@@ -221,9 +221,9 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
     | .genericInst head arguments =>
       match arguments.toList with
       | [first, second] =>
-        if some head.scope == corlib && head.name == bytesOf "System.ValueTuple`2" then
-          if site.name == bytesOf "Item1" then .ok (0, first, none)
-          else if site.name == bytesOf "Item2" then .ok (1, second, none)
+        if some head.scope == corlib && head.name == valueTuplePairName then
+          if site.name == firstItemName then .ok (0, first, none)
+          else if site.name == secondItemName then .ok (1, second, none)
           else .ok (0, held, none)
         else .ok (0, held, none)
       | _ => .ok (0, held, none)

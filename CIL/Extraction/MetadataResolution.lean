@@ -333,26 +333,68 @@ def MetadataEnv.resolveToken (env : MetadataEnv) (position token : Nat) :
 
 /-! ## Spelling -/
 
-/-- The `System` type name of an element type byte. -/
+/-- `System.`, the namespace of every primitive type with its separator, as bytes. -/
+def systemPrefix : List Nat := systemNamespace ++ [46]
+
+/-- `System.String` as bytes. -/
+def systemStringName : List Nat := systemPrefix ++ [83, 116, 114, 105, 110, 103]
+
+/-- `System.Object` as bytes. -/
+def systemObjectName : List Nat := systemPrefix ++ [79, 98, 106, 101, 99, 116]
+
+/-- `System.ValueTuple\``, the stem of every value tuple's name, as bytes. -/
+def valueTupleStem : List Nat :=
+  systemPrefix ++ [86, 97, 108, 117, 101, 84, 117, 112, 108, 101, 96]
+
+/-- `System.ValueTuple\`2`, the pair, as bytes. -/
+def valueTuplePairName : List Nat := valueTupleStem ++ [50]
+
+/-- `Item1`, the pair's first field, as bytes. -/
+def firstItemName : List Nat := [73, 116, 101, 109, 49]
+
+/-- `Item2`, the pair's second field, as bytes. -/
+def secondItemName : List Nat := [73, 116, 101, 109, 50]
+
+/-- The value tuple names spell the texts they stand for. -/
+theorem value_tuple_names_spell :
+    spelled? valueTupleStem = some "System.ValueTuple`" ∧
+      spelled? valueTuplePairName = some "System.ValueTuple`2" ∧
+      spelled? firstItemName = some "Item1" ∧ spelled? secondItemName = some "Item2" :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms value_tuple_names_spell
+
+/-- The `System` type name of an element type byte, as bytes, so that no decision evaluates a
+    string; `primitiveName_spells` gives the text of each. -/
 def primitiveName : Nat → Option (List Nat)
-  | 0x01 => some (bytesOf "System.Void")
-  | 0x02 => some (bytesOf "System.Boolean")
-  | 0x03 => some (bytesOf "System.Char")
-  | 0x04 => some (bytesOf "System.SByte")
-  | 0x05 => some (bytesOf "System.Byte")
-  | 0x06 => some (bytesOf "System.Int16")
-  | 0x07 => some (bytesOf "System.UInt16")
-  | 0x08 => some (bytesOf "System.Int32")
-  | 0x09 => some (bytesOf "System.UInt32")
-  | 0x0A => some (bytesOf "System.Int64")
-  | 0x0B => some (bytesOf "System.UInt64")
-  | 0x0C => some (bytesOf "System.Single")
-  | 0x0D => some (bytesOf "System.Double")
-  | 0x0E => some (bytesOf "System.String")
-  | 0x18 => some (bytesOf "System.IntPtr")
-  | 0x19 => some (bytesOf "System.UIntPtr")
-  | 0x1C => some (bytesOf "System.Object")
+  | 0x01 => some (systemPrefix ++ [86, 111, 105, 100])
+  | 0x02 => some (systemPrefix ++ [66, 111, 111, 108, 101, 97, 110])
+  | 0x03 => some (systemPrefix ++ [67, 104, 97, 114])
+  | 0x04 => some (systemPrefix ++ [83, 66, 121, 116, 101])
+  | 0x05 => some (systemPrefix ++ [66, 121, 116, 101])
+  | 0x06 => some (systemPrefix ++ [73, 110, 116, 49, 54])
+  | 0x07 => some (systemPrefix ++ [85, 73, 110, 116, 49, 54])
+  | 0x08 => some (systemPrefix ++ [73, 110, 116, 51, 50])
+  | 0x09 => some (systemPrefix ++ [85, 73, 110, 116, 51, 50])
+  | 0x0A => some (systemPrefix ++ [73, 110, 116, 54, 52])
+  | 0x0B => some (systemPrefix ++ [85, 73, 110, 116, 54, 52])
+  | 0x0C => some (systemPrefix ++ [83, 105, 110, 103, 108, 101])
+  | 0x0D => some (systemPrefix ++ [68, 111, 117, 98, 108, 101])
+  | 0x0E => some systemStringName
+  | 0x18 => some (systemPrefix ++ [73, 110, 116, 80, 116, 114])
+  | 0x19 => some (systemPrefix ++ [85, 73, 110, 116, 80, 116, 114])
+  | 0x1C => some systemObjectName
   | _ => none
+
+/-- Each element type byte with a name spells the `System` type it stands for. -/
+theorem primitiveName_spells :
+    [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x18,
+        0x19, 0x1C].map (fun code => (primitiveName code).bind spelled?) =
+      ["System.Void", "System.Boolean", "System.Char", "System.SByte", "System.Byte",
+        "System.Int16", "System.UInt16", "System.Int32", "System.UInt32", "System.Int64",
+        "System.UInt64", "System.Single", "System.Double", "System.String", "System.IntPtr",
+        "System.UIntPtr", "System.Object"].map some := by
+  cil_kernel_rfl
+#print axioms primitiveName_spells
 
 mutual
 
@@ -364,8 +406,9 @@ def cecilName (pointers : Bool) : Nat → ResolvedType → Option (List Nat)
   | 0, _ => none
   | _ + 1, .primitive code => primitiveName code
   | _ + 1, .named named => some named.name
-  | _ + 1, .var index => some (bytesOf "!" ++ decimalDigits 10 index)
-  | _ + 1, .mvar index => some (bytesOf "!!" ++ decimalDigits 10 index)
+  -- `!` and `!!`
+  | _ + 1, .var index => some (33 :: decimalDigits 10 index)
+  | _ + 1, .mvar index => some (33 :: 33 :: decimalDigits 10 index)
   | fuel + 1, .byref element => (· ++ [38]) <$> cecilName pointers fuel element
   | fuel + 1, .pointer element => (· ++ [42]) <$> cecilName pointers fuel element
   | fuel + 1, .szarray element => (· ++ [91, 93]) <$> cecilName pointers fuel element
@@ -374,7 +417,9 @@ def cecilName (pointers : Bool) : Nat → ResolvedType → Option (List Nat)
     some (head.name ++ [60] ++ inner ++ [62])
   | fuel + 1, .modified required modifier element => do
     let spelled ← cecilName pointers fuel element
-    let marker := bytesOf (if required then " modreq(" else " modopt(")
+    -- ` modreq(` and ` modopt(`
+    let marker := if required then [32, 109, 111, 100, 114, 101, 113, 40]
+      else [32, 109, 111, 100, 111, 112, 116, 40]
     some (spelled ++ marker ++ modifier.name ++ [41])
   | fuel + 1, .functionPointer _ result parameters =>
     if pointers then do
@@ -413,7 +458,7 @@ def aggregateSpelling (corlib : List Nat) : Nat → ResolvedType → Option (Lis
     else
       -- A value tuple is an aggregate and keeps Cecil's spelling; any other instance outside
       -- the carried slices, such as a vector, spells its arguments with their scopes.
-      let inner ← if (bytesOf "System.ValueTuple`").isPrefixOf head.name
+      let inner ← if valueTupleStem.isPrefixOf head.name
         then cecilNames false fuel arguments else aggregateSpellings corlib fuel arguments
       some (head.scope ++ [58, 58] ++ head.name ++ [60] ++ inner ++ [62])
   | _ + 1, _ => none
@@ -490,15 +535,41 @@ def listHasModifier : Nat → ResolvedList → Bool
   | fuel + 1, .cons head tail => hasModifier fuel head || listHasModifier fuel tail
 end
 
+/-- `System.Runtime.InteropServices.InAttribute` as bytes. -/
+def inAttributeName : List Nat :=
+  systemPrefix ++ [82, 117, 110, 116, 105, 109, 101, 46, 73, 110, 116, 101, 114, 111, 112, 83,
+    101, 114, 118, 105, 99, 101, 115, 46, 73, 110, 65, 116, 116, 114, 105, 98, 117, 116, 101]
+
+/-- `System.Runtime.CompilerServices.IsExternalInit` as bytes. -/
+def externalInitName : List Nat :=
+  systemPrefix ++ [82, 117, 110, 116, 105, 109, 101, 46, 67, 111, 109, 112, 105, 108, 101, 114,
+    83, 101, 114, 118, 105, 99, 101, 115, 46, 73, 115, 69, 120, 116, 101, 114, 110, 97, 108, 73,
+    110, 105, 116]
+
+/-- `runtimeScope` as bytes. -/
+def runtimeScopeBytes : List Nat :=
+  [83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44, 32,
+    86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46, 48,
+    44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97,
+    108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101,
+    110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48, 97,
+    51, 97]
+
+/-- The modifier names and the runtime scope spell the texts they stand for. -/
+theorem modifier_names_spell :
+    spelled? inAttributeName = some "System.Runtime.InteropServices.InAttribute" ∧
+      spelled? externalInitName = some "System.Runtime.CompilerServices.IsExternalInit" ∧
+      spelled? runtimeScopeBytes = some runtimeScope :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms modifier_names_spell
+
 /-- `System.Runtime`'s `InAttribute`, the modifier Roslyn writes on `in` parameters. -/
 def isInModifier (modifier : NamedType) : Bool :=
-  modifier.name == bytesOf "System.Runtime.InteropServices.InAttribute" &&
-    modifier.scope == bytesOf runtimeScope
+  modifier.name == inAttributeName && modifier.scope == runtimeScopeBytes
 
 /-- `IsExternalInit` from any assembly, the marker Roslyn writes on `init` accessors. -/
 def isInitModifier (modifier : NamedType) : Bool :=
-  modifier.name == bytesOf "System.Runtime.CompilerServices.IsExternalInit" &&
-    !modifier.name.contains 47
+  modifier.name == externalInitName && !modifier.name.contains 47
 
 /-- The reference an `in` parameter's `modreq(InAttribute)` wraps: modified directly, once. -/
 def inReference : ResolvedType → Option ResolvedType
@@ -594,7 +665,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
       code != 0x01 && frame.corlib == some (bytesOf scope) &&
         primitiveName code == some (bytesOf name)
     | .primitive 0x0E, .object scope name =>
-      frame.corlib == some (bytesOf scope) && bytesOf name == bytesOf "System.String"
+      frame.corlib == some (bytesOf scope) && bytesOf name == systemStringName
     | .named named, .atom scope name =>
       named.scope == bytesOf scope && named.name == bytesOf name && !named.isEnum
     | .named named, .object scope name =>
