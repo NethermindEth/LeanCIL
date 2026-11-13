@@ -149,8 +149,8 @@ private def arithmeticFlagCases : List (Nat × Instruction) := [
   (216, .checkedArithmetic .mul true), (217, .checkedArithmetic .mul false),
   (218, .checkedArithmetic .sub true), (219, .checkedArithmetic .sub false)]
 example : arithmeticFlagCases.all (fun (opcode, operation) =>
-    decide (TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by
-  decide +kernel
+    decide (TranslationValid [] #[] [binaryEvidence opcode] []
+      [binaryMethod operation])) = true := by decide +kernel
 example : arithmeticFlagMutations.all (fun (opcode, operation) =>
     decide (¬ TranslationValid [] #[] [binaryEvidence opcode] []
       [binaryMethod operation])) = true := by decide +kernel
