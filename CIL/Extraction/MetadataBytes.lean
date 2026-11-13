@@ -38,8 +38,6 @@ inductive MetadataError where
   | unsupportedAssemblyRef (token : Nat)
   | unsupportedScope (token : Nat)
   | unsupportedBase (token : Nat)
-  | unsupportedUserString (offset : Nat)
-  | unsupportedModifier (token : Nat)
   | unresolvedType (token : Nat)
   | unresolvedMember (token : Nat)
   | operandMismatch (token : Nat)

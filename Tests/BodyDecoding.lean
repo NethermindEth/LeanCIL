@@ -582,4 +582,12 @@ theorem rejects_another_version_of_a_pinned_assembly :
       (.missingSlice tokens.boxRef) = false := by decide +kernel
 #print axioms rejects_another_version_of_a_pinned_assembly
 
+/-- Tables that do not match the slices in number are refused before any decoding. -/
+theorem rejects_tables_that_do_not_match_the_slices_in_number :
+    failsWith { evidence tinyBytes with tables := [] } (.metadata .tablesMismatch) tinyMethod =
+      true ∧
+    failsWith { evidence tinyBytes with identities := [] } (.metadata .tablesMismatch)
+      tinyMethod = true := by decide +kernel
+#print axioms rejects_tables_that_do_not_match_the_slices_in_number
+
 end Tests.BodyDecoding

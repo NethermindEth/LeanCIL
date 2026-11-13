@@ -305,6 +305,22 @@ theorem reads_a_field_parameter_against_the_declaring_instance :
       (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
 #print axioms reads_a_field_parameter_against_the_declaring_instance
 
+/-- The own slice without the row of the static field between the first and the second instance
+    field of `Program`: the carried rows of the type leave a gap. -/
+private def ownWithGappedFields : MetadataSlice :=
+  { own.1 with rows := own.1.rows.filter (·.1 != tokens.totalField) }
+
+/-- The second instance field is index 1 when every field row before it is carried. A prefix of
+    the type's fields with a missing row cannot give the count of instance fields before it, so
+    the token is refused, not read as the first instance field. -/
+theorem rejects_a_field_after_a_gap_in_the_carried_field_rows :
+    passes own.1 lib tokens.secondField (.field (.atom ownIdentity "Program") 1 int32 false) =
+      true ∧
+    rejects ownWithGappedFields lib tokens.secondField
+      (.field (.atom ownIdentity "Program") 1 int32 false)
+      (.unresolvedMember tokens.secondField) = true := by decide +kernel
+#print axioms rejects_a_field_after_a_gap_in_the_carried_field_rows
+
 /-! ## The use of a token -/
 
 theorem rejects_a_field_access_that_disagrees_with_the_field_row :
@@ -690,4 +706,50 @@ theorem refuses_an_owner_parameter_past_the_owner_arity :
     !pairFrame.admits (.var 1) (.parameter 2) && pairFrame.admits (.var 0) (.parameter 1) := by
   decide +kernel
 #print axioms refuses_an_owner_parameter_past_the_owner_arity
+
+/-! ## Each reason a reference or type is refused -/
+
+/-- A type reference scoped by a module reference, which the checker does not read. -/
+private def consoleInModuleReference : MetadataSlice :=
+  mutateRow own.1 tokens.consoleRef fun bytes => [5, 0] ++ bytes.drop 2
+
+theorem refuses_a_type_reference_scoped_by_a_module_reference :
+    rejects consoleInModuleReference lib tokens.consoleRef
+      (.type (.atom runtimeScope "System.Console")) (.unsupportedScope tokens.consoleRef) =
+      true := by decide +kernel
+#print axioms refuses_a_type_reference_scoped_by_a_module_reference
+
+/-- The links of `T` with the one from `Lib.Box`'s reference removed, or aimed at `T` itself. -/
+private def ownWithoutBoxLink : MetadataSlice :=
+  { own.1 with links := own.1.links.filter fun link => link.kind != linkDefinition ||
+      link.source != tokens.boxRef }
+
+private def ownWithBoxLinkIntoItself : MetadataSlice :=
+  { own.1 with links := own.1.links.map fun link =>
+      if link.kind == linkDefinition && link.source == tokens.boxRef then
+        { link with slice := 0 } else link }
+
+theorem refuses_a_reference_into_a_pinned_slice_without_its_definition_link :
+    rejects ownWithoutBoxLink lib tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.unresolvedType tokens.boxRef) = true ∧
+    rejects ownWithBoxLinkIntoItself lib tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.unresolvedType tokens.boxRef) = true := by decide +kernel
+#print axioms refuses_a_reference_into_a_pinned_slice_without_its_definition_link
+
+/-- `Program` extending a type specification, and extending `Console` instead of `Object`: the
+    chain of base classes ends only at `System.Object`. -/
+private def programExtends (coded : Nat) : MetadataSlice :=
+  mutateRow own.1 (tokenOf Table.typeDef 2) fun bytes =>
+    bytes.take 8 ++ [coded, 0] ++ bytes.drop 10
+
+private def objectFieldOperand : RawOperand :=
+  .field (.object ownIdentity "Program") 0 int32 false
+
+theorem refuses_a_base_class_chain_that_does_not_end_at_object :
+    passes own.1 lib tokens.countField objectFieldOperand = true ∧
+    rejects (programExtends 6) lib tokens.countField objectFieldOperand
+      (.unsupportedBase (tokenOf Table.typeDef 2)) = true ∧
+    rejects (programExtends 9) lib tokens.countField objectFieldOperand
+      (.unsupportedBase (tokenOf Table.typeDef 2)) = true := by decide +kernel
+#print axioms refuses_a_base_class_chain_that_does_not_end_at_object
 end Tests.MetadataBinding
