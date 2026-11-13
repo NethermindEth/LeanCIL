@@ -3044,7 +3044,8 @@ partial class Program : IDisposable
     internal static class ContractModules
     {
         static readonly string[] ReservedRoots = ["CIL", "Lean", "Init", "Std", "Lake", "Extracted", "ExtractedImports", "Proof", "Audit",
-            "ExtractionAudit", "ExtractedSymbols", "Symbols", "Examples", "Tests", "lakefile"];
+            "ExtractionAudit", "ExtractedSymbols", "Symbols", "Examples", "Tests", "lakefile",
+            "StrictBinding", "BindingAudit"];
 
         internal static bool Name(string? value) => value is not null && !value.Split('.').Contains("_root_", StringComparer.Ordinal) &&
             Regex.IsMatch(value, @"\A[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z");

@@ -5,6 +5,12 @@
 #:include GeneratedEvidence.cs
 #:include MultiAssemblyFixture.cs
 #:include MultiAssemblyGenerics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/BindingAudit.cs
+#:include StrictBindingFacts.cs
+#:include StrictBindingDecoding.cs
+#:include StrictBindingScaling.cs
+#:include StrictBindingAudit.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -366,3 +372,11 @@ Console.WriteLine("PASS pinned referenced assemblies: proofs, missing, duplicate
 
 // Generic structs and generic class statics run in the same job with their own Lib and App.
 CheckGenericAssemblies();
+
+// The strict binding library decodes images as an independent reader does, and its own tests pass.
+Run(["lake", "build", "StrictBinding", "Tests.StrictBinding"], FixturePackage(),
+    progress: "Building strict binding tests");
+Console.WriteLine("PASS strict binding library: SHA-256, SHA-1, container and table decoding tests");
+CheckBindingDecoding(Path.Combine(root, "binding"));
+CheckBindingScaling(Path.Combine(root, "binding-scaling"));
+CheckBindingAudit(root, cli, Artifact("Direct"), app, lib, libName, Verify(Artifact("Direct")));

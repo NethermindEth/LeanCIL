@@ -105,7 +105,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates at a per-instruction cost that does not grow with the method |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
 | `stepping` | full scalar and checked-memory bodies with per-instruction heartbeat, proof-size and latency budgets |
-| `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection |
+| `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, and the strict binding library and audit |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches and self-admission |
 | `audit` | theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge |
