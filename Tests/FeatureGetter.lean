@@ -121,19 +121,19 @@ theorem platform_values :
 /-- A platform constant is checked even when its forged instruction has the same stack effect. -/
 theorem platform_encoding (raw : RawMethod) :
     let site := platform "System.IntPtr" "get_Size" "System.Int32"
-    featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.const32 8) = true ∧
-    featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.const32 4) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.ldc_i4 8) = true ∧
+    featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.ldc_i4 4) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      declaringType := .atom "forged" "System.IntPtr" }⟩ (.const32 8) = false ∧
+      declaringType := .atom "forged" "System.IntPtr" }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      target := .external "forged" }⟩ (.const32 8) = false ∧
+      target := .external "forged" }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      returnType := .atom runtimeScope "System.UInt32" }⟩ (.const32 8) = false ∧
-    featureOpMatches #[] raw ⟨0, 111, .call site⟩ (.const32 8) = false ∧
-    featureOpMatches #[] raw ⟨0, 40, .call { site with hasThis := true }⟩ (.const32 8) = false ∧
-    featureOpMatches #[] raw ⟨0, 40, .call { site with parameterCount := 1 }⟩ (.const32 8) = false ∧
+      returnType := .atom runtimeScope "System.UInt32" }⟩ (.ldc_i4 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 111, .call site⟩ (.ldc_i4 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with hasThis := true }⟩ (.ldc_i4 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with parameterCount := 1 }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      typeArguments := [.atom runtimeScope "System.Int32"] }⟩ (.const32 8) = false := by
+      typeArguments := [.atom runtimeScope "System.Int32"] }⟩ (.ldc_i4 8) = false := by
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 #print axioms platform_encoding
 
@@ -153,9 +153,9 @@ theorem platform_field (raw : RawMethod) :
     platformField (staticBoolean runtimeScope "System.BitConverterX") = none ∧
     platformField { endian with opcode := 127 } = none ∧
     platformField { endian with operand := integerField } = none ∧
-    featureOpMatches #[] raw endian (.const32 1) = true ∧
-    featureOpMatches #[] raw endian (.const32 0) = false ∧
-    featureOpMatches #[] raw (staticBoolean "forged" "System.BitConverter") (.const32 1) =
+    featureOpMatches #[] raw endian (.ldc_i4 1) = true ∧
+    featureOpMatches #[] raw endian (.ldc_i4 0) = false ∧
+    featureOpMatches #[] raw (staticBoolean "forged" "System.BitConverter") (.ldc_i4 1) =
       false := by
   exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 #print axioms platform_field

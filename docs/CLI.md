@@ -740,7 +740,7 @@ abbrev State (home0 : Reference) :=
 
 -- The cutpoint is the loop's back-edge test at Loops.cs:38.
 bind_cutpoint header (home0 : Reference) (state : State home0) :=
-  Extracted.method0 at loop.latch matching (· matches .brnonzero _)
+  Extracted.method0 at loop.latch matching (· matches .brtrue _)
   with entry.frame home0, [.scalar (.i32 state.values)], state.memory
 
 set_option linter.unusedVariables false in

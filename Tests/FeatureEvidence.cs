@@ -125,7 +125,7 @@ string MutateState(string source, string update) => Regex.Replace(source,
 // Each mutation checks feature flow independently, without unrelated validator proofs
 // or instruction lookup equations that could reject it for a different reason.
 Reject("wrong-feature", baseline.Replace(".feature .avx2", ".feature .sse2"));
-Reject("wrong-branch", baseline.Replace(".brzero 10", ".brzero 11"));
+Reject("wrong-branch", baseline.Replace(".brfalse 10", ".brfalse 11"));
 Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))]", "stack := [some (BitVec.ofInt 32 (1))]"));
 Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [none], locals := [none] })"));
 Reject("false-pruned-successor", MutateState(baseline, "set 10 none"));
@@ -307,7 +307,7 @@ foreach (var obligation in new[] { featureObligation, "method0_scalars_validated
     if (aggregate.Length == 0) throw new InvalidOperationException("Missing query-only aggregate layout");
     foreach (var (name, before, after) in new[]
     {
-        ("answer", ".const32 0", ".const32 1"),
+        ("answer", ".ldc_i4 0", ".ldc_i4 1"),
         ("scope", ".atom Extraction.runtimeScope \"System.Runtime.CompilerServices.RuntimeHelpers\"",
             ".atom \"forged\" \"System.Runtime.CompilerServices.RuntimeHelpers\""),
         ("byref", "typeArguments := [.atom Extraction.runtimeScope \"System.Int32\"]",
@@ -441,11 +441,11 @@ foreach (var (obligation, diagnostic) in new[]
     var controlPath = Path.Combine(output, obligation + "-platform.lean");
     File.WriteAllText(controlPath, narrowed);
     platformControls.Add(controlPath, "PASS exact platform constant control: " + diagnostic, obligation);
-    const string literal = ".const32 8";
+    const string literal = ".ldc_i4 8";
     var position = narrowed.IndexOf(literal, StringComparison.Ordinal);
     if (position < 0) throw new InvalidOperationException("Missing initial platform getter constant");
     var forged = Path.Combine(output, obligation + "-wrong-platform.lean");
-    File.WriteAllText(forged, narrowed[..position] + ".const32 4" + narrowed[(position + literal.Length)..]);
+    File.WriteAllText(forged, narrowed[..position] + ".ldc_i4 4" + narrowed[(position + literal.Length)..]);
     rejected.Add(forged, "PASS exact platform constant rejection: " + diagnostic, diagnostic);
 }
 platformControls.Check(replay: false);
@@ -461,11 +461,11 @@ foreach (var (obligation, diagnostic) in new[]
     var controlPath = Path.Combine(output, obligation + "-endian.lean");
     File.WriteAllText(controlPath, narrowed);
     endianControls.Add(controlPath, "PASS exact endianness constant control: " + diagnostic, obligation);
-    const string literal = ".const32 1";
+    const string literal = ".ldc_i4 1";
     var position = narrowed.IndexOf(literal, StringComparison.Ordinal);
     if (position < 0) throw new InvalidOperationException("Missing endianness constant");
     var forgedValue = Path.Combine(output, obligation + "-wrong-endian.lean");
-    File.WriteAllText(forgedValue, narrowed[..position] + ".const32 0" + narrowed[(position + literal.Length)..]);
+    File.WriteAllText(forgedValue, narrowed[..position] + ".ldc_i4 0" + narrowed[(position + literal.Length)..]);
     rejected.Add(forgedValue, "PASS endianness constant value rejection: " + diagnostic, diagnostic);
     const string owner = ".atom Extraction.runtimeScope \"System.BitConverter\"";
     if (!narrowed.Contains(owner, StringComparison.Ordinal))
@@ -516,8 +516,8 @@ foreach (var mutation in new[] { "scope", "field", "module-type" })
 var comparisonEvidence = NarrowEvidence(platformSource, featureObligation);
 foreach (var (name, before, after) in new[]
 {
-    ("branch", ".bne ", ".beq "), ("signedness", ".gt,", ".gtu,"),
-    ("unsigned-comparison", ".ltu,", ".lt,")
+    ("branch", ".bne_un ", ".beq "), ("signedness", ".cgt,", ".cgt_un,"),
+    ("unsigned-comparison", ".clt_un,", ".clt,")
 })
 {
     if (!comparisonEvidence.Contains(before, StringComparison.Ordinal))

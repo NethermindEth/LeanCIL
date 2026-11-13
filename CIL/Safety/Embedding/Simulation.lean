@@ -192,7 +192,7 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc :
   cases op
   case throw => exact (step_throw h).elim
   case unsupported => exact (step_unsupported h).elim
-  case branch target =>
+  case br target =>
     change Except.ok (.next target stack frame m) = .ok action at h
     cases h
     exact resumes.elim

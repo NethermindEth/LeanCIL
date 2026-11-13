@@ -132,7 +132,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
             "ManagedCallsValid"),
         ("signature", "method0_calls_validated", call,
             call.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal), "ManagedCallsValid"),
-        ("numeric-pointer", "method0_calls_validated", address, "  .const64 0,", "ManagedCallsValid"),
+        ("numeric-pointer", "method0_calls_validated", address, "  .ldc_i8 0,", "ManagedCallsValid"),
         ("convention", "method0_calls_validated", "] false false 0 },", "] false false 1 },",
             "ManagedCallsValid"),
         ("tail", "method0_features_validated", call,

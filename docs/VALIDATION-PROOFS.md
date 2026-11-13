@@ -17,8 +17,8 @@ library and tactic regressions kernel-check the resulting proofs.
 
 ### Stepping
 
-- `Tests.Automation` steps an eight-instruction arithmetic method (`arg, arg, const32, shl, add,
-  const32, gtu, ret`) with symbolic inputs and arbitrary caller memory using `cil_checked_steps`;
+- `Tests.Automation` steps an eight-instruction arithmetic method (`arg, arg, ldc_i4, shl, add,
+  ldc_i4, cgt_un, ret`) with symbolic inputs and arbitrary caller memory using `cil_checked_steps`;
   its axiom assertion permits only `propext` and `Quot.sound`. It checks both paths of a symbolic
   branch from a supplied truth hypothesis, and that failed candidate summaries do not escape their
   transaction. Memory and static dispatch facts keep abstract bitcast results in inferred stacks;

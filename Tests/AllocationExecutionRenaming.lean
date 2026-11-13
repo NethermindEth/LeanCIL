@@ -91,7 +91,7 @@ theorem private_initializer_readback :
 
 /-- A returned child value is stored before later dynamic allocation changes fresh identities. -/
 def allocationPrefix : List CIL.Instruction :=
-  [.const32 9, .setLocal 0, .call 1 0, .setLocal 1, .const32 4, .stackAlloc false, .pop]
+  [.ldc_i4 9, .setLocal 0, .call 1 0, .setLocal 1, .ldc_i4 4, .stackAlloc false, .pop]
 
 /-- The resumed caller reads both retained homes after its child and dynamic allocation. -/
 def returningCode : List CIL.Instruction := allocationPrefix ++ [.local 0, .local 1, .add, .ret]
@@ -242,7 +242,7 @@ open CIL.Safety
 
 /-- A compact method has no local declarations and returns a fixed scalar. -/
 def compact : CIL.Method := {
-  locals := [], returnsValue := true, code := [.const32 7, .ret] }
+  locals := [], returnsValue := true, code := [.ldc_i4 7, .ret] }
 
 /-- The target inserts exactly one unused declaration with its supplied initializer. -/
 def inserted (kind : CIL.LocalKind) (initial : CIL.Value) : CIL.Method := {

@@ -18,7 +18,7 @@ def method2Signature : String := "System.Void Contracts.Calls::AddTo(System.UInt
 @[cil_code] def method0 : Method := { returnsValue := false, locals := [], code :=
   [.arg 0, .arg 1, .arg 0, .call 2 3, .arg 0, .arg 0, .load64, .arg 1, .load64, .call 1 2, .store64, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 3, .convI8, .mul, .arg 1, .add, .ret] }
+  [.arg 0, .ldc_i4 3, .conv_i8, .mul, .arg 1, .add, .ret] }
 @[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
   [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ret] }
 @[cil_code] def program : Program := [method0, method1, method2]
@@ -242,8 +242,8 @@ example {program : CIL.Program} {before after : Memory} (kept : FrameInvariants 
 -- equation; unfolding `CIL.step`, or re-elaborating a tactic per step, exceeds the budget.
 def loadedGuardBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := false, locals := [], code :=
-    [.local 0, .const32 4, .bltu 7, .local 0, .const32 0, .bge 7, .nop, .ret,
-      .local 1, .local 2, .bltu 7, .ret] }
+    [.local 0, .ldc_i4 4, .blt_un 7, .local 0, .ldc_i4 0, .bge 7, .nop, .ret,
+      .local 1, .local 2, .blt_un 7, .ret] }
 
 set_option maxHeartbeats 2000 in
 theorem loaded_unsigned_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -286,7 +286,7 @@ theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.
 -- equation; re-elaborating a tactic at every contract step exceeds the budget.
 def widenBody (signed : Bool) : CIL.Method :=
   { returnsValue := true, locals := [], code :=
-      [.arg 0, if signed then .convI8 else .convU8, .arg 1, .pop, .pop, .const32 0, .ret] }
+      [.arg 0, if signed then .conv_i8 else .conv_u8, .arg 1, .pop, .pop, .ldc_i4 0, .ret] }
 
 def widenArgs (scalarFirst : Bool) (input : Reference) (value : CIL.Value) : List Value :=
   if scalarFirst then [.scalar value, .reference (.address input)] else [.reference (.address input), .scalar value]
@@ -356,10 +356,10 @@ theorem feature_op_contract_steps (program : CIL.Program) (index : Nat) (profile
 def orderedWidenBody (signed scalarFirst reversed : Bool) : CIL.Method :=
   let first := if reversed then 1 else 0
   let second := if reversed then 0 else 1
-  let convert := if signed then CIL.Instruction.convI8 else CIL.Instruction.convU8
+  let convert := if signed then CIL.Instruction.conv_i8 else CIL.Instruction.conv_u8
   { returnsValue := true, locals := [], code :=
       (if scalarFirst then [.arg first, convert, .arg second]
-       else [.arg first, .arg second, convert]) ++ [.pop, .pop, .const32 0, .ret] }
+       else [.arg first, .arg second, convert]) ++ [.pop, .pop, .ldc_i4 0, .ret] }
 
 set_option maxHeartbeats 12000 in
 /-- All eight wrapper cases use one three-step proof without unfolding the evaluator. -/
@@ -426,7 +426,7 @@ theorem framed_opaque_call {program : CIL.Program} {memory : Memory} (value : CI
 /-- A feature test and a literal each feed a branch, which then continues at a numeral. -/
 @[cil_code] def literalBranchBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [], code :=
-    [.feature .avx2, .brzero 5, .const64 1, .brnonzero 6, .ret, .const32 9, .const32 7, .ret] }
+    [.feature .avx2, .brfalse 5, .ldc_i8 1, .brtrue 6, .ret, .ldc_i4 9, .ldc_i4 7, .ret] }
 
 /-- A branch on a literal operand is decided where it is taken: the lookups after it meet a
     numeral, and so does a continuation stated at the numeral. A conditional left in the
@@ -469,7 +469,7 @@ theorem coerced_index_facts (program : CIL.Program) (index : Nat) (body : CIL.Me
 /-- Two symbolic words are combined and branched on. -/
 @[cil_code] def symbolicBranchBody : CIL.Method :=
   { returnsValue := true, locals := [], code :=
-    [.arg 0, .arg 1, .bor, .brnonzero 6, .const32 7, .ret, .const32 9, .ret] }
+    [.arg 0, .arg 1, .or, .brtrue 6, .ldc_i4 7, .ret, .ldc_i4 9, .ret] }
 
 /-- A branch no fact decides ends the walk with its condition in the program counter, where
     `split` gives both successors; stepping resumes in each. -/

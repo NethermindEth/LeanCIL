@@ -401,14 +401,14 @@ internal static partial class ProofOutline
                     if (Compared(left, right) is not { } condition) return Stop(Uncompared(op));
                     return Branch(condition, equalityTest.Kind == JumpKind.Equal, equalityTest.Target);
                 }
-                else if (op is StackOperation { Kind: StackOpcode.Eq or StackOpcode.Gtu } comparison
+                else if (op is StackOperation { Kind: StackOpcode.Ceq or StackOpcode.CgtUn } comparison
                     && stack.Count > 1 &&
                     (stack[^1] is Opaque || stack[^2] is Opaque))
                 {
                     var right = Pop();
                     var left = Pop();
                     // `cgt.un` on references is defined only against null.
-                    if (Compared(left, right) is null || comparison.Kind == StackOpcode.Gtu && right is not Null)
+                    if (Compared(left, right) is null || comparison.Kind == StackOpcode.CgtUn && right is not Null)
                         return Stop(Uncompared(op));
                     stack.Add(new Word(null, 4));
                 }
@@ -454,13 +454,13 @@ internal static partial class ProofOutline
                 }
                 // Values the steps compute but the outline does not name: they may be returned, not stored.
                 else if (op is StackOperation { Kind: StackOpcode.Shl or StackOpcode.Shr or StackOpcode.ShrUn
-                    or StackOpcode.Eq or StackOpcode.Gt or
-                    StackOpcode.Gtu or StackOpcode.Lt or StackOpcode.Ltu } unnamed)
+                    or StackOpcode.Ceq or StackOpcode.Cgt or
+                    StackOpcode.CgtUn or StackOpcode.Clt or StackOpcode.CltUn } unnamed)
                 {
                     if (Pop() is not Word || Pop() is not Word left)
                         return Stop($"`{op.ToLean()}` on a value that is not a word");
-                    stack.Add(new Word(null, unnamed.Kind is StackOpcode.Eq or StackOpcode.Gt or StackOpcode.Gtu
-                        or StackOpcode.Lt or StackOpcode.Ltu
+                    stack.Add(new Word(null, unnamed.Kind is StackOpcode.Ceq or StackOpcode.Cgt or StackOpcode.CgtUn
+                        or StackOpcode.Clt or StackOpcode.CltUn
                         ? 4 : left.Width));
                 }
                 else if (op is StackOperation { Kind: StackOpcode.Neg or StackOpcode.ConvI1 or StackOpcode.ConvI2

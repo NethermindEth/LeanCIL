@@ -11,7 +11,7 @@ def method1Signature : String := "System.UInt64 Examples.Identity::Left(System.U
 def method2Signature : String := "System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64)"
 def method3Signature : String := "System.UInt64 Examples.Overloads::Pick(System.UInt64)"
 def method4Signature : String := "System.UInt32 Examples.Overloads::Pick(System.UInt32)"
-def helper (marker : Nat) : Method := { code := [.arg 0, .arg 1, .const64 (BitVec.ofNat 64 marker), .ret], locals := [], returnsValue := true }
+def helper (marker : Nat) : Method := { code := [.arg 0, .arg 1, .ldc_i8 (BitVec.ofNat 64 marker), .ret], locals := [], returnsValue := true }
 def method0 : Method := { code := [.arg 0, .arg 0, .call 2 2, .arg 0, .call 1 2, .ret], locals := [], returnsValue := true }
 def method1 : Method := helper 1
 def method2 : Method := helper 2

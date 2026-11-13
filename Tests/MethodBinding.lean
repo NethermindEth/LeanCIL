@@ -6,7 +6,7 @@ open CIL
 
 /-- An extraction-independent body whose branch target depends on a shift. -/
 def body (shift : Nat) (locals : List Value := [.i32 0]) : Method := {
-  code := [.arg 0, .brzero (4 + shift), .arg 1, .ret, .arg 1, .ret]
+  code := [.arg 0, .brfalse (4 + shift), .arg 1, .ret, .arg 1, .ret]
   locals, returnsValue := true }
 
 def program : Program := [{ code := [.ret], locals := [], returnsValue := false }, body 6]
@@ -23,8 +23,8 @@ run_cmd do
 error: cil_body: rfl could not prove the method-body binding
 method index 1
 field code: first difference at index 1 (left length 6, right length 6)
-  left:  CIL.Instruction.brzero 10
-  right: CIL.Instruction.brzero 4
+  left:  CIL.Instruction.brfalse 10
+  right: CIL.Instruction.brfalse 4
 -/
 #guard_msgs (substring := true) in
 example : program[1]? = some (body 0) := by cil_body
@@ -62,7 +62,7 @@ def field : StaticDescriptor :=
 
 /-- An extracted method whose call sits at pc 2, behind a branch, and which reads no static. -/
 def calling : Method := {
-  code := [.arg 0, .branch 2, .call 7 1, .ret], locals := [], returnsValue := true }
+  code := [.arg 0, .br 2, .call 7 1, .ret], locals := [], returnsValue := true }
 
 /-- An extracted method that reads a static at pc 0 and calls at pc 3. -/
 def reading : Method := {

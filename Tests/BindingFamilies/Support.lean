@@ -14,8 +14,8 @@ open CIL CIL.Safety
 @[cil_code] def equalityBody (profile : FeatureProfile) (environment : LayoutEnvironment)
     (declared : DeclaredSignature) (positive : Bool) : Method := {
   profile, environment, declared, locals := [], returnsValue := true,
-  code := [.arg 0, .arg 1, .eq] ++
-    (if positive then [] else [.const32 0, .eq]) ++ [.ret (some .unsigned8)] }
+  code := [.arg 0, .arg 1, .ceq] ++
+    (if positive then [] else [.ldc_i4 0, .ceq]) ++ [.ret (some .unsigned8)] }
 
 /-- The fixed body of one binary bitwise method. -/
 @[cil_code] def bitwiseBody (profile : FeatureProfile) (environment : LayoutEnvironment)
@@ -50,7 +50,7 @@ theorem different64 (program : Program) (profile : FeatureProfile)
 theorem and32 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
-    (found : program[0]? = some (bitwiseBody profile environment declared .band))
+    (found : program[0]? = some (bitwiseBody profile environment declared .and))
     (left right : W32) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (left &&& right))]) := by
@@ -61,7 +61,7 @@ theorem and32 (program : Program) (profile : FeatureProfile)
 theorem xor64 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
-    (found : program[0]? = some (bitwiseBody profile environment declared .bxor))
+    (found : program[0]? = some (bitwiseBody profile environment declared .xor))
     (left right : W64) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 (left ^^^ right))]) := by

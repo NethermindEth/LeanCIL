@@ -29,8 +29,8 @@ internal static partial class ProofOutline
         internal static bool Pure(Operation operation) => operation is
             Arg { Narrow: null } or Constant { Width: 32 or 64 } or Return { Narrow: null } or
             ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
-            StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.Band
-                or StackOpcode.Bor or StackOpcode.Bxor or StackOpcode.Nop or
+            StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.And
+                or StackOpcode.Or or StackOpcode.Xor or StackOpcode.Nop or
                 StackOpcode.ConvI8 or StackOpcode.ConvU8 or StackOpcode.ConvU4 or StackOpcode.ConvI4 };
 
         /// <summary>The proposition a conditional branch tests of its `bits`-bit operands' terms, and whether it
@@ -570,8 +570,8 @@ internal static partial class ProofOutline
                 ops.Any(op => Body.Conditional(op) || op is Throw) &&
                 ops.All(op => op is Arg { Narrow: null } or Constant { Width: 32 or 64 } or Return { Narrow: null } or
                     Jump or Throw or StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul
-                        or StackOpcode.Band or StackOpcode.Bor or
-                        StackOpcode.Bxor or StackOpcode.Nop });
+                        or StackOpcode.And or StackOpcode.Or or
+                        StackOpcode.Xor or StackOpcode.Nop });
         }
 
         /// <summary>The term a constant's operand is written as: its digits, or its bit-vector conversion.</summary>

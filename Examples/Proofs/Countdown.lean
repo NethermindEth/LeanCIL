@@ -17,7 +17,7 @@ private abbrev State (home : Reference) :=
 /-- The loop test, with the remaining count on the stack. It is found as the only conditional
     branch of the compiled code, so no instruction position or block order is assumed. -/
 bind_cutpoint header (home : Reference) (state : State home) :=
-  Extracted.method0 matching (fun op => match op with | .brnonzero _ => true | _ => false)
+  Extracted.method0 matching (fun op => match op with | .brtrue _ => true | _ => false)
   with entry.frame home, [.scalar (.i32 state.values)], state.memory
 
 theorem correctness : CIL.Safety.Ensures Extracted.program 0

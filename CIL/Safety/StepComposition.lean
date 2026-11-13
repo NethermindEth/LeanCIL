@@ -82,23 +82,23 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       else .error .invalidState := rfl
 
 -- Conditional branches on an i32 or i64 operand.
-@[cil_step] theorem step_brzero_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
-    step body (.brzero target) pc args frame (.scalar (.i32 value) :: rest) memory = do
+@[cil_step] theorem step_brfalse_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
+    step body (.brfalse target) pc args frame (.scalar (.i32 value) :: rest) memory = do
       let some taken := CIL.truth (.i32 value) | .error .invalidState
       return FrameAction.next (if taken then pc + 1 else target) rest frame memory := rfl
 
-@[cil_step] theorem step_brzero_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
-    step body (.brzero target) pc args frame (.scalar (.i64 value) :: rest) memory = do
+@[cil_step] theorem step_brfalse_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
+    step body (.brfalse target) pc args frame (.scalar (.i64 value) :: rest) memory = do
       let some taken := CIL.truth (.i64 value) | .error .invalidState
       return FrameAction.next (if taken then pc + 1 else target) rest frame memory := rfl
 
-@[cil_step] theorem step_brnonzero_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
-    step body (.brnonzero target) pc args frame (.scalar (.i32 value) :: rest) memory = do
+@[cil_step] theorem step_brtrue_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
+    step body (.brtrue target) pc args frame (.scalar (.i32 value) :: rest) memory = do
       let some taken := CIL.truth (.i32 value) | .error .invalidState
       return FrameAction.next (if taken then target else pc + 1) rest frame memory := rfl
 
-@[cil_step] theorem step_brnonzero_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
-    step body (.brnonzero target) pc args frame (.scalar (.i64 value) :: rest) memory = do
+@[cil_step] theorem step_brtrue_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
+    step body (.brtrue target) pc args frame (.scalar (.i64 value) :: rest) memory = do
       let some taken := CIL.truth (.i64 value) | .error .invalidState
       return FrameAction.next (if taken then target else pc + 1) rest frame memory := rfl
 
@@ -165,12 +165,12 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       instructionStep (.setAggregateFieldAt offset size) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
-@[cil_step] theorem step_const32_eq {word} (stack : List Value) :
-    step body (.const32 word) pc args frame stack memory =
-      instructionStep (.const32 word) pc frame stack memory := rfl
-@[cil_step] theorem step_const64_eq {word} (stack : List Value) :
-    step body (.const64 word) pc args frame stack memory =
-      instructionStep (.const64 word) pc frame stack memory := rfl
+@[cil_step] theorem step_ldc_i4_eq {value} (stack : List Value) :
+    step body (.ldc_i4 value) pc args frame stack memory =
+      instructionStep (.ldc_i4 value) pc frame stack memory := rfl
+@[cil_step] theorem step_ldc_i8_eq {value} (stack : List Value) :
+    step body (.ldc_i8 value) pc args frame stack memory =
+      instructionStep (.ldc_i8 value) pc frame stack memory := rfl
 @[cil_step] theorem step_load64_eq (stack : List Value) :
     step body .load64 pc args frame stack memory =
       instructionStep .load64 pc frame stack memory := by

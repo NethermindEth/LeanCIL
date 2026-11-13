@@ -165,7 +165,7 @@ theorem unknown_load (memory : Memory) (frame : Frame) (vector : BitVec 128) :
 
 /-- Mixed private homes include a narrowed byte and a vector. -/
 @[cil_code] def mixedHomes : CIL.Method := {
-  code := [.arg 0, .setLocal 0, .const32 0x1FF, .setLocal 1 (some .unsigned8),
+  code := [.arg 0, .setLocal 0, .ldc_i4 0x1FF, .setLocal 1 (some .unsigned8),
     .arg 1, .setLocal 2, .local 2, .pop, .local 1 (some .unsigned8), .pop,
     .local 0, .ret]
   locals := [.i64 0, .i32 0, .v128 0]

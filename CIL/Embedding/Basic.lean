@@ -22,11 +22,12 @@ namespace CIL
 /-- Replaces every code target of an instruction by its image under `r`. -/
 def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
   | .nativeBinary op => .nativeBinary (op.relabel r)
-  | .bgt t => .bgt (r t) | .ble t => .ble (r t) | .bleu t => .bleu (r t)
-  | .branch t => .branch (r t) | .switch ts => .switch (ts.map r)
-  | .brzero t => .brzero (r t) | .brnonzero t => .brnonzero (r t)
-  | .bltu t => .bltu (r t) | .bgeu t => .bgeu (r t) | .bgtu t => .bgtu (r t)
-  | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t) | .bne t => .bne (r t)
+  | .bgt t => .bgt (r t) | .ble t => .ble (r t) | .ble_un t => .ble_un (r t)
+  | .br t => .br (r t) | .switch ts => .switch (ts.map r)
+  | .brfalse t => .brfalse (r t) | .brtrue t => .brtrue (r t)
+  | .blt_un t => .blt_un (r t) | .bge_un t => .bge_un (r t) | .bgt_un t => .bgt_un (r t)
+  | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t)
+  | .bne_un t => .bne_un (r t)
   | op => op
 
 /-- Renaming code targets never changes the link an instruction implies. -/
@@ -39,8 +40,8 @@ theorem Instruction.link?_relabel (r : Nat → Nat) (op : Instruction) :
 /-- Every code target of an instruction, in operand order. -/
 def Instruction.targets : Instruction → List Nat
   | .nativeBinary op => op.targets
-  | .bgt t | .ble t | .bleu t | .branch t | .brzero t | .brnonzero t
-  | .bltu t | .bgeu t | .bgtu t | .bge t | .blt t | .beq t | .bne t => [t]
+  | .bgt t | .ble t | .ble_un t | .br t | .brfalse t | .brtrue t
+  | .blt_un t | .bge_un t | .bgt_un t | .bge t | .blt t | .beq t | .bne_un t => [t]
   | .switch ts => ts
   | _ => []
 
@@ -63,7 +64,7 @@ theorem Instruction.relabel_of_targets_nil (r : Nat → Nat) (op : Instruction)
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Instruction.continues : Instruction → Bool
   | .managed (.call _ _ true) => false
-  | .branch _ | .tailCall .. | .ret _ | .throw _ | .unsupported _ => false
+  | .br _ | .tailCall .. | .ret _ | .throw _ | .unsupported _ => false
   | _ => true
 
 /-- `.unsupported` faults whenever it executes, so it constrains nothing. -/

@@ -66,7 +66,7 @@ def comparisonValues (compare32 : W32 → W32 → Bool) (compare64 : W64 → W64
   | .i64 b :: .i64 a :: rest => some (compare64 a b, rest)
   | _ => none
 
-/-- Whether `brnonzero` (or, with `negate`, `brzero`) is taken, and the remaining stack. -/
+/-- Whether `brtrue` (or, with `negate`, `brfalse`) is taken, and the remaining stack. -/
 def truthValues (negate : Bool) (stack : List Value) : Option (Bool × List Value) := do
   match stack with
   | value :: rest => return ((← truth value) != negate, rest)
@@ -139,7 +139,7 @@ macro "base_relabel_binary" : tactic => `(tactic| (
   · rfl))
 
 set_option hygiene false in
-/-- Proves `BaseRelabel` for `brzero` (`negate` true) or `brnonzero` (`negate` false). -/
+/-- Proves `BaseRelabel` for `brfalse` (`negate` true) or `brtrue` (`negate` false). -/
 macro "base_relabel_truth " negate:term : tactic => `(tactic| (
   apply base_relabel_branching (evaluate := truthValues $negate)
   · intro target pc stack profile
@@ -157,40 +157,40 @@ theorem base_relabel_nop : BaseRelabel (.nop) :=
   base_relabel_fallthrough (evaluate := fun stack _ => some stack)
     (fun _ _ _ => rfl) (fun _ => rfl) rfl
 theorem base_relabel_neg : BaseRelabel (.neg) := by base_relabel_unary
-theorem base_relabel_gt : BaseRelabel (.gt) := by base_relabel_binary
+theorem base_relabel_cgt : BaseRelabel (.cgt) := by base_relabel_binary
 theorem base_relabel_bgt (t : Nat) : BaseRelabel (.bgt t) := by
   base_relabel_comparison (fun a b => decide (b.toInt < a.toInt)),
     (fun a b => decide (b.toInt < a.toInt))
 theorem base_relabel_ble (t : Nat) : BaseRelabel (.ble t) := by
   base_relabel_comparison (fun a b => decide (a.toInt ≤ b.toInt)),
     (fun a b => decide (a.toInt ≤ b.toInt))
-theorem base_relabel_bleu (t : Nat) : BaseRelabel (.bleu t) := by
+theorem base_relabel_ble_un (t : Nat) : BaseRelabel (.ble_un t) := by
   base_relabel_comparison (fun a b => decide (a ≤ b)), (fun a b => decide (a ≤ b))
-theorem base_relabel_convI1 : BaseRelabel (.convI1) := by base_relabel_unary
-theorem base_relabel_convI2 : BaseRelabel (.convI2) := by base_relabel_unary
-theorem base_relabel_convU2 : BaseRelabel (.convU2) := by base_relabel_unary
-theorem base_relabel_convI8 : BaseRelabel (.convI8) := by base_relabel_unary
-theorem base_relabel_convI4 : BaseRelabel (.convI4) := by base_relabel_unary
-theorem base_relabel_convU1 : BaseRelabel (.convU1) := by base_relabel_unary
-theorem base_relabel_convU4 : BaseRelabel (.convU4) := by base_relabel_unary
-theorem base_relabel_convU8 : BaseRelabel (.convU8) := by base_relabel_unary
-theorem base_relabel_convU : BaseRelabel (.convU) := by base_relabel_unary
-theorem base_relabel_bnot : BaseRelabel (.bnot) := by base_relabel_unary
+theorem base_relabel_conv_i1 : BaseRelabel (.conv_i1) := by base_relabel_unary
+theorem base_relabel_conv_i2 : BaseRelabel (.conv_i2) := by base_relabel_unary
+theorem base_relabel_conv_u2 : BaseRelabel (.conv_u2) := by base_relabel_unary
+theorem base_relabel_conv_i8 : BaseRelabel (.conv_i8) := by base_relabel_unary
+theorem base_relabel_conv_i4 : BaseRelabel (.conv_i4) := by base_relabel_unary
+theorem base_relabel_conv_u1 : BaseRelabel (.conv_u1) := by base_relabel_unary
+theorem base_relabel_conv_u4 : BaseRelabel (.conv_u4) := by base_relabel_unary
+theorem base_relabel_conv_u8 : BaseRelabel (.conv_u8) := by base_relabel_unary
+theorem base_relabel_conv_u : BaseRelabel (.conv_u) := by base_relabel_unary
+theorem base_relabel_not : BaseRelabel (.not) := by base_relabel_unary
 theorem base_relabel_add : BaseRelabel (.add) := by base_relabel_binary
 theorem base_relabel_sub : BaseRelabel (.sub) := by base_relabel_binary
 theorem base_relabel_mul : BaseRelabel (.mul) := by base_relabel_binary
-theorem base_relabel_band : BaseRelabel (.band) := by base_relabel_binary
-theorem base_relabel_bor : BaseRelabel (.bor) := by base_relabel_binary
-theorem base_relabel_bxor : BaseRelabel (.bxor) := by base_relabel_binary
+theorem base_relabel_and : BaseRelabel (.and) := by base_relabel_binary
+theorem base_relabel_or : BaseRelabel (.or) := by base_relabel_binary
+theorem base_relabel_xor : BaseRelabel (.xor) := by base_relabel_binary
 theorem base_relabel_shl : BaseRelabel (.shl) := by base_relabel_binary
 theorem base_relabel_shr : BaseRelabel (.shr) := by base_relabel_binary
-theorem base_relabel_shrUn : BaseRelabel (.shrUn) := by base_relabel_binary
-theorem base_relabel_lt : BaseRelabel (.lt) := by base_relabel_binary
-theorem base_relabel_ltu : BaseRelabel (.ltu) := by base_relabel_binary
-theorem base_relabel_gtu : BaseRelabel (.gtu) := by base_relabel_binary
-theorem base_relabel_eq : BaseRelabel (.eq) := by base_relabel_binary
-theorem base_relabel_brzero (t : Nat) : BaseRelabel (.brzero t) := by base_relabel_truth true
-theorem base_relabel_brnonzero (t : Nat) : BaseRelabel (.brnonzero t) := by base_relabel_truth false
+theorem base_relabel_shr_un : BaseRelabel (.shr_un) := by base_relabel_binary
+theorem base_relabel_clt : BaseRelabel (.clt) := by base_relabel_binary
+theorem base_relabel_clt_un : BaseRelabel (.clt_un) := by base_relabel_binary
+theorem base_relabel_cgt_un : BaseRelabel (.cgt_un) := by base_relabel_binary
+theorem base_relabel_ceq : BaseRelabel (.ceq) := by base_relabel_binary
+theorem base_relabel_brfalse (t : Nat) : BaseRelabel (.brfalse t) := by base_relabel_truth true
+theorem base_relabel_brtrue (t : Nat) : BaseRelabel (.brtrue t) := by base_relabel_truth false
 theorem base_relabel_switch (ts : List Nat) : BaseRelabel (.switch ts) := by
   intro r pc q values profile target result memory next h
   cases values with
@@ -204,11 +204,11 @@ theorem base_relabel_switch (ts : List Nat) : BaseRelabel (.switch ts) := by
       change some (Action.next ((ts.map r)[index.toNat]?.getD (q + 1)) rest (fun _ => none)) = _
       rw [List.getElem?_map, ← next rfl]
       cases ts[index.toNat]? <;> rfl
-theorem base_relabel_bltu (t : Nat) : BaseRelabel (.bltu t) := by
+theorem base_relabel_blt_un (t : Nat) : BaseRelabel (.blt_un t) := by
   base_relabel_comparison (fun a b => decide (a < b)), (fun a b => decide (a < b))
-theorem base_relabel_bgeu (t : Nat) : BaseRelabel (.bgeu t) := by
+theorem base_relabel_bge_un (t : Nat) : BaseRelabel (.bge_un t) := by
   base_relabel_comparison (fun a b => decide (b ≤ a)), (fun a b => decide (b ≤ a))
-theorem base_relabel_bgtu (t : Nat) : BaseRelabel (.bgtu t) := by
+theorem base_relabel_bgt_un (t : Nat) : BaseRelabel (.bgt_un t) := by
   base_relabel_comparison (fun a b => decide (b < a)), (fun a b => decide (b < a))
 theorem base_relabel_bge (t : Nat) : BaseRelabel (.bge t) := by
   base_relabel_comparison (fun a b => decide (b.toInt ≤ a.toInt)),
@@ -218,9 +218,9 @@ theorem base_relabel_blt (t : Nat) : BaseRelabel (.blt t) := by
     (fun a b => decide (a.toInt < b.toInt))
 theorem base_relabel_beq (t : Nat) : BaseRelabel (.beq t) := by
   base_relabel_comparison (fun a b => decide (a = b)), (fun a b => decide (a = b))
-theorem base_relabel_bne (t : Nat) : BaseRelabel (.bne t) := by
+theorem base_relabel_bne_un (t : Nat) : BaseRelabel (.bne_un t) := by
   base_relabel_comparison (fun a b => decide (a ≠ b)), (fun a b => decide (a ≠ b))
-theorem base_relabel_branch (t : Nat) : BaseRelabel (.branch t) := by
+theorem base_relabel_br (t : Nat) : BaseRelabel (.br t) := by
   intro r pc q values profile target result memory next h
   change some (Action.next t values (fun _ => none)) = _ at h
   cases h
@@ -244,9 +244,9 @@ theorem base_relabel_of_nativePure (op : Instruction) (pure : nativePureBinary o
   cases op <;> simp only [nativePureBinary, Bool.false_eq_true] at pure
   all_goals first
     | exact base_relabel_add | exact base_relabel_sub | exact base_relabel_mul
-    | exact base_relabel_band | exact base_relabel_bor | exact base_relabel_bxor
-    | exact base_relabel_lt | exact base_relabel_ltu | exact base_relabel_gt
-    | exact base_relabel_gtu | exact base_relabel_eq | exact base_relabel_bgt _
+    | exact base_relabel_and | exact base_relabel_or | exact base_relabel_xor
+    | exact base_relabel_clt | exact base_relabel_clt_un | exact base_relabel_cgt
+    | exact base_relabel_cgt_un | exact base_relabel_ceq | exact base_relabel_bgt _
     | exact base_relabel_ble _ | exact base_relabel_bge _ | exact base_relabel_blt _
     | exact base_relabel_beq _
 

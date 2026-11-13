@@ -13,7 +13,7 @@ instruction from an extracted method:
 
 ```lean extracted
 bind_entry entry := Extracted.method0 with [] from CIL.Safety.Memory.empty
-bind_cutpoint cutpoint := Extracted.method0 matching (· matches .brnonzero _) with entry.frame
+bind_cutpoint cutpoint := Extracted.method0 matching (· matches .brtrue _) with entry.frame
 ```
 
 `entry.frame`, `entry.memory` and `entry.home0` (and subsequent numeric homes) come from
@@ -143,7 +143,7 @@ with frame` checks that particular instruction rather than requiring a unique pr
 bind_loop outer := Extracted.method0 [0]
 bind_loop inner := Extracted.method0 [1]
 bind_cutpoint cutpoint (frame : Frame) := Extracted.method0 at inner.latch matching
-  (· matches .brnonzero _) with frame
+  (· matches .brtrue _) with frame
 ```
 
 Structural loop occurrences are ordered by head index. Out-of-range locations and wrong instruction
@@ -245,11 +245,11 @@ open CIL
 
 /-- What an extraction emits: a dead block puts the call at pc 3. -/
 def emitted : Method :=
-  { code := [.arg 0, .branch 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret],
+  { code := [.arg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret],
     locals := [], returnsValue := true }
 
 /-- The body the proof uses; its call is at pc 2, and `withCode` gives it the link of that pc. -/
-def literal : Method := emitted.withCode [.arg 0, .branch 2, .call 1 1, .ret]
+def literal : Method := emitted.withCode [.arg 0, .br 2, .call 1 1, .ret]
 
 theorem literal_embeds : MethodEmbeds [emitted] 0 literal := by cil_embed
 ```
@@ -277,8 +277,8 @@ index, both elements and both lengths:
 cil_body: rfl could not prove the method-body binding
 method index 1
 field code: first difference at index 1 (left length 6, right length 6)
-  left:  CIL.Instruction.brzero 10
-  right: CIL.Instruction.brzero 4
+  left:  CIL.Instruction.brfalse 10
+  right: CIL.Instruction.brfalse 4
 ```
 
 The left side is the extraction's body. An index past the end of the program is reported with the
@@ -351,7 +351,7 @@ import CIL.StructuralLabels
 bind_loop reduce := rootBody [1]     -- the second loop head in pc order
 bind_call after := step from rootBody [1]
 
-theorem body : (rootBody.code.drop reduce).take 4 = [.local 0, .const32 3, .sub, .setLocal 0] := rfl
+theorem body : (rootBody.code.drop reduce).take 4 = [.local 0, .ldc_i4 3, .sub, .setLocal 0] := rfl
 ```
 
 A loop head is the target of a branch at the same or a later pc. `bind_loop` defines `reduce` and
@@ -423,13 +423,13 @@ open CIL (Method MethodEmbeds)
 
 /-- Returns argument 1 on both paths; pc 4 is reached only by the branch. -/
 @[cil_code] def body : Method := {
-  code := [.arg 0, .brzero 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.arg 0, .brfalse 4, .arg 1, .ret, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 /-- `body` as a profile-specific extraction emits it, with a dead block before the branch target. -/
 def extracted : Method := {
-  code := [.arg 0, .brzero 6, .arg 1, .ret,
-    .unsupported "Unreachable under selected profile", .const32 9, .arg 1, .ret]
+  code := [.arg 0, .brfalse 6, .arg 1, .ret,
+    .unsupported "Unreachable under selected profile", .ldc_i4 9, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem bound : MethodEmbeds [extracted] 0 body := by cil_embed
@@ -464,10 +464,10 @@ inserted live one is reported by expected and actual pc:
 cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Instruction.brzero 4
-  renamed:  CIL.Instruction.brzero 6
-  actual:   CIL.Instruction.brzero 4
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brfalse 4
+  renamed:  CIL.Instruction.brfalse 6
+  actual:   CIL.Instruction.brfalse 4
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.ldc_i4 0x00000009#32) is not the image of any live expected pc
 ```
 
 The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for 1,414 instructions. See
@@ -634,7 +634,7 @@ abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected
 
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
-    .feature .avx2, .brzero 4,
+    .feature .avx2, .brfalse 4,
     if avx2 then .call callee 0 else unreachable,
     if avx2 then .ret else unreachable,
     if avx2 then unreachable else .ret] }

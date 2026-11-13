@@ -114,11 +114,11 @@ inductive Instruction where
   | newArray (element : ArrayElement)
   /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
   | newReferenceArray (element : Extraction.TypeExpr)
-  | nop | neg | gt
+  | nop | neg | cgt
   -- Signed and unsigned compare-and-branch; more follow `switch` below.
   | bgt (target : Nat)
   | ble (target : Nat)
-  | bleu (target : Nat)
+  | ble_un (target : Nat)
   -- Value-type aggregates and fields, by byte offset and width.
   | loadAggregate (size : Nat)
   | copyObject (size : Nat)
@@ -142,23 +142,23 @@ inductive Instruction where
   /-- Authenticated managed pointers, immutable tables and exact-signature indirect calls. -/
   | managed (operation : ManagedOp)
   -- Constants, conversions, arithmetic, 64-bit memory access and stack shuffling.
-  | const32 (word : W32)
-  | const64 (word : W64)
-  | convI1 | convI2 | convU2
-  | convI8 | convI4 | convU1 | convU4 | convU8 | convU | bnot | add | sub | mul | band | bor | bxor
-  | shl | shr | shrUn | lt | ltu | gtu | eq | load64 | store64 | dup | pop
+  | ldc_i4 (value : W32)
+  | ldc_i8 (value : W64)
+  | conv_i1 | conv_i2 | conv_u2
+  | conv_i8 | conv_i4 | conv_u1 | conv_u4 | conv_u8 | conv_u | not | add | sub | mul | and | or
+  | xor | shl | shr | shr_un | clt | clt_un | cgt_un | ceq | load64 | store64 | dup | pop
   -- Control flow.
-  | branch (target : Nat)
+  | br (target : Nat)
   | switch (targets : List Nat)
-  | brzero (target : Nat)
-  | brnonzero (target : Nat)
-  | bltu (target : Nat)
-  | bgeu (target : Nat)
-  | bgtu (target : Nat)
+  | brfalse (target : Nat)
+  | brtrue (target : Nat)
+  | blt_un (target : Nat)
+  | bge_un (target : Nat)
+  | bgt_un (target : Nat)
   | bge (target : Nat)
   | blt (target : Nat)
   | beq (target : Nat)
-  | bne (target : Nat)
+  | bne_un (target : Nat)
   -- Calls and constructors; `argc` values are popped as arguments.
   | call (method : Nat) (argc : Nat)
   /-- `callvirt` of a non-virtual instance method of a class: a null receiver, the first of the

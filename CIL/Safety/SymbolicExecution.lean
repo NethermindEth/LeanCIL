@@ -1046,14 +1046,14 @@ elab_rules : tactic
       let opcodeHead := (argument? pending 1).bind (·.getAppFn.constName?)
       if pending.isAppOfArity ``CIL.Safety.step 7 &&
           opcodeHead.any
-            ([``CIL.Instruction.brzero, ``CIL.Instruction.brnonzero, ``CIL.Instruction.beq,
-              ``CIL.Instruction.bne, ``CIL.Instruction.blt, ``CIL.Instruction.bltu,
-              ``CIL.Instruction.ble, ``CIL.Instruction.bleu, ``CIL.Instruction.bgt,
-              ``CIL.Instruction.bgtu, ``CIL.Instruction.bge,
-              ``CIL.Instruction.bgeu].contains ·) then
+            ([``CIL.Instruction.brfalse, ``CIL.Instruction.brtrue, ``CIL.Instruction.beq,
+              ``CIL.Instruction.bne_un, ``CIL.Instruction.blt, ``CIL.Instruction.blt_un,
+              ``CIL.Instruction.ble, ``CIL.Instruction.ble_un, ``CIL.Instruction.bgt,
+              ``CIL.Instruction.bgt_un, ``CIL.Instruction.bge,
+              ``CIL.Instruction.bge_un].contains ·) then
         -- A matching truth equation must rewrite before its definition can erase that head.
         let mut truthDefinitions : Array Term := #[← `(term| CIL.truth)]
-        if opcodeHead.any ([``CIL.Instruction.brzero, ``CIL.Instruction.brnonzero].contains ·) then
+        if opcodeHead.any ([``CIL.Instruction.brfalse, ``CIL.Instruction.brtrue].contains ·) then
           let stackTerm ← argumentAt "cil_checked_step_normalized" pending 5
           let stack ← whnfD stackTerm
           if let some #[_, value, _] := argumentsOf? stack ``List.cons 3 then
@@ -1110,15 +1110,15 @@ elab_rules : tactic
             all_goals cil_checked_side [])))
           return
         catch _ => saved.restore
-    let scalar := #[``CIL.Instruction.neg, ``CIL.Instruction.gt, ``CIL.Instruction.convI1,
-      ``CIL.Instruction.convI2, ``CIL.Instruction.convU2, ``CIL.Instruction.convI8,
-      ``CIL.Instruction.convI4, ``CIL.Instruction.convU1, ``CIL.Instruction.convU4,
-      ``CIL.Instruction.convU8, ``CIL.Instruction.convU, ``CIL.Instruction.bnot,
+    let scalar := #[``CIL.Instruction.neg, ``CIL.Instruction.cgt, ``CIL.Instruction.conv_i1,
+      ``CIL.Instruction.conv_i2, ``CIL.Instruction.conv_u2, ``CIL.Instruction.conv_i8,
+      ``CIL.Instruction.conv_i4, ``CIL.Instruction.conv_u1, ``CIL.Instruction.conv_u4,
+      ``CIL.Instruction.conv_u8, ``CIL.Instruction.conv_u, ``CIL.Instruction.not,
       ``CIL.Instruction.add, ``CIL.Instruction.sub, ``CIL.Instruction.mul,
-      ``CIL.Instruction.band, ``CIL.Instruction.bor, ``CIL.Instruction.bxor,
-      ``CIL.Instruction.shl, ``CIL.Instruction.shr, ``CIL.Instruction.shrUn,
-      ``CIL.Instruction.lt, ``CIL.Instruction.ltu, ``CIL.Instruction.gtu,
-      ``CIL.Instruction.eq].contains operation
+      ``CIL.Instruction.and, ``CIL.Instruction.or, ``CIL.Instruction.xor,
+      ``CIL.Instruction.shl, ``CIL.Instruction.shr, ``CIL.Instruction.shr_un,
+      ``CIL.Instruction.clt, ``CIL.Instruction.clt_un, ``CIL.Instruction.cgt_un,
+      ``CIL.Instruction.ceq].contains operation
     if scalar && lhs.isAppOfArity ``CIL.Safety.step 7 then
       -- Reuse the selected value equation without rewriting its symbolic arithmetic result.
       let mut widths := #[]

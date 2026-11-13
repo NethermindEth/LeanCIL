@@ -20,7 +20,7 @@ theorem disabled_intrinsic :
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl
 
 theorem unsigned_compare_wraps :
-    CIL.binary .ltu (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 0) = some (.i32 0) := by decide
+    CIL.binary .clt_un (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 0) = some (.i32 0) := by decide
 
 theorem add_wraps_at_width :
     CIL.binary .add (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 1) = some (.i64 0) := by decide
@@ -68,11 +68,12 @@ theorem neg_underflow :
 theorem neg_reference_rejected :
     (step scalarBody .neg 0 [] scalarFrame [Tests.reference] Tests.caller).isOk = false := rfl
 
-theorem gt_mixed_width_rejected :
-    (step scalarBody .gt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk = false := rfl
+theorem cgt_mixed_width_rejected :
+    (step scalarBody .cgt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)]
+      Memory.empty).isOk = false := rfl
 
 theorem branches_reject_underflow :
-    ([CIL.Instruction.bgt 1, .ble 1, .bleu 1].all fun op =>
+    ([CIL.Instruction.bgt 1, .ble 1, .ble_un 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0)] Memory.empty).isOk) = true := rfl
 
 theorem signed_branches_reject_references :
@@ -82,11 +83,11 @@ theorem signed_branches_reject_references :
 #print axioms signed_branches_reject_references
 
 theorem branches_reject_mixed_widths :
-    ([CIL.Instruction.bgt 1, .ble 1, .bleu 1].all fun op =>
+    ([CIL.Instruction.bgt 1, .ble 1, .ble_un 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk) = true := rfl
 
 theorem narrow_conversions_reject_references :
-    ([CIL.Instruction.convI1, .convI2, .convU2].all fun op =>
+    ([CIL.Instruction.conv_i1, .conv_i2, .conv_u2].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [Tests.reference] Tests.caller).isOk) = true := rfl
 
 theorem narrow_read_bounds :
@@ -334,9 +335,9 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 8) ∧
     instructions [.memory .nullRef, .loadScalar 4 true] [] Memory.empty =
       .error (.memory .nullDereference .null 4) ∧
-    instructions [.memory .nullRef, .const64 7, .store64] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i8 7, .store64] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .const32 7, .storeScalar 4] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i4 7, .storeScalar 4] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .loadAggregate 32] [] Memory.empty =
       .error (.memory .nullDereference .null 32) ∧
@@ -348,7 +349,7 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .fieldAddress 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .const64 7, .setFieldAt 8 8] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i8 7, .setFieldAt 8 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) :=
   ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
@@ -387,7 +388,7 @@ theorem constructor_zero_initialization :
       8 0 [] Memory.empty).map Prod.snd = .ok [.scalar (.aggregate [0, 0, 0])] := rfl
 
 theorem constructor_must_return_void :
-    (invoke [constructorCaller, { returnsValue := true, locals := [], code := [.const32 7, .ret] }]
+    (invoke [constructorCaller, { returnsValue := true, locals := [], code := [.ldc_i4 7, .ret] }]
       8 0 [] Memory.empty).map Prod.snd = .error ⟨0, 0, .invalidState⟩ := rfl
 
 end Tests
@@ -420,18 +421,18 @@ theorem native_checked_unsigned_extension :
       .ok (1, [.i64 4294967296]) := rfl
 
 theorem native_unsigned_branch_rejected :
-    CIL.nativeBinaryValues (.bne 9) 0 (.i64 18446744073709551615) (.i32 4294967295) =
+    CIL.nativeBinaryValues (.bne_un 9) 0 (.i64 18446744073709551615) (.i32 4294967295) =
       .error .invalidOperands := rfl
 
 theorem native_unsigned_branch_family_rejected :
-    CIL.nativeBinaryValues (.bltu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bgtu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bleu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bgeu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands :=
+    CIL.nativeBinaryValues (.blt_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.bgt_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.ble_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.bge_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands :=
   ⟨rfl, rfl, rfl, rfl⟩
 
 theorem native_unsigned_compare_extension :
-    CIL.nativeBinaryValues .gtu 0 (.i64 18446744073709551615) (.i32 4294967295) =
+    CIL.nativeBinaryValues .cgt_un 0 (.i64 18446744073709551615) (.i32 4294967295) =
       .ok (1, [.i32 0]) := rfl
 
 theorem checked_conversion_reference_rejected :

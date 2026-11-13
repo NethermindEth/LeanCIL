@@ -205,7 +205,7 @@ def arithmeticFlag (subtract : Bool) (left right : CIL.W64) : CIL.W32 :=
   { locals := [], returnsValue := true,
     code := [.arg 2, .arg 0, .arg 1, if subtract then .sub else .add, .store64] ++
       (if subtract then [.arg 0, .arg 1] else [.arg 0, .arg 1, .add, .arg 0]) ++
-      [.ltu, .ret] }
+      [.clt_un, .ret] }
 
 /-- Arithmetic output storage needs write authority, while the returned flag remains exact. -/
 def arithmeticContract (subtract : Bool) : MethodContract BinaryOutputInput CIL.W32 where

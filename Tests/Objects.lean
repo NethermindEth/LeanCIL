@@ -50,21 +50,21 @@ theorem expired_object_faults :
 
 /-- `ceq` of an object with itself is 1 and with null is 0. -/
 theorem identity_comparisons :
-    CIL.Safety.step body .eq 0 [] frame [.object live, .object live] memory =
+    CIL.Safety.step body .ceq 0 [] frame [.object live, .object live] memory =
       .ok (.next 1 [.scalar (.i32 1)] frame memory) ∧
-    CIL.Safety.step body .eq 0 [] frame [.object .null, .object live] memory =
+    CIL.Safety.step body .ceq 0 [] frame [.object .null, .object live] memory =
       .ok (.next 1 [.scalar (.i32 0)] frame memory) := ⟨rfl, rfl⟩
 #print axioms identity_comparisons
 
 /-- `cgt.un` on two objects is defined only against null. -/
 theorem ordering_rejected :
-    CIL.Safety.step body .gtu 0 [] frame [.object live, .object live] memory =
+    CIL.Safety.step body .cgt_un 0 [] frame [.object live, .object live] memory =
       .error .invalidState := rfl
 #print axioms ordering_rejected
 
 /-- Object and byref nulls are distinct: neither compares with the other. -/
 theorem byref_null_not_object :
-    CIL.Safety.step body .eq 0 [] frame [.object .null, .reference .null] memory =
+    CIL.Safety.step body .ceq 0 [] frame [.object .null, .reference .null] memory =
       .error .invalidState ∧
     storeLocal memory (.object none) (.reference .null) = .error .invalidState := ⟨rfl, rfl⟩
 #print axioms byref_null_not_object
@@ -435,7 +435,7 @@ theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
 /-- A receiver check selects a Boolean-returning instance call or an explicit exception. -/
 @[cil_code] private def checkedReceiverProgram : CIL.Program := [
   { returnsValue := true, locals := [], code := [
-    .arg 0, .brnonzero 3, .throw "MissingReceiver", .arg 0, .const32 1,
+    .arg 0, .brtrue 3, .throw "MissingReceiver", .arg 0, .ldc_i4 1,
     .callInstance 1 2, .ret (some .unsigned8)] },
   { returnsValue := true, locals := [], code := [.arg 1, .ret (some .unsigned8)] }]
 

@@ -25,13 +25,13 @@ example : MethodEmbeds [opaqueHomeBody] 0 opaqueHomeBody := by cil_embed
 
 /-- Returns argument 1 on both paths; pc 4 is reached only by the branch. -/
 @[cil_code] def body : Method := {
-  code := [.arg 0, .brzero 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.arg 0, .brfalse 4, .arg 1, .ret, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 /-- `body` with a dead block before the branch target, as a profile-specific extraction emits it. -/
 def inserted : Method := {
-  code := [.arg 0, .brzero 6, .arg 1, .ret,
-    .unsupported "Unreachable under selected profile", .const32 9, .arg 1, .ret]
+  code := [.arg 0, .brfalse 6, .arg 1, .ret,
+    .unsupported "Unreachable under selected profile", .ldc_i4 9, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 -- Each `cil_embed` proof is kernel checked against the extracted method, never against `expected`.
@@ -62,7 +62,7 @@ theorem relocated_suffix (frame : Safety.Frame) (memory : Safety.Memory) (value 
 
 /-- An expected body that still carries a dead block the extraction no longer emits. -/
 def withDeadBlock : Method := {
-  code := [.arg 0, .brzero 6, .arg 1, .ret, .unsupported "Unreachable under selected profile",
+  code := [.arg 0, .brfalse 6, .arg 1, .ret, .unsupported "Unreachable under selected profile",
     .unsupported "Unreachable under selected profile", .arg 1, .ret]
   locals := [], returnsValue := true }
 
@@ -103,26 +103,27 @@ example : MethodEmbeds [{ inserted with code := inserted.code.set 2 (.arg 0 none
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Instruction.brzero 4
-  renamed:  CIL.Instruction.brzero 6
-  actual:   CIL.Instruction.brzero 5
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 5; actual pc 5 (CIL.Instruction.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brfalse 4
+  renamed:  CIL.Instruction.brfalse 6
+  actual:   CIL.Instruction.brfalse 5
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 5; actual pc 5 (CIL.Instruction.ldc_i4 0x00000009#32) is not the image of any live expected pc
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ inserted with code := inserted.code.set 1 (.brzero 5) }] 0 body := by cil_embed
+example : MethodEmbeds [{ inserted with code := inserted.code.set 1 (.brfalse 5) }] 0 body := by
+  cil_embed
 
 -- The branch reaches an inserted live instruction, so the extracted method can return 9.
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Instruction.brzero 4
-  renamed:  CIL.Instruction.brzero 6
-  actual:   CIL.Instruction.brzero 4
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brfalse 4
+  renamed:  CIL.Instruction.brfalse 6
+  actual:   CIL.Instruction.brfalse 4
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.ldc_i4 0x00000009#32) is not the image of any live expected pc
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ body with code := [.arg 0, .brzero 4, .arg 1, .ret, .const32 9, .ret, .arg 1, .ret] }] 0 body := by
+example : MethodEmbeds [{ body with code := [.arg 0, .brfalse 4, .arg 1, .ret, .ldc_i4 9, .ret, .arg 1, .ret] }] 0 body := by
   cil_embed
 
 -- The fallthrough of the branch reaches an inserted instruction.
@@ -131,12 +132,12 @@ error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 2 maps to actual pc 2
   expected: CIL.Instruction.arg 1 none
-  actual:   CIL.Instruction.const32 0x00000009#32
+  actual:   CIL.Instruction.ldc_i4 0x00000009#32
   the instructions differ
   expected pc 1 falls through to it, so it must be actual pc 2
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ body with code := [.arg 0, .brzero 5, .const32 9, .arg 1, .ret, .arg 1, .ret] }] 0 body := by
+example : MethodEmbeds [{ body with code := [.arg 0, .brfalse 5, .ldc_i4 9, .arg 1, .ret, .arg 1, .ret] }] 0 body := by
   cil_embed
 
 /--
@@ -219,11 +220,11 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 
 /-- Jumps to a throw. -/
 def thrower : Method :=
-  { code := [.branch 1, .throw "Overflow"], locals := [], returnsValue := false }
+  { code := [.br 1, .throw "Overflow"], locals := [], returnsValue := false }
 
 /-- `thrower` with a dead block before the throw and unused reference and span locals. -/
 def throwerDead : Method := {
-  code := [.branch 2, .unsupported "Unreachable under selected profile", .throw "Overflow"]
+  code := [.br 2, .unsupported "Unreachable under selected profile", .throw "Overflow"]
   locals := [.nullRef, .nullRef], localKinds := [.reference, .span 1 false], returnsValue := false }
 
 /-- A throw of the expected body is raised by the extraction with the dead local. -/
@@ -608,14 +609,14 @@ example : (MethodBinding.methodDifferences caller otherLink).head?.map
 
 /-- What an extraction emits when a dead block puts the call at pc 3. -/
 def moved : Method := {
-  code := [.arg 0, .branch 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret]
+  code := [.arg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret]
   locals := [], returnsValue := true }
 
 /-- The body a proof uses, with its call at pc 2. `withCode` gives it that pc's link. -/
-def viaWithCode : Method := moved.withCode [.arg 0, .branch 2, .call 1 1, .ret]
+def viaWithCode : Method := moved.withCode [.arg 0, .br 2, .call 1 1, .ret]
 
 /-- The same code through a structure update, which keeps the link table of the call at pc 3. -/
-def viaUpdate : Method := { moved with code := [.arg 0, .branch 2, .call 1 1, .ret] }
+def viaUpdate : Method := { moved with code := [.arg 0, .br 2, .call 1 1, .ret] }
 
 theorem with_code_embeds : MethodEmbeds [moved] 0 viaWithCode := by cil_embed
 

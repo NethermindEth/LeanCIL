@@ -222,12 +222,12 @@ RejectLean("WrongProfile", wideBinding.Replace("Extracted.profile", "FeatureProf
 RejectLean("WrongEquation", """
 import Templates
 example (profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) (callee : Nat) :
-    (Templates.method0 profile environment true true callee).code[1]? = some (.brzero 6) := by rfl
+    (Templates.method0 profile environment true true callee).code[1]? = some (.brfalse 6) := by rfl
 """, sharedPath);
 var changed = Path.Combine(directory, "ChangedBranch");
 Directory.CreateDirectory(changed);
 File.WriteAllText(Path.Combine(changed, "Templates.lean"),
-    templates.Replace(".brzero 5", ".brzero 6", StringComparison.Ordinal));
+    templates.Replace(".brfalse 5", ".brfalse 6", StringComparison.Ordinal));
 Compile(changed, "Templates", changed + Path.PathSeparator + library);
 RejectLean("WrongBranch", wideBinding, changed + Path.PathSeparator + widePath);
 
