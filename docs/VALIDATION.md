@@ -104,7 +104,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates at a per-instruction cost that does not grow with the method |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
-| `stepping` | full scalar and checked-memory bodies with per-instruction heartbeat, proof-size and latency budgets |
+| `stepping` | full scalar, checked-memory, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth and hypotheses bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, and the strict binding library and audit |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches and self-admission |
@@ -173,14 +173,29 @@ accept an increase.
 dotnet run --file scripts/Test.cs -- --suite stepping
 ```
 
-The `stepping` suite generates explicit scalar and checked-memory bodies near 16, 64 and 256
-instructions and proves each invocation end to end. The memory bodies repeat an idempotent
-checked store and reload, so the operation facts stay constant as the instruction count grows.
-The suite uses the proof-cost measuring frontend, with three sequential proof compilations per
-body.
+The `stepping` suite generates explicit scalar, checked-memory, accumulate, locals, contract,
+loop, loop-facts, outcome, lemma, depth and hypotheses bodies and proves each end to end. The
+scalar, memory, accumulate and locals bodies have 16, 64 and 256 instructions, and the accumulate
+body also 1,024. The memory bodies repeat an idempotent checked store and reload, so the
+operation facts stay constant as the instruction count grows. The accumulate, contract, loop,
+loop-facts, outcome and lemma bodies keep a running sum on the stack, so the symbolic value a step
+reads grows with the program counter. The contract body is proved by `cil_contract_steps`, the
+loop body by `cil_loop_steps` along a path, the loop-facts body by the same with a case fact in
+the context that every instruction reads, the outcome body by `cil_loop_outcome_advance`, and the
+lemma body by `cil_checked_steps` with a universe-polymorphic lemma among its facts. The locals
+bodies store a
+reference into each of eight locals of a literal frame per cycle. The depth bodies push 8, 32 and
+128 values and add them all. The hypotheses body is a 62-instruction accumulate body proved with 16,
+64 and 256 equations in scope. The suite uses the proof-cost measuring frontend, with three
+sequential proof compilations and a header-only baseline per scalar, memory, accumulate and locals
+body up to 256 instructions, and one compilation for every other body.
 
-- For each successive size, frontend heartbeats, kernel heartbeats and compiled proof bytes per
-  instruction may grow by at most 1.35 times, and median frontend milliseconds by at most twice.
+- For each successive size, frontend and kernel heartbeats per instruction may grow by at most
+  1.35 times. For the bodies with three compilations, compiled proof bytes per instruction may
+  also grow by at most 1.35 times, and median frontend milliseconds by at most twice.
+- The heartbeats a hypothesis adds may not grow by more than 1.35 times from the step between
+  16 and 64 hypotheses to the step between 64 and 256, which a step that compares each hypothesis
+  with every other would exceed.
 - Heartbeats and bytes must repeat exactly across the three runs.
 - Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
   recheck. Compiled proof bytes subtract the same module containing only the body and its lookup
