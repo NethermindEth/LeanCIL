@@ -4,13 +4,6 @@ import CIL.Extraction.Dispatch
 
 namespace CIL.Extraction
 
-/-- A branch cannot enter the call after skipping its constrained prefix. -/
-private def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
-  match instruction.operand with
-  | .target target => target == pc
-  | .targets targets => targets.contains pc
-  | _ => false
-
 /-- The selected program entry must be precisely the resolved target, declared by its closed
     owner and instantiated at the site's method type arguments, with a receiver argument exactly
     when the target is an instance method. -/
@@ -100,29 +93,6 @@ def constrainedSiteValid (types : List DispatchType) (methods : List Specialized
   constrainedSiteCheck types (methods[·]?) (raw.code[·]?) (reachable[·]?) (code[·]?)
     (fun target => raw.code.any (branchesTo target)) pc
 
-/-- All decoded branch destinations, including switch arms and unreachable instructions. -/
-def constrainedBranchTargets (raw : List RawInstruction) : List Nat :=
-  raw.flatMap fun instruction => match instruction.operand with
-    | .target target => [target]
-    | .targets targets => targets
-    | _ => []
-
-/-- Collecting branch destinations preserves the rejection rule at every possible pc. -/
-theorem constrainedBranchTargets_contains (raw : List RawInstruction) (pc : Nat) :
-    (constrainedBranchTargets raw).contains pc = raw.any (branchesTo pc) := by
-  induction raw with
-  | nil => rfl
-  | cons instruction rest ih =>
-    cases instruction with
-    | mk offset opcode operand =>
-      change _ = (branchesTo pc ⟨offset, opcode, operand⟩ || rest.any (branchesTo pc))
-      simp only [constrainedBranchTargets, List.flatMap_cons, List.contains_append]
-      change (_ || (constrainedBranchTargets rest).contains pc) = _
-      rw [ih]
-      cases operand <;> simp [branchesTo, BEq.beq, eq_comm]
-
-#print axioms constrainedBranchTargets_contains
-
 /-- Traverse adjacent raw instructions and parallel state/code lists without positional lookup. -/
 def constrainedSites (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
@@ -202,7 +172,7 @@ def ConstrainedCallsValid (types : List DispatchType) (methods : List Specialize
       (castTargetValid fun identity =>
         ((DispatchIndex.ofTypes types).findType identity).map (·.raw))
       (FlowIndex.ofList methods).get?
-      (Std.TreeSet.ofList (constrainedBranchTargets raw.code) compare).contains
+      (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
       0 raw.code.head? raw.code reachable emitted.code = true
 
 /-- Indexed validation is exactly the original per-pc rule, including malformed evidence. -/
@@ -223,16 +193,16 @@ theorem ConstrainedCallsValid_iff_original (types : List DispatchType)
     · rw [constrainedSites_eq (resolveConstrained types)
         (virtualTableValid types (findDispatchType types) (FlowIndex.ofList methods).get?)
         (castTargetValid (findDispatchType types)) (FlowIndex.ofList methods).get?
-        (Std.TreeSet.ofList (constrainedBranchTargets raw.code) compare).contains
+        (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
         raw.code reachable emitted.code raw.code reachable emitted.code 0 raw.code.head?
         (by simp) (by simp) (by simp) (by simp [List.head?_eq_getElem?]) stateLength codeLength]
       have index : (FlowIndex.ofList methods).get? = (methods[·]?) := by
         funext pc
         exact FlowIndex.get?_ofList methods pc
-      have targets : (Std.TreeSet.ofList (constrainedBranchTargets raw.code) compare).contains =
+      have targets : (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
           (fun target => raw.code.any (branchesTo target)) := by
         funext pc
-        rw [Std.TreeSet.contains_ofList, constrainedBranchTargets_contains]
+        rw [Std.TreeSet.contains_ofList, branchTargets_contains]
       rw [index, targets, ← List.range_eq_range']
       rfl
     · simp [codeLength]

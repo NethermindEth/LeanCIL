@@ -88,10 +88,10 @@ not CLR correspondence. See [layout assumptions](SOUNDNESS-RUNTIME.md#sequential
 descriptors, call links and live instructions under a PC map. A body built as
 `extracted.withCode code` keeps the signature and environment of `extracted`, takes the links its
 `code` implies and resets the static sites; `{ extracted with code := ... }` keeps the links and
-static sites of `extracted`, which are keyed by its pcs. Entry, branch/call targets and resumable fallthroughs must match.
-Expected `.unsupported` locations constrain no actual code and cannot occur on a successful
-expected path. Even a live inserted `nop` is outside this exact relation. `cil_embed` computes a
-candidate map; the kernel checks every field.
+static sites of `extracted`, which are keyed by its pcs. Entry, branch/call targets and resumable
+fallthroughs must match. Expected `.unsupported` locations constrain no actual code and cannot
+occur on a successful expected path. Even a live inserted `nop` is outside this exact relation.
+`cil_embed` computes a candidate map; the kernel checks every field.
 
 `ProgramRefines` transfers successful runs with the same fuel and final memory. Outcome variants
 transfer named throws with relocated PCs, preserving method and exception. They do not transfer
