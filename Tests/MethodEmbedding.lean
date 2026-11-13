@@ -645,13 +645,13 @@ def staticField : StaticDescriptor :=
 
 /-- What an extraction emits when a dead block puts a static read at pc 2. -/
 def staticMoved : Method := {
-  code := [.branch 2, .unsupported "Unreachable under selected profile",
+  code := [.br 2, .unsupported "Unreachable under selected profile",
     .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
   locals := [], returnsValue := false, staticSites := [(2, staticField)] }
 
 /-- The body a proof uses, with its static read at pc 1; `withCode` leaves it no static sites. -/
 def staticWritten : Method :=
-  staticMoved.withCode [.branch 1, .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
+  staticMoved.withCode [.br 1, .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
 
 /-- Whether the first embedding failure of `expected` contains each of `phrases`. -/
 def failureMentions (expected : Method) (phrases : List String) : Bool :=
@@ -706,13 +706,13 @@ example : Extraction.linkWalk evenTable evenTable 0 (List.range 42).reverse =
 
 /-- An extraction that places the block the head branches to before the block after the head. -/
 def reorderedExtraction : Method := {
-  code := [.branch 1, .arg 1, .call 2 1, .pop, .ret, .arg 0, .call 1 1, .pop, .ret]
+  code := [.br 1, .arg 1, .call 2 1, .pop, .ret, .arg 0, .call 1 1, .pop, .ret]
   locals := [], returnsValue := false }
 
 /-- The body a proof uses, with the blocks in source order. -/
 def reorderedWritten : Method :=
   reorderedExtraction.withCode
-    [.branch 5, .arg 0, .call 1 1, .pop, .ret, .arg 1, .call 2 1, .pop, .ret]
+    [.br 5, .arg 0, .call 1 1, .pop, .ret, .arg 1, .call 2 1, .pop, .ret]
 
 -- The map sends the second block back to pc 1, so the link reads descend once.
 #guard MethodBinding.alignLive reorderedWritten.code.toArray reorderedExtraction.code.toArray ==

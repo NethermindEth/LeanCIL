@@ -310,11 +310,11 @@ def second : List Instruction := [.arg 1, .call 2 1, .pop, .ret]
 /-- The extraction, with the second block first. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
-    code := [.branch 1] ++ (List.replicate {{segments}} second).flatten ++
+    code := [.br 1] ++ (List.replicate {{segments}} second).flatten ++
       (List.replicate {{segments}} first).flatten ++ [.ret] }
 /-- The proof's body, with the blocks in source order. -/
 def written : Method :=
-  extraction.withCode ([.branch {{1 + 4 * segments}}] ++ (List.replicate {{segments}} first).flatten ++
+  extraction.withCode ([.br {{1 + 4 * segments}}] ++ (List.replicate {{segments}} first).flatten ++
     (List.replicate {{segments}} second).flatten ++ [.ret])
 #guard let map := (MethodBinding.alignLive written.code.toArray extraction.code.toArray).toList
   (map.zip map.tail).countP (fun (left, right) => right < left) == 1
