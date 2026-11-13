@@ -315,9 +315,11 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
               cil_checked_steps
             """
     };
-    const string Audit = """
+    // The snapshot lemmas rest on choice, as `LocalSnapshots.store_at` does.
+    var axioms = snapshots ? "propext, Classical.choice, Quot.sound" : "propext, Quot.sound";
+    var Audit = $$"""
 
-        /-- info: 'checked' depends on axioms: [propext, Quot.sound] -/
+        /-- info: 'checked' depends on axioms: [{{axioms}}] -/
         #guard_msgs (whitespace := lax) in
         #print axioms checked
         """;
