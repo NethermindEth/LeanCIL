@@ -832,14 +832,9 @@ open Lean Meta in
     `called`, `output` and `call`, or with the first suffix `_1`, `_2` that leaves all three
     unused, so one call's names share a suffix. -/
 def cilCallNames : MetaM (Ident × Ident × Ident) := do
-  let context ← getLCtx
-  let named (index : Nat) (base : String) : Name :=
-    Name.mkSimple (if index == 0 then base else s!"{base}_{index}")
-  let mut index := 0
-  while ["called", "output", "call"].any fun base => context.usesUserName (named index base) do
-    index := index + 1
-  return (mkIdent (named index "called"), mkIdent (named index "output"),
-    mkIdent (named index "call"))
+  let index := firstUnusedSuffix (← getLCtx) #["called", "output", "call"]
+  return (mkIdent (suffixedName index "called"), mkIdent (suffixedName index "output"),
+    mkIdent (suffixedName index "call"))
 
 open Lean Elab Tactic Meta in
 /-- Apply a matching contract and expose its `CallResult` to the caller continuation. -/
@@ -916,10 +911,12 @@ elab_rules : tactic
     withMainContext <| evalTactic (← `(tactic|
       cil_contract_step_normalized [$[$prepared:term],*]))
   | `(tactic| cil_contract_step_normalized [$facts:term,*]) => withMainContext do
-    let (methodFound, instructionFound, operation) ←
+    -- The lookups read the supplied facts, so they run on the record of those facts.
+    let (methodFound, instructionFound, operation) ← withNormalNodes facts.getElems <|
       cilFetchedOp ``CIL.Safety.run_next_exists some 4 facts.getElems
     let currentFacts := facts.getElems ++ (← cilOutputFacts operation)
     let facts := currentFacts
+    withNormalNodes currentFacts do
     if callsCallee operation then
       let saved ← saveState
       try cilContractApply methodFound instructionFound facts
@@ -1040,20 +1037,22 @@ elab_rules : tactic
     let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| (
       cil_contract_prepare [$[$prepared:term],*]
-      cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or the \
-        first step, did not close; pass the lookup hypothesis, feature facts or step facts"
-        cil_contract_step_normalized [$[$prepared:term],*])))
+      cil_normal_run
+        cil_steps_from "cil_contract_steps took no step: the method or instruction lookup, or \
+          the first step, did not close; pass the lookup hypothesis, feature facts or step facts"
+          cil_contract_step_normalized [$[$prepared:term],*])))
   | `(tactic| cil_contract_steps $count:num [$facts:term,*]) => do
     let prepared ← prepareStepFacts facts.getElems
     withMainContext <| evalTactic (← `(tactic| cil_contract_prepare [$[$prepared:term],*]))
     let next ← `(tactic| cil_contract_step_normalized [$[$prepared:term],*])
-    for _ in [:count.getNat] do
-      let saved ← saveState
-      try
-        evalTactic next
-      catch _ =>
-        saved.restore
-        break
+    withNormalRun do
+      for _ in [:count.getNat] do
+        let saved ← saveState
+        try
+          evalTactic next
+        catch _ =>
+          saved.restore
+          break
   | `(tactic| cil_contract_steps [$facts:term,*] until $continuation) => do
     let prepared ← prepareStepFacts facts.getElems
     let (direct, finish) ← cilContractContinuation continuation
@@ -1061,9 +1060,10 @@ elab_rules : tactic
       | (cil_strict exact $direct)
       | (
         cil_contract_prepare [$[$prepared:term],*]
-        repeat first
-        | (cil_strict $finish)
-        | cil_contract_step_normalized [$[$prepared:term],*]))))
+        cil_normal_run
+          repeat first
+          | (cil_strict $finish)
+          | cil_contract_step_normalized [$[$prepared:term],*]))))
 
 /-- Apply a proved contract at the fetched call, optionally checked against a `bind_call`
     site: leaves the `precondition`, then the continuation over the callee's final memory,

@@ -393,7 +393,8 @@ syntax "cil_raise_run_step" "[" term,* "]" : tactic
 
 open Lean Elab Tactic in
 elab_rules : tactic
-  | `(tactic| cil_raise_run_step [$facts:term,*]) => withMainContext do
+  | `(tactic| cil_raise_run_step [$facts:term,*]) => withNormalNodes facts.getElems do
+    withMainContext do
     let (methodSyntax, instructionSyntax, operation) ←
       cilFetchedOp ``CIL.Safety.run_next_raises some 4 facts.getElems
     evalTactic (← if operation == ``CIL.Instruction.throw then
@@ -414,9 +415,10 @@ macro_rules
            (by cil_lookup [$[$facts:term],*])
            (by cil_checked_side [$[$facts:term],*])
            (by cil_checked_side [$[$facts:term],*]) ?_)
-    cil_steps_from "cil_raise_steps took no step: the method or instruction lookup, or the \
-      first step, did not close; pass the lookup hypothesis, feature facts or step facts"
-      cil_raise_run_step [$[$facts:term],*]))
+    cil_normal_run
+      cil_steps_from "cil_raise_steps took no step: the method or instruction lookup, or the \
+        first step, did not close; pass the lookup hypothesis, feature facts or step facts"
+        cil_raise_run_step [$[$facts:term],*]))
 
 /-- Step a `Raises` or `RunRaises` goal to a `throw`, after normalising the step facts. Use on
     a raising path; each `.call` on the way is left for `cil_outcome_raise` or

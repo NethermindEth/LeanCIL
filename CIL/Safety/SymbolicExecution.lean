@@ -13,6 +13,7 @@ import CIL.Safety.CheckedMemoryFacts
 import CIL.Safety.AggregateMemorySteps
 import CIL.Safety.LoopFacts
 import CIL.TermAccess
+import CIL.Safety.NormalNodes
 
 /-!
 # Checked symbolic execution
@@ -165,20 +166,31 @@ syntax "cil_fact_simp" Lean.Parser.Tactic.optConfig " [" term,* "]" " [" term,* 
 initialize Lean.registerTraceClass `CIL.factNormalize
 
 open Lean in
-/-- Whether an expression contains a literal operand the checked state normalizer evaluates. -/
-private def hasClosedLiteralOperand (expression : Expr) : Bool :=
+/-- Whether `value` is a literal operand the checked state normalizer evaluates. -/
+def closedLiteralOperand (value : Expr) : Bool :=
   let literal (value : Expr) := value.isRawNatLit || value.isAppOfArity ``OfNat.ofNat 3
   let numeral (value : Expr) := literal value ||
     (value.isAppOfArity ``BitVec.ofNat 2 && (lastArgument? value).any literal) ||
     (value.isAppOfArity ``BitVec.ofFin 2 && (lastArgument? value).any fun finite =>
       finite.isAppOfArity ``Fin.ofNat 3 && (lastArgument? finite).any literal)
-  (expression.find? fun value =>
-    (value.isAppOfArity ``BitVec.ofFin 2 && numeral value) ||
+  -- The simprocs need the new width as a literal too, and `ofInt` an integer literal.
+  let integer (value : Expr) := literal value || (value.isAppOfArity ``Int.ofNat 1 &&
+    (lastArgument? value).any literal) || (value.isAppOfArity ``Neg.neg 3 &&
+    (lastArgument? value).any literal)
+  (value.isAppOfArity ``BitVec.ofFin 2 && numeral value) ||
     ((value.isAppOfArity ``BitVec.signExtend 3 || value.isAppOfArity ``BitVec.setWidth 3 ||
-      value.isAppOfArity ``BitVec.zeroExtend 3 || value.isAppOfArity ``BitVec.toNat 2) &&
+      value.isAppOfArity ``BitVec.zeroExtend 3) && (argument? value 1).any literal &&
       (lastArgument? value).any numeral) ||
+    (value.isAppOfArity ``BitVec.toNat 2 && (lastArgument? value).any numeral) ||
+    (value.isAppOfArity ``BitVec.ofInt 2 && (argument? value 0).any literal &&
+      (argument? value 1).any integer) ||
     (value.isAppOfArity ``HMod.hMod 6 && (argument? value 5).any numeral &&
-      (argument? value 4).any numeral)).isSome
+      (argument? value 4).any numeral)
+
+open Lean in
+/-- Whether an expression contains a literal operand the checked state normalizer evaluates. -/
+private def hasClosedLiteralOperand (expression : Expr) : Bool :=
+  (expression.find? closedLiteralOperand).isSome
 
 open Lean Meta in
 /-- `type` with each closed natural-number argument of a `step` opcode evaluated to a numeral,
@@ -208,11 +220,17 @@ def evaluateOpcodeIndices (type : Expr) : MetaM Expr := do
 open Lean Meta in
 /-- `term` with each `localResult kind value` that its constructors decide replaced by the value
     a load of that kind pushes, so a loaded `localResult .vector128 (.v128 bits)` reads
-    `.v128 bits` as the next fact states it. The result is definitionally equal to `term`. -/
-def reduceLocalResults (term : Expr) : MetaM Expr := do
+    `.v128 bits` as the next fact states it. The result is definitionally equal to `term`, and
+    the nodes `leaveAlone` selects, which name no local result, are not entered. -/
+def reduceLocalResults (term : Expr) (leaveAlone : Expr → Bool := fun _ => false) :
+    MetaM Expr := do
   -- Most goals and facts name no local result, and are returned without being rebuilt.
-  if (term.find? (·.isConstOf ``CIL.Safety.localResult)).isNone then return term
+  let names (candidate : Expr) : Expr.FindStep :=
+    if leaveAlone candidate then .done
+    else if candidate.isConstOf ``CIL.Safety.localResult then .found else .visit
+  if (term.findExt? names).isNone then return term
   Meta.transform term (pre := fun candidate => do
+    if leaveAlone candidate then return .done candidate
     unless candidate.isAppOfArity ``CIL.Safety.localResult 2 do return .continue
     let some unfolded ← unfoldDefinition? candidate | return .continue
     let reduced ← whnfCore unfolded
@@ -411,24 +429,40 @@ elab "cil_lookup_equation" : tactic => withMainContext do
     only hypotheses that are equations whose left side has the goal's head; fails otherwise. -/
 syntax "cil_lookup_assumption" : tactic
 
+open Lean in
+/-- The head of the left side of the equation `type` states, under any quantifiers. -/
+private def equationHead? : Expr → Option Expr
+  | .forallE _ _ body _ => equationHead? body
+  | .mdata _ body => equationHead? body
+  | type => type.eq?.map fun (_, lhs, _) => lhs.consumeMData.getAppFn
+
+open Lean Elab Tactic Meta in
+/-- The hypotheses that state an equation, in context order, with the head of each left side.
+    A stepping step reads the list the record holds for its local context, which is found once
+    per record; any other call scans the context. -/
+private def equationHypotheses : TacticM (Array (FVarId × Expr)) := do
+  let usable ← usableNormalNodes
+  if let some record := usable then
+    if let some found := record.equations then return found
+  let mut found := #[]
+  for declaration in ← getLCtx do
+    if declaration.isImplementationDetail then continue
+    if let some head := equationHead? (← instantiateMVars declaration.type) then
+      found := found.push (declaration.fvarId, head)
+  if let some record := usable then
+    setNormalNodes { record with equations := some found }
+  return found
+
 open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_lookup_assumption) => withMainContext do
     let goal ← getMainGoal
-    let rec head (type : Expr) : Option Expr :=
-      match type with
-      | .forallE _ _ body _ => head body
-      | .mdata _ body => head body
-      | type => type.eq?.map fun (_, lhs, _) => lhs.consumeMData.getAppFn
-    let some wanted := head (← instantiateMVars (← goal.getType))
+    let some wanted := equationHead? (← instantiateMVars (← goal.getType))
       | throwError "cil_lookup_assumption: the goal is not an equation"
-    -- A head that is not a constant may unify with anything, so every hypothesis is tried.
-    let candidate (type : Expr) : Bool := match head type with
-      | some found => !wanted.isConst || !found.isConst || found == wanted
-      | none => false
-    for declaration in ← getLCtx do
-      if declaration.isImplementationDetail then continue
-      unless candidate (← instantiateMVars declaration.type) do continue
+    for (hypothesis, found) in ← equationHypotheses do
+      -- A head that is not a constant may unify with anything, so every hypothesis is tried.
+      unless !wanted.isConst || !found.isConst || found == wanted do continue
+      let declaration ← hypothesis.getDecl
       let saved ← saveState
       if declaration.type.isForall then
         try
@@ -602,7 +636,7 @@ elab_rules : tactic
     let some (_, lookup, _) := (← instantiateMVars (← getMainTarget)).consumeMData.eq?
       | throwError "Expected a lookup equation"
     if !lookup.hasFVar && !lookup.hasMVar then
-      evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd, Nat.reduceMul]))
+      evalTactic (← `(tactic| cil_try_simp_only [cil_code, Nat.reduceAdd, Nat.reduceMul]))
       pruneSolvedGoals
       if (← getGoals).isEmpty then return
       if ← attempt (← `(tactic| cil_lookup_rfl [$facts:term,*])) then return
@@ -617,7 +651,7 @@ elab_rules : tactic
           finite := finite || (← whnf declaration.type).isAppOfArity ``Fin 1
       if placed && (← attempt (← `(tactic| cil_lookup_placed [$facts:term,*]))) then return
       if finite && (← attempt (← `(tactic| cil_lookup_finite [$facts:term,*]))) then return
-    evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd, Nat.reduceMul,
+    evalTactic (← `(tactic| cil_try_simp_only [cil_code, Nat.reduceAdd, Nat.reduceMul,
       bne_iff_ne, ne_eq, not_false_eq_true, Bool.false_eq_true, ite_true, ite_false,
       ↓reduceIte, $[$facts:term],*]))
     pruneSolvedGoals
@@ -658,8 +692,16 @@ elab "cil_literal_operands" : tactic => do
   -- A step that closed its goal leaves nothing to normalise.
   if (← getGoals).isEmpty then return
   withMainContext do
-  if hasClosedLiteralOperand (← instantiateMVars (← getMainTarget)) then
-    evalTactic (← `(tactic| try simp only [cil_literal]))
+  let name := "cil_literal_operands"
+  let target ← instantiateMVars (← getMainTarget)
+  let found ← if (← usableNormalNodes).isNone then pure (hasClosedLiteralOperand target)
+    else do
+      let (found, (_, clean)) :=
+        (cleanWalk closedLiteralOperand (← normalNodesFor name) target).run ({}, #[])
+      -- The terms below which no operand occurs stay so, whatever the step does next.
+      recordNormalNodes name clean
+      pure found
+  if found then evalTactic (← `(tactic| cil_try_simp_only [cil_literal]))
 
 open Lean Elab Tactic Meta in
 /-- State the goal with each decided `localResult` as the value it loads as
@@ -669,15 +711,24 @@ elab "cil_local_results" : tactic => do
   withMainContext do
     let goal ← getMainGoal
     let target ← instantiateMVars (← goal.getType)
-    let reduced ← reduceLocalResults target
-    unless reduced == target do replaceMainGoal [← goal.replaceTargetDefEq reduced]
+    let name := "cil_local_results"
+    let known ← normalNodesFor name
+    let isLocalResult (term : Expr) := term.isConstOf ``CIL.Safety.localResult
+    let found ← if (← usableNormalNodes).isNone then pure (target.find? isLocalResult).isSome
+      else do
+        let (found, (_, clean)) := (cleanWalk isLocalResult known target).run ({}, #[])
+        recordNormalNodes name clean
+        pure found
+    if found then
+      let reduced ← reduceLocalResults target known.contains
+      unless reduced == target do replaceMainGoal [← goal.replaceTargetDefEq reduced]
 
 /-- Normalises the literal `take`, `drop`, `reverse` and `++` a step leaves on the stack,
     evaluates its closed literal operands (`cil_literal_operands`) and states each decided local
     result as its value (`cil_local_results`); never fails. -/
 macro "cil_stack_cleanup" : tactic =>
   `(tactic| (
-    try simp only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
+    cil_try_simp_only [List.drop_succ_cons, List.drop_zero, List.drop_nil,
       List.take_succ_cons, List.take_zero, List.take_nil, List.reverse_cons, List.reverse_nil,
       List.nil_append, List.cons_append, List.append_nil]
     cil_literal_operands
@@ -688,8 +739,8 @@ macro "cil_stack_cleanup" : tactic =>
     definitions and `facts`, constructors and `rfl`. -/
 macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       simp only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep]
-       try simp only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
+       cil_simp_only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep]
+       cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
 /-- A matching instruction fact closes a step through its generic `@[cil_step]` equation.
@@ -697,8 +748,8 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
     rewrites past it; the opcode need not have a per-shape `@[cil_instruction_step]` equation. -/
 macro "cil_checked_instruction_from_fact " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
-       try simp only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
+       cil_simp_only [cil_step, cil_guard, CIL.Safety.instructionStep]
+       cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
 /-- `cil_checked_step_by_equations` for a `.memory` step, also rewriting `referenceAt` on
@@ -706,13 +757,13 @@ macro "cil_checked_instruction_from_fact " "[" facts:term,* "]" : tactic =>
     generic list would slow every other step. -/
 macro "cil_checked_memory_by_equations " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-       simp only [cil_step, cil_guard, CIL.Safety.instructionStep]
-       try simp only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
+       cil_simp_only [cil_step, cil_guard, CIL.Safety.instructionStep]
+       cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
 /-- Normalize checked conditions with the shared closed rules, retaining unresolved goals. -/
 macro "cil_checked_normalize " "[" facts:term,* "]" : tactic =>
-  `(tactic| try simp only [cil_checked, cil_guard, cil_side, $[$facts:term],*])
+  `(tactic| cil_try_simp_only [cil_checked, cil_guard, cil_side, $[$facts:term],*])
 
 /-- Closes frame-entry and return premises with the closed checked-value rules and supplied
     facts. Returned objects retain formation when the exiting frame does not own them. -/
@@ -748,8 +799,8 @@ macro "cil_checked_step_equations " "[" facts:term,* "]" : tactic =>
 macro "cil_checked_memory_from_fact " "[" facts:term,* "]" : tactic =>
   `(tactic| (
        rw [CIL.Safety.step_memory_eq]
-       try simp only [cil_guard]
-       try simp only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
+       cil_try_simp_only [cil_guard]
+       cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
 open Lean Elab Tactic Meta in
@@ -799,7 +850,7 @@ elab_rules : tactic
     operands are respelled as numerals to match it. -/
 macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    simp only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
+    cil_simp_only [cil_step, cil_guard, CIL.Intrinsic.available, List.length_cons, List.length_nil,
       Nat.reduceAdd, Nat.reduceLT, Bool.not_true, Bool.not_false, Bool.false_eq_true,
       ite_false, ite_true, List.take_succ_cons, List.take_zero, List.take_nil,
       List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append, List.append_nil,
@@ -807,7 +858,7 @@ macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
       CIL.Safety.numericValue, Bind.bind, Except.bind, Pure.pure, Except.pure,
       BitVec.ofInt_ofNat, cil_eval, $[$facts:term],*]
     -- A fact that makes the intrinsic fault leaves no result for this pass to check.
-    all_goals try simp only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
+    all_goals cil_try_simp_only [CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
       List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
       Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue, ite_true,
       Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
@@ -817,7 +868,7 @@ macro "cil_checked_intrinsic " "[" facts:term,* "]" : tactic =>
     all_goals try (
          cil_numeral_eval_fact [$[$facts:term],*]
          cil_intrinsic_pending
-         simp only [bitVecOfNatLiteral, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
+         cil_simp_only [bitVecOfNatLiteral, CIL.Safety.checkedIntrinsic, cil_guard, cil_eval,
            List.any_cons, List.any_nil, Bool.false_or, Bool.true_or, Bool.or_false,
            Bool.false_eq_true, ite_false, CIL.Safety.checkedValue, CIL.Safety.numericValue,
            ite_true, Bind.bind, Except.bind, Pure.pure, Except.pure, $[$facts:term],*]
@@ -967,7 +1018,8 @@ elab_rules : tactic
         if localOperation then
           let narrow ← lastArgument "cil_checked_step_normalized" operation
           unless (← whnfR narrow).isAppOf ``Option.none do
-            evalTactic (← `(tactic| simp only [step_local_annotation, step_setLocal_annotation]))
+            evalTactic (← `(tactic|
+              cil_simp_only [step_local_annotation, step_setLocal_annotation]))
             if (← getGoals).isEmpty then return
     -- A body reached through a lookup hypothesis stays named; one reached by unfolding a
     -- `cil_code` program is already a literal, so a fact on the named body needs its own
@@ -1016,12 +1068,12 @@ elab_rules : tactic
         -- Numerals use the same spelling as the normalized branch facts, and a comparison of
         -- two numerals is decided, so a literal operand leaves a numeral pc.
         evalTactic (← `(tactic| cil_strict (
-          simp only [cil_code, Nat.reduceAdd, cil_step, cil_guard, cil_checked, cil_side,
+          cil_simp_only [cil_code, Nat.reduceAdd, cil_step, cil_guard, cil_checked, cil_side,
             BitVec.ofNat_eq_ofNat, BitVec.setWidth_ofNat_of_le, Nat.reduceLeDiff,
             BitVec.reduceEq, ↓reduceIte, $[$branchFacts:term],*]
           all_goals ((repeat constructor) <;> rfl))))
         return
-    evalTactic (← `(tactic| try simp only [cil_code, Nat.reduceAdd]))
+    evalTactic (← `(tactic| cil_try_simp_only [cil_code, Nat.reduceAdd]))
     if (← getGoals).isEmpty then return
     -- A tactic `have` leaves the target under `mdata`, which `Expr.eq?` does not see through.
     let mut target := (← instantiateMVars (← getMainTarget)).consumeMData
@@ -1098,7 +1150,7 @@ elab_rules : tactic
         try
           evalTactic (← `(tactic| cil_strict (
             apply step_unspecified
-            simp only [observerCount, cil_guard, cil_side, $[$facts:term],*]
+            cil_simp_only [observerCount, cil_guard, cil_side, $[$facts:term],*]
             done)))
           return
         catch _ => saved.restore
@@ -1244,15 +1296,20 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
   return prepared ++ (← numericValueFacts facts)
 
 open Lean Elab Tactic in
-/-- Normalise `CIL.truth` and `facts` once for a stepping loop, then build its tactic from the
-    raw and normalised facts; per-step normalisation would re-simp every local fact on every
-    instruction. -/
+/-- `CIL.truth` and `facts` normalised once for a stepping loop; per-step normalisation would
+    re-simp every local fact on every instruction. -/
+def cilNormalisedFacts (facts : Array Term) : TacticM (Array Term) :=
+  withMainContext do
+    normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
+      (← prepareOperationFacts (#[← `(CIL.truth)] ++ facts))
+
+open Lean Elab Tactic in
+/-- Normalise `facts` with `cilNormalisedFacts`, then build a stepping loop's tactic from the
+    raw and normalised facts. -/
 def cilWithNormalisedFacts (facts : Array Term)
     (body : Array Term → Array Term → TacticM Syntax) : TacticM Unit :=
   withMainContext do
-    let prepared ←
-      normaliseStepFacts (← `(Lean.Parser.Tactic.optConfig|))
-        (← prepareOperationFacts (#[← `(CIL.truth)] ++ facts))
+    let prepared ← cilNormalisedFacts facts
     withMainContext <| evalTactic (← body facts prepared)
 
 open Lean Elab Tactic in
@@ -1431,20 +1488,25 @@ def cilOutputFacts (operation : Name) : TacticM (Array Term) := withMainContext 
       (·.isAppOfArity ``run 8) | return #[]
   let #[_, _, _, _, _, _, stack, memory] := execution.getAppArgs | return #[]
   if operation == ``CIL.Instruction.ret && (← whnfD stack).isAppOf ``List.nil then return #[]
-  let currentFacts := withMainContext do
+  -- Facts remembered below join the context after `retained` was collected, so they are
+  -- found by a second scan.
+  let currentFacts (markers : Array LocalDecl) : TacticM (Array Term) := withMainContext do
     let mut facts := #[]
-    for declaration in ← getLCtx do
-      if declaration.userName.eraseMacroScopes == `cilOutputFact &&
-          (← loopFactMemories declaration.type).contains memory then
+    for declaration in markers do
+      if (← loopFactMemories declaration.type).contains memory then
         facts := facts.push (← Term.exprToSyntax declaration.toExpr)
     return facts
-  let facts ← currentFacts
+  let facts ← currentFacts retained
   unless facts.isEmpty do return facts
   for declaration in calls do
     let type ← instantiateMVars declaration.type
     if type.isAppOfArity `CIL.Safety.ValidCall 3 && argument? type 0 == some memory then
       cilRememberOutputFacts (← Term.exprToSyntax declaration.toExpr)
-      return ← currentFacts
+      let remembered ← withMainContext do
+        return (← getLCtx).foldl (init := #[]) fun found declaration =>
+          if declaration.userName.eraseMacroScopes == `cilOutputFact then found.push declaration
+          else found
+      return ← currentFacts remembered
   return #[]
 
 open Lean Elab Tactic Meta in
@@ -1507,14 +1569,9 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
       try
         let call ← Term.exprToSyntax declaration.toExpr
         let view ← Term.exprToSyntax view
-        let context ← getLCtx
-        let bases := ["stored", "addressed", "written", "readback", "storedCall"]
-        let named (index : Nat) (base : String) :=
-          Name.mkSimple (if index == 0 then base else s!"{base}_{index}")
-        let mut index := 0
-        while bases.any (fun base => context.usesUserName (named index base)) do
-          index := index + 1
-        let names := bases.toArray.map (fun base => mkIdent (named index base))
+        let bases := #["stored", "addressed", "written", "readback", "storedCall"]
+        let index := firstUnusedSuffix (← getLCtx) bases
+        let names := bases.map (fun base => mkIdent (suffixedName index base))
         let #[after, addressed, written, readback, retained] := names
           | throwError "cilPrepareOutputStore: expected a name for each of {bases}"
         let store := Syntax.mkApp (mkCIdent `CIL.Safety.ValidCall.store_word)
@@ -1569,7 +1626,7 @@ open Lean Elab Tactic Meta in
 /-- One `run` step: prove the method and instruction lookups once, then apply only the
     composition lemma for the fetched opcode. A call proves its callee and leaves the caller's
     continuation as the goal. Toward a stated fault, a step that raises it ends the run. -/
-def cilRunStep (facts : Array Term) : TacticM Unit := withMainContext do
+def cilRunStepNodes (facts : Array Term) : TacticM Unit := withMainContext do
   -- `run_fault` can close only at the pc the stated fault names; elsewhere it only costs.
   let target := (← instantiateMVars (← getMainTarget)).consumeMData
   let faulting ← match target.eq? with
@@ -1609,6 +1666,12 @@ def cilRunStep (facts : Array Term) : TacticM Unit := withMainContext do
     else
       `(tactic| cil_checked_next_at $methodSyntax $instructionSyntax [$facts,*]))
 
+open Lean Elab Tactic in
+/-- `cilRunStepNodes` on the record of normal-form nodes of the running driver, so that a
+    simplification leaves alone what earlier steps visited and left unchanged. -/
+def cilRunStep (facts : Array Term) : TacticM Unit :=
+  withNormalNodes facts (cilRunStepNodes facts)
+
 /-- One `run` step of the goal, chosen by the fetched opcode; at a call it proves the callee and
     leaves the caller's continuation. -/
 syntax "cil_checked_run_step" "[" term,* "]" : tactic
@@ -1621,9 +1684,10 @@ macro_rules
   `(tactic| (
     try (conv => lhs; arg 2; cil_reduce_fuel)
     cil_checked_entry [$[$facts:term],*]
-    cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the \
-      first step, did not close; pass the lookup hypothesis, feature facts or step facts"
-      cil_checked_run_step [$[$facts:term],*]))
+    cil_normal_run
+      cil_steps_from "cil_checked_steps took no step: the method or instruction lookup, or the \
+        first step, did not close; pass the lookup hypothesis, feature facts or step facts"
+        cil_checked_run_step [$[$facts:term],*]))
 
 /-- Proves an `invoke` or `run` goal, returning or stating a located fault, by checked
     stepping with `facts` and the object evidence facts of the context, such as `live.formed` of
@@ -1654,10 +1718,11 @@ elab_rules : tactic
     let prepared ← prepareStepFacts facts.getElems
     -- Focus the original goal: an early close must error, not step into an unrelated pending goal.
     focus do
-      for taken in [:count.getNat] do
-        if (← getGoals).isEmpty then
-          throwError "cil_checked_steps {count.getNat}: the goal closed after {taken} steps"
-        cilRunStep prepared
+      withNormalRun do
+        for taken in [:count.getNat] do
+          if (← getGoals).isEmpty then
+            throwError "cil_checked_steps {count.getNat}: the goal closed after {taken} steps"
+          cilRunStep prepared
       -- Fold the stepped pc (`2 + 1`) so the residual matches a target stated with a numeral.
       unless (← getGoals).isEmpty do
         evalTactic (← `(tactic| try (conv => lhs; arg 4; simp only [Nat.reduceAdd])))
