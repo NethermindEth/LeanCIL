@@ -265,6 +265,24 @@ theorem decides_a_struct_without_the_corlib_number :
       (.operandMismatch tokens.pairRef) = true := by decide +kernel
 #print axioms decides_a_struct_without_the_corlib_number
 
+/-- A field of a struct in a pinned assembly is read from that assembly's slice: without the
+    slice it is refused, not taken for a platform field. -/
+theorem rejects_a_pinned_struct_field_whose_slice_is_missing :
+    passes own.1 lib tokens.firstRef (.field (.atom libScope "Lib.Pair") 0 int32 false) = true ∧
+    rejectsWithoutLibSlice tokens.firstRef (.field (.atom libScope "Lib.Pair") 0 int32 false)
+      (.missingSlice tokens.pairRef) = true := by decide +kernel
+#print axioms rejects_a_pinned_struct_field_whose_slice_is_missing
+
+/-- A call into a struct of a pinned assembly whose core-library number is wrong: the struct is
+    still a value type, so a call that names it as a class is refused. -/
+theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :
+    passes own.1 lib tokens.sumRef (.call sumSite) = true ∧
+    passes own.1 libWithoutCorlib tokens.sumRef (.call sumSite) = true ∧
+    rejects own.1 libWithoutCorlib tokens.sumRef
+      (.call { sumSite with declaringType := .object libScope "Lib.Pair" })
+      (.operandMismatch tokens.sumRef) = true := by decide +kernel
+#print axioms rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number
+
 /-! ## The use of a token -/
 
 theorem rejects_a_field_access_that_disagrees_with_the_field_row :
@@ -290,7 +308,7 @@ private def mainMethod : RawMethod :=
 private def identity (slice : MetadataSlice) (method : RawMethod) :
     Except MetadataError MethodNames := do
   let env : MetadataEnv := { slices := [← slice.index, ← lib.index] }
-  methodIdentityValid env method
+  methodIdentityValid env method [] []
 
 private def identityFails (slice : MetadataSlice) (method : RawMethod) (error : MetadataError) :
     Bool :=

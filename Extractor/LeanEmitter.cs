@@ -276,7 +276,8 @@ internal static class LeanEmitter
                 $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
                 $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
                 $"dispatchTypes := method{n}DispatchTypes, " +
-                $"assembly := assembly{pinned.Index(methods[n].Module)}, pins := assemblies }}")) + "]");
+                $"assembly := assembly{pinned.Index(methods[n].Module)}, pins := assemblies, " +
+                $"signature := method{n}Signature }}")) + "]");
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);
@@ -288,8 +289,9 @@ internal static class LeanEmitter
                 $"method{n}Closed) method{n}Reachable method{n} := {proof}");
         }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
-        // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them.
-        lean.AppendLine("def signatures : List String := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}Signature")) + "]");
+        // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them. Each
+        // entry is its evidence record's, which the body check equates with the full name its metadata row spells.
+        lean.AppendLine("def signatures : List String := methodEvidence.map Extraction.MethodEvidence.signature");
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
         lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");

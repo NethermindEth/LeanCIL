@@ -526,6 +526,19 @@ def siteReturn (methodArguments ownerArguments : Option (List ResolvedType))
     (type : ResolvedType) : Option ResolvedType :=
   declaredReturn <$> substituteResolved methodArguments ownerArguments resolveFuel type
 
+/-- A declared type of a method instantiated at the given arguments, as Cecil writes the
+    instance: an `in` reference is substituted inside and keeps its modifier, any other type is
+    substituted whole, and a parameter with no argument fails. -/
+def instanceType (methodArguments ownerArguments : List ResolvedType) (type : ResolvedType) :
+    Option ResolvedType :=
+  match type with
+  | .modified true modifier (.byref element) =>
+    if isInModifier modifier && !hasModifier resolveFuel element then
+      (fun inner => .modified true modifier (.byref inner)) <$>
+        substituteResolved (some methodArguments) (some ownerArguments) resolveFuel element
+    else substituteResolved (some methodArguments) (some ownerArguments) resolveFuel type
+  | _ => substituteResolved (some methodArguments) (some ownerArguments) resolveFuel type
+
 /-! ## The relation between resolved types and the extractor's types -/
 
 /-- How the extractor's types read the generic parameters and the primitive types of one

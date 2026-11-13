@@ -3,9 +3,9 @@ import Tests.MetadataBuilder
 /-!
 # A hand-built world of two pinned assemblies
 
-`T` carries the operands under test: references to `System.Runtime`, a call into `Lib`, an
-instance and a static field, a generic method specification, a string, a locals signature and a
-standalone call signature. `Lib` defines the class `Lib.Box` that `T` calls into. Tests
+`T` carries the operands under test: references to `System.Runtime`, calls into `Lib`, instance
+and static fields, a generic method specification, a string, a locals signature and a standalone
+call signature. `Lib` defines the class `Lib.Box` and the struct `Lib.Pair` that `T` uses. Tests
 check each operand against the slices, then change one fact and assert the exact error.
 -/
 
@@ -39,7 +39,14 @@ def libWorld : Step Unit := do
   let pairName ← string "Pair"
   let valueTypeName ← string "ValueType"
   let valueTypeRef ← row Table.typeRef [1 * 4 + 2, valueTypeName, systemName]
-  let _ ← row Table.typeDef [0x101, pairName, libName, (valueTypeRef - 0x01000000) * 4 + 1, 2, 2]
+  let pair ← row Table.typeDef [0x101, pairName, libName, (valueTypeRef - 0x01000000) * 4 + 1, 2, 2]
+  -- Its instance field `first` and its static method `Sum`.
+  let firstName ← string "first"
+  let sumName ← string "Sum"
+  let first ← row Table.field [0x0006, firstName, fieldSignature]
+  let sum ← row Table.methodDef [0x2060, 0, 0x0096, sumName, getSignature, 1]
+  link linkDeclaring first 1 pair
+  link linkDeclaring sum 1 pair
 
 /-- The tokens of the `T` world that the tests name. -/
 structure OwnTokens where
@@ -59,6 +66,9 @@ structure OwnTokens where
   extra : Nat
   /-- The reference to the struct `Lib.Pair`. -/
   pairRef : Nat
+  /-- The references to the field `Lib.Pair.first` and the method `Lib.Pair.Sum`. -/
+  firstRef : Nat
+  sumRef : Nat
 
 /-- The `T` assembly: the references and members its operands name. -/
 def ownWorld : Step OwnTokens := do
@@ -111,7 +121,15 @@ def ownWorld : Step OwnTokens := do
   let pairName ← string "Pair"
   let pairRef ← row Table.typeRef [2 * 4 + 2, pairName, libName]
   link linkDefinition pairRef 1 (tokenOf Table.typeDef 3)
-  pure { pairRef := pairRef, objectRef := objectRef, consoleRef := consoleRef, boxRef := boxRef,
+  let firstName ← string "first"
+  let sumName ← string "Sum"
+  let pairParent := (pairRef - 0x01000000) * 8 + 1
+  let firstRef ← row Table.memberRef [pairParent, firstName, intField]
+  let sumRef ← row Table.memberRef [pairParent, sumName, getSignature]
+  link linkDefinition firstRef 1 (tokenOf Table.field 2)
+  link linkDefinition sumRef 1 (tokenOf Table.methodDef 2)
+  pure { pairRef := pairRef, firstRef := firstRef, sumRef := sumRef, objectRef := objectRef,
+         consoleRef := consoleRef, boxRef := boxRef,
          writeLine := writeLine, getRef := getRef, idRef := idRef, idSpec := idSpec,
          countField := countField, totalField := totalField, main := main,
          localsSignature := localsSignature, hello := 0x70000000 + hello,
@@ -144,6 +162,12 @@ def writeLineSite : CallSite :=
 /-- `Lib.Box.Get()`: a managed call into the other assembly. -/
 def getSite : CallSite :=
   { declaringType := .atom libScope "Lib.Box", name := "Get", target := .managed 0x06000001,
+    typeArguments := [], parameterCount := 0, hasThis := false, returnsValue := true,
+    returnType := int32, parameterTypes := [] }
+
+/-- `Lib.Pair.Sum()`: a managed call to a static method of a struct in the other assembly. -/
+def sumSite : CallSite :=
+  { declaringType := .atom libScope "Lib.Pair", name := "Sum", target := .managed 0x06000002,
     typeArguments := [], parameterCount := 0, hasThis := false, returnsValue := true,
     returnType := int32, parameterTypes := [] }
 

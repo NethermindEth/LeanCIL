@@ -179,7 +179,7 @@ def evidenceOf (bytes : List Nat) (operands : List (Nat × RawOperand)) (metadat
   let identities := metadata.slices.map fun slice => (slice.assembly.spelling).toOption.getD []
   let tables := metadata.tables.toOption.getD []
   let names := match metadata.environmentWith identities tables [] with
-    | .ok env => (methodIdentityValid env method).toOption.getD {}
+    | .ok env => (methodIdentityValid env method [] []).toOption.getD {}
     | .error _ => {}
   { bytes := bytes, tokens := { operands := operands }, metadata, identities, tables, names,
     pinned := [] }
@@ -209,13 +209,15 @@ def realizeOffsets (method : RawMethod) : RawMethod :=
         { instruction with offset := offset } }
   | none => method
 
-/-- The evidence with real offsets in its original and closed bodies and the bytes and metadata
-    of its original body. An unencodable body keeps the evidence's own `body`, which then fails
-    the check, so a fixture needs one positive check that its evidence has its bytes. -/
+/-- The evidence with real offsets in its original and closed bodies, the bytes and metadata of
+    its original body and the signature its row spells. An unencodable body keeps the evidence's
+    own `body`, which then fails the check, so a fixture needs one positive check that its
+    evidence has its bytes. -/
 def withBody (item : MethodEvidence) : MethodEvidence :=
   let original := realizeOffsets item.original
-  { item with original := original, closed := realizeOffsets item.closed,
-              body := (encodeBody item.assembly original).getD item.body }
+  let body := (encodeBody item.assembly original).getD item.body
+  { item with original := original, closed := realizeOffsets item.closed, body := body,
+              signature := (spelled? body.names.signature).getD item.signature }
 
 /-- The body of evidence that `withBody` has not yet filled in; it never decodes. -/
 def noBody : BodyEvidence :=

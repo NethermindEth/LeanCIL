@@ -135,7 +135,10 @@ What `MetadataResolution` and `MetadataBinding` check:
 - The local variable types are checked against the standalone signature the body header names.
 - The method's own identity is checked against its `MethodDef` row: owner, flags, calling
   convention, parameter and return types, generic parameter counts and flags, the class layout
-  facts of a class receiver. Every column of the row is compared but the address of the body.
+  facts of a class receiver. The row's name and signature give Cecil's full name of the method,
+  for a generic instance at the type arguments its evidence states, and `BodyDecodes` equates it
+  with the evidence's `signature`, the string `Extracted.signatures` lists and proofs select the
+  method by. The address of the body and the parameter list are not read.
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a

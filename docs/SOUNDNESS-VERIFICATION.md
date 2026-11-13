@@ -57,8 +57,9 @@ statement, inputs and library identity; their prose is not an independent specif
 | `audit-library` | Kernel-replayed compiled declarations and namespace theorem audit | Not proof that a package build directory was compiled from its current sources. |
 | `audit-binding` | Kernel-checked binding of the extraction's method bodies to assembly files with stated digests | Covers only the items it reports as reconfirmed; every fact it does not check stays trusted and is reported as not covered, and a digest that only matches the extraction's pinned digest, and the bodies found in that image, are not reconfirmed. The meaning of the audited statements rests on the `StrictBinding` sources and the Lean toolchain, whose hash and version the report prints. |
 
-`Extracted.signatures` selects method indices and is hash-bound; it is not part of
-`TranslationValid`.
+`Extracted.signatures` selects method indices and is hash-bound. It lists the `signature` of each
+`methodEvidence` record, which `TranslationValid` equates with the full name the method's
+`MethodDef` row spells.
 Bindings are kernel-checked against the actual program. PDB names and locations are similarly
 untrusted selection aids: they cannot change `Extracted.lean` or its translation evidence.
 Proofs importing `Symbols.lean` compile/replay it and bind its hash; forged names cannot make the
