@@ -131,7 +131,7 @@ def MetadataEnv.fieldDefinition (env : MetadataEnv) (token : Nat) (owner : Named
   let index ← env.slice position token
   let row ← index.field definition
   let declaring ← env.ownerOf position definition
-  if declaring.scope != owner.scope || declaring.name != owner.name then
+  if declaring.scope != owner.scope || declaring.parts != owner.parts then
     throw (.unresolvedMember token)
   let found ← env.resolveBlob position definition row.signature
   if (← index.string row.name) != name || found != declared then throw (.unresolvedMember token)
@@ -281,7 +281,7 @@ def MetadataEnv.methodDefinition (env : MetadataEnv) (token : Nat) (owner : Name
   let index ← env.slice position token
   let row ← index.methodDef definition
   let declaring ← env.ownerOf position definition
-  if declaring.scope != owner.scope || declaring.name != owner.name then
+  if declaring.scope != owner.scope || declaring.parts != owner.parts then
     throw (.unresolvedMember token)
   let found ← env.resolveMethod position (← index.blob row.signature)
   if (← index.string row.name) != name || found != signature then

@@ -35,6 +35,10 @@ inductive TypeKind where
 structure NamedType where
   scope : List Nat
   name : List Nat
+  /-- The namespace and the simple name of each enclosing type and the type itself, kept apart:
+      `name` joins them with dots and slashes, so namespace `A.B` with name `C` and namespace `A`
+      with name `B.C` spell one name but are different types. -/
+  parts : List (List Nat)
   kind : TypeKind
   pinned : Bool
   deriving DecidableEq, Repr
@@ -119,21 +123,23 @@ def MetadataIndex.corlibIdentity (index : MetadataIndex) :
     if !corlibNames.contains (← index.string row.name) then throw (.unsupportedAssemblyRef token)
     .ok (some (← index.assemblyRefIdentity token))
 
-/-- The scope and full name a `TypeRef` spells: its assembly, or the outermost enclosing
-    type's. -/
+/-- The scope, full name and name parts a `TypeRef` spells: its assembly, or the outermost
+    enclosing type's. -/
 def typeRefQualified (env : MetadataEnv) (position : Nat) :
-    Nat → Nat → Except MetadataError (List Nat × List Nat)
+    Nat → Nat → Except MetadataError (List Nat × List Nat × List (List Nat))
   | 0, token => .error (.unresolvedType token)
   | fuel + 1, token => do
     let index ← env.slice position token
     let row ← index.typeRef token
-    let name := qualifiedName (← index.string row.namespace_) (← index.string row.name)
+    let namespace_ ← index.string row.namespace_
+    let simple ← index.string row.name
+    let name := qualifiedName namespace_ simple
     match metadataTableOf row.scope with
-    | 0x23 => .ok (← index.assemblyRefIdentity row.scope, name)
-    | 0x00 => .ok (index.identity, name)
+    | 0x23 => .ok (← index.assemblyRefIdentity row.scope, name, [namespace_, simple])
+    | 0x00 => .ok (index.identity, name, [namespace_, simple])
     | 0x01 =>
-      let (scope, enclosing) ← typeRefQualified env position fuel row.scope
-      .ok (scope, nestedName enclosing (← index.string row.name))
+      let (scope, enclosing, parts) ← typeRefQualified env position fuel row.scope
+      .ok (scope, nestedName enclosing simple, parts ++ [simple])
     | _ => .error (.unsupportedScope token)
 
 /-- The first instance field among `count` consecutive `Field` rows from `row`: a scan that
@@ -172,6 +178,11 @@ def enumUnderlying (index : MetadataIndex) (token : Nat) : Except MetadataError 
       if 0x04 ≤ code && code ≤ 0x0B then .ok code else .error (.unresolvedType token)
     | _ => .error (.unresolvedType token)
   | none => .error (.unresolvedType token)
+/-- The namespace `System` and the names `Enum` and `ValueType` as bytes. -/
+def systemNamespace : List Nat := [83, 121, 115, 116, 101, 109]
+def enumName : List Nat := [69, 110, 117, 109]
+def valueTypeName : List Nat := [86, 97, 108, 117, 101, 84, 121, 112, 101]
+
 /-- An interface has the interface flag; a type that extends `System.Enum` is an enum with the
     underlying type of its instance field, one that extends `System.ValueType` is a value
     type, and any other type is a class. -/
@@ -180,11 +191,11 @@ def typeDefKind (env : MetadataEnv) (position token : Nat) (row : TypeDefRow) :
   if row.flags / 0x20 % 2 == 1 then return .interfaceType
   if metadataTableOf row.extends_ != Table.typeRef then return .classType
   let index ← env.slice position token
-  let (scope, name) ← typeRefQualified env position resolveFuel row.extends_
+  let (scope, _, parts) ← typeRefQualified env position resolveFuel row.extends_
   let corlib ← index.corlibIdentity
   if some scope != corlib then return .classType
-  if name == bytesOf "System.Enum" then return .enumType (← enumUnderlying index token)
-  if name == bytesOf "System.ValueType" then return .valueType
+  if parts == [systemNamespace, enumName] then return .enumType (← enumUnderlying index token)
+  if parts == [systemNamespace, valueTypeName] then return .valueType
   .ok .classType
 
 /-- The named type of a `TypeDef` in the slice at `position`: its scope is that slice's
@@ -197,8 +208,8 @@ def typeDefNamed (env : MetadataEnv) (position : Nat) : Nat → Nat → Except M
     let row ← index.typeDef token
     let simple ← index.string row.name
     let namespace_ ← index.string row.namespace_
-    let name ←
-      if row.flags % 8 < 2 then pure (qualifiedName namespace_ simple)
+    let (name, parts) ←
+      if row.flags % 8 < 2 then pure (qualifiedName namespace_ simple, [namespace_, simple])
       else do
         let some (linked, nesting) := index.link linkNesting token
           | throw (.unresolvedType token)
@@ -206,9 +217,9 @@ def typeDefNamed (env : MetadataEnv) (position : Nat) : Nat → Nat → Except M
         let nested ← index.nestedClass nesting
         if nested.nested != token then throw (.unresolvedType token)
         let enclosing ← typeDefNamed env position fuel nested.enclosing
-        pure (nestedName enclosing.name simple)
+        pure (nestedName enclosing.name simple, enclosing.parts ++ [simple])
     let kind ← typeDefKind env position token row
-    .ok { scope := index.identity, name := name, kind := kind, pinned := true }
+    .ok { scope := index.identity, name := name, parts := parts, kind := kind, pinned := true }
 
 /-- The named type of a `TypeRef`. A scope that names a carried slice is resolved through the
     slice's definition link to the `TypeDef` that defines it, whose name must be the one the
@@ -217,16 +228,17 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
     Nat → Nat → Option Bool → Except MetadataError NamedType
   | 0, token, _ => .error (.unresolvedType token)
   | fuel + 1, token, hint => do
-    let (scope, name) ← typeRefQualified env position resolveFuel token
+    let (scope, name, parts) ← typeRefQualified env position resolveFuel token
     match env.slices.findIdx? (fun candidate => candidate.identity == scope) with
-    | none => .ok { scope := scope, name := name, kind := .external hint, pinned := false }
+    | none => .ok { scope := scope, name := name, parts := parts, kind := .external hint,
+                    pinned := false }
     | some target =>
       let index ← env.slice position token
       let some (linked, definition) := index.link linkDefinition token
         | throw (.unresolvedType token)
       if linked != target then throw (.unresolvedType token)
       let named ← typeDefNamed env linked fuel definition
-      if named.scope != scope || named.name != name then throw (.operandMismatch token)
+      if named.scope != scope || named.parts != parts then throw (.operandMismatch token)
       .ok named
 
 /-- The named type of a custom modifier. A modifier is read by its scope and name alone, so it needs
@@ -234,13 +246,15 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
 def modifierNamed (env : MetadataEnv) (position token : Nat) : Except MetadataError NamedType := do
   match metadataTableOf token with
   | 0x01 =>
-    let (scope, name) ← typeRefQualified env position resolveFuel token
-    .ok { scope := scope, name := name, kind := .external none, pinned := false }
+    let (scope, name, parts) ← typeRefQualified env position resolveFuel token
+    .ok { scope := scope, name := name, parts := parts, kind := .external none, pinned := false }
   | 0x02 =>
     let index ← env.slice position token
     let row ← index.typeDef token
-    let name := qualifiedName (← index.string row.namespace_) (← index.string row.name)
-    .ok { scope := index.identity, name := name, kind := .external none, pinned := false }
+    let namespace_ ← index.string row.namespace_
+    let simple ← index.string row.name
+    .ok { scope := index.identity, name := qualifiedName namespace_ simple,
+          parts := [namespace_, simple], kind := .external none, pinned := false }
   | _ => .error (.unsupportedTable token)
 
 /-- Whether a signature's class-or-value-type byte agrees with a type found in a carried

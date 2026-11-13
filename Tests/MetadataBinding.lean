@@ -219,6 +219,19 @@ theorem rejects_an_external_identity_other_than_the_member :
       (.operandMismatch tokens.writeLine) = true := by decide +kernel
 #print axioms rejects_an_external_identity_other_than_the_member
 
+/-- `Lib.Box` defined with namespace `Lib` and name `Box`, as the reference spells it, and the
+    same type defined with an empty namespace and the name `Lib.Box`: both join to `Lib.Box`. -/
+private def libWithJoinedName : MetadataSlice :=
+  let joined : ByteEntry := (0x4000, bytesOf "Lib.Box" ++ [0])
+  { mutateRow lib (tokenOf Table.typeDef 2) (fun bytes =>
+      bytes.take 4 ++ [0x00, 0x40, 0x00, 0x00] ++ bytes.drop 8) with
+    strings := lib.strings ++ [joined] }
+
+theorem rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference :
+    rejects own.1 libWithJoinedName tokens.getRef (.call getSite)
+      (.operandMismatch tokens.boxRef) = true := by decide +kernel
+#print axioms rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
+
 /-! ## The use of a token -/
 
 theorem rejects_a_field_access_that_disagrees_with_the_field_row :
