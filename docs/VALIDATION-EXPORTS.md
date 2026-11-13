@@ -192,8 +192,9 @@ These regressions cover the extractor's own C# indexes:
   order, explicit overlaps, empty layouts, missing children, packing/offset failures and vector
   architecture restrictions.
 - The `Decidable` instance of `LayoutsValid` runs `layoutsValidIndexed`, one pass over the raw
-  and claimed tables, so the emitted `layouts_validated` and `method{n}_layouts_validated`
-  theorems, import catalog checks and layout projection checks all decide it that way. The pass
+  and claimed tables, so the emitted `Extracted.layouts_validated` theorem, the layout theorem
+  emitted for each method, import catalog checks and layout projection checks all decide it that
+  way. The pass
   reads raw entries and claimed layouts through balanced indexes built once, lets each entry read
   only claimed layouts at earlier positions, and finds closed generic owners through an ordered
   map keyed by closed type that returns the first match. For `L` layouts with `A` fields in total

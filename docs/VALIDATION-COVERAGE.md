@@ -320,9 +320,10 @@ performance fixture is never supplied to a verifier as a certified library.
   compositional certificate and a deliberately failing monolithic certificate. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
   The consumer verifies the original extraction. The fixture then checks the emitted
-  `layouts_validated` theorem over a chain of nested structs, each holding the one before it, and
-  over a chain of generic structs, each holding the previous distinct closed generic owner, and
-  the emitted `method0_layouts_validated` theorem over the nested chain. It compiles them with
+  `Extracted.layouts_validated` theorem over a chain of nested structs, each holding the one
+  before it, and over a chain of generic structs, each holding the previous distinct closed
+  generic owner, and the emitted `Extracted.method0_layouts_validated` theorem over the nested
+  chain. It compiles them with
   `-DElab.async=false` so kernel heartbeats are counted and under `lean -M 8192`, and requires
   axioms `[propext, Classical.choice, Quot.sound]`; heartbeats per layout may grow by at most 1.5
   times from chains of 64 to chains of 512.
