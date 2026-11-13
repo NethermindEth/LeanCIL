@@ -838,6 +838,10 @@ Each Lean or Lake process `verify` and `workspace` start is a stage, and stderr 
 - When stderr is a file or a pipe, a stage shorter than 20 seconds prints nothing, so a warm run
   leaves stderr empty. A longer stage prints a `PROGRESS` line every 20 seconds and then its `END`
   line.
+- The removal of unused cache directories after a run publishes a library entry is a stage of
+  its own: when it chooses any directory, fails or reaches its time limit it prints its `START`
+  and `END` lines, even when stderr is a file, and never `PROGRESS` lines, see
+  [Library cache](#library-cache).
 
 A `PROGRESS` line of a Lake build carries Lake's job count:
 
@@ -855,6 +859,63 @@ several minutes. It is cached in the directory `LEANCIL_CACHE_DIR` names, by def
 `<local application data>/LeanCIL/libraries`, under a key of the framework sources, toolchain
 and platform. A cache miss first prints one line saying what is being built and kernel-replayed
 and where later runs reuse it from.
+
+An entry of a whole library holds about 1.2 GB; a closure entry holds only its modules. Every
+`verify`, `workspace` and `watch` process that reads an entry in place records its use in the
+entry directory's write time and holds a lock on a file beside the entry (`<key>.use`) until it
+ends; the lock files are never deleted. A process that cannot create the lock file for want of
+permission runs without it. `LEANCIL_CACHE_DIR` should name an absolute directory that only
+LeanCIL uses.
+
+A run that publishes an entry removes cache directories that it judges unused, once, before it
+continues; there is no setting that turns this off. When the pass chooses any directory, fails or
+reaches its time limit it prints a stage to stderr, even when stderr is a file: `START Removing
+up to <n> unused certified library cache directories` with the number chosen, or a `START` line
+without a number when it chose none, and an `END` line with the number removed and the duration.
+The number removed is smaller when a process holds an entry the pass chose, when an entry was
+used or became a link after it was chosen, and when an entry could not be renamed or deleted.
+The pass reads each package's lakefile for at most two seconds and stops choosing, reading and
+removing after a minute, so a project on a mount that does not answer can delay it by up to a
+minute; a deletion already under way can finish later. Whatever it could not read in that time it
+keeps, whatever the age of its pin, past the limit it removes no entry and no pin, and the `END`
+line says that it stopped at the limit or how many lakefiles it did not read in time. Nothing
+the pass raises fails the run: a failure is reported on the `END` line, with exit 1. Nothing
+else is printed. Removal goes by age and recency of use, not by whether anything needs the
+library later:
+
+- An entry not used for `LEANCIL_LIBRARY_RETENTION_DAYS` days (default 7) is removed. A value
+  below one day counts as one day, so nothing used within the last day is removed.
+- When more than `LEANCIL_LIBRARY_MAX_ENTRIES` entries exist (default 8), counting closure
+  entries, the least recently used ones beyond that number are removed, except those used within
+  the last day.
+- Staging directories, download archives and unfinished pin files left by killed runs that are
+  over a day old are removed.
+- The entry the run uses, an entry whose lock another process holds, and an entry that a
+  `workspace` package still requires by path are kept, whatever their age. The package records
+  that in a `<key>.pin-*` file beside the entry, which every `workspace` run renews. A pin
+  renewed within a day always counts. Otherwise a package whose lakefile can be read keeps the
+  entry for as long as the lakefile names a directory ending in the entry's key, whatever the age
+  of the pin and however the cache directory is spelled; the pin stops protecting the entry when
+  the lakefile names another key or none. When a read of the lakefile finishes and finds the
+  package missing or unreadable, as when a drive is unmounted or the project was moved, the pin
+  protects the entry until it has not been renewed for the retention period, and a pin that
+  cannot be read is treated the same way. A lakefile that is not read in time keeps the entry
+  for that pass, and a pin that a pass set aside and did not finish with is put back and judged
+  again.
+- A directory is removed only if its name is exactly a library key and it holds the manifest and
+  receipt that a publisher writes, or its name is a library staging name. The `success-v1`
+  directory, `.lock` and `.use` files and every other name are left alone, and so are links.
+- The pins and closure records of a removed entry are removed with it.
+
+Each setting is a positive number, a whole number for the entry limit; any other value keeps the
+default. Infinity and values too large to count mean for ever, or as many entries as can be
+counted.
+
+An entry removed while its owner was away is rebuilt, or downloaded for a release, by the next
+`verify`, which prints the stage lines of that build. A package that `workspace` wrote keeps its
+entry while its lakefile can be read and names the entry. A package that is found missing or
+unreadable for longer than the retention period without a `workspace` run, or whose lakefile
+names another library or none, loses the entry, and `leancil workspace` sets it up again.
 
 With no whole library cached, `verify` of one proof without `--proof-root` first builds a closure
 entry: the framework modules that the proof, the extraction, its symbols and the statement display

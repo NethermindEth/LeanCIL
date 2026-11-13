@@ -200,7 +200,7 @@ try
     var staleGeneration = Entry(Generation('1'), 8);
     var usedGeneration = Entry(Generation('2'), 6);
     var restored = Entry(Generation('3'), 30);
-    TouchSuccess(restored);
+    TouchEntry(restored);
     var staleReceipt = Entry(new string('4', 64), 30);
     var abandoned = Entry(new string('5', 64) + "." + new string('6', 32), 2);
     var replaced = Entry(Generation('7') + ".invalid-" + new string('8', 32), 2);
