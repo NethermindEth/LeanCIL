@@ -288,6 +288,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         externalIdentities.Emit(lean);
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
         lean.AppendLine(body.Bytes);
+        if (body.Slices.Length > 0)
+            foreach (var line in body.Slices.Split('\n')) lean.AppendLine(line);
         lean.AppendLine(body.Definition);
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
         lean.AppendLine($"def method{number}Closed : Extraction.RawMethod := {closedEvidence}");
@@ -296,12 +298,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         lean.AppendLine($"theorem method{number}_specialization_validated :" +
             $" Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw" +
             $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
-        // The module's tables are decided once; this method's check reads them by name.
-        var module = (metadata ?? throw new InvalidOperationException(
-            "Method evidence requires the pinned assemblies.")).Name(original.Module);
         lean.AppendLine($"theorem method{number}_body_validated :" +
             $" Extraction.BodyDecodes ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
-            $" method{number}Original := ⟨{module[..^"Metadata".Length]}_tables_valid, by cil_body_decodes⟩");
+            $" method{number}Original := ⟨{body.TablesValid}, by cil_body_decodes⟩");
     }
 
     static readonly HashSet<Instruction> EmptySet = [];
@@ -314,7 +313,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// The body bytes of an original method and its token table: each token read from the body, with the operand
     /// the extractor resolved it to. The Lean decoder reads the same bytes and checks them against the code.
     /// </summary>
-    (string Bytes, string Definition) Body(MethodDefinition original, MethodDefinition admitted,
+    (string Bytes, string Slices, string Definition, string TablesValid) Body(MethodDefinition original, MethodDefinition admitted,
         IReadOnlySet<Instruction> reachable, int number)
     {
         var body = Pinned.Body(original);
@@ -351,16 +350,29 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var shared = bodyBytes.TryGetValue(definition, out var first);
         var data = shared
             ? $"method{first}Bytes" : List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
-        var rows = (metadata ?? throw new InvalidOperationException(
-            "Method evidence requires the pinned assemblies.")).Name(original.Module);
+        // The slices hold what this body reaches; a closed instantiation shares its open definition's.
+        var owner = shared ? first : number;
+        var slices = "";
+        if (!shared)
+        {
+            var (rows, tables) = (metadata ?? throw new InvalidOperationException(
+                "Method evidence requires the pinned assemblies.")).Method(original,
+                operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32())
+                    .Where(token => token != 0),
+                original.HasThis && ObjectTypes.Is(original.DeclaringType));
+            // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
+            slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
+                $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
+                $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
+                $"method{number}Tables = true := by decide +kernel";
+        }
         bodyBytes.TryAdd(definition, number);
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
-        return ($"def method{number}Bytes : List Nat := {data}",
+        return ($"def method{number}Bytes : List Nat := {data}", slices,
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
-            $"tokens := {{ operands := {table} }}, metadata := {rows}, tables := {Tables(rows)} }}");
+            $"tokens := {{ operands := {table} }}, metadata := method{owner}Metadata, tables := method{owner}Tables }}",
+            $"method{owner}_tables_valid");
     }
-
-    static string Tables(string metadata) => metadata[..^"Metadata".Length] + "Tables";
 
     static uint TokenOperand(MethodDefinition original, MethodBodyBytes.Body body, Instruction instruction)
     {
@@ -371,33 +383,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     /// <summary>
-    /// The rows and heap entries every method of a module reaches, emitted once per module so the
-    /// extraction's text and the checker's index grow with the rows reached, not with the methods.
+    /// The identity block of each pinned assembly: its table header and <c>Assembly</c> row, a function of the
+    /// assembly alone, so every extraction of it writes the same bytes.
     /// </summary>
-    internal void EmitModuleMetadata(StringBuilder lean, IEnumerable<MethodDefinition> methods)
-    {
-        var slices = metadata ?? throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
-        foreach (var method in methods)
-        {
-            var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
-            var body = Pinned.Body(original);
-            var tokens = original.Body.Instructions.Where(instruction => HasToken(instruction.OpCode))
-                .Select(instruction => TokenOperand(original, body, instruction))
-                .Append(original.Body.LocalVarToken.ToUInt32()).Where(token => token != 0);
-            slices.Add(original, tokens, original.HasThis && ObjectTypes.Is(original.DeclaringType));
-        }
-        foreach (var (name, rows, tables) in slices.Modules())
-        {
-            lean.AppendLine($"def {name} : Extraction.MethodMetadata := {rows}");
-            lean.AppendLine($"def {Tables(name)} : List Extraction.IndexTables := {tables}");
-            // The kernel decides once per module that the literal tables are the decoder's, so each method's
-            // check reads them by name instead of rebuilding them.
-            lean.AppendLine($"theorem {name[..^"Metadata".Length]}_tables_valid : " +
-                $"Extraction.tablesMatch {name} {Tables(name)} = true := by decide +kernel");
-        }
-    }
-
-    /// <summary>The identity block of each pinned assembly: its table header and <c>Assembly</c> row.</summary>
     internal void EmitAssemblyMetadata(StringBuilder lean)
     {
         var slices = metadata ?? throw new InvalidOperationException("Method evidence requires the pinned assemblies.");

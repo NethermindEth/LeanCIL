@@ -188,23 +188,23 @@ RejectBody(0, "altered-max-stack", bodyTheorem, "method0Original",
 // The module's lookup tables are decided once against its metadata; a changed row, heap entry or table is refuted there.
 void RejectTables(string name, string definition, Func<string, string> change)
 {
-    const string theorem = "module0_tables_valid";
+    const string theorem = "method0_tables_valid";
     Reject(0, name, source => ChangeDefinition(source, definition, change), theorem);
     var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, "0", "Extracted.lean")), definition, change);
-    var refuted = KernelRefutation(mutated, theorem, "module0_tables_refuted");
+    var refuted = KernelRefutation(mutated, theorem, "method0_tables_refuted");
     var path = Path.Combine(output, "RefutedTables-" + name + ".lean");
-    File.WriteAllText(path, NarrowEvidence(refuted, "module0_tables_refuted"));
-    evidence.Add(path, "PASS the kernel proves the mutated tables obligation false: " + name, "module0_tables_refuted");
+    File.WriteAllText(path, NarrowEvidence(refuted, "method0_tables_refuted"));
+    evidence.Add(path, "PASS the kernel proves the mutated tables obligation false: " + name, "method0_tables_refuted");
 }
-RejectTables("altered-metadata-row", "module0Metadata",
+RejectTables("altered-metadata-row", "method0Metadata",
     line => ChangeByte(line, @"(rows := \[\(\d+, \[)(\d+)(,)", 1));
-RejectTables("altered-metadata-string", "module0Metadata",
+RejectTables("altered-metadata-string", "method0Metadata",
     line => ChangeByte(line, @"(strings := \[\(0, \[0\]\), \(\d+, \[)(\d+)(,)", 1));
-RejectTables("altered-lookup-row", "module0Tables", line => ChangeByte(line, @"(rows := .*?\[)(\d+)(,)", 1));
+RejectTables("altered-lookup-row", "method0Tables", line => ChangeByte(line, @"(rows := .*?\[)(\d+)(,)", 1));
 // A leaf entry of the rows tree removed, and one added before another.
-RejectTables("missing-lookup-row", "module0Tables",
+RejectTables("missing-lookup-row", "method0Tables",
     line => new Regex(@"\(\.node \.leaf \d+ \[[^\]]*\] \.leaf\)").Replace(line, ".leaf", 1));
-RejectTables("extra-lookup-row", "module0Tables",
+RejectTables("extra-lookup-row", "method0Tables",
     line => new Regex(@"\(\.node \.leaf (\d+) (\[[^\]]*\]) \.leaf\)").Replace(line,
         "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
 RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",

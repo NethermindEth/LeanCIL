@@ -157,31 +157,21 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             $"strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])} }}";
     }
 
-    readonly Dictionary<ModuleDefinition, Collection> collections = [];
-
-    /// <summary>Add one method's definition and tokens to the slices of its module.</summary>
-    internal void Add(MethodDefinition original, IEnumerable<uint> tokens, bool classOwner)
+    /// <summary>
+    /// The slices of one method's body, as a Lean <c>MethodMetadata</c> value, and the lookup tables of those slices.
+    /// They hold what this method reaches and nothing else, with heap entries numbered by rank among the entries
+    /// carried, so the method's evidence is a function of the method and its assemblies alone.
+    /// </summary>
+    internal (string Metadata, string Tables) Method(MethodDefinition original, IEnumerable<uint> tokens,
+        bool classOwner)
     {
-        var module = pinned.Original(original.Module);
-        if (!collections.TryGetValue(module, out var collection)) collections[module] = collection = new Collection(pinned);
+        var collection = new Collection(pinned);
         var own = collection.SliceOf(original.Module);
         own.Method(original, classOwner);
         foreach (var token in tokens) own.Token(token);
+        var metadata = collection.Lean();
+        return (metadata, collection.Tables());
     }
-
-    /// <summary>The Lean name of the slices every method of a module shares.</summary>
-    internal string Name(ModuleDefinition module) =>
-        $"module{pinned.Index(pinned.Working(pinned.Original(module)))}Metadata";
-
-    /// <summary>
-    /// The slices of each module a method was added for, as Lean <c>MethodMetadata</c> values with their lookup tables.
-    /// </summary>
-    internal IEnumerable<(string Name, string Lean, string Tables)> Modules() =>
-        collections.OrderBy(entry => pinned.Index(pinned.Working(entry.Key))).Select(entry =>
-        {
-            var lean = entry.Value.Lean();
-            return (Name(entry.Key), lean, entry.Value.Tables());
-        });
 
     internal static string Bytes(IEnumerable<byte> bytes) =>
         "[" + string.Join(", ", bytes.Select(value => value.ToString(CultureInfo.InvariantCulture))) + "]";

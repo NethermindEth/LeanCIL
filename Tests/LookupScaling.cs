@@ -219,11 +219,13 @@ foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
             $"as {fewCount}; the limit is {AllowedGrowth}."));
 }
 
-// One method's body check reads its module's literal lookup tables by name, so its kernel cost is its own body and
-// tokens times a logarithm: independent of the number of methods in the extraction and of the rows its module carries.
+// One method's body check reads the literal lookup tables of its own metadata slice by name, so its kernel cost is its
+// own slice and tokens times a logarithm: independent of the number of methods in the extraction and of the rows
+// that other methods carry.
 const double AllowedBodyGrowth = 1.35;
 int[] chainLengths = [8, 32, 128];
 int[] bulkSizes = [125, 500];
+int[] fieldCounts = [10, 200];
 var bodySource = Path.Combine(directory, "BodyAssembly");
 Directory.CreateDirectory(bodySource);
 File.WriteAllText(Path.Combine(bodySource, "Bodies.csproj"), File.ReadAllText(Path.Combine(tokenSource, "Tokens.csproj")));
@@ -234,19 +236,30 @@ string Rows(int count) =>
     $"public static ulong Rows{count}(ulong x) {{ x = Small{count}(x); return Bulk{count}(x); }} " +
     $"static ulong Small{count}(ulong x) => x + 1UL; " +
     $"static ulong Bulk{count}(ulong x) {{ " + Join(count, index => $"Use(\"r{count}_{index}\"); ") + "return x; } ";
+// A method that reads one field of a class with `count` fields carries that class's field rows.
+string Fields(int count) =>
+    $"public sealed class Wide{count} {{ " + Join(count, index => $"public ulong F{index}; ") + "} " +
+    $"public static ulong Read{count}(Wide{count} w) => w.F{count / 2}; ";
 File.WriteAllText(Path.Combine(bodySource, "Bodies.cs"), "public static class Bodies { public static void Use(string text) { } " +
-    string.Concat(chainLengths.Select(Chain)) + string.Concat(bulkSizes.Select(Rows)) + "}");
+    string.Concat(chainLengths.Select(Chain)) + string.Concat(bulkSizes.Select(Rows)) +
+    string.Concat(fieldCounts.Select(Fields)) + "}");
 Run(["dotnet", "build", Path.Combine(bodySource, "Bodies.csproj"), "-c", "Release"]);
 var bodyAssembly = Path.Combine(bodySource, "bin/Bodies.dll");
+// The index of a method in an extraction, found by the name in its signature.
+string MethodNumber(string extracted, string method, string name)
+{
+    var number = Regex.Match(extracted, @"def method(\d+)Signature : String := ""[^""]*Bodies::" +
+        Regex.Escape(method) + @"\(").Groups[1].Value;
+    return number.Length == 0 ? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.")
+        : number;
+}
 // Heartbeats of the method's `method{n}_body_validated`, less the same file with its proof left open.
 long BodyCheck(string name, string entry, string method)
 {
     var output = Path.Combine(directory, "Body" + name);
-    Run(Extract("extract", bodyAssembly, "Bodies", $"Bodies::{entry}(ulong)", output));
+    Run(Extract("extract", bodyAssembly, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var number = Regex.Match(extracted, @"def method(\d+)Signature : String := ""[^""]*Bodies::" +
-        Regex.Escape(method) + @"\(").Groups[1].Value;
-    if (number.Length == 0) throw new InvalidOperationException($"Method {method} is not in the extraction {name}.");
+    var number = MethodNumber(extracted, method, name);
     var theorem = $"method{number}_body_validated";
     var narrowed = NarrowEvidence(extracted, theorem);
     var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := ⟨[^\r\n]*⟩\r?$").Value;
@@ -277,26 +290,46 @@ if (rowGrowth > AllowedBodyGrowth)
     throw new Exception(FormattableString.Invariant(
         $"One body check costs {rowGrowth:F2} times as much against {bulkSizes[1]} rows ") +
         FormattableString.Invariant($"as against {bulkSizes[0]}; the limit is {AllowedBodyGrowth}."));
-// The kernel's one decision per module that its literal tables are the decoder's costs the rows carried, times a
-// logarithm; it is paid once per extraction, not once per method.
-long TablesCheck(string name)
+// The kernel's decision that a method's literal tables are the decoder's costs the rows that method carries, times a
+// logarithm, and is made once per method.
+long TablesCheck(string name, string method)
 {
     var output = Path.Combine(directory, "Body" + name);
-    var narrowed = NarrowEvidence(File.ReadAllText(Path.Combine(output, "Extracted.lean")), "module0_tables_valid");
-    var proof = Regex.Match(narrowed, @"(?m)^theorem module0_tables_valid : [^\r\n]*? := by decide \+kernel\r?$").Value;
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var theorem = $"method{MethodNumber(extracted, method, name)}_tables_valid";
+    var narrowed = NarrowEvidence(extracted, theorem);
+    var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := by decide \+kernel\r?$").Value;
     if (proof.Length == 0) throw new InvalidOperationException("Missing tables obligation in " + name);
     var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := by", StringComparison.Ordinal)] + " := sorry");
     return Heartbeats(Path.Combine(output, "TablesChecked.lean"), narrowed, equations: false) -
         Heartbeats(Path.Combine(output, "TablesOpen.lean"), open, equations: false);
 }
-var tablesFew = TablesCheck("Rows" + bulkSizes[0]);
-var tablesMany = TablesCheck("Rows" + bulkSizes[1]);
+var tablesFew = TablesCheck("Rows" + bulkSizes[0], "Bulk" + bulkSizes[0]);
+var tablesMany = TablesCheck("Rows" + bulkSizes[1], "Bulk" + bulkSizes[1]);
 var tablesGrowth = tablesMany / (double)tablesFew;
 Console.WriteLine(FormattableString.Invariant(
-    $"PASS module tables check with {bulkSizes[0]} and {bulkSizes[1]} user string rows: ") +
+    $"PASS tables check of a method carrying {bulkSizes[0]} and {bulkSizes[1]} user string rows: ") +
     FormattableString.Invariant($"{tablesFew} and {tablesMany} heartbeats, ") +
     FormattableString.Invariant($"{tablesGrowth / (bulkSizes[1] / (double)bulkSizes[0]):F2} times the cost per row"));
 if (tablesGrowth > AllowedBodyGrowth * bulkSizes[1] / bulkSizes[0])
     throw new Exception(FormattableString.Invariant(
-        $"The module tables check costs {tablesGrowth:F2} times as much for {bulkSizes[1]} rows ") +
+        $"The tables check costs {tablesGrowth:F2} times as much for {bulkSizes[1]} rows ") +
         FormattableString.Invariant($"as for {bulkSizes[0]}."));
+
+// A method reading one field of a class with 10 and with 200 fields carries those field rows: its body check and its
+// tables check grow with the slice, not faster than the rows it carries.
+var fieldBody = fieldCounts.Select(count => (double)BodyCheck("Fields" + count,
+    $"Bodies::Read{count}(Bodies/Wide{count})", $"Read{count}")).ToArray();
+var fieldTables = fieldCounts.Select(count => (double)TablesCheck("Fields" + count, $"Read{count}")).ToArray();
+var fieldRatio = fieldCounts[1] / (double)fieldCounts[0];
+foreach (var (label, costs) in new[] { ("body", fieldBody), ("tables", fieldTables) })
+{
+    var growth = costs[1] / costs[0];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS {label} check of a method reading one of {fieldCounts[0]} and {fieldCounts[1]} fields: ") +
+        FormattableString.Invariant($"{costs[0]:F0} and {costs[1]:F0} heartbeats, {growth:F2} times"));
+    if (growth > AllowedBodyGrowth * fieldRatio)
+        throw new Exception(FormattableString.Invariant(
+            $"The {label} check costs {growth:F2} times as much with {fieldCounts[1]} fields ") +
+            FormattableString.Invariant($"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth * fieldRatio:F1}."));
+}

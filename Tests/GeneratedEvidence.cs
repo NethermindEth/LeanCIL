@@ -43,8 +43,8 @@ partial class Program
                     return match.Value;
                 // A body obligation reads its module's lookup tables through their equality with the metadata.
                 if (match.Groups[1].Value != theorem &&
-                    Regex.IsMatch(match.Groups[1].Value, @"\Amodule\d+_tables_valid\z") &&
-                    !theorem.StartsWith("module", StringComparison.Ordinal))
+                    Regex.IsMatch(match.Groups[1].Value, @"\Amethod\d+_tables_valid\z") &&
+                    !theorem.EndsWith("_tables_valid", StringComparison.Ordinal))
                     return match.Value;
                 if (match.Groups[1].Value != theorem) return "";
                 found++;

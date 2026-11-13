@@ -218,11 +218,43 @@ RejectedExtract("unpinned entry type argument", "no single pinned --reference as
 RejectedExtract("unpinned receiver interface", "Unpinned assembly reference: MultiFixture.Other",
     scaled, [.. Reference(lib), "--type-argument", "MultiFixture.Marked"]);
 
-// A pinned type its assembly does not define has no definition to link, unlike a custom modifier, which needs none.
+// A pinned type its assembly does not define is refused (by the class check, ahead of the metadata slice's own
+// "Unresolved pinned type" backstop), unlike a custom modifier, which needs no definition at all.
 string gone = fixture.Build("Gone", libName, libraryText.Replace("STEP", "3 + 1")
     .Replace("public sealed class Marker { }\n", ""));
-RejectedExtract("pinned type without definition", "Unresolved pinned type",
+RejectedExtract("pinned type without definition", "Unresolved class: MultiFixture.Marker",
     "MultiFixture.Application::Take(MultiFixture.Marker,ulong)", Reference(gone));
+// No extraction reaches the metadata slice's own refusal, since the aggregate and class checks run first, so the
+// collector is called directly on the method whose signature names the pinned type the library no longer defines.
+{
+    const System.Reflection.BindingFlags Internal = System.Reflection.BindingFlags.Instance |
+        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public;
+    var extractor = System.Reflection.Assembly.LoadFrom(ExtractorPath);
+    var pinnedType = extractor.GetType("Nethermind.LeanCIL.PinnedAssemblies", throwOnError: true)!;
+    var sourceType = pinnedType.GetNestedType("Source", System.Reflection.BindingFlags.NonPublic |
+        System.Reflection.BindingFlags.Public)!;
+    var sources = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(sourceType))!;
+    sources.Add(Activator.CreateInstance(sourceType, gone, null)!);
+    var pinned = Activator.CreateInstance(pinnedType, Internal, null,
+        [File.ReadAllBytes(app), Sha(app), sources], null)!;
+    var slices = Activator.CreateInstance(extractor.GetType("Nethermind.LeanCIL.MetadataSlices", throwOnError: true)!,
+        pinned)!;
+    var selected = (Mono.Cecil.ModuleDefinition)pinnedType.GetProperty("Selected", Internal)!.GetValue(pinned)!;
+    var original = (Mono.Cecil.ModuleDefinition)pinnedType.GetMethod("Original", Internal)!
+        .Invoke(pinned, [selected])!;
+    var take = original.GetType("MultiFixture.Application").Methods.Single(method => method.Name == "Take");
+    var add = slices.GetType().GetMethod("Add", Internal)!;
+    try
+    {
+        add.Invoke(slices, [take, Array.Empty<uint>(), false]);
+        throw new InvalidOperationException("The metadata slice accepted a pinned type with no definition.");
+    }
+    catch (System.Reflection.TargetInvocationException refusal) when (
+        refusal.InnerException is InvalidDataException { Message: "Unresolved pinned type: MultiFixture.Marker" })
+    {
+        Console.WriteLine("PASS the metadata slice refuses a pinned non-modifier type with no definition");
+    }
+}
 
 // Proofs bind bodies by unscoped signature, so a same-named type in two pinned assemblies is rejected.
 string aliasDirectory = fixture.Project("Alias", "MultiFixture.Alias", "",
