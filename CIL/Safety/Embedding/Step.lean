@@ -316,13 +316,19 @@ theorem step_relabel_faulting (op : Instruction)
 
 #print axioms step_relabel_faulting
 
+/-- A successful checked conversion of a signed operand is matched by the relabeled step. -/
 theorem step_relabel_conv_ovf (target : ConvTarget) : StepRelabel (.conv_ovf target) := by
   stack_cases =>
     first | fallback_vacuous | lockstep
 
+#print axioms step_relabel_conv_ovf
+
+/-- A successful checked conversion of an unsigned operand is matched by the relabeled step. -/
 theorem step_relabel_conv_ovf_un (target : ConvTarget) : StepRelabel (.conv_ovf_un target) := by
   stack_cases =>
     first | fallback_vacuous | lockstep
+
+#print axioms step_relabel_conv_ovf_un
 
 theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
     StepRelabel (.arg index narrow) := by
@@ -772,7 +778,9 @@ theorem step_relabel_conv_u1 : StepRelabel .conv_u1 := step_relabel _
 theorem step_relabel_conv_u4 : StepRelabel .conv_u4 := step_relabel _
 theorem step_relabel_conv_u8 : StepRelabel .conv_u8 := step_relabel _
 theorem step_relabel_conv_u : StepRelabel .conv_u := step_relabel _
+/-- A successful `conv_i` step is matched by the relabeled step at the renamed pc. -/
 theorem step_relabel_conv_i : StepRelabel .conv_i := step_relabel _
+#print axioms step_relabel_conv_i
 theorem step_relabel_not : StepRelabel .not := step_relabel _
 theorem step_relabel_add : StepRelabel .add := step_relabel _
 theorem step_relabel_mul : StepRelabel .mul := step_relabel _
@@ -950,13 +958,20 @@ theorem step_raise_faulting (op : Instruction)
 
 #print axioms step_raise_faulting
 
+/-- A throwing checked conversion of a signed operand throws the same from the relabeled step. -/
 theorem step_raise_conv_ovf (target : ConvTarget) : StepRaise (.conv_ovf target) := by
   stack_cases =>
     first | fallback_raise_vacuous | raise_lockstep
 
+#print axioms step_raise_conv_ovf
+
+/-- A throwing checked conversion of an unsigned operand throws the same from the relabeled
+    step. -/
 theorem step_raise_conv_ovf_un (target : ConvTarget) : StepRaise (.conv_ovf_un target) := by
   stack_cases =>
     first | fallback_raise_vacuous | raise_lockstep
+
+#print axioms step_raise_conv_ovf_un
 
 theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := by
   plain_cases

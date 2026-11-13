@@ -101,6 +101,15 @@ theorem checked_conversion_result (body : CIL.Method) (frame : Frame) (memory : 
   cil_checked_step [calculated]
 #print axioms checked_conversion_result
 
+/-- A fact about a 64-bit signed range drives the conversion to the native `int` target. -/
+theorem native_conversion_result (body : CIL.Method) (frame : Frame) (memory : Memory)
+    (input : CIL.W64)
+    (calculated : CIL.convertInteger 64 true true (.i64 input) = .ok (.i64 input)) :
+    step body (.conv_ovf_un .i) 0 [] frame [.scalar (.i64 input)] memory =
+      .ok (.next 1 [.scalar (.i64 input)] frame memory) := by
+  cil_checked_step [calculated]
+#print axioms native_conversion_result
+
 /-- A two-word aggregate argument is described independently of any callee body. -/
 def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 

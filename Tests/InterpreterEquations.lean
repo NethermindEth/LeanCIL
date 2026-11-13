@@ -124,21 +124,14 @@ example : unaryStep .conv_u (.i32 0xFFFFFFFF) = pushesValue (.i64 0xFFFFFFFF) :=
 
 end FaultingArithmetic
 
--- An unsigned same-width checked step keeps its helper folded, the form the checked bridge reads.
-/--
-info: CIL.Safety.step_add_ovf_un_i32_i32_eq (body✝ : CIL.Method) (pc✝ : Nat) (args✝ : List CIL.Safety.Value)
-  (frame✝ : CIL.Safety.Frame) (memory✝ : CIL.Safety.Memory) (rest : List CIL.Safety.Value) (b a : CIL.W32) :
-  CIL.Safety.step body✝ CIL.Instruction.add_ovf_un pc✝ args✝ frame✝
-      (CIL.Safety.Value.scalar (CIL.Value.i32 b) :: CIL.Safety.Value.scalar (CIL.Value.i32 a) :: rest) memory✝ =
-    match
-      Except.mapError CIL.Safety.ExecutionFault.arithmetic
-        (CIL.checkedValues CIL.CheckedBinaryKind.add false (CIL.Value.i32 a) (CIL.Value.i32 b)) with
-    | Except.error err => Except.error err
-    | Except.ok v =>
-      match CIL.Safety.checkedValue memory✝ (CIL.Safety.Value.scalar v) with
-      | Except.error err => Except.error err
-      | Except.ok v => Except.ok (CIL.Safety.FrameAction.next (pc✝ + 1) (v :: rest) frame✝ memory✝)
--/
-#guard_msgs in #check CIL.Safety.step_add_ovf_un_i32_i32_eq
+-- A faulting step equation keeps its helper folded, the form the checked bridge reads; an
+-- unfolded unsigned bound would expand `2 ^ width` instead.
+run_cmd do
+  for (equation, helper) in [
+      (``CIL.Safety.step_add_ovf_un_i32_i32_eq, ``CIL.checkedValues),
+      (``CIL.Safety.step_conv_ovf_un_i64_eq, ``CIL.convertInteger)] do
+    let type := (← getConstInfo equation).type
+    unless (type.find? (·.isAppOf helper)).isSome do
+      throwError "{equation} no longer applies {helper}"
 
 end Tests.InterpreterEquations

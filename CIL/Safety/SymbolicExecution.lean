@@ -1111,7 +1111,7 @@ elab_rules : tactic
         try
           let lemma := mkIdent bridge
           -- The goal fixes the constructor, so its flags are decided once `apply` unifies. A
-          -- conversion's fact is checked after `apply` fixes the target, so `target.width` reduces.
+          -- conversion's fact is checked once `apply` fixes the target, so its width reduces.
           let bridged ← if checkedArithmetic then
               `(tactic| (apply $lemma (calculated := $fact); case selected => rfl))
             else `(tactic| (apply $lemma; case calculated => exact $fact))
