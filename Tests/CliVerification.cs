@@ -4,7 +4,6 @@
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 
-using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -547,16 +546,36 @@ if (refusedOutline.Code == 0 || !refusedOutline.Output.Contains("Unapproved proo
     throw new InvalidOperationException("The unedited Add outline was not refused for its holes alone: " +
         refusedOutline.Output);
 // `--goals` prints the goal at each hole, once each in source order and without the proof's warnings, and
-// stops before replay and audit, so it answers sooner than the verification that refuses the file.
+// ends the run at the proof check: the kernel replay and audit that refuse the file never start.
 var holes = Regex.Matches(outlineText.ReplaceLineEndings("\n"), @"(?<=:= |=> |^\s+)sorry\b", RegexOptions.Multiline)
     .Select(hole => outlineText.ReplaceLineEndings("\n")[..hole.Index].Split('\n'))
     .Select(before => (Line: before.Length, Column: before[^1].Length)).ToArray();
-var refusal = Stopwatch.StartNew();
-Execute([.. cli, "verify", outlined, "--proof", addOutline]);
-refusal.Stop();
-var answer = Stopwatch.StartNew();
-var outlineGoals = Execute([.. cli, "verify", outlined, "--proof", addOutline, "--goals"]);
-answer.Stop();
+// A run's trace records each command it starts, so the stages after the proof check are the commands started
+// after the one that checks the proof.
+string[] StagesAfterProofCheck(string trace)
+{
+    var commands = Directory.EnumerateFiles(trace, "*.jsonl").SelectMany(File.ReadLines)
+        .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+        .Select(item => (Stage: item.GetProperty("stage").GetString()!,
+            Program: Path.GetFileNameWithoutExtension(item.GetProperty("command")[0].GetString()!),
+            Started: item.GetProperty("startedAtUtc").GetDateTimeOffset())).ToArray();
+    var proofCheck = commands.Where(command => command.Stage.StartsWith("Checking Proof: ", StringComparison.Ordinal))
+        .Select(command => command.Started).DefaultIfEmpty(DateTimeOffset.MaxValue).Min();
+    if (proofCheck == DateTimeOffset.MaxValue)
+        throw new InvalidOperationException("The trace of a verify run records no proof check: " + trace);
+    return commands.Where(command => command.Started > proofCheck).Select(command =>
+        command.Program == "leancil-audit" ? "theorem audit" : command.Stage).ToArray();
+}
+static bool ReplaysOrAudits(string stage) =>
+    stage == "theorem audit" || stage.Contains("kernel replay", StringComparison.OrdinalIgnoreCase);
+var refusalTrace = Path.Combine(outlines, "RefusalTrace");
+Execute([.. cli, "verify", outlined, "--proof", addOutline],
+    environment: new Dictionary<string, string> { ["LEANCIL_TRACE_DIRECTORY"] = refusalTrace });
+var goalsTrace = Path.Combine(outlines, "GoalsTrace");
+var outlineGoals = Execute([.. cli, "verify", outlined, "--proof", addOutline, "--goals"],
+    environment: new Dictionary<string, string> { ["LEANCIL_TRACE_DIRECTORY"] = goalsTrace });
+var refusalStages = StagesAfterProofCheck(refusalTrace);
+var goalsStages = StagesAfterProofCheck(goalsTrace);
 var outlineGoalsText = outlineGoals.Stderr.ReplaceLineEndings("\n");
 var reportedHoles = Regex.Matches(outlineGoalsText, @"^    \S*AddProof\.lean:(\d+):(\d+): sorry$",
         RegexOptions.Multiline)
@@ -569,9 +588,9 @@ if (outlineGoals.Code != 1 || outlineGoals.Stdout.Length != 0 || holes.Length !=
     outlineGoalsText.Contains("[LeanCIL goal") || File.Exists(Path.Combine(outlined, "verified.json")))
     throw new InvalidOperationException("verify --goals did not print one goal per hole in source order: " +
         outlineGoals.Output);
-if (answer.Elapsed >= refusal.Elapsed)
-    throw new InvalidOperationException($"verify --goals took {answer.Elapsed.TotalSeconds:F1}s, no less than " +
-        $"the {refusal.Elapsed.TotalSeconds:F1}s of the verification that refuses the outline.");
+if (!refusalStages.Any(ReplaysOrAudits) || goalsStages.Any(ReplaysOrAudits))
+    throw new InvalidOperationException("verify --goals did not end at the proof check. After it, verify --goals " +
+        $"ran [{string.Join("; ", goalsStages)}] and the refused verification ran [{string.Join("; ", refusalStages)}].");
 var outlineGoalsJson = JsonNode.Parse(Exited(Execute([.. cli, "verify", outlined, "--proof", addOutline, "--goals",
     "--format", "json"]), 1).Stdout) as JsonObject;
 var jsonGoals = outlineGoalsJson?["goals"]?.AsArray();
@@ -586,8 +605,8 @@ if (outlineGoalsJson?["result"]?.GetValue<string>() != "failed" ||
     !outlineGoalsJson["rerun"]!.AsArray().Any(argument => argument!.GetValue<string>() == "--goals"))
     throw new InvalidOperationException("verify --goals --format json did not report each hole's goal: " +
         outlineGoalsJson?.ToJsonString());
-Console.WriteLine($"PASS CLI --goals prints one goal per hole in source order in {answer.Elapsed.TotalSeconds:F1}s, " +
-    $"under the {refusal.Elapsed.TotalSeconds:F1}s of the refused verification, and the goal of a failing tactic");
+Console.WriteLine("PASS CLI --goals prints one goal per hole in source order, starts no kernel replay or audit " +
+    "after the proof check, and prints the goal of a failing tactic");
 var overwrite = Execute([.. cli, "new-proof", outlined, addOutline]);
 if (overwrite.Code == 0 || !overwrite.Stderr.Contains("already exists; new-proof never overwrites a proof") ||
     File.ReadAllText(addOutline) != outlineText)
