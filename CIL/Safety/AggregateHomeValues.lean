@@ -1,4 +1,6 @@
-import CIL.Safety.ArgumentHomeValues
+import CIL.Safety.HomeProgress
+import CIL.Safety.FrameMemoryBelow
+import CIL.Safety.WriteEffects
 import CIL.Safety.ByteRoundTrip
 
 /-!
@@ -70,7 +72,7 @@ theorem allocate_initialized_aggregate (memory : Memory) (activation : Nat)
     (allocateHome_fresh _ _ _ _ _ home).2.1⟩
 
 /-- By-value aggregate parameters get private initialized copies of their actual
-    bytes, using the emitted parameterHomes path rather than vector arguments. -/
+    bytes, through the parameterHomes path. -/
 theorem make_parameter_home_aggregate (memory : Memory) (activation index : Nat)
     (args : List Value) (size : Fin (2^64)) (bytes : List (BitVec 8))
     (length : bytes.length = size) (wellFormed : memory.WellFormed)

@@ -129,14 +129,9 @@ inductive Instruction where
   | setFieldAt (offset width : Nat)
   | aggregateFieldAt (offset size : Nat)
   | setAggregateFieldAt (offset size : Nat)
-  -- Arguments, locals and their vector homes.
+  -- Arguments and locals.
   | arg (index : Nat) (narrow : Option NarrowKind := none)
-  | vectorArg (index : Nat)
-  | vectorArgAddr (index : Nat)
   | local (index : Nat) (narrow : Option NarrowKind := none)
-  | vectorLocal (index : Nat)
-  | vectorLocalAddr (index : Nat)
-  | setVectorLocal (index : Nat)
   | localAddr (index : Nat)
   | setLocal (index : Nat) (narrow : Option NarrowKind := none)
   | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
@@ -144,10 +139,6 @@ inductive Instruction where
   | tailCall (callee argc : Nat)
   /-- Authenticated managed pointers, immutable tables and exact-signature indirect calls. -/
   | managed (operation : ManagedOp)
-  -- 64-bit lanes of a 256-bit vector.
-  | lane (index : Fin 4)
-  | laneAddress (index : Fin 4)
-  | setLane (index : Fin 4)
   -- Constants, conversions, arithmetic, 64-bit memory access and stack shuffling.
   | const32 (word : W32)
   | const64 (word : W64)
@@ -175,7 +166,6 @@ inductive Instruction where
       enters the body `targets` lists for its exact runtime class. A null receiver throws
       `System.NullReferenceException`; a class `targets` omits is a model fault, not a call. -/
   | callVirtual (targets : List (Extraction.TypeExpr × Nat)) (argc : Nat)
-  | newVector256 (constructor : Nat) (argc : Nat)
   | newAggregate (constructor : Nat) (argc : Nat) (size : Fin (2^64))
   /-- A fresh zeroed instance of class `owner` with `size` bytes of fields, passed to
       `constructor` as its receiver ahead of `argc` arguments and pushed once it returns. -/
@@ -185,7 +175,7 @@ inductive Instruction where
       of its bases is `type` stays on the stack, as does null; any other object becomes null,
       or throws `System.InvalidCastException` for `castclass`. -/
   | objectTest (type : Extraction.TypeExpr) (throwing : Bool)
-  | skipInit | asRef
+  | skipInit
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)
   | intrinsic (operation : Intrinsic) (argc : Nat)
@@ -236,11 +226,7 @@ structure Method where
   locals : List Value
   localKinds : List LocalKind := []
   staticSites : List (Nat × StaticDescriptor) := []
-  /-- Locals kept in 256-bit vector homes rather than scalar slots. -/
-  vectorLocals : List Nat := []
   opaqueVectorLocals : List Nat := []
-  /-- Arguments kept in 256-bit vector homes rather than scalar slots. -/
-  vectorArgs : List Nat := []
   parameterHomes : List (Nat × LocalKind) := []
   returnsValue : Bool
   deriving Repr

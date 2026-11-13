@@ -128,8 +128,7 @@ internal static class LeanEmitter
             if (!operation.StartsWith(".call ", StringComparison.Ordinal) &&
                 !operation.StartsWith(".callInstance ", StringComparison.Ordinal) &&
                 !operation.StartsWith(".newAggregate ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".newObject ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".newVector256 ", StringComparison.Ordinal)) continue;
+                !operation.StartsWith(".newObject ", StringComparison.Ordinal)) continue;
             hasCall = true;
             var fields = operation.Split(' ', 3);
             if (fields.Length >= 2 && int.TryParse(fields[1], out var target) &&
@@ -286,8 +285,8 @@ internal static class LeanEmitter
             lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : method{n}.parameterHomes = [{parameters}] := rfl");
             // The command states `method{n}_instruction{pc}` for each pc and proves it in time linear in the body.
             lean.AppendLine($"cil_instruction_equations method{n}");
-            foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites", "vectorLocals", "vectorArgs" })
-                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (ReturnsValue(m) ? "true" : "false") : field == "staticSites" ? $"[{sites}]" : "[]")}) := rfl");
+            foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites" })
+                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (ReturnsValue(m) ? "true" : "false") : $"[{sites}]")}) := rfl");
         }
         // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
         PinnedAssemblies.Pin[] pins = pinned.Pins.ToArray();

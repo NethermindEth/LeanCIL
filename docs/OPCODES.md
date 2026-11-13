@@ -625,7 +625,7 @@ its translation to `skipInit`.
 storage types. `NullRef` pushes the model's null managed reference, which a
 byref local or argument can hold like any other reference. `IsNullRef` returns
 1 for it and 0 for every other reference, live or not, without accessing memory.
-Every load, store, copy, initialization, field or lane access of one or more
+Every load, store, copy, initialization or field access of one or more
 bytes through null faults with `nullDereference`, the model's
 `NullReferenceException`, and no address is formed from it; zero-length block
 operations access nothing. Extraction evidence binds each call to its operation in both
@@ -697,12 +697,7 @@ A validated byref-like aggregate without reference or byref fields is admitted; 
 spans, byref/pointer arguments and unsupported storage are rejected. What the query does and
 does not establish is in [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).
 
-## Lean-only operations and implementation sources
-
-The Lean `CIL.Instruction` type and memory/SIMD modules contain operations that the extractor
-does not emit, including vector argument homes, fixed vector-lane helpers, `newVector256` and
-additional memory helpers. Their existence is not evidence that the corresponding arbitrary CIL or .NET API
-is extractable. The checked memory interpreter implements generic aggregate operations.
+## Implementation sources
 
 The implementation this inventory describes is:
 

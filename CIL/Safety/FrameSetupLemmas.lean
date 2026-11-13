@@ -11,7 +11,7 @@ import CIL.Safety.ObjectsKept
 What `enterFrame` (in `CIL/Safety/Frames.lean`) does to memory, collected in one
 `FrameSetup` record: the frame owns only fresh allocations of its own activation, caller
 memory below the entry watermark is untouched, the static registry is unchanged, and every
-slot refers to live storage. Each builder (`makeLocal`, `makeArgumentHomes`, ...) proves a
+slot refers to live storage. Each builder (`makeLocal`, `makeParameterHomes`, ...) proves a
 `FrameSetup`, and `FrameSetup.append` composes them; the other `Frame*` files project it.
 -/
 
@@ -732,41 +732,6 @@ theorem makeSelectedLocals_setup (m result : Memory) (activation : Nat) (indices
   · exact makeLocals_setup _ _ _ _ _ _ _ h
   · exact makeSelectedLocalsFrom_setup _ _ _ _ _ _ _ _ _ h
 
-theorem makeArgumentHomes_setup (m result : Memory) (activation : Nat) (indices : List Nat)
-    (args : List Value) (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
-    (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
-    FrameSetup activation m result (homes.map Prod.snd) owned := by
-  induction indices generalizing m homes owned result with
-  | nil => cases h; exact .empty _ _
-  | cons index indices ih =>
-    simp only [makeArgumentHomes] at h
-    have known : (args[index]?.map Value.hasUnspecified).getD false = false := by
-      cases hu : (args[index]?.map Value.hasUnspecified).getD false with
-      | false => rfl
-      | true => simp only [hu, ite_true] at h; cases h
-    simp only [known, Bool.false_eq_true, ite_false] at h
-    split at h
-    · rename_i bits hv
-      cases ha : allocateHome m activation (localWidth .vector256) <;>
-        simp only [ha, Bind.bind, Except.bind] at h
-      · cases h
-      · rename_i home
-        obtain ⟨reference, memory⟩ := home
-        cases hs : storeLocal memory (.bytes .vector256 reference) (.scalar (.v256 bits)) <;>
-          simp only [hs] at h
-        · cases h
-        · rename_i stored
-          obtain ⟨slot, memory'⟩ := stored
-          have first := (allocateHome_setup _ _ _ _ _ .vector256 ha).store hs
-          cases hr : makeArgumentHomes activation indices args memory' <;>
-            simp only [hr, Pure.pure, Except.pure] at h
-          · cases h
-          · rename_i rest
-            obtain ⟨rest, other, final⟩ := rest
-            cases h
-            exact first.append (ih memory' final rest other hr)
-    · cases h
-
 theorem makeParameterHomes_setup (m result : Memory) (activation : Nat)
     (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
     (homes : List (Nat × LocalSlot)) (owned : List AllocationId)
@@ -798,20 +763,10 @@ theorem makeParameterHomes_setup (m result : Memory) (activation : Nat)
             exact first.append (ih memory' final rest other hr)
     · cases h
 
-theorem FrameSetup.select {activation : Nat} {before after : Memory}
-    {slots selected : List LocalSlot} {owned : List AllocationId}
-    (setup : FrameSetup activation before after slots owned)
-    (subset : ∀ slot ∈ selected, slot ∈ slots) :
-    FrameSetup activation before after selected owned :=
-  { setup with
-    references := fun hm slot member => setup.references hm slot (subset slot member)
-    above := fun slot member => setup.above slot (subset slot member) }
-
 /-- Everything `enterFrame` guarantees about the memory it returns and the frame's slots. -/
 theorem enterFrame_setup (body : CIL.Method) (args : List Value) (m result : Memory)
     (frame : Frame) (h : enterFrame body args m = .ok (frame, result)) :
-    FrameSetup frame.activation m result (frame.locals ++ frame.arguments.map Prod.snd)
-      frame.owned := by
+    FrameSetup frame.activation m result frame.locals frame.owned := by
   simp only [enterFrame] at h
   cases hl : makeSelectedLocals m.nextIdentity body.opaqueVectorLocals body.localKinds
       body.locals m <;>
@@ -819,26 +774,14 @@ theorem enterFrame_setup (body : CIL.Method) (args : List Value) (m result : Mem
   · cases h
   · rename_i locals
     obtain ⟨slots, owned, memory⟩ := locals
-    cases ha : makeArgumentHomes m.nextIdentity body.vectorArgs args memory <;>
-      simp only [ha, Pure.pure, Except.pure] at h
+    cases hp : makeParameterHomes m.nextIdentity body.parameterHomes args memory <;>
+      simp only [hp, Pure.pure, Except.pure] at h
     · cases h
-    · rename_i homes
-      obtain ⟨arguments, other, final⟩ := homes
-      cases hp : makeParameterHomes m.nextIdentity body.parameterHomes args final <;>
-        simp only [hp] at h
-      · cases h
-      · rename_i parameters
-        obtain ⟨parameters, ids, final'⟩ := parameters
-        cases h
-        apply ((makeSelectedLocals_setup _ _ _ _ _ _ _ _ hl).append
-          (makeArgumentHomes_setup _ _ _ _ _ _ _ ha) |>.append
-          (makeParameterHomes_setup _ _ _ _ _ _ _ hp)).select
-        intro slot member
-        simp only [List.mem_append] at member ⊢
-        rcases member with (left | right) | middle
-        · exact Or.inl (Or.inl left)
-        · exact Or.inr right
-        · exact Or.inl (Or.inr middle)
+    · rename_i parameters
+      obtain ⟨parameters, ids, final⟩ := parameters
+      cases h
+      exact (makeSelectedLocals_setup _ _ _ _ _ _ _ _ hl).append
+        (makeParameterHomes_setup _ _ _ _ _ _ _ hp)
 
 /-- Entering a frame charges nothing to the object heap budget, so a caller's grant reaches the
     callee's first `newobj` whole. -/
@@ -856,7 +799,6 @@ theorem enterFrame_objectsKept {body : CIL.Method} {args : List Value} {m result
 #print axioms enterFrame_objectsKept
 #print axioms makeLocal_setup
 #print axioms makeLocals_setup
-#print axioms makeArgumentHomes_setup
 #print axioms makeParameterHomes_setup
 #print axioms enterFrame_setup
 
@@ -876,13 +818,6 @@ theorem makeLocals_preserves_wellFormed (m result : Memory) (activation : Nat)
 #print axioms makeLocal_preserves_wellFormed
 #print axioms makeLocals_preserves_wellFormed
 
-theorem makeArgumentHomes_preserves_wellFormed (m result : Memory) (activation : Nat)
-    (indices : List Nat) (args : List Value) (homes : List (Nat × LocalSlot))
-    (owned : List AllocationId) (hm : m.WellFormed)
-    (h : makeArgumentHomes activation indices args m = .ok (homes, owned, result)) :
-    result.WellFormed := by
-  exact (makeArgumentHomes_setup _ _ _ _ _ _ _ h).wellFormed hm
-
 theorem makeParameterHomes_preserves_wellFormed (m result : Memory) (activation : Nat)
     (parameters : List (Nat × CIL.LocalKind)) (args : List Value)
     (homes : List (Nat × LocalSlot)) (owned : List AllocationId) (hm : m.WellFormed)
@@ -895,7 +830,6 @@ theorem enterFrame_preserves_wellFormed (body : CIL.Method) (args : List Value)
     (h : enterFrame body args m = .ok (frame, result)) : result.WellFormed := by
   exact (enterFrame_setup _ _ _ _ _ h).wellFormed hm
 
-#print axioms makeArgumentHomes_preserves_wellFormed
 #print axioms enterFrame_preserves_wellFormed
 
 end CIL.Safety

@@ -191,9 +191,7 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
-  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.vectorArg,
-    ``CIL.Instruction.vectorArgAddr, ``CIL.Instruction.local, ``CIL.Instruction.vectorLocal,
-    ``CIL.Instruction.vectorLocalAddr, ``CIL.Instruction.setVectorLocal,
+  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.local,
     ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.const32,
     ``CIL.Instruction.const64, ``CIL.Instruction.branch, ``CIL.Instruction.skipInit,
     ``CIL.Instruction.initAggregate, ``CIL.Instruction.fieldAddress]
@@ -239,7 +237,7 @@ def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
     let frame ← whnfR frame
-    let some #[_, locals, _, _, _] := argumentsOf? frame ``Frame.mk 5 | return true
+    let some #[_, locals, _, _] := argumentsOf? frame ``Frame.mk 4 | return true
     let some (_, slot) := (← listEntries locals).find? (·.1 == index) | return true
     let slot ← whnfR slot
     let some #[kind, _] := argumentsOf? slot ``LocalSlot.bytes 2 | return true
@@ -261,7 +259,7 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) : MetaM Bool
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
     let frame ← whnfR frame
-    let some #[_, locals, _, _, _] := argumentsOf? frame ``Frame.mk 5 | return true
+    let some #[_, locals, _, _] := argumentsOf? frame ``Frame.mk 4 | return true
     let some (_, slot) := (← listEntries locals).find? (·.1 == index) | return true
     unless (← whnfR slot).isAppOf ``LocalSlot.bytes do return true
   else unless
@@ -282,8 +280,7 @@ def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
     Array (Array Lean.Syntax.Term) :=
   if op == ``CIL.Instruction.ret then
     #[facts.addresses, facts.fields, facts.cases, facts.references] else
-  #[if op == ``CIL.Instruction.localAddr || op == ``CIL.Instruction.vectorLocalAddr then
-      facts.addresses else #[],
+  #[if op == ``CIL.Instruction.localAddr then facts.addresses else #[],
     if op == ``CIL.Instruction.fieldAt then facts.fields else #[],
     if loopMovesOnly.contains op then #[] else facts.cases,
     if references then facts.references else #[]]
@@ -326,10 +323,12 @@ def loopStuck (tactic : String) (facts prepared : Array Term)
     | some goals => MessageData.joinSep (goals.toList.map (m!"{loopLiteralSums ·}")) "\n"
     | none => m!"no step equation or fact rewrites it"
   let hint ← loopMissingHint (residual.getD #[obligation])
-  throwError "{tactic}: cannot step pc {position} ({op}) at memory{indentExpr memory}\n\
-    The step is{indentExpr obligation}\n\
-    With the step equations and facts it reduces to{indentD shown}\n\
-    Supply {hint}."
+  -- Unassigned parts print as `?_`, so the text does not depend on metavariable numbering.
+  withOptions (pp.mvars.set · false) do
+    throwError "{tactic}: cannot step pc {position} ({op}) at memory{indentExpr memory}\n\
+      The step is{indentExpr obligation}\n\
+      With the step equations and facts it reduces to{indentD shown}\n\
+      Supply {hint}."
 
 open Lean Elab Tactic Meta in
 /-- Fail, as `tactic`, for a `LoopReaches` goal that has stepped back to its target's pc in

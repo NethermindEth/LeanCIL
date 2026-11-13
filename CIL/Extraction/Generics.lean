@@ -520,7 +520,7 @@ private def managedCallTarget (opcode : Nat) : Instruction → Option (Nat × Na
   | .call target count | .tailCall target count =>
     if opcode = 40 then some (target, count) else none
   | .callInstance target count => if opcode = 111 then some (target, count) else none
-  | .newAggregate target count _ | .newVector256 target count | .newObject target count .. =>
+  | .newAggregate target count _ | .newObject target count .. =>
     if opcode = 115 then some (target, count) else none
   | _ => none
 
@@ -678,13 +678,12 @@ def validateManagedCallWith (methodCount : Nat)
     | .external identity => match emitted with
       | .call target count =>
         validateImportCallWith methodCount imports raw.opcode site identity target count
-      | .callInstance .. | .tailCall .. | .newAggregate .. | .newVector256 .. | .newObject .. =>
+      | .callInstance .. | .tailCall .. | .newAggregate .. | .newObject .. =>
         false
       | _ => true
   | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newVector256 ..
-    | .newObject .. => false
+    | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newObject .. => false
     | _ => true
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/

@@ -41,14 +41,15 @@ example {r : Reference} (h : step body (.call 2 1) pc args frame stack m = .ok (
   obtain ⟨_, _, _, contradiction⟩ := step_call_action h
   cases contradiction
 
-example {argc} (h : step body (.newVector256 2 argc) pc args frame stack m = .ok (.call 2 args stack m')) :
+example {argc size}
+    (h : step body (.newAggregate 2 argc size) pc args frame stack m =
+      .ok (.call 2 args stack m')) :
     False := by
-  obtain ⟨_, _, _, _, _, _, contradiction⟩ := step_newVector256_action h
+  obtain ⟨_, _, _, _, _, _, contradiction⟩ := step_newAggregate_action h
   cases contradiction
 
 #print axioms step_next_target
 #print axioms step_call_action
-#print axioms step_newVector256_action
 #print axioms step_newAggregate_action
 #print axioms step_callee
 

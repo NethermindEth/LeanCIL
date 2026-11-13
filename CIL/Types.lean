@@ -26,7 +26,7 @@ def SnapshotShape.width : SnapshotShape → Nat
   | .vector256 => 32
   | .vector512 => 64
 
-/-- A memory location. The four kinds are disjoint address spaces. -/
+/-- A memory location. The three kinds are disjoint address spaces. -/
 inductive Address where
   /-- A byte of caller-provided storage; aggregate references may overlap. -/
   | byte (address : Nat)
@@ -34,9 +34,6 @@ inductive Address where
   | local (frame index : Nat)
   /-- Byte `offset` of read-only data extracted from the assembly. -/
   | static (bytes : List (BitVec 8)) (offset : Nat)
-  /-- Byte `offset` of a private 32-byte vector home; `kind` is 0 for locals, 1 for
-      arguments and 2 for construction temporaries. -/
-  | home (frame kind index offset : Nat)
   deriving DecidableEq, Repr
 
 /-- An evaluation-stack or memory value. -/

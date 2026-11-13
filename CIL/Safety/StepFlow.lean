@@ -14,8 +14,8 @@ namespace CIL
 def Instruction.callees : Instruction → List Nat
   | .managed (.call _ catalog _) => catalog.map ManagedTarget.method
   | .callVirtual targets _ => targets.map Prod.snd
-  | .call method _ | .callInstance method _ | .tailCall method _ | .newVector256 method _
-  | .newAggregate method _ _ | .newObject method .. => [method]
+  | .call method _ | .callInstance method _ | .tailCall method _ | .newAggregate method _ _
+  | .newObject method .. => [method]
   | _ => []
 
 end CIL
@@ -150,18 +150,8 @@ theorem step_tailCall_action {body : CIL.Method} {callee argc pc : Nat} {args : 
   all_goals (cases h; exact ⟨_, _, rfl⟩)
 #print axioms step_tailCall_action
 
-/-- Vector and aggregate construction enter the constructor they name with a temporary, never
-    as a plain call. -/
-theorem step_newVector256_action {body : CIL.Method} {callee argc pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.newVector256 callee argc) pc args frame stack m = .ok action) :
-    ∃ arguments rest frame' temporary kind m',
-      action = .construct callee arguments rest frame' temporary kind m' := by
-  unfold step at h
-  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  repeat' (first | contradiction | split at h)
-  all_goals (cases h; exact ⟨_, _, _, _, _, _, rfl⟩)
-
+/-- Aggregate construction enters the constructor it names with a temporary, never as a plain
+    call. -/
 theorem step_newAggregate_action {body : CIL.Method} {callee argc pc : Nat} {size}
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.newAggregate callee argc size) pc args frame stack m = .ok action) :

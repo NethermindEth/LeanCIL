@@ -54,8 +54,6 @@ def methodDifferences (left right : Method) : List String :=
     listField "locals" left.locals right.locals,
     listField "localKinds" left.localKinds right.localKinds,
     listField "staticSites" left.staticSites right.staticSites,
-    listField "vectorLocals" left.vectorLocals right.vectorLocals,
-    listField "vectorArgs" left.vectorArgs right.vectorArgs,
     listField "parameterHomes" left.parameterHomes right.parameterHomes,
     valueField "returnsValue" left.returnsValue right.returnsValue ].filterMap id
 
