@@ -374,8 +374,12 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             if (!scope.IsNil && scope.Kind != HandleKind.ModuleDefinition) Token(TokenOf(scope));
             var typeReference = (TypeReference)module.LookupToken(new MetadataToken(token));
             if (!IsPinned(typeReference)) return;
-            var definition = typeReference.Resolve() ??
-                throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
+            var definition = typeReference.Resolve();
+            // A modifier type is read by name and scope alone, so a polyfill that does not resolve needs no link.
+            if (definition is null && typeReference.FullName is
+                    "System.Runtime.CompilerServices.IsExternalInit" or "System.Runtime.InteropServices.InAttribute")
+                return;
+            definition ??= throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
             if (typeReference.Scope is AssemblyNameReference named && named.FullName != definition.Module.Assembly.Name.FullName)
                 throw new InvalidDataException("Unsupported forwarded type: " + typeReference.FullName +
                     " is defined in " + definition.Module.Assembly.Name.FullName + ", not in the assembly that names it.");
