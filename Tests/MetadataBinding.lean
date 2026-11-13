@@ -376,6 +376,19 @@ theorem ignores_the_body_address :
       | .error _ => false) = true := by decide +kernel
 #print axioms ignores_the_body_address
 
+/-- A method's own full name spells a function pointer as Cecil does, so a method that takes a
+    table of them can be selected by its signature; an external call identity still spells none,
+    since the spelling leaves out the calling convention. -/
+theorem spells_a_function_pointer_in_the_own_signature_only :
+    instanceSignature (bytesOf "Examples.Kinds") (bytesOf "Indirect") false 0 [] (.primitive 9)
+        [.szarray (.functionPointer 0 (.primitive 9) (.cons (.primitive 9) .nil)), .primitive 8,
+          .primitive 9] =
+      some (bytesOf ("System.UInt32 Examples.Kinds::Indirect(method System.UInt32 " ++
+        "*(System.UInt32)[],System.Int32,System.UInt32)")) ∧
+    cecilName false resolveFuel (.functionPointer 0 (.primitive 9) .nil) = none := by
+  decide +kernel
+#print axioms spells_a_function_pointer_in_the_own_signature_only
+
 /-- `Main`'s row and the method with the flags and implementation flags changed together. -/
 private def withFlags (flags implementation : Nat) : MetadataSlice × RawMethod :=
   (mutateRow own.1 tokens.main fun bytes =>

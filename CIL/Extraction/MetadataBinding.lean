@@ -334,9 +334,9 @@ def methodFullName (result owner name : List Nat) (parameters : List (List Nat))
     name of the method. -/
 def MethodSite.externalName (site : MethodSite) : Option (List Nat) := do
   let head ← site.owner.head
-  let result ← cecilName resolveFuel site.result
-  let owner ← cecilName resolveFuel site.owner
-  let parameters ← site.parameters.mapM (cecilName resolveFuel)
+  let result ← cecilName false resolveFuel site.result
+  let owner ← cecilName false resolveFuel site.owner
+  let parameters ← site.parameters.mapM (cecilName false resolveFuel)
   some (head.scope ++ [58, 58] ++ methodFullName result owner site.name parameters)
 
 /-- Whether an external identity is exactly the one the member spells. -/
@@ -558,13 +558,13 @@ def instanceSignature (owner name : List Nat) (constructor : Bool) (arity : Nat)
   let methodArguments := instantiation.take arity
   let ownerArguments := instantiation.drop arity
   let spell (type : ResolvedType) : Option (List Nat) :=
-    instanceType methodArguments ownerArguments type >>= cecilName resolveFuel
+    instanceType methodArguments ownerArguments type >>= cecilName true resolveFuel
   let result ← spell returned
   let spelledParameters ← parameters.mapM spell
   let named ←
     if instantiation.isEmpty || constructor then pure name
     else (fun spelled => name ++ [60] ++ spelled ++ [62]) <$>
-      cecilNames resolveFuel (ResolvedList.ofList instantiation)
+      cecilNames true resolveFuel (ResolvedList.ofList instantiation)
   pure (methodFullName result owner named spelledParameters)
 
 /-- Check the method definition against its `MethodDef` row: flags, name, signature, generic
@@ -605,8 +605,9 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
       !(parameters.zip method.parameters).all
         (fun (type, claimed) => frame.admits (declaredParameter type) claimed) then
     throw (.methodMismatch method.token)
-  if instantiation.length != arguments.length || (!instantiation.isEmpty &&
-        instantiation.length != methodParameters.length + ownerParameters.length) ||
+  -- A row with generic parameters is extracted only as an instance naming an argument for each.
+  if instantiation.length != arguments.length ||
+      instantiation.length != methodParameters.length + ownerParameters.length ||
       !(instantiation.zip arguments).all (fun (type, claimed) => frame.admits type claimed) then
     throw (.genericMismatch method.token)
   let name ← index.string row.name

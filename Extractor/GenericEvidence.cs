@@ -179,7 +179,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 // A field signature's `!n` is the declaring type's parameter: the declaring instance's argument.
                 var fieldType = field.FieldType.ContainsGenericParameter &&
                     field.DeclaringType is GenericInstanceType instance
-                    ? GenericStructs.Substitute(field.Resolve().FieldType, instance) : field.FieldType;
+                    ? GenericStructs.Substitute((field.Resolve() ?? throw new InvalidDataException(
+                        "Unresolved generic field: " + field.FullName)).FieldType, instance) : field.FieldType;
                 if (field.DeclaringType.Scope is ModuleDefinition ||
                     PinnedAssemblies.Active?.ModuleOf(field.DeclaringType) is not null)
                 {
