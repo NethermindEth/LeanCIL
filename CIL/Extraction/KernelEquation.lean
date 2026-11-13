@@ -147,7 +147,8 @@ private theorem utf8Character_encode {first : Nat} {rest tail : List Nat} {chara
         obtain ⟨sameCharacter, sameTail⟩ := step
         subst sameTail sameCharacter
         have bounds := value_of_scalar found
-        rw [encoded_scalar found, ite_eq_right (by omega), ite_eq_right (by omega), ite_eq_left (by omega)]
+        rw [encoded_scalar found, ite_eq_right (by omega), ite_eq_right (by omega),
+          ite_eq_left (by omega)]
         simp only [List.cons_append, List.nil_append, List.cons.injEq]
         exact ⟨by omega, by omega, by omega, trivial⟩
       · cases decoded
@@ -165,7 +166,8 @@ private theorem utf8Character_encode {first : Nat} {rest tail : List Nat} {chara
         obtain ⟨sameCharacter, sameTail⟩ := step
         subst sameTail sameCharacter
         have bounds := value_of_scalar found
-        rw [encoded_scalar found, ite_eq_right (by omega), ite_eq_right (by omega), ite_eq_right (by omega)]
+        rw [encoded_scalar found, ite_eq_right (by omega), ite_eq_right (by omega),
+          ite_eq_right (by omega)]
         simp only [List.cons_append, List.nil_append, List.cons.injEq]
         exact ⟨by omega, by omega, by omega, by omega, trivial⟩
       · cases decoded
