@@ -858,7 +858,7 @@ theorem fixtures_carry_their_bodies :
       localEvidence, argumentEvidence, faultLocalEvidence, nativeHomeEvidence,
       nativeReturnEvidence, holeEvidence 88 holeStates, holeEvidence 149 holeStates] ++
       (arithmeticFlagCases ++ arithmeticFlagMutations).map fun entry =>
-        binaryEvidence entry.1).all (fun item => bodyMatches item.assembly item.body item.original) = true := by
+        binaryEvidence entry.1).all (fun item => bodyMatches item.body item.original) = true := by
   decide +kernel
 #print axioms fixtures_carry_their_bodies
 

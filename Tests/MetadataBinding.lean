@@ -241,51 +241,51 @@ private def mainMethod : RawMethod :=
     genericParameters := [], code := [] }
 
 /-- Whether the method definition is accepted, or refused with this error. -/
-private def identity (slice : MetadataSlice) (pin : String) (method : RawMethod) :
-    Except MetadataError Unit := do
+private def identity (slice : MetadataSlice) (method : RawMethod) :
+    Except MetadataError MethodNames := do
   let env : MetadataEnv := { slices := [← slice.index, ← lib.index] }
-  methodIdentityValid env { identity := pin } method
+  methodIdentityValid env method
 
-private def identityFails (slice : MetadataSlice) (pin : String) (method : RawMethod)
-    (error : MetadataError) : Bool :=
-  match identity slice pin method with
+private def identityFails (slice : MetadataSlice) (method : RawMethod) (error : MetadataError) :
+    Bool :=
+  match identity slice method with
   | .error found => found == error
   | .ok _ => false
 
 theorem accepts_the_method_definition_its_row_gives :
-    (match identity own.1 ownIdentity mainMethod with
+    (match identity own.1 mainMethod with
       | .ok _ => true
       | .error _ => false) = true := by decide +kernel
 #print axioms accepts_the_method_definition_its_row_gives
 
 theorem rejects_a_method_definition_that_differs_from_its_row :
-    identityFails own.1 ownIdentity { mainMethod with attributes := 0x97 }
+    identityFails own.1 { mainMethod with attributes := 0x97 }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with implementation := 1 }
+    identityFails own.1 { mainMethod with implementation := 1 }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with hasThis := true }
+    identityFails own.1 { mainMethod with hasThis := true }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with returnType := int32 }
+    identityFails own.1 { mainMethod with returnType := int32 }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with parameters := [int32] }
+    identityFails own.1 { mainMethod with parameters := [int32] }
       (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity { mainMethod with owner := libScope ++ "::Program" }
-      (.methodMismatch tokens.main) = true ∧
-    identityFails own.1 ownIdentity
-      { mainMethod with genericParameters := [{ flags := 0, types := [] }] }
+    identityFails own.1 { mainMethod with genericParameters := [{ flags := 0, types := [] }] }
       (.methodMismatch tokens.main) = true := by decide +kernel
 #print axioms rejects_a_method_definition_that_differs_from_its_row
 
-theorem rejects_a_pin_of_another_version :
-    identityFails own.1 "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" mainMethod
-      .identityMismatch = true := by decide +kernel
-#print axioms rejects_a_pin_of_another_version
+/-- The names the row gives spell the owner the method states, and not another owner. -/
+theorem names_spell_the_owner_the_method_states :
+    (match identity own.1 mainMethod with
+      | .ok names => decide (names.Spell mainMethod) &&
+          !decide (names.Spell { mainMethod with owner := libScope ++ "::Program" })
+      | .error _ => false) = true := by decide +kernel
+#print axioms names_spell_the_owner_the_method_states
 
 /-- A method row whose address differs from the one the body was read at is accepted: where a body
     sits in the image is not part of the default check. -/
 theorem ignores_the_body_address :
     (match identity { own.1 with rows := own.1.rows.map fun (token, bytes) =>
-        (token, if token == tokens.main then 7 :: bytes.drop 1 else bytes) } ownIdentity mainMethod with
+        (token, if token == tokens.main then 7 :: bytes.drop 1 else bytes) } mainMethod with
       | .ok _ => true
       | .error _ => false) = true := by decide +kernel
 #print axioms ignores_the_body_address

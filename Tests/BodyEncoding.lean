@@ -171,6 +171,18 @@ def methodMetadata (pin : AssemblyPin) (method : RawMethod) : Option (MetadataSl
       row Table.standAloneSig [localBlob]
   some (build step assemblyName pin.identity)
 
+/-- The evidence for body bytes and token claims over `metadata`: the identities, tables and
+    names the decoder derives from the metadata for `method`, which a body that does not
+    resolve leaves empty so the check refuses it. -/
+def evidenceOf (bytes : List Nat) (operands : List (Nat × RawOperand)) (metadata : MethodMetadata)
+    (method : RawMethod) : BodyEvidence :=
+  let identities := metadata.slices.map fun slice => (slice.assembly.spelling).toOption.getD []
+  let tables := metadata.tables.toOption.getD []
+  let names := match metadata.environmentWith identities tables with
+    | .ok env => (methodIdentityValid env method).toOption.getD {}
+    | .error _ => {}
+  { bytes := bytes, tokens := { operands := operands }, metadata, identities, tables, names }
+
 /-- A body that decodes to the method: a tiny header when the method has no locals, the fixed
     stack depth and no init flag, and a fat header otherwise, with the metadata the method's
     definition and locals are checked against. -/
@@ -185,11 +197,7 @@ def encodeBody (pin : AssemblyPin) (method : RawMethod) : Option BodyEvidence :=
     if tiny then [code.length * 4 + 2]
     else [flags % 256, 0x30 + flags / 256] ++ littleEndian 2 method.maxStack ++
       littleEndian 4 code.length ++ littleEndian 4 signature
-  let metadata : MethodMetadata := { own := slice }
-  let tables := match metadata.tables with
-    | .ok built => built
-    | .error _ => []
-  some { bytes := header ++ code, tokens := { operands := [] }, metadata, tables }
+  some (evidenceOf (header ++ code) [] { own := slice } method)
 
 /-- The method with the instruction offsets its encoded bytes imply; unchanged if it has no
     encoding. -/
@@ -210,6 +218,7 @@ def withBody (item : MethodEvidence) : MethodEvidence :=
 
 /-- The body of evidence that `withBody` has not yet filled in; it never decodes. -/
 def noBody : BodyEvidence :=
-  { bytes := [], tokens := { operands := [] }, metadata := {}, tables := [] }
+  { bytes := [], tokens := { operands := [] }, metadata := {}, identities := [], tables := [],
+    names := {} }
 
 end Tests.BodyEncoding

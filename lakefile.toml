@@ -37,6 +37,9 @@ name = "Tests.BodyDecoding"
 name = "Tests.BodyLiteral"
 
 [[lean_lib]]
+name = "Tests.KernelEquation"
+
+[[lean_lib]]
 name = "Tests.MetadataBuilder"
 
 [[lean_lib]]

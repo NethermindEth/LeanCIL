@@ -490,19 +490,36 @@ def flagsAgree (rows : List GenericParamRow) (claimed : List GenericConstraint) 
   rows.length == claimed.length && (rows.zip claimed).all fun (row, constraint) =>
     row.flags == constraint.flags
 
-/-- Whether an extractor type is the class object type of a base class. -/
-def baseAgrees (base : NamedType) : TypeExpr → Bool
-  | .object scope name => bytesOf scope == base.scope && bytesOf name == base.name
-  | _ => false
+/-- The names of a method's definition as its metadata spells them: the scoped name of its owner
+    type, `scope::name`, and the scope and name of each base class of an object receiver's type,
+    from the nearest. The extractor states them as strings, which `MethodNames.spelling` reads
+    from the bytes. -/
+structure MethodNames where
+  owner : List Nat := []
+  bases : List (List Nat × List Nat) := []
+  deriving DecidableEq, Repr
 
-/-- Check the method definition against its `MethodDef` row: its identity in the pinned
-    assembly, flags, signature, generic parameters, owner and class layout facts. Every column of
-    the row is compared but its relative virtual address, which the extractor zeroes in the rows
-    it carries: where a body sits in the image is the strict audit's to confirm. -/
-def methodIdentityValid (env : MetadataEnv) (pin : AssemblyPin) (method : RawMethod) :
-    Except MetadataError Unit := do
+/-- The owner string and base class types these names spell, or `none` when a name is not
+    well-formed UTF-8. -/
+def MethodNames.spelling (names : MethodNames) : Option (String × List TypeExpr) := do
+  let owner ← spelled? names.owner
+  let bases ← names.bases.mapM fun (scope, name) => do
+    pure (TypeExpr.object (← spelled? scope) (← spelled? name))
+  pure (owner, bases)
+
+/-- The names are the owner and base class types the method states. An equation between strings
+    and bytes, so an extraction proves it with `cil_kernel_rfl`. -/
+abbrev MethodNames.Spell (names : MethodNames) (method : RawMethod) : Prop :=
+  names.spelling = some (method.owner, method.objectBases)
+
+/-- Check the method definition against its `MethodDef` row: flags, signature, generic
+    parameters, owner and class layout facts, and return the names it resolves, which the caller
+    ties to the extractor's strings. Every column of the row is compared but its relative
+    virtual address, which the extractor zeroes in the rows it carries: where a body sits in the
+    image is the strict audit's to confirm. -/
+def methodIdentityValid (env : MetadataEnv) (method : RawMethod) :
+    Except MetadataError MethodNames := do
   let index ← env.slice 0 method.token
-  if index.identity != bytesOf pin.identity then throw .identityMismatch
   if metadataTableOf method.token != Table.methodDef then
     throw (.unsupportedTable method.token)
   let row ← index.methodDef method.token
@@ -516,8 +533,6 @@ def methodIdentityValid (env : MetadataEnv) (pin : AssemblyPin) (method : RawMet
       method.callingConvention != convention % 0x20 then throw (.methodMismatch method.token)
   let ownerToken ← env.declaringType 0 method.token
   let owner ← typeDefNamed env 0 resolveFuel ownerToken
-  if bytesOf method.owner != owner.scope ++ [58, 58] ++ owner.name then
-    throw (.methodMismatch method.token)
   let methodParameters ← index.genericParameters method.token
   let ownerParameters ← index.genericParameters ownerToken
   if methodParameters.length != signature.genericArity ||
@@ -532,16 +547,16 @@ def methodIdentityValid (env : MetadataEnv) (pin : AssemblyPin) (method : RawMet
       !(parameters.zip method.parameters).all
         (fun (type, claimed) => frame.admits (declaredParameter type) claimed) then
     throw (.methodMismatch method.token)
+  let ownerName := owner.scope ++ [58, 58] ++ owner.name
   if method.objectReceiver then
     if !method.hasThis || owner.kind != .classType then throw (.methodMismatch method.token)
     let chain ← env.classChain resolveFuel 0 ownerToken
     let some own := index.instanceTotal.find? ownerToken | throw (.missingRow ownerToken)
     let bases ← chain.mapM fun (position, token) => typeDefNamed env position resolveFuel token
-    if method.objectFieldCount != (← env.chainFieldCount chain) + own ||
-        method.objectBases.length != bases.length ||
-        !(bases.zip method.objectBases).all (fun (base, claimed) => baseAgrees base claimed) then
+    if method.objectFieldCount != (← env.chainFieldCount chain) + own then
       throw (.methodMismatch method.token)
-  else if method.objectFieldCount != 0 || !method.objectBases.isEmpty then
-    throw (.methodMismatch method.token)
+    .ok { owner := ownerName, bases := bases.map fun base => (base.scope, base.name) }
+  else if method.objectFieldCount != 0 then throw (.methodMismatch method.token)
+  else .ok { owner := ownerName }
 
 end CIL.Extraction

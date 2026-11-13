@@ -100,8 +100,13 @@ def nestedName (enclosing name : List Nat) : List Nat := enclosing ++ 47 :: name
 
 /-- The assemblies that define the primitive types. -/
 def corlibNames : List (List Nat) :=
-  [bytesOf "System.Runtime", bytesOf "netstandard", bytesOf "mscorlib",
-   bytesOf "System.Private.CoreLib"]
+  -- `System.Runtime`, `netstandard`, `mscorlib` and `System.Private.CoreLib` as bytes, so the
+  -- kernel never evaluates their string literals.
+  [[83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101],
+   [110, 101, 116, 115, 116, 97, 110, 100, 97, 114, 100],
+   [109, 115, 99, 111, 114, 108, 105, 98],
+   [83, 121, 115, 116, 101, 109, 46, 80, 114, 105, 118, 97, 116, 101, 46, 67, 111, 114, 101, 76,
+    105, 98]]
 
 /-- The identity of the assembly the slice's primitive types come from, or `none` when the
     slice names none. -/

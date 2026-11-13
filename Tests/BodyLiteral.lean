@@ -56,24 +56,43 @@ def method0Tables : List Extraction.IndexTables :=
   | .ok built => built
   | .error _ => []
 
+/-- The bytes the `Assembly` row spells, which the extraction proves once per assembly. -/
+def assembly0Identity : List Nat :=
+  [69, 120, 97, 109, 112, 108, 101, 115, 44, 32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 46, 48,
+   46, 48, 46, 48, 44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97, 108,
+   44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61, 110, 117, 108, 108]
+
+theorem assembly0_identified : AssemblyIdentified assembly0Metadata assembly0Identity :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
+
+/-- The owner name the metadata gives `Add`, as bytes. -/
+def method0Names : Extraction.MethodNames :=
+  { owner := [69, 120, 97, 109, 112, 108, 101, 115, 44, 32, 86, 101, 114, 115, 105, 111, 110, 61,
+      49, 46, 48, 46, 48, 46, 48, 44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116,
+      114, 97, 108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101, 110, 61,
+      110, 117, 108, 108, 58, 58, 69, 120, 97, 109, 112, 108, 101, 115, 46, 65, 114, 105, 116, 104,
+      109, 101, 116, 105, 99] }
+
 def method0Body : Extraction.BodyEvidence :=
   { bytes := method0Bytes, tokens := { operands := [] }, metadata := method0Metadata,
-              tables := method0Tables }
+              identities := [assembly0Identity], tables := method0Tables, names := method0Names }
 
 /-- The pin of the assembly the method was extracted from. -/
 def pin : AssemblyPin := ⟨"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"⟩
 
-theorem add_body_decodes : BodyDecodes pin method0Body method0Original := by decide +kernel
+theorem add_body_decodes : BodyDecodes pin method0Body method0Original :=
+  ⟨AllIdentified.cons assembly0_identified AllIdentified.nil, by decide +kernel,
+    by cil_kernel_rfl, by cil_kernel_rfl, by decide +kernel⟩
 #print axioms add_body_decodes
 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
 #guard_msgs (substring := true) in
-example : BodyDecodes pin method0Body method0Original := by decide
+example : bodyMatches method0Body method0Original = true := by decide
 
 /-- A changed body byte fails the kernel's decision. -/
 theorem changed_byte_is_rejected :
-    bodyMatches pin { method0Body with bytes := method0Bytes.set 1 3 } method0Original = false := by
+    bodyMatches { method0Body with bytes := method0Bytes.set 1 3 } method0Original = false := by
   decide +kernel
 #print axioms changed_byte_is_rejected
 

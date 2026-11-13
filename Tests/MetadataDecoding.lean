@@ -206,9 +206,10 @@ private def failsWith {α : Type} (result : Except MetadataError α)
 
 /-- A slice cut from one of the images. -/
 private def sliceOf (identity : String) (header assemblyRow : List Nat)
-    (rows strings blobs userStrings : List ByteEntry) : MetadataSlice :=
-  { assembly := { identity := identity, tableHeader := header, assemblyRow := assemblyRow,
-                  strings := strings, blobs := blobs },
+    (rows strings blobs userStrings : List ByteEntry) (keyToken : List Nat := []) :
+    MetadataSlice :=
+  { assembly := { identity := identity, keyToken := keyToken, tableHeader := header,
+                  assemblyRow := assemblyRow, strings := strings, blobs := blobs },
     rows := rows, strings := strings, blobs := blobs, userStrings := userStrings }
 
 private def examplesSlice : MetadataSlice :=
@@ -217,7 +218,7 @@ private def examplesSlice : MetadataSlice :=
 
 private def corelibSlice : MetadataSlice :=
   sliceOf corelibIdentity corelibHeader corelibAssemblyRow corelibRows corelibStrings
-    corelibBlobs []
+    corelibBlobs [] (bytesOf "7cec85d7bea7798e")
 
 /-- The columns of a row as the typed accessors read them, with coded indices as tokens. -/
 private def typedColumns (index : MetadataIndex) (token : Nat) :
