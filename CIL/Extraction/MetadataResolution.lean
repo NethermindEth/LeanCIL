@@ -185,15 +185,18 @@ def valueTypeName : List Nat := [86, 97, 108, 117, 101, 84, 121, 112, 101]
 
 /-- An interface has the interface flag; a type that extends `System.Enum` is an enum with the
     underlying type of its instance field, one that extends `System.ValueType` is a value
-    type, and any other type is a class. -/
+    type, and any other type is a class. The base counts only when its own reference names a
+    core-library assembly, so the slice's `corlib` number plays no part. -/
 def typeDefKind (env : MetadataEnv) (position token : Nat) (row : TypeDefRow) :
     Except MetadataError TypeKind := do
   if row.flags / 0x20 % 2 == 1 then return .interfaceType
   if metadataTableOf row.extends_ != Table.typeRef then return .classType
   let index ← env.slice position token
-  let (scope, _, parts) ← typeRefQualified env position resolveFuel row.extends_
-  let corlib ← index.corlibIdentity
-  if some scope != corlib then return .classType
+  let (_, _, parts) ← typeRefQualified env position resolveFuel row.extends_
+  let baseRow ← index.typeRef row.extends_
+  if metadataTableOf baseRow.scope != Table.assemblyRef then return .classType
+  let baseScope ← index.assemblyRef baseRow.scope
+  if !corlibNames.contains (← index.string baseScope.name) then return .classType
   if parts == [systemNamespace, enumName] then return .enumType (← enumUnderlying index token)
   if parts == [systemNamespace, valueTypeName] then return .valueType
   .ok .classType

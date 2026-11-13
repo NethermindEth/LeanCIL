@@ -232,6 +232,20 @@ theorem rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
       (.operandMismatch tokens.boxRef) = true := by decide +kernel
 #print axioms rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
 
+/-- The `Lib` slice with a wrong number for its core-library reference. -/
+private def libWithoutCorlib : MetadataSlice := { lib with corlib := 0 }
+
+/-- The struct is a value type from its base reference alone, whatever `corlib` says, so a claim
+    that it is a class is refused with or without the number. -/
+theorem decides_a_struct_without_the_corlib_number :
+    passes own.1 lib tokens.pairRef (.type (.atom libScope "Lib.Pair")) = true ∧
+    passes own.1 libWithoutCorlib tokens.pairRef (.type (.atom libScope "Lib.Pair")) = true ∧
+    rejects own.1 lib tokens.pairRef (.type (.object libScope "Lib.Pair"))
+      (.operandMismatch tokens.pairRef) = true ∧
+    rejects own.1 libWithoutCorlib tokens.pairRef (.type (.object libScope "Lib.Pair"))
+      (.operandMismatch tokens.pairRef) = true := by decide +kernel
+#print axioms decides_a_struct_without_the_corlib_number
+
 /-! ## The use of a token -/
 
 theorem rejects_a_field_access_that_disagrees_with_the_field_row :
