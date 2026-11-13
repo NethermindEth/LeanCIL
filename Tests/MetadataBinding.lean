@@ -375,4 +375,28 @@ theorem ignores_the_body_address :
       | .ok _ => true
       | .error _ => false) = true := by decide +kernel
 #print axioms ignores_the_body_address
+
+/-- `Main`'s row and the method with the flags and implementation flags changed together. -/
+private def withFlags (flags implementation : Nat) : MetadataSlice × RawMethod :=
+  (mutateRow own.1 tokens.main fun bytes =>
+      (bytes.set 4 (implementation % 256)).set 5 (implementation / 256)
+        |>.set 6 (flags % 256) |>.set 7 (flags / 256),
+    { mainMethod with attributes := flags, implementation := implementation })
+
+/-- A row whose flags say it has no IL body is refused, so no body bytes are taken for it: an
+    abstract method, a platform invoke and an internal call. -/
+theorem rejects_body_bytes_for_a_row_without_a_body :
+    identityFails (withFlags 0x0496 0).1 (withFlags 0x0496 0).2 (.bodyLocation tokens.main) = true ∧
+    identityFails (withFlags 0x2096 0).1 (withFlags 0x2096 0).2 (.bodyLocation tokens.main) = true ∧
+    identityFails (withFlags 0x0096 0x1000).1 (withFlags 0x0096 0x1000).2
+      (.bodyLocation tokens.main) = true := by decide +kernel
+#print axioms rejects_body_bytes_for_a_row_without_a_body
+
+/-- The same rewrite of the row with `Main`'s own flags is accepted, so the refusals above come
+    from the flags and not from the rewrite. -/
+theorem accepts_the_row_rewritten_with_its_own_flags :
+    (match identity (withFlags 0x0096 0).1 (withFlags 0x0096 0).2 with
+      | .ok _ => true
+      | .error _ => false) = true := by decide +kernel
+#print axioms accepts_the_row_rewritten_with_its_own_flags
 end Tests.MetadataBinding

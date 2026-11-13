@@ -524,6 +524,20 @@ abbrev MethodNames.Spell (names : MethodNames) (method : RawMethod) : Prop :=
 abbrev MethodNames.Selects (names : MethodNames) (signature : String) : Prop :=
   spelled? names.signature = some signature
 
+/-- The `MethodDef` flag of an abstract method, which has no body. -/
+def abstractMethodFlag : Nat := 0x0400
+
+/-- The `MethodDef` flag of a platform invoke, whose body is native code outside the image. -/
+def platformInvokeFlag : Nat := 0x2000
+
+/-- The `MethodDef` implementation flag of a method the runtime implements itself. -/
+def internalCallFlag : Nat := 0x1000
+
+/-- Whether a `MethodDef` row's flags say the method has no IL body in the image. -/
+def hasNoBody (flags implFlags : Nat) : Bool :=
+  implFlags % 4 != 0 || flags / abstractMethodFlag % 2 == 1 ||
+    flags / platformInvokeFlag % 2 == 1 || implFlags / internalCallFlag % 2 == 1
+
 /-- `.ctor` and `.cctor` as bytes. -/
 def constructorName : List Nat := [46, 99, 116, 111, 114]
 def classConstructorName : List Nat := [46, 99, 99, 116, 111, 114]
@@ -568,7 +582,8 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
   let row ← index.methodDef method.token
   if row.flags != method.attributes || row.implFlags != method.implementation then
     throw (.methodMismatch method.token)
-  if row.implFlags % 4 != 0 then throw (.bodyLocation method.token)
+  -- A row with native, runtime or no code has no IL body for the decoded bytes to be.
+  if hasNoBody row.flags row.implFlags then throw (.bodyLocation method.token)
   let signature ← decodeMethodSig (← index.blob row.signature)
   let convention := signature.convention
   if method.hasThis != (convention / hasThisFlag % 2 == 1) ||
