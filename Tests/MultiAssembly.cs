@@ -243,10 +243,10 @@ RejectedExtract("pinned type without definition", "Unresolved class: MultiFixtur
     var original = (Mono.Cecil.ModuleDefinition)pinnedType.GetMethod("Original", Internal)!
         .Invoke(pinned, [selected])!;
     var take = original.GetType("MultiFixture.Application").Methods.Single(method => method.Name == "Take");
-    var add = slices.GetType().GetMethod("Add", Internal)!;
+    var collect = slices.GetType().GetMethod("Method", Internal)!;
     try
     {
-        add.Invoke(slices, [take, Array.Empty<uint>(), false]);
+        collect.Invoke(slices, [take, Array.Empty<uint>(), false]);
         throw new InvalidOperationException("The metadata slice accepted a pinned type with no definition.");
     }
     catch (System.Reflection.TargetInvocationException refusal) when (
