@@ -185,7 +185,8 @@ RejectBody(0, "altered-instruction-offset", bodyTheorem, "method0Original",
     line => line.Replace("offset := 1, opcode := 40", "offset := 2, opcode := 40"));
 RejectBody(0, "altered-max-stack", bodyTheorem, "method0Original",
     line => line.Replace("maxStack := 8", "maxStack := 9"));
-// The module's lookup tables are decided once against its metadata; a changed row, heap entry or table is refuted there.
+// The module's lookup tables are decided once against its metadata; a changed row, heap entry or table is
+// refuted there.
 void RejectTables(string name, string definition, Func<string, string> change)
 {
     const string theorem = "method0_tables_valid";

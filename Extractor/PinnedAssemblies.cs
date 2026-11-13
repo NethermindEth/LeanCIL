@@ -143,7 +143,9 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         return image;
     }
 
-    /// <summary>The working module that <paramref name="module"/> is the untouched copy of, or the module itself.</summary>
+    /// <summary>
+    /// The working module that <paramref name="module"/> is the untouched copy of, or the module itself.
+    /// </summary>
     internal ModuleDefinition Working(ModuleDefinition module) =>
         originals.FirstOrDefault(pair => pair.Value == module).Key ?? module;
     /// <summary>The index of a pinned module in <see cref="Pins"/>.</summary>

@@ -100,7 +100,8 @@ int[] workloads = [2, 4, 8];
 var costs = workloads.Select(count => (Count: count, Cost: KernelCost(count))).ToArray();
 foreach (var (count, cost) in costs)
     Console.WriteLine(FormattableString.Invariant(
-        $"kernel decide of the {count}-method certificate: {cost.Seconds:F1} s, peak {cost.Gigabytes:F2} GB (import floor {floorMemory:F2} GB)"));
+        $"kernel decide of the {count}-method certificate: {cost.Seconds:F1} s, peak {cost.Gigabytes:F2} GB") +
+        FormattableString.Invariant($" (import floor {floorMemory:F2} GB)"));
 var (smallCount, small) = costs[0];
 var (largeCount, large) = costs[^1];
 var timeGrowth = (large.Seconds / largeCount) / (small.Seconds / smallCount);
@@ -108,10 +109,11 @@ var memoryGrowth = Math.Max(large.Gigabytes - floorMemory,
     0.05) / largeCount / (Math.Max(small.Gigabytes - floorMemory, 0.05) / smallCount);
 if (timeGrowth > AllowedKernelGrowth || memoryGrowth > AllowedKernelGrowth)
     throw new InvalidOperationException(string.Create(System.Globalization.CultureInfo.InvariantCulture,
-        $"The kernel check of {largeCount} methods costs {timeGrowth:F2} times the time and {memoryGrowth:F2} times the memory " +
-        $"per method of {smallCount}; the limit is {AllowedKernelGrowth}."));
+        $"The kernel check of {largeCount} methods costs {timeGrowth:F2} times the time and " +
+        $"{memoryGrowth:F2} times the memory per method of {smallCount}; the limit is {AllowedKernelGrowth}."));
 Console.WriteLine(FormattableString.Invariant(
-    $"PASS the kernel check grows {timeGrowth:F2} times in time and {memoryGrowth:F2} times in memory per method from {smallCount} to {largeCount} methods"));
+    $"PASS the kernel check grows {timeGrowth:F2} times in time and {memoryGrowth:F2} times in memory ") +
+    FormattableString.Invariant($"per method from {smallCount} to {largeCount} methods"));
 
 // Peak working set of `lean` on a file in gigabytes. Lean runs directly, in the environment `lake env` prints,
 // so the measured process is the one that holds the memory on every platform.
@@ -120,7 +122,8 @@ static double MeasurePeakGigabytes(string[] command, string cwd, string? sourceT
     var path = command[^1];
     if (sourceText is not null) File.WriteAllText(path, sourceText);
     var environment = Run(["lake", "env"], cwd: cwd).ReplaceLineEndings("\n").Split('\n')
-        .Select(line => line.Split('=', 2)).Where(pair => pair.Length == 2).ToDictionary(pair => pair[0], pair => pair[1]);
+        .Select(line => line.Split('=', 2)).Where(pair => pair.Length == 2)
+        .ToDictionary(pair => pair[0], pair => pair[1]);
     var lean = Path.Combine(environment["LEAN_SYSROOT"], "bin", OperatingSystem.IsWindows() ? "lean.exe" : "lean");
     var info = new System.Diagnostics.ProcessStartInfo(lean) { WorkingDirectory = cwd, UseShellExecute = false,
         RedirectStandardOutput = true, RedirectStandardError = true };
@@ -136,7 +139,8 @@ static double MeasurePeakGigabytes(string[] command, string cwd, string? sourceT
         peak = Math.Max(peak, process.PeakWorkingSet64);
     }
     if (process.ExitCode != 0 || output.Result.Contains("sorryAx", StringComparison.Ordinal))
-        throw new InvalidOperationException($"{lean} {path} failed ({process.ExitCode}):\n{output.Result}\n{errors.Result}");
+        throw new InvalidOperationException(
+            $"{lean} {path} failed ({process.ExitCode}):\n{output.Result}\n{errors.Result}");
     return peak / (1024.0 * 1024 * 1024);
 }
 var consumer = Path.Combine(directory, "Consumer");

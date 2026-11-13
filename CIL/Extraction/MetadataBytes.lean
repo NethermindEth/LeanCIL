@@ -844,7 +844,8 @@ private def typeCounts (index : MetadataIndex) (token : Nat) :
     match stop with
     | none => none
     | some stop =>
-      let (found, instances, complete) := fieldCounts index (stop - row.fieldList) row.fieldList 0 []
+      let (found, instances, complete) :=
+        fieldCounts index (stop - row.fieldList) row.fieldList 0 []
       some (found, if complete then some instances else none)
 
 /-- The instance field counts of every carried type, as entries in ascending key order. -/
@@ -863,7 +864,8 @@ private def fieldCountEntries (index : MetadataIndex) :
     key. -/
 private def linkEntries : List MetadataLink → List (Nat × (Nat × Nat))
   | [] => []
-  | link :: rest => (link.kind * 0x100000000 + link.source, (link.slice, link.target)) :: linkEntries rest
+  | link :: rest =>
+    (link.kind * 0x100000000 + link.source, (link.slice, link.target)) :: linkEntries rest
 
 /-- The lookup structures of a slice, built from its bytes: its entries as trees, and the instance
     field counts of its carried types. -/
@@ -883,7 +885,8 @@ def MetadataSlice.tables (slice : MetadataSlice) : Except MetadataError IndexTab
       instanceBefore := .leaf
       instanceTotal := .leaf }
   let (before, total) ←
-    fieldCountEntries { toIndexTables := bare, header := header, corlib := slice.corlib, identity := [] }
+    fieldCountEntries
+      { toIndexTables := bare, header := header, corlib := slice.corlib, identity := [] }
   .ok { bare with instanceBefore := before, instanceTotal := total }
 
 /-- The index of a slice given its tables and the identity its assembly spells, which an

@@ -135,7 +135,8 @@ def assemblyBlock (builder : Builder) (name : List Nat) (identity : String) (ver
 /-- Insert `item` before the first item whose key is not smaller, keeping equal keys in order. -/
 def insertByKey {α : Type} (key : α → Nat) (item : α) : List α → List α
   | [] => [item]
-  | other :: rest => if key item ≤ key other then item :: other :: rest else other :: insertByKey key item rest
+  | other :: rest =>
+    if key item ≤ key other then item :: other :: rest else other :: insertByKey key item rest
 
 /-- The items in ascending key order, as the extractor carries rows and links. -/
 def sortByKey {α : Type} (key : α → Nat) (items : List α) : List α :=

@@ -152,7 +152,8 @@ def firstInstanceField (index : MetadataIndex) : Nat → Nat → Except Metadata
   | count + 1, row => do
     let token := tokenOf Table.field row
     let field ← index.field token
-    if field.flags / 0x10 % 2 == 1 then firstInstanceField index count (row + 1) else .ok (some token)
+    if field.flags / 0x10 % 2 == 1 then firstInstanceField index count (row + 1)
+    else .ok (some token)
 /-- The first `Field` row after a type's own: the next `TypeDef`'s, or one past the table. -/
 def MetadataIndex.fieldEnd (index : MetadataIndex) (token : Nat) (row : TypeDefRow) :
     Except MetadataError Nat :=
