@@ -1,4 +1,5 @@
 import CIL.Instructions
+import CIL.Extraction.LinkIndex
 
 /-!
 # Method embeddings
@@ -27,6 +28,13 @@ def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
   | .bltu t => .bltu (r t) | .bgeu t => .bgeu (r t) | .bgtu t => .bgtu (r t)
   | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t) | .bne t => .bne (r t)
   | op => op
+
+/-- Renaming code targets never changes the link an instruction implies. -/
+theorem Instruction.link?_relabel (r : Nat → Nat) (op : Instruction) :
+    (op.relabel r).link? = op.link? := by
+  cases op <;> simp [Instruction.relabel, Instruction.link?]
+
+#print axioms Instruction.link?_relabel
 
 /-- Every code target of an instruction, in operand order. -/
 def Instruction.targets : Instruction → List Nat
@@ -106,7 +114,10 @@ end Embedding
 open Embedding in
 /-- `expected` embeds into `actual` under the pc map `map`. Non-code fields agree,
     except that static sites may move as long as each live instruction resolves the
-    same descriptor and the program-wide descriptor list is unchanged. -/
+    same descriptor and the program-wide descriptor list is unchanged. Link tables
+    move the same way: each live instruction has the link its image has. The reads walk each
+    table once while its keys ascend and the queried pcs do not decrease; otherwise each query
+    scans the table. -/
 structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   profile : actual.profile = expected.profile
   returnsValue : actual.returnsValue = expected.returnsValue
@@ -114,6 +125,8 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   localKinds : actual.localKinds = expected.localKinds
   opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
   parameterHomes : actual.parameterHomes = expected.parameterHomes
+  declared : actual.declared = expected.declared
+  environment : actual.environment = expected.environment
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
   entry : rename map actual.code.length 0 = 0
   code : pick actual.code actual.code 0
@@ -123,6 +136,11 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   statics :
     (sites actual.code.length 0 expected.code map).map (fun site => staticAt actual site.image) =
       (sites actual.code.length 0 expected.code map).map (fun site => staticAt expected site.pc)
+  links :
+    Extraction.linkReads actual.links
+        ((sites actual.code.length 0 expected.code map).map Site.image) =
+      Extraction.linkReads expected.links
+        ((sites actual.code.length 0 expected.code map).map Site.pc)
   flow : (sites actual.code.length 0 expected.code map).all
     (fun site => !site.op.continues || site.next == site.image + 1) = true
 

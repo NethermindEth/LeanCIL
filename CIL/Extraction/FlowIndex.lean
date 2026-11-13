@@ -15,6 +15,7 @@ inductive FlowIndex (α : Type) where
   | empty
   | leaf (value : α)
   | branch (leftSize : Nat) (left right : FlowIndex α)
+  deriving DecidableEq
 
 /-- Lookup rejects every index outside the indexed certificate. -/
 def FlowIndex.get? : FlowIndex α → Nat → Option α

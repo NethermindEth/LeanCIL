@@ -3,6 +3,7 @@ import CIL.Embedding.Basic
 import Lean.Meta.Tactic.AuxLemma
 import Lean.Elab.Tactic.Simp
 import CIL.TermAccess
+import CIL.EntryIndex
 
 /-!
 # The `cil_embed` tactic
@@ -90,6 +91,8 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option (String ×
     listField "localKinds" expected.localKinds actual.localKinds,
     listField "opaqueVectorLocals" expected.opaqueVectorLocals actual.opaqueVectorLocals,
     listField "parameterHomes" expected.parameterHomes actual.parameterHomes,
+    valueField "declared" expected.declared actual.declared,
+    environmentField expected.environment actual.environment,
     listField "static descriptors" (expected.staticSites.map Prod.snd)
       (actual.staticSites.map Prod.snd) ].filterMap id
   if let some field := fields.head? then
@@ -97,6 +100,10 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option (String ×
   let limit := actual.code.length
   let r := rename map limit
   let actualCode := actual.code.toArray
+  -- One index per table, the first entry of a pc winning, so each live instruction costs a
+  -- logarithmic lookup.
+  let expectedLinks := firstEntryIndex expected.links
+  let actualLinks := firstEntryIndex actual.links
   if r 0 != 0 then return some (s!"expected pc 0 must map to actual pc 0, not {r 0}", none)
   let imageOf : Std.HashMap Nat Nat := (sites limit 0 expected.code map).foldl
     (fun table site => table.insert site.image site.pc) {}
@@ -138,6 +145,10 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option (String ×
       return some (s!"expected pc {p} (actual pc {q}) resolves a different static descriptor\n  \
         expected: {reprStr (staticAt expected p)}\n  \
         actual:   {reprStr (staticAt actual q)}", some q)
+    if actualLinks[q]? != expectedLinks[p]? then
+      return some (s!"expected pc {p} (actual pc {q}) has a different call link\n  \
+        expected: {reprStr expectedLinks[p]?}\n  \
+        actual:   {reprStr actualLinks[q]?}{linksHint}", some q)
     if op.continues && r (p + 1) != q + 1 then
       return some (s!"fallthrough differs: expected pc {p} ({reprStr op}) continues at \
         expected pc {p + 1}, which maps to actual pc {r (p + 1)}, but actual pc {q} continues \
@@ -191,7 +202,9 @@ private opaque evaluate (T : Type) (type value : Expr) : MetaM T
 syntax (name := cilEmbed) "cil_embed" (" [" term,* "]")? : tactic
 
 /-- `ctor` applied to `prefixArgs` and an `Eq.refl` of the left side of each remaining
-    equation field; only the kernel compares the sides. -/
+    equation field; only the kernel compares the sides. The link reads of the two bodies are
+    compared by evaluating a decision instead: for sides that are different terms, `Eq.refl` makes
+    the kernel unify the unevaluated walks step by step, which costs the square of the calls. -/
 private def reflFields (ctor : Name) (prefixArgs : Array Expr) : MetaM Expr := do
   let mut fieldsType ← instantiateForall (← inferType (mkConst ctor)) prefixArgs
   let mut fields : Array Expr := #[]
@@ -200,7 +213,8 @@ private def reflFields (ctor : Name) (prefixArgs : Array Expr) : MetaM Expr := d
       throwError "cil_embed: unexpected `{ctor}` fields {fieldsType}"
     let some (_, lhs, _) := domain.eq? |
       throwError "cil_embed: unexpected `{ctor}` field {domain}"
-    let proof ← mkEqRefl lhs
+    let proof ← if lhs.getAppFn.isConstOf ``CIL.Extraction.linkReads
+      then mkDecideProof domain else mkEqRefl lhs
     fields := fields.push proof
     fieldsType := body.instantiate1 proof
   return mkAppN (mkConst ctor) (prefixArgs ++ fields)

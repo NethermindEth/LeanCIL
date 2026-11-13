@@ -115,6 +115,12 @@ workflow.
   batch compilation/replay time.
 - `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
   unchecked declaration reaches, and fails, independent kernel replay.
+- `GenericEvidence` mutates the emitted `declared` signature (a parameter, the return type, the
+  receiver and its kind), the call-link table (a changed callee, a dropped entry, an entry at the
+  wrong pc or at a non-call) and the shared layout environment. Each fails its own conjunct with the
+  kernel's failed-decision or definitional-equality message. A changed call target moves its link
+  definition too, so only the call binding can reject it, and each mutation fails the fixture when its
+  text replacement matched nothing.
 - `GenericEvidence` mutates the body evidence of its first sample: a body byte, the header, a token
   operand byte, a token table key, a token table operand, an emitted instruction offset, `maxStack` and
   a branch index. Each must fail a body obligation with the kernel's failed-decision message, so a

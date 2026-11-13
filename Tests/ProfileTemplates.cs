@@ -87,7 +87,8 @@ if (templates.Split("@[cil_code] def method").Length != 4 ||
     !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
     throw new InvalidOperationException("Expected one generated body per method with flags, callees and equations.");
 var renamed = File.ReadAllText(Path.Combine(shared, "TemplateBindings3.lean"));
-if (!renamed.Contains("Templates.method0 Extracted.profile true true 2", StringComparison.Ordinal))
+if (!renamed.Contains("Templates.method0 Extracted.profile Extracted.environment true true 2",
+        StringComparison.Ordinal))
     throw new InvalidOperationException("Wrapper extraction did not exercise changed managed callee indices.");
 var library = args switch
 {
@@ -136,7 +137,7 @@ open CIL
 theorem selected_result (memory : Safety.Memory) (left right : W32) :
     Safety.invoke Extracted.program 30 {{entry}} [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 {{(index == 1 ? "right" : "left")}})]) :=
-  TemplateProof.choose_returns Extracted.program {{entry}} {{callee}} Extracted.profile
+  TemplateProof.choose_returns Extracted.program {{entry}} {{callee}} Extracted.profile Extracted.environment
     {{(sse ? "true" : "false")}} {{(avx ? "true" : "false")}} rfl rfl (by decide)
     TemplateBindings.method{{entry}}_template {{helper}} memory left right
 #print axioms selected_result
@@ -220,8 +221,8 @@ RejectLean("WrongProfile", wideBinding.Replace("Extracted.profile", "FeatureProf
     StringComparison.Ordinal), widePath);
 RejectLean("WrongEquation", """
 import Templates
-example (profile : CIL.FeatureProfile) (callee : Nat) :
-    (Templates.method0 profile true true callee).code[1]? = some (.brzero 6) := by rfl
+example (profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) (callee : Nat) :
+    (Templates.method0 profile environment true true callee).code[1]? = some (.brzero 6) := by rfl
 """, sharedPath);
 var changed = Path.Combine(directory, "ChangedBranch");
 Directory.CreateDirectory(changed);
@@ -307,7 +308,7 @@ File.WriteAllText(Path.Combine(changedStatic, "Templates.lean"),
 Compile(changedStatic, "Templates", changedStatic + Path.PathSeparator + library);
 RejectLean("ChangedStaticIdentity", staticBinding, changedStatic + Path.PathSeparator + staticPath);
 var siteStart = staticTemplate.IndexOf("staticSites := [", StringComparison.Ordinal);
-var siteEnd = staticTemplate.IndexOf("], code := [", siteStart, StringComparison.Ordinal);
+var siteEnd = staticTemplate.IndexOf("], declared := ", siteStart, StringComparison.Ordinal);
 if (siteStart < 0 || siteEnd < 0) throw new InvalidOperationException("Static template has no descriptor list.");
 var missingStatic = Path.Combine(directory, "MissingStatic");
 Directory.CreateDirectory(missingStatic);

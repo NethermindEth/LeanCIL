@@ -176,8 +176,8 @@ Embedding relates whole bodies. When only a suffix is shared, `CIL.Safety.Region
 rest first. `RegionClosed program region` says fallthroughs, targets and callee entries of region
 instructions stay in the region; `regionClosedCheck` decides it for a region listed as `(method,
 lower)` suffixes (`inStarts`). `AgreesOn program other region` says `other` has the same methods and
-metadata and the same instruction at every region pc; `AgreesOn.set` and `code_agrees_of_drop` build
-it for one replaced body. Then `run_congr_region` gives equal runs from any region pc, faults
+metadata, link table included, and the same instruction at every region pc; `AgreesOn.set` and
+`code_agrees_of_drop` build it for one replaced body. Then `run_congr_region` gives equal runs from any region pc, faults
 included. Masking the code outside the region with `.unsupported` makes it dead for `Embeds`, so
 `run_refines` carries the suffix run on to a body with a different prefix, for example a suffix
 after inline code to the same suffix after a helper call, one pc earlier.
@@ -187,9 +187,9 @@ For a long suffix, import `CIL.Safety.Embedding.Suffix` and use
 `actual.code.drop start
 = (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start))`.
 The expected prefix must contain only dead instructions. All branch targets in the suffix must be at
-least `lower`. The constructor also requires equal method metadata, equal static descriptor lists,
-and equal static lookups at each moved pc. If `lower = 0`, `start` must also be zero to preserve
-method entry.
+least `lower`. The constructor also requires equal method metadata except the static sites and link
+table, equal static descriptor lists, and equal static lookups and call links at each moved pc. If
+`lower = 0`, `start` must also be zero to preserve method entry.
 
 The resulting map, `suffixRename lower start`, sends prefix pcs to zero and suffix pcs to `pc -
 lower + start`. Pass the proof to `ProgramRefines.set_body` and then `run_refines`. This avoids
@@ -211,9 +211,63 @@ def double : CIL.Method :=
 
 def program : CIL.Program := [{ code := [.ret], locals := [], returnsValue := false }, double]
 
--- Against an extraction the goal reads `Extracted.program[1]? = some double`.
 theorem found : program[1]? = some double := by cil_body
 ```
+
+An extracted method also carries its declared signature (`declared`), the layout tables shared by
+the whole extraction (`environment`) and a call-link table (`links`), and an equality or an
+embedding compares all of them with the extraction's. A bare literal such as `double` has no
+signature, so it binds only to a method with none. Start from the extraction's method and replace
+its code with `Method.withCode`, which keeps `declared`, `environment` and the other fields, gives
+the body the links its new code implies and resets the static sites, which are keyed by pc like the
+links:
+
+```lean extracted
+import Extracted
+import CIL.MethodBinding
+
+/-- The extraction's method at index 1 with the body this proof expects. -/
+def double : CIL.Method := Extracted.method1.withCode [.arg 0, .arg 0, .add, .ret]
+
+theorem found : Extracted.program[1]? = some double := by cil_body
+```
+
+Do not write `{ Extracted.method1 with code := ... }`: a structure update copies the extraction's
+link table and static sites, which are keyed by the extraction's pcs, so the update agrees with the
+new code only where no call or static access moved. A body that reads statics sets the sites after
+`withCode`, as in `{ Extracted.method1.withCode code with staticSites := [...] }`. `withCode` is also
+the form for a body embedded into an extraction with dead blocks, where the pcs of the calls differ:
+
+```lean
+import CIL.Embedding.Tactic
+
+open CIL
+
+/-- What an extraction emits: a dead block puts the call at pc 3. -/
+def emitted : Method :=
+  { code := [.arg 0, .branch 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret],
+    locals := [], returnsValue := true }
+
+/-- The body the proof uses; its call is at pc 2, and `withCode` gives it the link of that pc. -/
+def literal : Method := emitted.withCode [.arg 0, .branch 2, .call 1 1, .ret]
+
+theorem literal_embeds : MethodEmbeds [emitted] 0 literal := by cil_embed
+```
+
+A literal that does not bind is reported field by field. A difference in `declared`, `environment`,
+`staticSites` or `links` prints `field declared:`, `field environment:`, `field staticSites:` or
+`field links:` with the value on each side, and the layout tables as their counts. The `links` line
+says to build the body with `withCode` from the extraction's method, and the `staticSites` line says
+that `withCode` resets the sites. The `declared` and `environment` lines name no remedy: take both
+from the extraction's method.
+
+A proof that steps through a call reads the link at the call's pc. For an extracted method the
+generated fact `methodN_linkPC` gives the link of each call site in logarithmic time, and the
+`cil_code` simp set unfolds its named link to the constructor. For a pc without a call the table is
+read by its listed keys, which costs the number of calls and never gets stuck
+(`Method.linkAt_of_unlisted`). A template or a literal body keeps the table its code implies, and
+`Method.linkAt_of_instruction` reads the link from the instruction equation of its pc in one step,
+whatever the callee of a template is; evaluating `linkAt` instead rebuilds that table.
 
 `cil_body` runs `rfl`, so the proof is the same kernel-checked `Eq.refl`. When `rfl` fails, it
 evaluates both closed sides and reports, for each differing `Method` field, the first differing
@@ -354,8 +408,10 @@ A profile can make the extractor emit dead `.unsupported` blocks that shift ever
 target, which breaks a `cil_body` equality even though reachable behaviour is unchanged. `cil_embed`
 (from `CIL.Embedding.Tactic`) proves the weaker `MethodEmbeds` relation instead: every live
 instruction of the literal body appears in the extracted method at a mapped pc, with its code
-targets mapped the same way and its fallthrough kept adjacent. Keep the proof over the literal body
-and transport it with the lemmas in `CIL.Safety.Embedding.Simulation`:
+targets mapped the same way and its fallthrough kept adjacent. The literal body must carry the
+extraction's `declared` and `environment`, and for a body with calls the links of its own code, so
+build it with `Method.withCode` from the extraction's method as shown above. Keep the proof over
+the literal body and transport it with the lemmas in `CIL.Safety.Embedding.Simulation`:
 
 ```lean
 import CIL.Embedding.Tactic
@@ -528,14 +584,16 @@ leancil templates shared scalar sse42 v3
 ```
 
 The command reruns exact extraction checking for every input and requires the same assembly bytes.
-`shared/Templates.lean` defines each method once, with a profile parameter, parameters for the
-feature flags it reads, and managed callee indices keyed by full method identity. Every original IL
-instruction keeps its pc. Conditional instructions and excluded paths become `if` expressions and
+`shared/Templates.lean` defines each method once, with a profile parameter, an environment parameter
+for the extraction's layout tables, parameters for the feature flags it reads, and managed callee
+indices keyed by full method identity. Every original IL instruction keeps its pc. Conditional instructions and excluded paths become `if` expressions and
 unsupported padding; `cil_instruction_equations` generates kernel-checked equations for every pc.
 
 `TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
 `Templates` and prove `Extracted.program[i]? = some (Templates.methodN ...)` by `rfl`, including
-all metadata and callee indices. Compile a binding only against its corresponding extraction,
+all metadata and callee indices. The binding passes `Extracted.profile` and `Extracted.environment`,
+and the call links of the template are those its code implies, so `rfl` also checks them against the
+extraction's link table. Compile a binding only against its corresponding extraction,
 recorded in `templates.json`. Add the shared module and selected binding module to your proof
 package, import that binding from the consumer proof, and run `leancil verify` with that
 extraction and proof package. The templates command generates proof source; it does not replace

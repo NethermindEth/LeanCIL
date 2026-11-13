@@ -66,14 +66,20 @@ def longExpected (profile : CIL.FeatureProfile) : Method :=
   { code := [.arg 0, .const32 6, .shr] ++ longSuffix, locals := [], returnsValue := true, profile := profile }
 
 def longMasked (profile : CIL.FeatureProfile) : Method :=
-  { longExpected profile with code := List.replicate 3 (.unsupported "Outside the region") ++ longSuffix }
+  (longExpected profile).withCode
+    (List.replicate 3 (.unsupported "Outside the region") ++ longSuffix)
 
 def longActual (profile : CIL.FeatureProfile) (callee : Nat) : Method :=
-  { longExpected profile with
-    code := [.arg 0, .call callee 1] ++
-      longSuffix.map (Instruction.relabel (fun pc => pc - 3 + 2)) }
+  (longExpected profile).withCode ([.arg 0, .call callee 1] ++
+    longSuffix.map (Instruction.relabel (fun pc => pc - 3 + 2)))
 
 theorem longSuffix_length : longSuffix.length = 100 := by simp [longSuffix]
+
+/-- The expected body calls nothing, so its link table is empty. -/
+theorem longExpected_links (profile : CIL.FeatureProfile) :
+    (longExpected profile).links = [] := rfl
+
+#print axioms longExpected_links
 
 theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
     CIL.Embedding.BodyRefines (longMasked profile) (longActual profile callee)
@@ -90,9 +96,9 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
     rw [lookup] at found
     cases found
     rfl
-  · simp [longActual, longMasked]
-  · simp only [longMasked, List.drop_append, List.length_replicate, Nat.sub_self, List.drop_zero,
-      List.drop_replicate, List.replicate_zero, List.nil_append]
+  · simp [longActual, longMasked, Method.withCode]
+  · simp only [longMasked, Method.withCode, List.drop_append, List.length_replicate,
+      Nat.sub_self, List.drop_zero, List.drop_replicate, List.replicate_zero, List.nil_append]
     intro op member target inside
     simp only [longSuffix, List.mem_append, List.mem_replicate, List.mem_cons,
       List.not_mem_nil, or_false] at member
@@ -100,6 +106,39 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
       simp_all [Instruction.targets] <;> omega
   · intro pc after
     rfl
+  · exact CIL.Embedding.links_of_relocated_suffix rfl rfl
+      (by simp [longActual, longMasked, Method.withCode])
+
+/-- A call inside the relocated suffix keeps its link at the shifted pc. -/
+def callExpected : Method :=
+  { code := [.arg 0, .const32 6, .shr, .arg 1, .call 2 1, .ret], locals := [],
+    returnsValue := true }
+
+def callMasked : Method :=
+  callExpected.withCode (List.replicate 3 (.unsupported "Outside the region") ++
+    callExpected.code.drop 3)
+
+def callActual : Method := callExpected.withCode ([.arg 0, .call 1 1] ++ callExpected.code.drop 3)
+
+theorem callSuffix_refines :
+    CIL.Embedding.BodyRefines callMasked callActual (CIL.Embedding.suffixRename 3 2) := by
+  apply CIL.Embedding.BodyRefines.of_relocated_suffix
+  · rfl
+  · rfl
+  · omega
+  · intro pc op before found
+    have unmasked : pc = 0 ∨ pc = 1 ∨ pc = 2 := by omega
+    rcases unmasked with rfl | rfl | rfl <;>
+      (simp [callMasked, Method.withCode] at found; subst found; rfl)
+  · rfl
+  · intro op member target inside
+    simp [callMasked, callExpected, Method.withCode] at member
+    rcases member with rfl | rfl | rfl <;> simp [Instruction.targets] at inside
+  · intro pc after
+    rfl
+  · exact CIL.Embedding.links_of_relocated_suffix rfl rfl rfl
+
+#print axioms callSuffix_refines
 
 theorem longSuffix_moves (profile : CIL.FeatureProfile) (callee fuel : Nat) (args stack : List Value)
     (frame : Frame) (m : Memory) (result : Memory × List Value)
@@ -108,7 +147,7 @@ theorem longSuffix_moves (profile : CIL.FeatureProfile) (callee fuel : Nat) (arg
   have closed : RegionClosed [longExpected profile] suffix := RegionClosed.of_check (by rfl)
   have agrees : AgreesOn [longExpected profile] [longMasked profile] suffix :=
     AgreesOn.set (program := [longExpected profile]) (index := 0) rfl (longMasked profile).code fun _ inside =>
-      code_agrees_of_drop (lower := 3) (by simp [longMasked, longExpected])
+      code_agrees_of_drop (lower := 3) (by simp [longMasked, longExpected, Method.withCode])
         (by simpa [suffix, inStarts] using inside)
   rw [← run_congr_region closed agrees _ _ _ _ _ _ _ (by decide)] at ran
   exact run_refines ((ProgramRefines.refl [longActual profile callee]).set_body (index := 0) rfl

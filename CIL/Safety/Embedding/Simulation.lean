@@ -30,18 +30,20 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
   localKinds : actual.localKinds = expected.localKinds
   opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
   parameterHomes : actual.parameterHomes = expected.parameterHomes
+  declared : actual.declared = expected.declared
+  environment : actual.environment = expected.environment
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
   entry : r 0 = 0
   /-- Each live expected instruction sits relabeled at its renamed pc with the same static
-      descriptor, and an instruction that falls through keeps its successor adjacent. -/
+      descriptor and link, and an instruction that falls through keeps its successor adjacent. -/
   code : ∀ p op, expected.code[p]? = some op → op.live = true →
     actual.code[r p]? = some (op.relabel r) ∧ staticAt actual (r p) = staticAt expected p ∧
-    (op.continues = true → r (p + 1) = r p + 1)
+    actual.linkAt (r p) = expected.linkAt p ∧ (op.continues = true → r (p + 1) = r p + 1)
 
 /-- Every body refines itself under the identity renaming. -/
 theorem BodyRefines.refl (body : Method) : BodyRefines body body id :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
-    fun _ op found _ => ⟨by simp [found, Instruction.relabel_id], rfl, fun _ => rfl⟩⟩
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
+    fun _ op found _ => ⟨by simp [found, Instruction.relabel_id], rfl, rfl, fun _ => rfl⟩⟩
 
 /-- A live instruction at `p` appears in `sites` with its mapped pc and mapped successor. -/
 theorem mem_sites {limit : Nat} {code : List Instruction} {map : List Nat} {start p : Nat}
@@ -89,7 +91,8 @@ theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat}
     (embeds : Embeds expected actual map) :
     BodyRefines expected actual (rename map actual.code.length) := by
   refine ⟨embeds.profile, embeds.returnsValue, embeds.locals, embeds.localKinds,
-    embeds.opaqueVectorLocals, embeds.parameterHomes, embeds.descriptors, embeds.entry, ?_⟩
+    embeds.opaqueVectorLocals, embeds.parameterHomes, embeds.declared,
+    embeds.environment, embeds.descriptors, embeds.entry, ?_⟩
   intro p op found live
   have member := mem_sites (limit := actual.code.length) (map := map) (start := 0) found live
   rw [Nat.zero_add] at member
@@ -100,9 +103,14 @@ theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat}
   rw [dropped, List.map_map] at picked
   have code := List.map_inj_left.mp picked _ member
   have statics := List.map_inj_left.mp embeds.statics _ member
+  -- The reads are the first entry of each table, as `linkAt` gives.
+  have reads := embeds.links
+  rw [Extraction.linkReads_eq, Extraction.linkReads_eq, List.map_map, List.map_map] at reads
+  have link : actual.linkAt (rename map actual.code.length p) = expected.linkAt p :=
+    List.map_inj_left.mp reads _ member
   have flow := List.all_eq_true.mp embeds.flow _ member
   simp only [Bool.or_eq_true, Bool.not_eq_true', beq_iff_eq] at flow
-  refine ⟨code, statics, fun continues => ?_⟩
+  refine ⟨code, statics, link, fun continues => ?_⟩
   rcases flow with stops | next
   · rw [continues] at stops; cases stops
   · exact next
@@ -332,18 +340,20 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
             cases op <;> first
               | rfl
               | (change Except.error (ExecutionFault.unsupported _) = _ at stepped; cases stepped)
-          obtain ⟨code, statics, next⟩ := refined.code pc op decoded live
+          obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
           have actualStep := step_raise op body target (maps method) pc (maps method pc) args
-            frame stack m exception ⟨refined.profile, refined.returnsValue, statics, next⟩ stepped
+            frame stack m exception ⟨refined.profile, refined.returnsValue, refined.declared,
+              refined.environment, statics, link, next⟩ stepped
           simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
           rfl
         | ok action =>
           simp only [stepped, Except.mapError] at h
           have live : op.live = true := by
             cases op <;> first | rfl | exact (step_unsupported stepped).elim
-          obtain ⟨code, statics, next⟩ := refined.code pc op decoded live
+          obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
           have actualStep := step_relabel op body target (maps method) pc (maps method pc) args
-            frame stack m action ⟨refined.profile, refined.returnsValue, statics, next⟩ stepped
+            frame stack m action ⟨refined.profile, refined.returnsValue, refined.declared,
+              refined.environment, statics, link, next⟩ stepped
           simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
           cases action with
           | next target' stack' frame' m' =>

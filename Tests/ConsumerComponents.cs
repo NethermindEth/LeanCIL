@@ -28,6 +28,10 @@ partial class Program
             public static ulong Second(ulong value) => Helper(value) + 2;
             public static ulong Third(ulong value) => Helper(value) + 3;
             public static ulong Fourth(ulong value) => Helper(value) + 4;
+            public static ulong Leaf(ulong value) => value ^ 5UL;
+            public static ulong Wrapped(ulong value) => Leaf(value) + 6;
+            public static ulong ViaWrapped(ulong value) => Wrapped(value) + 7;
+            public static ulong ViaBoth(ulong value) => Wrapped(value) + Helper(value);
             public static ulong Helper(ulong value)
             {
                 BODY
@@ -90,6 +94,7 @@ partial class Program
         var changedCall = SplitExtractionComponents(original.Replace(".call 1 1", ".call 0 1", StringComparison.Ordinal));
         if (changedCall.Sources.Keys.Intersect(first.Sources.Keys).Count() != 2 || changedCall.InputHash == first.InputHash)
             throw new Exception("A changed callee connection retained the caller component or input identity.");
+        CheckCalleeIndexReuse(cli, assembly, directory);
         // A long method raises the emitted recursion depth; a component at another depth would not compile it.
         const string deepOption = "\nset_option maxRecDepth 8192\n";
         var deepened = SplitExtractionComponents(original.Replace("\nset_option maxRecDepth 4096\n", deepOption,
@@ -179,6 +184,29 @@ partial class Program
         {
             foreach (var (name, value) in saved) Environment.SetEnvironmentVariable(name, value);
         }
+    }
+
+    // A component is the text of one method with its names and `.call` indices, so a helper whose callee sits at
+    // another index in a second extraction is not shared: only the header, which holds no program indices, is.
+    // The links a method emits repeat those indices, so they add no dependence the instruction text lacked.
+    static void CheckCalleeIndexReuse(string[] cli, string assembly, string directory)
+    {
+        var requests = new[] { "ViaWrapped", "ViaBoth" }.Select(method =>
+            new GeneratedExtraction(assembly, "Methods::" + method + "(ulong)",
+                Path.Combine(directory, method))).ToArray();
+        ExtractBatch("extract", null, requests, cli[1]);
+        var texts = requests.Select(request => File.ReadAllText(Path.Combine(request.Output, "Extracted.lean")))
+            .ToArray();
+        // Wrapped is method 1 beside ViaWrapped and method 2 beside ViaBoth, and its callee Leaf moves from 2 to 3.
+        if (!texts[0].Contains(".call 2 1", StringComparison.Ordinal) ||
+            !texts[1].Contains(".call 3 1", StringComparison.Ordinal))
+            throw new Exception("The helper's callee did not sit at different indices in the two extractions.");
+        var shared = SplitExtractionComponents(texts[0]).Sources.Keys
+            .Intersect(SplitExtractionComponents(texts[1]).Sources.Keys).ToArray();
+        if (shared.Length != 1)
+            throw new Exception("Expected only the header to be shared when a helper's callee index differs, found " +
+                shared.Length + " shared components.");
+        Console.WriteLine("PASS a helper with a callee at another index shares only the extraction header");
     }
 
     static void CheckConsumerCompilation(string[] cli, string package, string proof, string[] outputs)

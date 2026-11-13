@@ -117,6 +117,13 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
     var address = source.Split('\n').First(line => line.TrimStart().StartsWith(".managed (.address ",
         StringComparison.Ordinal));
     var changedTarget = Regex.Replace(call, @"method := \d+", "method := 999999");
+    // The link definition repeats the catalog, so these two mutations change it too and only the binding can
+    // reject. A change that matched no definition would leave the links check as the only rejection.
+    string Linked(string text, Func<string, string> change)
+    {
+        var linked = ManagedPatterns.LinkDefinition().Replace(text, match => change(match.Value));
+        return linked == text ? throw new Exception("Mutation did not change a link definition") : linked;
+    }
     foreach (var (mutation, theorem, before, after, marker) in new[]
     {
         ("target", "method0_calls_validated", call, changedTarget, "ManagedCallsValid"),
@@ -136,7 +143,13 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         if (before == after || !narrowed.Contains(before, StringComparison.Ordinal))
             throw new Exception("Missing managed mutation: " + mutation);
         var path = Path.Combine(root, "Rejected-" + mutation + ".lean");
-        File.WriteAllText(path, narrowed.Replace(before, after, StringComparison.Ordinal));
+        var mutated = narrowed.Replace(before, after, StringComparison.Ordinal);
+        if (mutation == "target")
+            mutated = Linked(mutated, link => Regex.Replace(link, @"method := \d+", "method := 999999"));
+        if (mutation == "identity")
+            mutated = Linked(mutated, link => link.Replace("Examples.ManagedDispatch", "Examples.ForgedDispatch",
+                StringComparison.Ordinal));
+        File.WriteAllText(path, mutated);
         rejected.Add(path, "PASS exact managed dispatch evidence rejection: " + mutation, marker);
     }
 }
@@ -251,3 +264,11 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 evidence.Check();
 rejected.Check();
+
+/// <summary>The patterns that find generated text to mutate.</summary>
+static partial class ManagedPatterns
+{
+    /// <summary>A link definition of method 0, whose text repeats the catalog of its call site.</summary>
+    [GeneratedRegex(@"(?m)^@\[cil_code\] def method0Link\d+ : Link := .*$")]
+    internal static partial Regex LinkDefinition();
+}

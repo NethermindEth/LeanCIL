@@ -69,7 +69,8 @@ library and tactic regressions kernel-check the resulting proofs.
   opaque vector locals. It checks empty and unmodeled span slots, both mutabilities and every
   supported width. It rejects unsupported widths, scalar span initializers, numeric dead locals
   (in the kernel and in the tactic) and non-trailing dead locals, and reports a changed live
-  instruction under dead locals.
+  instruction under dead locals. It also rejects an embedding whose declared signature,
+  layout environment or call link differs, and names the pc of a differing link.
 - `Tests.OutcomeEmbedding` checks transport of named exceptions and outcome contracts and the
   relocated fault pc, and that changed throws, unsupported execution and fuel exhaustion do not
   transfer.
@@ -212,7 +213,8 @@ every case; the prefix theorem checks the widened value.
   implementation, shows the unlinked program faults at the import's call, and composes an imported
   raising `Percent`.
 - `Tests.Linking` links an `AddTo` library whose entry calls its own relocated `Sum` helper and a
-  `Percent` library whose raise reaches `Root` through two relocated calls.
+  `Percent` library whose raise reaches `Root` through two relocated calls, and checks that relocating a
+  body renames its link table with its code.
 - `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3,
   and carries it to x86-64-v4, to v3 without 256-bit acceleration and to every profile with AVX2
   on. A raising method's outcome contract carries over too, in outcome, CLR-named and

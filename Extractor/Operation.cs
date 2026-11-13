@@ -25,6 +25,12 @@ internal abstract record Operation
     /// <summary>This operation with every method index replaced by <paramref name="map"/> of it.</summary>
     internal virtual Operation Renumber(Func<int, int> map) => this;
 
+    /// <summary>
+    /// The Lean `Link` term the interpreter follows from this instruction, with each callee written as
+    /// <paramref name="calleeName"/> of it; null for an instruction that enters no method.
+    /// </summary>
+    internal virtual string? Link(Func<int, string> calleeName) => null;
+
     internal abstract string Render(Func<int, string> calleeName);
 }
 
@@ -234,6 +240,8 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operatio
 
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
 
+    internal override string? Link(Func<int, string> calleeName) => $".direct {calleeName(Method)}";
+
     internal override string Render(Func<int, string> calleeName) => $"{Name} {calleeName(Method)} {Arguments}";
 
     string Name => Kind switch
@@ -249,6 +257,8 @@ internal sealed record NewAggregate(int Method, int Arguments, int Size) : Opera
 
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
 
+    internal override string? Link(Func<int, string> calleeName) => $".aggregate {calleeName(Method)} {Size}";
+
     internal override string Render(Func<int, string> calleeName) =>
         $".newAggregate {calleeName(Method)} {Arguments} {Size}";
 }
@@ -260,6 +270,9 @@ internal sealed record NewObject(int Method, int Arguments, string Type, ValueLi
     internal override IEnumerable<int> Methods => [Method];
 
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
+
+    internal override string? Link(Func<int, string> calleeName) =>
+        $".object {calleeName(Method)} {LeanText.ClassList(Bases)} {Size}";
 
     internal override string Render(Func<int, string> calleeName) =>
         $".newObject {calleeName(Method)} {Arguments} ({Type}) {LeanText.ClassList(Bases)} {Size}";
@@ -273,11 +286,13 @@ internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets
     internal override Operation Renumber(Func<int, int> map) =>
         this with { Targets = [.. Targets.Select(target => (target.Class, map(target.Method)))] };
 
-    internal override string Render(Func<int, string> calleeName)
-    {
-        var targets = Targets.Select(target => $"({target.Class}, {calleeName(target.Method)})");
-        return $".callVirtual [{string.Join(", ", targets)}] {Arguments}";
-    }
+    internal override string? Link(Func<int, string> calleeName) => $".virtual {Table(calleeName)}";
+
+    internal override string Render(Func<int, string> calleeName) =>
+        $".callVirtual {Table(calleeName)} {Arguments}";
+
+    string Table(Func<int, string> calleeName) => "[" + string.Join(", ",
+        Targets.Select(target => $"({target.Class}, {calleeName(target.Method)})")) + "]";
 }
 
 /// <summary>A boolean read of a runtime feature of the selected profile.</summary>
@@ -462,11 +477,13 @@ internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> C
     internal override Operation Renumber(Func<int, int> map) =>
         this with { Catalog = [.. Catalog.Select(target => target with { Method = map(target.Method) })] };
 
-    protected override string Body(Func<int, string> calleeName)
-    {
-        var targets = string.Join(", ", Catalog.Select(target => target.Lean(calleeName)));
-        return $"(.call {Signature} [{targets}] {LeanText.Bool(Tail)})";
-    }
+    internal override string? Link(Func<int, string> calleeName) => $".indirect {Targets(calleeName)}";
+
+    protected override string Body(Func<int, string> calleeName) =>
+        $"(.call {Signature} {Targets(calleeName)} {LeanText.Bool(Tail)})";
+
+    string Targets(Func<int, string> calleeName) =>
+        "[" + string.Join(", ", Catalog.Select(target => target.Lean(calleeName))) + "]";
 }
 
 /// <summary>The address of the managed method <paramref name="Target"/> of the given signature.</summary>

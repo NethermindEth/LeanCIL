@@ -60,9 +60,64 @@ theorem Instruction.relocate_of_callees_nil (f : Nat → Nat) (op : Instruction)
   case managed operation =>
     cases operation <;> simp_all
 
-/-- Renames the method indices in a body; pcs, locals, profile and static sites are unchanged. -/
+/-- Renames every method index a link enters. -/
+def Link.relocate (f : Nat → Nat) : Link → Link
+  | .direct method => .direct (f method)
+  | .virtual targets => .virtual (targets.map fun (type, method) => (type, f method))
+  | .aggregate constructor size => .aggregate (f constructor) size
+  | .object constructor bases size => .object (f constructor) bases size
+  | .indirect catalog => .indirect (catalog.map (ManagedTarget.relocate f))
+
+/-- A relocated link enters exactly the renamed methods of the original. -/
+theorem Link.callees_relocate (f : Nat → Nat) (link : Link) :
+    (link.relocate f).callees = link.callees.map f := by
+  cases link <;> simp [Link.relocate, Link.callees, List.map_map, Function.comp_def,
+    ManagedTarget.relocate]
+
+#print axioms Link.callees_relocate
+
+/-- Relocating an instruction relocates the link its program index implies. -/
+theorem Instruction.link?_relocate (f : Nat → Nat) (op : Instruction) :
+    (op.relocate f).link? = op.link?.map (Link.relocate f) := by
+  cases op <;> simp [Instruction.relocate, Instruction.link?, Link.relocate]
+  case managed operation =>
+    cases operation <;> simp [Link.relocate]
+
+#print axioms Instruction.link?_relocate
+
+/-- The link table of relocated code is the relocated link table of the code. -/
+theorem linksOfCode_relocate (f : Nat → Nat) (code : List Instruction) :
+    linksOfCode (code.map (Instruction.relocate f)) =
+      (linksOfCode code).map fun entry => (entry.1, entry.2.relocate f) := by
+  have general (code : List Instruction) (start : Nat) :
+      ((code.map (Instruction.relocate f)).zipIdx start).filterMap
+          (fun entry => entry.1.link?.map fun link => (entry.2, link)) =
+        ((code.zipIdx start).filterMap fun entry =>
+          entry.1.link?.map fun link => (entry.2, link)).map
+            fun entry => (entry.1, entry.2.relocate f) := by
+    induction code generalizing start with
+    | nil => rfl
+    | cons op rest ih =>
+      simp only [List.map_cons, List.zipIdx_cons, List.filterMap_cons, ih,
+        Instruction.link?_relocate]
+      cases op.link? <;> simp
+  exact general code 0
+
+#print axioms linksOfCode_relocate
+
+/-- Renames the method indices in a body and its link table; pcs, locals, profile and static
+    sites are unchanged. -/
 def Method.relocate (f : Nat → Nat) (body : Method) : Method :=
-  { body with code := body.code.map (Instruction.relocate f) }
+  { body with code := body.code.map (Instruction.relocate f),
+              links := body.links.map fun entry => (entry.1, entry.2.relocate f) }
+
+/-- Relocating a body whose links are those its code implies keeps them so. -/
+theorem Method.relocate_links_implied (f : Nat → Nat) (method : Method)
+    (implied : method.links = linksOfCode method.code) :
+    (method.relocate f).links = linksOfCode (method.relocate f).code := by
+  simp [Method.relocate, implied, linksOfCode_relocate]
+
+#print axioms Method.relocate_links_implied
 
 end CIL
 

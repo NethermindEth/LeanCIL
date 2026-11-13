@@ -65,7 +65,10 @@ structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL
     Prop where
   profile : actual.profile = expected.profile
   returnsValue : actual.returnsValue = expected.returnsValue
+  declared : actual.declared = expected.declared
+  environment : actual.environment = expected.environment
   statics : staticAt actual q = staticAt expected pc
+  link : actual.linkAt q = expected.linkAt pc
   next : op.continues = true → r (pc + 1) = q + 1
 
 /-- A successful expected step is matched by the relabeled step at the renamed pc. -/

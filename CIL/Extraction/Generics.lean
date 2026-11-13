@@ -1,3 +1,4 @@
+import CIL.CallSite
 import CIL.Extraction.Parameters
 import CIL.Extraction.FlowIndex
 import CIL.Imports
@@ -189,28 +190,6 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256
     else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
   | _ => none
-
-/-- A call target: a method of this module by metadata token, or another assembly's
-    method by its `scope::signature` identity. -/
-inductive MethodId where
-  | managed (token : Nat)
-  | external (identity : String)
-  deriving DecidableEq, Repr
-
-/-- The metadata of a `call` or `newobj` operand, as declared at the call site. -/
-structure CallSite where
-  declaringType : TypeExpr := .void
-  name : String := ""
-  target : MethodId
-  typeArguments : List TypeExpr
-  parameterCount : Nat
-  hasThis : Bool
-  returnsValue : Bool
-  returnType : TypeExpr := .void
-  parameterTypes : List TypeExpr := []
-  /-- The suffix of `typeArguments` belonging to the declaring type, not the method. -/
-  ownerArgumentCount : Nat := 0
-  deriving DecidableEq, Repr
 
 /-- A decoded instruction operand. A field operand names its owner type and the field's
     index in the owner's raw layout. -/
@@ -696,11 +675,13 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
     (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
 
-/-- Every call emitted at a live call site of `raw` binds to the method table or an import
-    slot, and no other instruction emits a call. An external site may instead emit a
-    non-call translation, which other validators check. -/
+/-- The emitted link table is the one the emitted code implies. Every call emitted at a live
+    call site of `raw` binds to the method table or an import slot, and no other instruction
+    emits a call. An external site may instead emit a non-call translation, which other
+    validators check. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
+  emitted.links = linksOfCode emitted.code ∧
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
   all3 (validateManagedCallWith methods.length (FlowIndex.ofList methods).get?
     (FlowIndex.ofList imports).get?) raw.code reachable emitted.code = true
@@ -709,6 +690,7 @@ def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportS
 theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
     (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
     ManagedCallsValid methods imports raw reachable emitted ↔
+      emitted.links = linksOfCode emitted.code ∧
       raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
         all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true := by
   have index {α : Type} (values : List α) :
@@ -724,14 +706,15 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
 instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) :
     Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
 /-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
     Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
 macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | (apply (ManagedCallsValid_iff_original _ _ _ _ _).mpr
-       refine ⟨?_, ?_, ?_⟩
+       refine ⟨?_, ?_, ?_, ?_⟩
+       · decide +kernel
        · rfl
        · rfl
        · simp [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
@@ -746,10 +729,10 @@ theorem validated_managed_call {methods : List SpecializedMethod} {imports : Lis
     validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
       (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
   have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
-  have live : pc.val < reachable.length := valid.1 ▸ pc.isLt
-  have present : pc.val < emitted.code.length := valid.2.1 ▸ pc.isLt
+  have live : pc.val < reachable.length := valid.2.1 ▸ pc.isLt
+  have present : pc.val < emitted.code.length := valid.2.2.1 ▸ pc.isLt
   rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
-  exact all3_at valid.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
+  exact all3_at valid.2.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
     (List.getElem?_eq_getElem present)
 
 /-- An accepted live `call` past every extracted method is an external site calling a slot

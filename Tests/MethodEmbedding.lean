@@ -497,3 +497,170 @@ end DeadLocals
 #guard_msgs (whitespace := lax) in #print axioms numeric_dead_rejected
 
 end Tests.MethodEmbedding
+
+/-! Declared signatures, environments and link tables are embedding fields: an embedding that
+    differs in any of them is rejected, and the diagnostic names the first one. -/
+namespace Tests.MethodEmbedding.Metadata
+
+open CIL
+
+/-- Calls method 1 at pc 1 and enters a virtual table at pc 3. -/
+def caller : Method := {
+  code := [.arg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .ret]
+  locals := [], returnsValue := false }
+
+/-- The pc map of a body onto itself. -/
+private def identityMap : List Nat := [0, 1, 2, 3, 4]
+
+theorem caller_links :
+    linksOfCode caller.code = [(1, .direct 1), (3, .virtual [(.void, 2)])] := rfl
+
+#print axioms caller_links
+
+/-- Only linking instructions have entries, keyed by their pc. -/
+example : linksOfCode [.nop, .call 1 2, .arg 0, .newAggregate 4 0 8, .ret] =
+    [(1, .direct 1), (3, .aggregate 4 8)] := rfl
+
+/-- A table written out in a literal wins over the default. -/
+example : ({ caller with links := [] } : Method).linkAt 1 = none := rfl
+
+/-- The first entry for a pc wins, as in `step`. -/
+example : ({ code := [], locals := [], returnsValue := false, links :=
+    [(2, .direct 5), (2, .direct 6)] } : Method).linkAt 2 = some (.direct 5) := rfl
+
+example : caller.linkAt 0 = none := rfl
+example : caller.linkAt 1 = some (.direct 1) := rfl
+
+/-- Copying a body with new code keeps its table, so a rewrite of the code states its links. -/
+example : ({ caller with code := [] } : Method).links = caller.links := rfl
+
+/-- The declared type of a 32-bit integer parameter. -/
+def int32 : Extraction.TypeExpr := .atom Extraction.runtimeScope "System.Int32"
+
+/-- An instance method's declared types start after `this`. -/
+def instanceSignature : DeclaredSignature := {
+  receiver := some .object, parameters := [int32], returnType := .void }
+
+example : instanceSignature.argumentType 0 = none := rfl
+example : instanceSignature.argumentType 1 = some int32 := rfl
+example : instanceSignature.argumentType 2 = none := rfl
+
+/-- A static method's first argument is its first declared parameter. -/
+example : { instanceSignature with receiver := none }.argumentType 0 =
+    some int32 := rfl
+example : { instanceSignature with receiver := none }.argumentType 1 = none := rfl
+
+theorem caller_embeds : MethodEmbeds [caller] 0 caller := by cil_embed
+
+#print axioms caller_embeds
+
+/-- caller with another declared signature. -/
+private def otherSignature : Method := { caller with declared := instanceSignature }
+/-- caller with other layout tables. -/
+private def otherEnvironment : Method :=
+  { caller with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } }
+/-- caller with another link for its call. -/
+private def otherLink : Method :=
+  { caller with links := [(1, .direct 9), (3, .virtual [(.void, 2)])] }
+
+theorem declared_rejected : ¬ Embeds caller otherSignature identityMap :=
+  fun embedded => absurd embedded.declared (by decide)
+
+theorem environment_rejected : ¬ Embeds caller otherEnvironment identityMap :=
+  fun embedded => absurd embedded.environment (by decide)
+
+theorem links_rejected : ¬ Embeds caller otherLink identityMap :=
+  fun embedded => absurd embedded.links (by decide +kernel)
+
+/-- info: 'Tests.MethodEmbedding.Metadata.declared_rejected' does not depend on any axioms -/
+#guard_msgs in #print axioms declared_rejected
+/-- info: 'Tests.MethodEmbedding.Metadata.environment_rejected' depends on axioms:
+  [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms environment_rejected
+/-- info: 'Tests.MethodEmbedding.Metadata.links_rejected' depends on axioms: [propext] -/
+#guard_msgs in #print axioms links_rejected
+
+/-- The diagnostic of a link difference names the actual pc of the call. -/
+example : (MethodBinding.embedFailure caller otherLink identityMap).map Prod.snd =
+    some (some 1) := by decide +kernel
+
+example : (MethodBinding.embedFailure caller otherSignature identityMap).map Prod.snd =
+    some none := by decide +kernel
+
+example : (MethodBinding.embedFailure caller otherEnvironment identityMap).map Prod.snd =
+    some none := by decide +kernel
+
+example : MethodBinding.embedFailure caller caller identityMap = none := by decide +kernel
+
+/-- A literal that does not bind is told which field differs, and what each side has. -/
+example : (MethodBinding.methodDifferences caller otherSignature).length = 1 := by
+  decide +kernel
+example : (MethodBinding.methodDifferences caller otherEnvironment).length = 1 := by
+  decide +kernel
+example : (MethodBinding.methodDifferences caller otherLink).length = 1 := by decide +kernel
+
+example : (MethodBinding.methodDifferences caller otherSignature).head?.map
+    (·.startsWith "field declared:") = some true := by decide +kernel
+example : (MethodBinding.methodDifferences caller otherEnvironment).head?.map
+    (·.startsWith "field environment:") = some true := by decide +kernel
+example : (MethodBinding.methodDifferences caller otherLink).head?.map
+    (·.startsWith "field links:") = some true := by decide +kernel
+
+/-- What an extraction emits when a dead block puts the call at pc 3. -/
+def moved : Method := {
+  code := [.arg 0, .branch 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret]
+  locals := [], returnsValue := true }
+
+/-- The body a proof uses, with its call at pc 2. `withCode` gives it that pc's link. -/
+def viaWithCode : Method := moved.withCode [.arg 0, .branch 2, .call 1 1, .ret]
+
+/-- The same code through a structure update, which keeps the link table of the call at pc 3. -/
+def viaUpdate : Method := { moved with code := [.arg 0, .branch 2, .call 1 1, .ret] }
+
+theorem with_code_embeds : MethodEmbeds [moved] 0 viaWithCode := by cil_embed
+
+#print axioms with_code_embeds
+
+example : viaWithCode.linkAt 2 = some (.direct 1) := rfl
+example : viaWithCode.linkAt 3 = none := rfl
+example : viaUpdate.linkAt 2 = none := rfl
+
+/-- The update leaves the link at pc 3, so its call has no link and the embedding fails. -/
+theorem update_rejected : ¬ Embeds viaUpdate moved [0, 1, 3, 4] :=
+  fun embedded => absurd embedded.links (by decide +kernel)
+
+#print axioms update_rejected
+
+-- The diagnostic of the rejected update names `withCode`.
+#guard ((MethodBinding.embedFailure viaUpdate moved [0, 1, 3, 4]).map fun failure =>
+    (failure.1.splitOn "withCode").length) == some 2
+
+#guard ((MethodBinding.methodDifferences moved viaWithCode).map fun line =>
+    (line.splitOn "withCode").length) == [1, 2]
+
+/-- A table whose keys do not ascend, with a repeated pc whose first entry wins. -/
+def unsortedTable : List (Nat × Link) := [(3, .direct 1), (1, .direct 2), (3, .direct 9)]
+
+/-- The table takes the scan, since its keys do not ascend. -/
+example : Extraction.linkKeysAscend 0 unsortedTable = false := by decide
+
+/-- The scan answers each query with the first entry for it, in query order. -/
+example : Extraction.linkReads unsortedTable [1, 3, 2] =
+    [some (.direct 2), some (.direct 1), none] := by decide
+
+/-- An ascending table read with decreasing queries, as a map that reorders blocks gives. -/
+example : Extraction.queriesAscend 0 [3, 1, 2] = false := by decide
+
+example : Extraction.linkReads [(1, .direct 2), (3, .direct 1)] [3, 1, 2] =
+    [some (.direct 1), some (.direct 2), none] := by decide
+
+/-- Where the walk applies it answers as the scan does. -/
+example : Extraction.linkReads [(1, .direct 2), (3, .direct 1)] [1, 2, 3] =
+    [1, 2, 3].map (linkLookup [(1, .direct 2), (3, .direct 1)]) := by decide
+
+/-- Whichever branch runs, the reads are the per-query lookups. -/
+example : Extraction.linkReads unsortedTable [1, 3, 2] =
+    [1, 3, 2].map (linkLookup unsortedTable) :=
+  Extraction.linkReads_eq unsortedTable _
+
+end Tests.MethodEmbedding.Metadata

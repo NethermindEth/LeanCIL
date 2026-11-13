@@ -47,14 +47,34 @@ def valueField [BEq T] [Repr T] (field : String) (left right : T) : Option Strin
   if left == right then none
   else some s!"field {field}:\n  left:  {reprStr left}\n  right: {reprStr right}"
 
+/-- The environment difference, without printing the layout tables. -/
+def environmentField (left right : LayoutEnvironment) : Option String :=
+  if left == right then none
+  else some (s!"field environment: the layout tables differ\n" ++
+    s!"  left:  {left.rawLayouts.length} raw layouts, {left.layouts.size} computed\n" ++
+    s!"  right: {right.rawLayouts.length} raw layouts, {right.layouts.size} computed")
+
+/-- What to do when a body's link table differs: a structure update copies the old table. -/
+def linksHint : String :=
+  "\n  a body written as `{ method with code := ... }` keeps the links of `method`, keyed by its \
+    own pcs; build it with `Method.withCode` so its links follow its code"
+
+/-- What to do when a body's static sites differ: `Method.withCode` resets them. -/
+def staticSitesHint : String :=
+  "\n  static sites are keyed by pc; `Method.withCode` resets them, so a body that reads statics \
+    sets `staticSites` after it"
+
 /-- One line per differing `Method` field, in declaration order. -/
 def methodDifferences (left right : Method) : List String :=
   [ valueField "profile" left.profile right.profile,
     listField "code" left.code right.code,
     listField "locals" left.locals right.locals,
     listField "localKinds" left.localKinds right.localKinds,
-    listField "staticSites" left.staticSites right.staticSites,
+    (listField "staticSites" left.staticSites right.staticSites).map (· ++ staticSitesHint),
     listField "parameterHomes" left.parameterHomes right.parameterHomes,
+    valueField "declared" left.declared right.declared,
+    environmentField left.environment right.environment,
+    (listField "links" left.links right.links).map (· ++ linksHint),
     valueField "returnsValue" left.returnsValue right.returnsValue ].filterMap id
 
 /-- The type `CIL.Method` as an expression, for evaluating a side. -/

@@ -1098,7 +1098,7 @@ its result is cached apart from one without it. With `--format json` the goals a
 
 Method and call validation failures name the rejected item and the method containing it. A
 rejected call reports its callee, caller, IL offset and declaring assembly scope. For example, a
-reachable `Environment.ProcessorCount` call is outside the admitted runtime models. Exact closed
+reachable `System.Environment.ProcessorCount` call is outside the admitted runtime models. Exact closed
 `typeof` comparisons are supported; a `GetTypeFromHandle` call outside those patterns is
 unsupported. The diagnostic identifies metadata/CIL validation as the failing stage and links to
 the supported subset.
