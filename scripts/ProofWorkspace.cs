@@ -108,8 +108,8 @@ partial class Program
             throw new InvalidDataException("A different lean-toolchain already pins " + package +
                 "; pass --proof-root for a Lake package on the tool's toolchain.");
         // Lake reads a rewritten requirement on its next run, so pointing it at another library needs no update.
-        var lakefile = $"name = \"{ScratchPackageName}\"\n" + FrameworkRequirement(package, EditorLibrary()) +
-            EditorLibraryDeclaration(EditorSourceDirectory);
+        var lakefile = $"name = \"{ScratchPackageName}\"\n" +
+            FrameworkRequirement(package, EditorLibrary(), pin: true) + EditorLibraryDeclaration(EditorSourceDirectory);
         var lakefilePath = Path.Combine(package, "lakefile.toml");
         if (File.Exists(lakefilePath) && File.ReadAllText(lakefilePath) == lakefile &&
             File.Exists(Path.Combine(package, "lake-manifest.json")))
@@ -151,7 +151,7 @@ partial class Program
         var editorPackage = Path.Combine(root, PinnedEditorPackage);
         Directory.CreateDirectory(editorPackage);
         FrameworkPackage(root, EditorLibrary(),
-            $"\n[[require]]\nname = \"{PinnedEditorPackageName}\"\npath = \"../leancil-editor\"\n");
+            $"\n[[require]]\nname = \"{PinnedEditorPackageName}\"\npath = \"../leancil-editor\"\n", pin: true);
         WriteIfChanged(Path.Combine(editorPackage, "lakefile.toml"),
             $"name = \"{PinnedEditorPackageName}\"\n" + EditorLibraryDeclaration("../leancil"));
         WriteIfChanged(Path.Combine(editorPackage, "lean-toolchain"), File.ReadAllText(At("lean-toolchain")));
