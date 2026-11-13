@@ -42,6 +42,9 @@ internal static partial class Program
         "       leancil bindings catalog.json [--check]\n" +
         "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +
         "[--results results.json]\n" +
+        "       leancil audit-binding extraction-directory --sha256 hex [--assembly-path assembly.dll] " +
+        "[--reference-sha256 Lib=hex]... [--require item,...] [--output directory] " +
+        "[--format text|json] [--results results.json]\n" +
         "       leancil --version";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
@@ -170,6 +173,11 @@ internal static partial class Program
             {
                 stage = "library audit";
                 return global::Program.AuditLibrary(args[1..]);
+            }
+            if (args[0] == "audit-binding")
+            {
+                stage = "binding audit";
+                return global::Program.AuditBinding(args[1..]);
             }
             if (args[0] == "verify")
             {
@@ -485,7 +493,8 @@ internal static partial class Program
         {
             if (rethrow) throw;
             if (exception is CliFailure { Reported: true }) return 1;
-            CliDiagnostics.Write(exception, stage, args[0] is "check" or "verify" or "audit-library");
+            CliDiagnostics.Write(exception, stage,
+                args[0] is "check" or "verify" or "audit-library" or "audit-binding");
             return 1;
         }
         return 0;

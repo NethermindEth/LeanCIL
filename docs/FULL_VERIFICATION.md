@@ -100,8 +100,10 @@ requirement still applies to ongoing or hostile producer processes.
 Reports retain the original conditional caller theorem and add the composed
 theorem and audit, source bundle identities, and `acceptedVia:
 independently-verified`. Metadata and token resolution, the PE container, the extractor's translation of instructions
-outside the checked families and CIL/runtime correspondence remain trust boundaries. These checks establish CIL theorems. They do not establish
-correctness of CoreCLR or a JIT.
+outside the checked families and CIL/runtime correspondence remain trust boundaries of full verification. To reconfirm in the
+kernel that the method bodies of an extraction of a library assembly are the bytes of its DLL, run
+[`leancil audit-binding`](CLI.md#strict-binding-audit) with the digest of that DLL. These checks
+establish CIL theorems. They do not establish correctness of CoreCLR or a JIT.
 
 Imported libraries may depend on each other in any acyclic graph, such as a chain (a caller
 importing A, which imports B) or a diamond (a caller importing A and C, which both import B). A

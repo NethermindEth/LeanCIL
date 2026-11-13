@@ -137,7 +137,7 @@ internal static class VerificationSuites
             "scalar and checked-memory stepping with per-instruction work, proof-size and latency budgets"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
-            "substitution rejection"),
+            "substitution rejection, and the strict binding library and audit"),
         new("pool", "Tests/ItemPool.cs",
             "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
             "they reject"),

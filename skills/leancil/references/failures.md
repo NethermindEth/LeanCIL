@@ -15,7 +15,7 @@ Invalid: Lean could not prove the selected theorem.
   Goals: add --goals to print the goal at each `sorry` and failing tactic.
 ```
 
-`check`, `verify` and `audit-library` start the first line with `Invalid:`; every other command
+`check`, `verify`, `audit-library` and `audit-binding` start the first line with `Invalid:`; every other command
 starts it with `Error:`. Each Lean error cites `file:line:column` in the file you edit, with
 1-based lines and 0-based columns.
 
