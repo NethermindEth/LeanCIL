@@ -302,9 +302,9 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $" Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw" +
             $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
         lean.AppendLine($"theorem method{number}_body_validated :" +
-            $" Extraction.BodyDecodes ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
+            $" Extraction.BodyDecodes assemblies ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
             $" method{number}Original := ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, " +
-            "by cil_kernel_rfl, by cil_body_decodes⟩");
+            "by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩");
     }
 
     static readonly HashSet<Instruction> EmptySet = [];
@@ -373,7 +373,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         return ($"def method{number}Bytes : List Nat := {data}", slices,
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
             $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, " +
-            $"identities := {identities}, tables := method{number}Tables, names := method{number}Names }}",
+            $"identities := {identities}, tables := method{number}Tables, names := method{number}Names, " +
+            $"pinned := {List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity"))} }}",
             identified, $"method{number}_tables_valid");
     }
 
@@ -417,6 +418,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +
                 $"assembly{index}Metadata assembly{index}Identity := ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩");
         }
+        // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
+        var pins = Pinned.Pins.ToArray();
+        for (var k = 0; k < pins.Length; k++)
+            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := {{ identity := {Quote(pins[k].Identity)} }}");
+        lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
+            string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
     }
 
     string DispatchTypes(MethodDefinition method)

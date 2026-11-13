@@ -871,7 +871,7 @@ refuses at once, within a small heartbeat budget, and `decide +kernel` decides. 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
 #guard_msgs (substring := true) in
-example : BodyDecodes scope addEvidence.body addEvidence.original := by decide
+example : BodyDecodes [] scope addEvidence.body addEvidence.original := by decide
 
 set_option maxHeartbeats 20000 in
 /-- error: Tactic `decide` failed to reduce -/
@@ -894,6 +894,6 @@ example : (encodeBody scope addRaw).isSome = true := by decide
 set_option maxHeartbeats 100000 in
 example : (encodeBody scope wideRaw).isSome = true := by decide
 example : (encodeBody scope addRaw).isSome = true := by decide +kernel
-example : BodyDecodes scope addEvidence.body addEvidence.original := by decide +kernel
+example : BodyDecodes [] scope addEvidence.body addEvidence.original := by decide +kernel
 example : MethodEvidenceValid [] #[] [addEvidence] [] addEvidence addMethod := by decide +kernel
 end Tests.ScalarEvidence

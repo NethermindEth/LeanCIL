@@ -75,14 +75,15 @@ def method0Names : Extraction.MethodNames :=
 
 def method0Body : Extraction.BodyEvidence :=
   { bytes := method0Bytes, tokens := { operands := [] }, metadata := method0Metadata,
-              identities := [assembly0Identity], tables := method0Tables, names := method0Names }
+              identities := [assembly0Identity], tables := method0Tables, names := method0Names,
+              pinned := [assembly0Identity] }
 
 /-- The pin of the assembly the method was extracted from. -/
 def pin : AssemblyPin := ⟨"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"⟩
 
-theorem add_body_decodes : BodyDecodes pin method0Body method0Original :=
+theorem add_body_decodes : BodyDecodes [pin] pin method0Body method0Original :=
   ⟨AllIdentified.cons assembly0_identified AllIdentified.nil, by decide +kernel,
-    by cil_kernel_rfl, by cil_kernel_rfl, by decide +kernel⟩
+    by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by decide +kernel⟩
 #print axioms add_body_decodes
 
 set_option maxHeartbeats 20000 in

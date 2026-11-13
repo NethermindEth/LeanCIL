@@ -232,6 +232,25 @@ theorem rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
       (.operandMismatch tokens.boxRef) = true := by decide +kernel
 #print axioms rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
 
+/-- Whether checking an operand against the own slice alone fails with exactly this error, when
+    `Lib` is pinned: its slice is not carried. -/
+private def rejectsWithoutLibSlice (token : Nat) (operand : RawOperand) (error : MetadataError) :
+    Bool :=
+  match (do
+    let env : MetadataEnv := { slices := [← own.1.index], pinned := [bytesOf libScope] }
+    checkEntry env 0 token operand) with
+  | .error found => found == error
+  | .ok _ => false
+
+/-- A reference into a pinned assembly whose slice is left out is refused, not read as a platform
+    type or call. -/
+theorem rejects_a_pinned_assembly_whose_slice_is_missing :
+    rejectsWithoutLibSlice tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.missingSlice tokens.boxRef) = true ∧
+    rejectsWithoutLibSlice tokens.getRef (.call getSite) (.missingSlice tokens.boxRef) = true := by
+  decide +kernel
+#print axioms rejects_a_pinned_assembly_whose_slice_is_missing
+
 /-- The `Lib` slice with a wrong number for its core-library reference. -/
 private def libWithoutCorlib : MetadataSlice := { lib with corlib := 0 }
 

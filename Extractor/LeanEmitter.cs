@@ -264,13 +264,6 @@ internal static class LeanEmitter
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
             }
         }
-        // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
-        PinnedAssemblies.Pin[] pins = pinned.Pins.ToArray();
-        for (var k = 0; k < pins.Length; k++)
-            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := " +
-                $"{{ identity := {JsonSerializer.Serialize(pins[k].Identity)} }}");
-        lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
-            string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
@@ -283,7 +276,7 @@ internal static class LeanEmitter
                 $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
                 $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
                 $"dispatchTypes := method{n}DispatchTypes, " +
-                $"assembly := assembly{pinned.Index(methods[n].Module)} }}")) + "]");
+                $"assembly := assembly{pinned.Index(methods[n].Module)}, pins := assemblies }}")) + "]");
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);
