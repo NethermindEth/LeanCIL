@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -99,9 +100,20 @@ static partial class Documentation
         [.. Enumerable.Range(0, 0x20).Where(value => value is not (9 or 10 or 13)).Select(value => (byte)value)]);
 
     /// <summary>
-    /// One problem per control byte in the text files among <paramref name="tracked"/> (paths relative to the
-    /// root), each read once. A shell that expands a backtick escape writes such a byte into a docstring, and
-    /// git then treats the file as binary.
+    /// Whether a character above ASCII shows nothing, shows as a space or reorders the text around it: a
+    /// format character such as a zero-width space or a bidirectional override, a line or paragraph
+    /// separator, a space other than U+0020, or a control character.
+    /// </summary>
+    static bool IsInvisible(Rune rune) => Rune.GetUnicodeCategory(rune) is UnicodeCategory.Format
+        or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator or UnicodeCategory.SpaceSeparator
+        or UnicodeCategory.Control;
+
+    /// <summary>
+    /// One problem per control byte and per invisible character in the text files among
+    /// <paramref name="tracked"/> (paths relative to the root), each read once. A shell that expands a backtick
+    /// escape writes a control byte into a docstring, and git then treats the file as binary. A reader of a
+    /// diff cannot see an invisible character, and a bidirectional override shows code in another order than
+    /// the compiler reads it; source spells such a character as an escape.
     /// </summary>
     internal static List<string> ControlCharacterProblems(string root, IEnumerable<string> tracked)
     {
@@ -119,6 +131,16 @@ static partial class Documentation
                 problems.Add(
                     $"{relative}:{line}: control byte 0x{bytes[offset]:X2}; text holds only tab and line ends");
                 offset++;
+            }
+            (line, offset) = (1, 0);
+            while (bytes.AsSpan(offset).IndexOfAnyInRange((byte)0x80, (byte)0xFF) is var found and >= 0)
+            {
+                line += bytes.AsSpan(offset, found).Count((byte)'\n');
+                offset += found;
+                Rune.DecodeFromUtf8(bytes.AsSpan(offset), out var rune, out var consumed);
+                if (IsInvisible(rune))
+                    problems.Add($"{relative}:{line}: invisible character U+{rune.Value:X4}; write it as an escape");
+                offset += consumed;
             }
         }
         return problems;

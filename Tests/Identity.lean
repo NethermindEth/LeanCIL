@@ -349,7 +349,7 @@ example : [PrimitiveType.boolean, .char, .sbyte, .byte, .int16, .uint16, .int32,
 -- Escapes in printed text: a backslash, and control, format, separator and non-ASCII space
 -- characters, each of which would otherwise print as nothing or as a space.
 #guard (name!"a\\b").display == "a\\\\b"
-#guard (name!"a​b").display == "a\\u200Bb"
+#guard (name!"a\u200Bb").display == "a\\u200Bb"
 #guard (str!"line\nnext").display == "line\\u000Anext"
 
 /-- info: name!"a\"b\\c" : MetadataName -/
@@ -358,10 +358,10 @@ example : [PrimitiveType.boolean, .char, .sbyte, .byte, .int16, .uint16, .int32,
 
 -- A `#guard_msgs` docstring reads `\uHHHH` of a visible-width character as the character, so
 -- these escapes are pinned on the literal text that `Repr` and the delaborators print.
-#guard reprStr name!"Cc\u0085 Cf‮ Zl  Zp  Zs " ==
+#guard reprStr name!"Cc\u0085 Cf\u202E Zl\u2028 Zp\u2029 Zs\u00A0" ==
   "name!\"Cc\\u0085 Cf\\u202E Zl\\u2028 Zp\\u2029 Zs\\u00A0\""
-#guard (str!"zero\x00width​").literal? == some "\"zero\\u0000width\\u200B\""
-#guard ({ assembly := examples, typeNamespace := name!"N", name := name!"A​" } :
+#guard (str!"zero\x00width\u200B").literal? == some "\"zero\\u0000width\\u200B\""
+#guard ({ assembly := examples, typeNamespace := name!"N", name := name!"A\u200B" } :
   TypeIdentity).text? == some "[Examples,1.0.0.0]N.A\\u200B"
 
 /-- info: str!"tab\u0009zero\u0000next\u0085" : UserString -/

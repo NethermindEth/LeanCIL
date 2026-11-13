@@ -264,6 +264,17 @@ try
     ControlsFail("a NUL on a later line", "def a := 1\n\ndef b := \0\n", "Control.lean:3: control byte 0x00");
     ControlsFail("a backspace after a carriage return", "def a := 1\r\n/-- \b -/\r\n",
         "Control.lean:2: control byte 0x08");
+    // A diff viewer shows none of these, and a bidirectional override shows code in another order.
+    ControlsPass("visible characters above ASCII", "example : a \u2260 b := \u27E8\"\u00E9\", \"\U0001F600\"\u27E9\n");
+    ControlsFail("a zero-width space in a string literal", "def a := 1\ndef b := \"x\u200By\"\n",
+        "Control.lean:2: invisible character U+200B");
+    ControlsFail("a bidirectional override in a comment", "-- \u202E reversed\n",
+        "Control.lean:1: invisible character U+202E");
+    ControlsFail("a no-break space", "def a :=\u00A01\n", "Control.lean:1: invisible character U+00A0");
+    ControlsFail("a line separator", "def a := 1\n\n-- one\u2028two\n", "Control.lean:3: invisible character U+2028");
+    ControlsFail("a byte order mark", "\uFEFFdef a := 1\n", "Control.lean:1: invisible character U+FEFF");
+    ControlsFail("a tag character above U+FFFF", "def a := \"\U000E0041\"\n",
+        "Control.lean:1: invisible character U+E0041");
     Write("Control.bin", "\0");
     Write("Missing.lean", "def a := 1\n");
     File.Delete(Path.Combine(root, "Missing.lean"));
