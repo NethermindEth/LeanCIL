@@ -358,33 +358,40 @@ mutual
 
 /-- Cecil's `FullName` of a type: nested types as `Outer/Inner`, instances as `Head<A,B>`,
     references as `T&`, pointers as `T*`, vectors as `T[]`, parameters as `!n` and `!!n` and
-    modifiers as `T modreq(M)`. A function pointer has no spelling here. -/
-def cecilName : Nat → ResolvedType → Option (List Nat)
+    modifiers as `T modreq(M)`. With `pointers`, a function pointer is `method R *(P,Q)`; its
+    calling convention is not spelled, so an identity compared across methods leaves it out. -/
+def cecilName (pointers : Bool) : Nat → ResolvedType → Option (List Nat)
   | 0, _ => none
   | _ + 1, .primitive code => primitiveName code
   | _ + 1, .named named => some named.name
   | _ + 1, .var index => some (bytesOf "!" ++ decimalDigits 10 index)
   | _ + 1, .mvar index => some (bytesOf "!!" ++ decimalDigits 10 index)
-  | fuel + 1, .byref element => (· ++ [38]) <$> cecilName fuel element
-  | fuel + 1, .pointer element => (· ++ [42]) <$> cecilName fuel element
-  | fuel + 1, .szarray element => (· ++ [91, 93]) <$> cecilName fuel element
+  | fuel + 1, .byref element => (· ++ [38]) <$> cecilName pointers fuel element
+  | fuel + 1, .pointer element => (· ++ [42]) <$> cecilName pointers fuel element
+  | fuel + 1, .szarray element => (· ++ [91, 93]) <$> cecilName pointers fuel element
   | fuel + 1, .genericInst head arguments => do
-    let inner ← cecilNames fuel arguments
+    let inner ← cecilNames pointers fuel arguments
     some (head.name ++ [60] ++ inner ++ [62])
   | fuel + 1, .modified required modifier element => do
-    let spelled ← cecilName fuel element
+    let spelled ← cecilName pointers fuel element
     let marker := bytesOf (if required then " modreq(" else " modopt(")
     some (spelled ++ marker ++ modifier.name ++ [41])
-  | _ + 1, .functionPointer .. => none
+  | fuel + 1, .functionPointer _ result parameters =>
+    if pointers then do
+      let returned ← cecilName pointers fuel result
+      let spelled ← cecilNames pointers fuel parameters
+      -- `method ` and ` *(`
+      some ([109, 101, 116, 104, 111, 100, 32] ++ returned ++ [32, 42, 40] ++ spelled ++ [41])
+    else none
 
 /-- The names of a chain of types, separated by commas. -/
-def cecilNames : Nat → ResolvedList → Option (List Nat)
+def cecilNames (pointers : Bool) : Nat → ResolvedList → Option (List Nat)
   | 0, _ => none
   | _ + 1, .nil => some []
-  | fuel + 1, .cons head .nil => cecilName fuel head
+  | fuel + 1, .cons head .nil => cecilName pointers fuel head
   | fuel + 1, .cons head tail => do
-    let first ← cecilName fuel head
-    let rest ← cecilNames fuel tail
+    let first ← cecilName pointers fuel head
+    let rest ← cecilNames pointers fuel tail
     some (first ++ [44] ++ rest)
 
 end
@@ -407,7 +414,7 @@ def aggregateSpelling (corlib : List Nat) : Nat → ResolvedType → Option (Lis
       -- A value tuple is an aggregate and keeps Cecil's spelling; any other instance outside
       -- the carried slices, such as a vector, spells its arguments with their scopes.
       let inner ← if (bytesOf "System.ValueTuple`").isPrefixOf head.name
-        then cecilNames fuel arguments else aggregateSpellings corlib fuel arguments
+        then cecilNames false fuel arguments else aggregateSpellings corlib fuel arguments
       some (head.scope ++ [58, 58] ++ head.name ++ [60] ++ inner ++ [62])
   | _ + 1, _ => none
 
@@ -612,7 +619,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
           | some corlib => aggregateSpelling corlib fuel (.genericInst head arguments)
           | none => none
         else (fun spelled => head.scope ++ [58, 58] ++ spelled) <$>
-          cecilName fuel (.genericInst head arguments)) == some (bytesOf identity)
+          cecilName false fuel (.genericInst head arguments)) == some (bytesOf identity)
     | .genericInst head arguments, expr => appliedAdmits frame fuel head arguments expr
     | .functionPointer convention result parameters,
         .functionPointer expectedResult expectedParameters expectedConvention hasThis
@@ -623,7 +630,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         chainAdmits frame fuel parameters expectedParameters
     | .modified required modifier element, .atom scope name =>
       bytesOf scope == frame.anchor &&
-        cecilName fuel (.modified required modifier element) == some (bytesOf name)
+        cecilName false fuel (.modified required modifier element) == some (bytesOf name)
     | _, _ => false
 
 /-- A generic instance whose head and arguments the `apply` chain of `expr` repeats. -/
