@@ -351,8 +351,17 @@ open Lean Elab Tactic Meta in
 /-- Whether a loop goal mentions a list operation that `loopStackLemmas` puts in literal form. -/
 def loopMentionsStackOperations : TacticM Bool := withMainContext do
   let operations := [``List.drop, ``List.take, ``List.reverse, ``HAppend.hAppend]
-  return ((← instantiateMVars (← getMainTarget)).find? fun term =>
-    term.constName?.any operations.contains).isSome
+  -- Once the walk uses the record, the terms below which none occurs are remembered, so a long
+  -- walk reads only the terms each step produced.
+  if (← usableNormalNodes).isNone then
+    return ((← instantiateMVars (← getMainTarget)).find? fun term =>
+      term.constName?.any operations.contains).isSome
+  let name := "loopMentionsStackOperations"
+  let known ← normalNodesFor name
+  let (found, (_, clean)) := (cleanWalk (·.constName?.any operations.contains) known
+    (← instantiateMVars (← getMainTarget))).run ({}, #[])
+  recordNormalNodes name clean
+  return found
 
 open Lean Elab Tactic Meta in
 /-- Step a loop goal through fetched instructions with the `facts` as `mode` directs, failing
@@ -363,15 +372,15 @@ open Lean Elab Tactic Meta in
     fact steps. A finishing walk takes its return through `finishReturn`, given the fetched
     return and the facts it reads, or else leaves a return the facts do not close as the goal.
     Returns the opcode the walk stopped at before stepping it, if any. -/
-def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepared : Array Term)
-    (stepped : Bool := false)
-    (finishReturn : Option (LoopFetched → Array Term → TacticM Unit) := none) :
+private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFacts)
+    (prepared : Array Term) (stepped : Bool)
+    (finishReturn : Option (LoopFetched → Array Term → TacticM Unit)) :
     TacticM (Option Lean.Name) := do
   let stackLemmas : Array Term := loopStackLemmas.map fun name => mkIdent (`_root_ ++ name)
   let core := facts.core
   let withStack := core ++ stackLemmas
-  let rewrite ← `(tactic| simp only [$[$core:term],*])
-  let rewriteStack ← `(tactic| simp only [$[$withStack:term],*])
+  let rewrite ← `(tactic| cil_simp_only [$[$core:term],*])
+  let rewriteStack ← `(tactic| cil_simp_only [$[$withStack:term],*])
   let close ← `(tactic| exact CIL.Safety.loop_reaches_refl)
   -- Each group of `LoopFacts.readBy`, once normalised.
   let mut normalised : Array (Option (Array Term)) := #[none, none, none, none]
@@ -405,8 +414,15 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
   let mut taken := 0
   repeat
     if (← getGoals).isEmpty then return none
-    let rewriting := if ← loopMentionsStackOperations then rewriteStack else rewrite
-    if ← attempt rewriting then continue
+    let rewriting := if ← withNormalNodes prepared loopMentionsStackOperations then rewriteStack
+      else rewrite
+    let rewrote ← withNormalNodes prepared do
+      let saved ← saveState
+      -- As for `attempt`: a fact that is no simp lemma fails the rewrite quietly instead of
+      -- logging an error and admitting.
+      try Term.withoutErrToSorry <| withoutRecover <| cilSimpProgress rewriting
+      catch _ => saved.restore; pure false
+    if rewrote then continue
     if let .resume target := mode then
       if taken > 0 || stepped then
         if (← currentPc) == some target then return none
@@ -473,13 +489,23 @@ def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepa
       | _ => `(tactic| (
           apply CIL.Safety.loop_terminates_next $found $instruction
           · cil_checked_step_normalized [$[$reading:term],*]))
-    if ← attempt next then
+    if ← withNormalNodes reading (attempt next) then
       taken := taken + 1
       continue
     if yields op then return some op
     loopStuck tactic facts.all reading yields
     return none
   return none
+
+open Lean Elab Tactic Meta in
+/-- `loopStepsRun` on the record of normal-form nodes of this walk, so that the whole-goal
+    rewrite and the step simplifications leave alone what earlier steps visited and left
+    unchanged. -/
+def loopSteps (tactic : String) (mode : LoopStepping) (facts : LoopFacts) (prepared : Array Term)
+    (stepped : Bool := false)
+    (finishReturn : Option (LoopFetched → Array Term → TacticM Unit) := none) :
+    TacticM (Option Lean.Name) :=
+  withNormalRun (loopStepsRun tactic mode facts prepared stepped finishReturn)
 
 /-- Compose actual fetched instructions until the requested invariant state.
     Fuel is inferred from the path, including NOPs and unconditional branches. The facts are
