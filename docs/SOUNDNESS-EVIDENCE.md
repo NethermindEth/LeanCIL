@@ -92,8 +92,9 @@ extraction, with one slice per assembly it reaches, and each pinned assembly has
 table stream header and `Assembly` row. The `RVA` column of every carried `MethodDef` row is zero: where a
 body sits in the image moves whenever an earlier body changes length, so no method's evidence may depend
 on it. The same holds for `#Strings` and `#Blob` offsets, which move when an earlier name changes length:
-the extractor renumbers them to the order of the carried entries, in the rows and the heap keys, and Lean
-reads a heap entry only through the offset a row names. (`#US` offsets are named by the body's own `ldstr`
+the extractor renumbers them, in the rows and the heap keys, to the rank of each carried entry among the
+carried entries by bytes (the image's own entry order is a hash or suffix sort that one changed name can
+reshuffle), and Lean reads a heap entry only through the offset a row names. (`#US` offsets are named by the body's own `ldstr`
 tokens and stay the image's.) The extractor records each body's address as `bodyAddress` in `identity.json`,
 outside the Lean evidence, for the strict audit. A slice also holds links, each naming for a token the definition it resolves to, its declaring type,
 its `NestedClass` row or its first `GenericParam` row. Lean reads the rows by the widths the header

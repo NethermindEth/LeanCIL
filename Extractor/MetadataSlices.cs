@@ -128,9 +128,33 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         blobs[reader.GetHeapOffset(assembly.PublicKey)] =
             image.SizedEntry(HeapIndex.Blob, reader.GetHeapOffset(assembly.PublicKey));
         var identity = pinned.Original(module).Assembly.Name.FullName;
+        // Numbered by rank in bytes, as the slices' heaps are, so the block does not move with the image's offsets.
+        var row = image.Row(0x20000001);
+        var textWidth = reader.GetHeapSize(HeapIndex.String) > 0xFFFF ? 4 : 2;
+        var blobWidth = reader.GetHeapSize(HeapIndex.Blob) > 0xFFFF ? 4 : 2;
+        var ranked = new SortedDictionary<int, byte[]>[] { [], [] };
+        var numbers = new Dictionary<int, int>[] { new() { [0] = 0 }, new() { [0] = 0 } };
+        foreach (var (heap, source) in new[] { (0, strings), (1, blobs) })
+        {
+            var rank = 1;
+            foreach (var entry in source.Where(entry => entry.Key != 0)
+                         .OrderBy(entry => Convert.ToHexString(entry.Value), StringComparer.Ordinal))
+            {
+                numbers[heap][entry.Key] = rank;
+                ranked[heap][rank++] = entry.Value;
+            }
+            if (source.TryGetValue(0, out var empty)) ranked[heap][0] = empty;
+        }
+        var at = 4 + 8 + 4;
+        foreach (var (heap, width) in new[] { (1, blobWidth), (0, textWidth), (0, textWidth) })
+        {
+            var offset = width == 2 ? BitConverter.ToUInt16(row, at) : (int)BitConverter.ToUInt32(row, at);
+            Array.Copy(BitConverter.GetBytes(numbers[heap][offset]), 0, row, at, width);
+            at += width;
+        }
         return $"{{ identity := {System.Text.Json.JsonSerializer.Serialize(identity)}, " +
-            $"tableHeader := {Bytes(image.TableHeader())}, assemblyRow := {Bytes(image.Row(0x20000001))}, " +
-            $"strings := {Entries(strings)}, blobs := {Entries(blobs)} }}";
+            $"tableHeader := {Bytes(image.TableHeader())}, assemblyRow := {Bytes(row)}, " +
+            $"strings := {Entries(ranked[0])}, blobs := {Entries(ranked[1])} }}";
     }
 
     readonly Dictionary<ModuleDefinition, Collection> collections = [];
@@ -634,10 +658,12 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         }
 
         /// <summary>
-        /// Renumber the <c>#Strings</c> and <c>#Blob</c> offsets to the order of the carried entries, in the rows
-        /// and the heap keys. Lean reads a heap entry only through the offset a row names, so any consistent
-        /// numbering decodes the same rows; the image's own offsets move whenever an earlier name changes
-        /// length, which would change the evidence of every method whose names come after it.
+        /// Renumber the <c>#Strings</c> and <c>#Blob</c> offsets in the rows and the heap keys: the number of a
+        /// carried entry is its rank among the carried entries of its heap by bytes, from 1, and 0 stays 0. Lean
+        /// reads a heap entry only through the offset a row names, so any consistent numbering decodes the same
+        /// rows. The image's own offsets move whenever an earlier name changes length, and its entry order is a
+        /// hash or suffix sort that one changed name can reshuffle, so either would change the evidence of every
+        /// method that merely shares the module; the rank depends only on what the extraction carries.
         /// </summary>
         internal void Canonicalize()
         {
@@ -677,6 +703,22 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             }
             Renumber(strings, textNumbers);
             Renumber(blobs, blobNumbers);
+            RequireRanked(strings, "#Strings");
+            RequireRanked(blobs, "#Blob");
+        }
+
+        /// <summary>The emitted numbering is the rank by bytes; a change back to the image's order stops here.</summary>
+        static void RequireRanked(SortedDictionary<int, byte[]> heap, string name)
+        {
+            var rank = 1;
+            string? previous = null;
+            foreach (var (key, value) in heap.Where(entry => entry.Key != 0))
+            {
+                var hex = Convert.ToHexString(value);
+                if (key != rank++ || previous is not null && string.CompareOrdinal(previous, hex) > 0)
+                    throw new InvalidDataException($"The carried {name} entries are not numbered by their rank in bytes.");
+                previous = hex;
+            }
         }
 
         static void Renumber(SortedDictionary<int, byte[]> heap, Dictionary<int, int> numbers)

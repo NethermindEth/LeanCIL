@@ -4,52 +4,72 @@
 
 using System.Text.RegularExpressions;
 
-// An edit to one method body moves every later body in the image. The evidence of the other methods must not
-// notice: the carried rows have the body address masked and no generated definition holds it, so two builds that
-// differ only in the length of the first method's body emit identical metadata and tables for the second.
+// An edit to one method moves things in the image that other methods' evidence could pick up: a longer body moves
+// every later body, and a changed name moves heap entries, whose order the image fixes by a hash or a suffix sort.
+// The evidence of the other methods must not notice. The fixture has the shape of the workspace test, whose refresh
+// of only the edited method rests on this: a static class, a second one and a struct with a static constructor.
 var directory = At("artifacts/IncrementalEvidence");
-string Build(string name, string firstBody, string firstName = "First")
+string Build(string name, string method, string body)
 {
     var source = Path.Combine(directory, name);
+    // An earlier run's sources would join the build and shift every token.
+    if (Directory.Exists(source)) Directory.Delete(source, true);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Incremental.csproj"), """
         <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
         """);
-    File.WriteAllText(Path.Combine(source, "Incremental.cs"), $$"""
-        public static class Incremental
+    File.WriteAllText(Path.Combine(source, "Arith.cs"), $$"""
+        namespace Workspace;
+        public static class Arith
         {
-            public static ulong {{firstName}}(ulong x) => {{firstBody}};
-            public static ulong Second(ulong x) => x + 2UL;
-            public static ulong Third(ulong x) => x * 3UL;
+            public static ulong {{method}}(ulong x) => {{body}};
+        }
+        """);
+    File.WriteAllText(Path.Combine(source, "Third.cs"), """
+        namespace Workspace;
+        public static class Third
+        {
+            public static ulong Thrice(ulong x) => x + x + x;
+        }
+        """);
+    File.WriteAllText(Path.Combine(source, "Wide.cs"), """
+        namespace Workspace;
+        public readonly struct Wide(ulong u0, ulong u1, ulong u2, ulong u3)
+        {
+            public static readonly Wide Zero = default;
+            public static readonly Wide One = new(1, 0, 0, 0);
+            readonly ulong u0 = u0, u1 = u1, u2 = u2, u3 = u3;
+            public bool IsZeroOrOne => ((u0 >> 1) | u1 | u2 | u3) == 0;
         }
         """);
     Run(["dotnet", "build", Path.Combine(source, "Incremental.csproj"), "-c", "Release"]);
     return Path.Combine(source, "bin/Incremental.dll");
 }
-var short_ = Build("Short", "x + 1UL");
-var long_ = Build("Long", "x + 1UL + 2UL + 3UL + 4UL + 5UL");
-string Evidence(string assembly, string method, string name)
+var baseline = Build("Baseline", "Twice", "x + x");
+var longer = Build("Longer", "Twice", "x + x + x + x + x + x");
+var renamed = Build("Renamed", "Doubled", "x + x");
+string Evidence(string assembly, string selector, string name)
 {
     var output = Path.Combine(directory, name);
-    Run(Extract("extract", assembly, "Incremental", $"Incremental::{method}(ulong)", output));
+    Run([.. Extract("extract", assembly, "Incremental", selector, output), "--assume-initialized", "Workspace.Wide"]);
     var text = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    var lines = Regex.Matches(text, @"(?m)^(?:def module\d+(?:Metadata|Tables) |def method0Body ).*$")
+    var lines = Regex.Matches(text, @"(?m)^(?:def (?:assembly|module)\d+(?:Metadata|Tables) |def method0Body ).*$")
         .Select(match => match.Value).ToArray();
-    if (lines.Length != 3) throw new InvalidOperationException("Expected the module metadata, tables and body: " + name);
+    if (lines.Length != 4)
+        throw new InvalidOperationException("Expected the assembly and module metadata, tables and body: " + name);
     if (Regex.IsMatch(string.Concat(lines), @"\brva\b"))
         throw new InvalidOperationException("Evidence holds a body address: " + name);
     return string.Join('\n', lines);
 }
-// The name of the first method is longer, so every later name moves in the image's #Strings heap.
-var renamed = Build("Renamed", "x + 1UL", "FirstWithAMuchLongerName");
-foreach (var method in new[] { "Second", "Third" })
+foreach (var (method, label) in new[] { ("Workspace.Third::Thrice(ulong)", "Thrice"),
+    ("Workspace.Wide::get_IsZeroOrOne()", "Wide") })
 {
-    var baseline = Evidence(short_, method, "Short" + method);
-    if (baseline != Evidence(long_, method, "Long" + method))
+    var expected = Evidence(baseline, method, "Baseline" + label);
+    if (expected != Evidence(longer, method, "Longer" + label))
         throw new InvalidOperationException(
-            $"Lengthening the body of First changed the evidence of {method}: the incremental refresh would redo it.");
-    if (baseline != Evidence(renamed, method, "Renamed" + method))
+            $"Lengthening Twice changed the evidence of {label}: the incremental refresh would redo it.");
+    if (expected != Evidence(renamed, method, "Renamed" + label))
         throw new InvalidOperationException(
-            $"Renaming First changed the evidence of {method}: heap offsets must not reach the evidence.");
+            $"Renaming Twice changed the evidence of {label}: the image's heap order must not reach the evidence.");
 }
 Console.WriteLine("PASS lengthening or renaming one method leaves the metadata, tables and body evidence of the other methods byte-identical");
