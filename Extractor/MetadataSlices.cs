@@ -379,7 +379,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             if (definition is null && typeReference.FullName is
                     "System.Runtime.CompilerServices.IsExternalInit" or "System.Runtime.InteropServices.InAttribute")
                 return;
-            definition ??= throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
+            if (definition is null)
+                throw new InvalidDataException("Unresolved pinned type: " + typeReference.FullName);
             if (typeReference.Scope is AssemblyNameReference named && named.FullName != definition.Module.Assembly.Name.FullName)
                 throw new InvalidDataException("Unsupported forwarded type: " + typeReference.FullName +
                     " is defined in " + definition.Module.Assembly.Name.FullName + ", not in the assembly that names it.");
