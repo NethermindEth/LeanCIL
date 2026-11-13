@@ -226,12 +226,6 @@ private def isSnapshotOwnName (name : Name) : Bool :=
   [`snapshotAccess, `snapshotRetained, `snapshotHomes, `snapshotSlot, `snapshotBound,
     `snapshotReady].contains name.eraseMacroScopes
 
-/-- Whether `reference` is the home a store found for itself, a variable under the name
-    `snapshotHome` that `prepareSnapshotHome` gives it. -/
-private def isStoreHome (reference : Expr) : MetaM Bool := do
-  let .fvar home := reference | return false
-  return (← home.getDecl).userName.eraseMacroScopes == `snapshotHome
-
 /-- The memory a proved write `write memory reference bytes alignment = .ok after` starts from. -/
 private def snapshotWrittenMemory (writeProof : Expr) : TacticM Expr := do
   let some (_, operation, _) := (← instantiateMVars (← inferType writeProof)).eq?
@@ -249,9 +243,9 @@ private def preserveSnapshotAccess (scope : SnapshotScope) (written : Term) :
     unless accessTerm.isAppOf ``access do continue
     -- Only a fact about the memory the write starts from can be restated.
     unless ← memoryMatches (← argumentAt snapshotReader accessTerm 0) before do continue
-    -- The access a store found for its own home is read by that store alone, so it is dropped
-    -- instead of restated, which would add one fact per store.
-    if ← isStoreHome (← argumentAt snapshotReader accessTerm 1) then
+    -- The access a store found for its own home, a variable the walk introduced, is read by that
+    -- store alone, so it is dropped instead of restated, which would add one fact per store.
+    if ← producedByWalk (← argumentAt snapshotReader accessTerm 1) then
       scope.superseded.modify (·.push declaration.fvarId)
       continue
     let saved ← saveState
@@ -300,18 +294,18 @@ private def preserveSnapshotFacts (scope : SnapshotScope) (written below : Term)
       found.push type.appFn!.appFn!.appFn!.appArg!
     else found
   for declaration in declarationsFrom (← getLCtx) (← memoryWindowStart before) do
+    let type := (← instantiateMVars declaration.type).consumeMData
+    -- The position of the memory a fact is about; only a fact about the memory the write starts
+    -- from is restated.
+    let aboutMemory? : Option Nat :=
+      if type.isAppOfArity ``CompleteWritableHomes 4 || type.isAppOfArity ``ValidCall 3 then
+        some 0
+      else if type.isAppOfArity ``MemoryBelow 3 || type.isAppOfArity ``AccessBelow 3 then
+        some 2
+      else none
+    let some position := aboutMemory? | continue
     let saved ← saveState
     try
-      let type := (← instantiateMVars declaration.type).consumeMData
-      -- The position of the memory a fact is about; only a fact about the memory the write
-      -- starts from is restated.
-      let aboutMemory? : Option Nat :=
-        if type.isAppOfArity ``CompleteWritableHomes 4 || type.isAppOfArity ``ValidCall 3 then
-          some 0
-        else if type.isAppOfArity ``MemoryBelow 3 || type.isAppOfArity ``AccessBelow 3 then
-          some 2
-        else none
-      let some position := aboutMemory? | continue
       unless ← memoryMatches (← argumentAt snapshotReader type position) before do continue
       -- A chain from a memory an earlier store produced adds one fact per store, and a store reads
       -- it only when homes are stated at that memory; the others are not carried.
@@ -440,8 +434,11 @@ private def introWitness (scope : SnapshotScope) (located witness : Ident)
     (conjuncts : Array Ident) : TacticM Unit := do
   let rest := mkIdent (← mkFreshUserName `snapshotRest)
   evalTactic (← `(tactic| refine Exists.elim $located (fun $witness $rest => ?_)))
-  let some carried := (← withMainContext getLCtx).findFromUserName? rest.getId
+  let context ← withMainContext getLCtx
+  let some carried := context.findFromUserName? rest.getId
     | throwError "{snapshotReader}: the store's evidence was not introduced"
+  if let some introduced := context.findFromUserName? witness.getId then
+    recordWalkVariable introduced.fvarId
   introConjuncts carried.toExpr conjuncts
   scope.superseded.modify (·.push carried.fvarId)
   withMainContext do

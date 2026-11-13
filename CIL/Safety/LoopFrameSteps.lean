@@ -143,21 +143,30 @@ def memoryMatches (left right : Expr) : MetaM Bool := do
     if !leftDeclaration.isLet && !rightDeclaration.isLet then return false
   withNewMCtxDepth (isDefEq left right)
 
-/-- Whether `memory` is one a stepping walk produced, a variable that a store names `stored`,
-    `stored_1`, `storedLocal` and so on. A fact at any other memory belongs to the caller. -/
-def producedByWalk (memory : Expr) : MetaM Bool := do
-  let .fvar produced := memory | return false
-  return match (← produced.getDecl).userName.eraseMacroScopes with
-    | .str .anonymous text => text.startsWith "stored"
-    | _ => false
+/-- The variables stepping walks introduced: the memory each store or call produced and the
+    home each snapshot store found. It lives in the environment, so a backtracked step forgets
+    the variables it introduced. -/
+initialize walkVariablesExtension : EnvExtension (PersistentHashSet FVarId) ←
+  registerEnvExtension (pure {}) (asyncMode := .local)
 
-/-- Where the facts about `memory` can start in the context: at the variable a walk made, since
-    every fact about it was introduced after it, and at the start for any other memory. A
-    store that reads only the facts from there reads a number that does not grow with the walk. -/
+/-- Record `introduced` as a variable a stepping walk introduced. -/
+def recordWalkVariable (introduced : FVarId) : CoreM Unit :=
+  modifyEnv fun env => walkVariablesExtension.modifyState env (·.insert introduced)
+
+/-- Whether `term` is a variable a stepping walk introduced, such as the memory a store
+    produced. A fact at any other memory belongs to the caller, whatever its name. -/
+def producedByWalk (term : Expr) : CoreM Bool := do
+  let .fvar introduced := term | return false
+  return (walkVariablesExtension.getState (← getEnv)).contains introduced
+
+/-- Where the facts about `memory` can start in the context: at the variable itself when it has
+    no value, since every fact that mentions it follows it, and at the start otherwise, since a
+    fact may state a let variable's value or another term equal to `memory`. A store that reads
+    only the facts from there reads a number that does not grow with the walk. -/
 def memoryWindowStart (memory : Expr) : MetaM Nat := do
-  if ← producedByWalk memory then
-    if let .fvar produced := memory then return (← produced.getDecl).index
-  return 0
+  let .fvar memoryVariable := memory | return 0
+  let declaration ← memoryVariable.getDecl
+  return if declaration.isLet then 0 else declaration.index
 
 /-- The declarations of `context` from position `start` on, without the implementation details. -/
 def declarationsFrom (context : LocalContext) (start : Nat) : Array LocalDecl := Id.run do
@@ -323,6 +332,9 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   catch _ =>
     saved.restore
     return false
+  withMainContext do
+    if let some produced := (← getLCtx).findFromUserName? after.getId then
+      recordWalkVariable produced.fvarId
   -- The slots stay literal, as the next step's frame states them, so the next gathering finds it.
   evalTactic (← `(tactic| try dsimp only at $framed:ident))
   loopCarryBelow memory below
@@ -590,6 +602,9 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term)
     have $confined:ident := CIL.Safety.CallResult.framed call
     have $returned:ident := CIL.Safety.CallResult.post call
     clear call)))
+  withMainContext do
+    if let some produced := (← getLCtx).findFromUserName? called.getId then
+      recordWalkVariable produced.fvarId
   let unfold : Array Ident := match contract.getAppFn.constName? with
     | some name => #[mkIdent (`_root_ ++ name)]
     | none => #[]

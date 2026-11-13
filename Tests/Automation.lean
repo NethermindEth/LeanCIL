@@ -1674,11 +1674,12 @@ example (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
   exact rfl
 
 open Lean Elab Tactic Meta in
-/-- A loop walk restates a caller buffer fact at the memory a store made and clears the one it
-    restated, and keeps the caller's own fact, which the restatement does not give back. -/
-example (stored entry : Memory) (base : Reference) (x : BitVec 32)
-    (producedFact : Contents stored base 4 [x]) (callerFact : Contents entry base 4 [x]) :
-    True := by
+/-- A loop walk restates a caller buffer fact at a memory the walk introduced and clears the one
+    it restated, and keeps a fact at any other memory, which the restatement does not give back,
+    even one the caller names `stored` as the walk names its own. -/
+example (produced stored entry : Memory) (base : Reference) (x : BitVec 32)
+    (producedFact : Contents produced base 4 [x]) (namedFact : Contents stored base 4 [x])
+    (callerFact : Contents entry base 4 [x]) : True := by
   run_tac withMainContext do
     let count (memory : Name) : TacticM Nat := withMainContext do
       let memory ← elabTerm (mkIdent memory) none
@@ -1686,9 +1687,12 @@ example (stored entry : Memory) (base : Reference) (x : BitVec 32)
         if declaration.type.isAppOf ``Contents &&
             (declaration.type.getAppArgs[0]? == some memory) then found + 1 else found
     let carry : LoopCarried → Ident → TacticM (Option Term) := fun _ fact => pure (some fact)
-    for memory in [`stored, `entry] do
+    recordWalkVariable (← elabTerm (mkIdent `produced) none).fvarId!
+    for memory in [`produced, `stored, `entry] do
       loopCarryFacts (← elabTerm (mkIdent memory) none) carry
-    unless (← count `stored) == 1 do throwError "the fact at the walk's memory was not replaced"
+    unless (← count `produced) == 1 do
+      throwError "the fact at the walk's memory was not replaced"
+    unless (← count `stored) == 2 do throwError "the fact at the memory named stored was cleared"
     unless (← count `entry) == 2 do throwError "the caller's fact was cleared"
   trivial
 

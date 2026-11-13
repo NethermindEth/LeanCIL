@@ -461,7 +461,9 @@ All gather facts as the other loop tactics do, so their lists are optional:
 Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`, `storedBelow`),
 and the tactic restates each `Contents`, `Filled` and `Writable` hypothesis about the stored-over
 memory, or about the caller's, at the new one under the same name, so an invariant reads them at
-the memory it is stated at.
+the memory it is stated at. The restated fact replaces the earlier one when the stored-over memory
+is one the walk introduced; a fact about a memory the theorem or the author introduced stays in
+scope, whatever that memory is named.
 
 [CountCalls](../Examples/Proofs/CountCalls.lean) proves a counted loop this way without unfolding
 the helper or naming its fuel.

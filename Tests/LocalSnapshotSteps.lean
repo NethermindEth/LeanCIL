@@ -733,4 +733,26 @@ theorem entry_facts_stay (memory : Memory) (slots : List LocalSlot) (boundary : 
   trivial
 
 #print axioms entry_facts_stay
+
+/-- A theorem may name its own memory `stored`: the walk clears restated facts only at the
+    memories it introduced, so the caller's facts at that memory stay in scope after two stores,
+    whatever their memory is called. -/
+theorem caller_memory_named_stored (stored : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes stored boundary twoStores.localKinds slots)
+    (inputs outputs : List ArgumentView) (valid : ValidCall stored inputs outputs)
+    (first second : BitVec 64) :
+    WP (Execution (fun fuel => run [twoStores] fuel 0 0
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] stored))
+      (fun _ => True) := by
+  have formed := valid.wellFormed
+  have preserved := MemoryBelow.refl boundary stored
+  have authority := (MemoryBelow.refl stored.nextIdentity stored).accessBelow
+  have snapshots := LocalSnapshots.empty stored slots
+  cil_contract_steps (snapshots := snapshots) []
+  have _ : ValidCall stored inputs outputs := by assumption
+  have _ : CompleteWritableHomes stored boundary twoStores.localKinds slots := by assumption
+  have _ : MemoryBelow boundary stored stored := by assumption
+  trivial
+
+#print axioms caller_memory_named_stored
 end Tests.LocalSnapshotSteps
