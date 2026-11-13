@@ -139,7 +139,7 @@ theorem bodiesBound_nil {images : List PinnedImage}
   unfold bodiesBound
   cases decoded : prepare images with
   | error _ => simp [decoded, ok] at prepared
-  | ok _ => simp [decoded, bind, Except.bind, claimsBound, ok, pure, Except.pure]
+  | ok _ => simp [bind, Except.bind, claimsBound, ok, pure, Except.pure]
 
 #print axioms bodiesBound_nil
 
