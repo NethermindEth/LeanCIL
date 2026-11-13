@@ -1,5 +1,9 @@
 import Tests.FeatureExecution
 import CIL.Safety.SymbolicExecution
+import CIL.Safety.MethodContract
+import CIL.Safety.LoopAutomation
+import CIL.Safety.OutcomeContract
+import CIL.Safety.LocalSnapshotSteps
 import CIL.SIMD.VectorLemmas
 
 namespace Tests.Automation
@@ -1277,12 +1281,16 @@ def sameGoal (steps : TSyntax `tactic) : TacticM Unit := do
       against plain:{indentExpr plain}"
 
 open Lean Elab Tactic in
+/-- Whether a record is active or kept. -/
+def recordIsLeft : TacticM Bool := do
+  let record ← getNormalNodes
+  return record.driven || record.active || !record.nodes.isEmpty || record.equations.covered != 0 ||
+    !record.contexts.isEmpty || !record.others.isEmpty
+
+open Lean Elab Tactic in
 /-- Fails unless no record is active or kept. -/
 def recordIsEmpty : TacticM Unit := do
-  let record ← getNormalNodes
-  unless !record.active && record.nodes.isEmpty && record.equations.isNone &&
-      record.contexts.isEmpty && record.others.isEmpty do
-    throwError "a stepping record outlived its run"
+  if ← recordIsLeft then throwError "a stepping record outlived its run"
 
 /-- Adds two arguments. -/
 @[cil_code] def recordBody : CIL.Method := {
@@ -1372,7 +1380,8 @@ end
 set_option linter.unusedVariables false in
 open Lean Elab Tactic Meta in
 /-- Facts that print alike but state different things are keyed apart, and a record made for one
-    is not used for the other or after a hypothesis is added. -/
+    is not used for the other. A step that only adds hypotheses keeps the record, which a step
+    that rewrites one in place does not. -/
 example (one : (1 : Nat) = 1) (two : (2 : Nat) = 2) : True := by
   run_tac withMainContext do
     -- Unhygienic names, since a quoted `one` would carry a macro scope no hypothesis has.
@@ -1399,6 +1408,13 @@ example (one : (1 : Nat) = 1) (two : (2 : Nat) = 2) : True := by
       remember #[holeSecond]
       unless ← recorded #[holeFirst] do
         throwError "the record of the earlier facts was dropped when a step read other facts"
+      -- Steps that add hypotheses, as stores and calls do, keep what the run recorded.
+      for extra in [`extraOne, `extraTwo] do
+        evalTactic (← `(tactic| have $(mkIdent extra) : True := trivial))
+        unless ← recorded #[holeSecond] do
+          throwError "the record was dropped when a step added the hypothesis {extra}"
+        unless ← recorded #[holeFirst] do
+          throwError "the record of the other facts was dropped when a step added {extra}"
       -- A hypothesis outside the facts, rewritten in place, keeps its name and identity but not
       -- what it states, and a simplification may use it.
       let goal ← getMainGoal
@@ -1407,8 +1423,6 @@ example (one : (1 : Nat) = 1) (two : (2 : Nat) = 2) : True := by
       replaceMainGoal [← goal.replaceLocalDeclDefEq declaration.fvarId
         (← mkEq (mkNatLit 1) sum)]
       if ← recorded #[holeSecond] then throwError "a record was used after a hypothesis changed"
-      evalTactic (← `(tactic| have extra : True := trivial))
-      if ← recorded #[holeSecond] then throwError "a record was used after a hypothesis was added"
     recordIsEmpty
   trivial
 
@@ -1541,6 +1555,167 @@ example : True := by
         recordNormalNodes "probe" clean
         unless (← getNormalNodes).count == clean.size do
           throwError "a node was recorded twice"
+  trivial
+
+set_option linter.unusedVariables false in
+open Lean Elab Tactic Meta in
+/-- Simplifying under a binder opens temporary free variables, and the terms that carry them can
+    never occur again, so the record keeps none of them while it keeps the closed terms. The goal
+    is the one that plain simplification gives. -/
+example (p : Nat → Prop) : True := by
+  run_tac withMainContext do
+    let statement ← `(∀ x : Nat, $(mkIdent `p) (x + 0) ∧ $(mkIdent `p) (2 + 3 + (x + 0)))
+    let context ← getLCtx
+    let mut goals := #[]
+    for record in [true, false] do
+      let goal ← mkFreshExprMVar (← elabTerm statement none)
+      let saved ← getGoals
+      setGoals [goal.mvarId!]
+      withOptions (fun options => cil.stepping.record.set options record) do
+        withNormalRun do
+          withNormalNodes #[] do
+            withMainContext (evalTactic (← `(tactic|
+              cil_try_simp_only [Nat.add_zero, Nat.reduceAdd])))
+          if record then
+            let kept ← getNormalNodes
+            let mut recorded := 0
+            for (_, nodes) in kept.nodes do
+              for node in nodes.toList do
+                recorded := recorded + 1
+                if node.hasAnyFVar (!context.contains ·) then
+                  throwError "a term with a temporary free variable was recorded:{indentExpr node}"
+            if recorded == 0 then throwError "no node was recorded, so the test checks nothing"
+      goals := goals.push (← instantiateMVars (← getMainTarget))
+      setGoals saved
+    unless goals[0]! == goals[1]! do
+      throwError "the record changed the goal:{indentExpr goals[0]!}\n\
+        against:{indentExpr goals[1]!}"
+  trivial
+
+open Lean Elab Tactic Meta in
+/-- Every goal that `steps` leaves, with its hypotheses, as printed text, with the record on or
+    off. Printing makes the comparison independent of the identifiers of fresh variables. The
+    state is restored afterwards. -/
+def steppedGoals (record : Bool) (steps : TSyntax `tactic) : TacticM (Array String) := do
+  let saved ← saveState
+  try
+    withOptions (fun options => cil.stepping.record.set options record) (evalTactic steps)
+    let mut printed := #[]
+    for goal in ← getGoals do
+      printed := printed.push (toString (← withOptions (·.setBool `pp.mvars false) (ppGoal goal)))
+    return printed
+  finally saved.restore
+
+open Lean Elab Tactic in
+/-- Fails unless `steps` leaves the same goals, hypotheses included, with the record and without
+    it. Unless `mayClose`, it also fails when the steps close every goal, since the comparison
+    would check nothing. -/
+def sameGoals (steps : TSyntax `tactic) (mayClose := false) : TacticM Unit := do
+  let recorded ← steppedGoals true steps
+  let plain ← steppedGoals false steps
+  if recorded.isEmpty && !mayClose then
+    throwError "the steps closed every goal, so the test checks nothing"
+  unless recorded == plain do
+    throwError "the record changed the goals:\n{recorded}\nagainst plain:\n{plain}"
+
+/-- A body the loop tactics walk: two operands added, ending in a `nop`. -/
+@[cil_code] def loopRecordBody : CIL.Method := {
+  code := [.arg 0, .arg 1, .add, .nop], locals := [], returnsValue := true }
+
+/-- A body that stores an argument into a numeric local and loads it back. -/
+@[cil_code] def snapshotRecordBody : CIL.Method := {
+  code := [.arg 0, .setLocal 0, .local 0, .ret], locals := [.i64 0],
+  localKinds := [.word64], returnsValue := true }
+
+/-- Contract stepping leaves the goals that plain simplification gives. -/
+example (memory : Memory) (left right : CIL.W64) :
+    WP (Execution (fun fuel => invoke [recordBody] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (left + right))]) := by
+  run_tac sameGoals (← `(tactic| cil_contract_steps 2 []))
+  cil_contract_steps []
+  exact ⟨rfl, rfl⟩
+
+open Lean Elab Tactic Meta in
+/-- Raise stepping leaves the goals that plain simplification gives. -/
+example (memory : Memory) (left right : CIL.W64) (exception : String) : True := by
+  run_tac withMainContext do
+    let original ← getGoals
+    let statement ← `(Raises recordProgram 0 [.scalar (.i64 $(mkIdent `left)),
+      .scalar (.i64 $(mkIdent `right))] $(mkIdent `memory) $(mkIdent `exception))
+    setGoals [(← mkFreshExprMVar (← elabTerm statement none)).mvarId!]
+    sameGoals (← `(tactic| cil_raise_steps []))
+    setGoals original
+  trivial
+
+/-- Loop stepping leaves the goals that plain simplification gives. -/
+example (memory : Memory) (left right : CIL.W64) (frame : Frame) :
+    LoopReaches [loopRecordBody] 0 [.scalar (.i64 left), .scalar (.i64 right)]
+      (LoopState.mk 0 frame [] memory)
+      (LoopState.mk 3 frame [.scalar (.i64 (left + right))] memory) := by
+  run_tac sameGoals (← `(tactic| cil_loop_steps)) (mayClose := true)
+  cil_loop_steps
+
+/-- Snapshot stepping leaves the goals that plain simplification gives, including the
+    hypotheses a store adds and clears. -/
+example (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes memory boundary snapshotRecordBody.localKinds slots)
+    (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
+    (word : BitVec 64) :
+    WP (Execution (fun fuel => run [snapshotRecordBody] fuel 0 0 [.scalar (.i64 word)]
+      ⟨0, slots, [], 0⟩ [] memory)) (fun result => result.2 = [.scalar (.i64 word)]) := by
+  have formed := valid.wellFormed
+  have preserved := MemoryBelow.refl boundary memory
+  have authority := (MemoryBelow.refl memory.nextIdentity memory).accessBelow
+  have snapshots := LocalSnapshots.empty memory slots
+  run_tac sameGoals (← `(tactic| cil_contract_steps (snapshots := snapshots) 2 []))
+  cil_contract_steps (snapshots := snapshots) []
+  exact rfl
+
+open Lean Elab Tactic Meta in
+/-- A step that runs out of heartbeats leaves no record behind. The exception is a runtime
+    exception, which `try` does not catch, so the cleanup must not depend on a handler. -/
+example (memory : Memory) (frame : Frame) (left right : CIL.W64) :
+    run recordProgram 5 0 0 [.scalar (.i64 left), .scalar (.i64 right)] frame [] memory =
+      run recordProgram 3 0 2 [.scalar (.i64 left), .scalar (.i64 right)] frame
+        [.scalar (.i64 right), .scalar (.i64 left)] memory := by
+  run_tac do
+    let saved ← saveState
+    -- The limit is the cost of preparing the facts plus a little, so it is the step that runs out.
+    let started ← IO.getNumHeartbeats
+    evalTactic (← `(tactic| cil_checked_steps 0 []))
+    let preparation := (← IO.getNumHeartbeats) - started
+    saved.restore
+    -- A handler restores the state, which would empty the record, so it is read as the
+    -- exception passes.
+    let left ← IO.mkRef false
+    let exhausted ← tryCatchRuntimeEx
+      (Core.withCurrHeartbeats <| withTheReader Core.Context
+        (fun context => { context with maxHeartbeats := preparation + 20000 }) do
+          tryFinally (do evalTactic (← `(tactic| cil_checked_steps 2 [])); pure false)
+            (do left.set (← recordIsLeft)))
+      (fun exception => if exception.isRuntime then pure true else throw exception)
+    unless exhausted do
+      throwError "the steps did not run out of heartbeats, so the test checks nothing"
+    if ← left.get then throwError "a stepping record outlived the step that ran out of heartbeats"
+    saved.restore
+  cil_checked_steps 2 []
+  all_goals rfl
+
+open Lean Elab Tactic Meta in
+/-- A driver uses the record from its thirteenth step: twelve steps run plainly and build no key,
+    and the thirteenth builds one and records. -/
+example : True := by
+  run_tac do
+    withOptions (fun options => cil.stepping.warmup.set options 12) do
+      withNormalRun do
+        let step : TacticM Bool := withNormalNodes #[] do return (← getNormalNodes).active
+        for count in [:12] do
+          if ← step then throwError "step {count + 1} used the record during the warm-up"
+          unless (← getNormalNodes).key.isNone do
+            throwError "step {count + 1} built a key during the warm-up"
+        unless ← step do throwError "step 13 did not use the record"
+        unless (← getNormalNodes).key.isSome do throwError "step 13 built no key"
   trivial
 
 end Tests.Automation

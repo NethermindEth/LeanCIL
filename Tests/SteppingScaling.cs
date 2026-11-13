@@ -40,7 +40,9 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("accumulate", [16, 64, 256], true), ("accumulate", [1024], false),
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
-    ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false)
+    ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
+    ("hypothesescontract", [16, 64, 256], false), ("hypothesesloop", [16, 64, 256], false),
+    ("snapshots", [10, 20, 40], false)
 };
 foreach (var (workload, sizes, full) in workloads)
     foreach (var requested in sizes)
@@ -71,16 +73,11 @@ File.WriteAllText(reportPath,
 foreach (var workload in rows.GroupBy(row => row.Workload))
 {
     var measurements = workload.OrderBy(row => row.Size).ToArray();
-    if (workload.Key == "hypotheses")
-    {
-        CheckMarginalGrowth(measurements);
-        continue;
-    }
     for (var index = 1; index < measurements.Length; index++)
         CheckGrowth(measurements[index - 1], measurements[index]);
 }
 Console.WriteLine("PASS stepping growth budgets for scalar, memory, accumulate, locals, contract, loop, " +
-    "loopfacts, outcome, lemma, depth and hypotheses bodies; results: " + reportPath);
+    "loopfacts, outcome, lemma, depth, hypotheses and snapshot bodies; results: " + reportPath);
 
 // The instructions that open a body, repeat per cycle and end it. The accumulate, contract, lemma,
 // outcome and loop bodies keep one value on the stack that grows by an operand per cycle, and the
@@ -90,12 +87,34 @@ Console.WriteLine("PASS stepping growth budgets for scalar, memory, accumulate, 
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".arg 0", ".arg 1", ".store64", ".arg 0", ".load64", ".pop"], [".arg 0", ".load64", ".ret"]),
-    "accumulate" or "contract" or "hypotheses" or "lemma" or "outcome" => ([".arg 0"], [".arg 1", ".add"], [".ret"]),
-    "loop" or "loopfacts" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
+    "accumulate" or "contract" or "hypotheses" or "hypothesescontract" or "lemma" or "outcome" =>
+        ([".arg 0"], [".arg 1", ".add"], [".ret"]),
+    "loop" or "loopfacts" or "hypothesesloop" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
     "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".arg 0", $".setLocal {slot}" })
         .ToArray(), [".local 0", ".ret"]),
     _ => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"])
 };
+
+// The numeric locals of the snapshot body; the first stores give each one a remembered value.
+const int SnapshotLocalCount = 8;
+
+// Stores `left` into each local, then updates one local per store from its remembered value, and
+// returns local 0. Both the remembered values and the facts a walk carries grow with the stores.
+static string[] SnapshotOperations(int stores)
+{
+    var operations = new List<string>();
+    for (var local = 0; local < SnapshotLocalCount; local++)
+        operations.AddRange([".arg 0", $".setLocal {local}"]);
+    for (var store = SnapshotLocalCount; store < stores; store++)
+        operations.AddRange([$".local {store % SnapshotLocalCount}", ".arg 1", ".add",
+            $".setLocal {store % SnapshotLocalCount}"]);
+    operations.AddRange([".local 0", ".ret"]);
+    return [.. operations];
+}
+
+// The value local 0 holds at the end of the snapshot body: `left` plus `right` once per update.
+static string SnapshotResult(int stores) =>
+    "left" + string.Concat(Enumerable.Repeat(" + right", (stores - 1) / SnapshotLocalCount));
 
 // The value a stack of `depth` copies of `right` adds up to, associated to the right as `.add` pops them.
 static string DepthSum(int depth) =>
@@ -106,34 +125,103 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var memory = workload == "memory";
     var depth = Math.Max(2, requested / 2);
     var (opening, cycle, ending) = Shape(workload);
-    var cycles = workload == "hypotheses" ? HypothesisBodyCycles
+    var hypotheses = workload.StartsWith("hypotheses");
+    var snapshots = workload == "snapshots";
+    var cycles = hypotheses ? HypothesisBodyCycles
         : workload == "depth" ? depth - 1
+        : snapshots ? requested - SnapshotLocalCount
         : Math.Max(1, (requested - opening.Length - ending.Length) / cycle.Length);
     var operations = workload == "depth"
         ? Enumerable.Repeat(".arg 1", depth).Concat(Enumerable.Repeat(".add", depth - 1)).Append(".ret").ToArray()
+        : snapshots ? SnapshotOperations(requested)
         : opening.Concat(Enumerable.Range(0, cycles).SelectMany(_ => cycle)).Concat(ending).ToArray();
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
     {
-        "contract" or "loop" or "loopfacts" => "import CIL.Safety.MethodContract\nimport CIL.Safety.LoopAutomation\n",
+        "contract" or "loop" or "loopfacts" or "hypothesescontract" or "hypothesesloop" =>
+            "import CIL.Safety.MethodContract\nimport CIL.Safety.LoopAutomation\n",
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
+        "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
         _ => ""
     };
+    var localKinds = string.Join(", ", Enumerable.Repeat(".word64", SnapshotLocalCount));
+    var localValues = string.Join(", ", Enumerable.Repeat(".i64 0", SnapshotLocalCount));
+    var bodyDefinition = snapshots ? $$"""
+        /-- Stores into numeric locals, each later update reading the local's remembered value. -/
+        def body : CIL.Method := {
+          code := [{{string.Join(", ", operations)}}]
+          locals := [{{localValues}}]
+          localKinds := [{{localKinds}}], returnsValue := true }
+        cil_instruction_equations body
+        """ : $$"""
+        /-- A synthetic body in the emitter's explicit instruction-list shape. -/
+        def body : CIL.Method := {
+          locals := [], returnsValue := true,
+          code := [{{string.Join(",\n    ", operations)}}] }
+        cil_instruction_equations body
+        """;
     var header = extraImports + $$"""
         import CIL.InstructionEquations
         import CIL.Safety.LoopFrames
         open CIL.Safety
         set_option maxRecDepth 8192
         set_option maxHeartbeats 800000
-        /-- A synthetic body in the emitter's explicit instruction-list shape. -/
-        def body : CIL.Method := {
-          locals := [], returnsValue := true,
-          code := [{{string.Join(",\n    ", operations)}}] }
-        cil_instruction_equations body
+        {{bodyDefinition}}
         """ + "\n";
+    var hypothesisLines = string.Join("\n", Enumerable.Range(1, hypotheses ? requested : 0).Select(index =>
+        $"  have hypothesis{index} : right + {index} = right + {index} := rfl"));
+    var runningSum = $"left{string.Concat(Enumerable.Repeat(" + right", cycles))}";
+    // The tactic that steps a hypotheses body; the setup measurement replaces it by `sorry`.
+    string HypothesesStatement(bool setup) => workload switch
+    {
+        "hypothesescontract" => $$"""
+            /-- Equations in scope before contract stepping, which it must not scan at each step. -/
+            theorem checked (memory : Memory) (left right : CIL.W64) :
+                WP (Execution (fun fuel => invoke [body] fuel 0
+                  [.scalar (.i64 left), .scalar (.i64 right)] memory))
+                  (fun (final, values) => final = memory /\ values = [.scalar (.i64 ({{runningSum}}))]) := by
+            {{hypothesisLines}}
+              {{(setup ? "sorry" : "cil_contract_steps []\n  exact And.intro rfl rfl")}}
+            """,
+        "hypothesesloop" => $$"""
+            /-- Equations in scope before loop stepping, which it must not scan at each step. -/
+            theorem checked (memory : Memory) (left right : CIL.W64) (frame : Frame) :
+                LoopReaches [body] 0 [.scalar (.i64 left), .scalar (.i64 right)]
+                  (LoopState.mk 0 frame [] memory)
+                  (LoopState.mk {{operations.Length - 1}} frame [.scalar (.i64 ({{runningSum}}))] memory) := by
+            {{hypothesisLines}}
+              {{(setup ? "sorry" : "cil_loop_steps")}}
+            """,
+        _ => $$"""
+            /-- Equations in scope before the run, which stepping must not scan again at each step. -/
+            theorem checked (memory : Memory) (left right : CIL.W64) :
+                invoke [body] {{operations.Length + 1}} 0
+                  [.scalar (.i64 left), .scalar (.i64 right)] memory =
+                  .ok (memory, [.scalar (.i64 ({{runningSum}}))]) := by
+            {{hypothesisLines}}
+              {{(setup ? "sorry" : "cil_checked_steps")}}
+            """
+    };
     var statement = workload switch
     {
+        "hypotheses" or "hypothesescontract" or "hypothesesloop" => HypothesesStatement(false),
+        "snapshots" => $$"""
+            /-- Numeric locals stored and reloaded through snapshots, each store updating one local. -/
+            theorem checked (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
+                (homes : CompleteWritableHomes memory boundary body.localKinds slots)
+                (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
+                (left right : BitVec 64) :
+                WP (Execution (fun fuel => run [body] fuel 0 0
+                  [.scalar (.i64 left), .scalar (.i64 right)] ⟨0, slots, [], 0⟩ [] memory))
+                  (fun result => result.2 = [.scalar (.i64 ({{SnapshotResult(requested)}}))]) := by
+              have formed := valid.wellFormed
+              have preserved := MemoryBelow.refl boundary memory
+              have authority := (MemoryBelow.refl memory.nextIdentity memory).accessBelow
+              have snapshots := LocalSnapshots.empty memory slots
+              cil_contract_steps (snapshots := snapshots) []
+              exact rfl
+            """,
         "memory" => $$"""
             /-- Checked reads and writes advance from reusable operation facts through the full body. -/
             theorem checked (memory : Memory) (target : Reference) (word : CIL.W64)
@@ -209,16 +297,6 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   .ok (memory, [.scalar (.i64 ({{DepthSum(depth)}}))]) := by
               cil_checked_steps
             """,
-        "hypotheses" => $$"""
-            /-- Equations in scope before the run, which stepping must not scan again at each step. -/
-            theorem checked (memory : Memory) (left right : CIL.W64) :
-                invoke [body] {{operations.Length + 1}} 0
-                  [.scalar (.i64 left), .scalar (.i64 right)] memory =
-                  .ok (memory, [.scalar (.i64 (left{{string.Concat(Enumerable.Repeat(" + right", cycles))}}))]) := by
-            {{string.Join("\n", Enumerable.Range(1, requested).Select(index =>
-                $"  have hypothesis{index} : right + {index} = right + {index} := rfl"))}}
-              cil_checked_steps
-            """,
         "locals" => $$"""
             /-- Every cycle replaces all eight reference locals of a literal frame. -/
             theorem checked (memory : Memory) (target : ManagedReference) (activation : Nat)
@@ -255,8 +333,11 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         throw new InvalidOperationException("Stepping work did not repeat exactly for " + module);
     var proofBytes = baseline is null ? 0 : samples[0].Bytes - baseline.Bytes;
     if (full && proofBytes <= 0) throw new InvalidOperationException("Missing compiled proof bytes for " + module);
+    // Elaborating each hypothesis costs the same with or without stepping, so the same statement
+    // with `sorry` for the stepping tactic is measured and subtracted.
+    var setup = hypotheses ? SetupCost(module, header, HypothesesStatement(true)) : (0L, 0L);
     var row = new SteppingMeasurement(workload, operations.Length, cycles, memory ? 2 * cycles + 1 : 0,
-        commands[0].Heartbeats, commands[0].KernelHeartbeats, proofBytes,
+        commands[0].Heartbeats - setup.Item1, commands[0].KernelHeartbeats - setup.Item2, proofBytes,
         Median(commands.Select(command => command.ElapsedMs)), Median(commands.Select(command => command.KernelMs)),
         Median(samples.Select(sample => sample.Commands.Sum(command => command.ElapsedMs))),
         samples.Select(sample => sample.ProcessMs).ToArray(), baseline?.ProcessMs ?? 0)
@@ -273,6 +354,17 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         $"{row.KernelHeartbeatsPerInstruction:F0} kernel HB, {row.ProofBytesPerInstruction:F0} proof bytes, " +
         $"{row.FrontendMsPerInstruction:F2} frontend ms per instruction"));
     return row;
+}
+
+// Heartbeats of the statement `statement` without stepping, as its frontend and kernel work.
+(long Frontend, long Kernel) SetupCost(string module, string header, string statement)
+{
+    var setupModule = module + "Setup";
+    var setupPath = Path.Combine(directory, setupModule + ".lean");
+    File.WriteAllText(setupPath, header + statement + "\n");
+    var sample = Compile(setupModule, setupPath, "setup");
+    var command = sample.Commands.Single(command => command.Label == "checked");
+    return (command.Heartbeats, command.KernelHeartbeats);
 }
 
 CompiledSample Compile(string module, string source, string suffix)
@@ -317,26 +409,8 @@ static void CheckGrowth(SteppingMeasurement shorter, SteppingMeasurement longer)
         if (before <= 0 || after / before > budget)
             throw new InvalidOperationException(string.Create(System.Globalization.CultureInfo.InvariantCulture, 
                 $"{longer.Workload} {metric}/instruction grew from {before:F3} to {after:F3} " +
-                $"between {shorter.Instructions} and {longer.Instructions} instructions; budget {budget:F2}."));
-    }
-}
-
-// The cost of one more hypothesis in scope may not grow with the number already there: a step
-// that scans the context costs a fixed amount per hypothesis, one that compares each hypothesis
-// with every other costs more per hypothesis the more there are.
-static void CheckMarginalGrowth(SteppingMeasurement[] measurements)
-{
-    double Marginal(SteppingMeasurement shorter, SteppingMeasurement longer) =>
-        (double)(longer.FrontendHeartbeats - shorter.FrontendHeartbeats) / (longer.Size - shorter.Size);
-    for (var index = 2; index < measurements.Length; index++)
-    {
-        var before = Marginal(measurements[index - 2], measurements[index - 1]);
-        var after = Marginal(measurements[index - 1], measurements[index]);
-        if (before <= 0 || after / before > WorkGrowthLimit)
-            throw new InvalidOperationException(string.Create(System.Globalization.CultureInfo.InvariantCulture,
-                $"{measurements[index].Workload} heartbeats per added hypothesis grew from {before:F0} to " +
-                $"{after:F0} between {measurements[index - 1].Size} and {measurements[index].Size} " +
-                $"hypotheses; budget {WorkGrowthLimit:F2}."));
+                $"between sizes {shorter.Size} and {longer.Size} ({shorter.Instructions} and " +
+                $"{longer.Instructions} instructions); budget {budget:F2}."));
     }
 }
 
@@ -355,18 +429,18 @@ static void ScalingChecks()
         catch (InvalidOperationException) { continue; }
         throw new InvalidOperationException("Scaling budget accepted a quadratic work mutant.");
     }
-    var scanned = new[] { 16, 64, 256 }.Select(size => baseline with { Size = size,
-        FrontendHeartbeats = 1_000_000 + 1000L * size }).ToArray();
-    CheckMarginalGrowth(scanned);
-    var compared = new[] { 16, 64, 256 }.Select(size => baseline with { Size = size,
-        FrontendHeartbeats = 1_000_000 + 1000L * size * size / 16 }).ToArray();
-    try { CheckMarginalGrowth(compared); }
+    // With the same instructions at every size, per-instruction cost must stay flat in the size: a
+    // step that scans each hypothesis in scope grows with it.
+    var flat = baseline with { Size = 256, FrontendHeartbeats = 17000, KernelHeartbeats = 1700 };
+    CheckGrowth(baseline with { Size = 16 }, flat);
+    var scanning = flat with { FrontendHeartbeats = 24000 };
+    try { CheckGrowth(baseline with { Size = 16 }, scanning); }
     catch (InvalidOperationException)
     {
         Console.WriteLine("PASS stepping budgets accept linear work and reject each quadratic metric");
         return;
     }
-    throw new InvalidOperationException("The hypothesis budget accepted a quadratic mutant.");
+    throw new InvalidOperationException("The hypothesis budget accepted a cost that grows with the hypotheses.");
 }
 
 internal sealed record CommandSample(string Label, long Heartbeats, long KernelHeartbeats,

@@ -174,7 +174,8 @@ dotnet run --file scripts/Test.cs -- --suite stepping
 ```
 
 The `stepping` suite generates explicit scalar, checked-memory, accumulate, locals, contract,
-loop, loop-facts, outcome, lemma, depth and hypotheses bodies and proves each end to end. The
+loop, loop-facts, outcome, lemma, depth, hypotheses and snapshot bodies and proves each end to
+end. The
 scalar, memory, accumulate and locals bodies have 16, 64 and 256 instructions, and the accumulate
 body also 1,024. The memory bodies repeat an idempotent checked store and reload, so the
 operation facts stay constant as the instruction count grows. The accumulate, contract, loop,
@@ -185,17 +186,21 @@ the context that every instruction reads, the outcome body by `cil_loop_outcome_
 lemma body by `cil_checked_steps` with a universe-polymorphic lemma among its facts. The locals
 bodies store a
 reference into each of eight locals of a literal frame per cycle. The depth bodies push 8, 32 and
-128 values and add them all. The hypotheses body is a 62-instruction accumulate body proved with 16,
-64 and 256 equations in scope. The suite uses the proof-cost measuring frontend, with three
+128 values and add them all. The hypotheses bodies are 62-instruction accumulate, contract and loop
+bodies proved with 16, 64 and 256 equations in scope. The snapshot bodies store into eight numeric
+locals and then update one local per store from its remembered value, with 10, 20 and 40 stores,
+proved by `cil_contract_steps (snapshots := ..)` with caller memory facts in the context. The
+suite uses the proof-cost measuring frontend, with three
 sequential proof compilations and a header-only baseline per scalar, memory, accumulate and locals
 body up to 256 instructions, and one compilation for every other body.
 
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. For the bodies with three compilations, compiled proof bytes per instruction may
   also grow by at most 1.35 times, and median frontend milliseconds by at most twice.
-- The heartbeats a hypothesis adds may not grow by more than 1.35 times from the step between
-  16 and 64 hypotheses to the step between 64 and 256, which a step that compares each hypothesis
-  with every other would exceed.
+- For the hypotheses bodies the sizes are the numbers of hypotheses, and the heartbeats counted
+  are those of the proof less those of the same statement closed by `sorry`, so that elaborating
+  the hypotheses does not count as stepping. The same limit applies, so a step that scans or
+  compares the hypotheses in scope fails it.
 - Heartbeats and bytes must repeat exactly across the three runs.
 - Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
   recheck. Compiled proof bytes subtract the same module containing only the body and its lookup
