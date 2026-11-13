@@ -536,4 +536,12 @@ theorem refuses_each_refused_pairing :
     refusedPairings.all (fun (type, expr) => !pairFrame.admits type expr) = true := by
   decide +kernel
 #print axioms refuses_each_refused_pairing
+
+/-- A method parameter past the method's arity is refused, so it cannot be read as the owner
+    parameter whose extractor index it shares. -/
+theorem refuses_a_method_parameter_past_the_arity :
+    !pairFrame.admits (.mvar 1) (.parameter 1) && pairFrame.admits (.var 0) (.parameter 1) &&
+      pairFrame.admits (.mvar 0) (.parameter 0) := by
+  decide +kernel
+#print axioms refuses_a_method_parameter_past_the_arity
 end Tests.MetadataBinding
