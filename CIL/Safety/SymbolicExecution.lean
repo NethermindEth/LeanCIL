@@ -127,9 +127,8 @@ elab "cil_have_by " name:ident " := " term:term : tactic => withMainContext do
   let (proof, pending) ← elabTermRunningBlocks term.raw none
   unless pending.isEmpty do throwError "cil_have_by: the term leaves goals"
   let proof ← instantiateMVars proof
-  let (_, goal) ← (← (← getMainGoal).assert name.getId (← instantiateMVars (← inferType proof))
-    proof).intro1P
-  replaceMainGoal [goal]
+  let type ← instantiateMVars (← inferType proof)
+  replaceMainGoal [(← addFact (← getMainGoal) name.getId type proof).2]
 
 open Lean Elab Tactic Meta in
 /-- `have name : type := by steps`, with the steps run as a tactic on a goal of their own. -/
@@ -140,8 +139,7 @@ elab "cil_have_proved " name:ident " : " type:term " := " "by " steps:tacticSeq 
   let unsolved ← Tactic.run hole.mvarId! (evalTactic steps)
   unless unsolved.isEmpty do
     throwError "cil_have_proved: the proof left goals{goalsToMessageData unsolved}"
-  let (_, goal) ← (← (← getMainGoal).assert name.getId statement (← instantiateMVars hole)).intro1P
-  replaceMainGoal [goal]
+  replaceMainGoal [(← addFact (← getMainGoal) name.getId statement (← instantiateMVars hole)).2]
 
 /-- The projections of a method contract that stepping unfolds in a goal: its argument and
     result encodings, precondition, footprint and postcondition. -/
@@ -402,8 +400,7 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
             | some eq => mkEqMP eq instanceProof
             | none => mkExpectedTypeHint instanceProof result.expr
           let name ← mkFreshUserName base
-          let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
-          replaceMainGoal [goal]
+          replaceMainGoal [(← addFact (← getMainGoal) name result.expr normalisedProof).2]
           names := names.push (mkIdent name)
       return names
     if !locals.isEmpty then

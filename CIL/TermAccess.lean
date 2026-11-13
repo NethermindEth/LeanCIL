@@ -8,7 +8,8 @@ arrays through these accessors. Core's `xs[i]!`, `Expr.getArg!`, `Expr.appArg!` 
 `Expr.appFn!` return a default value after printing a panic if the term has an unexpected
 shape; the caller then continues with that value. Each accessor here either reports
 the absent part as `none`, for code that probes a term's shape, or fails with an error naming
-its reader and the term, for code that has committed to a shape.
+its reader and the term, for code that has committed to a shape. `addFact` adds a proved
+hypothesis to a goal for the tactics that restate facts at each step.
 -/
 
 namespace CIL
@@ -101,5 +102,20 @@ def firstUnusedSuffix (context : LocalContext) (bases : Array String) : Nat := I
   while used.contains index do
     index := index + 1
   return index
+
+open Meta in
+/-- Adds the hypothesis `name : type`, proved by `proof`, to `goal`, and returns it with the goal
+    that follows. The proof term applies `fun name => rest` to `proof`, so `proof` occurs once.
+    `assert` followed by `intro` gives the same goal, but instantiating it substitutes `proof` for
+    each use of the hypothesis; a fact restated from the previous one at every step then carries
+    every earlier proof, under a different number of binders each time, so the term of a walk
+    grows with the square of its steps. -/
+def addFact (goal : MVarId) (name : Name) (type proof : Expr) : MetaM (FVarId × MVarId) :=
+  goal.withContext do
+    let target ← goal.getType
+    withLocalDeclD name type fun fact => do
+      let rest ← mkFreshExprSyntheticOpaqueMVar target (← goal.getTag)
+      goal.assign (mkApp (← mkLambdaFVars #[fact] rest) proof)
+      return (fact.fvarId!, rest.mvarId!)
 
 end CIL

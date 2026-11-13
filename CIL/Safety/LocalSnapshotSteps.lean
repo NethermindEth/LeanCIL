@@ -217,8 +217,7 @@ private def assertSnapshotFact (scope : SnapshotScope) (base : Name) (proof : Ex
       else none
     if let some present := present? then return ← Term.exprToSyntax present.toExpr
   let name ← if named then pure base else mkFreshUserName base
-  let (_, goal) ← (← (← getMainGoal).assert name type proof).intro1P
-  replaceMainGoal [goal]
+  replaceMainGoal [(← addFact (← getMainGoal) name type proof).2]
   return mkIdent name
 
 /-- Whether a hypothesis of this name is one a store made for itself, so that no supplied fact
@@ -431,8 +430,7 @@ private def introConjuncts (proof : Expr) (names : Array Ident) : TacticM Unit :
     let last := position + 1 == names.size
     let component ← if last then pure rest else mkAppM ``And.left #[rest]
     let name := names[position]!
-    let (_, goal) ← (← (← getMainGoal).assert name.getId (← inferType component) component).intro1P
-    replaceMainGoal [goal]
+    replaceMainGoal [(← addFact (← getMainGoal) name.getId (← inferType component) component).2]
     unless last do rest ← mkAppM ``And.right #[rest]
 
 /-- Introduces the witness and the conjuncts of the hypothesis `located : ∃ witness, a ∧ b ∧ c`,
@@ -681,13 +679,18 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
       evalTactic (← `(tactic| cil_have_by $located := $(← Term.exprToSyntax proof)))
       introWitness scope located after #[taken, updated, formed, below, retained, written]
       pure (taken : Term)
-  -- The remembered value is stated as the value a load pushes, not as its `localResult`.
+  -- The remembered value is stated as the value a load pushes, not as its `localResult`. Only
+  -- this store's value is restated: rebuilding the earlier updates would copy each of them again.
   withMainContext do
     if let some declaration := (← getLCtx).findFromUserName? updated.getId then
       let stated ← instantiateMVars declaration.type
-      let reduced ← reduceLocalResults stated
-      unless reduced == stated do
-        replaceMainGoal [← (← getMainGoal).replaceLocalDeclDefEq declaration.fvarId reduced]
+      if let some #[produced, slots, chain] := argumentsOf? stated ``LocalSnapshots 3 then
+        if let some #[known, slot, remembered] := argumentsOf? chain ``rememberLocal 3 then
+          let reduced ← reduceLocalResults remembered
+          unless reduced == remembered do
+            let restated := mkApp3 stated.getAppFn produced slots
+              (mkApp3 chain.getAppFn known slot reduced)
+            replaceMainGoal [← (← getMainGoal).replaceLocalDeclDefEq declaration.fvarId restated]
   preserveSnapshotAccess scope written
   if automatic then
     preserveSnapshotFacts scope written below
