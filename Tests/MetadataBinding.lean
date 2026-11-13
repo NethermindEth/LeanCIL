@@ -412,4 +412,128 @@ theorem accepts_the_row_rewritten_with_its_own_flags :
       | .ok _ => true
       | .error _ => false) = true := by decide +kernel
 #print axioms accepts_the_row_rewritten_with_its_own_flags
+
+/-! ## Which extractor types name a resolved type -/
+
+/-- A frame whose primitive assembly is `C`, whose modified types are anchored at `A`, and whose
+    method has one generic parameter. -/
+private def pairFrame : Frame :=
+  { corlib := some (bytesOf "C"), anchor := bytesOf "A", arity := 1 }
+
+/-- The type `name` of scope `scope` with the given kind. -/
+private def namedIn (scope name : String) (kind : TypeKind) (pinned := false) : NamedType :=
+  { scope := bytesOf scope, name := bytesOf name, parts := [], kind := kind, pinned := pinned }
+
+/-- `System.Int32` of the primitive assembly. -/
+private def int32Atom : TypeExpr := .atom "C" "System.Int32"
+
+/-- `L.G<int>`, with `L.G` of the given kind and pinning. -/
+private def instanceOf (kind : TypeKind) (pinned := false) : ResolvedType :=
+  .genericInst (namedIn "L" "G`1" kind pinned) (.cons (.primitive 8) .nil)
+
+/-- One pairing for each way `typeAdmits` accepts, by resolved and extractor constructor. -/
+private def acceptedPairings : List (ResolvedType × TypeExpr) := [
+  -- Primitives: `void`, an atom of the primitive assembly, and a string as an object.
+  (.primitive 1, .void), (.primitive 8, int32Atom),
+  (.primitive 0x0E, .atom "C" "System.String"), (.primitive 0x1C, .atom "C" "System.Object"),
+  (.primitive 0x0E, .object "C" "System.String"),
+  -- Named types: an atom unless a carried enum, an object if class-like, an aggregate if
+  -- value-like, and an enum over the carried underlying type or, outside, any integer atom.
+  (.named (namedIn "L" "N" .valueType), .atom "L" "N"),
+  (.named (namedIn "L" "N" .classType), .atom "L" "N"),
+  (.named (namedIn "L" "N" (.external none)), .atom "L" "N"),
+  (.named (namedIn "L" "N" .classType), .object "L" "N"),
+  (.named (namedIn "L" "N" .interfaceType), .object "L" "N"),
+  (.named (namedIn "L" "N" (.external (some false))), .object "L" "N"),
+  (.named (namedIn "L" "N" (.external none)), .object "L" "N"),
+  (.named (namedIn "L" "N" .valueType), .aggregate "L::N" 0),
+  (.named (namedIn "L" "N" (.external (some true))), .aggregate "L::N" 0),
+  (.named (namedIn "L" "N" (.external none)), .aggregate "L::N" 0),
+  (.named (namedIn "L" "E" (.enumType 8)), .enum "L::E" int32Atom),
+  (.named (namedIn "L" "E" (.external none)), .enum "L::E" (.atom "C" "System.Byte")),
+  (.named (namedIn "L" "E" (.external none)), .enum "L::E" int32Atom),
+  -- Generic parameters: the method's first, then the owner's.
+  (.mvar 0, .parameter 0), (.var 0, .parameter 1),
+  -- Element types, element by element.
+  (.byref (.primitive 8), .byref int32Atom), (.pointer (.primitive 8), .pointer int32Atom),
+  (.szarray (.primitive 8), .array int32Atom),
+  -- Instances: a value-like one as an aggregate, its arguments scoped when the head is
+  -- carried, and any instance as an `apply` chain.
+  (instanceOf .valueType, .aggregate "L::G`1<System.Int32>" 0),
+  (instanceOf .valueType true, .aggregate "L::G`1<C::System.Int32>" 0),
+  (instanceOf .classType, .apply (.constructor "L" "G`1") int32Atom),
+  (instanceOf .valueType, .apply (.constructor "L" "G`1") int32Atom),
+  -- Function pointers, with the calling convention and receiver flags.
+  (.functionPointer 0 (.primitive 8) (.cons (.primitive 8) .nil),
+    .functionPointer int32Atom (.signatureParameter int32Atom .void) 0 false false),
+  (.functionPointer 0x20 (.primitive 8) .nil, .functionPointer int32Atom .void 0 true false),
+  -- A modified type as an atom of the anchor, spelled with its modifier.
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .atom "A" "System.Int32 modreq(Mod)"),
+  (.modified false (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .atom "A" "System.Int32 modopt(Mod)")]
+
+/-- For each accepting arm, a pairing that changes the scope, the name, the kind, the index, the
+    element, the convention or the constructor; and pairings of constructors no arm relates. -/
+private def refusedPairings : List (ResolvedType × TypeExpr) := [
+  -- Primitives.
+  (.primitive 8, .void), (.primitive 1, .atom "C" "System.Void"),
+  (.primitive 8, .atom "D" "System.Int32"), (.primitive 8, .atom "C" "System.UInt32"),
+  (.primitive 0x0E, .object "C" "System.Object"), (.primitive 0x1C, .object "C" "System.Object"),
+  (.primitive 8, .object "C" "System.Int32"), (.primitive 8, .enum "C::System.Int32" int32Atom),
+  -- Named types.
+  (.named (namedIn "L" "N" .valueType), .atom "L" "M"),
+  (.named (namedIn "L" "N" .valueType), .atom "K" "N"),
+  (.named (namedIn "L" "N" (.enumType 8)), .atom "L" "N"),
+  (.named (namedIn "L" "N" .valueType), .object "L" "N"),
+  (.named (namedIn "L" "N" (.external (some true))), .object "L" "N"),
+  (.named (namedIn "L" "N" .classType), .aggregate "L::N" 0),
+  (.named (namedIn "L" "N" (.external (some false))), .aggregate "L::N" 0),
+  (.named (namedIn "L" "N" .valueType), .aggregate "L::M" 0),
+  (.named (namedIn "L" "E" (.enumType 8)), .enum "L::E" (.atom "C" "System.Int64")),
+  (.named (namedIn "L" "E" (.external none)), .enum "L::E" (.atom "C" "System.Single")),
+  (.named (namedIn "L" "E" .classType), .enum "L::E" int32Atom),
+  (.named (namedIn "L" "E" (.external (some false))), .enum "L::E" int32Atom),
+  (.named (namedIn "L" "N" .valueType), .constructor "L" "N"),
+  (.named (namedIn "L" "N" .valueType), .parameter 0),
+  -- Generic parameters.
+  (.var 0, .parameter 0), (.mvar 0, .parameter 1), (.primitive 8, .parameter 0),
+  (.var 0, int32Atom),
+  -- Element types.
+  (.byref (.primitive 8), .pointer int32Atom), (.byref (.primitive 8), .array int32Atom),
+  (.pointer (.primitive 8), .byref int32Atom), (.szarray (.primitive 8), .pointer int32Atom),
+  (.byref (.primitive 9), .byref int32Atom),
+  -- Instances.
+  (instanceOf .valueType true, .aggregate "L::G`1<System.Int32>" 0),
+  (instanceOf .classType, .aggregate "L::G`1<System.Int32>" 0),
+  (instanceOf .classType, .apply (.constructor "L" "G`1") (.atom "C" "System.UInt32")),
+  (instanceOf .classType, .apply (.constructor "K" "G`1") int32Atom),
+  (instanceOf .classType, .constructor "L" "G`1"),
+  (instanceOf .classType, .atom "L" "G`1<System.Int32>"),
+  -- Function pointers.
+  (.functionPointer 0 (.primitive 8) (.cons (.primitive 8) .nil),
+    .functionPointer int32Atom (.signatureParameter int32Atom .void) 1 false false),
+  (.functionPointer 0x20 (.primitive 8) .nil, .functionPointer int32Atom .void 0 false false),
+  (.functionPointer 0 (.primitive 8) .nil, int32Atom),
+  -- Modified types.
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .atom "B" "System.Int32 modreq(Mod)"),
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .atom "A" "System.Int32 modopt(Mod)"),
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 9),
+    .atom "A" "System.Int32 modreq(Mod)"),
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .object "A" "System.Int32 modreq(Mod)")]
+
+/-- Every listed pairing is accepted. -/
+theorem admits_each_accepted_pairing :
+    acceptedPairings.all (fun (type, expr) => pairFrame.admits type expr) = true := by
+  decide +kernel
+#print axioms admits_each_accepted_pairing
+
+/-- Every listed pairing is refused. -/
+theorem refuses_each_refused_pairing :
+    refusedPairings.all (fun (type, expr) => !pairFrame.admits type expr) = true := by
+  decide +kernel
+#print axioms refuses_each_refused_pairing
 end Tests.MetadataBinding
