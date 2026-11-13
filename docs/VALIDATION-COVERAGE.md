@@ -393,7 +393,9 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
   read access and rejection of an adapter that would remove the restriction, plus readonly
   `GetReference` results for nonempty, empty and out-of-extent views and field loads, field
-  addresses and rejected field stores through restricted references. Both run in the `evidence`
+  addresses and rejected field stores through restricted references. It evaluates the readonly
+  rule of `ScalarFlowValid` at single sites, which rejects a writable address under a prefix, a
+  prefix with an operand and both sites of a branch to the address. Both run in the `evidence`
   suite.
 - `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
   covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper

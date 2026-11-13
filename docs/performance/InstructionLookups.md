@@ -62,6 +62,14 @@ characters long and differ only in their last character, less the same statement
 than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
 check takes about 5 seconds.
 
+The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
+and 512 array element addresses, each followed by a branch, with and without a `readonly.`
+prefix, less the heartbeats of stating the same certificate. It fails when the cost per address
+at 256 or 512 exceeds 1.25 times the cost at 128. The readonly rule reads neighbouring
+instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, both built once
+per body, and measures 1.02 for plain and 1.09 for prefixed addresses. A rule that scans the body
+at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the

@@ -1009,11 +1009,44 @@ private def readOnlySiteMatches (raw : RawMethod) (pc : Nat) (instruction : RawI
     | _ => false
   else true
 
+/-- The readonly prefix rule of `readOnlySiteMatches`, reading neighbouring raw instructions
+    through `rawAt` and branch entry through `targeted`. -/
+def readOnlySiteWindow (rawAt : Nat → Option RawInstruction) (targeted : Nat → Bool)
+    (pc : Nat) (instruction : RawInstruction) (emitted : Instruction) : Bool :=
+  if instruction.opcode == 65054 then
+    instruction.operand == .none &&
+      (rawAt (pc + 1)).any (fun next => next.opcode == 143) && !targeted (pc + 1)
+  else if instruction.opcode == 143 then
+    -- `pc - 1` saturates at 0, so the first instruction never follows a prefix.
+    let prefixed := pc > 0 && (rawAt (pc - 1)).any (fun previous => previous.opcode == 65054)
+    match emitted with
+    | .memory (.arrayAddress _ writable) => writable == !prefixed && (!prefixed || !targeted pc)
+    | _ => false
+  else true
+
+/-- An index of the body and its branch destinations, each built once, decide the readonly
+    rule exactly as scanning the body at every site does. -/
+theorem readOnlySiteWindow_eq (raw : RawMethod) :
+    readOnlySiteWindow (FlowIndex.ofList raw.code).get?
+      (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
+      readOnlySiteMatches raw := by
+  have rawAt : (FlowIndex.ofList raw.code).get? = (raw.code[·]?) :=
+    funext (FlowIndex.get?_ofList raw.code)
+  have targeted : (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
+      fun target => raw.code.any (branchesTo target) := by
+    funext target
+    rw [Std.TreeSet.contains_ofList, branchTargets_contains]
+  rw [rawAt, targeted]
+  rfl
+
+#print axioms readOnlySiteWindow_eq
+
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
-    agree with the feature stack depth, emit the right encoding, and give every successor,
-    which must be reachable, exactly the resulting stack kinds. -/
+    agree with the feature stack depth, emit the right encoding, satisfy the readonly rule
+    `readOnly`, and give every successor, which must be reachable, exactly the resulting stack
+    kinds. -/
 private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
-    (context : NativeDispatchContext)
+    (context : NativeDispatchContext) (readOnly : Nat → RawInstruction → Instruction → Bool)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Instruction → Bool
@@ -1025,7 +1058,7 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
           | .initializeSpanLocal actual operation => index == actual && spanConstructorMatches constructor operation
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
-      readOnlySiteMatches raw pc instruction emitted &&
+      readOnly pc instruction emitted &&
       scalarEmissionMatches layouts role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted ||
       match scalarTransfer raw instruction stack role context,
@@ -1040,11 +1073,13 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
 def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Instruction) : Prop :=
   let context := nativeDispatchContext raw
+  let readOnly := readOnlySiteWindow (FlowIndex.ofList raw.code).get?
+    (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
   raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3Flow (fun lookup instruction (feature, stack) emitted =>
-      checkScalarSite layouts raw context (fun after target => match lookup target with
+      checkScalarSite layouts raw context readOnly (fun after target => match lookup target with
         | some (some _, incoming) => incoming == some after
         | _ => false) instruction feature stack emitted)
     (.ofList (features.zip certificate)) 0
@@ -1077,7 +1112,8 @@ theorem scalarSuccessor_zip (features : FeatureCertificate)
 
 #print axioms scalarSuccessor_zip
 
-/-- Streaming scalar validation preserves all list-indexed site checks and lengths. -/
+/-- Streaming scalar validation preserves all list-indexed site checks and lengths, with the
+    readonly rule scanning the body at each site. -/
 theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
     (features : FeatureCertificate)
     (certificate : ScalarCertificate) (code : List Instruction) :
@@ -1085,7 +1121,7 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
       raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
       raw.code.length = code.length ∧ certificate[0]? = some (some []) ∧
       all3 (fun (instruction, feature) stack emitted =>
-          checkScalarSite layouts raw (nativeDispatchContext raw)
+          checkScalarSite layouts raw (nativeDispatchContext raw) (readOnlySiteMatches raw)
             (fun after target => match features[target]? with
             | some (some _) => certificate[target]? == some (some after)
             | _ => false)
@@ -1093,7 +1129,7 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
         ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code =
         true := by
   dsimp only [ScalarFlowValid]
-  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
+  rw [readOnlySiteWindow_eq, all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
   simp only [scalarSuccessor_zip]
   by_cases featureLength : raw.code.length = features.length
   · by_cases scalarLength : raw.code.length = certificate.length
