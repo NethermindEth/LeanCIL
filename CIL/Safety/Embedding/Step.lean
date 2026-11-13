@@ -316,8 +316,11 @@ theorem step_relabel_faulting (op : Instruction)
 
 #print axioms step_relabel_faulting
 
-theorem step_relabel_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
-    StepRelabel (.checkedConvert width signed unsignedInput) := by
+theorem step_relabel_conv_ovf (target : ConvTarget) : StepRelabel (.conv_ovf target) := by
+  stack_cases =>
+    first | fallback_vacuous | lockstep
+
+theorem step_relabel_conv_ovf_un (target : ConvTarget) : StepRelabel (.conv_ovf_un target) := by
   stack_cases =>
     first | fallback_vacuous | lockstep
 
@@ -689,8 +692,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case nativeBinary operation => exact step_relabel_nativeBinary operation
   case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
     | mul_ovf_un => exact step_relabel_faulting _ rfl
-  case checkedConvert width signed unsignedInput =>
-    exact step_relabel_checkedConvert width signed unsignedInput
+  case conv_ovf target => exact step_relabel_conv_ovf target
+  case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case arg index narrow => exact step_relabel_arg index narrow
   case «local» index narrow => exact step_relabel_local index narrow
   case initializeSpanLocal index constructor =>
@@ -723,7 +726,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case beq target => exact step_relabel_beq target
   case bne_un target => exact step_relabel_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
-    | conv_u4 | conv_u8 | conv_u | not | add | mul | and | or | xor | shl | shr | shr_un
+    | conv_u4 | conv_u8 | conv_u | conv_i | not | add | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
@@ -769,6 +772,7 @@ theorem step_relabel_conv_u1 : StepRelabel .conv_u1 := step_relabel _
 theorem step_relabel_conv_u4 : StepRelabel .conv_u4 := step_relabel _
 theorem step_relabel_conv_u8 : StepRelabel .conv_u8 := step_relabel _
 theorem step_relabel_conv_u : StepRelabel .conv_u := step_relabel _
+theorem step_relabel_conv_i : StepRelabel .conv_i := step_relabel _
 theorem step_relabel_not : StepRelabel .not := step_relabel _
 theorem step_relabel_add : StepRelabel .add := step_relabel _
 theorem step_relabel_mul : StepRelabel .mul := step_relabel _
@@ -946,8 +950,11 @@ theorem step_raise_faulting (op : Instruction)
 
 #print axioms step_raise_faulting
 
-theorem step_raise_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
-    StepRaise (.checkedConvert width signed unsignedInput) := by
+theorem step_raise_conv_ovf (target : ConvTarget) : StepRaise (.conv_ovf target) := by
+  stack_cases =>
+    first | fallback_raise_vacuous | raise_lockstep
+
+theorem step_raise_conv_ovf_un (target : ConvTarget) : StepRaise (.conv_ovf_un target) := by
   stack_cases =>
     first | fallback_raise_vacuous | raise_lockstep
 
@@ -1229,8 +1236,8 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case nativeBinary operation => exact step_raise_nativeBinary operation
   case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
     | mul_ovf_un => exact step_raise_faulting _ rfl
-  case checkedConvert width signed unsignedInput =>
-    exact step_raise_checkedConvert width signed unsignedInput
+  case conv_ovf target => exact step_raise_conv_ovf target
+  case conv_ovf_un target => exact step_raise_conv_ovf_un target
   case arg index narrow =>
     plain_cases
     cases narrow <;> dsimp only at h ⊢ <;> lookup_raise
@@ -1285,7 +1292,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case beq target => exact step_raise_beq target
   case bne_un target => exact step_raise_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
-    | conv_u4 | conv_u8 | conv_u | not | add | mul | and | or | xor | shl | shr | shr_un
+    | conv_u4 | conv_u8 | conv_u | conv_i | not | add | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar

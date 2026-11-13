@@ -38,7 +38,7 @@ internal abstract record Operation
 internal enum StackOpcode
 {
     Nop, Pop, Dup, Add, Sub, Mul, And, Or, Xor, Not, Neg, Shl, Shr, ShrUn, Ceq, Clt, Cgt, CltUn, CgtUn,
-    ConvI1, ConvI2, ConvU2, ConvI4, ConvI8, ConvU, ConvU1, ConvU4, ConvU8, Load64, Store64, SkipInit
+    ConvI1, ConvI2, ConvU2, ConvI4, ConvI8, ConvI, ConvU, ConvU1, ConvU4, ConvU8, Load64, Store64, SkipInit
 }
 
 internal sealed record StackOperation(StackOpcode Kind) : Operation
@@ -81,6 +81,7 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
         StackOpcode.ConvU2 => ".conv_u2",
         StackOpcode.ConvI4 => ".conv_i4",
         StackOpcode.ConvI8 => ".conv_i8",
+        StackOpcode.ConvI => ".conv_i",
         StackOpcode.ConvU => ".conv_u",
         StackOpcode.ConvU1 => ".conv_u1",
         StackOpcode.ConvU4 => ".conv_u4",
@@ -394,11 +395,17 @@ internal sealed record StackAlloc(bool Zeroed) : Operation
     internal override string Render(Func<int, string> calleeName) => $".stackAlloc {LeanText.Bool(Zeroed)}";
 }
 
-/// <summary>A conversion that faults on overflow, to <paramref name="Width"/> bits.</summary>
-internal sealed record CheckedConvert(int Width, bool Signed, bool UnsignedSource) : Operation
+/// <summary>The target of an overflow-checked conversion; <c>I</c> and <c>U</c> are native-sized.</summary>
+internal enum ConvTarget { I1, U1, I2, U2, I4, U4, I8, U8, I, U }
+
+/// <summary>
+/// A conversion to <paramref name="Target"/> that faults on overflow, reading the operand as unsigned when
+/// <paramref name="UnsignedSource"/> is set.
+/// </summary>
+internal sealed record CheckedConvert(ConvTarget Target, bool UnsignedSource) : Operation
 {
     internal override string Render(Func<int, string> calleeName) =>
-        $".checkedConvert {Width} {LeanText.Bool(Signed)} {LeanText.Bool(UnsignedSource)}";
+        $".conv_ovf{(UnsignedSource ? "_un" : "")} .{Target.ToString().ToLowerInvariant()}";
 }
 
 internal enum CheckedOperator { Add, Sub, Mul }

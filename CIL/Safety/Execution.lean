@@ -90,7 +90,7 @@ def pureArity : CIL.Instruction → Option Nat
   | .nop => some 0
   | .neg => some 1
   | .cgt | .bgt _ | .ble _ | .ble_un _ => some 2
-  | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .not => some 1
+  | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .not => some 1
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
     | .clt | .clt_un | .cgt_un | .ceq => some 2
   | .brfalse _ | .brtrue _ | .switch _ => some 1
@@ -99,7 +99,7 @@ def pureArity : CIL.Instruction → Option Nat
   | .intrinsic _ argc => some argc
   -- Faulting arithmetic has its own arms in `step`; `CIL.step` would drop the fault.
   | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un
-    | .mul_ovf | .mul_ovf_un => none
+    | .mul_ovf | .mul_ovf_un | .conv_ovf _ | .conv_ovf_un _ => none
   | _ => none
 
 /-- The operands of a value-only instruction, all of which must be numeric scalars. -/
@@ -230,6 +230,15 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .rem_un, .scalar y :: .scalar x :: rest =>
     let value ← (CIL.divideValues false true x y).mapError ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- Overflow-checked conversions, reading the operand as signed or as unsigned.
+  | .conv_ovf target, .scalar x :: rest =>
+    let value ← (CIL.convertInteger target.width target.signed false x).mapError
+      ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .conv_ovf_un target, .scalar x :: rest =>
+    let value ← (CIL.convertInteger target.width target.signed true x).mapError
+      ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m
@@ -347,9 +356,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let (target, values) ← (CIL.nativeBinaryValues operation pc x y).mapError ExecutionFault.arithmetic
     let values ← (values.map Value.scalar).mapM (checkedValue m)
     return .next target (values ++ rest) frame m
-  | .checkedConvert width signed unsignedInput, .scalar x :: rest =>
-    let value ← (CIL.convertInteger width signed unsignedInput x).mapError ExecutionFault.arithmetic
-    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
   | .arg i none, _ =>
     let some value := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m value) :: stack) frame m

@@ -83,24 +83,29 @@ example : arithmeticFlagMutations.all (fun (opcode, operation) =>
 private def conversions : List (Nat × Instruction) := [
   (103, .conv_i1), (104, .conv_i2), (105, .conv_i4), (106, .conv_i8), (109, .conv_u4),
   (110, .conv_u8),
-  (130, .checkedConvert 8 true true), (131, .checkedConvert 16 true true),
-  (132, .checkedConvert 32 true true), (133, .checkedConvert 64 true true),
-  (134, .checkedConvert 8 false true), (135, .checkedConvert 16 false true),
-  (136, .checkedConvert 32 false true), (137, .checkedConvert 64 false true),
-  (138, .checkedConvert 64 true true), (139, .checkedConvert 64 false true),
-  (179, .checkedConvert 8 true false), (180, .checkedConvert 8 false false),
-  (181, .checkedConvert 16 true false), (182, .checkedConvert 16 false false),
-  (183, .checkedConvert 32 true false), (184, .checkedConvert 32 false false),
-  (185, .checkedConvert 64 true false), (186, .checkedConvert 64 false false),
-  (209, .conv_u2), (210, .conv_u1), (211, .conv_i8), (212, .checkedConvert 64 true false),
-  (213, .checkedConvert 64 false false), (224, .conv_u)]
+  (130, .conv_ovf_un .i1), (131, .conv_ovf_un .i2), (132, .conv_ovf_un .i4),
+  (133, .conv_ovf_un .i8), (134, .conv_ovf_un .u1), (135, .conv_ovf_un .u2),
+  (136, .conv_ovf_un .u4), (137, .conv_ovf_un .u8), (138, .conv_ovf_un .i),
+  (139, .conv_ovf_un .u),
+  (179, .conv_ovf .i1), (180, .conv_ovf .u1), (181, .conv_ovf .i2), (182, .conv_ovf .u2),
+  (183, .conv_ovf .i4), (184, .conv_ovf .u4), (185, .conv_ovf .i8), (186, .conv_ovf .u8),
+  (209, .conv_u2), (210, .conv_u1), (211, .conv_i), (212, .conv_ovf .i), (213, .conv_ovf .u),
+  (224, .conv_u)]
 example : conversions.all (fun (opcode, operation) => scalarOpMatches (i opcode) [.word64] operation) = true := by decide
 example : scalarOpMatches (i 106) [.word32] .conv_u8 = false := by decide
-example : scalarOpMatches (i 133) [.word32] (.checkedConvert 64 true false) = false := by decide
-example : scalarOpMatches (i 133) [.word32] (.checkedConvert 64 false true) = false := by decide
+example : scalarOpMatches (i 133) [.word32] (.conv_ovf .i8) = false := by decide
+example : scalarOpMatches (i 133) [.word32] (.conv_ovf_un .u8) = false := by decide
 example : scalarOpMatches (i 133) [.word32] .conv_i8 = false := by decide
-example : scalarOpMatches (i 106) [.word32] (.checkedConvert 64 true false) = false := by decide
-example : scalarOpMatches (i 183) [.word64] (.checkedConvert 16 true false) = false := by decide
+example : scalarOpMatches (i 106) [.word32] (.conv_ovf .i8) = false := by decide
+example : scalarOpMatches (i 183) [.word64] (.conv_ovf .i2) = false := by decide
+-- A native-sized opcode and its 64-bit sibling have the same semantics but distinct constructors,
+-- so the decoded opcode is recoverable from the emitted instruction.
+private def nativeSiblings : List (Nat × Instruction) := [
+  (133, .conv_ovf_un .i), (138, .conv_ovf_un .i8), (137, .conv_ovf_un .u),
+  (139, .conv_ovf_un .u8), (185, .conv_ovf .i), (212, .conv_ovf .i8), (186, .conv_ovf .u),
+  (213, .conv_ovf .u8), (106, .conv_i), (211, .conv_i8)]
+example : nativeSiblings.all (fun (opcode, operation) =>
+    !scalarOpMatches (i opcode) [.word64] operation) = true := by decide
 
 example : scalarOpMatches (i 21) [] (.ldc_i4 (BitVec.ofInt 32 (-1))) = true := by decide
 example : scalarOpMatches (i 30) [] (.ldc_i4 8) = true := by decide
@@ -180,12 +185,14 @@ private def convertEvidence : MethodEvidence := withBody {
   reachable := [true, true, true], featureStates := convertFeatures, scalarStates := convertStates, layoutUses := [], assembly := scope }
 private def convertMethod : Method := {
   locals := [], returnsValue := true, declared := { parameters := [word], returnType := word },
-  code := [.arg 0, .checkedConvert 64 true true, .ret] }
+  code := [.arg 0, .conv_ovf_un .i8, .ret] }
 example : TranslationValid [] #[] [convertEvidence] [] [convertMethod] := by decide
 example : ¬ TranslationValid [] #[] [convertEvidence] []
-    [{ convertMethod with code := [.arg 0, .checkedConvert 64 false true, .ret] }] := by decide
+    [{ convertMethod with code := [.arg 0, .conv_ovf_un .u8, .ret] }] := by decide
 example : ¬ TranslationValid [] #[] [convertEvidence] []
-    [{ convertMethod with code := [.arg 0, .checkedConvert 64 true false, .ret] }] := by decide
+    [{ convertMethod with code := [.arg 0, .conv_ovf .i8, .ret] }] := by decide
+example : ¬ TranslationValid [] #[] [convertEvidence] []
+    [{ convertMethod with code := [.arg 0, .conv_ovf_un .i, .ret] }] := by decide
 example : ¬ TranslationValid [] #[] [convertEvidence] []
     [{ convertMethod with code := [.arg 0, .conv_i8, .ret] }] := by decide
 
@@ -601,9 +608,13 @@ private def unaryHoleCode (emitted : Instruction) : List Instruction :=
 example : ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates (unaryHoleCode (.loadScalar 8)) := by decide
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .conv_i8) := by decide
+-- `conv.r4` is uncovered: the site admits a load, but no conversion or faulting arithmetic.
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
-    (unaryHoleCode (.checkedConvert 64 true false)) := by decide
--- `conv.r4` is uncovered: the site admits a load, but no faulting arithmetic in its place.
+    (unaryHoleCode .conv_i) := by decide
+example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
+    (unaryHoleCode (.conv_ovf .i)) := by decide
+example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
+    (unaryHoleCode (.conv_ovf_un .u)) := by decide
 example : ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.loadScalar 8)) := by decide
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates

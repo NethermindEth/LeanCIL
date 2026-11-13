@@ -1097,8 +1097,10 @@ elab_rules : tactic
       ``CIL.Instruction.mul_ovf_un].contains operation
     let checkedOperation := if checkedArithmetic then
         some (``CIL.checkedValues, ``CIL.Safety.step_checked_result)
-      else if operation == ``CIL.Instruction.checkedConvert then
-        some (``CIL.convertInteger, ``CIL.Safety.step_checkedConvert_result)
+      else if operation == ``CIL.Instruction.conv_ovf then
+        some (``CIL.convertInteger, ``CIL.Safety.step_conv_ovf_result)
+      else if operation == ``CIL.Instruction.conv_ovf_un then
+        some (``CIL.convertInteger, ``CIL.Safety.step_conv_ovf_un_result)
       else none
     if let some (function, bridge) := checkedOperation then
       for fact in facts.getElems do
@@ -1108,10 +1110,11 @@ elab_rules : tactic
         let saved ← saveState
         try
           let lemma := mkIdent bridge
-          -- The goal fixes the constructor, so its flags are decided once `apply` unifies.
+          -- The goal fixes the constructor, so its flags are decided once `apply` unifies. A
+          -- conversion's fact is checked after `apply` fixes the target, so `target.width` reduces.
           let bridged ← if checkedArithmetic then
               `(tactic| (apply $lemma (calculated := $fact); case selected => rfl))
-            else `(tactic| apply $lemma $fact)
+            else `(tactic| (apply $lemma; case calculated => exact $fact))
           evalTactic (← `(tactic| cil_strict (
             $bridged:tactic
             all_goals cil_checked_side [])))
@@ -1120,7 +1123,8 @@ elab_rules : tactic
     let scalar := #[``CIL.Instruction.neg, ``CIL.Instruction.cgt, ``CIL.Instruction.conv_i1,
       ``CIL.Instruction.conv_i2, ``CIL.Instruction.conv_u2, ``CIL.Instruction.conv_i8,
       ``CIL.Instruction.conv_i4, ``CIL.Instruction.conv_u1, ``CIL.Instruction.conv_u4,
-      ``CIL.Instruction.conv_u8, ``CIL.Instruction.conv_u, ``CIL.Instruction.not,
+      ``CIL.Instruction.conv_u8, ``CIL.Instruction.conv_u, ``CIL.Instruction.conv_i,
+      ``CIL.Instruction.conv_ovf, ``CIL.Instruction.conv_ovf_un, ``CIL.Instruction.not,
       ``CIL.Instruction.add, ``CIL.Instruction.sub, ``CIL.Instruction.mul,
       ``CIL.Instruction.and, ``CIL.Instruction.or, ``CIL.Instruction.xor,
       ``CIL.Instruction.shl, ``CIL.Instruction.shr, ``CIL.Instruction.shr_un,

@@ -12,7 +12,7 @@ def operation : Case → CIL.Instruction
   | .add => .add_ovf
   | .sub => .sub_ovf
   | .mul => .mul_ovf
-  | .convert => .checkedConvert 8 false false
+  | .convert => .conv_ovf .u1
   | .divide => .div_un
   | .remainder => .rem_un
   | .signedDivide => .div

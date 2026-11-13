@@ -194,19 +194,31 @@ theorem step_appendLocals_faulting (op : Instruction)
 
 #print axioms step_appendLocals_faulting
 
-/-- `checkedConvert` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
-    StepAppendLocals (.checkedConvert width signed unsignedInput) := by
+/-- `conv_ovf` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_ovf (target : ConvTarget) :
+    StepAppendLocals (.conv_ovf target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.checkedConvert width signed unsignedInput)
-      pc _ frame extra memory
+    fallback_appendLocals body.profile (.conv_ovf target) pc _ frame extra memory
 
-#print axioms step_appendLocals_checkedConvert
+#print axioms step_appendLocals_conv_ovf
+
+/-- `conv_ovf_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_ovf_un (target : ConvTarget) :
+    StepAppendLocals (.conv_ovf_un target) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  append_stack_cases using
+    fallback_appendLocals body.profile (.conv_ovf_un target) pc _ frame extra memory
+
+#print axioms step_appendLocals_conv_ovf_un
 
 /-- `stackAlloc` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_stackAlloc (initLocals : Bool) :
@@ -660,6 +672,18 @@ theorem step_appendLocals_conv_u :
   exact fallback_appendLocals body.profile .conv_u pc stack frame extra memory
 
 #print axioms step_appendLocals_conv_u
+
+/-- `conv_i` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_i :
+    StepAppendLocals .conv_i := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  exact fallback_appendLocals body.profile .conv_i pc stack frame extra memory
+
+#print axioms step_appendLocals_conv_i
 
 /-- `not` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_not :
@@ -1212,8 +1236,10 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_nativeBinary operation
     case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
       | mul_ovf_un => exact step_appendLocals_faulting _ rfl
-    case checkedConvert width signed unsignedInput =>
-      exact step_appendLocals_checkedConvert width signed unsignedInput
+    case conv_ovf target =>
+      exact step_appendLocals_conv_ovf target
+    case conv_ovf_un target =>
+      exact step_appendLocals_conv_ovf_un target
     case stackAlloc initLocals =>
       exact step_appendLocals_stackAlloc initLocals
     case newArray element => exact step_appendLocals_newArray element
@@ -1284,6 +1310,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_conv_u8
     case conv_u =>
       exact step_appendLocals_conv_u
+    case conv_i =>
+      exact step_appendLocals_conv_i
     case not =>
       exact step_appendLocals_not
     case add =>

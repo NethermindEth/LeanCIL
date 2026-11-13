@@ -230,15 +230,16 @@ internal static partial class ProofOutline
                 {
                     if (literal.Width == 8) path.Stack.Add(literal.Term);
                     else if (pc + 1 < body.Operations.Length &&
-                        body.Operations[pc + 1] is StackOperation { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 })
+                        body.Operations[pc + 1] is StackOperation
+                            { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI })
                         path.Stack.Add($"({literal.Term})." +
-                            (body.Operations[++pc] is StackOperation { Kind: StackOpcode.ConvI8 } ? "signExtend"
-                                : "setWidth") +
+                            (body.Operations[++pc] is StackOperation { Kind: StackOpcode.ConvI8 or StackOpcode.ConvI }
+                                ? "signExtend" : "setWidth") +
                             " 64");
                     else throw Unsupported("A receiver loop needs 64-bit arithmetic and comparisons");
                 }
                 else if (op is StackOperation
-                    { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.Nop }) { }
+                    { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.Nop }) { }
                 else if (op is StackOperation { Kind: StackOpcode.Dup }) path.Stack.Add(path.Stack[^1]);
                 else if (op is StackOperation { IsArithmetic: true } arithmetic)
                 {

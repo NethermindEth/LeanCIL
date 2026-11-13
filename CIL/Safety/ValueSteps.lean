@@ -76,7 +76,7 @@ elab_rules : command
     let mut declared := #[]
     for op in ops.getElems do
       let checked := #[`div, `div_un, `rem, `rem_un, `add_ovf, `add_ovf_un, `sub_ovf,
-        `sub_ovf_un, `mul_ovf, `mul_ovf_un, `checkedConvert].contains op.getId
+        `sub_ovf_un, `mul_ovf, `mul_ovf_un, `conv_ovf, `conv_ovf_un].contains op.getId
       let select := if checked then checkedSelect else select
       let cleanup := if checked then checkedCleanup else cleanup
       for shape in widths do
@@ -152,7 +152,7 @@ elab_rules : command
 -- Results stay on the stack; compare-branches expose their condition as an `if` that a fact
 -- can decide.
 cil_value_steps [neg, not, conv_i1, conv_i2, conv_u2, conv_i4, conv_i8, conv_u1, conv_u4,
-  conv_u8, conv_u] 1
+  conv_u8, conv_u, conv_i] 1
 cil_value_steps [cgt, add, sub, mul, and, or, xor, shl, shr, shr_un, clt, clt_un, cgt_un, ceq] 2
 cil_value_steps (target : Nat) [bgt, ble, ble_un, blt_un, bge_un, bgt_un, bge, blt, beq, bne_un] 2
 cil_value_steps (targets : List Nat) [switch] 1
@@ -162,16 +162,20 @@ cil_value_steps (exception : String) [throw] 0
 #print axioms step_throw_eq
 
 cil_value_steps (id : CIL.Feature) [feature] 0
-cil_value_steps (width : Nat) (signed : Bool) (unsignedInput : Bool) [checkedConvert] 1
+cil_value_steps (target : CIL.ConvTarget) [conv_ovf, conv_ovf_un] 1
 cil_value_steps [div, div_un, rem, rem_un, add_ovf, add_ovf_un, sub_ovf, sub_ovf_un, mul_ovf,
   mul_ovf_un] 2
+-- A conversion's generated equation names `target.width` and `target.signed`; a known target
+-- reduces them to the literals a caller's `calculated` fact states.
+attribute [cil_step] CIL.ConvTarget.width CIL.ConvTarget.signed
 
 #print axioms step_add_ovf_i64_i64_eq
 #print axioms step_add_ovf_un_i64_i64_eq
 #print axioms step_sub_ovf_un_i32_i32_eq
 #print axioms step_mul_ovf_un_i32_i64_eq
-#print axioms step_checkedConvert_i64_eq
-#print axioms step_checkedConvert_i32_eq
+#print axioms step_conv_ovf_i64_eq
+#print axioms step_conv_ovf_un_i32_eq
+#print axioms step_conv_i_i32_eq
 #print axioms step_div_i64_i64_eq
 #print axioms step_rem_un_i32_i32_eq
 #print axioms step_div_un_i32_i64_eq
@@ -197,21 +201,37 @@ theorem step_checked_result {operation : CIL.Instruction} {kind : CIL.CheckedBin
 
 #print axioms step_checked_result
 
-/-- A proved checked conversion advances the instruction without unfolding its range check. -/
-theorem step_checkedConvert_result {width : Nat} {signed unsignedInput : Bool}
-    {input value : CIL.Value} {memory : Memory}
-    (calculated : CIL.convertInteger width signed unsignedInput input = .ok value)
+/-- A proved checked conversion of a signed operand advances the instruction without unfolding
+    its range check. -/
+theorem step_conv_ovf_result {target : CIL.ConvTarget} {input value : CIL.Value}
+    {memory : Memory}
+    (calculated : CIL.convertInteger target.width target.signed false input = .ok value)
     (inputKnown : input.hasUnspecified = false)
     (checked : checkedValue memory (.scalar value) = .ok (.scalar value)) :
     ∀ body pc args frame rest,
-      step body (.checkedConvert width signed unsignedInput) pc args frame
-        (.scalar input :: rest) memory =
+      step body (.conv_ovf target) pc args frame (.scalar input :: rest) memory =
         .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
   intro body pc args frame rest
   simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
     inputKnown, calculated, checked, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
-#print axioms step_checkedConvert_result
+#print axioms step_conv_ovf_result
+
+/-- A proved checked conversion of an unsigned operand advances the instruction without
+    unfolding its range check. -/
+theorem step_conv_ovf_un_result {target : CIL.ConvTarget} {input value : CIL.Value}
+    {memory : Memory}
+    (calculated : CIL.convertInteger target.width target.signed true input = .ok value)
+    (inputKnown : input.hasUnspecified = false)
+    (checked : checkedValue memory (.scalar value) = .ok (.scalar value)) :
+    ∀ body pc args frame rest,
+      step body (.conv_ovf_un target) pc args frame (.scalar input :: rest) memory =
+        .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
+  intro body pc args frame rest
+  simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
+    inputKnown, calculated, checked, Except.mapError,
+    Bind.bind, Except.bind, Pure.pure, Except.pure]
+#print axioms step_conv_ovf_un_result
 
 open Lean Meta in
 /-- `(m ..).profile` for a method definition or literal, unfolding only to the structure head;

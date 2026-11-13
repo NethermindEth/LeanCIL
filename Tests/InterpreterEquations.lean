@@ -84,6 +84,44 @@ example : step body (.nativeBinary .mul_ovf_un) 0 [] frame
     [.scalar (.i32 0x80000000), .scalar (.i64 2)] Memory.empty =
       .ok (.next 1 [.scalar (.i64 0x100000000)] frame Memory.empty) := rfl
 
+/-- One checked step of `op` over a single operand `value`. -/
+private def unaryStep (op : Instruction) (value : CIL.Value) :
+    Except ExecutionFault FrameAction :=
+  step body op 0 [] frame [.scalar value] Memory.empty
+
+/-- The checked step that pushes `result` from a one-operand instruction. -/
+private def pushesValue (result : CIL.Value) : Except ExecutionFault FrameAction :=
+  .ok (.next 1 [.scalar result] frame Memory.empty)
+
+-- `conv.ovf.i.un` converts to 64 signed bits from an unsigned operand: 2^63 overflows, which
+-- a signed operand or an unsigned target would accept, and `i32` operands zero-extend.
+example : unaryStep (.conv_ovf_un .i) (.i64 0x8000000000000000) = overflows := rfl
+example : unaryStep (.conv_ovf .i) (.i64 0x8000000000000000) =
+    pushesValue (.i64 0x8000000000000000) := rfl
+example : unaryStep (.conv_ovf_un .u) (.i64 0x8000000000000000) =
+    pushesValue (.i64 0x8000000000000000) := rfl
+example : unaryStep (.conv_ovf_un .i) (.i64 0x7FFFFFFFFFFFFFFF) =
+    pushesValue (.i64 0x7FFFFFFFFFFFFFFF) := rfl
+example : unaryStep (.conv_ovf_un .i) (.i32 0xFFFFFFFF) = pushesValue (.i64 0xFFFFFFFF) := rfl
+example : unaryStep (.conv_ovf .i4) (.i64 0x80000000) = overflows := rfl
+example : unaryStep (.conv_ovf .u2) (.i32 0xFFFF) = pushesValue (.i32 0xFFFF) := rfl
+
+-- A native target's width and signedness reduce, so a fact about `convertInteger 64 true true`
+-- drives the bridge for `.conv_ovf_un .i`.
+example (input value : CIL.Value) (rest : List CIL.Safety.Value)
+    (calculated : CIL.convertInteger 64 true true input = .ok value)
+    (known : input.hasUnspecified = false)
+    (checked : checkedValue Memory.empty (.scalar value) = .ok (.scalar value)) :
+    step body (.conv_ovf_un .i) 0 [] frame (.scalar input :: rest) Memory.empty =
+      .ok (.next 1 (.scalar value :: rest) frame Memory.empty) :=
+  step_conv_ovf_un_result (target := .i) calculated known checked body 0 [] frame rest
+
+-- `conv.i` sign-extends like `conv.i8` on the admitted 64-bit native width; `conv.u` does not.
+example (value : CIL.Value) : CIL.unary .conv_i value = CIL.unary .conv_i8 value := by
+  cases value <;> rfl
+example : unaryStep .conv_i (.i32 0xFFFFFFFF) = pushesValue (.i64 0xFFFFFFFFFFFFFFFF) := rfl
+example : unaryStep .conv_u (.i32 0xFFFFFFFF) = pushesValue (.i64 0xFFFFFFFF) := rfl
+
 end FaultingArithmetic
 
 -- An unsigned same-width checked step keeps its helper folded, the form the checked bridge reads.
