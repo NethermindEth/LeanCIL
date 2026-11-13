@@ -132,37 +132,66 @@ macro "cil_caller_grows" : tactic => `(tactic| first
   | (apply CIL.Safety.Confined.grows; apply CIL.Safety.LoopFrame.confined
      with_reducible assumption))
 
+/-- Whether `left` and `right` can be the same memory. Two different local variables never are,
+    and deciding that by unification unfolds the reads and writes that mention them, which costs
+    more with every memory a walk has passed, so they are told apart syntactically. -/
+def memoryMatches (left right : Expr) : MetaM Bool := do
+  if left == right then return true
+  if left.isFVar && right.isFVar then
+    let leftDeclaration ← left.fvarId!.getDecl
+    let rightDeclaration ← right.fvarId!.getDecl
+    if !leftDeclaration.isLet && !rightDeclaration.isLet then return false
+  withNewMCtxDepth (isDefEq left right)
+
+/-- The declarations of `context` that a user name reaches: the last declaration of each name, in
+    context order, found in one pass. -/
+def accessibleDeclarations (context : LocalContext) : Array LocalDecl := Id.run do
+  let mut latest : Std.HashMap Name FVarId := {}
+  for declaration in context do
+    if declaration.isImplementationDetail then continue
+    latest := latest.insert declaration.userName declaration.fvarId
+  let mut reached := #[]
+  for declaration in context do
+    if declaration.isImplementationDetail then continue
+    if latest[declaration.userName]? == some declaration.fvarId then
+      reached := reached.push declaration
+  return reached
+
 /-- Re-state each named hypothesis about a caller buffer or class instance at `memory` through
     `carry`, a term from its predicate and name, under the same name; a fact `carry` gives nothing
     for, or whose term does not elaborate, stays as it is. -/
-def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (Option Term)) :
-    TacticM Unit := do
+def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (Option Term))
+    (superseded : Option (IO.Ref (Array FVarId)) := none) : TacticM Unit := do
   let carried ← withMainContext do
-    let context ← getLCtx
-    let mut found : Array (LoopCarried × Name) := #[]
-    for declaration in context do
-      if declaration.isImplementationDetail || declaration.userName.hasMacroScopes then continue
-      unless (context.findFromUserName? declaration.userName).any
-        (·.fvarId == declaration.fvarId) do continue
+    let mut found : Array (LoopCarried × LocalDecl) := #[]
+    for declaration in accessibleDeclarations (← getLCtx) do
+      if declaration.userName.hasMacroScopes then continue
       let type := (← instantiateMVars declaration.type).consumeMData
       let some head := type.getAppFn.constName? | continue
       let some carried := loopCarriedHeads.find? fun carried =>
         carried.head == head && carried.arity == type.getAppNumArgs | continue
       let some carriedMemory := argument? type carried.memory | continue
-      unless ← withNewMCtxDepth (isDefEq carriedMemory memory) do continue
-      found := found.push (carried, declaration.userName)
+      unless ← memoryMatches carriedMemory memory do continue
+      found := found.push (carried, declaration)
     return found
-  for (head, name) in carried do
-    let some term ← carry head (mkIdent name) | continue
+  for (head, old) in carried do
+    let some term ← carry head (mkIdent old.userName) | continue
     let saved ← saveState
     -- A failed side proof inside `term` is logged, not thrown; `cil_strict` makes it fail here.
-    try evalTactic (← `(tactic| cil_strict have $(mkIdent name):ident := $term))
+    try
+      evalTactic (← `(tactic| cil_strict cil_have_by $(mkIdent old.userName):ident := $term))
+      -- The restated fact has the name, so the one it restates is out of reach; clearing it keeps
+      -- the context from growing with each store, now or when the caller clears `superseded`.
+      match superseded with
+      | some pending => pending.modify (·.push old.fvarId)
+      | none => replaceMainGoal [← (← getMainGoal).tryClear old.fvarId]
     catch _ => saved.restore
 
 /-- Carry the caller-buffer facts at `memory` across `below`, a store that keeps everything below
     the caller's watermark. -/
-def loopCarryBelow (memory : Expr) (below : Ident) : TacticM Unit :=
-  loopCarryFacts memory fun carried fact => do
+def loopCarryBelow (memory : Expr) (below : Ident)
+    (superseded : Option (IO.Ref (Array FVarId)) := none) : TacticM Unit :=
+  loopCarryFacts memory (superseded := superseded) fun carried fact => do
     if carried.grows then
       return some (← `(($fact).after_below $below (by cil_caller_allocation)
         (by cil_caller_grows)))
