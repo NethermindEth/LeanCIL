@@ -24,6 +24,7 @@ const string unsigned = ", Culture=neutral, PublicKeyToken=null";
 const string libraryText = """
 namespace MultiFixture;
 public struct Cell { public ulong Value; }
+public sealed class Marker { }
 public static class Mix
 {
     public static ulong Step(ulong x) => x * STEP;
@@ -65,6 +66,7 @@ namespace MultiFixture;
 public static class Application
 {
     public static ulong Direct(ulong x) => Mix.Step(x) + 1;
+    public static ulong Take(Marker marker, ulong x) => x;
     public static ulong Nested(ulong x) => Mix.Twice(x);
     public static ulong Local(ulong x) { Cell cell = default; cell.Value = x; Mix.Bump(ref cell); return cell.Value; }
     public static ulong Size<T>(ulong x) where T : struct => x + (ulong)Unsafe.SizeOf<T>();
@@ -218,10 +220,9 @@ RejectedExtract("unpinned receiver interface", "Unpinned assembly reference: Mul
 
 // A pinned type its assembly does not define has no definition to link, unlike a custom modifier, which needs none.
 string gone = fixture.Build("Gone", libName, libraryText.Replace("STEP", "3 + 1")
-    .Replace("public struct Cell { public ulong Value; }\n", "")
-    .Replace("    public static void Bump(ref Cell cell) => cell.Value = Step(cell.Value);\n", ""));
-RejectedExtract("pinned type without definition", "Unresolved pinned type", "MultiFixture.Application::Local(ulong)",
-    Reference(gone));
+    .Replace("public sealed class Marker { }\n", ""));
+RejectedExtract("pinned type without definition", "Unresolved pinned type",
+    "MultiFixture.Application::Take(MultiFixture.Marker,ulong)", Reference(gone));
 
 // Proofs bind bodies by unscoped signature, so a same-named type in two pinned assemblies is rejected.
 string aliasDirectory = fixture.Project("Alias", "MultiFixture.Alias", "",

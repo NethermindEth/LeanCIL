@@ -189,6 +189,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         {
             // Closing a slice can reach another module, so the list is read by index while it grows.
             for (var position = 0; position < slices.Count; position++) slices[position].Finish();
+            foreach (var slice in slices) slice.Canonicalize();
             return $"{{ own := {slices[0].Lean()}, others := [{string.Join(", ", slices.Skip(1).Select(slice => slice.Lean()))}] }}";
         }
 
@@ -591,6 +592,92 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             if (index < 0) return;
             corlib = index + 1;
             Token(0x23000000 + (uint)corlib);
+        }
+
+        enum Heap { None, Text, Blob }
+
+        /// <summary>
+        /// The columns of a carried row, each with its width and the heap it indexes. The widths follow the
+        /// table stream header, as Lean's decoder reads them.
+        /// </summary>
+        (int Width, Heap Heap)[] Columns(TableIndex table)
+        {
+            int Rows(TableIndex index) => Reader.GetTableRowCount(index);
+            int Simple(TableIndex index) => Rows(index) > 0xFFFF ? 4 : 2;
+            int Coded(int bits, params TableIndex[] tables) => tables.Max(Rows) < 1 << (16 - bits) ? 2 : 4;
+            var text = Reader.GetHeapSize(HeapIndex.String) > 0xFFFF ? 4 : 2;
+            var blob = Reader.GetHeapSize(HeapIndex.Blob) > 0xFFFF ? 4 : 2;
+            var scope = Coded(2, TableIndex.Module, TableIndex.ModuleRef, TableIndex.AssemblyRef, TableIndex.TypeRef);
+            var typeDefOrRef = Coded(2, TableIndex.TypeDef, TableIndex.TypeRef, TableIndex.TypeSpec);
+            return table switch
+            {
+                TableIndex.TypeRef => [(scope, Heap.None), (text, Heap.Text), (text, Heap.Text)],
+                TableIndex.TypeDef => [(4, Heap.None), (text, Heap.Text), (text, Heap.Text),
+                    (typeDefOrRef, Heap.None), (Simple(TableIndex.Field), Heap.None),
+                    (Simple(TableIndex.MethodDef), Heap.None)],
+                TableIndex.Field => [(2, Heap.None), (text, Heap.Text), (blob, Heap.Blob)],
+                TableIndex.MethodDef => [(4, Heap.None), (2, Heap.None), (2, Heap.None), (text, Heap.Text),
+                    (blob, Heap.Blob), (Simple(TableIndex.Param), Heap.None)],
+                TableIndex.MemberRef => [(Coded(3, TableIndex.TypeDef, TableIndex.TypeRef, TableIndex.ModuleRef,
+                    TableIndex.MethodDef, TableIndex.TypeSpec), Heap.None), (text, Heap.Text), (blob, Heap.Blob)],
+                TableIndex.StandAloneSig or TableIndex.TypeSpec => [(blob, Heap.Blob)],
+                TableIndex.GenericParam => [(2, Heap.None), (2, Heap.None),
+                    (Coded(1, TableIndex.TypeDef, TableIndex.MethodDef), Heap.None), (text, Heap.Text)],
+                TableIndex.MethodSpec => [(Coded(1, TableIndex.MethodDef, TableIndex.MemberRef), Heap.None),
+                    (blob, Heap.Blob)],
+                TableIndex.AssemblyRef => [(8, Heap.None), (4, Heap.None), (blob, Heap.Blob), (text, Heap.Text),
+                    (text, Heap.Text), (blob, Heap.Blob)],
+                TableIndex.NestedClass => [(Simple(TableIndex.TypeDef), Heap.None),
+                    (Simple(TableIndex.TypeDef), Heap.None)],
+                _ => throw new InvalidDataException($"No column layout for table {table}.")
+            };
+        }
+
+        /// <summary>
+        /// Renumber the <c>#Strings</c> and <c>#Blob</c> offsets to the order of the carried entries, in the rows
+        /// and the heap keys. Lean reads a heap entry only through the offset a row names, so any consistent
+        /// numbering decodes the same rows; the image's own offsets move whenever an earlier name changes
+        /// length, which would change the evidence of every method whose names come after it.
+        /// </summary>
+        internal void Canonicalize()
+        {
+            Dictionary<int, int> Numbering(SortedDictionary<int, byte[]> heap)
+            {
+                var next = 1;
+                return heap.Keys.ToDictionary(key => key, key => key == 0 ? 0 : next++);
+            }
+            var textNumbers = Numbering(strings);
+            var blobNumbers = Numbering(blobs);
+            foreach (var token in rows.Keys.ToArray())
+            {
+                var row = rows[token];
+                var at = 0;
+                foreach (var (width, heap) in Columns((TableIndex)(token >> 24)))
+                {
+                    if (heap != Heap.None)
+                    {
+                        var offset = width == 2 ? BitConverter.ToUInt16(row, at) : (int)BitConverter.ToUInt32(row, at);
+                        var numbers = heap == Heap.Text ? textNumbers : blobNumbers;
+                        // A row carried only for its position, such as the next type's, may name entries that are
+                        // not carried; they become 0, which Lean reads as a missing entry if it ever looks.
+                        numbers.TryGetValue(offset, out var number);
+                        var bytes = BitConverter.GetBytes(number);
+                        Array.Copy(bytes, 0, row, at, width);
+                    }
+                    at += width;
+                }
+                if (at != row.Length)
+                    throw new InvalidDataException($"The columns of row 0x{token:X8} do not add up to its length.");
+            }
+            Renumber(strings, textNumbers);
+            Renumber(blobs, blobNumbers);
+        }
+
+        static void Renumber(SortedDictionary<int, byte[]> heap, Dictionary<int, int> numbers)
+        {
+            var entries = heap.ToArray();
+            heap.Clear();
+            foreach (var (key, value) in entries) heap[numbers[key]] = value;
         }
 
         internal string Lean()

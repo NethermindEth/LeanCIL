@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 // notice: the carried rows have the body address masked and no generated definition holds it, so two builds that
 // differ only in the length of the first method's body emit identical metadata and tables for the second.
 var directory = At("artifacts/IncrementalEvidence");
-string Build(string name, string firstBody)
+string Build(string name, string firstBody, string firstName = "First")
 {
     var source = Path.Combine(directory, name);
     Directory.CreateDirectory(source);
@@ -18,7 +18,7 @@ string Build(string name, string firstBody)
     File.WriteAllText(Path.Combine(source, "Incremental.cs"), $$"""
         public static class Incremental
         {
-            public static ulong First(ulong x) => {{firstBody}};
+            public static ulong {{firstName}}(ulong x) => {{firstBody}};
             public static ulong Second(ulong x) => x + 2UL;
             public static ulong Third(ulong x) => x * 3UL;
         }
@@ -40,8 +40,16 @@ string Evidence(string assembly, string method, string name)
         throw new InvalidOperationException("Evidence holds a body address: " + name);
     return string.Join('\n', lines);
 }
+// The name of the first method is longer, so every later name moves in the image's #Strings heap.
+var renamed = Build("Renamed", "x + 1UL", "FirstWithAMuchLongerName");
 foreach (var method in new[] { "Second", "Third" })
-    if (Evidence(short_, method, "Short" + method) != Evidence(long_, method, "Long" + method))
+{
+    var baseline = Evidence(short_, method, "Short" + method);
+    if (baseline != Evidence(long_, method, "Long" + method))
         throw new InvalidOperationException(
             $"Lengthening the body of First changed the evidence of {method}: the incremental refresh would redo it.");
-Console.WriteLine("PASS lengthening one body leaves the metadata, tables and body evidence of the other methods byte-identical");
+    if (baseline != Evidence(renamed, method, "Renamed" + method))
+        throw new InvalidOperationException(
+            $"Renaming First changed the evidence of {method}: heap offsets must not reach the evidence.");
+}
+Console.WriteLine("PASS lengthening or renaming one method leaves the metadata, tables and body evidence of the other methods byte-identical");
