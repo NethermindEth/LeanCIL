@@ -14,17 +14,90 @@ const int LongStatements = 500;
 const double AllowedGrowth = 1.25;
 const int FewCalls = 100;
 const int ManyCalls = 400;
-// The recheck of an embedding with a link scan per call grows by about 1.9 times per doubling and a body of
-// 1,024 calls exhausts the kernel's stack, so these sizes separate it from the one-pass read.
-const int EmbedFewCalls = 256;
-const int EmbedManyCalls = 1024;
+// Link reads whose cost grows with the square of the calls make the recheck of an embedding cost 1.29 times as
+// much per call at 2,048 calls as at 512; linear reads cost the same.
+const int EmbedFewCalls = 512;
+const int EmbedManyCalls = 2048;
+// Segments in each of the two blocks of an embedding whose pc map puts the second block first.
+const int ReorderFewSegments = 128;
+const int ReorderManySegments = 512;
+// Four times the calls of an embedding may cost at most this much more per call.
+const double AllowedEmbedGrowth = 1.15;
 // Two calls in bodies of these many statements: the link output must not grow with the body.
 const int SparseShortStatements = 250;
 const int SparseLongStatements = 1000;
 // Four times the call sites may cost at most this much more per call site.
 const double AllowedCallGrowth = 1.35;
+// Type identities compare one code per name, so a name four times as long may cost at most this much more.
+const double AllowedNameGrowth = 1.05;
+// The most heartbeats deciding equality or inequality of two type identities may cost at either name length.
+const long TypeDecisionLimit = 9_500;
+// `decide +kernel` costs about 2,000 heartbeats for any statement; less means the decision was not measured.
+const long KernelDecisionFloor = 2_000;
+// Bodies of these many array element addresses. A readonly rule that scans the body at every address costs
+// about 1.5 times as much per address at each doubling; the indexed rule costs about 1.1 times as much at 512.
+const int FewAddresses = 128;
+const int MoreAddresses = 256;
+const int ManyAddresses = 512;
 
 var directory = At("artifacts/LookupScaling");
+Directory.CreateDirectory(directory);
+
+// The heartbeats `decide +kernel` adds to the same statement closed with `sorry`, for equal and unequal type
+// identities whose names have 20 and 80 characters and share all but their last character. Each statement is
+// distinct, so no decision reuses the auxiliary lemma of another.
+Dictionary<string, long> TypeDecisionCosts()
+{
+    const string Prefix = "System.Runtime.InteropServices.Marshalling.Collections.Generic.Dictionary.Keys.";
+    string Type(int length, char last)
+    {
+        var name = Prefix[..(length - 1)] + last;
+        return $$"""({ assembly := runtime, typeNamespace := name!"System", name := name!"{{name}}" } : """ +
+            "TypeIdentity)";
+    }
+    var statements = new[] { 20, 80 }.SelectMany(length => new[]
+    {
+        $"#kernel_cost \"equal {length}\" {Type(length, '0')} = {Type(length, '0')}",
+        $"#kernel_cost \"unequal {length}\" Not ({Type(length, '1')} = {Type(length, '2')})"
+    });
+    var path = Path.Combine(directory, "TypeIdentityEquality.lean");
+    File.WriteAllText(path, """
+        import CIL.Identity
+        open CIL Lean Elab Command
+        /-- The core library assembly of .NET 10. -/
+        def runtime : AssemblyName :=
+          { name := name!"System.Runtime", version := { major := 10, minor := 0, build := 0, revision := 0 },
+            culture := name!"", publicKeyToken := some 0xb03f5f7f11d50a3a }
+        /-- Logs what `decide +kernel` costs beyond elaborating the statement. -/
+        elab "#kernel_cost " label:str statement:term : command => do
+          let before <- IO.getNumHeartbeats
+          elabCommand (<- `(example : $statement := sorry))
+          let middle <- IO.getNumHeartbeats
+          elabCommand (<- `(example : $statement := by decide +kernel))
+          let after <- IO.getNumHeartbeats
+          let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
+          logInfo m!"{label.getString} {cost} heartbeats"
+
+        """ + string.Join("\n", statements) + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.TypeDecision().Matches(output).ToDictionary(
+        match => match.Groups[1].Value, match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != 4) throw new InvalidOperationException("Missing type identity decision costs:\n" + output);
+    return costs;
+}
+var decisions = TypeDecisionCosts();
+foreach (var outcome in new[] { "equal", "unequal" })
+{
+    long shortName = decisions[outcome + " 20"], longName = decisions[outcome + " 80"];
+    var measured = $"{shortName} heartbeats at 20 characters and {longName} at 80";
+    if (Math.Min(shortName, longName) < KernelDecisionFloor || Math.Max(shortName, longName) > TypeDecisionLimit ||
+        longName > shortName * AllowedNameGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Deciding {outcome} type identities costs {measured}; the limits are {TypeDecisionLimit} heartbeats " +
+            $"and {AllowedNameGrowth} times as many at 80 characters."));
+    Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
+}
+
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Lookups.csproj"), """
@@ -173,32 +246,20 @@ if (callGrowth > AllowedCallGrowth)
         $"Extracting a body with many calls costs {callsMeasured}; the limit is {AllowedCallGrowth}."));
 Console.WriteLine($"PASS extracting a body with many calls costs {callsMeasured}");
 
-// The kernel heartbeats to recheck the proof that a hand-written body embeds into an extraction with a dead
-// block before each of its many calls. The two link tables differ and their call sites sit at different pcs, so
-// the kernel cannot close the link clause by comparing equal arguments: it must read both tables, and a read
-// that scans the table per call grows with the call count. `cil_embed` states the proof as an auxiliary lemma,
-// so that lemma is rechecked.
-long EmbeddingCost(int calls)
+// The kernel heartbeats to recheck the proof that `written` embeds into `extraction`, both defined by
+// `definitions`. The two link tables differ and their call sites sit at different pcs, so the kernel cannot close
+// the link clause by comparing equal arguments: it must read both tables, and a read that scans the table per
+// call grows with the call count. `cil_embed` states the proof as an auxiliary lemma, so that lemma is rechecked.
+long EmbeddingCost(string name, string definitions)
 {
-    var path = Path.Combine(directory, "Embedding" + calls + ".lean");
+    var path = Path.Combine(directory, name + ".lean");
     File.WriteAllText(path, $$"""
         import CIL.Embedding.Tactic
         set_option maxHeartbeats 0
         set_option maxRecDepth 100000
         open CIL
         namespace Embedded
-        /-- What an extraction emits for one call followed by a dead block. -/
-        def extractedSegment : List Instruction :=
-          [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
-        /-- The hand-written segment without the dead block. -/
-        def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
-        /-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
-        def extraction : Method :=
-          { locals := [], returnsValue := false,
-            code := (List.replicate {{calls}} extractedSegment).flatten ++ [.ret] }
-        /-- The proof's body, built with the links its own code implies, with calls at pcs 1, 5, 9. -/
-        def written : Method :=
-          extraction.withCode ((List.replicate {{calls}} writtenSegment).flatten ++ [.ret])
+        {{definitions}}
         theorem embeds : MethodEmbeds [extraction] 0 written := by cil_embed
         end Embedded
         open Lean in
@@ -216,22 +277,68 @@ long EmbeddingCost(int calls)
           let beats := (← IO.getNumHeartbeats) - start
           logInfo m!"{count} lemmas rechecked, {beats} kernel heartbeats"
         """ + "\n");
-    var output = Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var cost = LookupPatterns.EmbeddingRecheck().Match(output);
     if (!cost.Success || cost.Groups[1].Value == "0")
         throw new InvalidOperationException("Missing the embedding recheck cost:\n" + output);
     return long.Parse(cost.Groups[2].Value, CultureInfo.InvariantCulture);
 }
-var embedFewCost = (double)EmbeddingCost(EmbedFewCalls) / EmbedFewCalls;
-var embedManyCost = (double)EmbeddingCost(EmbedManyCalls) / EmbedManyCalls;
-var embedGrowth = embedManyCost / embedFewCost;
-var embedMeasured = string.Create(CultureInfo.InvariantCulture,
-    $"{embedFewCost:F0} kernel heartbeats per call at {EmbedFewCalls} calls and {embedManyCost:F0} at " +
-    $"{EmbedManyCalls}, {embedGrowth:F2} times as many");
-if (embedGrowth > AllowedCallGrowth)
-    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Embedding a body with many calls costs {embedMeasured}; the limit is {AllowedCallGrowth}."));
-Console.WriteLine($"PASS embedding a body with many calls costs {embedMeasured}");
+
+// A hand-written body embedded into an extraction with a dead block after each return.
+string DeadBlocks(int calls) => $$"""
+/-- What an extraction emits for one call followed by a dead block. -/
+def extractedSegment : List Instruction :=
+  [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
+/-- The hand-written segment without the dead block. -/
+def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+/-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
+def extraction : Method :=
+  { locals := [], returnsValue := false,
+    code := (List.replicate {{calls}} extractedSegment).flatten ++ [.ret] }
+/-- The proof's body, built with the links its own code implies, with calls at pcs 1, 5, 9. -/
+def written : Method :=
+  extraction.withCode ((List.replicate {{calls}} writtenSegment).flatten ++ [.ret])
+""";
+
+// A body whose head branches over its first block to its second, embedded into an extraction that places the
+// second block first, so the pc map descends once at every size.
+string Reordered(int segments) => $$"""
+/-- The block after the head. -/
+def first : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+/-- The block the head branches to. -/
+def second : List Instruction := [.arg 1, .call 2 1, .pop, .ret]
+/-- The extraction, with the second block first. -/
+def extraction : Method :=
+  { locals := [], returnsValue := false,
+    code := [.br 1] ++ (List.replicate {{segments}} second).flatten ++
+      (List.replicate {{segments}} first).flatten ++ [.ret] }
+/-- The proof's body, with the blocks in source order. -/
+def written : Method :=
+  extraction.withCode ([.br {{1 + 4 * segments}}] ++ (List.replicate {{segments}} first).flatten ++
+    (List.replicate {{segments}} second).flatten ++ [.ret])
+#guard let map := (MethodBinding.alignLive written.code.toArray extraction.code.toArray).toList
+  (map.zip map.tail).countP (fun (left, right) => right < left) == 1
+""";
+
+// Fails when a fixture at the larger size costs more per call to embed than the allowed growth.
+void CheckEmbeddingGrowth(string fixture, string description, Func<int, string> definitions, int callsPerSize,
+    int few, int many)
+{
+    double Cost(int size) => (double)EmbeddingCost(fixture + size, definitions(size)) / (callsPerSize * size);
+    var fewCost = Cost(few);
+    var manyCost = Cost(many);
+    var growth = manyCost / fewCost;
+    var measured = string.Create(CultureInfo.InvariantCulture,
+        $"{fewCost:F0} kernel heartbeats per call at {callsPerSize * few} calls and {manyCost:F0} at " +
+        $"{callsPerSize * many}, {growth:F2} times as many");
+    if (growth > AllowedEmbedGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Embedding {description} costs {measured}; the limit is {AllowedEmbedGrowth}."));
+    Console.WriteLine($"PASS embedding {description} costs {measured}");
+}
+CheckEmbeddingGrowth("Embedding", "a body with many calls", DeadBlocks, 1, EmbedFewCalls, EmbedManyCalls);
+CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders", Reordered, 2,
+    ReorderFewSegments, ReorderManySegments);
 
 // The text a method emits for its links and the kernel heartbeats to recheck its link index, for a body
 // with two calls: both depend on the calls, not on the length of the body.
@@ -302,6 +409,71 @@ Console.WriteLine(FormattableString.Invariant(
 if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
     throw new Exception("Computed lookup cost per case grows with the segment count.");
 
+// The kernel heartbeats of the scalar certificate of a body whose segments each address an array element, with
+// or without a `readonly.` prefix, and branch to the next segment, less those of stating the same certificate.
+long ArrayAddressCost(bool prefixed, int sites)
+{
+    var flag = prefixed ? "true" : "false";
+    var header = $$"""
+        import CIL.Extraction.Scalars
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        namespace ArrayAddresses
+        open CIL CIL.Extraction
+        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
+        def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
+          [⟨0, 2, .none⟩, ⟨0, 3, .none⟩] ++ (if prefixed then [⟨0, 65054, .none⟩] else []) ++
+            [⟨0, 143, .type intType⟩, ⟨0, 38, .none⟩, ⟨0, 43, .target ((index + 1) * width prefixed)⟩]
+        def raw (prefixed : Bool) (sites : Nat) : RawMethod := {
+          token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+          callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+          parameters := [.array intType, intType], locals := [], initLocals := true, maxStack := 2,
+          genericParameters := [],
+          code := (List.range sites).flatMap (segment prefixed) ++ [⟨0, 42, .none⟩] }
+        def featureSegment (prefixed : Bool) : FeatureCertificate :=
+          [some ⟨[], []⟩, some ⟨[none], []⟩] ++
+            (if prefixed then [some ⟨[none, none], []⟩] else []) ++
+            [some ⟨[none, none], []⟩, some ⟨[none], []⟩, some ⟨[], []⟩]
+        def features (prefixed : Bool) (sites : Nat) : FeatureCertificate :=
+          (List.replicate sites (featureSegment prefixed)).flatten ++ [some ⟨[], []⟩]
+        def stateSegment (prefixed : Bool) : ScalarCertificate :=
+          [some [], some [.array .signed32]] ++
+            (if prefixed then [some [.word32, .array .signed32]] else []) ++
+            [some [.word32, .array .signed32], some [.reference], some []]
+        def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
+          (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
+        def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
+          [.arg 0, .arg 1] ++ (if prefixed then [.nop] else []) ++
+            [.memory (.arrayAddress .signed32 !prefixed), .pop, .br ((index + 1) * width prefixed)]
+        def code (prefixed : Bool) (sites : Nat) : List Instruction :=
+          (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
+        """ + "\n";
+    var statement = $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) " +
+        $"(states {flag} {sites}) (code {flag} {sites})";
+    var path = Path.Combine(directory, $"ArrayAddresses{(prefixed ? "Prefixed" : "")}{sites}.lean");
+    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend ArrayAddresses\n", equations: false);
+    var decided = Heartbeats(path, header + $"""
+        theorem valid : {statement} := by decide +kernel
+        #print axioms valid
+        end ArrayAddresses
+        """ + "\n", equations: false);
+    return decided - stated;
+}
+foreach (var prefixed in new[] { false, true })
+{
+    var label = prefixed ? "readonly element addresses" : "element addresses";
+    var perSite = new[] { FewAddresses, MoreAddresses, ManyAddresses }
+        .Select(sites => (Sites: sites, Cost: (double)ArrayAddressCost(prefixed, sites) / sites)).ToArray();
+    var addressesMeasured = string.Join("; ", perSite.Select(run =>
+        string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per address at {run.Sites}")));
+    if (perSite.Skip(1).Any(run => run.Cost > perSite[0].Cost * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Checking the scalar certificate of {label} costs {addressesMeasured}; the limit is {AllowedGrowth} " +
+            $"times the cost per address at {FewAddresses}."));
+    Console.WriteLine($"PASS checking the scalar certificate of {label} costs {addressesMeasured}");
+}
+
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
@@ -313,4 +485,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"^(@\[cil_code\] )?(def method0Link|theorem method0_link)")]
     internal static partial Regex LinkLine();
+
+    [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex TypeDecision();
 }
