@@ -432,16 +432,20 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
         if let some (position, source, target) ← reachedPc then
           loopTargetMismatch tactic position source target
     -- Fetching unifies the goal with a step lemma; only its closed lookup proofs are kept.
-    let saved ← saveState
-    let fetched? ← observing? do
-      let fetched ← loopFetch core
-      let stores := [``CIL.Instruction.setLocal, ``CIL.Instruction.setFieldAt,
-        ``CIL.Instruction.initAggregate]
-      let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
-          pure !(← loopStoreKnown fetched.op fetched.step facts.known)
-        else pure false
-      return (fetched, ← loopReadsReferences fetched.op fetched.step, unknownStore)
-    saved.restore
+    -- The fetch runs on the record of the facts, so its lookups read the equation hypotheses the
+    -- record holds; the restore inside the step undoes the fetch and keeps the record.
+    let fetched? ← withNormalNodes prepared do
+      let saved ← saveState
+      let fetched? ← observing? do
+        let fetched ← loopFetch core
+        let stores := [``CIL.Instruction.setLocal, ``CIL.Instruction.setFieldAt,
+          ``CIL.Instruction.initAggregate]
+        let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
+            pure !(← loopStoreKnown fetched.op fetched.step facts.known)
+          else pure false
+        return (fetched, ← loopReadsReferences fetched.op fetched.step, unknownStore)
+      saved.restore
+      pure fetched?
     let some (fetched, references, unknownStore) := fetched?
       | loopStuck tactic facts.all prepared stops; return none
     let op := ((← whnfR fetched.op).getAppFn.constName?).getD Name.anonymous

@@ -402,7 +402,7 @@ elab_rules : tactic
           cil_strict exact CIL.Safety.run_throw_raises $methodSyntax $instructionSyntax rfl)
       else
         `(tactic| (
-          cil_strict refine CIL.Safety.run_next_raises $methodSyntax $instructionSyntax
+          cil_strict cil_refine_by CIL.Safety.run_next_raises $methodSyntax $instructionSyntax
             (by cil_checked_step_normalized [$facts,*]) ?_
           cil_stack_cleanup)))
 

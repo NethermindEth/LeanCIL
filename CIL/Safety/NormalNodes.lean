@@ -10,26 +10,29 @@ simp visited and left unchanged (the entries of its cache whose result is the ke
 steps of the same run, and `cil_simp_only` and `cil_try_simp_only` return such a term without
 visiting it again. The literal-operand and local-result passes record the terms below which
 their detectors find nothing, which depends on the term alone. The record also keeps the
-simplification contexts and the list of equation hypotheses of the run, which every step would
-otherwise rebuild.
+simplification contexts of the run, which every step would otherwise rebuild, and an index of
+the equation hypotheses by the head of their left side, which the lookups of every step read.
 
 Invariant for a tactic that reads the record: it runs inside `withNormalNodes`, on a goal whose
 local context is the one the record was made for (`NormalNodes.usable` checks this), and the
 result it records for a term depends only on the term, the simp set named by the call, the
-configuration, and the facts that `withNormalNodes` keys the run on. A call with a discharger,
-`contextual`, `+arith` or `at h`, and a call that follows a tactic of the same step that adds,
-clears or reverts a hypothesis, must not use it. Every fact spliced into a `cil_simp_only` call
-inside a step must be one of the facts `withNormalNodes` was given, because the contexts the
-record caches are named by the call's text with macro scopes erased. The options that change what
-simp does must stay fixed during a driver for the same reason.
+configuration, and the facts that `withNormalNodes` keys the run on. The simplifications use
+`steppingDischarge?`, which proves a side condition from the simp set and never from a
+hypothesis, so the hypotheses outside the facts cannot change a result. A call with another
+discharger, `contextual`, `+arith` or `at h`, and a call that follows a tactic of the same step
+that adds, clears or reverts a hypothesis, must not use it. Every fact spliced into a
+`cil_simp_only` call inside a step must be one of the facts `withNormalNodes` was given, because
+the contexts the record caches are named by the call's text with macro scopes erased. The
+options that change what simp does must stay fixed during a driver for the same reason.
 
-At the start of each step `withNormalNodes` compares the local context's hypotheses (names,
-types, values, user names) and the elaborated facts with those of each shelf, and starts a new
-shelf when none matches, so a driver that rewrites, renames or clears a hypothesis in place
-cannot reach a stale record. The record lives in the environment, so a backtracked step forgets
-what it recorded. `withNormalRun` opens it for one driver and restores the earlier record when
-the driver ends, however it ends, `withNormalNodes` drops it when a step fails, and a step
-outside a driver keeps none. `cil.stepping.record` turns the record off.
+At the start of each step `withNormalNodes` keeps each shelf whose local context the step's
+context extends without changing a hypothesis, and drops the others, so a driver that rewrites,
+renames or clears a hypothesis in place cannot reach a stale record while a step that only adds
+hypotheses, as a store or a call does, keeps it. A step in a longer context elaborates its facts
+again, since a name may now refer to a new hypothesis. The record lives in the environment, so a
+backtracked step forgets what it recorded. `withNormalRun` opens it for one driver and restores
+the earlier record when the driver ends, however it ends, `withNormalNodes` drops it when a step
+fails, and a step outside a driver keeps none. `cil.stepping.record` turns the record off.
 -/
 
 namespace CIL.Safety
@@ -41,30 +44,85 @@ open Lean Elab Tactic Meta
 def contextId (context : LocalContext) : Nat × Option FVarId :=
   (context.numIndices, context.lastDecl.map (·.fvarId))
 
-/-- A digest of every hypothesis of a local context: its name, type, value and user name. A step
-    that rewrites a hypothesis in place or renames it changes the digest, which `contextId`
-    does not. -/
-def contextDigest (context : LocalContext) : UInt64 :=
-  context.foldl (init := 11) fun digest declaration =>
-    mixHash digest (mixHash (hash declaration.fvarId.name) (mixHash declaration.type.hash
-      (mixHash (hash declaration.userName) ((declaration.value?.map Expr.hash).getD 0))))
+/-- Whether two declarations state the same hypothesis: name, user name, type and value. -/
+def sameDeclaration (left right : LocalDecl) : Bool :=
+  left.fvarId == right.fvarId && left.userName == right.userName && left.type == right.type &&
+    left.value? == right.value?
+
+/-- Whether `current` holds every hypothesis of `earlier`, unchanged and in the same positions,
+    followed by any number of others. A step that rewrites a hypothesis in place, renames it or
+    clears it makes this false; a step that only adds hypotheses keeps it true. -/
+def contextExtendedBy (earlier current : LocalContext) : Bool := Id.run do
+  if current.numIndices < earlier.numIndices then return false
+  for position in [:earlier.numIndices] do
+    match earlier.decls[position]!, current.decls[position]! with
+    | none, none => pure ()
+    | some old, some new => unless sameDeclaration old new do return false
+    | _, _ => return false
+  return true
+
+/-- The head of the left side of the equation `type` states, under any quantifiers. -/
+def equationHead? : Expr → Option Expr
+  | .forallE _ _ body _ => equationHead? body
+  | .mdata _ body => equationHead? body
+  | type => type.eq?.map fun (_, lhs, _) => lhs.consumeMData.getAppFn
+
+/-- The hypotheses of a local context that state an equation, by the head of the left side, in
+    context order. Extending it for a longer context reads only the added hypotheses. -/
+structure EquationIndex where
+  /-- How many declarations of the context it covers. -/
+  covered : Nat := 0
+  /-- Every equation hypothesis, with its position in the context. -/
+  all : Array (Nat × FVarId) := #[]
+  /-- The equation hypotheses whose left side is headed by the constant. -/
+  byHead : Std.HashMap Name (Array (Nat × FVarId)) := {}
+  /-- The equation hypotheses whose left side has no constant head, which may unify with any. -/
+  anyHead : Array (Nat × FVarId) := #[]
+
+instance : Inhabited EquationIndex := ⟨{}⟩
+
+/-- The index extended to the hypotheses of `context` that it does not cover. -/
+def EquationIndex.extend (index : EquationIndex) (context : LocalContext) :
+    MetaM EquationIndex := do
+  if index.covered == context.numIndices then return index
+  let mut index := index
+  for declaration in context.decls.toArray.extract index.covered context.numIndices do
+    let some declaration := declaration | continue
+    if declaration.isImplementationDetail then continue
+    let some head := equationHead? (← instantiateMVars declaration.type) | continue
+    let entry := (declaration.index, declaration.fvarId)
+    index := { index with all := index.all.push entry }
+    match head.constName? with
+    | some name =>
+      index := { index with
+        byHead := index.byHead.insert name ((index.byHead.getD name #[]).push entry) }
+    | none => index := { index with anyHead := index.anyHead.push entry }
+  return { index with covered := context.numIndices }
+
+/-- The equation hypotheses that can state a lookup whose left side has head `wanted`, in
+    context order. -/
+def EquationIndex.candidates (index : EquationIndex) (wanted : Expr) : Array FVarId :=
+  let entries := match wanted.constName? with
+    | none => index.all
+    | some name =>
+      let named := index.byHead.getD name #[]
+      if index.anyHead.isEmpty then named else (named ++ index.anyHead).qsort (·.1 < ·.1)
+  entries.map (·.2)
 
 /-- What a stepping run has established for one local context and one set of facts. -/
 structure NormalShelf where
   /-- The facts of the step that made the shelf, as elaborated; see `factsKey`. -/
   key : Option (Array Expr) := none
-  /-- The local context the shelf was made for. -/
+  /-- The identity of the local context the shelf was last used in. -/
   context : Nat × Option FVarId := (0, none)
-  /-- The digest of that context's hypotheses. -/
-  digest : UInt64 := 0
+  /-- The local context the shelf was last used in. -/
+  locals : LocalContext := {}
   /-- The syntax of the facts that `key` was built from. -/
   factsSeen : Array Syntax := #[]
   /-- How many nodes are recorded. -/
   count : Nat := 0
   /-- For each simplification, by name, the terms it visited and left unchanged. -/
   nodes : PersistentHashMap String (PersistentHashSet Expr) := {}
-  /-- The hypotheses that state an equation, with the head of the left side. -/
-  equations : Option (Array (FVarId × Expr)) := none
   /-- The simplification contexts the run built, by the arguments that name them. -/
   contexts : Array (String × Simp.Context × Simp.SimprocsArray) := #[]
 
@@ -83,6 +141,10 @@ structure NormalNodes extends NormalShelf where
   steps : Nat := 0
   /-- The shelves that are not current. -/
   others : Array NormalShelf := #[]
+  /-- The equation hypotheses of `equationLocals`, which every shelf shares. -/
+  equations : EquationIndex := {}
+  /-- The local context `equations` was built for. -/
+  equationLocals : LocalContext := {}
 
 instance : Inhabited NormalNodes := ⟨{}⟩
 
@@ -140,10 +202,14 @@ def normalNodesFor (name : String) : MetaM (PersistentHashSet Expr) := do
 
 /-- Add `fresh` to the terms the simplification `name` leaves alone, when the record is usable.
     Terms with metavariables or loose bound variables are not recorded: a later assignment or
-    binder instance would change what they mean. -/
+    binder instance would change what they mean. Neither are terms with a free variable outside
+    the local context, such as the temporary variables simp opens under a binder, which can
+    never occur again. -/
 def recordNormalNodes (name : String) (fresh : Array Expr) : MetaM Unit := do
   let some record ← usableNormalNodes | return
-  let fresh := fresh.filter fun expr => !expr.hasMVar && !expr.hasLooseBVars
+  let context ← getLCtx
+  let fresh := fresh.filter fun expr => !expr.hasMVar && !expr.hasLooseBVars &&
+    !(expr.hasFVar && expr.hasAnyFVar fun free => !context.contains free)
   if fresh.isEmpty then return
   let known := fresh.foldl (fun nodes expr => nodes.insert expr) (record.normalFor name)
   let nodes := record.nodes.insert name known
@@ -237,21 +303,23 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
   let noGoals := (← getGoals).isEmpty
   let localContext ← if noGoals then getLCtx else withMainContext getLCtx
   let context := contextId localContext
-  let digest := contextDigest localContext
-  let sameContext (shelf : NormalShelf) := shelf.context == context && shelf.digest == digest
-  -- Shelves of an earlier context can never match again; the current shelf comes first.
-  let currentKept := sameContext outer.toNormalShelf
+  -- A shelf stays valid while the hypotheses it was made for are unchanged, so a step that only
+  -- adds hypotheses keeps it; one that rewrites, renames or clears a hypothesis does not.
+  let kept (shelf : NormalShelf) := contextExtendedBy shelf.locals localContext
+  let currentKept := kept outer.toNormalShelf
   let shelves := (if currentKept then #[outer.toNormalShelf] else #[]) ++
-    outer.others.filter sameContext
-  -- The same syntax in the same context states the same facts, so a walk elaborates them once.
+    outer.others.filter kept
+  -- The same syntax in the same context states the same facts, so a walk elaborates them once;
+  -- in a longer context a name may refer to a new hypothesis, so the facts are elaborated again.
   let raw := facts.map (·.raw)
-  let mut index := shelves.findIdx? fun shelf => shelf.key.isSome && shelf.factsSeen == raw
+  let mut index := shelves.findIdx? fun shelf =>
+    shelf.key.isSome && shelf.factsSeen == raw && shelf.context == context
   let mut key := index.bind fun position => shelves[position]!.key
   if key.isNone then
     key ← if noGoals then factsKey facts else withMainContext (factsKey facts)
     let some elaborated := key | return ← step
     index := shelves.findIdx? (·.key == some elaborated)
-  let fresh : NormalShelf := { key, context, digest, factsSeen := raw }
+  let fresh : NormalShelf := { key, context, locals := localContext, factsSeen := raw }
   let selected := match index with
     | some position => if shelves[position]!.count < normalNodeLimit then shelves[position]!
       else fresh
@@ -259,8 +327,15 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
   let remaining := (shelves.eraseIdxIfInBounds (index.getD shelves.size)).extract 0
     (normalShelfLimit - 1)
   let shared := currentKept && index == some 0 && outer.count < normalNodeLimit
+  -- Looking the equation hypotheses up is a failed attempt's work, which a backtrack discards,
+  -- so the step starts with them.
+  let known := if contextExtendedBy outer.equationLocals localContext then outer.equations else {}
+  let equations ← known.extend localContext
   let current : NormalNodes :=
-    { selected with factsSeen := raw, driven := true, steps := outer.steps, others := remaining }
+    { selected with
+      factsSeen := raw, driven := true, steps := outer.steps, others := remaining,
+      context := context, locals := localContext, equations := equations,
+      equationLocals := localContext }
   setNormalNodes { current with active := true }
   -- The finalizer also runs for heartbeat and interrupt exceptions, which `catch` does not see.
   let (result, _) ← tryFinally' step fun result? => do
@@ -278,12 +353,28 @@ syntax (name := cilSimpOnly) "cil_simp_only " " ["
   withoutPosition((Lean.Parser.Tactic.simpStar <|> Lean.Parser.Tactic.simpErase <|>
     Lean.Parser.Tactic.simpLemma),*,?) "]" : tactic
 
+/-- Simp's default discharger without its search of the hypotheses for a side condition of an
+    equation theorem. Each hypothesis tried costs a unification, so the default cost grows with
+    the hypotheses in scope; this one decides a side condition by the simp set alone, and the
+    result of a simplification no longer depends on the hypotheses outside it. -/
+def steppingDischarge? (e : Expr) : Simp.SimpM (Option Expr) := do
+  let e := e.cleanupAnnotations
+  if Simp.isEqnThmHypothesis e then
+    if let some proof ← Simp.dischargeEqnThmHypothesis? e then return some proof
+  let result ← Simp.simp e
+  if let some proof ← Simp.dischargeRfl result.expr then
+    return some (mkApp4 (mkConst ``Eq.mpr [Level.zero]) e result.expr (← result.getProof) proof)
+  else if result.expr.isTrue then
+    return some (← mkOfEqTrue (← result.getProof))
+  else
+    return none
+
 /-- Simplify `target` with `ctx`. When the record is usable, a term the simplification `name`
     left unchanged in an earlier step is returned as it is, and the terms this call visited and
     left unchanged are recorded. -/
 def simpLeavingAlone (name : String) (target : Expr) (ctx : Simp.Context)
     (simprocs : Simp.SimprocsArray) : MetaM Simp.Result := do
-  let defaults := Simp.mkDefaultMethodsCore simprocs
+  let defaults := { Simp.mkDefaultMethodsCore simprocs with discharge? := steppingDischarge? }
   let some record ← usableNormalNodes
     | return (← Simp.mainCore target ctx {} defaults).1
   let known := record.normalFor name
