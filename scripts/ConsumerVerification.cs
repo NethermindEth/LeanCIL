@@ -571,13 +571,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
     ConsumerDependency[]? fullBundleDependencies { get; init; }
 
+    /// <summary>
+    /// `relative`, read against `root`, spelled under `root` as given. Containment is decided after links are
+    /// followed on both sides, so Lake's resolved spelling of a package directory matches the root as given.
+    /// </summary>
     static string Within(string root, string relative)
     {
-        var path = Path.GetFullPath(relative, root);
-        var back = Path.GetRelativePath(root, path);
-        if (Path.IsPathRooted(back) || back == ".." || back.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            throw new InvalidDataException("Consumer path escapes its package: " + relative);
-        return path;
+        var spelledRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        var inside = ResolvedRelativePath(spelledRoot, Path.GetFullPath(relative, spelledRoot))
+            ?? throw new InvalidDataException("Consumer path escapes its package: " + relative);
+        return inside == "." ? spelledRoot : Path.Join(spelledRoot, inside);
     }
 
     /// <summary>A directory name whose contents are never consumer sources, such as build outputs.</summary>
@@ -772,13 +775,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean import paths.");
         var leanPath = lines[0]["LEAN_PATH=".Length..];
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var trusted = Path.GetFullPath(Path.Combine(Toolchain, "lib/lean"));
+        // Lake reports directories with links followed, so each is compared after following links too.
+        var trusted = ResolvedPath(Path.Combine(Toolchain, "lib/lean"));
         var certified = library is null ? null : CertifiedModuleDirectory(library);
+        var resolvedCertified = certified is null ? null : ResolvedPath(certified);
         return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, session)))
-            .Where(path => !path.Equals(trusted, comparison))
-            // Keep the certified base in place; map other imports into the session.
-            .Select(path => path.Equals(certified, comparison) ? path : Within(session, Path.GetRelativePath(session, path)))
+            .Select(path => Path.GetFullPath(path, session)).Select(path => (Spelled: path, Resolved: ResolvedPath(path)))
+            .Where(path => !path.Resolved.Equals(trusted, comparison))
+            // Keep the certified base in place; map other imports into the session, spelled as the session is.
+            .Select(path => path.Resolved.Equals(resolvedCertified, comparison) ? certified! : Within(session, path.Spelled))
             .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray(), leanPath);
     }
 
@@ -2412,9 +2417,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 }
             }
             if (!share) return;
-            var modules = directories.Where(directory => Path.GetFullPath(directory).StartsWith(
-                    session + Path.DirectorySeparatorChar, OperatingSystem.IsWindows()
-                        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            var modules = directories.Where(directory => ResolvedRelativePath(session, directory) is not (null or "."))
                 .Where(Directory.Exists).SelectMany(directory => Directory.EnumerateFiles(
                     directory, "*.olean", SearchOption.AllDirectories).Select(path =>
                         (Name: ModuleName(Path.GetRelativePath(directory, path)), Path: path)))

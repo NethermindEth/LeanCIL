@@ -24,9 +24,10 @@ partial class Program : IDisposable
         var root = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_ROOT");
         var manifest = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_MANIFEST");
         if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(manifest)) return null;
-        var directory = Path.GetDirectoryName(Path.GetFullPath(manifest))! + Path.DirectorySeparatorChar;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return typeof(Program).Assembly.Location.StartsWith(directory, comparison) ? Path.GetFullPath(root) : null;
+        // The runtime may report the assembly with links followed, so both sides are compared resolved.
+        var directory = Path.GetDirectoryName(Path.GetFullPath(manifest))!;
+        return typeof(Program).Assembly.Location is { Length: > 0 } location &&
+            ResolvedRelativePath(directory, location) is not (null or ".") ? Path.GetFullPath(root) : null;
     }
 #endif
 
@@ -443,6 +444,59 @@ partial class Program : IDisposable
     SortedDictionary<string, string>? libraryInputs;
 
     static string At(string path) => Path.Combine(Root, path);
+
+    /// <summary>Links one path may expand through before it is taken for a cycle, the bound POSIX sets.</summary>
+    const int MaximumPathLinks = 40;
+
+    /// <summary>
+    /// The absolute location `path` names, with every symbolic link and junction among its existing components
+    /// followed, the last one included; the components below the deepest existing one follow as spelled.
+    /// </summary>
+    internal static string ResolvedPath(string path)
+    {
+        char[] separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+        var full = Path.GetFullPath(path);
+        var resolved = Path.GetPathRoot(full)!;
+        // The components still to resolve, the next one on top.
+        var pending = new Stack<string>(full[resolved.Length..]
+            .Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse());
+        var links = 0;
+        while (pending.TryPop(out var component))
+        {
+            if (component == ".") continue;
+            if (component == "..")
+            {
+                resolved = Path.GetDirectoryName(resolved) ?? resolved;
+                continue;
+            }
+            var next = Path.Join(resolved, component);
+            // A dangling link is still a link: where it points is where a write through it lands.
+            if (new FileInfo(next).LinkTarget is { } target)
+            {
+                if (++links > MaximumPathLinks)
+                    throw new InvalidDataException($"Path expands through more than {MaximumPathLinks} links: {path}");
+                var targetRoot = Path.GetPathRoot(target);
+                if (!string.IsNullOrEmpty(targetRoot)) resolved = Path.GetPathRoot(Path.GetFullPath(targetRoot, resolved))!;
+                foreach (var part in target[(targetRoot?.Length ?? 0)..]
+                    .Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse())
+                    pending.Push(part);
+            }
+            else if (Directory.Exists(next) || File.Exists(next)) resolved = next;
+            else return Path.GetFullPath(Path.Join([next, .. pending]));
+        }
+        return resolved;
+    }
+
+    /// <summary>
+    /// `path` relative to `root` once both are resolved through their links, or null when it lies outside `root`:
+    /// two spellings of one location agree, and a link cannot carry a path out of `root` unnoticed.
+    /// </summary>
+    internal static string? ResolvedRelativePath(string root, string path)
+    {
+        var relative = Path.GetRelativePath(ResolvedPath(root), ResolvedPath(path));
+        return Path.IsPathRooted(relative) || relative == ".." ||
+            relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? null : relative;
+    }
 
     /// <summary>Deletes a tree that may hold git objects, which git marks read-only and Windows refuses to delete.</summary>
     static void DeleteTree(string directory)

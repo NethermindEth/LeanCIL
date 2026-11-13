@@ -254,8 +254,7 @@ partial class Program
     /// <summary>Writes a plan's generated modules below its output directory, replacing an earlier audit's.</summary>
     void WriteBindingModules(BindingPlan plan)
     {
-        var inside = Path.GetRelativePath(plan.Extraction, plan.Output);
-        if (!Path.IsPathRooted(inside) && inside != ".." && !inside.StartsWith(".." + Path.DirectorySeparatorChar))
+        if (ResolvedRelativePath(plan.Extraction, plan.Output) is not null)
             throw new InvalidOperationException("--output must not be the extraction directory or below it.");
         if (Directory.Exists(plan.Output))
         {

@@ -12,12 +12,15 @@
 #:include ConsumerComponents.cs
 #:include ConsumerFingerprintReuse.cs
 #:include CertifiedFingerprints.cs
+#:include ConsumerPackagePaths.cs
+#:include DirectoryLinks.cs
 
 using System.Text.Json;
 
 var checks = new Dictionary<string, Action<string[]>>(StringComparer.Ordinal)
 {
     ["source-resolution"] = CheckConsumerSourceResolution,
+    ["package-paths"] = CheckConsumerPackagePaths,
     ["support-union"] = CheckConsumerSupportUnion,
     ["certificate-reuse"] = CheckConsumerCertificateReuse,
     ["components"] = CheckConsumerComponents,

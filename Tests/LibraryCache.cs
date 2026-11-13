@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include DirectoryLinks.cs
 
 // Child mode: an independent process holding the use lock of one entry until told to stop.
 if (args is ["hold-entry", var heldByChild, var childSignal, var childStop])
@@ -398,19 +399,6 @@ try
     List<string> EvictLibraries(string root, int? limit = null, string? current = null, double retentionDays = 7) =>
         EvictUnused(root, KeyName(), LibraryStaging(), TimeSpan.FromDays(retentionDays), limit, current, library: true);
     TimeSpan Days(double days) => TimeSpan.FromDays(days);
-    bool TryLink(string link, string target)
-    {
-        try { Directory.CreateSymbolicLink(link, target); return true; }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-        if (!OperatingSystem.IsWindows()) return false;
-        // A junction needs no privilege.
-        using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe",
-            $"/c mklink /J \"{link}\" \"{target}\"")
-        { CreateNoWindow = true, RedirectStandardOutput = true, UseShellExecute = false })!;
-        mklink.StandardOutput.ReadToEnd();
-        mklink.WaitForExit();
-        return mklink.ExitCode == 0 && Directory.Exists(link);
-    }
 
     var retained = NewEvictionRoot();
     var stale = PlantEntry(retained, LibraryKeyOf('1'), Days(8));
@@ -438,7 +426,7 @@ try
     foreach (var file in new[] { "cache-manifest.json", "cache-receipt.hmac" })
         File.WriteAllText(Path.Combine(elsewhere, file), "published");
     var linkedEntry = Path.Combine(retained, LibraryKeyOf('c'));
-    var linked = TryLink(linkedEntry, elsewhere);
+    var linked = TryLinkDirectory(linkedEntry, elsewhere);
     if (linked) Directory.SetLastWriteTimeUtc(linkedEntry, DateTime.UtcNow - Days(30));
     var removed = EvictLibraries(retained, current: Path.GetFileName(inUse));
     if (removed.Count != 4 || Directory.Exists(stale) || Directory.Exists(killedPublisher) ||
@@ -463,7 +451,7 @@ try
     File.WriteAllText(Path.Combine(linkTarget, "keep.txt"), "outside the entry");
     var holdsLink = NewEvictionRoot();
     var withLink = PlantEntry(holdsLink, LibraryKeyOf('a'), Days(30));
-    if (TryLink(Path.Combine(withLink, ".lake", "link"), linkTarget))
+    if (TryLinkDirectory(Path.Combine(withLink, ".lake", "link"), linkTarget))
     {
         if (EvictLibraries(holdsLink).Count != 1 || Directory.Exists(withLink) ||
             !File.Exists(Path.Combine(linkTarget, "keep.txt")))
@@ -769,7 +757,7 @@ try
     var spelledEntry = PlantEntry(spelledRoot, LibraryKeyOf('a'), Days(30));
     var spelledLink = Path.Combine(evictionRoots, "link-to-" + Path.GetFileName(spelledRoot));
     var spelledOwner = Path.Combine(packageOwner, "spelled");
-    var reachedByLink = TryLink(spelledLink, spelledRoot);
+    var reachedByLink = TryLinkDirectory(spelledLink, spelledRoot);
     var entryThroughLink = Path.Combine(reachedByLink ? spelledLink : spelledRoot, LibraryKeyOf('a'));
     Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", reachedByLink ? spelledLink : spelledRoot);
     try { FrameworkPackage(spelledOwner, entryThroughLink, pin: true); }
