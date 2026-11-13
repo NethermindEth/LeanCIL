@@ -15,14 +15,22 @@ open Lean PrettyPrinter Delaborator SubExpr
 /-- The smallest bit-vector literal value printed in hexadecimal. -/
 def hexLiteralMinimum : Nat := 2 ^ 16
 
+/-- The uppercase hexadecimal digits of `value`, such as `80000000`. -/
+def upperHexDigits (value : Nat) : String :=
+  String.ofList ((Nat.toDigits 16 value).map Char.toUpper)
+
 /-- `value` as an uppercase hexadecimal numeral, such as `0x80000000`. -/
 def hexLiteral (value : Nat) : String :=
-  "0x" ++ String.ofList ((Nat.toDigits 16 value).map Char.toUpper)
+  "0x" ++ upperHexDigits value
+
+/-- The value of a natural number literal, written as a numeral or as a raw literal. -/
+def natLiteral? (term : Expr) : Option Nat :=
+  term.nat? <|> term.rawNatLit?
 
 /-- The literal `value` of a bit-vector numeral, when it is shown in hexadecimal. -/
 private def hexDisplayed? (value : Expr) : DelabM (Option Nat) := do
   if ← getPPOption getPPAll then return none
-  return (value.nat?.orElse fun _ => value.rawNatLit?).filter (· ≥ hexLiteralMinimum)
+  return (natLiteral? value).filter (· ≥ hexLiteralMinimum)
 
 /-- Print `BitVec.ofNat w n` of a wide literal `n` as `0x...#w`. -/
 @[delab app.BitVec.ofNat]

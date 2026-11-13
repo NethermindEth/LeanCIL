@@ -55,6 +55,13 @@ extraction and about 3.7 for the body. A ratio that rises toward 1.25 means some
 elaboration step walks the code list again. The suite also fails when a `cil_lookup` at a
 computed pc costs more than 1.25 times as much per case at 16 repeated segments as at 4.
 
+The suite also measures `decide +kernel` on two `CIL.TypeIdentity` values whose names are 20 or 80
+characters long and differ only in their last character, less the same statement closed with
+`sorry`. A name is one code, so the decision costs about 7,500 heartbeats for equal names and
+8,300 for unequal ones at either length; one enclosing type adds about 2,500. The suite fails when the 80-character case costs more
+than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
+check takes about 5 seconds.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the

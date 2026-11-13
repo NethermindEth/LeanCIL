@@ -129,7 +129,8 @@ internal static class VerificationSuites
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",
             "lookup equations of extracted methods, hand-written bodies and templates at a per-instruction " +
-            "cost that does not grow with the method"),
+            "cost that does not grow with the method, and type identity equality at a cost that does not grow with " +
+            "the name"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +

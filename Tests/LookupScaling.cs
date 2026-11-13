@@ -23,8 +23,71 @@ const int SparseShortStatements = 250;
 const int SparseLongStatements = 1000;
 // Four times the call sites may cost at most this much more per call site.
 const double AllowedCallGrowth = 1.35;
+// Type identities compare one code per name, so a name four times as long may cost at most this much more.
+const double AllowedNameGrowth = 1.05;
+// The most heartbeats deciding equality or inequality of two type identities may cost at either name length.
+const long TypeDecisionLimit = 9_500;
+// `decide +kernel` costs about 2,000 heartbeats for any statement; less means the decision was not measured.
+const long KernelDecisionFloor = 2_000;
 
 var directory = At("artifacts/LookupScaling");
+Directory.CreateDirectory(directory);
+
+// The heartbeats `decide +kernel` adds to the same statement closed with `sorry`, for equal and unequal type
+// identities whose names have 20 and 80 characters and share all but their last character. Each statement is
+// distinct, so no decision reuses the auxiliary lemma of another.
+Dictionary<string, long> TypeDecisionCosts()
+{
+    const string Prefix = "System.Runtime.InteropServices.Marshalling.Collections.Generic.Dictionary.Keys.";
+    string Type(int length, char last)
+    {
+        var name = Prefix[..(length - 1)] + last;
+        return $$"""({ assembly := runtime, typeNamespace := name!"System", name := name!"{{name}}" } : """ +
+            "TypeIdentity)";
+    }
+    var statements = new[] { 20, 80 }.SelectMany(length => new[]
+    {
+        $"#kernel_cost \"equal {length}\" {Type(length, '0')} = {Type(length, '0')}",
+        $"#kernel_cost \"unequal {length}\" Not ({Type(length, '1')} = {Type(length, '2')})"
+    });
+    var path = Path.Combine(directory, "TypeIdentityEquality.lean");
+    File.WriteAllText(path, """
+        import CIL.Identity
+        open CIL Lean Elab Command
+        /-- The core library assembly of .NET 10. -/
+        def runtime : AssemblyName :=
+          { name := name!"System.Runtime", version := { major := 10, minor := 0, build := 0, revision := 0 },
+            culture := name!"", publicKeyToken := some 0xb03f5f7f11d50a3a }
+        /-- Logs what `decide +kernel` costs beyond elaborating the statement. -/
+        elab "#kernel_cost " label:str statement:term : command => do
+          let before <- IO.getNumHeartbeats
+          elabCommand (<- `(example : $statement := sorry))
+          let middle <- IO.getNumHeartbeats
+          elabCommand (<- `(example : $statement := by decide +kernel))
+          let after <- IO.getNumHeartbeats
+          let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
+          logInfo m!"{label.getString} {cost} heartbeats"
+
+        """ + string.Join("\n", statements) + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.TypeDecision().Matches(output).ToDictionary(
+        match => match.Groups[1].Value, match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != 4) throw new InvalidOperationException("Missing type identity decision costs:\n" + output);
+    return costs;
+}
+var decisions = TypeDecisionCosts();
+foreach (var outcome in new[] { "equal", "unequal" })
+{
+    long shortName = decisions[outcome + " 20"], longName = decisions[outcome + " 80"];
+    var measured = $"{shortName} heartbeats at 20 characters and {longName} at 80";
+    if (Math.Min(shortName, longName) < KernelDecisionFloor || Math.Max(shortName, longName) > TypeDecisionLimit ||
+        longName > shortName * AllowedNameGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Deciding {outcome} type identities costs {measured}; the limits are {TypeDecisionLimit} heartbeats " +
+            $"and {AllowedNameGrowth} times as many at 80 characters."));
+    Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
+}
+
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Lookups.csproj"), """
@@ -313,4 +376,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"^(@\[cil_code\] )?(def method0Link|theorem method0_link)")]
     internal static partial Regex LinkLine();
+
+    [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex TypeDecision();
 }
