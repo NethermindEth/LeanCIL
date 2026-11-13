@@ -1546,8 +1546,14 @@ partial class Program : IDisposable
     /// <summary>Reads a package's lakefile for a pass; tests replace it with a slow or blocking reader.</summary>
     internal static Func<string, string> packageReader = ReadSmallFile;
 
-    /// <summary>The clock a pass takes its time limit from; tests move it to jump past the limit.</summary>
-    internal static Func<DateTime> passClock = () => DateTime.UtcNow;
+    /// <summary>
+    /// The clock a pass takes its time limit from. It counts from when the process first read it, so a change
+    /// of the system clock moves it neither forward nor back; tests replace it to jump past the limit.
+    /// </summary>
+    internal static Func<DateTime> passClock = () => PassClockOrigin + PassClockRun.Elapsed;
+
+    static readonly DateTime PassClockOrigin = DateTime.UtcNow;
+    static readonly Stopwatch PassClockRun = Stopwatch.StartNew();
 
     /// <summary>Called with a pin's path just before a pass retires it; tests renew the pin here.</summary>
     internal static Action<string>? beforePinRetired;
