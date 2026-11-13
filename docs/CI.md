@@ -9,7 +9,7 @@ the workflow, the selection scripts or a documentation marker.
 
 ## Jobs
 
-All jobs run on `ubuntu-24.04`. A newer run on the same ref cancels the one in progress. Uploaded
+All jobs run on `ubuntu-26.04`. A newer run on the same ref cancels the one in progress. Uploaded
 artifacts are kept for 14 days.
 
 | Job | Name | Limit | Does |
