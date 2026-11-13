@@ -137,7 +137,11 @@ private partial def mayUnify (left right : Expr) (statement := false) : MetaM Bo
     else
       -- Two terms with different heads, such as `localWidth kind` and `16`, may be equal.
       unless statement && function.isConst && right.getAppFn.isConst do return true
-      -- A reducible head, as `>` is `<` swapped and `≠` is `¬ =`, may state the other one.
+      -- A reducible head, as `>` is `<` swapped and `≠` is `¬ =`, may state the other one; the
+      -- check reads two attributes, so a hypothesis with neither head reducible costs nothing.
+      let reducible (head : Expr) : MetaM Bool := do
+        return (← getReducibilityStatus head.constName!) == .reducible
+      unless (← reducible function) || (← reducible right.getAppFn) do return false
       let leftUnfolded ← whnfR left
       let rightUnfolded ← whnfR right
       if leftUnfolded == left && rightUnfolded == right then return false
@@ -150,11 +154,13 @@ private partial def mayUnify (left right : Expr) (statement := false) : MetaM Bo
 elab "cil_cheap_assumption" : tactic => withMainContext do
   let goal ← getMainGoal
   let type ← instantiateMVars (← goal.getType)
+  -- The goal with its reducible head unfolded once, so no hypothesis unfolds it again.
+  let shape ← whnfR type
   let context ← getLCtx
   for step in [:context.numIndices] do
     let some declaration := context.decls[context.numIndices - 1 - step]! | continue
     if declaration.isImplementationDetail then continue
-    unless ← mayUnify type (← instantiateMVars declaration.type) (statement := true) do continue
+    unless ← mayUnify shape (← instantiateMVars declaration.type) (statement := true) do continue
     if ← isDefEq type declaration.type then
       goal.assign declaration.toExpr
       replaceMainGoal []
