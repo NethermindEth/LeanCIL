@@ -187,9 +187,46 @@ def accessibleDeclarations (context : LocalContext) (start : Nat := 0) : Array L
   return declarations.filter fun declaration =>
     latest[declaration.userName]? == some declaration.fvarId
 
+/-- Clear from the main goal each hypothesis of `superseded` that neither the goal nor a remaining
+    hypothesis mentions, by its type or its value. Only a hypothesis after the earliest of them can
+    mention one, so the pass reads the context from there and not the whole walk's. -/
+def clearSuperseded (superseded : Array FVarId) : TacticM Unit := withMainContext do
+  let context ← getLCtx
+  let mut doomed : Std.HashSet FVarId := {}
+  let mut earliest := context.numIndices
+  for free in superseded do
+    if let some declaration := context.find? free then
+      doomed := doomed.insert free
+      earliest := min earliest declaration.index
+  if doomed.isEmpty then return
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let mentions (expression : Expr) : Array FVarId := (CollectFVars.main expression {}).fvarIds
+  for free in mentions target do doomed := doomed.erase free
+  -- Latest first, so a hypothesis that stays keeps what it mentions, which may itself be doomed.
+  for step in [:context.numIndices - earliest] do
+    let some declaration := context.decls[context.numIndices - 1 - step]! | continue
+    if declaration.isImplementationDetail || doomed.contains declaration.fvarId then continue
+    -- Looking for a doomed variable allocates nothing; the variables are collected only on a hit.
+    let type ← instantiateMVars declaration.type
+    if type.hasAnyFVar doomed.contains then
+      for free in mentions type do doomed := doomed.erase free
+    if let some value := declaration.value? then
+      let value ← instantiateMVars value
+      if value.hasAnyFVar doomed.contains then
+        for free in mentions value do doomed := doomed.erase free
+  if doomed.isEmpty then return
+  let declaration ← goal.getDecl
+  let replacement ← mkFreshExprMVarAt (doomed.fold (·.erase ·) declaration.lctx)
+    declaration.localInstances target MetavarKind.syntheticOpaque declaration.userName
+  goal.assign replacement
+  replaceMainGoal [replacement.mvarId!]
+
 /-- Re-state each named hypothesis about a caller buffer or class instance at `memory` through
     `carry`, a term from its predicate and name, under the same name; a fact `carry` gives nothing
-    for, or whose term does not elaborate, stays as it is. -/
+    for, or whose term does not elaborate, stays as it is. A restated fact at a memory the walk
+    introduced supersedes the earlier one, which is added to `superseded` for the caller to clear,
+    or cleared here when no list is given. -/
 def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (Option Term))
     (superseded : Option (IO.Ref (Array FVarId)) := none) : TacticM Unit := do
   let carried ← withMainContext do
@@ -205,6 +242,9 @@ def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (O
       found := found.push (carried, declaration)
     return found
   let produced ← producedByWalk memory
+  let pending ← match superseded with
+    | some pending => pure pending
+    | none => IO.mkRef #[]
   for (head, earlier) in carried do
     let some term ← carry head (mkIdent earlier.userName) | continue
     let saved ← saveState
@@ -214,11 +254,9 @@ def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (O
       -- A fact at a memory the walk made is out of reach once restated, and clearing it keeps the
       -- context from growing with each store. A fact at the caller's memory stays, since the
       -- restatement does not give it back.
-      if produced then
-        match superseded with
-        | some pending => pending.modify (·.push earlier.fvarId)
-        | none => replaceMainGoal [← (← getMainGoal).tryClear earlier.fvarId]
+      if produced then pending.modify (·.push earlier.fvarId)
     catch _ => saved.restore
+  if superseded.isNone then clearSuperseded (← pending.get)
 
 /-- Carry the caller-buffer facts at `memory` across `below`, a store that keeps everything below
     the caller's watermark. -/

@@ -114,36 +114,6 @@ private structure SnapshotScope where
 private def SnapshotScope.start : TacticM SnapshotScope :=
   return { superseded := ← IO.mkRef #[] }
 
-/-- Clear the superseded hypotheses that nothing else mentions, in one pass over the context. A
-    hypothesis a remaining hypothesis or the goal mentions stays. -/
-private def SnapshotScope.clearSuperseded (scope : SnapshotScope) : TacticM Unit :=
-    withMainContext do
-  let mut doomed : Std.HashSet FVarId := (← scope.superseded.get).foldl (·.insert ·) {}
-  if doomed.isEmpty then return
-  let goal ← getMainGoal
-  let target ← instantiateMVars (← goal.getType)
-  let mentions (expression : Expr) : Array FVarId :=
-    (CollectFVars.main expression {}).fvarIds
-  for free in mentions target do doomed := doomed.erase free
-  -- Latest first, so a hypothesis that stays keeps what it mentions, which may itself be doomed.
-  for declaration in (← getLCtx).decls.toArray.reverse do
-    let some declaration := declaration | continue
-    if declaration.isImplementationDetail || doomed.contains declaration.fvarId then continue
-    -- Looking for a doomed variable allocates nothing; the variables are collected only on a hit.
-    let type ← instantiateMVars declaration.type
-    if type.hasAnyFVar doomed.contains then
-      for free in mentions type do doomed := doomed.erase free
-    if let some value := declaration.value? then
-      let value ← instantiateMVars value
-      if value.hasAnyFVar doomed.contains then
-        for free in mentions value do doomed := doomed.erase free
-  let declaration ← goal.getDecl
-  let context := doomed.fold (·.erase ·) declaration.lctx
-  let replacement ← mkFreshExprMVarAt context declaration.localInstances target
-    MetavarKind.syntheticOpaque declaration.userName
-  goal.assign replacement
-  replaceMainGoal [replacement.mvarId!]
-
 /-- Whether `left` and `right` may still be made equal by assigning metavariables: false when
     they are statements headed by different predicates, or applications of one constant to
     arguments that differ at two distinct memory variables. Unification would settle these only
@@ -694,7 +664,7 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
     -- Caller buffers and reads below the homes' watermark hold unchanged after the store.
     loopCarryBelow memory below scope.superseded
     carrySnapshotReads scope memory below
-  scope.clearSuperseded
+  clearSuperseded (← scope.superseded.get)
   return { snapshots := updated, stepped, source := memory, below }
 
 /-- The value the chain of updates `known` remembers at `index`: the result of the latest
