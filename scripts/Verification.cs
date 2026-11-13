@@ -2907,7 +2907,7 @@ partial class Program : IDisposable
           | some (.thmInfo _) => pure ()
           | _ => throwError "Expected extraction certificate theorem"
         theorem ExtractionAudit.valid :
-            CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
+            CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts Extracted.assemblies
               Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
         #print Extracted.imports
         """;
@@ -2962,7 +2962,8 @@ partial class Program : IDisposable
     // The certificate must prove the validator for exactly the emitted tables and program.
     static AuditRequest ExtractionCertificate(string theorem, string prefix = "") => new(theorem,
         new { app = new[] { AuditConstant("CIL.Extraction.TranslationValid") }.Concat(
-            new[] { "rawLayouts", "computedLayouts", "methodEvidence", "imports", "program" }.Select(name => AuditConstant(prefix + "Extracted." + name))) },
+            new[] { "rawLayouts", "computedLayouts", "assemblies", "methodEvidence", "imports", "program" }
+                .Select(name => AuditConstant(prefix + "Extracted." + name))) },
         ApprovedAxioms);
 
     static AuditRequest ProofTheorem(string theorem) => new(theorem, axioms: ApprovedAxioms, statement: true, refutation: true);

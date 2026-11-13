@@ -308,8 +308,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         lean.AppendLine($"theorem method{number}_body_validated :" +
             $" Extraction.BodyDecodes assemblies ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
             $" method{number}Original method{number}TypeArgumentsRaw method{number}Signature :=" +
-            $" ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl," +
-            " by cil_kernel_rfl, by cil_body_decodes⟩");
+            $" ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, pinned_identities_spelled," +
+            " by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩");
     }
 
     static readonly HashSet<Instruction> EmptySet = [];
@@ -381,7 +381,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
             $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, " +
             $"identities := {identities}, tables := method{number}Tables, names := method{number}Names, " +
-            $"pinned := {List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity"))}{instantiation} }}",
+            $"pinned := pinnedIdentities{instantiation} }}",
             identified, $"method{number}_tables_valid");
     }
 
@@ -456,6 +456,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 $"def assembly{k} : Extraction.AssemblyPin := {{ identity := {Quote(pins[k].Identity)} }}");
         lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
             string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
+        // Every body lists these identities; one proof that they spell the pins serves them all.
+        lean.AppendLine("def pinnedIdentities : List (List Nat) := " +
+            List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity")));
+        lean.AppendLine("theorem pinned_identities_spelled : pinnedIdentities.mapM Extraction.spelled? = " +
+            "some (assemblies.map (·.identity)) := by cil_kernel_rfl");
     }
 
     string DispatchTypes(MethodDefinition method)

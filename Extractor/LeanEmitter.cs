@@ -276,7 +276,7 @@ internal static class LeanEmitter
                 $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
                 $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
                 $"dispatchTypes := method{n}DispatchTypes, " +
-                $"assembly := assembly{pinned.Index(methods[n].Module)}, pins := assemblies, " +
+                $"assembly := assembly{pinned.Index(methods[n].Module)}, " +
                 $"signature := method{n}Signature }}")) + "]");
         for (var n = 0; n < methods.Length; n++)
         {
@@ -305,7 +305,8 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_intrinsics_validated : Extraction.ExactIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
+            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts " +
+                $"computedLayouts assemblies methodEvidence imports methodEvidence[{n}] method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_intrinsics_validated, method{n}_opaque_validated, method{n}_vector_initializations_validated, method{n}_scalars_validated, method{n}_constrained_validated, method{n}_body_validated⟩");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
@@ -314,7 +315,8 @@ internal static class LeanEmitter
             "Extraction.ImportedLocalLayoutsBound rawLayouts computedLayouts imports := " + Decide);
         lean.AppendLine("theorem attribution_validated : " +
             "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
-        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
+        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
+            "assemblies methodEvidence imports program := by");
         lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated");
         for (int n = 0; n < methods.Length; n++)
