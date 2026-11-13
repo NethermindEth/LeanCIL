@@ -130,7 +130,7 @@ partial class Program
                 File.ReadAllText(Path.Combine(directory, "fingerprints.json")));
             if (parts is null || !parts.Keys.SequenceEqual(raw.Keys) ||
                 !parts.Values.All(value => Regex.IsMatch(value, "^[0-9a-f]{64}$"))) return null;
-            TouchSuccess(Path.Combine(SuccessCacheRoot, key));
+            TouchEntry(Path.Combine(SuccessCacheRoot, key));
             return parts;
         }
         catch (Exception error) when (error is IOException or JsonException) { return null; }
@@ -968,7 +968,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                     File.Copy(source, target, true);
                 }
-                TouchSuccess(Path.Combine(SuccessCacheRoot, name));
+                TouchEntry(Path.Combine(SuccessCacheRoot, name));
                 return CacheFiles(destination);
             }
             catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException) { }

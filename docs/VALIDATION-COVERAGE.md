@@ -460,6 +460,22 @@ These tests cover preparation:
   from an empty cache, reuses it, keeps it while a process reads it, reports a whole library that
   cannot be built, completes the whole library, which replaces the entry and is preferred, and
   rejects an import outside a closure from the compiled import header in three spellings.
+- `Tests/LibraryCache.cs` also covers eviction of library entries. Entries unused for the
+  retention period and abandoned staging go. The current entry, an entry whose use lock is held,
+  an entry a package pins, a directory without a publisher's manifest and receipt, other names,
+  lock files and links stay, and a link inside a removed entry is not followed. The entry limit
+  removes only the least recently used entries unused for a day, and no retention setting removes
+  an entry used within a day. Opening or publishing an entry renews it, and an open run and an
+  editor process hold the entry's lock, taken before the entry is validated. Another process
+  holding the lock excludes a pass, and the lock files stay. A pin that cannot be read, is being
+  written, is renewed during the pass, or names a missing package keeps its entry as described in
+  the CLI document, a package whose lakefile names the entry keeps it however old its pin and
+  however the cache directory is spelled, and no pass raises. A lakefile that never answers, and
+  an injected reader that blocks, delay a pass by a bounded time; the named-pipe check prints SKIP
+  on Windows. Opening an entry evicts nothing, and a publication reports its removal as a stage
+  with the number removed and nothing else on stderr. Malformed settings keep the defaults and
+  huge ones clamp. The link checks print SKIP when no symbolic link or junction can be made. The
+  `workspace` suite checks that both package kinds pin the entry they require.
 - The `workspace` suite checks that a full audit, contract imports and a package import are never
   offered a closure entry.
 - Closure verification of a real extraction through the CLI, with its `verified.json` fields and
