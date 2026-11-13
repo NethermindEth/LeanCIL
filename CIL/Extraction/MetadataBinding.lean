@@ -27,11 +27,13 @@ structure TokenFacts where
   staticField : Option Bool := none
   deriving DecidableEq, Repr
 
-/-- The frame of the primitive assembly and generic arity a method's types are read in. -/
-def MetadataEnv.frame (env : MetadataEnv) (arity : Nat) : Except MetadataError Frame := do
+/-- The frame of the primitive assembly and the method and owner generic arities a method's
+    types are read in. -/
+def MetadataEnv.frame (env : MetadataEnv) (arity ownerArity : Nat) :
+    Except MetadataError Frame := do
   let index ← env.slice 0 0
   let corlib ← index.corlibIdentity
-  .ok { corlib := corlib, anchor := corlib.getD [], arity := arity }
+  .ok { corlib := corlib, anchor := corlib.getD [], arity := arity, ownerArity := ownerArity }
 
 /-- The type of a signature blob read in the slice at `position`. -/
 def MetadataEnv.resolveBlob (env : MetadataEnv) (position token blobOffset : Nat) :
@@ -155,7 +157,8 @@ def MetadataEnv.fieldSite (env : MetadataEnv) (token : Nat) : Except MetadataErr
     .ok { owner := owner, name := name, declared := declared, definition := definition }
 
 /-- The base classes of a class definition, nearest first, as slice positions and `TypeDef`
-    tokens. The chain ends at `System.Object` of the primitive assembly. -/
+    tokens. The chain ends at `System.Object`, named through a reference to an assembly of a
+    core-library name. -/
 def MetadataEnv.classChain (env : MetadataEnv) :
     Nat → Nat → Nat → Except MetadataError (List (Nat × Nat))
   | 0, _, token => .error (.unsupportedBase token)
@@ -172,10 +175,9 @@ def MetadataEnv.classChain (env : MetadataEnv) :
         let some (linked, definition) := index.link linkDefinition row.extends_
           | throw (.unsupportedBase token)
         .ok ((linked, definition) :: (← env.classChain fuel linked definition))
-      else
-        let corlib ← index.corlibIdentity
-        if some named.scope == corlib && named.name == systemObjectName then .ok []
-        else .error (.unsupportedBase token)
+      else if (← index.coreLibraryReference row.extends_) &&
+          named.parts == [systemNamespace, objectName] then .ok []
+      else .error (.unsupportedBase token)
     | _ => .error (.unsupportedBase token)
 
 /-- The number of instance fields of the types of a chain. -/
@@ -216,12 +218,12 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
       .ok (tokenRow definition - start, held, some true)
     else .ok (← env.instanceIndex position definition classOwner, held, some false)
   | none =>
-    let corlib ← (← env.slice 0 token).corlibIdentity
+    -- The pair is known by its own reference, never by the slice's `corlib` number.
     match site.owner with
     | .genericInst head arguments =>
       match arguments.toList with
       | [first, second] =>
-        if some head.scope == corlib && head.name == valueTuplePairName then
+        if isCorlibScope head.scope && head.parts == [systemNamespace, valueTuplePairName] then
           if site.name == firstItemName then .ok (0, first, none)
           else if site.name == secondItemName then .ok (1, second, none)
           else .ok (0, held, none)
@@ -424,10 +426,11 @@ def checkEntryIn (env : MetadataEnv) (frame : Frame) (token : Nat) (operand : Ra
     if (← userStringMatches index token text) then .ok {} else .error (.operandMismatch token)
   | _ => .error (.operandMismatch token)
 
-/-- Check one token-table entry of a method with arity generic parameters. -/
-def checkEntry (env : MetadataEnv) (arity : Nat) (token : Nat) (operand : RawOperand) :
-    Except MetadataError TokenFacts := do
-  checkEntryIn env (← env.frame arity) token operand
+/-- Check one token-table entry of a method with `arity` generic parameters whose owner has
+    `ownerArity`. -/
+def checkEntry (env : MetadataEnv) (arity : Nat) (token : Nat) (operand : RawOperand)
+    (ownerArity : Nat := 0) : Except MetadataError TokenFacts := do
+  checkEntryIn env (← env.frame arity ownerArity) token operand
 
 /-- The facts that depend on the opcode using a token: a static field access names a static
     field, an instance access an instance field, and `ldtoken` of a field takes the static form. -/
@@ -443,13 +446,14 @@ def checkSite (opcode : Nat) (facts : TokenFacts) : RawOperand → Bool
 
 /-! ## Locals -/
 
-/-- Check the local variable types against the standalone signature the header names. -/
-def checkLocals (env : MetadataEnv) (arity signature : Nat) (locals : List TypeExpr) :
-    Except MetadataError Unit := do
+/-- Check the local variable types against the standalone signature the header names, for a
+    method with `arity` generic parameters whose owner has `ownerArity`. -/
+def checkLocals (env : MetadataEnv) (arity signature : Nat) (locals : List TypeExpr)
+    (ownerArity : Nat := 0) : Except MetadataError Unit := do
   if signature == 0 then
     if locals.isEmpty then return () else throw (.localMismatch 0)
   if metadataTableOf signature != Table.standAloneSig then throw (.unsupportedTable signature)
-  let frame ← env.frame arity
+  let frame ← env.frame arity ownerArity
   let index ← env.slice 0 signature
   let blob ← index.blob (← index.signatureOf Table.standAloneSig signature)
   let types ← env.resolveAll 0 (← decodeLocalSig blob)
@@ -597,7 +601,7 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
       !flagsAgree methodParameters method.genericParameters ||
       !flagsAgree ownerParameters method.ownerParameters || method.ownerArgumentCount != 0 then
     throw (.methodMismatch method.token)
-  let frame ← env.frame method.genericParameters.length
+  let frame ← env.frame method.genericParameters.length method.ownerParameters.length
   let returned ← env.resolve 0 signature.result
   let parameters ← env.resolveAll 0 signature.parameters
   if !(frame.admits (declaredReturn returned) method.returnType) ||

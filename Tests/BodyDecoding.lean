@@ -424,11 +424,14 @@ theorem rejects_a_method_with_other_attributes :
       { tinyMethod with attributes := 0x97 } = true := by decide +kernel
 #print axioms rejects_a_method_with_other_attributes
 
-/-- A pin of another version than the method's own assembly states: `BodyDecodes` equates the
-    two strings, so the pin the method is attributed to must be the assembly its rows came from. -/
-theorem rejects_a_pin_of_another_version :
-    (evidence tinyBytes).metadata.own.assembly.identity ≠
-      "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" := by decide
+/-- A pin of another version than the method's own assembly states fails the conjunct of
+    `BodyDecodes` that equates the two, so the pin the method is attributed to must be the
+    assembly its rows came from. -/
+theorem rejects_a_pin_of_another_version (pins : List AssemblyPin) (method : RawMethod)
+    (arguments : List TypeExpr) (signature : String) :
+    ¬ BodyDecodes pins { identity := "T, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" }
+      (evidence tinyBytes) method arguments signature :=
+  fun decodes => absurd decodes.2.2.1 (by decide)
 #print axioms rejects_a_pin_of_another_version
 
 /-- Names the metadata does not resolve to: the body check refuses an owner or base class the
@@ -540,5 +543,43 @@ theorem operand_kinds_agree_with_cecil :
       cecilOpcodes.length := by
   decide +kernel
 #print axioms operand_kinds_agree_with_cecil
+
+/-! ## The extraction's pins -/
+
+/-- The pinned identities a body lists fail the conjunct of `BodyDecodes` that ties them to the
+    extraction's pins when they are left out or name another assembly. -/
+theorem rejects_pinned_identities_other_than_the_pins (method : RawMethod)
+    (arguments : List TypeExpr) (signature : String) :
+    ¬ BodyDecodes [pin] pin (evidence tinyBytes) method arguments signature ∧
+    ¬ BodyDecodes [pin] pin { evidence tinyBytes with pinned := [bytesOf "U"] } method arguments
+      signature :=
+  ⟨fun decodes => absurd decodes.2.2.2.1 (by decide),
+    fun decodes => absurd decodes.2.2.2.1 (by decide +kernel)⟩
+#print axioms rejects_pinned_identities_other_than_the_pins
+
+/-- The own slice with its reference to `Lib` at version 2, which no carried slice is. -/
+private def ownWithLibVersion2 : MetadataSlice :=
+  { own.1 with rows := own.1.rows.map fun (key, bytes) =>
+      (key, if key == tokenOf Table.assemblyRef 2 then bytes.set 0 2 else bytes) }
+
+/-- Whether checking an operand in the environment the body check builds, with `Lib` pinned,
+    fails with exactly this error. -/
+private def rejectsWithLibPinned (ownSlice : MetadataSlice) (token : Nat) (operand : RawOperand)
+    (error : MetadataError) : Bool :=
+  match (do
+    let env ← { own := ownSlice, others := [lib] : MethodMetadata }.environment [bytesOf libScope]
+    checkEntry env 0 token operand) with
+  | .error found => found == error
+  | .ok _ => false
+
+/-- A reference to another version of a pinned assembly is refused unless that version's slice
+    is carried, so it is never read as a platform type. -/
+theorem rejects_another_version_of_a_pinned_assembly :
+    rejectsWithLibPinned ownWithLibVersion2 tokens.boxRef
+      (.type (.atom "Lib, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null" "Lib.Box"))
+      (.missingSlice tokens.boxRef) = true ∧
+    rejectsWithLibPinned own.1 tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.missingSlice tokens.boxRef) = false := by decide +kernel
+#print axioms rejects_another_version_of_a_pinned_assembly
 
 end Tests.BodyDecoding

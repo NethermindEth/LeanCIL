@@ -426,24 +426,24 @@ def MethodMetadata.environmentWith (metadata : MethodMetadata) (identities : Lis
   else do
     let indexed ← (metadata.slices.zip (identities.zip tables)).mapM
       fun (slice, identity, sliceTables) => slice.indexWith sliceTables identity
-    .ok { slices := indexed, pinned := pinned }
+    .ok { slices := indexed, pinned := pinned.map assemblyStem }
 
 /-- The metadata of a body as an environment of indexed slices, built from its bytes alone. -/
 def MethodMetadata.environment (metadata : MethodMetadata) (pinned : List (List Nat) := []) :
     Except MetadataError MetadataEnv := do
-  .ok { slices := ← metadata.slices.mapM MetadataSlice.index, pinned := pinned }
+  .ok { slices := ← metadata.slices.mapM MetadataSlice.index, pinned := pinned.map assemblyStem }
 
 /-- Decode a method body: its header and its instructions, with branch operands as instruction
     indices and every token operand checked against the metadata. `arity` is the number of
-    generic parameters of the method. The supplied bytes must be exactly the header and the
-    declared code. -/
-def decodeBody (env : MetadataEnv) (arity : Nat) (body : BodyEvidence) :
+    generic parameters of the method and `ownerArity` that of its owner. The supplied bytes
+    must be exactly the header and the declared code. -/
+def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence) :
     Except BodyError DecodedBody := do
   if !body.bytes.all (· < 256) then throw .invalidByte
   let (header, code) ← decodeHeader body.bytes
   if code.length != header.codeSize then
     throw (.codeSizeMismatch header.codeSize code.length)
-  let frame ← (env.frame arity).mapError BodyError.metadata
+  let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
   let tokens ← checkTable env frame body.tokens.operands ∅
   let raw ← decodeInstructions tokens code.length 0 code
   let starts := indexStarts raw 0 false ∅
@@ -461,8 +461,11 @@ def checkBody (body : BodyEvidence) (method : RawMethod) (arguments : List TypeE
   let names ← (methodIdentityValid env method body.instantiation arguments).mapError
     BodyError.metadata
   if names != body.names then throw (.metadata (.methodMismatch method.token))
-  let decoded ← decodeBody env method.genericParameters.length body
-  (checkLocals env method.genericParameters.length decoded.localSignature method.locals).mapError
+  -- `methodIdentityValid` has tied both arities to the `GenericParam` rows.
+  let arity := method.genericParameters.length
+  let ownerArity := method.ownerParameters.length
+  let decoded ← decodeBody env arity ownerArity body
+  (checkLocals env arity decoded.localSignature method.locals ownerArity).mapError
     BodyError.metadata
   .ok decoded
 
