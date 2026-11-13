@@ -4,8 +4,8 @@
 
 ## Independently checked extraction evidence
 
-`TranslationValid rawLayouts computedLayouts methodEvidence imports program` checks one record
-per emitted method in program order. The verifier kernel-replays and structurally audits
+`TranslationValid rawLayouts computedLayouts assemblies methodEvidence imports program` checks one
+record per emitted method in program order, each body against the one list of pinned assemblies. The verifier kernel-replays and structurally audits
 `Extracted.translation_valid`; an unrelated theorem, non-theorem or different program/import table
 cannot substitute for it.
 

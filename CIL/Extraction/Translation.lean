@@ -44,9 +44,6 @@ structure MethodEvidence where
   dispatchTypes : List DispatchType := []
   /-- The pinned assembly whose metadata supplied this body. -/
   assembly : AssemblyPin := {}
-  /-- Every assembly the extraction pins, so a reference into one whose slice the body does not
-      carry is refused. -/
-  pins : List AssemblyPin := []
   /-- The string a proof selects the method by: an extraction's `signatures` table lists these,
       and `BodyDecodes` equates each with Cecil's full name of the method its row defines. -/
   signature : String := ""
@@ -176,10 +173,11 @@ instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) :
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
 /-- One emitted method against its evidence record: every per-method validator, in the
-    order generated modules supply their proofs. -/
+    order generated modules supply their proofs. `pins` are the assemblies the extraction pins,
+    shared by every method. -/
 def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
-    (method : Method) : Prop :=
+    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
+    (item : MethodEvidence) (method : Method) : Prop :=
   SpecializationValid rawLayouts item.original item.arguments item.closed item.parameterInput ∧
   ParameterHomesValid layouts item.parameterInput item.reachable method ∧
   MethodLayoutsValid rawLayouts layouts method item.layoutUses ∧
@@ -196,26 +194,26 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
-  BodyDecodes item.pins item.assembly item.body item.original item.arguments item.signature
+  BodyDecodes pins item.assembly item.body item.original item.arguments item.signature
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
-    (method : Method) :
-    Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
+    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
+    (item : MethodEvidence) (method : Method) :
+    Decidable (MethodEvidenceValid rawLayouts layouts pins all imports item method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
-    (method : Option Method) : Prop :=
+    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
+    (item : MethodEvidence) (method : Option Method) : Prop :=
   match method with
   | none => False
-  | some value => MethodEvidenceValid rawLayouts layouts all imports item value
+  | some value => MethodEvidenceValid rawLayouts layouts pins all imports item value
 
 private instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
-    (method : Option Method) :
-    Decidable (MethodAtValid rawLayouts layouts all imports item method) := by
+    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
+    (item : MethodEvidence) (method : Option Method) :
+    Decidable (MethodAtValid rawLayouts layouts pins all imports item method) := by
   cases method <;> dsimp [MethodAtValid] <;> infer_instance
 
 /-- The architecture layouts are computed for: the first method's profile, or `.scalar` for
@@ -224,47 +222,52 @@ abbrev programArchitecture (program : Program) : Architecture :=
   ((program.head?).map fun method => method.profile.architecture).getD .scalar
 
 /-- The certificate covers the entire emitted program, with no optional method list; calls
-    past it must match `imports`. -/
+    past it must match `imports`, and every body is checked against the one list of `pins`. -/
 def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) : Prop :=
+    (pins : List AssemblyPin) (evidence : List MethodEvidence) (imports : List ImportSlot)
+    (program : Program) : Prop :=
   LayoutsValid rawLayouts layouts (programArchitecture program) ∧
     evidence.length = program.length ∧
   (∀ index : Fin evidence.length,
-    MethodAtValid rawLayouts layouts evidence imports evidence[index] program[index.val]?) ∧
+    MethodAtValid rawLayouts layouts pins evidence imports evidence[index]
+      program[index.val]?) ∧
   StaticValuesValid program ∧
   ImportedLayoutsValid imports (programArchitecture program) ∧
   ImportedLocalLayoutsBound rawLayouts layouts imports ∧
   AttributionValid (bodyOwners evidence) = true
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (evidence : List MethodEvidence) (imports : List ImportSlot) (program : Program) :
-    Decidable (TranslationValid rawLayouts layouts evidence imports program) :=
+    (pins : List AssemblyPin) (evidence : List MethodEvidence) (imports : List ImportSlot)
+    (program : Program) :
+    Decidable (TranslationValid rawLayouts layouts pins evidence imports program) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
-    (all : List MethodEvidence) (imports : List ImportSlot) :
+    (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot) :
     List MethodEvidence → Program → Prop where
-  | nil : MethodsChecked rawLayouts layouts all imports [] []
+  | nil : MethodsChecked rawLayouts layouts pins all imports [] []
   | cons {item rest method program} :
-      MethodEvidenceValid rawLayouts layouts all imports item method →
-      MethodsChecked rawLayouts layouts all imports rest program →
-      MethodsChecked rawLayouts layouts all imports (item :: rest) (method :: program)
+      MethodEvidenceValid rawLayouts layouts pins all imports item method →
+      MethodsChecked rawLayouts layouts pins all imports rest program →
+      MethodsChecked rawLayouts layouts pins all imports (item :: rest) (method :: program)
 
 /-- Assembles `TranslationValid` from the program-wide checks and per-method proofs. -/
 theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
-    {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}
+    {pins : List AssemblyPin} {evidence : List MethodEvidence} {imports : List ImportSlot}
+    {program : Program}
     (layout : LayoutsValid rawLayouts layouts (programArchitecture program))
     (statics : StaticValuesValid program)
     (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (importedLocals : ImportedLocalLayoutsBound rawLayouts layouts imports)
     (attribution : AttributionValid (bodyOwners evidence) = true)
-    (methods : MethodsChecked rawLayouts layouts evidence imports evidence program) :
-    TranslationValid rawLayouts layouts evidence imports program := by
+    (methods : MethodsChecked rawLayouts layouts pins evidence imports evidence program) :
+    TranslationValid rawLayouts layouts pins evidence imports program := by
   have compose {items code}
-      (checked : MethodsChecked rawLayouts layouts evidence imports items code) :
+      (checked : MethodsChecked rawLayouts layouts pins evidence imports items code) :
       items.length = code.length ∧ ∀ index : Fin items.length,
-        MethodAtValid rawLayouts layouts evidence imports items[index] code[index.val]? := by
+        MethodAtValid rawLayouts layouts pins evidence imports items[index]
+          code[index.val]? := by
     induction checked with
     | nil => exact ⟨rfl, fun index => Fin.elim0 index⟩
     | @cons item rest method code valid tail ih =>
@@ -278,10 +281,10 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
 
 /-- Each method of a valid translation passes every per-method validator. -/
 theorem translation_method_checked {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
-    {evidence : List MethodEvidence} {imports : List ImportSlot} {program : Program}
-    (valid : TranslationValid rawLayouts layouts evidence imports program)
+    {pins : List AssemblyPin} {evidence : List MethodEvidence} {imports : List ImportSlot}
+    {program : Program} (valid : TranslationValid rawLayouts layouts pins evidence imports program)
     (index : Fin evidence.length) (method : Method) (found : program[index.val]? = some method) :
-    MethodEvidenceValid rawLayouts layouts evidence imports evidence[index] method := by
+    MethodEvidenceValid rawLayouts layouts pins evidence imports evidence[index] method := by
   have checked := valid.2.2.1 index
   simpa [MethodAtValid, found] using checked
 

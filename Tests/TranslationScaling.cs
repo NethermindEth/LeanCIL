@@ -28,7 +28,7 @@ if (!extracted.Contains("method5_evidence_validated") || extracted.Contains("set
 var start = extracted.IndexOf("theorem translation_valid :", StringComparison.Ordinal);
 var end = extracted.IndexOf("@[cil_code] theorem lookup0", start, StringComparison.Ordinal);
 var monolithicSource = extracted[..start] +
-    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
+    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
     "methodEvidence imports program := by decide\n" + extracted[end..];
 void RequireElaboratorRefusal(int code, string diagnostic)
 {
@@ -88,7 +88,7 @@ const double AllowedKernelGrowth = 1.5;
     var to = full.IndexOf("@[cil_code] theorem lookup0", from, StringComparison.Ordinal);
     var kernelFile = Path.Combine(work, "Monolithic.lean");
     File.WriteAllText(kernelFile, NarrowEvidence(full[..from] +
-        "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
+        "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
         "methodEvidence imports program := by decide +kernel\n" + full[to..], "translation_valid"));
     var start = System.Diagnostics.Stopwatch.StartNew();
     var peak = MeasurePeakGigabytes(["lake", "env", "lean", kernelFile], FixturePackage());
@@ -155,7 +155,8 @@ File.WriteAllText(proof, """
 import Extracted
 namespace ExampleProof
 theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-    Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
+    Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+  Extracted.translation_valid
 #print axioms correctness
 end ExampleProof
 """);
