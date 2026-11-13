@@ -198,24 +198,24 @@ def MetadataEnv.instanceIndex (env : MetadataEnv) (position field : Nat) (classO
     .ok (inherited + before)
   else .ok before
 
-/-- The index a field operand must carry, and the type it must hold. -/
+/-- The index a field operand must carry, and the type it must hold. A field signature's `!n`
+    names the declaring type's parameter, so the held type reads it as the declaring instance's
+    argument, which may itself be a parameter of the reading method or its owner. -/
 def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSite)
-    (classOwner : Bool) : Except MetadataError (Nat × ResolvedType × Option Bool) :=
+    (classOwner : Bool) : Except MetadataError (Nat × ResolvedType × Option Bool) := do
+  let some held := substituteResolved none site.owner.arguments resolveFuel site.declared
+    | throw (.operandMismatch token)
   match site.definition with
-  | some (position, definition) => do
+  | some (position, definition) =>
     let index ← env.slice position definition
     let row ← index.field definition
     let isStatic := row.flags / 0x10 % 2 == 1
     if isStatic then
       let owner ← env.declaringType position definition
       let (start, _) ← index.fieldRange owner
-      .ok (tokenRow definition - start, site.declared, some true)
-    else
-      let held ← match substituteResolved none site.owner.arguments resolveFuel site.declared with
-        | some held => pure held
-        | none => throw (.operandMismatch token)
-      .ok (← env.instanceIndex position definition classOwner, held, some false)
-  | none => do
+      .ok (tokenRow definition - start, held, some true)
+    else .ok (← env.instanceIndex position definition classOwner, held, some false)
+  | none =>
     let corlib ← (← env.slice 0 token).corlibIdentity
     match site.owner with
     | .genericInst head arguments =>
@@ -224,10 +224,10 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
         if some head.scope == corlib && head.name == bytesOf "System.ValueTuple`2" then
           if site.name == bytesOf "Item1" then .ok (0, first, none)
           else if site.name == bytesOf "Item2" then .ok (1, second, none)
-          else .ok (0, site.declared, none)
-        else .ok (0, site.declared, none)
-      | _ => .ok (0, site.declared, none)
-    | _ => .ok (0, site.declared, none)
+          else .ok (0, held, none)
+        else .ok (0, held, none)
+      | _ => .ok (0, held, none)
+    | _ => .ok (0, held, none)
 
 /-- Check a `.field` operand: the owner, the field's model index and the type it holds. -/
 def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner : TypeExpr)
