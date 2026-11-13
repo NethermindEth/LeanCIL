@@ -792,25 +792,25 @@ def AssemblyMetadata.spelling (assembly : AssemblyMetadata) :
   .ok (assemblySpelling (← stringBytes strings name) major minor build revision
     (← stringBytes strings culture) spelled)
 
-/-- The running instance field count before each of `count` consecutive `Field` rows from `row`,
-    with the total, or `none` when a row is not carried. A field is static when bit 4 of the
-    first flag byte is set. -/
+/-- The running instance field count before each of up to `count` consecutive `Field` rows from
+    `row`, as far as the rows are carried, with the total and whether every row was carried. A
+    field is static when bit 4 of the first flag byte is set. -/
 private def fieldCounts (index : MetadataIndex) :
-    Nat → Nat → Nat → List (Nat × Nat) → Option (List (Nat × Nat) × Nat)
-  | 0, _, instances, found => some (found, instances)
+    Nat → Nat → Nat → List (Nat × Nat) → List (Nat × Nat) × Nat × Bool
+  | 0, _, instances, found => (found, instances, true)
   | count + 1, row, instances, found =>
     match index.rows.find? (tokenOf Table.field row) with
-    | none => none
+    | none => (found, instances, false)
     | some bytes =>
       let isStatic := bytes.getD 0 0 / 0x10 % 2 == 1
       fieldCounts index count (row + 1) (if isStatic then instances else instances + 1)
         ((tokenOf Table.field row, instances) :: found)
 
-/-- The instance field counts of one carried type, when all its fields and the start of the next
-    type's fields are carried: each field's count before it, latest first, and the total. A type
-    without them has none. -/
+/-- The instance field counts of one carried type whose next type's row is carried: each count
+    before a field, latest first, over the carried rows from the type's first field, which may be a
+    prefix of its fields; and the total, only when every field is carried. -/
 private def typeCounts (index : MetadataIndex) (token : Nat) :
-    Option (List (Nat × Nat) × Nat) :=
+    Option (List (Nat × Nat) × Option Nat) :=
   match index.typeDef token with
   | .error _ => none
   | .ok row =>
@@ -822,7 +822,9 @@ private def typeCounts (index : MetadataIndex) (token : Nat) :
         | .error _ => none)
     match stop with
     | none => none
-    | some stop => fieldCounts index (stop - row.fieldList) row.fieldList 0 []
+    | some stop =>
+      let (found, instances, complete) := fieldCounts index (stop - row.fieldList) row.fieldList 0 []
+      some (found, if complete then some instances else none)
 
 /-- The instance field counts of every carried type, as entries in ascending key order. -/
 private def fieldCountEntries (index : MetadataIndex) :
@@ -830,7 +832,8 @@ private def fieldCountEntries (index : MetadataIndex) :
   let (before, total) := index.rows.toList.foldl (fun (before, total) (token, _) =>
     if metadataTableOf token == Table.typeDef then
       match typeCounts index token with
-      | some (found, count) => (found ++ before, (token, count) :: total)
+      | some (found, some count) => (found ++ before, (token, count) :: total)
+      | some (found, none) => (found ++ before, total)
       | none => (before, total)
     else (before, total)) ([], [])
   do .ok (← SearchTree.ofEntries before.reverse, ← SearchTree.ofEntries total.reverse)

@@ -112,6 +112,13 @@ logarithm; `method{n}_body_validated` uses it as a premise. Each closed instanti
 its own copy, built from the open definition and the assembly, so reuse does not depend on which
 instantiations an extraction holds or in which order.
 
+A field access carries the `Field` rows of its owner from the first up to the accessed field, and the
+owner's and the next type's `TypeDef` rows; rows carried only to be counted keep their flag bytes and name
+no heap entry. Lean counts the instance fields before the accessed one over the carried rows, which must
+run unbroken from the owner's first field, so a gap fails at the lookup. The total number of instance
+fields of a type is recorded only when every field is carried: base classes of a class receiver, the
+owner of an instance method, and enums carry their whole field lists.
+
 What `MetadataResolution` and `MetadataBinding` check:
 
 - The scope of every type is the assembly identity its `AssemblyRef` row spells (name, version,
