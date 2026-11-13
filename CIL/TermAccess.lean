@@ -105,7 +105,7 @@ def firstUnusedSuffix (context : LocalContext) (bases : Array String) : Nat := I
 
 open Meta in
 /-- Adds the hypothesis `name : type`, proved by `proof`, to `goal`, and returns it with the goal
-    that follows. The proof term applies `fun name => rest` to `proof`, so `proof` occurs once.
+    that follows. The proof term is `have name : type := proof; rest`, so `proof` occurs once.
     `assert` followed by `intro` gives the same goal, but instantiating it substitutes `proof` for
     each use of the hypothesis; a fact restated from the previous one at every step then carries
     every earlier proof, under a different number of binders each time, so the term of a walk
@@ -115,7 +115,9 @@ def addFact (goal : MVarId) (name : Name) (type proof : Expr) : MetaM (FVarId ×
     let target ← goal.getType
     withLocalDeclD name type fun fact => do
       let rest ← mkFreshExprSyntheticOpaqueMVar target (← goal.getTag)
-      goal.assign (mkApp (← mkLambdaFVars #[fact] rest) proof)
+      let .lam _ _ body _ ← mkLambdaFVars #[fact] rest
+        | throwError "addFact: abstracting {name} gave no binder"
+      goal.assign (.letE name type proof body (nondep := true))
       return (fact.fvarId!, rest.mvarId!)
 
 end CIL
