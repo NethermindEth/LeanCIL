@@ -92,7 +92,24 @@ reaches. Each pinned assembly has one small block, `assembly{k}Metadata`, with i
 bytes, the header they decode to (heap sizes and the row count of each present table) and its `Assembly`
 row, a function of that assembly alone, so every extraction of it writes the same bytes.
 `assembly{k}_identified` proves once per assembly that the bytes decode to the stated header, which every
-method's checks then read without decoding it again.
+method's checks then read without decoding it again, and that the identity its `Assembly` row spells is
+the string the block states (`assembly{k}Identity` holds those bytes). A method's `BodyDecodes` equates its own
+assembly's identity with its pin, lists the identity of every pinned assembly (`pinned`, equated with
+`Extracted.assemblies`) and names the identity each of its slices spells.
+
+### Names tied to bytes by equations
+
+A name the extraction states is a `String`; Lean reads the same name as heap bytes. A decision that
+compared them would evaluate the string literal in the kernel, about ten thousand heartbeats for each
+character, so the comparison is an equation instead: `spelled?` turns bytes into the string they spell as
+well-formed UTF-8 in one pass ([KernelEquation](../CIL/Extraction/KernelEquation.lean)), and the tactic
+`cil_kernel_rfl` proves `spelled? bytes = some name` by `Eq.refl`, which the kernel accepts when both sides
+reduce to the same term. The tactic adds the proof as an auxiliary lemma first, assigns it only after the
+kernel accepts it, and otherwise fails at the goal with both sides. `spelled?` agrees with `bytesOf`, the
+bytes of a string literal, so the two kinds of comparison in the checker mean the same. Indices, ranges, flags
+and blobs stay kernel decisions. The equations cover the owner and base class names of a method
+(`MethodNames.Spell`), the method's own assembly against its pin, and each assembly's identity; the method's
+signature string is equated the same way.
 A method's evidence is a function of the method and its assemblies and of nothing else in the extraction,
 so a verified method's component is reused by every extraction that holds the method. The `RVA` column of every carried `MethodDef` row is zero: where a
 body sits in the image moves whenever an earlier body changes length, so no method's evidence may depend
@@ -125,8 +142,16 @@ owner of an instance method, and enums carry their whole field lists.
 What `MetadataResolution` and `MetadataBinding` check:
 
 - The scope of every type is the assembly identity its `AssemblyRef` row spells (name, version,
-  culture, key token); nested types are named `Outer/Inner`; a type defined in a carried slice has
-  the value type, enum (with its integer type), class or interface kind its flags and base give.
+  culture, key token); nested types are named `Outer/Inner`, and a type's namespace and simple names
+  stay apart in the comparison between a reference and its definition, so namespace `A.B` with name
+  `C` is not namespace `A` with name `B.C`. A type defined in a carried slice has the value type,
+  enum (with its integer type), class or interface kind its flags and base give: the base counts
+  as `System.ValueType` or `System.Enum` only when the base's own `TypeRef` names a core-library
+  assembly (`System.Runtime`, `netstandard`, `mscorlib` or `System.Private.CoreLib`), whatever the
+  slice's `corlib` number says.
+- A reference whose scope is a pinned assembly needs that assembly's slice among the method's
+  slices; without it the check fails with `missingSlice`, so a pinned type or call is never read as
+  a platform one.
 - Each `.type`, `.field`, `.call`, `.indirectCall` and string operand of the token table is
   checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
   for a type, and Lean accepts the choices that name the same scoped type with a form its kind
@@ -154,7 +179,7 @@ What `MetadataResolution` and `MetadataBinding` check:
   slice collector agree). A type used any other way keeps the link, and a pinned type that does not resolve
   there stops the extraction with `Unresolved pinned type`.
 
-Trusted: that each carried row, heap entry and body is the image's bytes at that position (a wrong
+Lean takes on trust that each carried row, heap entry and body is the image's bytes at that position (a wrong
 copy cannot be detected without the whole stream; every row must still have the length the header's
 widths give, every blob its length prefix and every string one terminating zero), the PE container
 where a body sits in the image and the mapping of its address to its bytes, definitions in platform assemblies (so whether a
