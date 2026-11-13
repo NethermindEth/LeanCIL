@@ -224,6 +224,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         readonly HashSet<uint> visited = [];
         readonly HashSet<uint> modifierVisited = [];
         readonly HashSet<uint> fieldsAdded = [];
+        readonly HashSet<uint> chainedOwners = [];
         readonly HashSet<uint> chained = [];
         int corlib;
 
@@ -505,11 +506,14 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             var declaring = field.GetDeclaringType();
             Declared(token, declaring);
             var owner = Reader.GetTypeDefinition(declaring);
-            if (fieldsAdded.Add(TokenOf(declaring)))
+            // The owner's fields up to this one: Lean counts the instance fields before it over the carried rows
+            // from the owner's first field. Base classes, whose totals the index needs, stay whole.
+            foreach (var sibling in owner.GetFields())
             {
-                FieldRows(owner, signatures: false);
-                if (IsClass(owner)) Chain(owner);
+                Row(TokenOf(sibling));
+                if (TokenOf(sibling) == token) break;
             }
+            if (IsClass(owner) && chainedOwners.Add(TokenOf(declaring))) Chain(owner);
         }
 
         void MethodDef(uint token)
@@ -777,9 +781,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                     found.Add((field, instances.ToString(CultureInfo.InvariantCulture)));
                     if (bytes![0] / 0x10 % 2 == 0) instances++;
                 }
-                if (!complete) continue;
                 before.AddRange(found);
-                total.Add((token, instances.ToString(CultureInfo.InvariantCulture)));
+                if (complete) total.Add((token, instances.ToString(CultureInfo.InvariantCulture)));
             }
             return (Tree(before), Tree(total));
         }
