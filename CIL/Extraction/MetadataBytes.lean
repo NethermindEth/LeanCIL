@@ -7,7 +7,7 @@ An extraction carries the bytes of the metadata rows and heap entries a method u
 small header block per pinned assembly. This file reads those bytes by ECMA-335 II.22 and II.24:
 the table stream header, the widths it fixes for every column, the rows of the tables the
 checker decodes, and the entries of the `#Strings`, `#Blob` and `#US` heaps. Each slice builds
-one `Std.TreeMap` per kind, so a token costs one lookup.
+one balanced search tree per kind, so a token costs one lookup.
 
 Only the carried bytes are decoded. Whether they are the image's bytes at those positions is the
 extractor's claim: every row must still have the length the header's widths give, every blob its
@@ -108,6 +108,7 @@ inductive MetadataError where
   | methodMismatch (token : Nat)
   | identityMismatch
   | bodyLocation (token : Nat)
+  | tablesMismatch
   deriving DecidableEq, Repr
 
 
@@ -415,52 +416,108 @@ structure MethodSpecRow where
   instantiation : Nat
   deriving DecidableEq, Repr
 
-/-! ## One slice, indexed -/
+/-! ## Search trees -/
 
-/-- One slice with a map per kind of entry, so a token or offset is a single lookup. -/
-structure MetadataIndex where
+/-- A binary search tree keyed by number, built balanced from entries in ascending key order, so a
+    lookup costs the logarithm of the entry count and the tree can be written out as a literal. -/
+inductive SearchTree (α : Type) where
+  | leaf
+  | node (left : SearchTree α) (key : Nat) (value : α) (right : SearchTree α)
+  deriving DecidableEq, Repr
+
+namespace SearchTree
+
+variable {α : Type}
+
+/-- The value stored under `wanted`. -/
+def find? : SearchTree α → Nat → Option α
+  | .leaf, _ => none
+  | .node left key value right, wanted =>
+    match compare wanted key with
+    | .lt => find? left wanted
+    | .gt => find? right wanted
+    | .eq => some value
+
+/-- The entries in ascending key order. -/
+def toList : SearchTree α → List (Nat × α)
+  | .leaf => []
+  | .node left key value right => left.toList ++ (key, value) :: right.toList
+
+/-- The tree of the first `count` entries, taking `count / 2` of them to the left of the root, and
+    the entries left over. `fuel` bounds the depth. -/
+private def build : Nat → Nat → List (Nat × α) → SearchTree α × List (Nat × α)
+  | 0, _, rest => (.leaf, rest)
+  | fuel + 1, count, rest =>
+    if count == 0 then (.leaf, rest)
+    else
+      let leftCount := count / 2
+      let (left, afterLeft) := build fuel leftCount rest
+      match afterLeft with
+      | [] => (left, [])
+      | (key, value) :: afterRoot =>
+        let (right, remaining) := build fuel (count - 1 - leftCount) afterRoot
+        (.node left key value right, remaining)
+
+/-- The balanced tree of entries in ascending key order. -/
+def ofSorted (entries : List (Nat × α)) : SearchTree α :=
+  (build entries.length entries.length entries).1
+
+/-- The first key that does not ascend strictly from its predecessor. -/
+def firstOutOfOrder : Option Nat → List (Nat × α) → Option Nat
+  | _, [] => none
+  | none, (key, _) :: rest => firstOutOfOrder (some key) rest
+  | some previous, (key, _) :: rest =>
+    if previous < key then firstOutOfOrder (some key) rest else some key
+
+/-- The balanced tree of the entries, which must have strictly ascending keys. -/
+def ofEntries (entries : List (Nat × α)) : Except MetadataError (SearchTree α) :=
+  match firstOutOfOrder none entries with
+  | some key => .error (.duplicateEntry key)
+  | none => .ok (ofSorted entries)
+
+end SearchTree
+
+/-- The lookup structures of one slice: one tree per kind of entry, and the instance field counts
+    derived from the rows. They cost the size of the slice to build, so an extraction carries them
+    as literals that one theorem equates with `MetadataSlice.tables`. -/
+structure IndexTables where
+  rows : SearchTree (List Nat)
+  strings : SearchTree (List Nat)
+  blobs : SearchTree (List Nat)
+  userStrings : SearchTree (List Nat)
+  /-- Links keyed by `kind * 2 ^ 32 + source`, giving the slice index and target token. -/
+  links : SearchTree (Nat × Nat)
+  /-- For each Field row of a carried type, the instance fields before it in its type. -/
+  instanceBefore : SearchTree Nat
+  /-- For each carried TypeDef whose fields are all carried, its number of instance fields. -/
+  instanceTotal : SearchTree Nat
+  deriving DecidableEq, Repr
+
+/-! ## One slice, indexed -/
+/-- One slice with a tree per kind of entry, so a token or offset is a single lookup. -/
+structure MetadataIndex extends IndexTables where
   header : TableHeader
-  rows : Std.TreeMap Nat (List Nat) compare
-  strings : Std.TreeMap Nat (List Nat) compare
-  blobs : Std.TreeMap Nat (List Nat) compare
-  userStrings : Std.TreeMap Nat (List Nat) compare
   corlib : Nat
   /-- The identity of the assembly the slice is cut from, as the `Assembly` row spells it. -/
   identity : List Nat
-  /-- Links keyed by `kind * 2 ^ 32 + source`, giving the slice index and target token. -/
-  links : Std.TreeMap Nat (Nat × Nat) compare
-  /-- For each Field row of a carried type, the instance fields before it in its type. -/
-  instanceBefore : Std.TreeMap Nat Nat compare := ∅
-  /-- For each carried TypeDef whose fields are all carried, its number of instance fields. -/
-  instanceTotal : Std.TreeMap Nat Nat compare := ∅
 
-/-- Insert entries into a map, refusing duplicate keys and values that are not bytes. -/
-private def insertEntries : List ByteEntry → Std.TreeMap Nat (List Nat) compare →
-    Except MetadataError (Std.TreeMap Nat (List Nat) compare)
-  | [], map => .ok map
-  | (key, bytes) :: rest, map =>
-    if !bytes.all (· < 256) then .error .invalidByte
-    else if map.contains key then .error (.duplicateEntry key)
-    else insertEntries rest (map.insert key bytes)
-
-/-- The entries as a map keyed by offset or token. -/
-def indexEntries (entries : List ByteEntry) :
-    Except MetadataError (Std.TreeMap Nat (List Nat) compare) :=
-  insertEntries entries ∅
-
+/-- The entries as a tree keyed by offset or token; they must be bytes with ascending keys. -/
+def indexEntries (entries : List ByteEntry) : Except MetadataError (SearchTree (List Nat)) :=
+  if !entries.all (fun entry => entry.2.all (· < 256)) then .error .invalidByte
+  else SearchTree.ofEntries entries
 /-- The bytes of a string literal, for comparison with heap entries. -/
 def bytesOf (text : String) : List Nat := text.toByteArray.data.toList.map UInt8.toNat
 
 /-- The entry of a heap map: the bytes, or `missingHeap`. -/
-def heapEntry (heap : Nat) (entries : Std.TreeMap Nat (List Nat) compare) (offset : Nat) :
+def heapEntry (heap : Nat) (entries : SearchTree (List Nat)) (offset : Nat) :
     Except MetadataError (List Nat) :=
-  match entries[offset]? with
+  match entries.find? offset with
   | some bytes => .ok bytes
   | none => .error (.missingHeap heap offset)
 
 /-- A `#Strings` entry without its terminating zero; the entry must have exactly one zero,
     at its end. -/
-def stringBytes (entries : Std.TreeMap Nat (List Nat) compare) (offset : Nat) :
+def stringBytes (entries : SearchTree (List Nat)) (offset : Nat) :
     Except MetadataError (List Nat) := do
   let bytes ← heapEntry stringsHeap entries offset
   match bytes.reverse with
@@ -470,7 +527,7 @@ def stringBytes (entries : Std.TreeMap Nat (List Nat) compare) (offset : Nat) :
   | _ => .error (.malformedHeap stringsHeap offset)
 
 /-- A `#Blob` entry without its length prefix; the prefix must give the remaining length. -/
-def blobBytes (entries : Std.TreeMap Nat (List Nat) compare) (offset : Nat) :
+def blobBytes (entries : SearchTree (List Nat)) (offset : Nat) :
     Except MetadataError (List Nat) := do
   let bytes ← heapEntry blobHeap entries offset
   match decodeCompressed bytes with
@@ -525,7 +582,7 @@ private def littleUnits : Nat → List Nat → Option (List Nat)
 
 /-- The UTF-16 code units of a `#US` entry. Its length counts the units' bytes and the
     terminal byte, which is 1 exactly when a unit needs the flag. -/
-def userStringUnits (entries : Std.TreeMap Nat (List Nat) compare) (offset : Nat) :
+def userStringUnits (entries : SearchTree (List Nat)) (offset : Nat) :
     Except MetadataError (List Nat) := do
   let bytes ← heapEntry userStringHeap entries offset
   let some (length, rest) := decodeCompressed bytes
@@ -548,7 +605,7 @@ def MetadataIndex.row (index : MetadataIndex) (token : Nat) : Except MetadataErr
   let table := metadataTableOf token
   if tokenRow token == 0 || index.header.rows table < tokenRow token then
     .error (.tokenOutOfScope token)
-  else match columnWidths index.header.widths table, index.rows[token]? with
+  else match columnWidths index.header.widths table, index.rows.find? token with
   | none, _ => .error (.unsupportedTable token)
   | some widths, some bytes =>
     if bytes.length == widths.sum then .ok bytes
@@ -742,19 +799,20 @@ private def fieldCounts (index : MetadataIndex) :
     Nat → Nat → Nat → List (Nat × Nat) → Option (List (Nat × Nat) × Nat)
   | 0, _, instances, found => some (found, instances)
   | count + 1, row, instances, found =>
-    match index.rows[tokenOf Table.field row]? with
+    match index.rows.find? (tokenOf Table.field row) with
     | none => none
     | some bytes =>
       let isStatic := bytes.getD 0 0 / 0x10 % 2 == 1
       fieldCounts index count (row + 1) (if isStatic then instances else instances + 1)
         ((tokenOf Table.field row, instances) :: found)
 
-/-- Add the instance field counts of one carried type, when all its fields and the start of the
-    next type's fields are carried; a type without them contributes nothing. -/
-private def addTypeCounts (index : MetadataIndex) (token : Nat) (counts : MetadataIndex) :
-    MetadataIndex :=
+/-- The instance field counts of one carried type, when all its fields and the start of the next
+    type's fields are carried: each field's count before it, latest first, and the total. A type
+    without them has none. -/
+private def typeCounts (index : MetadataIndex) (token : Nat) :
+    Option (List (Nat × Nat) × Nat) :=
   match index.typeDef token with
-  | .error _ => counts
+  | .error _ => none
   | .ok row =>
     let stop :=
       if tokenRow token == index.header.rows Table.typeDef then
@@ -763,44 +821,78 @@ private def addTypeCounts (index : MetadataIndex) (token : Nat) (counts : Metada
         | .ok next => some next.fieldList
         | .error _ => none)
     match stop with
-    | none => counts
-    | some stop =>
-      match fieldCounts index (stop - row.fieldList) row.fieldList 0 [] with
-      | none => counts
-      | some (found, total) =>
-        { counts with
-          instanceBefore := found.foldl (fun map (field, before) => map.insert field before)
-            counts.instanceBefore,
-          instanceTotal := counts.instanceTotal.insert token total }
+    | none => none
+    | some stop => fieldCounts index (stop - row.fieldList) row.fieldList 0 []
 
-/-- The index with the instance field counts of every carried type, built once so that a field
-    operand costs a lookup rather than a scan of its type's fields. -/
-private def MetadataIndex.withFieldCounts (index : MetadataIndex) : MetadataIndex :=
-  index.rows.foldl (fun counts token _ =>
-    if metadataTableOf token == Table.typeDef then addTypeCounts index token counts
-    else counts) index
-/-- Insert links into a map keyed by kind and source, refusing a second link for one key. -/
-private def indexLinks : List MetadataLink → Std.TreeMap Nat (Nat × Nat) compare →
-    Except MetadataError (Std.TreeMap Nat (Nat × Nat) compare)
-  | [], map => .ok map
-  | link :: rest, map =>
-    let key := link.kind * 0x100000000 + link.source
-    if map.contains key then .error (.duplicateEntry link.source)
-    else indexLinks rest (map.insert key (link.slice, link.target))
+/-- The instance field counts of every carried type, as entries in ascending key order. -/
+private def fieldCountEntries (index : MetadataIndex) :
+    Except MetadataError (SearchTree Nat × SearchTree Nat) :=
+  let (before, total) := index.rows.toList.foldl (fun (before, total) (token, _) =>
+    if metadataTableOf token == Table.typeDef then
+      match typeCounts index token with
+      | some (found, count) => (found ++ before, (token, count) :: total)
+      | none => (before, total)
+    else (before, total)) ([], [])
+  do .ok (← SearchTree.ofEntries before.reverse, ← SearchTree.ofEntries total.reverse)
 
-/-- Build the index of a slice: its header, its identity, and one map per kind of entry. The
-    identity the `Assembly` row spells must be the one the assembly block claims. -/
-def MetadataSlice.index (slice : MetadataSlice) : Except MetadataError MetadataIndex := do
+/-- Insert links into a list of entries keyed by kind and source, refusing a second link for one
+    key. -/
+private def linkEntries : List MetadataLink → List (Nat × (Nat × Nat))
+  | [] => []
+  | link :: rest => (link.kind * 0x100000000 + link.source, (link.slice, link.target)) :: linkEntries rest
+
+/-- The lookup structures of a slice, built from its bytes: its entries as trees, and the instance
+    field counts of its carried types. -/
+def MetadataSlice.tables (slice : MetadataSlice) : Except MetadataError IndexTables := do
   let header ← decodeTableHeader slice.assembly.tableHeader
-  let identity ← slice.assembly.spelling
-  if identity != bytesOf slice.assembly.identity then throw .identityMismatch
   let rows ← indexEntries slice.rows
   let strings ← indexEntries slice.strings
   let blobs ← indexEntries slice.blobs
   let userStrings ← indexEntries slice.userStrings
-  let links ← indexLinks slice.links ∅
-  .ok (MetadataIndex.withFieldCounts
-    { header := header, rows := rows, strings := strings, blobs := blobs,
-      userStrings := userStrings, corlib := slice.corlib, identity := identity, links := links })
+  let links ← SearchTree.ofEntries (linkEntries slice.links)
+  let bare : IndexTables :=
+    { rows := rows
+      strings := strings
+      blobs := blobs
+      userStrings := userStrings
+      links := links
+      instanceBefore := .leaf
+      instanceTotal := .leaf }
+  let (before, total) ←
+    fieldCountEntries { toIndexTables := bare, header := header, corlib := slice.corlib, identity := [] }
+  .ok { bare with instanceBefore := before, instanceTotal := total }
+
+/-- The index of a slice given its tables: its header and its identity, which the `Assembly` row
+    must spell as the assembly block claims. Cheap: independent of the number of rows. -/
+def MetadataSlice.indexWith (slice : MetadataSlice) (tables : IndexTables) :
+    Except MetadataError MetadataIndex := do
+  let header ← decodeTableHeader slice.assembly.tableHeader
+  let identity ← slice.assembly.spelling
+  if identity != bytesOf slice.assembly.identity then throw .identityMismatch
+  .ok { toIndexTables := tables, header := header, corlib := slice.corlib, identity := identity }
+
+/-- Build the index of a slice from its bytes alone. -/
+def MetadataSlice.index (slice : MetadataSlice) : Except MetadataError MetadataIndex := do
+  let empty : IndexTables :=
+    { rows := .leaf
+      strings := .leaf
+      blobs := .leaf
+      userStrings := .leaf
+      links := .leaf
+      instanceBefore := .leaf
+      instanceTotal := .leaf }
+  let bare ← slice.indexWith empty
+  .ok { bare with toIndexTables := ← slice.tables }
+
+/-- The tables of the slices of one method's metadata, its own first. -/
+def MethodMetadata.tables (metadata : MethodMetadata) : Except MetadataError (List IndexTables) :=
+  (metadata.own :: metadata.others).mapM MetadataSlice.tables
+
+/-- Whether `tables` are what the decoder builds from the metadata's bytes. Only the kernel
+    decides it, like `bodyMatches`. -/
+@[irreducible] def tablesMatch (metadata : MethodMetadata) (tables : List IndexTables) : Bool :=
+  match metadata.tables with
+  | .ok built => built == tables
+  | .error _ => false
 
 end CIL.Extraction

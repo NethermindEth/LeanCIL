@@ -86,7 +86,7 @@ def MetadataEnv.slice (env : MetadataEnv) (position token : Nat) :
 
 /-- The slice, link-resolved: the link of a kind from a token, if the slice states one. -/
 def MetadataIndex.link (index : MetadataIndex) (kind source : Nat) : Option (Nat × Nat) :=
-  index.links[kind * 0x100000000 + source]?
+  index.links.find? (kind * 0x100000000 + source)
 
 /-- How deeply names, enclosing types and signature types may nest. -/
 def resolveFuel : Nat := 32
@@ -158,7 +158,7 @@ def MetadataIndex.fieldRange (index : MetadataIndex) (token : Nat) :
 /-- The integer element type of the single instance field of an enum. -/
 def enumUnderlying (index : MetadataIndex) (token : Nat) : Except MetadataError Nat := do
   let (start, stop) ← index.fieldRange token
-  if index.instanceTotal[token]? != some 1 then throw (.unresolvedType token)
+  if index.instanceTotal.find? token != some 1 then throw (.unresolvedType token)
   match ← firstInstanceField index (stop - start) start with
   | some field =>
     let row ← index.field field
@@ -363,8 +363,10 @@ def aggregateSpelling (corlib : List Nat) : Nat → ResolvedType → Option (Lis
       let inner ← aggregateSpellings corlib fuel arguments
       some (head.scope ++ [58, 58] ++ head.name ++ [60] ++ inner ++ [62])
     else
-      -- An instance of a type outside the carried slices, such as a tuple, keeps Cecil's spelling.
-      let inner ← cecilNames fuel arguments
+      -- A value tuple is an aggregate and keeps Cecil's spelling; any other instance outside
+      -- the carried slices, such as a vector, spells its arguments with their scopes.
+      let inner ← if (bytesOf "System.ValueTuple`").isPrefixOf head.name
+        then cecilNames fuel arguments else aggregateSpellings corlib fuel arguments
       some (head.scope ++ [58, 58] ++ head.name ++ [60] ++ inner ++ [62])
   | _ + 1, _ => none
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -217,3 +218,82 @@ foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
             $"Checking {manyCount} {kind.ToLowerInvariant()} tokens costs {tokenGrowth:F2} times as much per token " +
             $"as {fewCount}; the limit is {AllowedGrowth}."));
 }
+
+// One method's body check reads its module's literal lookup tables by name, so its kernel cost is its own body and
+// tokens times a logarithm: independent of the number of methods in the extraction and of the rows its module carries.
+const double AllowedBodyGrowth = 1.35;
+int[] chainLengths = [8, 32, 128];
+int[] bulkSizes = [125, 500];
+var bodySource = Path.Combine(directory, "BodyAssembly");
+Directory.CreateDirectory(bodySource);
+File.WriteAllText(Path.Combine(bodySource, "Bodies.csproj"), File.ReadAllText(Path.Combine(tokenSource, "Tokens.csproj")));
+string Chain(int count) =>
+    $"public static ulong Chain{count}(ulong x) {{ " + Join(count, index => $"x = Chain{count}_{index}(x); ") + "return x; } " +
+    Join(count, index => $"static ulong Chain{count}_{index}(ulong x) => x + {index + 1}UL; ");
+string Rows(int count) =>
+    $"public static ulong Rows{count}(ulong x) {{ x = Small{count}(x); return Bulk{count}(x); }} " +
+    $"static ulong Small{count}(ulong x) => x + 1UL; " +
+    $"static ulong Bulk{count}(ulong x) {{ " + Join(count, index => $"Use(\"r{count}_{index}\"); ") + "return x; } ";
+File.WriteAllText(Path.Combine(bodySource, "Bodies.cs"), "public static class Bodies { public static void Use(string text) { } " +
+    string.Concat(chainLengths.Select(Chain)) + string.Concat(bulkSizes.Select(Rows)) + "}");
+Run(["dotnet", "build", Path.Combine(bodySource, "Bodies.csproj"), "-c", "Release"]);
+var bodyAssembly = Path.Combine(bodySource, "bin/Bodies.dll");
+// Heartbeats of the method's `method{n}_body_validated`, less the same file with its proof left open.
+long BodyCheck(string name, string entry, string method)
+{
+    var output = Path.Combine(directory, "Body" + name);
+    Run(Extract("extract", bodyAssembly, "Bodies", $"Bodies::{entry}(ulong)", output));
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var number = Regex.Match(extracted, @"def method(\d+)Signature : String := ""[^""]*Bodies::" +
+        Regex.Escape(method) + @"\(").Groups[1].Value;
+    if (number.Length == 0) throw new InvalidOperationException($"Method {method} is not in the extraction {name}.");
+    var theorem = $"method{number}_body_validated";
+    var narrowed = NarrowEvidence(extracted, theorem);
+    var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := ⟨[^\r\n]*⟩\r?$").Value;
+    if (proof.Length == 0) throw new InvalidOperationException("Missing body obligation " + theorem);
+    var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := ⟨", StringComparison.Ordinal)] + " := sorry");
+    return Heartbeats(Path.Combine(output, "BodyChecked.lean"), narrowed, equations: false) -
+        Heartbeats(Path.Combine(output, "BodyOpen.lean"), open, equations: false);
+}
+var chainCosts = chainLengths.Select(count => (double)BodyCheck("Chain" + count, "Chain" + count,
+    $"Chain{count}_{count - 1}")).ToArray();
+var rowCosts = bulkSizes.Select(count => (double)BodyCheck("Rows" + count, "Rows" + count, $"Small{count}")).ToArray();
+for (var step = 1; step < chainCosts.Length; step++)
+{
+    var growth = chainCosts[step] / chainCosts[step - 1];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS body check of one method in {chainLengths[step - 1]} and {chainLengths[step]} methods: " +
+        $"{chainCosts[step - 1]:F0} and {chainCosts[step]:F0} heartbeats, {growth:F2} times"));
+    if (growth > AllowedBodyGrowth)
+        throw new Exception(FormattableString.Invariant(
+            $"One body check costs {growth:F2} times as much at {chainLengths[step]} methods as at {chainLengths[step - 1]}; " +
+            $"the limit is {AllowedBodyGrowth}."));
+}
+var rowGrowth = rowCosts[1] / rowCosts[0];
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of one method against {bulkSizes[0]} and {bulkSizes[1]} metadata rows: {rowGrowth:F2} times"));
+if (rowGrowth > AllowedBodyGrowth)
+    throw new Exception(FormattableString.Invariant(
+        $"One body check costs {rowGrowth:F2} times as much against {bulkSizes[1]} rows as against {bulkSizes[0]}; " +
+        $"the limit is {AllowedBodyGrowth}."));
+// The kernel's one decision per module that its literal tables are the decoder's costs the rows carried, times a
+// logarithm; it is paid once per extraction, not once per method.
+long TablesCheck(string name)
+{
+    var output = Path.Combine(directory, "Body" + name);
+    var narrowed = NarrowEvidence(File.ReadAllText(Path.Combine(output, "Extracted.lean")), "module0_tables_valid");
+    var proof = Regex.Match(narrowed, @"(?m)^theorem module0_tables_valid : [^\r\n]*? := by decide \+kernel\r?$").Value;
+    if (proof.Length == 0) throw new InvalidOperationException("Missing tables obligation in " + name);
+    var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := by", StringComparison.Ordinal)] + " := sorry");
+    return Heartbeats(Path.Combine(output, "TablesChecked.lean"), narrowed, equations: false) -
+        Heartbeats(Path.Combine(output, "TablesOpen.lean"), open, equations: false);
+}
+var tablesFew = TablesCheck("Rows" + bulkSizes[0]);
+var tablesMany = TablesCheck("Rows" + bulkSizes[1]);
+var tablesGrowth = tablesMany / (double)tablesFew;
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS module tables check with {bulkSizes[0]} and {bulkSizes[1]} user string rows: {tablesFew} and {tablesMany} " +
+    $"heartbeats, {tablesGrowth / (bulkSizes[1] / (double)bulkSizes[0]):F2} times the cost per row"));
+if (tablesGrowth > AllowedBodyGrowth * bulkSizes[1] / bulkSizes[0])
+    throw new Exception(FormattableString.Invariant(
+        $"The module tables check costs {tablesGrowth:F2} times as much for {bulkSizes[1]} rows as for {bulkSizes[0]}."));

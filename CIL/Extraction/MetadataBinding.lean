@@ -183,7 +183,7 @@ def MetadataEnv.chainFieldCount (env : MetadataEnv) : List (Nat × Nat) → Exce
   | [] => .ok 0
   | (position, token) :: rest => do
     let index ← env.slice position token
-    let some own := index.instanceTotal[token]? | throw (.missingRow token)
+    let some own := index.instanceTotal.find? token | throw (.missingRow token)
     .ok (own + (← env.chainFieldCount rest))
 
 /-- The model index of an instance field: counting the fields of the bases of a class first,
@@ -191,7 +191,7 @@ def MetadataEnv.chainFieldCount (env : MetadataEnv) : List (Nat × Nat) → Exce
 def MetadataEnv.instanceIndex (env : MetadataEnv) (position field : Nat) (classOwner : Bool) :
     Except MetadataError Nat := do
   let index ← env.slice position field
-  let some before := index.instanceBefore[field]? | throw (.unresolvedMember field)
+  let some before := index.instanceBefore.find? field | throw (.unresolvedMember field)
   if classOwner then
     let owner ← env.declaringType position field
     let inherited ← env.chainFieldCount (← env.classChain resolveFuel position owner)
@@ -496,9 +496,10 @@ def baseAgrees (base : NamedType) : TypeExpr → Bool
   | _ => false
 
 /-- Check the method definition against its `MethodDef` row: its identity in the pinned
-    assembly, flags, signature, generic parameters, owner and class layout facts. `rva` is the
-    relative virtual address the body was read at. -/
-def methodIdentityValid (env : MetadataEnv) (pin : AssemblyPin) (method : RawMethod) (rva : Nat) :
+    assembly, flags, signature, generic parameters, owner and class layout facts. Every column of
+    the row is compared but its relative virtual address, which the extractor zeroes in the rows
+    it carries: where a body sits in the image is the strict audit's to confirm. -/
+def methodIdentityValid (env : MetadataEnv) (pin : AssemblyPin) (method : RawMethod) :
     Except MetadataError Unit := do
   let index ← env.slice 0 method.token
   if index.identity != bytesOf pin.identity then throw .identityMismatch
@@ -507,7 +508,7 @@ def methodIdentityValid (env : MetadataEnv) (pin : AssemblyPin) (method : RawMet
   let row ← index.methodDef method.token
   if row.flags != method.attributes || row.implFlags != method.implementation then
     throw (.methodMismatch method.token)
-  if rva == 0 || row.rva != rva || row.implFlags % 4 != 0 then throw (.bodyLocation method.token)
+  if row.implFlags % 4 != 0 then throw (.bodyLocation method.token)
   let signature ← decodeMethodSig (← index.blob row.signature)
   let convention := signature.convention
   if method.hasThis != (convention / hasThisFlag % 2 == 1) ||
@@ -534,7 +535,7 @@ def methodIdentityValid (env : MetadataEnv) (pin : AssemblyPin) (method : RawMet
   if method.objectReceiver then
     if !method.hasThis || owner.kind != .classType then throw (.methodMismatch method.token)
     let chain ← env.classChain resolveFuel 0 ownerToken
-    let some own := index.instanceTotal[ownerToken]? | throw (.missingRow ownerToken)
+    let some own := index.instanceTotal.find? ownerToken | throw (.missingRow ownerToken)
     let bases ← chain.mapM fun (position, token) => typeDefNamed env position resolveFuel token
     if method.objectFieldCount != (← env.chainFieldCount chain) + own ||
         method.objectBases.length != bases.length ||

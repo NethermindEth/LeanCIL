@@ -56,7 +56,20 @@ internal sealed class MetadataImage
         var table = (TableIndex)(token >> 24);
         var size = Reader.GetTableRowSize(table);
         var at = Reader.GetTableMetadataOffset(table) + ((int)(token & 0xFFFFFF) - 1) * size;
-        return bytes.AsSpan(at, size).ToArray();
+        var row = bytes.AsSpan(at, size).ToArray();
+        // A MethodDef row's first column is the body's address, which moves whenever an earlier body changes
+        // size; the carried row has it zeroed so that no method's evidence depends on another method's body.
+        if (table == TableIndex.MethodDef) row.AsSpan(0, sizeof(uint)).Clear();
+        return row;
+    }
+
+    /// <summary>The first <c>Field</c> row of a <c>TypeDef</c> row: its <c>FieldList</c> column.</summary>
+    internal uint FieldList(byte[] typeDefRow)
+    {
+        var width = Reader.GetTableRowCount(TableIndex.Field) < 0x10000 ? 2 : 4;
+        var methodWidth = Reader.GetTableRowCount(TableIndex.MethodDef) < 0x10000 ? 2 : 4;
+        var at = typeDefRow.Length - width - methodWidth;
+        return width == 2 ? BitConverter.ToUInt16(typeDefRow, at) : BitConverter.ToUInt32(typeDefRow, at);
     }
 
     /// <summary>A <c>#Strings</c> entry through its terminating zero.</summary>
@@ -120,15 +133,31 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             $"strings := {Entries(strings)}, blobs := {Entries(blobs)} }}";
     }
 
-    /// <summary>The slices of one method's body, as a Lean <c>MethodMetadata</c> value.</summary>
-    internal string Method(MethodDefinition original, IEnumerable<uint> tokens, bool classOwner)
+    readonly Dictionary<ModuleDefinition, Collection> collections = [];
+
+    /// <summary>Add one method's definition and tokens to the slices of its module.</summary>
+    internal void Add(MethodDefinition original, IEnumerable<uint> tokens, bool classOwner)
     {
-        var collection = new Collection(pinned);
+        var module = pinned.Original(original.Module);
+        if (!collections.TryGetValue(module, out var collection)) collections[module] = collection = new Collection(pinned);
         var own = collection.SliceOf(original.Module);
         own.Method(original, classOwner);
         foreach (var token in tokens) own.Token(token);
-        return collection.Lean();
     }
+
+    /// <summary>The Lean name of the slices every method of a module shares.</summary>
+    internal string Name(ModuleDefinition module) =>
+        $"module{pinned.Index(pinned.Working(pinned.Original(module)))}Metadata";
+
+    /// <summary>
+    /// The slices of each module a method was added for, as Lean <c>MethodMetadata</c> values with their lookup tables.
+    /// </summary>
+    internal IEnumerable<(string Name, string Lean, string Tables)> Modules() =>
+        collections.OrderBy(entry => pinned.Index(pinned.Working(entry.Key))).Select(entry =>
+        {
+            var lean = entry.Value.Lean();
+            return (Name(entry.Key), lean, entry.Value.Tables());
+        });
 
     internal static string Bytes(IEnumerable<byte> bytes) =>
         "[" + string.Join(", ", bytes.Select(value => value.ToString(CultureInfo.InvariantCulture))) + "]";
@@ -162,6 +191,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             for (var position = 0; position < slices.Count; position++) slices[position].Finish();
             return $"{{ own := {slices[0].Lean()}, others := [{string.Join(", ", slices.Skip(1).Select(slice => slice.Lean()))}] }}";
         }
+
+        /// <summary>The lookup tables of each slice, in slice order; read after <see cref="Lean"/> has closed them.</summary>
+        internal string Tables() => "[" + string.Join(", ", slices.Select(slice => slice.Tables())) + "]";
     }
 
     /// <summary>The rows, heap entries and links of one module the method reaches.</summary>
@@ -255,10 +287,16 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             public int GetModifiedType(int modifier, int unmodifiedType, bool isRequired)
             {
                 var handle = MetadataTokens.EntityHandle(modifier);
-                var name = handle.Kind == HandleKind.TypeReference
-                    ? reader.GetString(reader.GetTypeReference((TypeReferenceHandle)handle).Name) : "";
+                var name = handle.Kind switch
+                {
+                    HandleKind.TypeReference =>
+                        reader.GetString(reader.GetTypeReference((TypeReferenceHandle)handle).Name),
+                    HandleKind.TypeDefinition =>
+                        reader.GetString(reader.GetTypeDefinition((TypeDefinitionHandle)handle).Name),
+                    _ => ""
+                };
                 return isRequired && name is "InAttribute" or "IsExternalInit" ? 0
-                    : throw Unsupported("custom modifier " + (name.Length == 0 ? "of a type definition" : name));
+                    : throw Unsupported("custom modifier " + (name.Length == 0 ? "of a specification" : name));
             }
 
             public int GetPinnedType(int elementType) => throw Unsupported("pinned local");
@@ -538,10 +576,78 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         internal string Lean()
         {
             var assembly = $"assembly{collection.Pinned.Index(collection.Pinned.Working(module))}Metadata";
-            var linkList = string.Join(", ", links.Select(link => $"⟨{link.Kind}, {link.Source}, {link.Slice}, {link.Target}⟩"));
+            var linkList = string.Join(", ", SortedLinks().Select(link => $"⟨{link.Kind}, {link.Source}, {link.Slice}, {link.Target}⟩"));
             return $"{{ assembly := {assembly}, rows := {Entries(rows)}, strings := {Entries(strings)}, " +
                 $"blobs := {Entries(blobs)}, userStrings := {Entries(userStrings)}, corlib := {corlib}, " +
                 $"links := [{linkList}] }}";
+        }
+
+        IEnumerable<(int Kind, uint Source, int Slice, uint Target)> SortedLinks() =>
+            links.OrderBy(link => ((ulong)link.Kind << 32) + link.Source);
+
+        /// <summary>
+        /// A balanced search tree over entries in ascending key order, as Lean's <c>SearchTree.ofSorted</c> builds
+        /// it: the first <c>count / 2</c> entries go left of the root.
+        /// </summary>
+        static string Tree(IReadOnlyList<(ulong Key, string Value)> entries)
+        {
+            string Build(int start, int count)
+            {
+                if (count == 0) return ".leaf";
+                var left = count / 2;
+                var root = entries[start + left];
+                return $"(.node {Build(start, left)} {root.Key} {root.Value} {Build(start + left + 1, count - 1 - left)})";
+            }
+            return Build(0, entries.Count);
+        }
+
+        static (ulong, string) Entry<TKey>(KeyValuePair<TKey, byte[]> entry) where TKey : struct, IConvertible =>
+            (Convert.ToUInt64(entry.Key, CultureInfo.InvariantCulture), Bytes(entry.Value));
+
+        /// <summary>
+        /// The instance field counts Lean derives from the carried rows: for each field of a carried type whose
+        /// fields and following type are carried, the instance fields before it, and for the type their total.
+        /// </summary>
+        (string Before, string Total) FieldCounts()
+        {
+            var before = new List<(ulong, string)>();
+            var total = new List<(ulong, string)>();
+            var typeCount = (uint)Reader.GetTableRowCount(TableIndex.TypeDef);
+            var fieldCount = (uint)Reader.GetTableRowCount(TableIndex.Field);
+            foreach (var (token, row) in rows.Where(entry => entry.Key >> 24 == 0x02))
+            {
+                var first = image.FieldList(row);
+                uint stop;
+                if ((token & 0xFFFFFF) == typeCount) stop = fieldCount + 1;
+                else if (rows.TryGetValue(token + 1, out var next)) stop = image.FieldList(next);
+                else continue;
+                var found = new List<(ulong, string)>();
+                uint instances = 0;
+                var complete = true;
+                for (uint index = 0; index < (stop > first ? stop - first : 0) && complete; index++)
+                {
+                    var field = 0x04000000u + first + index;
+                    complete = rows.TryGetValue(field, out var bytes);
+                    if (!complete) break;
+                    found.Add((field, instances.ToString(CultureInfo.InvariantCulture)));
+                    if (bytes![0] / 0x10 % 2 == 0) instances++;
+                }
+                if (!complete) continue;
+                before.AddRange(found);
+                total.Add((token, instances.ToString(CultureInfo.InvariantCulture)));
+            }
+            return (Tree(before), Tree(total));
+        }
+
+        /// <summary>The Lean <c>IndexTables</c> of this slice, equal to what the decoder builds from its bytes.</summary>
+        internal string Tables()
+        {
+            var (before, total) = FieldCounts();
+            var linkEntries = SortedLinks().Select(link =>
+                (((ulong)link.Kind << 32) + link.Source, $"({link.Slice}, {link.Target})")).ToList();
+            return $"{{ rows := {Tree([.. rows.Select(Entry)])}, strings := {Tree([.. strings.Select(Entry)])}, " +
+                $"blobs := {Tree([.. blobs.Select(Entry)])}, userStrings := {Tree([.. userStrings.Select(Entry)])}, " +
+                $"links := {Tree(linkEntries)}, instanceBefore := {before}, instanceTotal := {total} }}";
         }
 
         internal int PositionOf => position;

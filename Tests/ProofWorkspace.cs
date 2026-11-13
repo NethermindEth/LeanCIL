@@ -51,6 +51,15 @@ File.WriteAllText(arith, """
         public static ulong Twice(ulong x) => x + x;
     }
     """);
+// Compiled between the other two: editing the first body moves the later ones, whose evidence must not change.
+File.WriteAllText(Path.Combine(consumer, "Third.cs"), """
+    namespace Workspace;
+
+    public static class Third
+    {
+        public static ulong Thrice(ulong x) => x + x + x;
+    }
+    """);
 Console.WriteLine("Building the workspace consumer fixture");
 Run(["dotnet", "build", project, "-c", "Release"]);
 var assembly = Path.Combine(consumer, "bin", "Workspace.dll");
@@ -530,6 +539,17 @@ var twiceProof = Path.Combine(package, "TwiceProof.lean");
 File.WriteAllText(twiceProof, "-- written once the module name is known\n");
 var twiceKey = KeyOf(Run([.. cli, "workspace", assembly, twiceMethod, "--profile", "scalar", "--proof", twiceProof,
     "--theorem", "TwiceProof.length"]));
+var thriceProof = Path.Combine(package, "ThriceProof.lean");
+File.WriteAllText(thriceProof, "-- written once the module name is known\n");
+var thriceKey = KeyOf(Run([.. cli, "workspace", assembly, "Workspace.Third::Thrice(ulong)", "--profile", "scalar",
+    "--proof", thriceProof, "--theorem", "ThriceProof.length"]));
+File.WriteAllText(thriceProof, $"""
+import Extracted.{thriceKey}
+namespace ThriceProof
+theorem length : Extracted.method0.code.length = {CodeLength(thriceKey)} := by decide
+#print axioms length
+end ThriceProof
+""");
 void WriteTwiceProof(int length) => File.WriteAllText(twiceProof, $"""
 import Extracted.{twiceKey}
 namespace TwiceProof
@@ -542,6 +562,7 @@ WriteTwiceProof(twiceLength);
 // Both proofs are open at once: each checks in place against its own method's extraction.
 CheckedProof();
 if (CheckProof(twiceProof).Code != 0) throw new InvalidOperationException("The second proof does not check in place.");
+if (CheckProof(thriceProof).Code != 0) throw new InvalidOperationException("The third proof does not check in place.");
 
 string[] watch = [.. cli, "watch", package, "--project", project, "--format", "json"];
 // Scratch extractions on the package's drive, as on a single-drive machine, so a path recorded relative to one
@@ -593,6 +614,7 @@ if (crowdedWatch.Code == 0 || !crowdedWatch.Output.Contains(serveCheck, StringCo
 var (first, firstTime) = WatchOnce(passes: true);
 Expect(first, "Proof.lean", "verified", rechecked: true);
 Expect(first, "TwiceProof.lean", "verified", rechecked: true);
+Expect(first, "ThriceProof.lean", "verified", rechecked: true);
 // Each proof is verified against an extraction made in its own directory, whose recorded assembly path is
 // relative to that directory; a rooted recorded path names itself wherever the extraction lies.
 foreach (var identity in Directory.EnumerateFiles(Path.Combine(editor, "selections"), "identity.json",
@@ -610,6 +632,7 @@ foreach (var rooted in OperatingSystem.IsWindows() ? new[] { @"C:\x\y.dll", @"\\
 var (quiet, quietTime) = WatchOnce(passes: true);
 Expect(quiet, "Proof.lean", "verified", rechecked: false);
 Expect(quiet, "TwiceProof.lean", "verified", rechecked: false);
+Expect(quiet, "ThriceProof.lean", "verified", rechecked: false);
 if (Refreshed(quiet).Length != 0) throw new InvalidOperationException("An unchanged build refreshed: " + quiet);
 Console.WriteLine($"PASS watch verifies both proofs ({firstTime.TotalSeconds:F1}s), then reruns nothing when " +
     $"nothing changed ({quietTime.TotalSeconds:F1}s)");
@@ -621,10 +644,12 @@ Edit(arith, twiceBody, changedTwiceBody);
 var (edited, editedTime) = WatchOnce(passes: false);
 // Exactly the edited method's extraction is refreshed and its proof rechecked; the other one is not touched.
 if (!Refreshed(edited).Contains("Extracted." + twiceKey) ||
-    Refreshed(edited).Any(module => module.EndsWith("." + key, StringComparison.Ordinal)))
+    Refreshed(edited).Any(module => module.EndsWith("." + key, StringComparison.Ordinal) ||
+        module.EndsWith("." + thriceKey, StringComparison.Ordinal)))
     throw new InvalidOperationException("The edit did not refresh exactly the edited method: " + edited);
 Expect(edited, "TwiceProof.lean", "failed", rechecked: true);
 Expect(edited, "Proof.lean", "verified", rechecked: false);
+Expect(edited, "ThriceProof.lean", "verified", rechecked: false);
 var located = Outcome(edited, "TwiceProof.lean").GetProperty("report").GetProperty("failures")[0].GetProperty("source");
 if (Path.GetFullPath(located.GetProperty("file").GetString()!) != Path.GetFullPath(twiceProof) ||
     located.GetProperty("line").GetInt32() != 3)
@@ -749,3 +774,7 @@ finally
 {
     if (!watcher.HasExited) watcher.Kill(entireProcessTree: true);
 }
+
+// An edit that moves later bodies leaves their generated evidence unchanged, which the refreshes above rely on.
+Run(["dotnet", "run", "--file", At("Tests/IncrementalEvidence.cs")], streamOutput: true,
+    progress: "Incremental evidence of unedited methods");

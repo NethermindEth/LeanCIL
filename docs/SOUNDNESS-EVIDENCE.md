@@ -59,10 +59,13 @@ against the metadata it carries ([Metadata binding](#metadata-binding)):
   belong to a metadata table the opcode accepts. A token has one entry, and a field access names
   a static or instance field as its opcode requires.
 
-Only the kernel decides `BodyDecodes`: the elaborator's `decide` is refused at once with `failed to reduce`,
-and extractions prove it with `cil_body_decodes`, which runs `decide +kernel` and, when the kernel refutes
-it, reports the method and either the error the check raised or the part of the decoded body that differs
-from the emitted definition.
+Only the kernel decides `BodyDecodes`: the elaborator's `decide` is refused at once with `failed to reduce`.
+Extractions prove it per method as `method{n}_body_validated`, whose `bodyMatches` part uses `cil_body_decodes`:
+it runs `decide +kernel` and, when the kernel refutes it, reports the method and either the error the check
+raised or the part of the decoded body that differs from the emitted definition. The kernel keeps nothing between
+declarations, so the lookup tables of the metadata are written out once as a literal (see below) and each
+method's check reads them by name: its cost is its own bytes and tokens times a logarithm of the rows, whatever
+the number of methods or rows of the extraction.
 
 Lean does not establish that the emitted bytes are the method's body in the assembly image;
 System.Reflection.Metadata locates the body in the PE image, and the PE container stays trusted.
@@ -78,15 +81,26 @@ both.
 
 ### Metadata binding
 
-Each method's body evidence also carries a `MethodMetadata`
+Each module's methods share one `module{k}Metadata`, a `MethodMetadata`
 ([MetadataBytes](../CIL/Extraction/MetadataBytes.lean)): the raw bytes of the table rows and heap
-entries that its tokens, its own definition and its locals reach, one slice per assembly it reaches,
-and for each pinned assembly one small block with its table stream header and `Assembly` row. A
-slice also holds links, each naming for a token the definition it resolves to, its declaring type,
+entries that the tokens, definitions and locals of all the module's methods reach, emitted once per
+extraction, with one slice per assembly it reaches, and each pinned assembly has one small block with its
+table stream header and `Assembly` row. The `RVA` column of every carried `MethodDef` row is zero: where a
+body sits in the image moves whenever an earlier body changes length, so no method's evidence may depend
+on it. The extractor records each body's address as `bodyAddress` in `identity.json`, outside the Lean
+evidence, for the strict audit. A slice also holds links, each naming for a token the definition it resolves to, its declaring type,
 its `NestedClass` row or its first `GenericParam` row. Lean reads the rows by the widths the header
 fixes, decodes strings, blobs and user strings, and decodes the signature blobs
 ([Signatures](../CIL/Extraction/Signatures.lean)). `MetadataResolution` and `MetadataBinding` then
-check what the extractor states:
+check what the extractor states.
+
+Building the lookup trees of a slice costs its size, and the kernel keeps no cache between declarations. The
+extractor therefore writes them out once per module as the literal `module{k}Tables` (balanced search trees of the
+rows, heap entries, links and instance field counts), and `module{k}_tables_valid` states that `tablesMatch`: the
+decoder builds exactly that literal from `module{k}Metadata`. That decision costs the carried rows times a
+logarithm and is made once per extraction; each `method{n}_body_validated` uses it as a premise.
+
+What `MetadataResolution` and `MetadataBinding` check:
 
 - The scope of every type is the assembly identity its `AssemblyRef` row spells (name, version,
   culture, key token); nested types are named `Outer/Inner`; a type defined in a carried slice has
@@ -102,7 +116,7 @@ check what the extractor states:
 - The local variable types are checked against the standalone signature the body header names.
 - The method's own identity is checked against its `MethodDef` row: owner, flags, calling
   convention, parameter and return types, generic parameter counts and flags, the class layout
-  facts of a class receiver, and the address of the body.
+  facts of a class receiver. Every column of the row is compared but the address of the body.
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
@@ -111,7 +125,7 @@ check what the extractor states:
 Trusted: that each carried row, heap entry and body is the image's bytes at that position (a wrong
 copy cannot be detected without the whole stream; every row must still have the length the header's
 widths give, every blob its length prefix and every string one terminating zero), the PE container
-and the mapping of a body's address to its bytes, definitions in platform assemblies (so whether a
+where a body sits in the image and the mapping of its address to its bytes, definitions in platform assemblies (so whether a
 platform type is an enum, the field order of `ValueTuple`, and that `System.Object` declares no
 instance fields), public key tokens (the hash of a key is not computed in the kernel), the hashed
 part of a generic import identity, raw layout content, dispatch catalog completeness, static data

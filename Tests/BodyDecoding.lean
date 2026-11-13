@@ -20,11 +20,14 @@ open CIL CIL.Extraction Tests.BodyEncoding Tests.MetadataBuilder Tests.MetadataW
 /-- The assembly whose metadata the bodies are checked against. -/
 private def pin : AssemblyPin := { identity := ownIdentity }
 
-/-- A body with the given bytes and token claims, at the address of the world's `Main`. -/
+/-- A body with the given bytes and token claims, with the metadata of the world's `Main`. -/
 private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := []) :
     BodyEvidence :=
-  { bytes := bytes, tokens := { operands := operands },
-    metadata := { own := own.1, others := [lib] }, rva := bodyRva }
+  let metadata : MethodMetadata := { own := own.1, others := [lib] }
+  { bytes := bytes, tokens := { operands := operands }, metadata,
+    tables := match metadata.tables with
+      | .ok built => built
+      | .error _ => [] }
 
 /-- A decoded method with the given body fields: the world's `Main`, a public static method
     with no parameters. -/
@@ -430,12 +433,6 @@ theorem rejects_a_pin_of_another_version :
       | .error found => found == .metadata .identityMismatch
       | .ok _ => false) = true := by decide +kernel
 #print axioms rejects_a_pin_of_another_version
-
-/-- A body read from another address than the `MethodDef` row gives. -/
-theorem rejects_a_body_at_another_address :
-    failsWith { evidence tinyBytes with rva := 0x2051 } (.metadata (.bodyLocation tokens.main))
-      tinyMethod = true := by decide +kernel
-#print axioms rejects_a_body_at_another_address
 
 /-- Byte `0x24` is not an opcode. -/
 theorem rejects_unknown_opcode :
