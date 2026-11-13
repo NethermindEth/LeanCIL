@@ -138,7 +138,9 @@ What `MetadataResolution` and `MetadataBinding` check:
   facts of a class receiver. The row's name and signature give Cecil's full name of the method,
   for a generic instance at the type arguments its evidence states, and `BodyDecodes` equates it
   with the evidence's `signature`, the string `Extracted.signatures` lists and proofs select the
-  method by. The address of the body and the parameter list are not read.
+  method by. A row whose flags give it no IL body (abstract, platform invoke, internal call, or
+  a code type other than IL) is refused. The address of the body and the parameter list are not
+  read.
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
