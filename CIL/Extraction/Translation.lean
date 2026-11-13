@@ -20,7 +20,8 @@ against its evidence record, static values are reproduced by their initializers,
 layouts agree, every body is owned by the pinned assembly its evidence names, and every decoded
 method definition is what its body bytes and carried metadata say. It is not a simulation proof for
 every raw opcode; general instruction translation, that the carried metadata rows are the image's,
-definitions in platform assemblies and the PE container stay trusted, as `docs/SOUNDNESS.md`\ndescribes.
+definitions in platform assemblies and the PE container stay trusted, as `docs/SOUNDNESS.md`
+describes.
 
 Generated modules prove each method's evidence separately and assemble it with
 `translation_of_methods`, so no validator is reduced twice.
@@ -43,6 +44,9 @@ structure MethodEvidence where
   dispatchTypes : List DispatchType := []
   /-- The pinned assembly whose metadata supplied this body. -/
   assembly : AssemblyPin := {}
+  /-- Every assembly the extraction pins, so a reference into one whose slice the body does not
+      carry is refused. -/
+  pins : List AssemblyPin := []
 
 /-- The pin and owner identity of every original and closed body, for attribution checks. -/
 def bodyOwners (evidence : List MethodEvidence) : List (AssemblyPin × String) :=
@@ -189,7 +193,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
-  BodyDecodes item.assembly item.body item.original
+  BodyDecodes item.pins item.assembly item.body item.original
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)

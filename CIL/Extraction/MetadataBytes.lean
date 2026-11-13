@@ -111,6 +111,8 @@ inductive MetadataError where
   | localMismatch (index : Nat)
   | methodMismatch (token : Nat)
   | identityMismatch
+  /-- A reference into a pinned assembly whose slice the evidence does not carry. -/
+  | missingSlice (token : Nat)
   | bodyLocation (token : Nat)
   | tablesMismatch
   deriving DecidableEq, Repr

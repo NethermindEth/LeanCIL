@@ -77,9 +77,12 @@ def ResolvedList.ofList : List ResolvedType → ResolvedList
   | [] => .nil
   | head :: tail => .cons head (ofList tail)
 
-/-- The pinned assemblies' slices of one method, its own first. -/
+/-- The pinned assemblies' slices of one method, its own first, and the identity of every
+    assembly the extraction pins: a reference into a pinned assembly whose slice is not carried
+    is refused, not treated as a platform reference. -/
 structure MetadataEnv where
   slices : List MetadataIndex
+  pinned : List (List Nat) := []
 
 /-- The slice at a position, or `unresolvedType` for a token that points outside the list. -/
 def MetadataEnv.slice (env : MetadataEnv) (position token : Nat) :
@@ -233,8 +236,9 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
   | fuel + 1, token, hint => do
     let (scope, name, parts) ← typeRefQualified env position resolveFuel token
     match env.slices.findIdx? (fun candidate => candidate.identity == scope) with
-    | none => .ok { scope := scope, name := name, parts := parts, kind := .external hint,
-                    pinned := false }
+    | none =>
+      if env.pinned.contains scope then throw (.missingSlice token)
+      .ok { scope := scope, name := name, parts := parts, kind := .external hint, pinned := false }
     | some target =>
       let index ← env.slice position token
       let some (linked, definition) := index.link linkDefinition token
