@@ -608,7 +608,8 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         | .external (some true) | .external none => integerAtom frame underlying
         | _ => false
     | .var index, .parameter number => number == frame.arity + index
-    | .mvar index, .parameter number => number == index
+    -- Past the arity, a method parameter's index would be an owner parameter's.
+    | .mvar index, .parameter number => index < frame.arity && number == index
     | .byref element, .byref inner => typeAdmits frame fuel element inner
     | .pointer element, .pointer inner => typeAdmits frame fuel element inner
     | .szarray element, .array inner => typeAdmits frame fuel element inner
