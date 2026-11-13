@@ -35,9 +35,9 @@ inductive TypeKind where
 structure NamedType where
   scope : List Nat
   name : List Nat
-  /-- The namespace and the simple name of each enclosing type and the type itself, kept apart:
-      `name` joins them with dots and slashes, so namespace `A.B` with name `C` and namespace `A`
-      with name `B.C` spell one name but are different types. -/
+  /-- The namespace column and the simple name of each enclosing type and of the type itself,
+      kept apart: `name` joins them with dots and slashes and leaves out a nested type's
+      namespace, so types it spells alike stay different. -/
   parts : List (List Nat)
   kind : TypeKind
   pinned : Bool
@@ -77,11 +77,12 @@ def ResolvedList.ofList : List ResolvedType → ResolvedList
   | [] => .nil
   | head :: tail => .cons head (ofList tail)
 
-/-- The pinned assemblies' slices of one method, its own first, and the identity of every
-    assembly the extraction pins: a reference into a pinned assembly whose slice is not carried
-    is refused, not treated as a platform reference. -/
+/-- The pinned assemblies' slices of one method, its own first, and the name stem of every
+    assembly the extraction pins: a reference to an assembly of a pinned name whose slice is not
+    carried is refused, whatever its version, not treated as a platform reference. -/
 structure MetadataEnv where
   slices : List MetadataIndex
+  /-- `assemblyStem` of each pinned identity. -/
   pinned : List (List Nat) := []
 
 /-- The slice at a position, or `unresolvedType` for a token that points outside the list. -/
@@ -97,6 +98,13 @@ def MetadataIndex.link (index : MetadataIndex) (kind source : Nat) : Option (Nat
 
 /-- How deeply names, enclosing types and signature types may nest. -/
 def resolveFuel : Nat := 32
+
+/-- The simple name of an assembly identity followed by `versionMarker`: every identity of an
+    assembly of that name, at any version, culture or key, starts with it. -/
+def assemblyStem : List Nat → List Nat
+  | [] => []
+  | byte :: rest =>
+    if versionMarker.isPrefixOf (byte :: rest) then versionMarker else byte :: assemblyStem rest
 
 /-- `Namespace.Name`, or the bare name for the global namespace. -/
 def qualifiedName (namespace_ name : List Nat) : List Nat :=
@@ -114,6 +122,20 @@ def corlibNames : List (List Nat) :=
    [109, 115, 99, 111, 114, 108, 105, 98],
    [83, 121, 115, 116, 101, 109, 46, 80, 114, 105, 118, 97, 116, 101, 46, 67, 111, 114, 101, 76,
     105, 98]]
+
+/-- Whether an assembly identity names an assembly of one of the core-library names, at any
+    version. -/
+def isCorlibScope (scope : List Nat) : Bool :=
+  corlibNames.any fun name => (name ++ versionMarker).isPrefixOf scope
+
+/-- Whether the `TypeRef` at `token` is scoped by a reference to an assembly of a core-library
+    name: the base of a type counts as `System.Enum`, `System.ValueType` or `System.Object` only
+    then. -/
+def MetadataIndex.coreLibraryReference (index : MetadataIndex) (token : Nat) :
+    Except MetadataError Bool := do
+  let row ← index.typeRef token
+  if metadataTableOf row.scope != Table.assemblyRef then return false
+  .ok (corlibNames.contains (← index.string (← index.assemblyRef row.scope).name))
 
 /-- The identity of the assembly the slice's primitive types come from, or `none` when the
     slice names none. -/
@@ -142,7 +164,7 @@ def typeRefQualified (env : MetadataEnv) (position : Nat) :
     | 0x00 => .ok (index.identity, name, [namespace_, simple])
     | 0x01 =>
       let (scope, enclosing, parts) ← typeRefQualified env position fuel row.scope
-      .ok (scope, nestedName enclosing simple, parts ++ [simple])
+      .ok (scope, nestedName enclosing simple, parts ++ [namespace_, simple])
     | _ => .error (.unsupportedScope token)
 
 /-- The first instance field among `count` consecutive `Field` rows from `row`: a scan that
@@ -182,10 +204,25 @@ def enumUnderlying (index : MetadataIndex) (token : Nat) : Except MetadataError 
       if 0x04 ≤ code && code ≤ 0x0B then .ok code else .error (.unresolvedType token)
     | _ => .error (.unresolvedType token)
   | none => .error (.unresolvedType token)
-/-- The namespace `System` and the names `Enum` and `ValueType` as bytes. -/
+/-- The namespace `System` as bytes. -/
 def systemNamespace : List Nat := [83, 121, 115, 116, 101, 109]
+
+/-- `Enum`, the simple name of `System.Enum`, as bytes. -/
 def enumName : List Nat := [69, 110, 117, 109]
+
+/-- `ValueType`, the simple name of `System.ValueType`, as bytes. -/
 def valueTypeName : List Nat := [86, 97, 108, 117, 101, 84, 121, 112, 101]
+
+/-- `Object`, the simple name of `System.Object`, as bytes. -/
+def objectName : List Nat := [79, 98, 106, 101, 99, 116]
+
+/-- The core-library base names spell the texts they stand for; a wrong byte would turn every
+    struct into a class. -/
+theorem base_names_spell :
+    spelled? systemNamespace = some "System" ∧ spelled? enumName = some "Enum" ∧
+      spelled? valueTypeName = some "ValueType" ∧ spelled? objectName = some "Object" :=
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+#print axioms base_names_spell
 
 /-- An interface has the interface flag; a type that extends `System.Enum` is an enum with the
     underlying type of its instance field, one that extends `System.ValueType` is a value
@@ -197,10 +234,7 @@ def typeDefKind (env : MetadataEnv) (position token : Nat) (row : TypeDefRow) :
   if metadataTableOf row.extends_ != Table.typeRef then return .classType
   let index ← env.slice position token
   let (_, _, parts) ← typeRefQualified env position resolveFuel row.extends_
-  let baseRow ← index.typeRef row.extends_
-  if metadataTableOf baseRow.scope != Table.assemblyRef then return .classType
-  let baseScope ← index.assemblyRef baseRow.scope
-  if !corlibNames.contains (← index.string baseScope.name) then return .classType
+  if !(← index.coreLibraryReference row.extends_) then return .classType
   if parts == [systemNamespace, enumName] then return .enumType (← enumUnderlying index token)
   if parts == [systemNamespace, valueTypeName] then return .valueType
   .ok .classType
@@ -224,13 +258,14 @@ def typeDefNamed (env : MetadataEnv) (position : Nat) : Nat → Nat → Except M
         let nested ← index.nestedClass nesting
         if nested.nested != token then throw (.unresolvedType token)
         let enclosing ← typeDefNamed env position fuel nested.enclosing
-        pure (nestedName enclosing.name simple, enclosing.parts ++ [simple])
+        pure (nestedName enclosing.name simple, enclosing.parts ++ [namespace_, simple])
     let kind ← typeDefKind env position token row
     .ok { scope := index.identity, name := name, parts := parts, kind := kind, pinned := true }
 
 /-- The named type of a `TypeRef`. A scope that names a carried slice is resolved through the
     slice's definition link to the `TypeDef` that defines it, whose name must be the one the
-    reference spells; any other type is `external` with the given value-or-class hint. -/
+    reference spells; a scope of a pinned name is refused; any other type is `external` with the
+    given value-or-class hint. -/
 def typeRefNamed (env : MetadataEnv) (position : Nat) :
     Nat → Nat → Option Bool → Except MetadataError NamedType
   | 0, token, _ => .error (.unresolvedType token)
@@ -238,7 +273,7 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
     let (scope, name, parts) ← typeRefQualified env position resolveFuel token
     match env.slices.findIdx? (fun candidate => candidate.identity == scope) with
     | none =>
-      if env.pinned.contains scope then throw (.missingSlice token)
+      if env.pinned.any (·.isPrefixOf scope) then throw (.missingSlice token)
       .ok { scope := scope, name := name, parts := parts, kind := .external hint, pinned := false }
     | some target =>
       let index ← env.slice position token
@@ -341,14 +376,16 @@ def systemPrefix : List Nat := systemNamespace ++ [46]
 def systemStringName : List Nat := systemPrefix ++ [83, 116, 114, 105, 110, 103]
 
 /-- `System.Object` as bytes. -/
-def systemObjectName : List Nat := systemPrefix ++ [79, 98, 106, 101, 99, 116]
+def systemObjectName : List Nat := systemPrefix ++ objectName
+
+/-- `ValueTuple\``, the stem of every value tuple's simple name, as bytes. -/
+def valueTupleSimpleStem : List Nat := [86, 97, 108, 117, 101, 84, 117, 112, 108, 101, 96]
 
 /-- `System.ValueTuple\``, the stem of every value tuple's name, as bytes. -/
-def valueTupleStem : List Nat :=
-  systemPrefix ++ [86, 97, 108, 117, 101, 84, 117, 112, 108, 101, 96]
+def valueTupleStem : List Nat := systemPrefix ++ valueTupleSimpleStem
 
-/-- `System.ValueTuple\`2`, the pair, as bytes. -/
-def valueTuplePairName : List Nat := valueTupleStem ++ [50]
+/-- `ValueTuple\`2`, the simple name of the pair, as bytes. -/
+def valueTuplePairName : List Nat := valueTupleSimpleStem ++ [50]
 
 /-- `Item1`, the pair's first field, as bytes. -/
 def firstItemName : List Nat := [73, 116, 101, 109, 49]
@@ -359,7 +396,7 @@ def secondItemName : List Nat := [73, 116, 101, 109, 50]
 /-- The value tuple names spell the texts they stand for. -/
 theorem value_tuple_names_spell :
     spelled? valueTupleStem = some "System.ValueTuple`" ∧
-      spelled? valueTuplePairName = some "System.ValueTuple`2" ∧
+      spelled? valueTuplePairName = some "ValueTuple`2" ∧
       spelled? firstItemName = some "Item1" ∧ spelled? secondItemName = some "Item2" :=
   ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
 #print axioms value_tuple_names_spell
@@ -536,16 +573,22 @@ def listHasModifier : Nat → ResolvedList → Bool
   | fuel + 1, .cons head tail => hasModifier fuel head || listHasModifier fuel tail
 end
 
-/-- `System.Runtime.InteropServices.InAttribute` as bytes. -/
-def inAttributeName : List Nat :=
+/-- The namespace `System.Runtime.InteropServices` as bytes. -/
+def interopServicesNamespace : List Nat :=
   systemPrefix ++ [82, 117, 110, 116, 105, 109, 101, 46, 73, 110, 116, 101, 114, 111, 112, 83,
-    101, 114, 118, 105, 99, 101, 115, 46, 73, 110, 65, 116, 116, 114, 105, 98, 117, 116, 101]
+    101, 114, 118, 105, 99, 101, 115]
 
-/-- `System.Runtime.CompilerServices.IsExternalInit` as bytes. -/
-def externalInitName : List Nat :=
+/-- `InAttribute`, the simple name of the modifier of `in` parameters, as bytes. -/
+def inAttributeName : List Nat := [73, 110, 65, 116, 116, 114, 105, 98, 117, 116, 101]
+
+/-- The namespace `System.Runtime.CompilerServices` as bytes. -/
+def compilerServicesNamespace : List Nat :=
   systemPrefix ++ [82, 117, 110, 116, 105, 109, 101, 46, 67, 111, 109, 112, 105, 108, 101, 114,
-    83, 101, 114, 118, 105, 99, 101, 115, 46, 73, 115, 69, 120, 116, 101, 114, 110, 97, 108, 73,
-    110, 105, 116]
+    83, 101, 114, 118, 105, 99, 101, 115]
+
+/-- `IsExternalInit`, the simple name of the modifier of `init` accessors, as bytes. -/
+def externalInitName : List Nat :=
+  [73, 115, 69, 120, 116, 101, 114, 110, 97, 108, 73, 110, 105, 116]
 
 /-- `runtimeScope` as bytes. -/
 def runtimeScopeBytes : List Nat :=
@@ -558,19 +601,24 @@ def runtimeScopeBytes : List Nat :=
 
 /-- The modifier names and the runtime scope spell the texts they stand for. -/
 theorem modifier_names_spell :
-    spelled? inAttributeName = some "System.Runtime.InteropServices.InAttribute" ∧
-      spelled? externalInitName = some "System.Runtime.CompilerServices.IsExternalInit" ∧
+    spelled? interopServicesNamespace = some "System.Runtime.InteropServices" ∧
+      spelled? inAttributeName = some "InAttribute" ∧
+      spelled? compilerServicesNamespace = some "System.Runtime.CompilerServices" ∧
+      spelled? externalInitName = some "IsExternalInit" ∧
       spelled? runtimeScopeBytes = some runtimeScope :=
-  ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
+  ⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩
 #print axioms modifier_names_spell
 
-/-- `System.Runtime`'s `InAttribute`, the modifier Roslyn writes on `in` parameters. -/
+/-- `System.Runtime`'s `System.Runtime.InteropServices.InAttribute`, by namespace and simple
+    name, the modifier Roslyn writes on `in` parameters. -/
 def isInModifier (modifier : NamedType) : Bool :=
-  modifier.name == inAttributeName && modifier.scope == runtimeScopeBytes
+  modifier.parts == [interopServicesNamespace, inAttributeName] &&
+    modifier.scope == runtimeScopeBytes
 
-/-- `IsExternalInit` from any assembly, the marker Roslyn writes on `init` accessors. -/
+/-- `System.Runtime.CompilerServices.IsExternalInit` from any assembly, by namespace and simple
+    name, the marker Roslyn writes on `init` accessors. -/
 def isInitModifier (modifier : NamedType) : Bool :=
-  modifier.name == externalInitName && !modifier.name.contains 47
+  modifier.parts == [compilerServicesNamespace, externalInitName]
 
 /-- The reference an `in` parameter's `modreq(InAttribute)` wraps: modified directly, once. -/
 def inReference : ResolvedType → Option ResolvedType
@@ -622,12 +670,13 @@ def instanceType (methodArguments ownerArguments : List ResolvedType) (type : Re
 
 /-- How the extractor's types read the generic parameters and the primitive types of one
     signature: the identity of the primitive assembly, the scope Cecil gives a modified type
-    whose element is a generic parameter, and the number of method generic parameters that
-    precede the owner's. -/
+    whose element is a generic parameter, the number of method generic parameters that precede
+    the owner's, and the number of the owner's. -/
 structure Frame where
   corlib : Option (List Nat)
   anchor : List Nat
   arity : Nat
+  ownerArity : Nat
 
 /-- A class, interface or external type that may be a class. -/
 def classLike : TypeKind → Bool
@@ -644,6 +693,12 @@ def NamedType.isEnum (named : NamedType) : Bool :=
   match named.kind with
   | .enumType _ => true
   | _ => false
+
+/-- Whether a name is that of a primitive type to which `typeStorage` gives value storage as an
+    atom of the runtime scope: the boolean, character, integer and native integer types. -/
+def valueAtomName (name : List Nat) : Bool :=
+  [0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x18, 0x19].any fun code =>
+    primitiveName code == some name
 
 /-- The integer element types an enum may have, spelled as atoms of the primitive assembly. -/
 def integerAtom (frame : Frame) : TypeExpr → Bool
@@ -667,8 +722,10 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         primitiveName code == some (bytesOf name)
     | .primitive 0x0E, .object scope name =>
       frame.corlib == some (bytesOf scope) && bytesOf name == systemStringName
+    -- A type that cannot be a value type is never the runtime's primitive with value storage.
     | .named named, .atom scope name =>
-      named.scope == bytesOf scope && named.name == bytesOf name && !named.isEnum
+      named.scope == bytesOf scope && named.name == bytesOf name && !named.isEnum &&
+        (valueLike named.kind || !(named.scope == runtimeScopeBytes && valueAtomName named.name))
     | .named named, .object scope name =>
       named.scope == bytesOf scope && named.name == bytesOf name && classLike named.kind
     | .named named, .aggregate identity _ =>
@@ -679,7 +736,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
         | .enumType code => typeAdmits frame fuel (.primitive code) underlying
         | .external (some true) | .external none => integerAtom frame underlying
         | _ => false
-    | .var index, .parameter number => number == frame.arity + index
+    | .var index, .parameter number => index < frame.ownerArity && number == frame.arity + index
     -- Past the arity, a method parameter's index would be an owner parameter's.
     | .mvar index, .parameter number => index < frame.arity && number == index
     | .byref element, .byref inner => typeAdmits frame fuel element inner

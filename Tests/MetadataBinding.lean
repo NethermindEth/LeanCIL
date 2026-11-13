@@ -418,9 +418,9 @@ theorem accepts_the_row_rewritten_with_its_own_flags :
 /-! ## Which extractor types name a resolved type -/
 
 /-- A frame whose primitive assembly is `C`, whose modified types are anchored at `A`, and whose
-    method has one generic parameter. -/
+    method and owner have one generic parameter each. -/
 private def pairFrame : Frame :=
-  { corlib := some (bytesOf "C"), anchor := bytesOf "A", arity := 1 }
+  { corlib := some (bytesOf "C"), anchor := bytesOf "A", arity := 1, ownerArity := 1 }
 
 /-- The type `name` of scope `scope` with the given kind. -/
 private def namedIn (scope name : String) (kind : TypeKind) (pinned := false) : NamedType :=
@@ -546,4 +546,148 @@ theorem refuses_a_method_parameter_past_the_arity :
       pairFrame.admits (.mvar 0) (.parameter 0) := by
   decide +kernel
 #print axioms refuses_a_method_parameter_past_the_arity
+
+/-! ## Facts read from a type's own reference -/
+
+/-- `T` with `System.ValueTuple<Lib.Pair, Lib.Pair>` and its fields `Item1 : !0` and
+    `Item2 : !1`, as a method that names no primitive type reads them. -/
+private def tupleWorld : Step (Nat × Nat) := do
+  let tokens ← ownWorld
+  let tupleName ← string "ValueTuple`2"
+  let systemName ← string "System"
+  let firstName ← string "Item1"
+  let secondName ← string "Item2"
+  let tupleRef ← row Table.typeRef [1 * 4 + 2, tupleName, systemName]
+  let pair := (tokens.pairRef - 0x01000000) * 4 + 1
+  let tupleBlob ← blob [0x15, 0x11, (tupleRef - 0x01000000) * 4 + 1, 2, 0x11, pair, 0x11, pair]
+  let tupleSpec ← row Table.typeSpec [tupleBlob]
+  let firstSignature ← blob [0x06, 0x13, 0x00]
+  let secondSignature ← blob [0x06, 0x13, 0x01]
+  let parent := (tupleSpec - 0x1B000000) * 8 + 4
+  let firstRef ← row Table.memberRef [parent, firstName, firstSignature]
+  let secondRef ← row Table.memberRef [parent, secondName, secondSignature]
+  pure (firstRef, secondRef)
+
+/-- The tuple world's slice with the given core-library number, and its field tokens. -/
+private def tupleSlice (corlib : Nat) : MetadataSlice × Nat × Nat :=
+  let (slice, fields) := build tupleWorld (bytesOf "T") ownIdentity
+  ({ slice with corlib := corlib }, fields)
+
+/-- The pair as the extractor names it, and its element. -/
+private def pairTuple : TypeExpr :=
+  .aggregate (runtimeScope ++ "::System.ValueTuple`2<Lib.Pair,Lib.Pair>") 0
+private def pairAtom : TypeExpr := .atom libScope "Lib.Pair"
+
+/-- `Item2` of the pair is its second field whatever the slice's core-library number says: the
+    pair is known from its own reference to `System.Runtime`, so `Item2` claimed at index 0 is
+    refused with the number right, missing or naming no reference. -/
+theorem reads_the_pair_from_its_own_reference :
+    passes (tupleSlice 1).1 lib (tupleSlice 1).2.2 (.field pairTuple 1 pairAtom false) = true ∧
+    passes (tupleSlice 0).1 lib (tupleSlice 0).2.2 (.field pairTuple 1 pairAtom false) = true ∧
+    passes (tupleSlice 0).1 lib (tupleSlice 0).2.1 (.field pairTuple 0 pairAtom false) = true ∧
+    rejects (tupleSlice 1).1 lib (tupleSlice 1).2.2 (.field pairTuple 0 pairAtom false)
+      (.fieldIndexMismatch (tupleSlice 1).2.2 0 1) = true ∧
+    rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (.field pairTuple 0 pairAtom false)
+      (.fieldIndexMismatch (tupleSlice 0).2.2 0 1) = true := by decide +kernel
+#print axioms reads_the_pair_from_its_own_reference
+
+/-- A `Lib` whose class `Lib.Outer` encloses `Leaf` twice, with namespace columns `A` and `B`,
+    and `Mid` twice, with columns `A` and `B`, each enclosing an `Inner` of its own. -/
+private def nestedLibWorld : Step Unit := do
+  let runtimeName ← string "System.Runtime"
+  let objectName ← string "Object"
+  let systemName ← string "System"
+  let moduleName ← string "<Module>"
+  let libName ← string "Lib"
+  let outerName ← string "Outer"
+  let leafName ← string "Leaf"
+  let midName ← string "Mid"
+  let innerName ← string "Inner"
+  let first ← string "A"
+  let second ← string "B"
+  let _ ← row Table.assemblyRef [10, 0, 0, 0, 0, 0, runtimeName, 0, 0]
+  modify fun builder => { builder with corlib := 1 }
+  let objectRef ← row Table.typeRef [1 * 4 + 2, objectName, systemName]
+  let base := (objectRef - 0x01000000) * 4 + 1
+  let _ ← row Table.typeDef [0, moduleName, 0, 0, 1, 1]
+  let outer ← row Table.typeDef [1, outerName, libName, base, 1, 1]
+  -- Nested public types: `Leaf` and `Mid` in `Outer`, then an `Inner` in each `Mid`.
+  let types := [(leafName, first, outer), (leafName, second, outer), (midName, first, outer),
+    (midName, second, outer), (innerName, 0, 0x02000005), (innerName, 0, 0x02000006)]
+  for (name, namespace_, enclosing) in types do
+    let nested ← row Table.typeDef [2, name, namespace_, base, 1, 1]
+    let nesting ← row Table.nestedClass [nested - 0x02000000, enclosing - 0x02000000]
+    link linkNesting nested 1 nesting
+
+/-- The nested `Lib` slice. -/
+private def nestedLib : MetadataSlice :=
+  (build nestedLibWorld (bytesOf "Lib") libScope).1
+
+/-- `T` with references to `Outer/Leaf` and `Outer/Mid/Inner` through namespace `A` at each
+    nested level, linked to the definitions at the given `TypeDef` rows of `Lib`. -/
+private def nestedOwnWorld (leaf inner : Nat) : Step (Nat × Nat) := do
+  let runtimeName ← string "System.Runtime"
+  let libName ← string "Lib"
+  let outerName ← string "Outer"
+  let leafName ← string "Leaf"
+  let midName ← string "Mid"
+  let innerName ← string "Inner"
+  let first ← string "A"
+  let _ ← row Table.assemblyRef [10, 0, 0, 0, 0, 0, runtimeName, 0, 0]
+  let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, libName, 0, 0]
+  modify fun builder => { builder with corlib := 1 }
+  let outerRef ← row Table.typeRef [2 * 4 + 2, outerName, libName]
+  let enclosedBy (reference : Nat) := (reference - 0x01000000) * 4 + 3
+  let leafRef ← row Table.typeRef [enclosedBy outerRef, leafName, first]
+  let midRef ← row Table.typeRef [enclosedBy outerRef, midName, first]
+  let innerRef ← row Table.typeRef [enclosedBy midRef, innerName, 0]
+  link linkDefinition leafRef 1 (tokenOf Table.typeDef leaf)
+  link linkDefinition innerRef 1 (tokenOf Table.typeDef inner)
+  pure (leafRef, innerRef)
+
+/-- The nested own slice with the given links, and its two reference tokens. -/
+private def nestedOwn (leaf inner : Nat) : MetadataSlice × Nat × Nat :=
+  build (nestedOwnWorld leaf inner) (bytesOf "T") ownIdentity
+
+/-- A nested type is the type of its namespace column at every level: a reference through `A`
+    resolves to the definitions through `A`, and a link to the type that differs only in its own
+    column, or only in an enclosing type's, is refused though both spell `Lib.Outer/Leaf` or
+    `Lib.Outer/Mid/Inner`. -/
+theorem tells_nested_types_apart_by_their_namespace_columns :
+    passes (nestedOwn 3 7).1 nestedLib (nestedOwn 3 7).2.1
+      (.type (.object libScope "Lib.Outer/Leaf")) = true ∧
+    passes (nestedOwn 3 7).1 nestedLib (nestedOwn 3 7).2.2
+      (.type (.object libScope "Lib.Outer/Mid/Inner")) = true ∧
+    rejects (nestedOwn 4 7).1 nestedLib (nestedOwn 4 7).2.1
+      (.type (.object libScope "Lib.Outer/Leaf")) (.operandMismatch (nestedOwn 4 7).2.1) = true ∧
+    rejects (nestedOwn 3 8).1 nestedLib (nestedOwn 3 8).2.2
+      (.type (.object libScope "Lib.Outer/Mid/Inner"))
+      (.operandMismatch (nestedOwn 3 8).2.2) = true := by decide +kernel
+#print axioms tells_nested_types_apart_by_their_namespace_columns
+
+/-! ## Kinds against the extractor's constructors -/
+
+/-- `System.Int32` of the runtime scope as a type of the given kind. -/
+private def runtimeInt32 (kind : TypeKind) : ResolvedType :=
+  .named (namedIn runtimeScope "System.Int32" kind)
+
+/-- A type that cannot be a value type is never admitted as the runtime's primitive atom, which
+    would give it value storage; a type that may be one still is, and a class keeps its atom. -/
+theorem refuses_a_class_named_as_a_primitive :
+    !pairFrame.admits (runtimeInt32 (.external (some false))) int32 &&
+      !pairFrame.admits (runtimeInt32 .classType) int32 &&
+      !pairFrame.admits (runtimeInt32 .interfaceType) int32 &&
+      pairFrame.admits (runtimeInt32 (.external none)) int32 &&
+      pairFrame.admits (runtimeInt32 (.external (some true))) int32 &&
+      pairFrame.admits (.named (namedIn runtimeScope "System.Console" .classType))
+        (.atom runtimeScope "System.Console") := by
+  decide +kernel
+#print axioms refuses_a_class_named_as_a_primitive
+
+/-- An owner parameter past the owner's arity is refused, even where its extractor index would
+    follow the method's parameters. -/
+theorem refuses_an_owner_parameter_past_the_owner_arity :
+    !pairFrame.admits (.var 1) (.parameter 2) && pairFrame.admits (.var 0) (.parameter 1) := by
+  decide +kernel
+#print axioms refuses_an_owner_parameter_past_the_owner_arity
 end Tests.MetadataBinding
