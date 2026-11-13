@@ -98,6 +98,6 @@ internal static class StaticData
 
     internal static string LeanBytes(FieldDefinition field) => LeanBytes(field.InitialValue);
 
-    internal static string LeanBytes(byte[] bytes) =>
+    internal static string LeanBytes(IEnumerable<byte> bytes) =>
         "[" + string.Join(", ", bytes.Select(b => $"(BitVec.ofNat 8 {b})")) + "]";
 }

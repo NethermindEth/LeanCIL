@@ -8,14 +8,14 @@ namespace Nethermind.LeanCIL;
 internal static class LeanEmitter
 {
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates, ClassViews.View[] Views);
+        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts);
 
-    internal static string? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
+    internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
-        "System.SByte" => "signed8",
-        "System.Byte" or "System.Boolean" => "unsigned8",
-        "System.Int16" => "signed16",
-        "System.UInt16" or "System.Char" => "unsigned16",
+        "System.SByte" => Narrowing.Signed8,
+        "System.Byte" or "System.Boolean" => Narrowing.Unsigned8,
+        "System.Int16" => Narrowing.Signed16,
+        "System.UInt16" or "System.Char" => Narrowing.Unsigned16,
         _ => null
     };
 
@@ -25,68 +25,69 @@ internal static class LeanEmitter
 
     // The kernel rechecks every decide; elaborator whnf costs grow superlinearly with body size.
     internal const string Decide = "by decide +kernel";
-    internal static string Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar",
+    internal static LocalKind Kind(TypeReference type, ModuleDefinition module, string architecture = "scalar",
         MetadataValidation.LayoutContext? layouts = null)
     {
         layouts?.Require(module, architecture);
         if (ManagedPointers.Signature(type) is { } pointer)
-            return $".{(type is ArrayType ? "methodTable" : "methodPointer")} " +
-                ManagedPointers.SignatureEvidence(pointer);
-        if (type is ByReferenceType or PointerType) return ".reference";
-        if (ObjectTypes.Reference(type) || ReferenceArrays.Is(type)) return ".object";
-        if (Arrays.Of(type, architecture) is { } element) return $".array {element.Expression}";
-        if (Spans.Width(type, architecture) is { } width)
-            return $".span {width} {(Spans.Writable(type) ? "true" : "false")}";
+            return type is ArrayType ? new LocalKind.MethodTable(ManagedPointers.SignatureEvidence(pointer))
+                : new LocalKind.MethodPointer(ManagedPointers.SignatureEvidence(pointer));
+        if (type is ByReferenceType or PointerType) return new LocalKind.Reference();
+        if (ObjectTypes.Reference(type) || ReferenceArrays.Is(type)) return new LocalKind.Object();
+        if (Arrays.Of(type, architecture) is { } element) return new LocalKind.Array(element);
+        if (Spans.Width(type, architecture) is { } width) return new LocalKind.Span(width, Spans.Writable(type));
         if (MetadataValidation.IsAggregate(type, module) || layouts?.IsImported(type) == true)
-        {
-            var size = layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture);
-            return $".aggregate {size}";
-        }
-        if (Narrow(type) is { } narrow) return $".narrow .{narrow}";
+            return new LocalKind.Aggregate(
+                layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture));
+        if (Narrow(type) is { } narrow) return new LocalKind.Narrow(narrow);
         return EnumTypes.Storage(type).FullName switch
         {
-            "System.Int32" or "System.UInt32" => ".word32",
-            "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" => ".word64",
-            string s when s.StartsWith("System.Runtime.Intrinsics.Vector128`1<", StringComparison.Ordinal) => ".vector128",
-            string s when s.StartsWith("System.Runtime.Intrinsics.Vector256`1<", StringComparison.Ordinal) => ".vector256",
-            string s when s.StartsWith("System.Runtime.Intrinsics.Vector512`1<", StringComparison.Ordinal) => ".vector512",
+            "System.Int32" or "System.UInt32" => new LocalKind.Word32(),
+            "System.Int64" or "System.UInt64" or "System.IntPtr" or "System.UIntPtr" => new LocalKind.Word64(),
+            string s when s.StartsWith("System.Runtime.Intrinsics.Vector128`1<", StringComparison.Ordinal) =>
+                new LocalKind.Vector(128),
+            string s when s.StartsWith("System.Runtime.Intrinsics.Vector256`1<", StringComparison.Ordinal) =>
+                new LocalKind.Vector(256),
+            string s when s.StartsWith("System.Runtime.Intrinsics.Vector512`1<", StringComparison.Ordinal) =>
+                new LocalKind.Vector(512),
             _ => throw new InvalidDataException($"Unsupported local: {type.FullName}")
         };
     }
     // An opaque value names no initializer; its zero bytes fix only the load width.
-    static string OpaqueSite(int pc, StaticValues.Value value)
+    static StaticSite OpaqueSite(int pc, StaticValues.Value value) =>
+        new(pc, StaticIdentity.Of(value.Field), value.Field.FullName, value.Bytes,
+            new OpaqueStaticValue(StaticValues.ScalarSign(value.Field)));
+
+    static StaticSite SiteOf(Instruction i, int pc, MethodDefinition method,
+        IReadOnlyDictionary<MethodDefinition, int> methodIndices, FeatureProfile profile)
     {
-        StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
-        return $$"""
-            ({{pc}}, { identity := {{identity.Identity}},
-            assemblyIdentity := {{JsonSerializer.Serialize(identity.AssemblyIdentity)}},
-            fieldName := {{JsonSerializer.Serialize(value.Field.FullName)}},
-            bytes := {{StaticData.LeanBytes(value.Bytes)}}, scalar := {{StaticValues.Scalar(value.Field)}},
-            opaqueValue := true })
-            """.ReplaceLineEndings(" ");
+        if (StaticValues.IsLoad(i))
+        {
+            var value = StaticValues.Resolve((FieldReference)i.Operand, method.Module, profile.Architecture);
+            if (value.Opaque) return OpaqueSite(pc, value);
+            int? initializer = value.Initializer is null
+                ? null : methodIndices.GetValueOrDefault(value.Initializer, -1);
+            if (initializer < 0)
+                throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
+            return new(pc, StaticIdentity.Of(value.Field), value.Field.FullName, value.Bytes,
+                new InitializedStaticValue(StaticValues.ScalarSign(value.Field), initializer, value.Arguments,
+                    value.Literal, value.Construct));
+        }
+        FieldDefinition field = StaticData.Validate((FieldReference)i.Operand, method.Module);
+        return new(pc, StaticIdentity.Of(field), field.FullName, field.InitialValue,
+            new StaticDataBlock(StaticData.Alignment(field)));
     }
 
-    static bool StaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || StaticValues.IsLoad(i) ||
+    static bool IsStaticSite(Instruction i) => i.OpCode.Code == Code.Ldsflda || StaticValues.IsLoad(i) ||
         (i.OpCode.Code == Code.Ldtoken && i.Operand is FieldReference);
     static FieldDefinition StaticField(Instruction i, ModuleDefinition module, string architecture) => StaticValues.IsLoad(i)
         ? StaticValues.Resolve((FieldReference)i.Operand, module, architecture).Field : StaticData.Validate((FieldReference)i.Operand, module);
     internal static StaticIdentityRecord[] StaticIdentities(MethodDefinition[] methods, FeatureProfile profile) =>
-        methods.SelectMany(method => Reachability.Analyze(method, profile)).Where(StaticSite)
+        methods.SelectMany(method => Reachability.Analyze(method, profile)).Where(IsStaticSite)
             .Select(instruction => StaticIdentity.Of(StaticField(instruction, methods[0].Module, profile.Architecture)))
             .Distinct().OrderBy(identity => identity.Identity, StringComparer.Ordinal).ToArray();
-    internal static string Initial(TypeReference type, ModuleDefinition module, string architecture = "scalar",
-        MetadataValidation.LayoutContext? layouts = null) => Kind(type, module, architecture, layouts) switch
-    {
-        ".reference" or ".object" => ".nullRef", ".word32" => ".i32 0", ".word64" => ".i64 0",
-        string kind when kind.StartsWith(".narrow ", StringComparison.Ordinal) => ".i32 0",
-        string kind when kind.StartsWith(".span ", StringComparison.Ordinal) ||
-            kind.StartsWith(".array ", StringComparison.Ordinal) ||
-            kind.StartsWith(".methodPointer ", StringComparison.Ordinal) ||
-            kind.StartsWith(".methodTable ", StringComparison.Ordinal) => ".nullRef",
-        ".vector128" => ".v128 0", ".vector256" => ".v256 0", ".vector512" => ".v512 0",
-        _ => ".aggregate (List.replicate " +
-            (layouts?.Size(type) ?? MetadataValidation.Layout(type, module, architecture)) + " 0)"
-    };
+    internal static InitialValue Initial(TypeReference type, ModuleDefinition module, string architecture = "scalar",
+        MetadataValidation.LayoutContext? layouts = null) => Kind(type, module, architecture, layouts).Initial();
     static TypeReference[] LayoutTypes(MethodDefinition[] methods, MetadataValidation.LayoutContext metadata)
     {
         TypeReference[] types = methods
@@ -119,20 +120,17 @@ internal static class LeanEmitter
     }
 
     // These definitions guide proof simplification; the full validator still checks every call.
-    static string? CallDefinitions(int caller, IReadOnlyList<string> operations, int methodCount)
+    static string? CallDefinitions(int caller, IReadOnlyList<Operation> operations, int methodCount)
     {
         var targets = new SortedSet<int> { caller };
         var hasCall = false;
         foreach (var operation in operations)
         {
-            if (!operation.StartsWith(".call ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".callInstance ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".newAggregate ", StringComparison.Ordinal) &&
-                !operation.StartsWith(".newObject ", StringComparison.Ordinal)) continue;
+            // A tail call lists no callee: a method that only tail-calls is proved by `decide`, which unfolds none.
+            if (operation is not (Call { Kind: not CallKind.Tail } or NewAggregate or NewObject)) continue;
             hasCall = true;
-            var fields = operation.Split(' ', 3);
-            if (fields.Length >= 2 && int.TryParse(fields[1], out var target) &&
-                target >= 0 && target < methodCount) targets.Add(target);
+            var target = operation.Methods.Single();
+            if (target >= 0 && target < methodCount) targets.Add(target);
         }
         if (!hasCall) return null;
         return string.Join(", ", targets.SelectMany(target =>
@@ -177,18 +175,15 @@ internal static class LeanEmitter
         var layoutContext = new MetadataValidation.LayoutContext(methods[0].Module, profile.Architecture);
         if (importResolution is not null) layoutContext.AddImported(importResolution.LocalLayouts());
         TypeReference[] types = LayoutTypes(methods, layoutContext);
+        var layouts = new ComputedLayout[types.Length];
         for (int i = 0; i < types.Length; i++)
         {
             int size = layoutContext.Size(types[i]);
-            string fields = string.Join(", ", layoutContext.Fields(types[i])
-                .Select(field =>
-                {
-                    var offset = layoutContext.FieldOffset(types[i], field.Definition);
-                    var width = layoutContext.FieldSize(field.Type);
-                    var aggregate = layoutContext.IsLayout(field.Type);
-                    return $"⟨{offset}, {width}, {aggregate.ToString().ToLowerInvariant()}⟩";
-                }));
-            lean.AppendLine($"def layout{i} : AggregateLayout := ⟨{size}, [{fields}]⟩");
+            LayoutField[] fields = [.. layoutContext.Fields(types[i]).Select(field => new LayoutField(
+                layoutContext.FieldOffset(types[i], field.Definition), layoutContext.FieldSize(field.Type),
+                layoutContext.IsLayout(field.Type)))];
+            layouts[i] = new ComputedLayout(LayoutEvidence.Identity(types[i]), size, fields);
+            lean.AppendLine($"def layout{i} : AggregateLayout := {layouts[i].ToLean()}");
             lean.AppendLine($"theorem layout{i}_valid : layout{i}.Valid := {Decide}");
         }
         LayoutEvidence layoutEvidence = new(types, layoutContext);
@@ -205,86 +200,68 @@ internal static class LeanEmitter
             var parameterIndices = ParameterStorage.Analyze(m, reachable);
             var parameterHomes = ParameterStorage.IndexHomes(parameterIndices);
             var dispatch = NativeDispatch.For(m);
-            string LocalKind(TypeReference type, int? local = null) => dispatch.Kind(type, local) ??
+            LocalKind KindOf(TypeReference type, int? local = null) => dispatch.Kind(type, local) ??
                 Kind(type, m.Module, profile.Architecture, layoutContext);
-            string parameters = string.Join(", ", parameterIndices.Select(index =>
-                $"({index}, {LocalKind(MethodArguments.Type(m, index))})"));
-            string locals = string.Join(", ", m.Body.Variables.Select(variable => m.Body.InitLocals
-                ? dispatch.Kind(variable.VariableType, variable.Index) is not null ? ".nullRef" :
-                    Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext) : ".unmodeled"));
+            ParameterHome[] homes = [.. parameterIndices.Select(index =>
+                new ParameterHome(index, KindOf(MethodArguments.Type(m, index))))];
+            InitialValue[] locals = [.. m.Body.Variables.Select(variable => m.Body.InitLocals
+                ? dispatch.Kind(variable.VariableType, variable.Index) is not null ? InitialValue.NullRef :
+                    Initial(variable.VariableType, m.Module, profile.Architecture, layoutContext)
+                : InitialValue.Unmodeled)];
             HashSet<int> addressedLocals = m.Body.Instructions
                 .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
-            List<string> ops = [];
+            List<Operation> ops = [];
             foreach (Instruction i in m.Body.Instructions)
                 ops.Add(reachable.Contains(i)
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                         scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
-                    : ".unsupported \"Unreachable under selected profile\"");
+                    : new Unsupported("Unreachable under selected profile"));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
-            var needsOpaqueLocals = ops.Any(op => op.StartsWith(".intrinsic (.vector .createScalarUnsafe64) ", StringComparison.Ordinal));
-            string opaqueLocals = needsOpaqueLocals ? string.Join(", ", m.Body.Variables
+            var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);
+            int[] opaqueLocals = needsOpaqueLocals ? [.. m.Body.Variables
                 .Where(variable => variable.VariableType.FullName == "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" &&
-                    !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index)) : "";
-            string kinds = string.Join(", ", m.Body.Variables.Select(variable => LocalKind(variable.VariableType, variable.Index)));
-            string sites = string.Join(", ", m.Body.Instructions.Select((i, pc) => (i, pc))
-                .Where(s => reachable.Contains(s.i) && StaticSite(s.i)).Select(s =>
-                {
-                    if (StaticValues.IsLoad(s.i))
-                    {
-                        StaticValues.Value value = StaticValues.Resolve((FieldReference)s.i.Operand, m.Module, profile.Architecture);
-                        if (value.Opaque) return OpaqueSite(s.pc, value);
-                        var initializer = value.Initializer is null ? 0 : methodIndices.GetValueOrDefault(value.Initializer, -1);
-                        if (initializer < 0)
-                            throw new InvalidDataException($"Missing static initializer: {value.Initializer!.FullName}");
-                        var literal = value.Literal is null ? "" : $", literal := some ({value.Literal})";
-                        var construct = value.Construct ? ", construct := true" : "";
-                        StaticIdentityRecord identity = StaticIdentity.Of(value.Field);
-                        // Each method definition is emitted on one line, so the entry's line breaks become spaces.
-                        return $$"""
-                            ({{s.pc}}, { identity := {{identity.Identity}},
-                            assemblyIdentity := {{JsonSerializer.Serialize(identity.AssemblyIdentity)}},
-                            fieldName := {{JsonSerializer.Serialize(value.Field.FullName)}},
-                            bytes := {{StaticData.LeanBytes(value.Bytes)}}, scalar := {{StaticValues.Scalar(value.Field)}},
-                            initializer := some { method := {{initializer}},
-                            arguments := [{{string.Join(", ", value.Arguments)}}]{{literal}}{{construct}} } })
-                            """.ReplaceLineEndings(" ");
-                    }
-                    FieldDefinition f = StaticData.Validate((FieldReference)s.i.Operand, m.Module);
-                    StaticIdentityRecord fieldIdentity = StaticIdentity.Of(f);
-                    return $$"""
-                        ({{s.pc}}, { identity := {{fieldIdentity.Identity}},
-                        assemblyIdentity := {{JsonSerializer.Serialize(fieldIdentity.AssemblyIdentity)}},
-                        fieldName := {{JsonSerializer.Serialize(f.FullName)}},
-                        bytes := {{StaticData.LeanBytes(f)}}, alignment := {{StaticData.Alignment(f)}} })
-                        """.ReplaceLineEndings(" ");
-                }));
+                    !addressedLocals.Contains(variable.Index)).Select(variable => variable.Index)] : [];
+            LocalKind[] kinds =
+                [.. m.Body.Variables.Select(variable => KindOf(variable.VariableType, variable.Index))];
+            StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
+                .Where(s => reachable.Contains(s.i) && IsStaticSite(s.i))
+                .Select(s => SiteOf(s.i, s.pc, m, methodIndices, profile))];
+            var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, opaqueLocals, homes, sites);
             lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
                 lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
-            var metadata = $"returnsValue := {(ReturnsValue(m) ? "true" : "false")}, " +
-                $"locals := [{locals}], localKinds := [{kinds}], opaqueVectorLocals := [{opaqueLocals}], " +
-                $"parameterHomes := [{parameters}], staticSites := [{sites}]";
             callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
-            if (collectTemplates)
-                templates.Add(new(m.FullName, metadata, ops.ToArray(), sites.Length != 0));
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {metadata}, code := [");
-            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op)) + "] }");
+            if (collectTemplates) templates.Add(new(m.FullName, frame, [.. ops]));
+            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, code := [");
+            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op.ToLean())) + "] }");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
-            lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : method{n}.opaqueVectorLocals = [{opaqueLocals}] := rfl");
+            lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
+                $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
             ScalarEvidence.Emit(lean, m, n, scalarCertificate);
-            lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : method{n}.parameterHomes = [{parameters}] := rfl");
+            lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
+                $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
             // The command states `method{n}_instruction{pc}` for each pc and proves it in time linear in the body.
             lean.AppendLine($"cil_instruction_equations method{n}");
             foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites" })
-                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({(field == "profile" ? "profile" : field == "locals" ? $"[{locals}]" : field == "localKinds" ? $"[{kinds}]" : field == "returnsValue" ? (ReturnsValue(m) ? "true" : "false") : $"[{sites}]")}) := rfl");
+            {
+                var value = field switch
+                {
+                    "profile" => "profile",
+                    "locals" => $"[{frame.LocalsLean}]",
+                    "localKinds" => $"[{frame.LocalKindsLean}]",
+                    "returnsValue" => frame.ReturnsValueLean,
+                    _ => $"[{frame.StaticSitesLean}]"
+                };
+                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
+            }
         }
         // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
         PinnedAssemblies.Pin[] pins = pinned.Pins.ToArray();
@@ -359,6 +336,6 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts);
     }
 }

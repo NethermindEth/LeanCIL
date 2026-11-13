@@ -65,10 +65,11 @@ internal static class ExceptionLint
             {
                 if (folded.Raises.TryGetValue(instruction, out string? exception))
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
-                string operation = InstructionTranslation.Translate(instruction, method, methodIndices,
+                Operation operation = InstructionTranslation.Translate(instruction, method, methodIndices,
                     methodIndex, instructions, profile, nativeOperands, parameterHomes);
                 foreach (string named in RuntimeExceptions(operation))
-                    sites.Add(new(method.FullName, instruction.Offset, named, "interpreter operation: " + operation));
+                    sites.Add(new(method.FullName, instruction.Offset, named,
+                        "interpreter operation: " + operation.ToLean()));
             }
         }
         string[] modeled = sites.Select(site => site.Exception).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
@@ -99,24 +100,22 @@ internal static class ExceptionLint
         return 0;
     }
 
-    static IEnumerable<string> RuntimeExceptions(string operation)
+    static IEnumerable<string> RuntimeExceptions(Operation operation)
     {
-        if (operation.StartsWith(".nativeBinary (", StringComparison.Ordinal)) operation = operation[15..^1];
-        if (operation.StartsWith(".divide ", StringComparison.Ordinal))
+        if (operation is NativeBinary { Inner: var inner }) operation = inner;
+        if (operation is Divide divide)
         {
             yield return "System.DivideByZeroException";
-            if (operation.StartsWith(".divide true ", StringComparison.Ordinal)) yield return "System.OverflowException";
+            if (divide.Signed) yield return "System.OverflowException";
         }
-        else if (operation.StartsWith(".checkedArithmetic ", StringComparison.Ordinal) ||
-            operation.StartsWith(".checkedConvert ", StringComparison.Ordinal) ||
-            operation.StartsWith(".intrinsic (.scalar (.math .abs ", StringComparison.Ordinal))
+        else if (operation is CheckedArithmetic or CheckedConvert or ScalarIntrinsic { Function: ScalarFunction.Abs })
             yield return "System.OverflowException";
-        else if (operation == ".intrinsic (.x86Base .divRem64) 3")
+        else if (operation is X86BaseDivRem64)
         {
             yield return "System.DivideByZeroException";
             yield return "System.OverflowException";
         }
-        else if (operation.StartsWith(".memory (.spanItem ", StringComparison.Ordinal))
+        else if (operation is Memory { Operation: SpanItem })
             yield return "System.IndexOutOfRangeException";
     }
 

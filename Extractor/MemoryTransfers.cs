@@ -5,7 +5,7 @@ namespace Nethermind.LeanCIL;
 // Managed-reference transfers share the exact layouts used by typed CIL loads and stores.
 internal static class MemoryTransfers
 {
-    internal static string? Marshal(MethodReference reference, string architecture)
+    internal static Operation? Marshal(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.InteropServices.MemoryMarshal" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
@@ -30,7 +30,8 @@ internal static class MemoryTransfers
         RuntimeModels.ValidateSignature(reference, architecture);
         var type = generic.GenericArguments[0];
         var (kind, _) = Describe(type, reference.Module, architecture);
-        return $".memory (.marshal{(read ? "Read" : "Write")} ({kind}) {trying.ToString().ToLowerInvariant()})";
+        return MemoryOperation.Other(
+            $"(.marshal{(read ? "Read" : "Write")} ({kind}) {trying.ToString().ToLowerInvariant()})");
     }
 
     static (string Kind, int Alignment) Describe(TypeReference type, ModuleDefinition module, string architecture)
@@ -51,7 +52,7 @@ internal static class MemoryTransfers
         return ($".scalar {width} {signed.ToString().ToLowerInvariant()}", width);
     }
 
-    internal static string? Unsafe(MethodReference reference, string architecture)
+    internal static Operation? Unsafe(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
             !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
@@ -80,22 +81,23 @@ internal static class MemoryTransfers
         if (aligned)
         {
             var (kind, alignment) = Describe(type, reference.Module, architecture);
-            return $".memory (.pointerTransfer ({kind}) {alignment} {write.ToString().ToLowerInvariant()})";
+            return MemoryOperation.Other(
+                $"(.pointerTransfer ({kind}) {alignment} {write.ToString().ToLowerInvariant()})");
         }
         MetadataValidation.Type(type, reference.Module, architecture: architecture);
         if (MetadataValidation.IsAggregate(type, reference.Module))
         {
             var width = MetadataValidation.Layout(type, reference.Module, architecture);
-            return read ? $".loadAggregate {width}" : $".storeAggregate {width}";
+            return new AggregateTransfer(read ? AggregateAccess.Load : AggregateAccess.Store, width);
         }
         if (MetadataValidation.IntegerVectorWidth(type) is { } vectorWidth)
-            return $".memory .{(read ? "load" : "store")}{vectorWidth * 8}";
+            return MemoryOperation.Other($".{(read ? "load" : "store")}{vectorWidth * 8}");
         if (type is TypeSpecification)
             throw new InvalidDataException($"Unsupported unaligned value type: {type.FullName}");
         var storage = EnumTypes.Storage(type);
         var scalarWidth = MetadataValidation.PrimitiveWidth(storage);
         var signed = storage.FullName is "System.SByte" or "System.Int16";
-        return read ? $".loadScalar {scalarWidth} {signed.ToString().ToLowerInvariant()}" :
-            $".storeScalar {scalarWidth}";
+        if (!read) return new StoreScalar(scalarWidth);
+        return new LoadScalar(scalarWidth, signed ? LoadSign.Signed : LoadSign.UnsignedSpelled);
     }
 }

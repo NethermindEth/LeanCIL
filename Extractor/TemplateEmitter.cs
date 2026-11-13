@@ -7,12 +7,13 @@ namespace Nethermind.LeanCIL;
 // Templates are proof inputs. Only the generated, kernel-checked bindings connect them to CIL.
 internal static partial class TemplateEmitter
 {
-    internal sealed record Method(string Identity, string Metadata, string[] Ops, bool HasStaticSites);
+    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations);
     internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods);
-    sealed record Row(Variant Variant, Method Method, string[] Ops);
-    sealed record Template(string Identity, string Metadata, Feature[] Features, string[] Callees, Row[] Rows);
+    /// <summary>One profile's frame and body, its callees renumbered to the template's callee parameters.</summary>
+    sealed record Row(Variant Variant, FrameMetadata Frame, Operation[] Ops);
+    sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows);
 
-    const string MissingProfile = ".unsupported \"Profile combination not selected for template\"";
+    static readonly string MissingProfile = new Unsupported("Profile combination not selected for template").ToLean();
     const string Usage = "Usage: leancil templates output-directory extraction-directory... [--check] " +
         "[--namespace name] [--omit-equations] [--module file.lean]";
 
@@ -148,63 +149,62 @@ internal static partial class TemplateEmitter
 
     static string Flag(Feature feature) => FeatureProfile.LeanFeature(feature)[1..];
 
-    static (string Identity, string Prefix, string Tail)? Callee(Variant variant, string op)
-    {
-        var prefix = new[] { ".call ", ".callInstance ", ".newAggregate ", ".newObject " }
-            .FirstOrDefault(prefix => op.StartsWith(prefix, StringComparison.Ordinal));
-        if (prefix is null) return null;
-        var end = op.IndexOf(' ', prefix.Length);
-        if (end < 0 || !int.TryParse(op[prefix.Length..end], out var index) ||
-            index < 0 || index >= variant.Methods.Length)
-            throw new InvalidDataException("Templates do not support imported callee slots: " + op);
-        return (variant.Methods[index].Identity, prefix, op[end..]);
-    }
+    static string CalleeIdentity(Variant variant, int index) => index >= 0 && index < variant.Methods.Length
+        ? variant.Methods[index].Identity
+        : throw new InvalidDataException("Templates do not support imported callee slots: method " + index);
 
     static Template Prepare(string identity, (Variant Variant, Method Method)[] selected)
     {
         var first = selected[0].Method;
-        if (selected.Any(row => row.Method.HasStaticSites != first.HasStaticSites ||
-            row.Method.Metadata != first.Metadata ||
-            row.Method.Ops.Length != first.Ops.Length))
+        if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
         var features = Enum.GetValues<Feature>().Where(feature => selected.Any(row =>
-            row.Method.Ops.Contains(".feature " + FeatureProfile.LeanFeature(feature), StringComparer.Ordinal)))
+            row.Method.Operations.Any(operation => operation is FeatureTest test && test.Feature == feature)))
             .ToArray();
-        var callees = selected.SelectMany(row => row.Method.Ops.Select(op => Callee(row.Variant, op)))
-            .Where(callee => callee is not null).Select(callee => callee!.Value.Identity)
+        var callees = selected.SelectMany(row => row.Method.Operations.SelectMany(operation => operation.Methods)
+                .Concat(row.Method.Frame.Methods).Select(index => CalleeIdentity(row.Variant, index)))
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         var calleeIndices = callees.Select((callee, index) => (callee, index))
             .ToDictionary(pair => pair.callee, pair => pair.index, StringComparer.Ordinal);
-        var rows = selected.Select(row => new Row(row.Variant, row.Method, row.Method.Ops.Select(op =>
+        var rows = selected.Select(row =>
         {
-            var callee = Callee(row.Variant, op);
-            return callee is null ? op : callee.Value.Prefix +
-                "callee" + calleeIndices[callee.Value.Identity] + callee.Value.Tail;
-        }).ToArray())).ToArray();
-        return new(identity, first.Metadata, features, callees, rows);
+            int Renumbered(int index) => calleeIndices[CalleeIdentity(row.Variant, index)];
+            return new Row(row.Variant, row.Method.Frame.Renumber(Renumbered),
+                [.. row.Method.Operations.Select(operation => operation.Renumber(Renumbered))]);
+        }).ToArray();
+        // Frames compare once their callees share the template's numbering, as each body does.
+        if (rows.Any(row => row.Frame != rows[0].Frame))
+            throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
+                identity);
+        return new(identity, rows[0].Frame, features, callees, rows);
     }
 
+    /// <summary>An instruction merged over profiles: the operation when every profile agrees, and its text.</summary>
+    readonly record struct Merged(Operation? Operation, string Text);
+
+    static string Callee(int index) => "callee" + index;
+
     // Missing combinations stay unsupported even where all selected rows share an instruction.
-    static string Instruction(Template template, Row[] rows, int pc, int featureIndex = 0)
+    static Merged Instruction(Template template, Row[] rows, int pc, int featureIndex = 0)
     {
-        if (rows.Length == 0) return MissingProfile;
+        if (rows.Length == 0) return new(null, MissingProfile);
         if (featureIndex == template.Features.Length)
         {
-            var values = rows.Select(row => row.Ops[pc]).Distinct(StringComparer.Ordinal).ToArray();
+            var values = rows.Select(row => row.Ops[pc]).Distinct().ToArray();
             if (values.Length != 1)
                 throw new InvalidDataException("Profiles with identical observed flags emit different instructions: " +
                     template.Identity + " at pc " + pc);
-            return values[0];
+            return new(values[0], values[0].ToLean(Callee));
         }
         var feature = template.Features[featureIndex];
         var enabled = Instruction(template, rows.Where(row => row.Variant.Profile.Get(feature)).ToArray(),
             pc, featureIndex + 1);
         var disabled = Instruction(template, rows.Where(row => !row.Variant.Profile.Get(feature)).ToArray(),
             pc, featureIndex + 1);
-        return enabled == disabled ? enabled : $"if {Flag(feature)} then ({enabled}) else ({disabled})";
+        return enabled.Operation == disabled.Operation && enabled.Text == disabled.Text ? enabled
+            : new(null, $"if {Flag(feature)} then ({enabled.Text}) else ({disabled.Text})");
     }
-
     // Lines end in LF on every platform, so committed output compares equal wherever it was generated.
     static string EmitTemplates(Template[] templates, string space, bool omitEquations)
     {
@@ -222,9 +222,9 @@ internal static partial class TemplateEmitter
             lean.Append($"@[cil_code] def method{index} (profile : FeatureProfile)");
             foreach (var feature in template.Features) lean.Append($" ({Flag(feature)} : Bool)");
             for (var callee = 0; callee < template.Callees.Length; callee++) lean.Append($" (callee{callee} : Nat)");
-            Line($" : Method := {{ profile, {template.Metadata}, code := [");
+            Line($" : Method := {{ profile, {template.Frame.ToLean(Callee)}, code := [");
             Line(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
-                .Select(pc => "  " + Instruction(template, template.Rows, pc))) + "] }");
+                .Select(pc => "  " + Instruction(template, template.Rows, pc).Text)) + "] }");
             if (!omitEquations)
             {
                 Line($"cil_instruction_equations method{index}");
@@ -252,7 +252,7 @@ internal static partial class TemplateEmitter
             var templateIndex = templateIndices[variant.Methods[index].Identity];
             var template = templates[templateIndex];
             var arguments = new List<string> { "Extracted.profile" };
-            arguments.AddRange(template.Features.Select(feature => variant.Profile.Get(feature) ? "true" : "false"));
+            arguments.AddRange(template.Features.Select(feature => LeanText.Bool(variant.Profile.Get(feature))));
             foreach (var callee in template.Callees)
             {
                 var target = methodIndices.GetValueOrDefault(callee, -1);

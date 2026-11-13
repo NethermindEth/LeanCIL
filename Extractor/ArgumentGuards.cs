@@ -28,30 +28,30 @@ internal static class ArgumentGuards
         ("ThrowIfLessThanOrEqual", "lessThanOrEqual")
     ];
 
-    private static readonly Dictionary<string, string> Operations = Build();
+    private static readonly Dictionary<string, Operation> Operations = Build();
 
     // Exact generic instances only: another type argument or overload is not a modeled guard.
-    internal static string? Translate(string signature) => Operations.GetValueOrDefault(signature);
+    internal static Operation? Translate(string signature) => Operations.GetValueOrDefault(signature);
 
     // The modeled ThrowIfNull, whose object argument must be a class instance or null on the stack.
     internal static bool IsNullGuard(MethodReference callee) =>
         callee.FullName == NullGuard && callee.DeclaringType.Scope.Name == "System.Runtime";
 
-    private static Dictionary<string, string> Build()
+    private static Dictionary<string, Operation> Build()
     {
-        var operations = new Dictionary<string, string>(StringComparer.Ordinal)
+        var operations = new Dictionary<string, Operation>(StringComparer.Ordinal)
         {
-            [NullGuard] = ".memory .throwIfNull"
+            [NullGuard] = MemoryOperation.Other(".throwIfNull")
         };
         foreach (var (type, width, signed) in Integers)
         {
-            var bits = $"{width} {(signed ? "true" : "false")}";
+            var bits = $"{width} {LeanText.Bool(signed)}";
             foreach (var (method, guard) in ZeroGuards)
                 operations.Add($"System.Void {OutOfRange}::{method}<{type}>(!!0,System.String)",
-                    $".memory (.zeroGuard .{guard} {bits})");
+                    MemoryOperation.Other($"(.zeroGuard .{guard} {bits})"));
             foreach (var (method, guard) in ComparingGuards)
                 operations.Add($"System.Void {OutOfRange}::{method}<{type}>(!!0,!!0,System.String)",
-                    $".memory (.comparisonGuard .{guard} {bits})");
+                    MemoryOperation.Other($"(.comparisonGuard .{guard} {bits})"));
         }
         return operations;
     }
