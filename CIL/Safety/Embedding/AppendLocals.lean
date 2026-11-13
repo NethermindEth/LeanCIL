@@ -163,32 +163,36 @@ theorem step_appendLocals_nativeBinary (operation : Instruction) :
 
 #print axioms step_appendLocals_nativeBinary
 
-/-- `divide` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_divide (signed remainder : Bool) :
-    StepAppendLocals (.divide signed remainder) := by
+set_option hygiene false in
+/-- Proves `StepAppendLocals op` for one faulting arithmetic constructor `op`; the fallback
+    names `op`, since inferring it from the dispatcher does not terminate in budget. -/
+local macro "faulting_appendLocals " op:term : tactic => `(tactic| (
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.divide signed remainder) pc _ frame extra memory
+    fallback_appendLocals body.profile $op pc _ frame extra memory))
 
-#print axioms step_appendLocals_divide
+/-- Division, remainder and overflow-checked arithmetic preserve outcomes under trailing local
+    slots. -/
+theorem step_appendLocals_faulting (op : Instruction)
+    (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepAppendLocals op := by
+  cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
+    Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
+  case div => faulting_appendLocals .div
+  case div_un => faulting_appendLocals .div_un
+  case rem => faulting_appendLocals .rem
+  case rem_un => faulting_appendLocals .rem_un
+  case add_ovf => faulting_appendLocals .add_ovf
+  case add_ovf_un => faulting_appendLocals .add_ovf_un
+  case sub_ovf => faulting_appendLocals .sub_ovf
+  case sub_ovf_un => faulting_appendLocals .sub_ovf_un
+  case mul_ovf => faulting_appendLocals .mul_ovf
+  case mul_ovf_un => faulting_appendLocals .mul_ovf_un
 
-/-- `checkedArithmetic` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool) :
-    StepAppendLocals (.checkedArithmetic kind signed) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  append_stack_cases using
-    fallback_appendLocals body.profile (.checkedArithmetic kind signed)
-      pc _ frame extra memory
-
-#print axioms step_appendLocals_checkedArithmetic
+#print axioms step_appendLocals_faulting
 
 /-- `checkedConvert` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
@@ -1206,10 +1210,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
     case managed operation => exact step_appendLocals_managed operation
     case nativeBinary operation =>
       exact step_appendLocals_nativeBinary operation
-    case divide signed remainder =>
-      exact step_appendLocals_divide signed remainder
-    case checkedArithmetic kind signed =>
-      exact step_appendLocals_checkedArithmetic kind signed
+    case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
+      | mul_ovf_un => exact step_appendLocals_faulting _ rfl
     case checkedConvert width signed unsignedInput =>
       exact step_appendLocals_checkedConvert width signed unsignedInput
     case stackAlloc initLocals =>

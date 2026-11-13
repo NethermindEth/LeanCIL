@@ -238,6 +238,20 @@ theorem nativePureBinary_relabel (r : Nat → Nat) (op : Instruction) :
     nativePureBinary (op.relabel r) = nativePureBinary op := by
   cases op <;> rfl
 
+/-- Relabeling keeps the flags of a division or remainder. -/
+theorem divideKind?_relabel (r : Nat → Nat) (op : Instruction) :
+    (op.relabel r).divideKind? = op.divideKind? := by
+  cases op <;> rfl
+
+#print axioms divideKind?_relabel
+
+/-- Relabeling keeps the flags of overflow-checked arithmetic. -/
+theorem checkedKind?_relabel (r : Nat → Nat) (op : Instruction) :
+    (op.relabel r).checkedKind? = op.checkedKind? := by
+  cases op <;> rfl
+
+#print axioms checkedKind?_relabel
+
 /-- Every value-only instruction a native-width wrapper may carry satisfies `BaseRelabel`. -/
 theorem base_relabel_of_nativePure (op : Instruction) (pure : nativePureBinary op = true) :
     BaseRelabel op := by

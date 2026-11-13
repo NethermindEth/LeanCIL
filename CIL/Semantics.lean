@@ -26,8 +26,17 @@ def truth : Value → Option Bool
     operand. Comparisons push `1` or `0` as an `i32`; shift counts are taken modulo the width. -/
 def binary (op : Instruction) (a b : Value) : Option Value :=
   match op, a, b with
-  | .divide signed remainder, x, y => (divideValues signed remainder x y).toOption
-  | .checkedArithmetic kind signed, x, y => (checkedValues kind signed x y).toOption
+  -- Division, remainder and overflow-checked arithmetic; a fault gives no value.
+  | .div, x, y => (divideValues true false x y).toOption
+  | .div_un, x, y => (divideValues false false x y).toOption
+  | .rem, x, y => (divideValues true true x y).toOption
+  | .rem_un, x, y => (divideValues false true x y).toOption
+  | .add_ovf, x, y => (checkedValues .add true x y).toOption
+  | .add_ovf_un, x, y => (checkedValues .add false x y).toOption
+  | .sub_ovf, x, y => (checkedValues .sub true x y).toOption
+  | .sub_ovf_un, x, y => (checkedValues .sub false x y).toOption
+  | .mul_ovf, x, y => (checkedValues .mul true x y).toOption
+  | .mul_ovf_un, x, y => (checkedValues .mul false x y).toOption
   -- Wrapping arithmetic and bitwise operations.
   | .add, .i64 x, .i64 y => some (.i64 (x + y))
   | .add, .i32 x, .i32 y => some (.i32 (x + y))
@@ -162,8 +171,11 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
   | .conv_u4, v :: rest | .conv_u8, v :: rest | .conv_u, v :: rest =>
     return .next (pc + 1) ((← unary op v) :: rest) memory
   | .add, b :: a :: rest | .sub, b :: a :: rest
-  | .divide _ _, b :: a :: rest
-  | .checkedArithmetic _ _, b :: a :: rest
+  | .div, b :: a :: rest | .div_un, b :: a :: rest
+  | .rem, b :: a :: rest | .rem_un, b :: a :: rest
+  | .add_ovf, b :: a :: rest | .add_ovf_un, b :: a :: rest
+  | .sub_ovf, b :: a :: rest | .sub_ovf_un, b :: a :: rest
+  | .mul_ovf, b :: a :: rest | .mul_ovf_un, b :: a :: rest
   | .and, b :: a :: rest | .or, b :: a :: rest
   | .mul, b :: a :: rest | .xor, b :: a :: rest
   | .shl, b :: a :: rest | .shr, b :: a :: rest | .shr_un, b :: a :: rest

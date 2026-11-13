@@ -105,8 +105,10 @@ def SpanConstructor.operation : SpanConstructor → MemoryOp
 inductive Instruction where
   /-- Widen the int32 operand of a metadata-validated mixed native operation. -/
   | nativeBinary (operation : Instruction)
-  | divide (signed remainder : Bool)
-  | checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool)
+  -- Division and remainder; `divideKind?` gives their flags.
+  | div | div_un | rem | rem_un
+  -- Overflow-checked arithmetic; `checkedKind?` gives their flags.
+  | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf | mul_ovf_un
   | checkedConvert (width : Nat) (signed unsignedInput : Bool)
   /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
   | stackAlloc (initLocals : Bool)
@@ -190,6 +192,24 @@ inductive Instruction where
 
 /-- The name of the instruction type, for tactics that recognise its constructors. -/
 def instructionTypeName : Lean.Name := ``CIL.Instruction
+
+/-- `(signed, remainder)` of a division or remainder instruction. -/
+def Instruction.divideKind? : Instruction → Option (Bool × Bool)
+  | .div => some (true, false)
+  | .div_un => some (false, false)
+  | .rem => some (true, true)
+  | .rem_un => some (false, true)
+  | _ => none
+
+/-- `(kind, signed)` of an overflow-checked arithmetic instruction. -/
+def Instruction.checkedKind? : Instruction → Option (CheckedBinaryKind × Bool)
+  | .add_ovf => some (.add, true)
+  | .add_ovf_un => some (.add, false)
+  | .sub_ovf => some (.sub, true)
+  | .sub_ovf_un => some (.sub, false)
+  | .mul_ovf => some (.mul, true)
+  | .mul_ovf_un => some (.mul, false)
+  | _ => none
 
 /-- A literal, call or construction whose value a static constructor stores in a readonly field. -/
 structure StaticInitializer where

@@ -1092,8 +1092,11 @@ elab_rules : tactic
       unless args == lhs.getAppArgs do
         target ← mkEq (mkAppN lhs.getAppFn args) rhs
         replaceMainGoal [← (← getMainGoal).replaceTargetDefEq target]
-    let checkedOperation := if operation == ``CIL.Instruction.checkedArithmetic then
-        some (``CIL.checkedValues, ``CIL.Safety.step_checkedArithmetic_result)
+    let checkedArithmetic := [``CIL.Instruction.add_ovf, ``CIL.Instruction.add_ovf_un,
+      ``CIL.Instruction.sub_ovf, ``CIL.Instruction.sub_ovf_un, ``CIL.Instruction.mul_ovf,
+      ``CIL.Instruction.mul_ovf_un].contains operation
+    let checkedOperation := if checkedArithmetic then
+        some (``CIL.checkedValues, ``CIL.Safety.step_checked_result)
       else if operation == ``CIL.Instruction.checkedConvert then
         some (``CIL.convertInteger, ``CIL.Safety.step_checkedConvert_result)
       else none
@@ -1105,8 +1108,12 @@ elab_rules : tactic
         let saved ← saveState
         try
           let lemma := mkIdent bridge
+          -- The goal fixes the constructor, so its flags are decided once `apply` unifies.
+          let bridged ← if checkedArithmetic then
+              `(tactic| (apply $lemma (calculated := $fact); case selected => rfl))
+            else `(tactic| apply $lemma $fact)
           evalTactic (← `(tactic| cil_strict (
-            apply $lemma $fact
+            $bridged:tactic
             all_goals cil_checked_side [])))
           return
         catch _ => saved.restore
@@ -1118,7 +1125,10 @@ elab_rules : tactic
       ``CIL.Instruction.and, ``CIL.Instruction.or, ``CIL.Instruction.xor,
       ``CIL.Instruction.shl, ``CIL.Instruction.shr, ``CIL.Instruction.shr_un,
       ``CIL.Instruction.clt, ``CIL.Instruction.clt_un, ``CIL.Instruction.cgt_un,
-      ``CIL.Instruction.ceq].contains operation
+      ``CIL.Instruction.ceq, ``CIL.Instruction.div, ``CIL.Instruction.div_un,
+      ``CIL.Instruction.rem, ``CIL.Instruction.rem_un, ``CIL.Instruction.add_ovf,
+      ``CIL.Instruction.add_ovf_un, ``CIL.Instruction.sub_ovf, ``CIL.Instruction.sub_ovf_un,
+      ``CIL.Instruction.mul_ovf, ``CIL.Instruction.mul_ovf_un].contains operation
     if scalar && lhs.isAppOfArity ``CIL.Safety.step 7 then
       -- Reuse the selected value equation without rewriting its symbolic arithmetic result.
       let mut widths := #[]

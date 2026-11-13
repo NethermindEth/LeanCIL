@@ -403,17 +403,18 @@ internal sealed record CheckedConvert(int Width, bool Signed, bool UnsignedSourc
 
 internal enum CheckedOperator { Add, Sub, Mul }
 
+/// <summary>An overflow-checked <c>add</c>, <c>sub</c> or <c>mul</c>, rendered as its opcode's constructor.</summary>
 internal sealed record CheckedArithmetic(CheckedOperator Operator, bool Signed) : Operation
 {
     internal override string Render(Func<int, string> calleeName) =>
-        $".checkedArithmetic .{Operator.ToString().ToLowerInvariant()} {LeanText.Bool(Signed)}";
+        $".{Operator.ToString().ToLowerInvariant()}_ovf{(Signed ? "" : "_un")}";
 }
 
 /// <summary>A division or, when <paramref name="Remainder"/> is set, a remainder.</summary>
 internal sealed record Divide(bool Signed, bool Remainder) : Operation
 {
     internal override string Render(Func<int, string> calleeName)
-        => $".divide {LeanText.Bool(Signed)} {LeanText.Bool(Remainder)}";
+        => $".{(Remainder ? "rem" : "div")}{(Signed ? "" : "_un")}";
 }
 
 /// <summary>A new array of the element <paramref name="Element"/>.</summary>

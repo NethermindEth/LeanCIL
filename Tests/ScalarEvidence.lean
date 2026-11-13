@@ -52,12 +52,10 @@ private theorem nativeShiftCertificates :
 #print axioms nativeShiftCertificates
 
 private def arithmetic : List (Nat × Instruction) := [
-  (88, .add), (89, .sub), (90, .mul), (91, .divide true false), (92, .divide false false),
-  (93, .divide true true), (94, .divide false true), (95, .and), (96, .or), (97, .xor),
-  (98, .shl), (99, .shr), (100, .shr_un), (214, .checkedArithmetic .add true),
-  (215, .checkedArithmetic .add false), (216, .checkedArithmetic .mul true),
-  (217, .checkedArithmetic .mul false), (218, .checkedArithmetic .sub true),
-  (219, .checkedArithmetic .sub false), (65025, .ceq), (65026, .cgt), (65027, .cgt_un),
+  (88, .add), (89, .sub), (90, .mul), (91, .div), (92, .div_un), (93, .rem), (94, .rem_un),
+  (95, .and), (96, .or), (97, .xor), (98, .shl), (99, .shr), (100, .shr_un), (214, .add_ovf),
+  (215, .add_ovf_un), (216, .mul_ovf), (217, .mul_ovf_un), (218, .sub_ovf),
+  (219, .sub_ovf_un), (65025, .ceq), (65026, .cgt), (65027, .cgt_un),
   (65028, .clt), (65029, .clt_un)]
 example : arithmetic.all (fun (opcode, operation) => scalarOpMatches (i opcode) [.word32, .word32] operation) = true := by decide
 example : arithmetic.all (fun (opcode, _operation) =>
@@ -75,13 +73,10 @@ example : scalarOpMatches (i 88) [.word64, .word64] (.nativeBinary .add) = false
 example : scalarOpMatches (i 88) [.word32, .native] (.nativeBinary .sub) = false := by decide
 
 private def arithmeticFlagMutations : List (Nat × Instruction) := [
-  (91, .divide false false), (91, .divide true true), (91, .divide false true),
-  (92, .divide true false), (92, .divide false true), (92, .divide true true),
-  (93, .divide false true), (93, .divide true false), (93, .divide false false),
-  (94, .divide true true), (94, .divide false false), (94, .divide true false),
-  (214, .checkedArithmetic .add false), (215, .checkedArithmetic .add true),
-  (216, .checkedArithmetic .mul false), (217, .checkedArithmetic .mul true),
-  (218, .checkedArithmetic .sub false), (219, .checkedArithmetic .sub true)]
+  (91, .div_un), (91, .rem), (91, .rem_un), (92, .div), (92, .rem_un), (92, .rem),
+  (93, .rem_un), (93, .div), (93, .div_un), (94, .rem), (94, .div_un), (94, .div),
+  (214, .add_ovf_un), (215, .add_ovf), (216, .mul_ovf_un), (217, .mul_ovf),
+  (218, .sub_ovf_un), (219, .sub_ovf)]
 example : arithmeticFlagMutations.all (fun (opcode, operation) =>
     !scalarOpMatches (i opcode) [.word64, .word64] operation) = true := by decide
 
@@ -155,10 +150,8 @@ private def binaryEvidence (opcode : Nat) : MethodEvidence :=
 private def binaryMethod (operation : Instruction) : Method :=
   { addMethod with code := addCode.set 2 operation }
 private def arithmeticFlagCases : List (Nat × Instruction) := [
-  (91, .divide true false), (92, .divide false false), (93, .divide true true), (94, .divide false true),
-  (214, .checkedArithmetic .add true), (215, .checkedArithmetic .add false),
-  (216, .checkedArithmetic .mul true), (217, .checkedArithmetic .mul false),
-  (218, .checkedArithmetic .sub true), (219, .checkedArithmetic .sub false)]
+  (91, .div), (92, .div_un), (93, .rem), (94, .rem_un), (214, .add_ovf), (215, .add_ovf_un),
+  (216, .mul_ovf), (217, .mul_ovf_un), (218, .sub_ovf), (219, .sub_ovf_un)]
 example : arithmeticFlagCases.all (fun (opcode, operation) =>
     decide (TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by decide
 example : arithmeticFlagMutations.all (fun (opcode, operation) =>
@@ -582,7 +575,8 @@ example : ScalarFlowValid #[] (holeRaw 88) holeFeatures (holeStates.set 3 (some 
 -- Array loads now require exact array evidence rather than accepting an equal stack effect.
 example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode (.memory (.spanItem 4))) := by decide
 example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode .add) := by decide
-example : ¬ ScalarFlowValid #[] (holeRaw 143 (.type intType)) holeFeatures holeStates (holeCode (.divide true false)) := by decide
+example : ¬ ScalarFlowValid #[] (holeRaw 143 (.type intType)) holeFeatures holeStates
+    (holeCode .div) := by decide
 example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode (.nativeBinary .add)) := by decide
 private def holeEvidence (opcode : Nat) (states : ScalarCertificate) : MethodEvidence := withBody {
   body := noBody, original := holeRaw opcode, arguments := [], closed := holeRaw opcode,
@@ -609,6 +603,14 @@ example : ¬ ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleS
     (unaryHoleCode .conv_i8) := by decide
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.checkedConvert 64 true false)) := by decide
+-- `conv.r4` is uncovered: the site admits a load, but no faulting arithmetic in its place.
+example : ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
+    (unaryHoleCode (.loadScalar 8)) := by decide
+example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
+    (unaryHoleCode .rem_un) := by decide
+example : ([Instruction.div, .div_un, .rem, .add_ovf, .add_ovf_un, .sub_ovf, .sub_ovf_un, .mul_ovf,
+    .mul_ovf_un].all fun emitted => !decide (ScalarFlowValid #[] (unaryHoleRaw 107)
+      unaryHoleFeatures unaryHoleStates (unaryHoleCode emitted))) = true := by decide
 
 private def pushHoleRaw (opcode : Nat) := raw [i opcode, i 38, i 2, i 42] [word]
 private def pushHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1]

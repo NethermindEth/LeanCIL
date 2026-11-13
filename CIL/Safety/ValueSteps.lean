@@ -75,39 +75,75 @@ elab_rules : command
         ``Except.map, ``Bind.bind, ``Except.bind] (← getSimpTheorems)])
     let mut declared := #[]
     for op in ops.getElems do
-      let checked := #[`checkedArithmetic, `checkedConvert, `divide].contains op.getId
+      let checked := #[`div, `div_un, `rem, `rem_un, `add_ovf, `add_ovf_un, `sub_ovf,
+        `sub_ovf_un, `mul_ovf, `mul_ovf_un, `checkedConvert].contains op.getId
       let select := if checked then checkedSelect else select
       let cleanup := if checked then checkedCleanup else cleanup
       for shape in widths do
         let names := (if shape.length = 1 then [`v] else [`b, `a]).take shape.length |>.map mkIdent
-        let operands ← (names.zip shape).toArray.mapM fun (name, wide) =>
-          if wide then `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.W64))
-          else `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.W32))
-        let stack ← (names.zip shape).foldrM (init := (rest : Term)) fun (name, wide) tail =>
-          if wide then `(Value.scalar (CIL.Value.i64 $name) :: $tail)
-          else `(Value.scalar (CIL.Value.i32 $name) :: $tail)
         let opName := mkIdent (instructionTypeName ++ op.getId)
         let opTerm ← `(($opName $paramTerms*))
-        let statement ← `(∀ (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
-            (memory : Memory) ($rest : List Value) $params* $operands*,
-            step body $opTerm pc args frame $stack memory =
-              step body $opTerm pc args frame $stack memory)
+        -- The equation at this shape; `asValue` types every operand as an unknown `Value`.
+        let statementOver (asValue : Bool) : TermElabM Term := do
+          let operands ← (names.zip shape).toArray.mapM fun (name, wide) =>
+            if asValue then `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.Value))
+            else if wide then `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.W64))
+            else `(Lean.Parser.Term.bracketedBinderF| ($name : CIL.W32))
+          let stack ← (names.zip shape).foldrM (init := (rest : Term)) fun (name, wide) tail =>
+            if asValue then `(Value.scalar $name :: $tail)
+            else if wide then `(Value.scalar (CIL.Value.i64 $name) :: $tail)
+            else `(Value.scalar (CIL.Value.i32 $name) :: $tail)
+          `(∀ (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
+              (memory : Memory) ($rest : List Value) $params* $operands*,
+              step body $opTerm pc args frame $stack memory =
+                step body $opTerm pc args frame $stack memory)
+        -- Proves `∀ xs, lhs = rhs` with `rhs` the arm the dispatcher selects, cleaned up.
+        let reduceEquation (statement : Expr) : TermElabM (Expr × Expr) :=
+          forallTelescope statement fun xs equation => do
+            let some (_, lhs, _) := equation.eq? | throwError "cil_value_steps: not an equation"
+            let mut reduced := lhs
+            repeat
+              let next := (← dsimp (← arms reduced) select).1
+              if next == reduced then break
+              reduced := next
+            let (result, _) ← simp reduced cleanup simprocs
+            -- The proof states `reduced = rhs`; the kernel checks it at `lhs`, definitionally
+            -- equal by `dsimp`.
+            return (← mkForallFVars xs (← mkEq lhs result.expr),
+              ← mkLambdaFVars xs (← result.getProof))
+        let specific ← instantiateMVars (← Term.elabType (← statementOver false))
+        -- On fixed-width operands `whnf` and the kernel evaluate an unsigned overflow bound
+        -- `2 ^ width` in unary, so faulting ops reduce over `Value`s and are instantiated.
+        let (type, value) ← if checked && (shape.all id || shape.all (!·)) then
+            let (generalType, generalProof) ←
+              reduceEquation (← instantiateMVars (← Term.elabType (← statementOver true)))
+            forallTelescope specific fun xs _ => do
+              let fixed := xs.size - shape.length
+              let mut arguments := xs.extract 0 fixed
+              for (operand, wide) in (xs.extract fixed xs.size).zip shape.toArray do
+                let constructor := if wide then ``CIL.Value.i64 else ``CIL.Value.i32
+                arguments := arguments.push (mkApp (mkConst constructor) operand)
+              let some (_, lhs, guarded) := (← instantiateForall generalType arguments).eq?
+                | throwError "cil_value_steps: not an equation"
+              -- The operand constructors decide the unspecified-operand guard; nothing else
+              -- is reduced.
+              let guard := guarded.getAppArgs
+              unless guarded.isAppOf ``Bool.rec && guard.size > 3 do
+                throwError "cil_value_steps: no unspecified-operand guard in {guarded}"
+              let decided ← whnfD guard[3]!
+              let some branch := if decided.isConstOf ``Bool.false then some guard[1]!
+                  else if decided.isConstOf ``Bool.true then some guard[2]! else none
+                | throwError "cil_value_steps: unspecified-operand guard not decided: {decided}"
+              let selected := (mkAppN branch (guard.extract 4 guard.size)).headBeta
+              -- `id` gives the proof the general statement as its type, so the kernel does not
+              -- compare the dispatcher with the reduced form at fixed widths.
+              let general := mkApp2 (mkConst ``id [.zero]) generalType generalProof
+              return (← mkForallFVars xs (← mkEq lhs selected),
+                ← mkLambdaFVars xs (mkAppN general arguments))
+          else reduceEquation specific
         let suffix := String.join (shape.map fun wide => if wide then "_i64" else "_i32")
         let name := Name.mkSimple s!"step_{op.getId}{suffix}_eq"
-        forallTelescope (← instantiateMVars (← Term.elabType statement)) fun xs equation => do
-          let some (_, lhs, _) := equation.eq? | throwError "cil_value_steps: not an equation"
-          let mut reduced := lhs
-          repeat
-            let next := (← dsimp (← arms reduced) select).1
-            if next == reduced then break
-            reduced := next
-          let (result, _) ← simp reduced cleanup simprocs
-          -- The proof states `reduced = rhs`; the kernel checks it at `lhs`, definitionally
-          -- equal by `dsimp`.
-          addDecl <| .thmDecl {
-            name := ns ++ name, levelParams := []
-            type := ← mkForallFVars xs (← mkEq lhs result.expr)
-            value := ← mkLambdaFVars xs (← result.getProof) }
+        addDecl <| .thmDecl { name := ns ++ name, levelParams := [], type, value }
         declared := declared.push name
     return declared
   for name in declared do
@@ -126,35 +162,40 @@ cil_value_steps (exception : String) [throw] 0
 #print axioms step_throw_eq
 
 cil_value_steps (id : CIL.Feature) [feature] 0
-cil_value_steps (kind : CIL.CheckedBinaryKind) (signed : Bool) [checkedArithmetic] 2
 cil_value_steps (width : Nat) (signed : Bool) (unsignedInput : Bool) [checkedConvert] 1
-cil_value_steps (signed : Bool) (remainder : Bool) [divide] 2
+cil_value_steps [div, div_un, rem, rem_un, add_ovf, add_ovf_un, sub_ovf, sub_ovf_un, mul_ovf,
+  mul_ovf_un] 2
 
-#print axioms step_checkedArithmetic_i64_i64_eq
-#print axioms step_checkedArithmetic_i32_i32_eq
-#print axioms step_checkedArithmetic_i32_i64_eq
+#print axioms step_add_ovf_i64_i64_eq
+#print axioms step_add_ovf_un_i64_i64_eq
+#print axioms step_sub_ovf_un_i32_i32_eq
+#print axioms step_mul_ovf_un_i32_i64_eq
 #print axioms step_checkedConvert_i64_eq
 #print axioms step_checkedConvert_i32_eq
-#print axioms step_divide_i64_i64_eq
-#print axioms step_divide_i32_i32_eq
-#print axioms step_divide_i32_i64_eq
+#print axioms step_div_i64_i64_eq
+#print axioms step_rem_un_i32_i32_eq
+#print axioms step_div_un_i32_i64_eq
 
-/-- A proved checked arithmetic result advances the instruction without unfolding its check. -/
-theorem step_checkedArithmetic_result {kind : CIL.CheckedBinaryKind} {signed : Bool}
+/-- A proved overflow-checked arithmetic result advances the instruction without unfolding its
+    check; `selected` names the constructor's flags. -/
+theorem step_checked_result {operation : CIL.Instruction} {kind : CIL.CheckedBinaryKind}
+    {signed : Bool} (selected : operation.checkedKind? = some (kind, signed))
     {left right value : CIL.Value} {memory : Memory}
     (calculated : CIL.checkedValues kind signed left right = .ok value)
     (leftKnown : left.hasUnspecified = false) (rightKnown : right.hasUnspecified = false)
     (checked : checkedValue memory (.scalar value) = .ok (.scalar value)) :
     ∀ body pc args frame rest,
-      step body (.checkedArithmetic kind signed) pc args frame
-        (.scalar right :: .scalar left :: rest) memory =
+      step body operation pc args frame (.scalar right :: .scalar left :: rest) memory =
         .ok (.next (pc + 1) (.scalar value :: rest) frame memory) := by
   intro body pc args frame rest
-  simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
+  cases operation <;> simp only [CIL.Instruction.checkedKind?, reduceCtorEq,
+    Option.some.injEq, Prod.mk.injEq] at selected
+  all_goals obtain ⟨rfl, rfl⟩ := selected
+  all_goals simp [step, observerCount, unspecifiedOperands, Value.hasUnspecified,
     leftKnown, rightKnown, calculated, checked, Except.mapError,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
-#print axioms step_checkedArithmetic_result
+#print axioms step_checked_result
 
 /-- A proved checked conversion advances the instruction without unfolding its range check. -/
 theorem step_checkedConvert_result {width : Nat} {signed unsignedInput : Bool}

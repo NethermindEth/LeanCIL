@@ -97,6 +97,9 @@ def pureArity : CIL.Instruction → Option Nat
   | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => some 2
   | .br _ | .feature _ => some 0
   | .intrinsic _ argc => some argc
+  -- Faulting arithmetic has its own arms in `step`; `CIL.step` would drop the fault.
+  | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un
+    | .mul_ovf | .mul_ovf_un => none
   | _ => none
 
 /-- The operands of a value-only instruction, all of which must be numeric scalars. -/
@@ -192,6 +195,42 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     | _ => false
   if unspecifiedOperands (observerCount op) stack || unknownArgument then
     .error (.unsupported "Instruction observes unspecified vector bits") else
+  -- Faulting arithmetic is matched apart from the rest: every arm of one match adds to the cost
+  -- of the match equations each importer that splits `step` regenerates.
+  match op, stack with
+  -- One arm per overflow-checked arithmetic constructor, flags as `checkedKind?` gives them.
+  | .add_ovf, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .add true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .add_ovf_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .add false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .sub_ovf, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .sub true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .sub_ovf_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .sub false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .mul_ovf, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .mul true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .mul_ovf_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .mul false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- One arm per division constructor, flags as `divideKind?` gives them.
+  | .div, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues true false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .div_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues false false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .rem, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues true true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .rem_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues false true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m
   | .sub, .scalar offset :: .reference value :: rest =>
@@ -310,12 +349,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     return .next target (values ++ rest) frame m
   | .checkedConvert width signed unsignedInput, .scalar x :: rest =>
     let value ← (CIL.convertInteger width signed unsignedInput x).mapError ExecutionFault.arithmetic
-    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
-  | .checkedArithmetic kind signed, .scalar y :: .scalar x :: rest =>
-    let value ← (CIL.checkedValues kind signed x y).mapError ExecutionFault.arithmetic
-    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
-  | .divide signed remainder, .scalar y :: .scalar x :: rest =>
-    let value ← (CIL.divideValues signed remainder x y).mapError ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
   | .arg i none, _ =>
     let some value := args[i]? | .error .invalidState

@@ -67,10 +67,6 @@ namespace CIL.Safety
     observerCount (.nativeBinary op) = 2 := rfl
 @[cil_guard] theorem guard_checkedConvert (width : Nat) (signed unsigned : Bool) :
     observerCount (.checkedConvert width signed unsigned) = 1 := rfl
-@[cil_guard] theorem guard_checkedArithmetic (kind : CIL.CheckedBinaryKind) (signed : Bool) :
-    observerCount (.checkedArithmetic kind signed) = 2 := rfl
-@[cil_guard] theorem guard_divide (signed remainder : Bool) :
-    observerCount (.divide signed remainder) = 2 := rfl
 @[cil_guard] theorem guard_arg (index : Nat) (narrow : Option CIL.NarrowKind) :
     observerCount (.arg index narrow) = 0 := rfl
 @[cil_guard] theorem guard_call (callee argc : Nat) :
