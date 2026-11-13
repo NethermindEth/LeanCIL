@@ -224,6 +224,20 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
       if named.scope != scope || named.name != name then throw (.operandMismatch token)
       .ok named
 
+/-- The named type of a custom modifier. A modifier is read by its scope and name alone, so it needs
+    no link to a definition, whether or not its scope is a carried slice or the type resolves. -/
+def modifierNamed (env : MetadataEnv) (position token : Nat) : Except MetadataError NamedType := do
+  match metadataTableOf token with
+  | 0x01 =>
+    let (scope, name) ← typeRefQualified env position resolveFuel token
+    .ok { scope := scope, name := name, kind := .external none, pinned := false }
+  | 0x02 =>
+    let index ← env.slice position token
+    let row ← index.typeDef token
+    let name := qualifiedName (← index.string row.namespace_) (← index.string row.name)
+    .ok { scope := index.identity, name := name, kind := .external none, pinned := false }
+  | _ => .error (.unsupportedTable token)
+
 /-- Whether a signature's class-or-value-type byte agrees with a type found in a carried
     slice. -/
 def hintAgrees : TypeKind → Option Bool → Bool
@@ -261,7 +275,7 @@ def resolveType (env : MetadataEnv) (position : Nat) :
     let resolved ← resolveType env position fuel result
     .ok (.functionPointer convention resolved (← resolveList env position fuel parameters))
   | fuel + 1, .modified required modifier element => do
-    let named ← namedOf env position modifier none
+    let named ← modifierNamed env position modifier
     .ok (.modified required named (← resolveType env position fuel element))
 
 /-- Resolve a chain of signature types. -/
