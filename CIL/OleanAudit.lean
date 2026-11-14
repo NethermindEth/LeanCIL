@@ -41,6 +41,7 @@ Expected expressions `E`:
   "_"                                any expression
   {"const": N, "levels": [L, ...]}   constant; `levels` defaults to []
   {"app": [E, E1, ..., En]}          `E` applied to exactly the trailing n arguments
+  {"list": {"type": E, "level": L, "items": [E, ...]}}   exact `List.cons`/`List.nil` spine
   {"nat": n}                         the canonical numeral `@OfNat.ofNat Nat n (instOfNatNat n)`
   {"lit": n} / {"str": s}            raw literals
   {"sort": L} / {"bvar": i}
@@ -107,6 +108,20 @@ partial def fits (j : Json) (e : Expr) : Except String Bool := do
     for spec in args, arg in actual.reverse do
       unless ← fits spec arg do return false
     return true
+  if let .ok spec := j.getObjVal? "list" then
+    let elementType ← spec.getObjVal? "type"
+    let expectedLevel ← level (← spec.getObjVal? "level")
+    let items ← spec.getObjValAs? (Array Json) "items"
+    let mut tail := e
+    for item in items do
+      let .app (.app (.app (.const `List.cons [actualLevel]) actualType) head) rest := tail
+        | return false
+      unless actualLevel == expectedLevel do return false
+      unless ← fits elementType actualType do return false
+      unless ← fits item head do return false
+      tail := rest
+    let .app (.const `List.nil [actualLevel]) actualType := tail | return false
+    return actualLevel == expectedLevel && (← fits elementType actualType)
   if let .ok n := j.getObjValAs? Nat "nat" then return e == canonicalNat n
   if let .ok n := j.getObjValAs? Nat "lit" then return e == .lit (.natVal n)
   if let .ok s := j.getObjValAs? String "str" then return e == .lit (.strVal s)

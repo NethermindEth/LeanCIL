@@ -7,15 +7,21 @@
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/LibraryAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Text.Json;
 
-Run(["dotnet", "run", "--file", "Tests/ConsumerInspection.cs"]);
+var listsOnly = args is ["--lists-only"];
+if (!listsOnly) Run(["dotnet", "run", "--file", "Tests/ConsumerInspection.cs"]);
 using var verification = new Program();
 var root = At("artifacts/OleanAudit");
 if (Directory.Exists(root)) Directory.Delete(root, true);
 Directory.CreateDirectory(root);
 
+if (!listsOnly)
+{
 // Each proof below certifies the addition contract for the subtraction method, so any acceptance is unsound.
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 const string wrongAdd = "System.UInt64 Examples.Arithmetic::WrongAdd(System.UInt64,System.UInt64)";
@@ -101,22 +107,28 @@ Forged("substituted-oleans", $$"""
         unless out.exitCode == 0 do throwError m!"{out.stdout}{out.stderr}"
       IO.Process.exit (α := Unit) 0
     """, "Compiled artifacts changed during verification");
+}
 
 // Checker-level cases: modules compiled directly, audited without elaborating any source.
 var fixtures = Path.Combine(root, "fixtures");
 Directory.CreateDirectory(fixtures);
+verification.Library(Inputs(At("CIL.lean")));
+var fixtureSearch = fixtures + Path.PathSeparator + Path.Combine(verification.library!, ".lake/build/lib/lean");
 var environment = new Dictionary<string, string> { ["LEAN_SYSROOT"] = verification.Toolchain };
 void Compile(string module, string source)
 {
-    var path = Path.Combine(fixtures, module + ".lean");
+    var path = Path.Combine(fixtures, module.Replace('.', Path.DirectorySeparatorChar) + ".lean");
+    Directory.CreateDirectory(Path.GetDirectoryName(path)!);
     File.WriteAllText(path, source);
-    Run([verification.LeanExecutable, "--root=" + fixtures, "-o", Path.Combine(fixtures, module + ".olean"), path], fixtures, fixtures, environment: environment);
+    Run([verification.LeanExecutable, "--root=" + fixtures, "-o", Path.ChangeExtension(path, ".olean"), path],
+        fixtures, fixtureSearch, environment: environment);
 }
 string Elaborated(string source)
 {
     var path = Path.Combine(fixtures, "Elaborated.lean");
     File.WriteAllText(path, source);
-    return Run([verification.LeanExecutable, "--root=" + fixtures, path], fixtures, fixtures, environment: environment);
+    return Run([verification.LeanExecutable, "--root=" + fixtures, path], fixtures, fixtureSearch,
+        environment: environment);
 }
 AuditedOleans Audit(string module, AuditRequest[] theorems, AuditConstantRequest[]? constants = null) =>
     verification.AuditOleans(fixtures, [module], theorems, constants);
@@ -129,6 +141,175 @@ void Rejected(AuditedTheorem audited, string marker)
 object Const(string name, params int[] levels) => new { @const = name, levels };
 object App(params object[] parts) => new { app = parts };
 object Nat(int n) => new { nat = n };
+
+object ListPattern(object type, object level, params object[] items) => new { list = new { type, level, items } };
+object NestedList(object type, int level, params object[] items) =>
+    items.Reverse().Aggregate(App(Const("List.nil", level), type),
+        (tail, item) => App(Const("List.cons", level), type, item, tail));
+var listNat = Const("Nat");
+Compile("Lists", """
+    def Lists.empty : List Nat := []
+    def Lists.single : List Nat := [1]
+    def Lists.many : List Nat := [1, 2, 3]
+    def Lists.alias : List Nat := Lists.many
+    def Lists.append : List Nat := [1] ++ [2, 3]
+    def Lists.types : List Type := [Nat, Bool]
+    """);
+var listCases = new (string Name, object Pattern, bool Accept)[]
+{
+    ("empty", ListPattern(listNat, 0), true),
+    ("single", ListPattern(listNat, 0, Nat(1)), true),
+    ("many", ListPattern(listNat, 0, Nat(1), Nat(2), Nat(3)), true),
+    ("types", ListPattern(new { sort = 1 }, 1, Const("Nat"), Const("Bool")), true),
+    ("many", ListPattern(Const("Bool"), 0, Nat(1), Nat(2), Nat(3)), false),
+    ("many", ListPattern(listNat, 1, Nat(1), Nat(2), Nat(3)), false),
+    ("many", ListPattern(listNat, 0, Nat(2), Nat(1), Nat(3)), false),
+    ("many", ListPattern(listNat, 0, Nat(1), Nat(2)), false),
+    ("many", ListPattern(listNat, 0, Nat(1), Nat(2), Nat(3), Nat(4)), false),
+    ("many", ListPattern(listNat, 0, Nat(1), Nat(2), Nat(4)), false),
+    ("empty", ListPattern(Const("Bool"), 0), false),
+    ("empty", ListPattern(listNat, 1), false),
+    ("alias", ListPattern(listNat, 0, Nat(1), Nat(2), Nat(3)), false),
+    ("append", ListPattern(listNat, 0, Nat(1), Nat(2), Nat(3)), false)
+};
+var listResults = Audit("Lists", [], [.. listCases.Select(test =>
+    new AuditConstantRequest("Lists." + test.Name, test.Pattern))]).constants;
+for (var index = 0; index < listCases.Length; index++)
+    if ((listResults[index].error is null) != listCases[index].Accept)
+        throw new InvalidOperationException("List structural audit: " + JsonSerializer.Serialize(listResults[index]));
+
+// These expressions exercise constructor shape independently of Lean's type checker.
+string Expected(object pattern) => "(Json.parse " + LeanString(JsonSerializer.Serialize(pattern)) +
+    ").toOption.get!";
+var flat = Expected(ListPattern(listNat, 0, new { lit = 1 }, "_"));
+var nestedList = Expected(NestedList(listNat, 0, new { lit = 1 }, "_"));
+var flatAnyType = Expected(ListPattern("_", 0, new { lit = 1 }, "_"));
+var nestedAnyType = Expected(NestedList("_", 0, new { lit = 1 }, "_"));
+var malformedPatterns = new object[]
+{
+    new { list = new { level = 0, items = Array.Empty<object>() } },
+    new { list = new { type = listNat, items = Array.Empty<object>() } },
+    new { list = new { type = listNat, level = 0 } },
+    new { list = new { type = listNat, level = "bad", items = Array.Empty<object>() } },
+    new { list = new { type = listNat, level = 0, items = "bad" } },
+    new { list = new { type = 42, level = 0, items = Array.Empty<object>() } }
+};
+var malformedChecks = string.Join("\n", malformedPatterns.Select(pattern =>
+    "  unless (LeanCILAudit.fits " + Expected(pattern) +
+    " nil).toOption.isNone do throw <| IO.userError \"fields\""));
+Elaborated($$"""
+    import CIL.OleanAudit
+    open Lean
+    #eval show IO Unit from do
+      let ty := mkConst ``Nat
+      let nil := mkApp (mkConst ``List.nil [.zero]) ty
+      let cons := fun ty head tail => mkApp3 (mkConst ``List.cons [.zero]) ty head tail
+      let one := mkRawNatLit 1
+      let two := mkRawNatLit 2
+      let good := cons ty one (cons ty two nil)
+      let bad := #[nil, cons ty one nil, cons ty two (cons ty one nil),
+        cons (mkConst ``Bool) one (cons ty two nil),
+        cons ty one (cons (mkConst ``Bool) two nil),
+        cons ty one (cons ty two (mkApp (mkConst ``List.nil [.zero]) (mkConst ``Bool))),
+        mkApp3 (mkConst ``List.cons [.succ .zero]) ty one (cons ty two nil),
+        mkApp3 (mkConst ``List.cons []) ty one (cons ty two nil),
+        mkApp3 (mkConst ``List.cons [.zero, .zero]) ty one (cons ty two nil),
+        cons ty one (cons ty two (mkApp (mkConst ``List.nil [.succ .zero]) ty)),
+        cons ty one (cons ty two (mkApp (mkConst ``List.nil []) ty)),
+        cons ty one (cons ty two (mkApp (mkConst ``List.nil [.zero, .zero]) ty)),
+        mkApp good one, mkApp2 (mkConst ``List.cons [.zero]) ty one,
+        cons ty one (cons ty two (mkConst ``List.nil [.zero])),
+        cons ty one (cons ty two (mkApp nil one)),
+        mkMData {} good]
+      unless (LeanCILAudit.fits {{flat}} good).toOption == some true do throw <| IO.userError "good"
+      for expr in bad do
+        unless (LeanCILAudit.fits {{flat}} expr).toOption == some false do throw <| IO.userError "shape"
+      for expr in bad.push good do
+        unless (LeanCILAudit.fits {{flat}} expr).toOption ==
+            (LeanCILAudit.fits {{nestedList}} expr).toOption do
+          throw <| IO.userError "nested equivalence"
+        unless (LeanCILAudit.fits {{flatAnyType}} expr).toOption ==
+            (LeanCILAudit.fits {{nestedAnyType}} expr).toOption do
+          throw <| IO.userError "wildcard type equivalence"
+    {{malformedChecks}}
+    """);
+Console.WriteLine("PASS flat lists check every constructor type, universe, item, arity and exact tail");
+
+int previousRequestSize = 0;
+Compile("StrictBinding.Image", """
+    namespace StrictBinding
+    structure PinnedImage where
+      identity : String
+      image : Nat
+    end StrictBinding
+    """);
+int? requestDepth = null;
+int Depth(JsonElement element) => element.ValueKind switch
+{
+    JsonValueKind.Array => 1 + element.EnumerateArray().Select(Depth).DefaultIfEmpty().Max(),
+    JsonValueKind.Object => 1 + element.EnumerateObject().Select(property => Depth(property.Value))
+        .DefaultIfEmpty().Max(),
+    _ => 0
+};
+foreach (var count in new[] { 16, 128, 1024 })
+{
+    BindingImagePin[] pins = [.. Enumerable.Range(0, count).Select(index =>
+        new BindingImagePin("Identity" + index, "", (index % 2).ToString("x16") + new string('0', 48),
+            "stated", []))];
+    BindingPlan plan = new("", "", "", "", pins, 0);
+    foreach (var pin in pins.DistinctBy(pin => pin.Module))
+        Compile(pin.Module, "def " + pin.Module + ".image : Nat := 0\n");
+    Compile(ImagesModule, ImagesModuleSource(plan));
+    AuditedAxioms(Audit(ImagesModule, [BindingRequests(plan)[1].Audit]).theorems[0]);
+    var serialized = JsonSerializer.Serialize(BindingRequests(plan).Select(request => request.Audit), AuditJson);
+    using var parsed = JsonDocument.Parse(serialized);
+    var depth = Depth(parsed.RootElement);
+    requestDepth ??= depth;
+    if (depth != requestDepth) throw new InvalidOperationException("Binding request depth grows with pin count");
+    var items = parsed.RootElement[1].GetProperty("type").GetProperty("app")[3]
+        .GetProperty("list").GetProperty("items");
+    if (items.GetArrayLength() != count ||
+        items.EnumerateArray().Where((item, index) =>
+            item.GetProperty("app")[1].GetProperty("str").GetString() != pins[index].Identity ||
+            item.GetProperty("app")[2].GetProperty("const").GetString() != pins[index].Module + ".image").Any() ||
+        previousRequestSize != 0 && serialized.Length > previousRequestSize * 9)
+        throw new InvalidOperationException("Binding list serialization growth or order");
+    previousRequestSize = serialized.Length;
+    var module = "ListScale" + count;
+    Compile(module, "set_option maxRecDepth 10000\ndef " + module + ".values : List Nat := " +
+        string.Concat(Enumerable.Range(0, count).Select(index => "@List.cons Nat " + index + " (")) +
+        "@List.nil Nat" + new string(')', count) + "\n");
+    var audited = Audit(module, [], [new(module + ".values",
+        ListPattern(listNat, 0, [.. Enumerable.Range(0, count).Select(Nat)]))]);
+    if (audited.constants[0].error is not null)
+        throw new InvalidOperationException("Large list audit: " + audited.constants[0].error);
+    Console.WriteLine($"PASS {count} pins: {serialized.Length} characters, depth {depth}, list audited");
+}
+Console.WriteLine(Elaborated("""
+    import CIL.OleanAudit
+    open Lean
+    #eval show IO Unit from do
+      let ty := mkConst ``Nat
+      let nil := mkApp (mkConst ``List.nil [.zero]) ty
+      let cons := fun head tail => mkApp3 (mkConst ``List.cons [.zero]) ty head tail
+      let mut previous := 0
+      for count in [16, 128, 1024] do
+        let mut tail := nil
+        for index in [:count - 1] do tail := cons (mkNatLit index) tail
+        let pattern := Json.mkObj [("list", Json.mkObj [
+          ("type", Json.mkObj [("const", toJson "Nat")]), ("level", toJson (0 : Nat)),
+          ("items", toJson (Array.replicate count (Json.str "_")))])]
+        let started ← IO.monoNanosNow
+        for iteration in [:1000] do
+          unless (LeanCILAudit.fits pattern (cons (mkNatLit iteration) tail)).toOption == some true do
+            throw <| IO.userError "matcher scaling result"
+        let elapsed := (← IO.monoNanosNow) - started
+        IO.println s!"PASS list matcher {count}: {elapsed / 1000000} ms for 1000 matches"
+        if previous > 0 && elapsed > previous * 12 + 20000000 then
+          throw <| IO.userError "list matcher growth exceeds linear allowance"
+        previous := elapsed
+    """));
+if (listsOnly) return;
 
 // These fixtures elaborate successfully, so rejection exercises the audit rather than a syntax error.
 Compile("Overrides", """

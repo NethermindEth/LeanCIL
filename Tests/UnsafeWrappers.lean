@@ -44,7 +44,7 @@ theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvir
     (by simp [step, observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
       Value.hasUnspecified, specified, staticInstruction, operation] <;> rfl)]
   rw [run_return (body := addMethod size signed profile declared environment) rfl rfl
-    (by simp [step, observerCount, unspecifiedOperands, addMethod, result] <;> rfl)
+    (by simp [step, returnFrom, observerCount, unspecifiedOperands, addMethod, result] <;> rfl)
     (by simp [leaveFrame, result] <;> rfl)]
   rfl
 

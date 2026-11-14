@@ -147,39 +147,17 @@ theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : 
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.ret narrow) pc args frame stack m = .ok action) :
     ∃ values m', action = .returned values m' := by
-  cases narrow
-  · have known : unspecifiedOperands 1 stack = false := by
-      cases observed : unspecifiedOperands 1 stack with
-      | false => rfl
-      | true => simp [step, observerCount, observed] at h
-    simp only [step, observerCount, known, Bool.false_or, Bool.false_eq_true, ↓reduceIte] at h
-    change (if stack.length = (if body.returnsValue then 1 else 0) then
-        (do return FrameAction.returned (← stack.mapM (checkedValue m)) m)
-      else .error .invalidState) = .ok action at h
-    by_cases sized : stack.length = (if body.returnsValue then 1 else 0)
-    · rw [ite_eq_left sized] at h
-      obtain ⟨_, _, h⟩ := except_bind_ok h
-      cases h
-      exact ⟨_, _, rfl⟩
-    · rw [ite_eq_right sized] at h
-      cases h
-  · rename_i kind
-    cases stack with
-    | nil => cases h
-    | cons value rest =>
-      cases value <;> try (solve | cases rest <;> cases h)
-      rename_i value
-      cases value <;> cases rest <;> try (solve | cases h)
-      rename_i bits
-      change (if body.returnsValue then
-        (do return FrameAction.returned
-              (← [Value.scalar (.i32 (kind.extend bits))].mapM (checkedValue m)) m)
-        else .error .invalidState) = .ok action at h
-      split at h
-      · obtain ⟨_, _, h⟩ := except_bind_ok h
-        cases h
-        exact ⟨_, _, rfl⟩
-      · cases h
+  unfold step at h
+  simp only [observerCount, Bool.or_false] at h
+  split at h
+  · cases h
+  · unfold returnFrom at h
+    repeat' first
+      | (split at h)
+      | (obtain ⟨_, _, h⟩ := except_bind_ok h)
+      | (cases h <;> exact ⟨_, _, rfl⟩)
+
+#print axioms step_ret_returns
 
 /-- Calls and constructions come only from instructions that resume at the next pc. -/
 theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc : Nat}
