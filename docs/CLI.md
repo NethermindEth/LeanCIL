@@ -342,10 +342,10 @@ modules it then generates in the output directory:
   those evaluations does not grow with the file.
 - `BindingAudit/Images.lean` pins each identity from `identity.json` to its image constant.
 - `BindingAudit/Bodies.lean` states `StrictBinding.BodiesBound` for `Extracted.methodEvidence`,
-  proved in pages of 250 methods up to 8000 methods and in 32 pages beyond, each its own kernel
-  evaluation, and composed by a kernel-checked theorem that requires the pages to cover every
-  method once and in order. Lean decodes the PE headers, the section table, the CLI header, the
-  metadata root and the `#~` table stream from the same image constant, checks that the Assembly
+  proved in about 250 methods per page up to 8 pages and in 8 pages of `methods / 8` beyond
+  (one empty page for no methods), each its own kernel evaluation, and composed by a kernel-checked
+  theorem that requires the pages to cover every method once and in order. Lean decodes the PE
+  headers, the section table, the CLI header, the metadata root and the `#~` table stream from the same image constant, checks that the Assembly
   row spells the pinned identity, and requires every method body to equal the bytes at the file
   offset that the section table gives for the RVA in the MethodDef row of the method's own token.
 
@@ -402,13 +402,13 @@ error instead of reporting items.
 
 The kernel hashes about 1.3 KB per second: a 98 KB assembly takes about 80 seconds of replay, and
 a 6 KB reference a few seconds. The memory of a digest page does not grow with the file. A page of
-bodies holds 250 bodies up to 8000 methods and `methods / 32` bodies beyond, so the work of a page
-grows with the number of methods there. Replay checks pages concurrently, so the memory of one page
-is not the peak. Measured as the peak memory of the process for the whole body check, it is 1.4 GB
-for 1,272 bodies and 3.0 GB for 10,767. The body check costs a time linear in the image once,
-to check and arrange it, and then per body a time linear in its bytes and logarithmic in the image.
-Each page of bodies decodes every pinned image again, at most 32 times. `verify` and `check` never
-run or read the audit.
+bodies holds about 250 bodies up to 8 pages and `methods / 8` bodies beyond, so the work of a page
+grows with the number of methods there. Replay checks pages concurrently, so the peak is the sum of
+the pages running together. One page of 1,346 bodies, the page of 10,767 bodies, peaks at 2.5 GB and
+takes 22 seconds above the preparation. The body check costs a time linear in the image once, to check
+and arrange it, and then per body a time linear in its bytes and logarithmic in the image. Each page
+of bodies prepares every pinned image again, so the images are prepared at most nine times.
+`verify` and `check` never run or read the audit.
 
 ## Start a proof
 

@@ -5,7 +5,9 @@ import CIL.SIMD.Evaluation256Lemmas
 # Reusable intrinsic executions
 
 Execution facts for broadcast arithmetic separate instruction dispatch from vector evaluation.
-Concrete runtime comparisons instantiate these facts without reducing the interpreter again.
+Concrete runtime comparisons instantiate these facts without reducing the interpreter again. Each
+method takes the declared signature and layout environment an extraction records, which execution
+does not read, so a fact applies to an extracted body by unification alone.
 -/
 
 namespace CIL.Safety
@@ -14,8 +16,9 @@ set_option maxRecDepth 4096
 
 /-- A binary operation applied to broadcast operands, followed by a lane extraction. -/
 @[cil_code] def broadcastBinaryMethod (profile : FeatureProfile) (operation : AVX2Intrinsic)
-    (lane : W32) : Method := {
-  profile := profile, returnsValue := true, locals := []
+    (lane : W32) (declared : DeclaredSignature) (environment : LayoutEnvironment) : Method := {
+  profile := profile, returnsValue := true, locals := [], declared := declared,
+  environment := environment
   code := [.arg 0, .intrinsic (.vector (.create64 256)) 1,
     .arg 1, .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 operation) 2,
     .ldc_i4 lane, .intrinsic (.vector (.extract64 256)) 2, .ret] }
@@ -39,13 +42,14 @@ theorem checked_extract256 (bits : BitVec 256) (lane : W32) (bound : lane.toNat 
 #print axioms checked_extract256
 
 /-- A broadcast binary method returns the selected lane of its checked intrinsic result. -/
-theorem invoke_broadcastBinary (profile : FeatureProfile) (operation : AVX2Intrinsic)
+theorem invoke_broadcastBinary {declared : DeclaredSignature} {environment : LayoutEnvironment}
+    (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (left right : W64) (bits : BitVec 256) (memory : Memory)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 left left left left),
         .v256 (Vector.pack256 right right right right)] = .ok (.v256 bits)) :
-    invoke [broadcastBinaryMethod profile operation lane] 256 0
+    invoke [broadcastBinaryMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 (Vector.lane64 bits lane.toNat))]) := by
   cil_checked_steps [available, evaluated, checked_broadcast256,
@@ -62,14 +66,15 @@ theorem lane_broadcast256 (word : W64) (lane : Nat) (bound : lane < 4) :
 #print axioms lane_broadcast256
 
 /-- A broadcast result permits every valid lane selection without vector computation. -/
-theorem invoke_broadcastBinary_word (profile : FeatureProfile) (operation : AVX2Intrinsic)
+theorem invoke_broadcastBinary_word {declared : DeclaredSignature}
+    {environment : LayoutEnvironment} (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (left right word : W64) (memory : Memory)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 left left left left),
         .v256 (Vector.pack256 right right right right)] =
         .ok (.v256 (Vector.pack256 word word word word))) :
-    invoke [broadcastBinaryMethod profile operation lane] 256 0
+    invoke [broadcastBinaryMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 word)]) := by
   simpa only [lane_broadcast256 word lane.toNat bound] using
@@ -127,8 +132,9 @@ theorem checked_broadcast_andNot (left right : W64) :
 
 /-- A full-width shift count is held in an opaque local so its high bits stay unspecified. -/
 @[cil_code] def broadcastShiftMethod (profile : FeatureProfile) (operation : AVX2Intrinsic)
-    (lane : W32) : Method := {
-  profile := profile, returnsValue := true, locals := [.v128 0]
+    (lane : W32) (declared : DeclaredSignature) (environment : LayoutEnvironment) : Method := {
+  profile := profile, returnsValue := true, locals := [.v128 0], declared := declared,
+  environment := environment
   localKinds := [.vector128], opaqueVectorLocals := [0]
   code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .setLocal 0,
     .arg 0, .intrinsic (.vector (.create64 256)) 1, .local 0,
@@ -143,13 +149,14 @@ theorem checked_scalarUnsafe (word : W64) :
 #print axioms checked_scalarUnsafe
 
 /-- Shifting a broadcast returns the selected lane of the checked shift result. -/
-theorem invoke_broadcastShift (profile : FeatureProfile) (operation : AVX2Intrinsic)
+theorem invoke_broadcastShift {declared : DeclaredSignature} {environment : LayoutEnvironment}
+    (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (value count word : W64) (memory : Memory)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 value value value value), .v128Low64 count] =
         .ok (.v256 (Vector.pack256 word word word word))) :
-    invoke [broadcastShiftMethod profile operation lane] 256 0
+    invoke [broadcastShiftMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 value), .scalar (.i64 count)] memory =
       .ok (memory, [.scalar (.i64 word)]) := by
   cil_checked_steps [available, evaluated, checked_broadcast256, checked_scalarUnsafe,
