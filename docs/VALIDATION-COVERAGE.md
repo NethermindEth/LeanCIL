@@ -140,9 +140,10 @@ workflow.
   `Tests/MetadataBinding.lean` checks every operand form, the locals and a method definition
   against a hand-built pair of pinned assemblies, and changes one row byte, blob byte, heap
   offset, scope, instantiation, field index, local or link at a time, each with its exact error.
-  `Tests/MetadataDifferential.cs` writes every reference, type specification and method
-  specification row of `Examples.dll`, with Cecil's full name for each method reference, and Lean
-  must spell the same names from the bytes.
+  `Tests/MetadataDifferential.cs` writes every reference, type definition, type specification and
+  method specification row of `Examples.dll`, with the links that locate nested types and the
+  definitions of its own methods and Cecil's full name for each method reference, and Lean must
+  spell the same names from the bytes and refuse every reference that names a general array.
   Tests/BodyLiteral.lean writes the evidence of one method as literals, proves its body check with
   the kernel, rejects a changed byte, and requires the elaborator's decide to refuse the check
   within a small heartbeat budget. Tests/ScalarEvidence.lean does the same for the whole

@@ -59,7 +59,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `imports` | implementation-bound contract imports and conditional caller verification |
 | `exceptionlint` | diagnostic XML exception drift without proof claims |
 | `contracts` | universal checked contracts, caller memory preservation and incorrect implementations |
-| `evidence` | independent extraction certificates and malformed evidence rejection |
+| `evidence` | independent extraction certificates, malformed evidence rejection, and the metadata decoder's method names against Cecil's |
 | `dispatch` | constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage |
 | `loops` | cyclic control-flow validation, universal termination, negative contracts and class/word-array composition |
 | `outlines-control` | generated outlines for control flow, arithmetic and value types, completed proofs and rejection checks |

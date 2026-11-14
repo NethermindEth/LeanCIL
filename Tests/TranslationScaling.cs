@@ -167,7 +167,22 @@ if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.tran
     !report.GetProperty("theoremAudit").GetString()!.Contains("ExampleProof.correctness"))
     throw new InvalidOperationException("Missing independent certificate/theorem audits.");
 Console.WriteLine("PASS fresh consumer proof-root verifies the multi-method certificate with kernel replay and restricted axioms");
+CheckHeartbeatBudget(Path.Combine(output, "Extracted.lean"));
 CheckLayoutTableScaling(extracted);
+
+// The extraction checks within the default heartbeat budget with the kernel counted on the elaborating thread, and
+// the budget binds: the same file fails at 100 heartbeats with a deterministic timeout.
+void CheckHeartbeatBudget(string extraction)
+{
+    Run(["lake", "env", "lean", "-DElab.async=false", extraction], cwd: FixturePackage(),
+        progress: "Checking the extraction at the default heartbeat budget");
+    var starved = Execute(["lake", "env", "lean", "-DElab.async=false", "-DmaxHeartbeats=100", extraction],
+        cwd: FixturePackage(), progress: "Checking the extraction at 100 heartbeats");
+    if (starved.Code == 0 || !starved.Output.Contains("deterministic", StringComparison.Ordinal) ||
+        !starved.Output.Contains("timeout", StringComparison.Ordinal))
+        throw new InvalidOperationException("The extraction does not time out at 100 heartbeats: " + starved.Output);
+    Console.WriteLine("PASS the extraction checks at the default heartbeat budget and times out at 100");
+}
 
 // The emitted header and method layout theorems over chains of nested and of generic structs: kernel heartbeats
 // per layout may grow by at most 1.5 times from 64 to 512 layouts, and 512 layouts must check within 8 GiB.
