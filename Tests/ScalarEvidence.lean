@@ -600,9 +600,14 @@ private theorem span_constructor_cases :
 private def tupleType : TypeExpr := .aggregate
   (runtime ++ "::System.ValueTuple`2<System.UInt64,System.UInt64>") 0
 private def tupleSite : CallSite := {
-  declaringType := .atom "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51" "System.Runtime.Intrinsics.X86.X86Base/X64",
+  declaringType := .atom
+    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+    "System.Runtime.Intrinsics.X86.X86Base/X64",
   name := "DivRem", target := .external
-    "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.ValueTuple`2<System.UInt64,System.UInt64> System.Runtime.Intrinsics.X86.X86Base/X64::DivRem(System.UInt64,System.UInt64,System.UInt64)",
+    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
+      PublicKeyToken=cc7b13ffcd2ddd51::System.ValueTuple`2<System.UInt64,System.UInt64> \
+      System.Runtime.Intrinsics.X86.X86Base/X64::DivRem\
+      (System.UInt64,System.UInt64,System.UInt64)",
   typeArguments := [], parameterCount := 3, parameterTypes := [word, word, word],
   hasThis := false, returnsValue := true, returnType := tupleType }
 private def tupleRaw := { raw [i 2, i 3, i 4, i 40 (.call tupleSite), i 42] [word, word, word] with
@@ -919,7 +924,8 @@ private def sizeOfSite (type : TypeExpr) : CallSite := {
   typeArguments := [type], parameterCount := 0, hasThis := false, returnsValue := true,
   returnType := intType, parameterTypes := [] }
 private def vector128 : TypeExpr := .apply
-  (.constructor "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+  (.constructor
+    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
     "System.Runtime.Intrinsics.Vector128`1") word
 private def packet : TypeExpr := .aggregate "Fixture::Packet" 0
 /-- Size instructions retain exact widths and reject unsupported pointer and void types. -/

@@ -9,7 +9,8 @@ internal static class TypeTests
 {
     internal sealed record Analysis(Dictionary<Instruction, bool> Results, HashSet<Instruction> Operands, HashSet<Instruction> Interior);
 
-    internal const string RuntimeScope = "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
+    internal const string RuntimeScope =
+        "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a";
 
     sealed record Node(string Kind, string Scope = "", string Name = "", Node? Left = null, Node? Right = null);
 

@@ -107,7 +107,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `stepping` | full scalar, checked-memory, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses and faulting bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, and the strict binding library and audit |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
-| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches and self-admission |
+| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal and self-admission |
 | `audit` | theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge |
 | `docs` | documentation Lean snippets, cited library names and documented commands against the library and tool |
 | `exports` | contract production, restrictions and caller reuse |

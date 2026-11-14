@@ -93,7 +93,7 @@ isolated directory. Run its `dotnet` executable, rather than a system installati
 /path/to/isolated-runtime/dotnet Tests/NativeProbe/bin/NativeProbe.dll /path/to/results
 ```
 
-The project pins runtime 10.0.0 and disables roll-forward. To run on a second machine without
+The project pins runtime 11.0.0 and disables roll-forward. To run on a second machine without
 installing an SDK, copy `NativeProbe.dll`, `NativeProbe.deps.json`,
 `NativeProbe.runtimeconfig.json`, and `Mono.Cecil.dll` from the build directory. The generated
 fixture uses a deterministic MVID and timestamp. An admitted mismatch returns exit code 1;

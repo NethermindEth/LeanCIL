@@ -669,7 +669,7 @@ if (args.Length == 0)
     var packageVersion = Path.GetFileNameWithoutExtension(package)["Nethermind.LeanCIL.".Length..];
     var unpacked = Path.Combine(packages, "unpacked");
     System.IO.Compression.ZipFile.ExtractToDirectory(package, unpacked);
-    var packedVersion = Execute(["dotnet", Path.Combine(unpacked, "tools/net10.0/any/Nethermind.LeanCIL.dll"),
+    var packedVersion = Execute(["dotnet", Path.Combine(unpacked, "tools/net11.0/any/Nethermind.LeanCIL.dll"),
         "--version"]);
     var reported = packedVersion.Stdout.ReplaceLineEndings("\n").Split('\n')[0];
     if (packedVersion.Code != 0 || !packageVersion.Contains("-dev.") || reported != "leancil " + packageVersion)

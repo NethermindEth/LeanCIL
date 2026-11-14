@@ -144,7 +144,10 @@ if (cohort == "pair")
     string pairApp = Path.Combine(pairRoot, "App");
     Directory.CreateDirectory(pairApp);
     File.WriteAllText(Path.Combine(pairApp, "PairApp.csproj"), $$"""
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.PairApp</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><Reference Include="ImportFixture.Lib"><HintPath>{{library}}</HintPath></Reference></ItemGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <AssemblyName>ImportFixture.PairApp</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+    <ItemGroup><Reference Include="ImportFixture.Lib"><HintPath>{{library}}</HintPath></Reference></ItemGroup>
+    </Project>
     """);
     File.WriteAllText(Path.Combine(pairApp, "Application.cs"), "namespace ImportFixture; public static class PairApplication { public static ulong Entry(ulong value) => Library.AddSame(Library.AddOne(value)); }\n");
     Run(["dotnet", "build", Path.Combine(pairApp, "PairApp.csproj"), "-c", "Release"]);
