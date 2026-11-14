@@ -26,6 +26,7 @@ const string unsigned = ", Culture=neutral, PublicKeyToken=null";
 Run(["dotnet", "run", "--file", At("Tests/DeepCheckInputs.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/DeepSession.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/DeepVerify.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/ConsumerDeepChecks.cs")]);
 const string libraryText = """
 namespace MultiFixture;
 public struct Cell { public ulong Value; }
