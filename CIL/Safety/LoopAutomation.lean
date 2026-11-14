@@ -201,7 +201,7 @@ def loopMovesOnly : List Lean.Name :=
 def loopScalarOnly : List Lean.Name :=
   [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.ldloc,
     ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
-    ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.nativeBinary,
+    ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br,
     ``CIL.Instruction.div, ``CIL.Instruction.div_un, ``CIL.Instruction.rem,
     ``CIL.Instruction.rem_un, ``CIL.Instruction.add_ovf, ``CIL.Instruction.add_ovf_un,
     ``CIL.Instruction.sub_ovf, ``CIL.Instruction.sub_ovf_un, ``CIL.Instruction.mul_ovf,

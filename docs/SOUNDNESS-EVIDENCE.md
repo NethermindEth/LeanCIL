@@ -33,8 +33,8 @@ pass by stack effect alone. Non-covered raw opcodes cannot emit these scalar ope
 feature-bound type-test words and size constants bound to exact primitive/vector widths or
 validated layouts.
 
-Mixed native/int32 operations require the exact `nativeBinary` wrapper; homogeneous operands forbid
-it. Native/int64 arithmetic mixtures are rejected. The 64-bit representation interchange at homes
+Mixed native/int32 operations execute the decoded arithmetic opcode with operand widening.
+Native/int64 arithmetic mixtures are rejected. The 64-bit representation interchange at homes
 and returns does not justify arithmetic interchange. Native shift counts use their low 32 bits;
 the normalization theorem does not establish behavior on arbitrary CLI implementations.
 See [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).

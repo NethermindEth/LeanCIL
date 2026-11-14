@@ -12,39 +12,19 @@ mixed path adds no arithmetic of its own. The checked interpreter dispatches her
 namespace CIL
 
 /-- Only mixed integer arithmetic, comparisons and branches may use this path.
-    It cannot dispatch memory, calls, features or another native wrapper. -/
+    Memory operations, calls and feature queries do not widen operands. -/
 def nativePureBinary : Instruction → Bool
   | .add | .sub | .mul | .and | .or | .xor | .clt | .clt_un | .cgt | .cgt_un | .ceq
     | .bgt _ | .ble _ | .bge _ | .blt _ | .beq _ => true
   | _ => false
 
-/-- The admitted .NET runtime zero-extends for unsigned checked arithmetic.
-    Other admitted mixed operations sign-extend, including scalar clt.un/cgt.un.
-    Mixed unsigned branches are rejected: CoreCLR's widening depends on whether
-    its importer sees a constant, which can change through inlining. -/
-def widenNativeOperand (op : Instruction) (bits : W32) : W64 :=
-  match op.checkedKind? with
-  | some (_, false) => bits.zeroExtend 64
-  | _ => bits.signExtend 64
-
-/-- Runs a mixed `i32`/`i64` binary instruction at `pc`: the next pc and the values it
-    pushes, or the arithmetic fault. Any other operand pair is `invalidOperands`. -/
-def nativeBinaryValues (op : Instruction) (pc : Nat) (x y : Value) :
-    Except ArithmeticFault (Nat × List Value) := do
-  let (x, y) ← match x, y with
-    | .i32 a, .i64 b => .ok (Value.i64 (widenNativeOperand op a), Value.i64 b)
-    | .i64 a, .i32 b => .ok (Value.i64 a, Value.i64 (widenNativeOperand op b))
-    | _, _ => .error .invalidOperands
-  match op.divideKind?, op.checkedKind? with
-  | some (signed, remainder), _ =>
-    return (pc + 1, [← divideValues signed remainder x y])
-  | none, some (kind, signed) =>
-    return (pc + 1, [← checkedValues kind signed x y])
-  | none, none =>
-    if nativePureBinary op then
-      match step op false none pc [] [y, x] (fun _ => none) with
-      | some (.next target values _) => .ok (target, values)
-      | _ => .error .invalidOperands
-    else .error .invalidOperands
+/-- Pure mixed operands with int32 sign-extended; other instructions and shapes are unchanged. -/
+def widenMixed (operation : Instruction) (values : List Value) : List Value :=
+  if nativePureBinary operation then
+    match values with
+    | [.i64 right, .i32 left] => [.i64 right, .i64 (left.signExtend 64)]
+    | [.i32 right, .i64 left] => [.i64 (right.signExtend 64), .i64 left]
+    | values => values
+  else values
 
 end CIL

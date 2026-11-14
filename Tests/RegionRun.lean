@@ -60,7 +60,7 @@ example : regionClosedCheck [caller, helper] [(0, 2)] = false := by decide
 example : regionClosedCheck [{ caller with code := [.ldc_i4 0, .ldc_i4 1, .ret] }] [(0, 0)] = true := by decide
 
 def longSuffix : List Instruction :=
-  List.replicate 96 .nop ++ [.brfalse 102, .switch [3, 102], .nativeBinary (.bge 102), .ret]
+  List.replicate 96 .nop ++ [.brfalse 102, .switch [3, 102], .bge 102, .ret]
 
 def longExpected (profile : CIL.FeatureProfile) : Method :=
   { code := [.arg 0, .ldc_i4 6, .shr] ++ longSuffix, locals := [], returnsValue := true, profile := profile }

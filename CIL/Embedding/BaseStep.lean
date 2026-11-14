@@ -233,13 +233,15 @@ theorem base_relabel_feature (id : Feature) : BaseRelabel (.feature id) :=
     (evaluate := fun stack profile => some (.i32 (if profile.evaluate id then 1 else 0) :: stack))
     (fun _ _ _ => rfl) (fun _ => rfl) rfl
 
-theorem widenNativeOperand_relabel (r : Nat → Nat) (op : Instruction) :
-    widenNativeOperand (op.relabel r) = widenNativeOperand op := by
-  cases op <;> rfl
-
 theorem nativePureBinary_relabel (r : Nat → Nat) (op : Instruction) :
     nativePureBinary (op.relabel r) = nativePureBinary op := by
   cases op <;> rfl
+
+/-- Relabeling preserves the widening of pure mixed operands. -/
+theorem widenMixed_relabel (r : Nat → Nat) (op : Instruction) (values : List Value) :
+    widenMixed (op.relabel r) values = widenMixed op values := by
+  simp only [widenMixed, nativePureBinary_relabel]
+#print axioms widenMixed_relabel
 
 /-- Relabeling keeps the flags of a division or remainder. -/
 theorem divideKind?_relabel (r : Nat → Nat) (op : Instruction) :

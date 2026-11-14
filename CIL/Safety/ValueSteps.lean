@@ -30,8 +30,8 @@ elab_rules : command
   let widths := match arity.getNat with
     | 0 => [[]]
     | 1 => [[false], [true]]
-    -- Top of stack first: equal widths, and an i32 count over an i64 value for shifts.
-    | _ => [[false, false], [true, true], [false, true]]
+    -- Top of stack first: equal widths and both mixed operand orders.
+    | _ => [[false, false], [true, true], [false, true], [true, false]]
   let params ← (paramName.zip paramType).mapM fun (name, type) =>
     `(Lean.Parser.Term.bracketedBinderF| ($name : $type))
   let paramTerms : Array Term := paramName.map fun name => ⟨name.raw⟩
@@ -44,7 +44,7 @@ elab_rules : command
     let simprocs := #[← Simp.getSimprocs]
     let selectionNames := #[
       ``CIL.Safety.pureArity, ``CIL.Safety.scalars, ``CIL.Safety.numericValue,
-      ``CIL.Safety.checkedValue,
+      ``CIL.Safety.checkedValue, ``CIL.widenMixed, ``CIL.nativePureBinary,
       ``CIL.Safety.observerCount, ``CIL.Safety.unspecifiedOperands,
       ``CIL.Safety.Value.hasUnspecified, ``CIL.Value.hasUnspecified, ``List.any,
       ``List.take, ``List.drop, ``List.map, ``Bind.bind, ``Pure.pure, ``Except.bind, ``Except.pure,
@@ -115,7 +115,7 @@ elab_rules : command
         let specific ← instantiateMVars (← Term.elabType (← statementOver false))
         -- On fixed-width operands `whnf` and the kernel evaluate an unsigned overflow bound
         -- `2 ^ width` in unary, so faulting ops reduce over `Value`s and are instantiated.
-        let (type, value) ← if checked && (shape.all id || shape.all (!·)) then
+        let (type, value) ← if checked then
             let (generalType, generalProof) ←
               reduceEquation (← instantiateMVars (← Term.elabType (← statementOver true)))
             forallTelescope specific fun xs _ => do

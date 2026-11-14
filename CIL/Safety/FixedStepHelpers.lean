@@ -98,7 +98,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
-  | .intrinsic .. | .nativeBinary _ | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
+  | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
   | .managed _ | .arg .. | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
   | .tailCall ..

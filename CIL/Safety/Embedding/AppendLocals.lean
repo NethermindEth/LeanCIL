@@ -97,7 +97,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
       if stack.length < argc then Except.error ExecutionFault.invalidState else do
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false none pc [] values (fun _ => none) profile |
+          CIL.step op false none pc [] (CIL.widenMixed op values) (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue memory)
         pure (FrameAction.next target (result ++ stack.drop argc) (frame.appendLocals extra) memory)
@@ -110,7 +110,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
         if stack.length < argc then Except.error ExecutionFault.invalidState else do
           let values ← scalars (stack.take argc)
           let some (.next target result _) :=
-            CIL.step op false none pc [] values (fun _ => none) profile |
+            CIL.step op false none pc [] (CIL.widenMixed op values) (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
           let result ← (result.map Value.scalar).mapM (checkedValue memory)
           pure (FrameAction.next target (result ++ stack.drop argc) frame memory)
@@ -149,19 +149,6 @@ local macro "append_stack_cases" " using " fallback:term : tactic => `(tactic| (
     | exact $fallback
     | (rcases rest with _ | ⟨second, rest⟩ <;> (try cases second)
        all_goals first | exact $fallback | frame_natural)))
-
-/-- `nativeBinary` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_nativeBinary (operation : Instruction) :
-    StepAppendLocals (.nativeBinary operation) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  append_stack_cases using
-    fallback_appendLocals body.profile (.nativeBinary operation) pc _ frame extra memory
-
-#print axioms step_appendLocals_nativeBinary
 
 set_option hygiene false in
 /-- Proves `StepAppendLocals op` for one faulting arithmetic constructor `op`; the fallback
@@ -1235,8 +1222,6 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
   have padded : StepAppendLocals op := by
     cases op
     case managed operation => exact step_appendLocals_managed operation
-    case nativeBinary operation =>
-      exact step_appendLocals_nativeBinary operation
     case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
       | mul_ovf_un => exact step_appendLocals_faulting _ rfl
     case conv_ovf target =>

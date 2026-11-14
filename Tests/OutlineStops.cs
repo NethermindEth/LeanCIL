@@ -93,8 +93,8 @@ foreach (var (owner, methodName, selector) in new[]
 }
 if (args is ["--return-only"]) return;
 
-// A conditional branch the native-width analysis wraps, in a method over a class instance, is a hole that names
-// the wrapped branch.
+// A conditional branch with mixed native/int32 operands, in a method over a class instance, is a hole that names
+// the mixed-width branch.
 var wrapped = Outline("WrappedObject",
     "System.UInt64 Examples.NativeIntegers::Wrapped(Examples.Account,System.Int32[])", module =>
     {
@@ -115,36 +115,53 @@ var wrapped = Outline("WrappedObject",
         code.Add(Instruction.Create(OpCodes.Ret));
     });
 if (wrapped.Code != 0 || !wrapped.Proof.Contains("not outlined: ", StringComparison.Ordinal) ||
-    !wrapped.Proof.Contains(".nativeBinary (.blt", StringComparison.Ordinal))
-    throw new Exception("A wrapped native branch did not leave a hole naming it in the object outline:\n" +
+    !wrapped.Proof.Contains(".blt", StringComparison.Ordinal))
+    throw new Exception("A mixed native branch did not leave a hole naming it in the object outline:\n" +
         wrapped.Output + wrapped.Proof);
-Console.WriteLine("PASS a wrapped native and int32 branch is a hole that names it in the object outline");
+Console.WriteLine("PASS a mixed native and int32 branch is a hole that names it in the object outline");
 
-// A loop whose back edge the analysis wraps is refused with a message that names the back edge.
-var latch = Outline("WrappedLatch", "System.UInt32 Examples.NativeIntegers::WrappedLatch(System.UInt32)",
-    module =>
+// Mixed tests retain explicit diagnostics at both a loop latch and an internal branch.
+foreach (var atLatch in new[] { true, false })
 {
-    var method = Added(module, "WrappedLatch", module.TypeSystem.UInt32, module.TypeSystem.UInt32);
-    method.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
-    var code = method.Body.Instructions;
-    var head = Instruction.Create(OpCodes.Ldloc_0);
-    code.Add(Instruction.Create(OpCodes.Ldc_I4_0));
-    code.Add(Instruction.Create(OpCodes.Stloc_0));
-    code.Add(head);
-    code.Add(Instruction.Create(OpCodes.Ldc_I4_1));
-    code.Add(Instruction.Create(OpCodes.Add));
-    code.Add(Instruction.Create(OpCodes.Stloc_0));
-    code.Add(Instruction.Create(OpCodes.Ldloc_0));
-    code.Add(Instruction.Create(OpCodes.Conv_U));
-    code.Add(Instruction.Create(OpCodes.Ldarg_0));
-    code.Add(Instruction.Create(OpCodes.Blt, head));
-    code.Add(Instruction.Create(OpCodes.Ldloc_0));
-    code.Add(Instruction.Create(OpCodes.Ret));
-});
-if (latch.Code == 0 || !latch.Output.Contains("its loop at IL_0009 tests a native and an int32 value at its back edge",
-        StringComparison.Ordinal))
-    throw new Exception("A wrapped back edge was not refused by name in the loop outline:\n" + latch.Output);
-Console.WriteLine("PASS a wrapped back edge is refused by name in the loop outline");
+    var mixed = Outline(atLatch ? "MixedLatch" : "MixedInternal",
+        "System.Int32 Examples.NativeIntegers::MixedLoop(System.Int32)", module =>
+    {
+        var method = Added(module, "MixedLoop", module.TypeSystem.Int32, module.TypeSystem.Int32);
+        method.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+        var code = method.Body.Instructions;
+        var head = Instruction.Create(OpCodes.Ldc_I4_0);
+        var increment = Instruction.Create(OpCodes.Ldloc_0);
+        code.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+        code.Add(Instruction.Create(OpCodes.Stloc_0));
+        code.Add(head);
+        code.Add(Instruction.Create(OpCodes.Conv_I));
+        code.Add(Instruction.Create(OpCodes.Ldarg_0));
+        if (atLatch)
+        {
+            code.Add(Instruction.Create(OpCodes.Blt, head));
+        }
+        else
+        {
+            code.Add(Instruction.Create(OpCodes.Beq, increment));
+            code.Add(Instruction.Create(OpCodes.Nop));
+            code.Add(increment);
+            code.Add(Instruction.Create(OpCodes.Ldc_I4_1));
+            code.Add(Instruction.Create(OpCodes.Add));
+            code.Add(Instruction.Create(OpCodes.Stloc_0));
+            code.Add(Instruction.Create(OpCodes.Ldloc_0));
+            code.Add(Instruction.Create(OpCodes.Ldarg_0));
+            code.Add(Instruction.Create(OpCodes.Blt, head));
+        }
+        code.Add(Instruction.Create(OpCodes.Ldloc_0));
+        code.Add(Instruction.Create(OpCodes.Ret));
+    });
+    if (atLatch ? mixed.Code == 0 || !mixed.Output.Contains("at its back edge", StringComparison.Ordinal)
+        : mixed.Code != 0 || !mixed.Proof.Contains("not outlined:", StringComparison.Ordinal))
+        throw new Exception("Mixed test lacks an outline diagnostic:\n" + mixed.Output + mixed.Proof);
+    if (!(mixed.Output + mixed.Proof).Contains("operands of different widths", StringComparison.Ordinal))
+        throw new Exception("Mixed test stopped before inspecting its operands:\n" + mixed.Output + mixed.Proof);
+    Console.WriteLine("PASS mixed-width outline diagnostic: " + (atLatch ? "latch" : "internal branch"));
+}
 
 // The element a span read loads must be as wide as the span's elements.
 var read = Outline("WrongWidth",

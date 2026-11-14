@@ -78,7 +78,7 @@ def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
     any of them has unspecified bits. -/
 def observerCount : CIL.Instruction → Nat
   -- Arithmetic and comparisons
-  | .nativeBinary _ | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf
+  | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf
   | .sub_ovf_un | .mul_ovf | .mul_ovf_un => 2
   | .conv_ovf _ | .conv_ovf_un _ | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2
   | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .stackAlloc _

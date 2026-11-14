@@ -93,7 +93,7 @@ bind_call either := step from rootBody
 
 -- `relabel` and `targets` agree, so loop detection sees every branch `cil_embed` maps.
 example : (Instruction.switch [3, 0, 7]).targets = [3, 0, 7] ∧
-    (Instruction.nativeBinary (.blt 2)).targets = [2] ∧ (Instruction.call 1 1).targets = [] :=
+    (Instruction.blt 2).targets = [2] ∧ (Instruction.call 1 1).targets = [] :=
   ⟨rfl, rfl, rfl⟩
 
 -- Extracted bodies run to thousands of ops; labels past the default recursion depth still bind.

@@ -516,14 +516,6 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
   if instruction.opcode == 113 then
     if let .type type := instruction.operand then
       if spanLocal type then return match emitted with | .nop => true | _ => false
-  -- A native-width wrapper is looked through only for bitwise operations, comparisons and
-  -- two-operand branches.
-  let emitted := match emitted with
-    | .nativeBinary operation => if instruction.opcode ∈ [95, 96, 97] ||
-        (65025 <= instruction.opcode && instruction.opcode <= 65029) ||
-        (46 <= instruction.opcode && instruction.opcode <= 55) ||
-        (59 <= instruction.opcode && instruction.opcode <= 68) then operation else emitted
-    | _ => emitted
   return match instruction.opcode, instruction.operand, emitted with
     -- Stack duplication, bitwise operations and exact comparison signedness.
     | 37, _, .dup | 95, _, .and | 96, _, .or | 97, _, .xor | 65025, _, .ceq => true

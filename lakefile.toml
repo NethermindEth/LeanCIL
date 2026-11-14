@@ -28,6 +28,9 @@ name = "Tests.Support"
 name = "Tests.Semantics"
 
 [[lean_lib]]
+name = "Tests.MixedNativeOpcodes"
+
+[[lean_lib]]
 name = "Tests.BodyEncoding"
 
 [[lean_lib]]

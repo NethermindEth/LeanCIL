@@ -30,8 +30,7 @@ theorem ManagedTarget.find?_relocate (f : Nat → Nat) (catalog : List ManagedTa
 
 #print axioms ManagedTarget.find?_relocate
 
-/-- Renames the methods an instruction calls or constructs with; `.nativeBinary` never
-    dispatches its operand. -/
+/-- Renames the methods an instruction calls or constructs with. -/
 def Instruction.relocate (f : Nat → Nat) : Instruction → Instruction
   | .call method argc => .call (f method) argc
   | .callInstance method argc => .callInstance (f method) argc

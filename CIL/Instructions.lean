@@ -120,8 +120,6 @@ def ConvTarget.signed : ConvTarget → Bool
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
 inductive Instruction where
-  /-- Widen the int32 operand of a metadata-validated mixed native operation. -/
-  | nativeBinary (operation : Instruction)
   -- Division and remainder; `divideKind?` gives their flags.
   | div | div_un | rem | rem_un
   -- Overflow-checked arithmetic; `checkedKind?` gives their flags.
