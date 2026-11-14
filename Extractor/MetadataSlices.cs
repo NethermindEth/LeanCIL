@@ -834,6 +834,25 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             return (Tree(before), Tree(total));
         }
 
+        /// <summary>Each owner's first carried parameter and count, ordered by owner token.</summary>
+        string GenericOwners()
+        {
+            var ownerWidth = Columns(TableIndex.GenericParam)[2].Width;
+            var genericOwners = new SortedDictionary<uint, (uint First, int Count)>();
+            foreach (var (token, bytes) in rows.Where(entry => entry.Key >> 24 == 0x2A))
+            {
+                uint codedOwner = 0;
+                for (var offset = 0; offset < ownerWidth; offset++)
+                    codedOwner |= (uint)bytes[4 + offset] << (8 * offset);
+                var owner = (codedOwner % 2 == 0 ? 0x02000000u : 0x06000000u) + codedOwner / 2;
+                genericOwners[owner] = genericOwners.TryGetValue(owner, out var previous)
+                    ? (previous.First, previous.Count + 1) : (token, 1);
+            }
+            var ownerEntries = genericOwners.Select(entry =>
+                ((ulong)entry.Key, $"({entry.Value.First}, {entry.Value.Count})")).ToList();
+            return Tree(ownerEntries);
+        }
+
         /// <summary>
         /// The Lean <c>IndexTables</c> of this slice, equal to what the decoder builds from its bytes.
         /// </summary>
@@ -844,7 +863,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                 (((ulong)link.Kind << 32) + link.Source, $"({link.Slice}, {link.Target})")).ToList();
             return $"{{ rows := {Tree([.. rows.Select(Entry)])}, strings := {Tree([.. strings.Select(Entry)])}, " +
                 $"blobs := {Tree([.. blobs.Select(Entry)])}, userStrings := {Tree([.. userStrings.Select(Entry)])}, " +
-                $"links := {Tree(linkEntries)}, instanceBefore := {before}, instanceTotal := {total} }}";
+                $"links := {Tree(linkEntries)}, instanceBefore := {before}, instanceTotal := {total}, " +
+                $"genericOwners := {GenericOwners()} }}";
         }
 
         internal int PositionOf => position;
