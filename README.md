@@ -38,7 +38,7 @@ The extractor, CIL model and verification machinery have an explicit
 
 ## Quick start
 
-Install **Lean 4.35.0** through elan and **.NET SDK 10.0.403**, as pinned in
+Install **Lean 4.35.0** through elan and **.NET SDK 11.0.100**, as pinned in
 [lean-toolchain](lean-toolchain) and [global.json](global.json). From this checkout:
 
 ```sh

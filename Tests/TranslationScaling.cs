@@ -11,7 +11,8 @@ var directory = At("artifacts/TranslationScaling");
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Scaling.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<Optimize>true</Optimize></PropertyGroup></Project>
 """);
 var methods = Enumerable.Range(0, 6).Select(index =>
     $"public static ulong M{index}(ulong x) {{ " +

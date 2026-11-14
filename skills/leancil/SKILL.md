@@ -67,7 +67,7 @@ leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.cor
 
 State these limits to the user before promising a result.
 
-- `extract` accepts Release, IL-only .NET 10 assemblies, and every profile is 64-bit
+- `extract` accepts Release, IL-only .NET 11 assemblies, and every profile is 64-bit
   little-endian. It validates the selected method and every method reachable from it, and rejects
   an unsupported instruction, call, type or signature by name at the stage
   `metadata and CIL validation`. `leancil list` validates nothing.

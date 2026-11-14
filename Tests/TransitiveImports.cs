@@ -29,7 +29,7 @@ string Project(string name, params string[] references)
     string directory = Path.Combine(root, name);
     Directory.CreateDirectory(directory);
     File.WriteAllText(Path.Combine(directory, name + ".csproj"),
-        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework>" +
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net11.0</TargetFramework>" +
         "<AssemblyName>ImportFixture." + name + "</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup>" +
         string.Join("", references.Select(reference => "<ProjectReference Include=\"../" + reference + "/" + reference + ".csproj\" />")) +
         "</ItemGroup></Project>");

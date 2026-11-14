@@ -4,7 +4,8 @@ open CIL CIL.Extraction
 
 namespace Tests.UnsafeCallEvidence
 
-private def scope := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+private def scope :=
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 private def unsafeType : TypeExpr := .atom scope "System.Runtime.CompilerServices.Unsafe"
 private def word : TypeExpr := .atom scope "System.UInt64"
 private def call : CallSite := {

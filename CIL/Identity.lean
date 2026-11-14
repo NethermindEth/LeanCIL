@@ -490,7 +490,7 @@ deriving instance Repr for AssemblyName
 deriving instance Repr for TypeLevel
 deriving instance Repr for TypeIdentity
 
-/-- Dotted version numbers, such as `10.0.0.0`. -/
+/-- Dotted version numbers, such as `11.0.0.0`. -/
 def Version.display (version : Version) : String :=
   s!"{version.major}.{version.minor}.{version.build}.{version.revision}"
 
@@ -515,7 +515,7 @@ def AssemblyName.parts? (assembly : AssemblyName) : Option (String × String) :=
   return (name, if culture.isEmpty then "neutral" else culture)
 
 /-- The display name of an assembly, such as
-    `System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a`, when
+    `System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a`, when
     `AssemblyName.parts?` reads it. -/
 def AssemblyName.text? (assembly : AssemblyName) : Option String := do
   let (name, culture) ← assembly.parts?

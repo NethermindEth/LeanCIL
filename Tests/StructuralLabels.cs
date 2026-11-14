@@ -13,7 +13,8 @@ string Build(string name, string inserted)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Labels.csproj"), """
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Labels.cs"), "namespace Labels; public static class Calls { " +
         "public static uint Step(uint x) => x + 1; " +

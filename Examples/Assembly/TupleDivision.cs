@@ -1,4 +1,4 @@
-// DivRem is marked experimental in .NET 10; the fixture pins its current signature.
+// DivRem is marked experimental in .NET 11; the fixture pins its current signature.
 #pragma warning disable SYSLIB5004
 using System;
 using System.Runtime.Intrinsics.X86;

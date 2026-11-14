@@ -43,7 +43,7 @@ var identities = new[]
 {
     "", "ASCII", new string('a', 31) + "λ", new string('b', 30) + "漢",
     new string('c', 29) + "🚀", "embedded\0null", "quote\" and slash\\",
-    "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::" +
+    "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::" +
         "System.Boolean System.Runtime.Intrinsics.Vector256::get_IsHardwareAccelerated()"
 };
 foreach (var identity in identities)

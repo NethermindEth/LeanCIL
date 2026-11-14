@@ -92,7 +92,7 @@ and [traces](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#trac
 | Message | Meaning | Next action |
 | --- | --- | --- |
 | `No method matches selector`, `Ambiguous method selector ... Candidates:` | The selector names no method, or several | Copy the signature from `leancil list` or a candidate, with its parameter list |
-| `Unsupported assembly identity, target framework or build configuration` | The assembly is not a Release, IL-only .NET 10 build, or `--assembly` names another assembly | Build with `-c Release` for `net10.0` |
+| `Unsupported assembly identity, target framework or build configuration` | The assembly is not a Release, IL-only .NET 11 build, or `--assembly` names another assembly | Build with `-c Release` for `net11.0` |
 | `Unsupported static initialisation: T has a static constructor` | The method's type has a static constructor | Ask the user whether every caller runs it first; only then pass `--assume-initialized T` and report it as an assumption |
 | `Unsupported ...` or `Recursive managed dependency` at `metadata and CIL validation` | The named instruction, call, type or signature is outside the supported subset | Report it. `leancil blockers` lists every blocker of a list of methods ([blockers](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#report-extraction-blockers)) |
 | `Stale or mismatched verification artifact: assembly has changed since extraction.` | The DLL was rebuilt after `extract` | Run `extract` again. `verify` does so itself and prints `Re-extracted <directory>: the assembly changed since extraction.` |

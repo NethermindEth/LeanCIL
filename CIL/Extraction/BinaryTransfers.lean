@@ -17,7 +17,7 @@ private inductive BinaryTransfer where
 
 /-- Exact assembly identity for the endian-aware span API. -/
 private def binaryScope : String :=
-  "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+  "System.Memory, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
 /-- Decode a bounded overload family, retaining its complete raw signature. -/
 private def binaryCall (raw : RawInstruction) : Option BinaryTransfer := do
