@@ -30,9 +30,9 @@ def Program.ProfileAgreement (program : Program) (p q : FeatureProfile) : Prop :
 
 /-- An intrinsic step observes the profile only through the intrinsic's availability. -/
 theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool) (pc : Nat)
-    (args : List Value) (frame : Nat) (stack : List Value) (memory : Memory)
+    (args : List Value) (stack : List Value) (memory : Memory)
     (profile : FeatureProfile) :
-    step (.intrinsic operation argc) returns pc args frame stack memory profile =
+    step (.intrinsic operation argc) returns pc args stack memory profile =
       if stack.length < argc || !operation.available profile then none else do
         return .next (pc + 1)
           ((← evalIntrinsic operation (stack.take argc).reverse) :: stack.drop argc) memory :=
@@ -43,9 +43,9 @@ theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool) (pc
 /-- A step under agreeing profiles has the same outcome. -/
 theorem step_profile_eq (op : Instruction) (p q : FeatureProfile)
     (h : op.ProfileAgreement p q) (returns : Bool) (pc : Nat) (args : List Value)
-    (frame : Nat) (stack : List Value) (memory : Memory) :
-    step op returns pc args frame stack memory p =
-      step op returns pc args frame stack memory q := by
+    (stack : List Value) (memory : Memory) :
+    step op returns pc args stack memory p =
+      step op returns pc args stack memory q := by
   cases op <;> try rfl
   case feature id =>
     change p.evaluate id = q.evaluate id at h

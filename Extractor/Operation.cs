@@ -168,7 +168,7 @@ internal static class NarrowingText
         _ => throw new ArgumentOutOfRangeException(nameof(narrowing))
     };
 
-    /// <summary>The optional narrowing argument of an argument, local or return instruction.</summary>
+    /// <summary>The optional narrowing argument of an argument or return instruction.</summary>
     internal static string Suffix(this Narrowing? narrowing) =>
         narrowing is { } kind ? $" (some .{kind.LeanName()})" : "";
 }
@@ -179,16 +179,16 @@ internal sealed record Arg(int Index, Narrowing? Narrow) : Operation
     internal override string Render(Func<int, string> calleeName) => $".arg {Index}" + Narrow.Suffix();
 }
 
-/// <summary>A local pushed from its slot, narrowed to <paramref name="Narrow"/> when set.</summary>
-internal sealed record Local(int Index, Narrowing? Narrow) : Operation
+/// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
+internal sealed record Local(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".local {Index}" + Narrow.Suffix();
+    internal override string Render(Func<int, string> calleeName) => $".local {Index}";
 }
 
-/// <summary>A local assigned from the stack, narrowed to <paramref name="Narrow"/> when set.</summary>
-internal sealed record SetLocal(int Index, Narrowing? Narrow) : Operation
+/// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
+internal sealed record SetLocal(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".setLocal {Index}" + Narrow.Suffix();
+    internal override string Render(Func<int, string> calleeName) => $".setLocal {Index}";
 }
 
 internal sealed record LocalAddress(int Index) : Operation
