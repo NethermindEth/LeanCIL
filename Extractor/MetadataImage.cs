@@ -13,6 +13,7 @@ namespace Nethermind.LeanCIL;
 internal sealed class MetadataImage
 {
     readonly ImmutableArray<byte> bytes;
+    byte[]? tableHeader;
 
     internal MetadataImage(PEReader image)
     {
@@ -125,21 +126,36 @@ internal sealed class MetadataImage
         var counts = Enumerable.Range(0, 64).Where(table => Count(table) > 0)
             .Select(table => string.Create(CultureInfo.InvariantCulture, $"({table}, {Count(table)})"));
         return string.Create(CultureInfo.InvariantCulture,
-            $".ofCounts {TableHeader()[HeapSizesOffset]} [{string.Join(", ", counts)}]");
+            $".ofCounts {CachedTableHeader()[HeapSizesOffset]} [{string.Join(", ", counts)}]");
     }
 
     // The `HeapSizes` byte's offset in the table stream header (II.24.2.6).
     const int HeapSizesOffset = 6;
 
     /// <summary>The table stream header: the bytes from the reserved word through the last row count.</summary>
-    internal byte[] TableHeader()
+    internal byte[] TableHeader() => [.. CachedTableHeader()];
+
+    /// <summary>The heap index width recorded in the table stream, including explicitly wide small heaps.</summary>
+    internal int HeapIndexWidth(HeapIndex heap)
     {
+        var mask = heap switch
+        {
+            HeapIndex.String => 1,
+            HeapIndex.Blob => 4,
+            _ => throw new ArgumentOutOfRangeException(nameof(heap))
+        };
+        return (CachedTableHeader()[HeapSizesOffset] & mask) == 0 ? 2 : 4;
+    }
+
+    byte[] CachedTableHeader()
+    {
+        if (tableHeader is not null) return tableHeader;
         var tables = Enumerable.Range(0, 64).Where(table => Count(table) > 0).ToArray();
         var length = 24 + 4 * tables.Length;
         var start = tables.Min(table => Reader.GetTableMetadataOffset((TableIndex)table)) - length;
         var header = bytes.AsSpan(start, length).ToArray();
         if (header[4] != 2 || header[5] != 0)
             throw new InvalidDataException("The metadata table stream header was not found where its tables imply.");
-        return header;
+        return tableHeader = header;
     }
 }

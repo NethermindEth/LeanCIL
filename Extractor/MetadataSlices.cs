@@ -33,8 +33,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         var identity = pinned.Original(module).Assembly.Name.FullName;
         // Numbered by rank in bytes, as the slices' heaps are, so the block does not move with the image's offsets.
         var row = image.Row(0x20000001);
-        var textWidth = reader.GetHeapSize(HeapIndex.String) > 0xFFFF ? 4 : 2;
-        var blobWidth = reader.GetHeapSize(HeapIndex.Blob) > 0xFFFF ? 4 : 2;
+        var textWidth = image.HeapIndexWidth(HeapIndex.String);
+        var blobWidth = image.HeapIndexWidth(HeapIndex.Blob);
         var ranked = new SortedDictionary<int, byte[]>[] { [], [] };
         var numbers = new Dictionary<int, int>[] { new() { [0] = 0 }, new() { [0] = 0 } };
         foreach (var (heap, source) in new[] { (0, strings), (1, blobs) })
@@ -43,6 +43,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             foreach (var entry in source.Where(entry => entry.Key != 0)
                          .OrderBy(entry => Convert.ToHexString(entry.Value), StringComparer.Ordinal))
             {
+                RequireHeapRank((uint)rank, heap == 0 ? textWidth : blobWidth, heap == 0 ? "#Strings" : "#Blob");
                 numbers[heap][entry.Key] = rank;
                 ranked[heap][rank++] = entry.Value;
             }
@@ -86,6 +87,21 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
 
     internal static string Bytes(IEnumerable<byte> bytes) =>
         "[" + string.Join(", ", bytes.Select(value => value.ToString(CultureInfo.InvariantCulture))) + "]";
+
+    /// <summary>The reserved offset for a heap entry omitted from the carried evidence.</summary>
+    internal static uint OmittedHeapOffset(int width) => width switch
+    {
+        2 => ushort.MaxValue,
+        4 => uint.MaxValue,
+        _ => throw new ArgumentOutOfRangeException(nameof(width))
+    };
+
+    /// <summary>Every carried rank must fit below the reserved omitted-entry offset.</summary>
+    internal static void RequireHeapRank(uint rank, int width, string heap)
+    {
+        if (rank >= OmittedHeapOffset(width))
+            throw new InvalidDataException($"The carried {heap} rank {rank} reaches its reserved omitted-entry offset.");
+    }
 
     internal static string Entries<TKey>(SortedDictionary<TKey, byte[]> entries) where TKey : notnull =>
         "[" + string.Join(", ", entries.Select(entry =>
@@ -554,8 +570,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             int Rows(TableIndex index) => Reader.GetTableRowCount(index);
             int Simple(TableIndex index) => Rows(index) > 0xFFFF ? 4 : 2;
             int Coded(int bits, params TableIndex[] tables) => tables.Max(Rows) < 1 << (16 - bits) ? 2 : 4;
-            var text = Reader.GetHeapSize(HeapIndex.String) > 0xFFFF ? 4 : 2;
-            var blob = Reader.GetHeapSize(HeapIndex.Blob) > 0xFFFF ? 4 : 2;
+            var text = image.HeapIndexWidth(HeapIndex.String);
+            var blob = image.HeapIndexWidth(HeapIndex.Blob);
             var scope = Coded(2, TableIndex.Module, TableIndex.ModuleRef, TableIndex.AssemblyRef, TableIndex.TypeRef);
             var typeDefOrRef = Coded(2, TableIndex.TypeDef, TableIndex.TypeRef, TableIndex.TypeSpec);
             return table switch
@@ -594,17 +610,20 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         {
             // By content, not by image order: the image orders its heaps by a hash or a suffix sort, so one
             // changed name can move the position of every other entry.
-            Dictionary<int, int> Numbering(SortedDictionary<int, byte[]> heap)
+            Dictionary<int, int> Numbering(SortedDictionary<int, byte[]> heap, int width, string name)
             {
                 var next = 1;
                 var numbers = new Dictionary<int, int> { [0] = 0 };
                 foreach (var entry in heap.Where(entry => entry.Key != 0)
                              .OrderBy(entry => Convert.ToHexString(entry.Value), StringComparer.Ordinal))
+                {
+                    RequireHeapRank((uint)next, width, name);
                     numbers[entry.Key] = next++;
+                }
                 return numbers;
             }
-            var textNumbers = Numbering(strings);
-            var blobNumbers = Numbering(blobs);
+            var textNumbers = Numbering(strings, image.HeapIndexWidth(HeapIndex.String), "#Strings");
+            var blobNumbers = Numbering(blobs, image.HeapIndexWidth(HeapIndex.Blob), "#Blob");
             foreach (var token in rows.Keys.ToArray())
             {
                 var row = rows[token];
@@ -615,9 +634,9 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
                     {
                         var offset = width == 2 ? BitConverter.ToUInt16(row, at) : (int)BitConverter.ToUInt32(row, at);
                         var numbers = heap == Heap.Text ? textNumbers : blobNumbers;
-                        // A row carried only for its position, such as the next type's, may name entries that are
-                        // not carried; they become 0, which Lean reads as a missing entry if it ever looks.
-                        numbers.TryGetValue(offset, out var number);
+                        // A position-only row's omitted entry must remain unreadable even when zero is carried.
+                        var number = numbers.TryGetValue(offset, out var rank)
+                            ? (uint)rank : OmittedHeapOffset(width);
                         var bytes = BitConverter.GetBytes(number);
                         Array.Copy(bytes, 0, row, at, width);
                     }

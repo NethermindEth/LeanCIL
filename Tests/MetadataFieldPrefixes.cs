@@ -11,6 +11,8 @@ using FieldAttributes = Mono.Cecil.FieldAttributes;
 using MethodAttributes = Mono.Cecil.MethodAttributes;
 using TypeAttributes = Mono.Cecil.TypeAttributes;
 
+Run(["dotnet", "run", "--file", At("Tests/MetadataHeapOmissions.cs"), "-c", "Release"]);
+
 foreach (var count in new[] { 64, 512, 4096 })
 {
     uint[] fields = [.. Enumerable.Range(0, count).Select(index => 0x04000001u + (uint)index * 3)];
