@@ -106,7 +106,7 @@ def method0Signature : String :=
 def method0Body : Extraction.BodyEvidence :=
   { bytes := method0Bytes, tokens := { operands := [] }, metadata := method0Metadata,
               identities := [assembly0Identity], tables := method0Tables, names := method0Names,
-              pinned := [assembly0Identity] }
+              pinned := cil_pin_index [assembly0Identity] }
 
 /-- The pin of the assembly the method was extracted from. -/
 def pin : AssemblyPin := ⟨"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"⟩

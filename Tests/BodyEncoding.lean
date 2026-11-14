@@ -178,11 +178,11 @@ def evidenceOf (bytes : List Nat) (operands : List (Nat × RawOperand)) (metadat
     (method : RawMethod) : BodyEvidence :=
   let identities := metadata.slices.map fun slice => (slice.assembly.spelling).toOption.getD []
   let tables := metadata.tables.toOption.getD []
-  let names := match metadata.environmentWith identities tables [] with
+  let names := match metadata.environmentWith identities tables (PinnedIndex.ofIdentities []) with
     | .ok env => (methodIdentityValid env method [] []).toOption.getD {}
     | .error _ => {}
   { bytes := bytes, tokens := { operands := operands }, metadata, identities, tables, names,
-    pinned := [] }
+    pinned := PinnedIndex.ofIdentities [] }
 
 /-- A body that decodes to the method: a tiny header when the method has no locals, the fixed
     stack depth and no init flag, and a fat header otherwise, with the metadata the method's
@@ -222,6 +222,6 @@ def withBody (item : MethodEvidence) : MethodEvidence :=
 /-- The body of evidence that `withBody` has not yet filled in; it never decodes. -/
 def noBody : BodyEvidence :=
   { bytes := [], tokens := { operands := [] }, metadata := {}, identities := [], tables := [],
-    names := {}, pinned := [] }
+    names := {}, pinned := PinnedIndex.ofIdentities [] }
 
 end Tests.BodyEncoding
