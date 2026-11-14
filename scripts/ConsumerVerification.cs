@@ -790,7 +790,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         throw new InvalidDataException("Import directory has too many symbolic links: " + path);
                     current = Resolve(Path.IsPathFullyQualified(target) ? target : Path.Combine(current, target));
                     if (!Directory.Exists(current))
-                        throw new InvalidDataException("Import directory has an unresolved symbolic link: " + candidate);
+                        throw new InvalidDataException(
+                            "Import directory has an unresolved symbolic link: " + candidate);
                 }
                 else current = candidate;
             }
@@ -800,18 +801,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>Accepts only the toolchain, certified base and physical descendants of the session.</summary>
-    static string[] ValidatedConsumerImportDirectories(string session, string trusted, string? certified, string leanPath)
+    static string[] ValidatedConsumerImportDirectories(
+        string session, string trusted, string? certified, string leanPath)
     {
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var physicalSession = PhysicalImportDirectory(session);
         var physicalTrusted = PhysicalImportDirectory(trusted);
         var physicalCertified = certified is null ? null : PhysicalImportDirectory(certified);
         return leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => PhysicalImportDirectory(Path.IsPathFullyQualified(path) ? path : Path.Combine(session, path)))
+            .Select(path => PhysicalImportDirectory(
+                Path.IsPathFullyQualified(path) ? path : Path.Combine(session, path)))
             .Where(path => !path.Equals(physicalTrusted, comparison))
             .Select(path => path.Equals(physicalCertified, comparison) ? certified! :
                 Within(session, Path.GetRelativePath(physicalSession, Within(physicalSession, path))))
-            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .ToArray();
     }
 
     (string[] Directories, string LeanPath) ConsumerImportDirectories(string session)
