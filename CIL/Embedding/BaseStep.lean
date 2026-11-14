@@ -20,14 +20,14 @@ theorem option_bind_some {x : Option α} {f : α → Option β} {y : β} (h : x 
 def BaseRelabel (op : Instruction) : Prop :=
   ∀ (r : Nat → Nat) (pc q : Nat) (values : List Value) (profile : FeatureProfile) (target : Nat)
     (result : List Value) (memory : Memory), (op.continues = true → r (pc + 1) = q + 1) →
-    step op false pc [] 0 values (fun _ => none) profile = some (.next target result memory) →
-    step (op.relabel r) false q [] 0 values (fun _ => none) profile =
+    step op false pc [] values (fun _ => none) profile = some (.next target result memory) →
+    step (op.relabel r) false q [] values (fun _ => none) profile =
       some (.next (r target) result memory)
 
 /-- A value-only instruction computes its output independently of the program counter. -/
 def Fallthrough (op : Instruction) (evaluate : List Value → FeatureProfile → Option (List Value)) :
     Prop :=
-  ∀ pc stack profile, step op false pc [] 0 stack (fun _ => none) profile = do
+  ∀ pc stack profile, step op false pc [] stack (fun _ => none) profile = do
     return .next (pc + 1) (← evaluate stack profile) (fun _ => none)
 
 /-- A falling-through value-only instruction that relabeling leaves unchanged satisfies
@@ -75,7 +75,7 @@ def truthValues (negate : Bool) (stack : List Value) : Option (Bool × List Valu
 /-- A conditional branch observes values independently of either destination. -/
 def Branching (op : Nat → Instruction) (evaluate : List Value → Option (Bool × List Value)) :
     Prop :=
-  ∀ target pc stack profile, step (op target) false pc [] 0 stack (fun _ => none) profile = do
+  ∀ target pc stack profile, step (op target) false pc [] stack (fun _ => none) profile = do
     let (taken, rest) ← evaluate stack
     return .next (if taken then target else pc + 1) rest (fun _ => none)
 

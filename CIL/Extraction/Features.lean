@@ -464,8 +464,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Inst
 /-- Bind every control-flow operation and every operation that propagates a known
     feature fact to the actual emitted instruction. Unknown operations may not
     emit an unsupported hole on a reachable path. -/
-private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
-    (eligible : Nat → Option W32 → Bool)
+def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
@@ -497,30 +496,24 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
         | _ => false
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036, 10, 11, 12, 13, 19, 65038] then
     let some index := localIndex instruction | return false
-    let narrow := match raw.locals[index]? with
-      | some (.atom _ "System.Boolean") => some NarrowKind.unsigned8 | _ => none
     return match emitted with
-      | .local actual actualNarrow =>
-        instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index &&
-          (!eligible index (some 0) || actualNarrow == narrow)
-      | .setLocal actual actualNarrow =>
-        instruction.opcode ∈ [10, 11, 12, 13, 19, 65038] && actual == index &&
-          (!eligible index (some 0) || actualNarrow == narrow)
+      | .local actual => instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index
+      | .setLocal actual => instruction.opcode ∈ [10, 11, 12, 13, 19, 65038] && actual == index
       | _ => false
   if instruction.opcode ∈ [18, 65037] then
     return match localIndex instruction, emitted with
       | some index, .localAddr actual => index == actual
-      | some index, .local actual none =>
+      | some index, .local actual =>
         index == actual && spanLocalOp (raw.locals[·]?) instruction
       | _, _ => false
   -- Argument homes are appended after all raw locals. Their precise mapping is
   -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
   if instruction.opcode ∈ [15, 65034] then
     return match emitted with
-      | .localAddr index | .local index none => raw.locals.length <= index
+      | .localAddr index | .local index => raw.locals.length <= index
       | _ => false
   if instruction.opcode ∈ [16, 65035] then
-    return match emitted with | .setLocal index none => raw.locals.length <= index | _ => false
+    return match emitted with | .setLocal index => raw.locals.length <= index | _ => false
   -- A span address on the stack is already the view it names, so copying the span emits nothing.
   if instruction.opcode == 113 then
     if let .type type := instruction.operand then
@@ -560,10 +553,6 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
 
-/-- Bind an emitted operation using the raw local-eligibility rule. -/
-def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod) :=
-  featureOpMatchesWith layouts raw (featureLocalEligible raw)
-
 /-- A decided typeof branch preserves its raw target or falls through without a stack effect. -/
 def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : Instruction) :
     Bool :=
@@ -575,8 +564,7 @@ def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : I
 /-- Fold operands emit nothing, a type comparison emits its decided word or branch and a folded
     `throw` raises its constructed type. Outside a decided test, type handles and
     `System.Type` calls have no admitted translation. -/
-private def featureOpMatchesAtWith (layouts : Array RawLayout) (raw : RawMethod)
-    (eligible : Nat → Option W32 → Bool)
+def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     (role : Option FoldRole)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   match role, emitted with
@@ -588,20 +576,16 @@ private def featureOpMatchesAtWith (layouts : Array RawLayout) (raw : RawMethod)
     index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with
     | .call site => site.returnType == raw.returnType &&
-      featureOpMatchesWith layouts raw eligible instruction (.call target count)
+      featureOpMatches layouts raw instruction (.call target count)
     | _ => false
   | some .tailCall, .managed (.call signature catalog true) =>
     signature.result == callableType raw.returnType &&
-      featureOpMatchesWith layouts raw eligible instruction
+      featureOpMatches layouts raw instruction
         (.managed (.call signature catalog false))
-  | some .argument, _ => featureOpMatchesWith layouts raw eligible instruction emitted
+  | some .argument, _ => featureOpMatches layouts raw instruction emitted
   | some _, _ => false
   | none, _ => !typeTestInstruction instruction &&
-      featureOpMatchesWith layouts raw eligible instruction emitted
-
-/-- Fold-aware instruction matching stated independently of any eligibility index. -/
-def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod) :=
-  featureOpMatchesAtWith layouts raw (featureLocalEligible raw)
+      featureOpMatches layouts raw instruction emitted
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     be well shaped, match its emitted instruction, and flow into a weaker state at every
@@ -616,7 +600,7 @@ private def checkFeatureSiteWith (layouts : Array RawLayout) (constants : Nat �
   | _, none, .unsupported _ => true
   | ((instruction, role), pc), some state, emitted =>
     wellShaped raw eligible state &&
-      featureOpMatchesAtWith layouts raw eligible role instruction emitted &&
+      featureOpMatchesAt layouts raw role instruction emitted &&
       match featureTransferAtWith layouts raw eligible profile (calleeConstant constants emitted)
           role instruction state,
           featureSuccessors role pc instruction state with
