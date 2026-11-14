@@ -579,7 +579,8 @@ def checkIdentityCodecCost : IO Unit := do
         if previous[index]! > 0 && best[index]! > previous[index]! * 16 + 2000000 then
           throw (IO.userError (s!"codec cost grew too quickly: width {bits}, size {size}, " ++
             s!"operation {index}, {previous[index]!} -> {best[index]!} ns"))
-      IO.println s!"PASS codec width {bits}, bytes {size}: encode/decode/hash ns {best}, {checksum}"
+      IO.println (s!"PASS codec width {bits}, bytes {size}: " ++
+        s!"encode/decode/hash ns {best}, {checksum}")
       previous := best
 
 #eval checkIdentityCodecCost
