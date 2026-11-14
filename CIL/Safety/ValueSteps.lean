@@ -1,5 +1,6 @@
 import CIL.Safety.StepComposition
 import CIL.Safety.GuardNormalization
+import CIL.Safety.ResolutionFacts
 
 /-!
 # Value step equations
@@ -231,5 +232,17 @@ dsimproc [cil_step] reduceMethodProfile (CIL.Method.profile _) := fun e => do
   let head ← withDefault <| whnf body
   unless head.isAppOf ``CIL.Method.mk do return .continue
   return .done (← withReducible <| whnf (mkApp (mkConst ``CIL.Method.profile) head))
+
+open Lean Meta in
+/-- Known return signatures simplify by checked storage lemmas without traversing method code. -/
+simproc [cil_step] reduceReturnNarrow (CIL.Method.returnNarrow _) := fun expression => do
+  let_expr CIL.Method.returnNarrow method := expression | return .continue
+  let returns ← withDefault <| whnf (mkApp (mkConst ``CIL.Method.returnsValue) method)
+  unless returns.isConstOf ``Bool.true || returns.isConstOf ``Bool.false do return .continue
+  let some proof ← ResolutionFacts.returnProof? method
+      (← mkEqRefl (mkApp (mkConst ``CIL.Method.returnsValue) method))
+      (← mkEqRefl (mkApp (mkConst ``CIL.Method.declared) method)) | return .continue
+  let some (_, _, result) := (← inferType proof).eq? | return .continue
+  return .done { expr := ← withDefault <| whnf result, proof? := some proof }
 
 end CIL.Safety

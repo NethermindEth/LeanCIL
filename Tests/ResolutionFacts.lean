@@ -1,4 +1,7 @@
 import CIL.Resolution
+import CIL.Safety.ValueSteps
+import CIL.Safety.StepTransport
+import CIL.Extraction.Translation
 
 /-!
 # Declared narrowing
@@ -149,5 +152,139 @@ info: 'CIL.Extraction.declaredNarrow_of_not_candidate' depends on axioms: [prope
 -/
 #guard_msgs in
 #print axioms declaredNarrow_of_not_candidate
+
+namespace Generated
+
+open Lean Elab Command in
+/-- A named signature fixture with both generated and simplifier proofs. -/
+elab "resolution_fixture " name:ident " : " type:term " returns " returns:term
+    " narrows " expected:term : command => do
+  let returnsName := mkIdent (name.getId.appendAfter "_returnsValue")
+  let declaredName := mkIdent (name.getId.appendAfter "_declared")
+  let narrowedName := mkIdent (name.getId.appendAfter "_returnNarrow")
+  let simplifiedName := mkIdent (name.getId.appendAfter "_simplified")
+  elabCommand (← `(def $name : Method :=
+    { code := [], locals := [], returnsValue := $returns, declared := { returnType := $type },
+      environment := { rawLayouts := [pointLayout] } }))
+  elabCommand (← `(theorem $returnsName : ($name).returnsValue = $returns := rfl))
+  elabCommand (← `(theorem $declaredName : ($name).declared = { returnType := $type } := rfl))
+  elabCommand (← `(cil_resolution_facts $name))
+  elabCommand (← `(example : ($name).returnNarrow = $expected := $narrowedName))
+  elabCommand (← `(theorem $simplifiedName : ($name).returnNarrow = $expected := by
+    simp only [cil_step]))
+  elabCommand (← `(#print axioms $returnsName))
+  elabCommand (← `(#print axioms $declaredName))
+  elabCommand (← `(#print axioms $narrowedName))
+  elabCommand (← `(#print axioms $simplifiedName))
+
+resolution_fixture primitive : (.atom runtimeScope "System.Byte")
+  returns true narrows (some .unsigned8)
+resolution_fixture enumeration : (.enum "Small" (.atom runtimeScope "System.Int16"))
+  returns true narrows (some .signed16)
+resolution_fixture invalidEnumeration : (.enum "Truth" (.atom runtimeScope "System.Boolean"))
+  returns true narrows none
+resolution_fixture nestedEnumeration :
+  (.enum "Outer" (.enum "Inner" (.atom runtimeScope "System.Byte")))
+  returns true narrows (some .unsigned8)
+resolution_fixture noValue : (.atom runtimeScope "System.Byte") returns false narrows none
+resolution_fixture aggregate : (.aggregate "Examples.Point" 0) returns true narrows none
+resolution_fixture foreign : (.atom "Other" "System.Byte") returns true narrows none
+resolution_fixture misspelled : (.atom runtimeScope "System.Bytex") returns true narrows none
+
+/-- Enum storage over an aggregate stays unresolved as storage, but its narrowing is known. -/
+def aggregateEnum (layouts : List RawLayout) : Method :=
+  { code := [], locals := [], returnsValue := true, environment := { rawLayouts := layouts },
+    declared := { returnType := .enum "Bad" (.aggregate "Point" 0) } }
+
+/-- The aggregate enum fixture returns a value. -/
+theorem aggregateEnum_returnsValue (layouts : List RawLayout) :
+    (aggregateEnum layouts).returnsValue = true := rfl
+#print axioms aggregateEnum_returnsValue
+
+/-- The aggregate enum fixture retains its exact declared type. -/
+theorem aggregateEnum_declared (layouts : List RawLayout) :
+    (aggregateEnum layouts).declared =
+      { returnType := .enum "Bad" (.aggregate "Point" 0) } := rfl
+#print axioms aggregateEnum_declared
+
+cil_resolution_facts aggregateEnum
+#print axioms aggregateEnum_returnNarrow
+
+/-- Enum narrowing over an aggregate does not inspect a symbolic layout table. -/
+theorem aggregateEnum_simplified (layouts : List RawLayout) :
+    (aggregateEnum layouts).returnNarrow = none := by simp only [cil_step]
+#print axioms aggregateEnum_simplified
+
+/-- Nested enum metadata over an aggregate array retains an arbitrary layout table. -/
+def arrayEnum (layouts : List RawLayout) : Method :=
+  { code := [], locals := [], returnsValue := true, environment := { rawLayouts := layouts },
+    declared := { returnType := .enum "Outer" (.enum "Bad" (.array (.aggregate "Point" 0))) } }
+
+/-- The aggregate array enum fixture returns a value. -/
+theorem arrayEnum_returnsValue (layouts : List RawLayout) :
+    (arrayEnum layouts).returnsValue = true := rfl
+#print axioms arrayEnum_returnsValue
+
+/-- The aggregate array enum fixture retains its exact declared type. -/
+theorem arrayEnum_declared (layouts : List RawLayout) :
+    (arrayEnum layouts).declared =
+      { returnType := .enum "Outer" (.enum "Bad" (.array (.aggregate "Point" 0))) } := rfl
+#print axioms arrayEnum_declared
+
+cil_resolution_facts arrayEnum
+#print axioms arrayEnum_returnNarrow
+
+/-- Nested enum narrowing over an aggregate array does not inspect a symbolic layout table. -/
+theorem arrayEnum_simplified (layouts : List RawLayout) :
+    (arrayEnum layouts).returnNarrow = none := by simp only [cil_step]
+#print axioms arrayEnum_simplified
+
+/-- info: 'Tests.ResolutionFacts.Generated.primitive_returnNarrow' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms primitive_returnNarrow
+
+/-- A symbolic signature retains its unknown return narrowing. -/
+def unknown (type : TypeExpr) : Method :=
+  { code := [], locals := [], returnsValue := true, declared := { returnType := type } }
+
+/-- The symbolic method always returns a value. -/
+theorem unknown_returnsValue (type : TypeExpr) : (unknown type).returnsValue = true := rfl
+#print axioms unknown_returnsValue
+
+/-- The symbolic method preserves its declared type. -/
+theorem unknown_declared (type : TypeExpr) :
+    (unknown type).declared = { returnType := type } := rfl
+#print axioms unknown_declared
+
+/--
+error: cil_resolution_facts: return narrowing of Tests.ResolutionFacts.Generated.unknown is unresolved
+-/
+#guard_msgs in
+cil_resolution_facts unknown
+
+example (type : TypeExpr) (expected : Option NarrowKind)
+    (known : (unknown type).returnNarrow = expected) :
+    (unknown type).returnNarrow = expected := by
+  fail_if_success simp only [cil_step]
+  exact known
+
+/-- Differing return narrowing prevents metadata transport even when both methods return values. -/
+theorem differing_narrowing_rejected : ¬ CIL.Safety.StepMetadata primitive enumeration := by
+  intro metadata
+  have mismatch := metadata.returnNarrow
+  rw [primitive_returnNarrow, enumeration_returnNarrow] at mismatch
+  cases mismatch
+#print axioms differing_narrowing_rejected
+
+/-- Signature and environment evidence suffice without an instruction-shaped hypothesis. -/
+theorem shape_narrowing {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
+    {closed : RawMethod} {method : Method}
+    (shape : MethodShapeValid rawLayouts closed method)
+    (environment : MethodEnvironmentValid rawLayouts layouts method) :
+    method.returnNarrow = declaredNarrow rawLayouts closed.returnType :=
+  returnNarrow_of_shape shape environment
+#print axioms shape_narrowing
+
+end Generated
 
 end Tests.ResolutionFacts

@@ -66,6 +66,21 @@ theorem declaredNarrow_enum (layouts : List RawLayout) (identity : String)
 
 #print axioms declaredNarrow_enum
 
+/-- An enum cannot introduce narrowing when its underlying storage does not narrow. -/
+theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : String)
+    (type : TypeExpr) (narrow : declaredNarrow layouts type = none) :
+    declaredNarrow layouts (.enum identity type) = none := by
+  unfold declaredNarrow at narrow ⊢
+  simp only [typeStorage]
+  cases stored : typeStorage layouts type with
+  | none => simp
+  | some storage =>
+    cases storage <;> try simp
+    case field kind =>
+      cases kind <;> simp_all
+
+#print axioms declaredNarrow_enum_of_none
+
 /-- A type whose storage is never a small-integer field does not narrow. -/
 theorem declaredNarrow_of_storage {layouts : List RawLayout} {type : TypeExpr}
     (wide : ∀ field, typeStorage layouts type = some (.field field) →

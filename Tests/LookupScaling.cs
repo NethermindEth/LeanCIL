@@ -7,7 +7,13 @@
 #:include GeneratedEvidence.cs
 
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
+
+CheckNarrowedResolution();
+if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
+ReturnResolutionCosts();
+if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 
@@ -61,6 +67,133 @@ const double AllowedLocalGrowth = 1.25;
 
 var directory = At("artifacts/LookupScaling");
 Directory.CreateDirectory(directory);
+
+// Signature facts inspect a return head; code and unrelated layout entries stay outside that inspection.
+void ReturnResolutionCosts()
+{
+    var resolutionDirectory = At("artifacts/LookupScaling/ReturnResolution");
+    Directory.CreateDirectory(resolutionDirectory);
+    const double GrowthLimit = AllowedLocalGrowth;
+    static bool WithinGrowth((int Size, double Cost)[] samples, bool perItem)
+    {
+        double Normalized((int Size, double Cost) sample) => sample.Cost / (perItem ? sample.Size : 1);
+        return samples.Skip(1).All(sample => Normalized(sample) <= Normalized(samples[0]) * GrowthLimit);
+    }
+    int[] controlSizes = [32, 128, 512];
+    if (!WithinGrowth(controlSizes.Select(size => (size, (double)size)).ToArray(), perItem: true) ||
+        WithinGrowth(controlSizes.Select(size => (size, (double)size * size)).ToArray(), perItem: true) ||
+        !WithinGrowth(controlSizes.Select(size => (size, 32.0)).ToArray(), perItem: false) ||
+        WithinGrowth(controlSizes.Select(size => (size, (double)size)).ToArray(), perItem: false))
+        throw new InvalidOperationException("Return resolution growth check failed its normalization controls.");
+    foreach (var dimension in new[] { "methods", "depth", "body", "layouts", "enum-depth", "enum-layouts" })
+    {
+        var samples = new List<(int Size, long Facts, long Simplifier)>();
+        foreach (var size in new[] { 32, 128, 512 })
+        {
+            var source = new StringBuilder("""
+                import CIL.Safety.ValueSteps
+                open CIL CIL.Extraction Lean Elab Command
+                set_option maxRecDepth 8192
+                /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+                elab "#resolution_cost " label:str " in " command:command : command => do
+                  let before <- IO.getNumHeartbeats
+                  elabCommand command
+                  let after <- IO.getNumHeartbeats
+                  logInfo m!"resolution {label.getString} {after - before} heartbeats"
+
+                """);
+            var type = ".atom runtimeScope \"System.Byte\"";
+            var expected = "some .unsigned8";
+            if (dimension == "depth")
+                type = string.Concat(Enumerable.Repeat(".enum \"Nested\" (", size)) + type + new string(')', size);
+            if (dimension == "layouts")
+            {
+                type = ".aggregate \"Point\" 0";
+                expected = "none";
+            }
+            if (dimension is "enum-depth" or "enum-layouts")
+            {
+                var depth = dimension == "enum-depth" ? size : 1;
+                type = string.Concat(Enumerable.Repeat(".enum \"Nested\" (", depth)) +
+                    ".array (.aggregate \"Point\" 0)" + new string(')', depth);
+                expected = "none";
+            }
+            var instructions = dimension == "body" ? string.Join(", ", Enumerable.Repeat(".nop", size)) : "";
+            var layouts = dimension is "layouts" or "enum-layouts" ? string.Join(", ", Enumerable.Repeat(
+                "{ identity := \"Point\", explicit := false, packing := 0, declaredSize := 0, fields := [] }", size)) : "";
+            source.AppendLine($"def rawLayouts : List RawLayout := [{layouts}]");
+            var methods = dimension == "methods" ? size : 1;
+            for (var index = 0; index < methods; index++)
+            {
+                source.AppendLine($$"""
+                    def body{{index}} : Method := {
+                      code := [{{instructions}}], locals := [], returnsValue := true,
+                      declared := { returnType := {{type}} }, environment := { rawLayouts := rawLayouts } }
+                    theorem body{{index}}_returnsValue : body{{index}}.returnsValue = true := rfl
+                    theorem body{{index}}_declared :
+                      body{{index}}.declared = { returnType := {{type}} } := rfl
+                    #resolution_cost "fact" in cil_resolution_facts body{{index}}
+                    #resolution_cost "simplifier" in
+                    theorem body{{index}}_simplified : body{{index}}.returnNarrow = {{expected}} := by
+                      simp only [cil_step]
+                    """);
+                foreach (var suffix in new[] { "returnsValue", "declared", "returnNarrow", "simplified" })
+                    source.AppendLine($"#print axioms body{index}_{suffix}");
+            }
+            var path = Path.Combine(resolutionDirectory, $"{dimension}{size}.lean");
+            File.WriteAllText(path, source.ToString());
+            var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+            if (output.Contains("sorryAx", StringComparison.Ordinal))
+                throw new InvalidOperationException("Return resolution introduced an unproved theorem.");
+            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            if (costs.Length != methods * 2)
+                throw new InvalidOperationException("Missing return resolution costs: " + output);
+            long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
+                .Sum(match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+            samples.Add((size, Sum("fact"), Sum("simplifier")));
+        }
+        foreach (var simplifier in new[] { false, true })
+        {
+            var measured = samples.Select(sample =>
+                (sample.Size, (double)(simplifier ? sample.Simplifier : sample.Facts))).ToArray();
+            if (!WithinGrowth(measured, perItem: dimension is "methods" or "depth" or "enum-depth"))
+                throw new InvalidOperationException($"Superlinear return resolution {dimension}: " +
+                    string.Join("; ", measured));
+            Console.WriteLine($"PASS return resolution {(simplifier ? "simplifier" : "fact")} {dimension}: " +
+                string.Join("; ", samples.Select(sample =>
+                    $"{sample.Size} = {(simplifier ? sample.Simplifier : sample.Facts)} heartbeats")));
+        }
+    }
+}
+
+// Isolating one validator must also remove generated facts whose signature premises were removed.
+void CheckNarrowedResolution()
+{
+    const string Source = """
+        import CIL.Safety.ResolutionFacts
+        namespace Extracted
+        open CIL CIL.Extraction
+        def method0 : Method :=
+          { code := [], locals := [], returnsValue := true,
+            declared := { returnType := .atom runtimeScope "System.Byte" } }
+        theorem method0_returnsValue : method0.returnsValue = true := rfl
+        theorem method0_declared :
+          method0.declared = { returnType := .atom runtimeScope "System.Byte" } := rfl
+        cil_resolution_facts method0
+        theorem selected : True := True.intro
+        #print axioms method0_returnsValue
+        #print axioms method0_declared
+        #print axioms method0_returnNarrow
+        #print axioms selected
+        end Extracted
+        """;
+    var directory = At("artifacts/LookupScaling/ReturnResolution");
+    Directory.CreateDirectory(directory);
+    var path = Path.Combine(directory, "Narrowed.lean");
+    File.WriteAllText(path, NarrowEvidence(Source + "\n", "selected") + "\n#print axioms Extracted.selected\n");
+    Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    Console.WriteLine("PASS isolated evidence retains its selected obligation with generated return facts");
+}
 
 // The heartbeats `decide +kernel` adds to the same statement closed with `sorry`, for equal and unequal type
 // identities whose names have 20 and 80 characters and share all but their last character. Each statement is
@@ -893,6 +1026,9 @@ enum LocalSlots
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
+    [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
+    internal static partial Regex ReturnResolution();
+
     [GeneratedRegex(@"([0-9]+) lemmas rechecked, ([0-9]+) kernel heartbeats")]
     internal static partial Regex EmbeddingRecheck();
 

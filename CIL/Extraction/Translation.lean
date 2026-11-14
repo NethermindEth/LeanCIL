@@ -160,6 +160,21 @@ def MethodEnvironmentValid (rawLayouts : List RawLayout) (layouts : Array Comput
     (method : Method) : Prop :=
   method.environment = { rawLayouts := rawLayouts, layouts := layouts }
 
+/-- Valid signature and environment metadata determine return narrowing independently of code. -/
+theorem returnNarrow_of_shape {rawLayouts : List RawLayout}
+    {layouts : Array ComputedLayout} {closed : RawMethod} {method : Method}
+    (shape : MethodShapeValid rawLayouts closed method)
+    (environment : MethodEnvironmentValid rawLayouts layouts method) :
+    method.returnNarrow = declaredNarrow rawLayouts closed.returnType := by
+  have returns := shape.2.1
+  have declared := shape.2.2.1
+  change method.environment = _ at environment
+  by_cases void : closed.returnType = .void
+  · simp [Method.returnNarrow, returns, void, declaredNarrow, typeStorage]
+  · simp [Method.returnNarrow, returns, void, declared, DeclaredSignature.ofRaw, environment]
+
+#print axioms returnNarrow_of_shape
+
 -- Generated proofs use `rfl`, which unfolds the two shared constants; deciding this instance
 -- compares the layout tables element by element, once per method.
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout) (method : Method) :
