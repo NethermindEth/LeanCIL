@@ -185,28 +185,32 @@ the context that every instruction reads, the outcome body by `cil_loop_outcome_
 lemma body by `cil_checked_steps` with a universe-polymorphic lemma among its facts. The locals
 bodies store a reference into each of eight locals of a literal frame per cycle. The depth bodies
 push 8, 32 and 128 values and add them all. The hypotheses bodies are 62-instruction accumulate,
-contract and loop bodies proved with 16, 64 and 256 hypotheses in scope, and a contract body with
-as many instruction-lookup equations in scope. The snapshot bodies store into eight numeric locals
-and then update one local per store from its remembered value, with 10, 20, 40 and 80 stores,
-proved by `cil_contract_steps (snapshots := ..)` with caller memory facts in the context. Each
-store clears the facts it supersedes, so the hypotheses in scope stay level, while the value a
-store writes grows with the number of updates to its local; the cost per instruction rises slowly
-with the stores. The suite uses the proof-cost measuring frontend, with three sequential proof
-compilations and a header-only baseline per scalar, memory, accumulate and locals body up to 256
-instructions, and one compilation for every other body.
+contract and loop bodies proved with 16, 64 and 256 hypotheses in scope, a contract body with
+as many instruction-lookup equations in scope, and the lookups of every instruction of the
+accumulate body made by `cil_lookup` outside a stepping run, with 16 and 256 equations in scope. The
+snapshot bodies store into eight numeric locals and then update one local per store from its
+remembered value, with 10, 20, 40 and 80 stores, proved by `cil_contract_steps (snapshots := ..)`
+with caller memory facts in the context. Each store clears the facts it supersedes, so the
+hypotheses in scope stay level, while the value a store writes grows with the number of updates to
+its local; the cost per instruction rises slowly with the stores. The suite uses the proof-cost
+measuring frontend, with three sequential proof compilations and a header-only baseline per scalar,
+memory, accumulate and locals body up to 256 instructions, and one compilation for every other body.
 
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. For the bodies with three compilations, compiled proof bytes per instruction may
   also grow by at most 1.35 times, and median frontend milliseconds by at most twice.
 - For the hypotheses bodies the sizes are the numbers of hypotheses: in the accumulate, contract
   and loop bodies half of them are equations headed by an operator and half by a local variable,
-  and in the lookup body each is an instruction lookup like those stepping makes,
-  `([.ldc_i4 i] : List CIL.Instruction)[0]? = some (.ldc_i4 i)`. The heartbeats counted are
+  in the lookup body each is an instruction lookup like those stepping makes,
+  `([.ldc_i4 i] : List CIL.Instruction)[0]? = some (.ldc_i4 i)`, and in the direct lookups
+  each is an equation headed by an operator. The heartbeats and frontend milliseconds counted are
   those of the proof less those of the same statement closed by `sorry`, so that elaborating the
-  hypotheses does not count as stepping. The same ratio limit applies, and one more hypothesis in
-  scope may add at most 100 heartbeats to an instruction, which costs about 120,000, between the
-  smallest and the largest size. A lookup that tries to unify with every equation hypothesis adds
-  600 to 1,900 and fails the second limit.
+  hypotheses does not count as stepping. The same ratio limit applies, except to the direct
+  lookups, which read every hypothesis in scope once each. One more hypothesis in scope may add
+  at most 100 heartbeats to an instruction, which costs about 120,000, or to a direct lookup,
+  between the smallest and the largest size. A lookup that tries to unify with every equation
+  hypothesis adds 600 to 1,950 and fails that limit, as does a direct lookup that builds an index
+  of the hypotheses, which adds about 410; reading each hypothesis once adds about 23.
 - Heartbeats and bytes must repeat exactly across the three runs.
 - Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
   recheck. Compiled proof bytes subtract the same module containing only the body and its lookup

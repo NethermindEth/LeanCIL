@@ -9,7 +9,8 @@ using System.Text.Json;
 const double WorkGrowthLimit = 1.35;
 const double TimeGrowthLimit = 2.0;
 // Most heartbeats one more hypothesis in scope may add to one instruction, which costs about 120,000.
-// Unifying each lookup with every equation hypothesis added 600 to 1,900.
+// Unifying each lookup with every equation hypothesis added 600 to 1,950. A lookup outside a stepping
+// driver reads each hypothesis once, about 23 heartbeats; building an index for it took about 410.
 const double HypothesisCostLimit = 100.0;
 const int Repetitions = 3;
 const int LocalCount = 8;
@@ -45,7 +46,8 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
     ("hypothesescontract", [16, 64, 256], false), ("hypothesesloop", [16, 64, 256], false),
-    ("hypotheseslookup", [16, 64, 256], false), ("snapshots", [10, 20, 40, 80], false)
+    ("hypotheseslookup", [16, 64, 256], false), ("hypothesesdirect", [16, 256], false),
+    ("snapshots", [10, 20, 40, 80], false)
 };
 foreach (var (workload, sizes, full) in workloads)
     foreach (var requested in sizes)
@@ -76,24 +78,25 @@ File.WriteAllText(reportPath,
 foreach (var workload in rows.GroupBy(row => row.Workload))
 {
     var measurements = workload.OrderBy(row => row.Size).ToArray();
-    for (var index = 1; index < measurements.Length; index++)
+    // A lookup outside a driver reads every hypothesis in scope, so only the hypothesis limit bounds it.
+    for (var index = 1; index < measurements.Length && workload.Key != "hypothesesdirect"; index++)
         CheckGrowth(measurements[index - 1], measurements[index]);
     if (workload.Key.StartsWith("hypotheses"))
         CheckHypothesisCost(measurements[0], measurements[^1]);
 }
 Console.WriteLine("PASS stepping growth budgets for scalar, memory, accumulate, locals, contract, loop, " +
-    "loopfacts, outcome, lemma, depth, hypotheses and snapshot bodies; results: " + reportPath);
+    "loopfacts, outcome, lemma, depth, hypotheses, direct lookups and snapshot bodies; results: " + reportPath);
 
 // The instructions that open a body, repeat per cycle and end it. The accumulate, contract, lemma,
 // outcome and loop bodies keep one value on the stack that grows by an operand per cycle, and the
 // loop bodies end in a `nop` at the state their path reaches. The locals body stores a reference
 // into each of eight reference locals per cycle. The hypotheses bodies are accumulate bodies of
-// fixed length.
+// fixed length; the direct one looks up each of their instructions outside a stepping driver.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".arg 0", ".arg 1", ".store64", ".arg 0", ".load64", ".pop"], [".arg 0", ".load64", ".ret"]),
-    "accumulate" or "contract" or "hypotheses" or "hypothesescontract" or "hypotheseslookup" or "lemma"
-        or "outcome" => ([".arg 0"], [".arg 1", ".add"], [".ret"]),
+    "accumulate" or "contract" or "hypotheses" or "hypothesescontract" or "hypotheseslookup"
+        or "hypothesesdirect" or "lemma" or "outcome" => ([".arg 0"], [".arg 1", ".add"], [".ret"]),
     "loop" or "loopfacts" or "hypothesesloop" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
     "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".arg 0", $".setLocal {slot}" })
         .ToArray(), [".local 0", ".ret"]),
@@ -174,14 +177,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         set_option maxHeartbeats 800000
         {{bodyDefinition}}
         """ + "\n";
-    // Odd hypotheses are equations headed by an operator and even ones by a local variable. The
-    // lookup hypotheses are instruction lookups like those stepping makes, which a lookup that unified
-    // with every equation hypothesis would try at each instruction.
+    // Odd hypotheses are equations headed by an operator and even ones by a local variable; the direct
+    // body has only the first kind. The lookup hypotheses are instruction lookups like those stepping
+    // makes, which a lookup that unified with every equation hypothesis would try at each instruction.
     var hypothesisLines = string.Join("\n", Enumerable.Range(1, hypotheses ? requested : 0).Select(index =>
         workload == "hypotheseslookup"
             ? $"  have hypothesis{index} : ([.ldc_i4 {index}] : List CIL.Instruction)[0]? = " +
               $"some (.ldc_i4 {index}) := rfl"
-        : index % 2 == 1
+        : index % 2 == 1 || workload == "hypothesesdirect"
             ? $"  have hypothesis{index} : right + {index} = right + {index} := rfl"
             : $"  obtain ⟨witness{index}, hypothesis{index}⟩ : ∃ witness : CIL.W64, " +
               $"witness = right + {index} := ⟨_, rfl⟩"));
@@ -197,6 +200,15 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   (fun (final, values) => final = memory /\ values = [.scalar (.i64 ({{runningSum}}))]) := by
             {{hypothesisLines}}
               {{(setup ? "sorry" : "cil_contract_steps []\n  exact And.intro rfl rfl")}}
+            """,
+        "hypothesesdirect" => $$"""
+            /-- Equations in scope before lookups outside a stepping driver, which scan them. -/
+            theorem checked (right : CIL.W64) :
+                {{string.Join(" ∧\n      ", operations.Select((operation, pc) =>
+                    $"body.code[{pc}]? = some (CIL.Instruction{operation})"))}} := by
+            {{hypothesisLines}}
+              {{(setup ? "sorry" : $"refine ⟨{string.Join(", ", operations.Select(_ => "?_"))}⟩\n" +
+                  "  all_goals cil_lookup []")}}
             """,
         "hypothesesloop" => $$"""
             /-- Equations in scope before loop stepping, which it must not scan at each step. -/
@@ -219,7 +231,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     };
     var statement = workload switch
     {
-        "hypotheses" or "hypothesescontract" or "hypothesesloop" or "hypotheseslookup" =>
+        "hypotheses" or "hypothesescontract" or "hypothesesloop" or "hypotheseslookup" or "hypothesesdirect" =>
             HypothesesStatement(false),
         "snapshots" => $$"""
             /-- Numeric locals stored and reloaded through snapshots, each store updating one local. -/
@@ -331,7 +343,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             """
     };
     // The snapshot lemmas rest on choice, as `LocalSnapshots.store_at` and `LocalSnapshots.load` do.
-    var axioms = snapshots ? "propext, Classical.choice, Quot.sound" : "propext, Quot.sound";
+    var axioms = snapshots ? "propext, Classical.choice, Quot.sound"
+        : workload == "hypothesesdirect" ? "propext" : "propext, Quot.sound";
     var Audit = $$"""
 
         /-- info: 'checked' depends on axioms: [{{axioms}}] -/
@@ -350,11 +363,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         throw new InvalidOperationException("Stepping work did not repeat exactly for " + module);
     var proofBytes = baseline is null ? 0 : samples[0].Bytes - baseline.Bytes;
     if (full && proofBytes <= 0) throw new InvalidOperationException("Missing compiled proof bytes for " + module);
-    // Elaborating each hypothesis costs the same with or without stepping, so the same statement
-    // with `sorry` for the stepping tactic is measured and subtracted.
-    var setup = hypotheses ? SetupCost(module, header, HypothesesStatement(true)) : (0L, 0L);
     var row = new SteppingMeasurement(workload, operations.Length, cycles, memory ? 2 * cycles + 1 : 0,
-        commands[0].Heartbeats - setup.Item1, commands[0].KernelHeartbeats - setup.Item2, proofBytes,
+        commands[0].Heartbeats, commands[0].KernelHeartbeats, proofBytes,
         Median(commands.Select(command => command.ElapsedMs)), Median(commands.Select(command => command.KernelMs)),
         Median(samples.Select(sample => sample.Commands.Sum(command => command.ElapsedMs))),
         samples.Select(sample => sample.ProcessMs).ToArray(), baseline?.ProcessMs ?? 0)
@@ -366,6 +376,10 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         HeaderCommandsMs = baseline?.Commands.Sum(command => command.ElapsedMs) ?? 0,
         SourceSha256 = Sha(path)
     };
+    // Elaborating each hypothesis costs the same with or without stepping, so the same statement
+    // with `sorry` for the stepping tactic is measured and subtracted.
+    if (hypotheses)
+        row = WithoutSetup(row, SetupCost(module, header, HypothesesStatement(true)));
     Console.WriteLine(string.Create(System.Globalization.CultureInfo.InvariantCulture, 
         $"{workload} {row.Instructions} instructions: {row.FrontendHeartbeatsPerInstruction:F0} frontend HB, " +
         $"{row.KernelHeartbeatsPerInstruction:F0} kernel HB, {row.ProofBytesPerInstruction:F0} proof bytes, " +
@@ -373,16 +387,24 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     return row;
 }
 
-// Heartbeats of the statement `statement` without stepping, as its frontend and kernel work.
-(long Frontend, long Kernel) SetupCost(string module, string header, string statement)
+// What elaborating and checking the statement `statement` costs without stepping.
+CommandSample SetupCost(string module, string header, string statement)
 {
     var setupModule = module + "Setup";
     var setupPath = Path.Combine(directory, setupModule + ".lean");
     File.WriteAllText(setupPath, header + statement + "\n");
     var sample = Compile(setupModule, setupPath, "setup");
-    var command = sample.Commands.Single(command => command.Label == "checked");
-    return (command.Heartbeats, command.KernelHeartbeats);
+    return sample.Commands.Single(command => command.Label == "checked");
 }
+
+// The stepping share of `row`: its frontend heartbeats, kernel heartbeats and frontend milliseconds
+// less those of `setup`, the same statement closed by `sorry`.
+static SteppingMeasurement WithoutSetup(SteppingMeasurement row, CommandSample setup) => row with
+{
+    FrontendHeartbeats = row.FrontendHeartbeats - setup.Heartbeats,
+    KernelHeartbeats = row.KernelHeartbeats - setup.KernelHeartbeats,
+    FrontendMs = Math.Max(0, row.FrontendMs - setup.ElapsedMs)
+};
 
 CompiledSample Compile(string module, string source, string suffix)
 {
@@ -453,6 +475,9 @@ static void ScalingChecks()
     catch (InvalidOperationException) { rejected = true; }
     if (!rejected)
         throw new InvalidOperationException("The hypothesis limit accepted a cost of 380 heartbeats per hypothesis.");
+    var stepped = WithoutSetup(few with { FrontendMs = 900 }, new CommandSample("checked", 400_000, 0, 700, 0));
+    if (stepped.FrontendHeartbeats != 7_500_000 || stepped.FrontendMs != 200)
+        throw new InvalidOperationException("A hypotheses row kept the cost of elaborating its hypotheses.");
     var baseline = new SteppingMeasurement("test", 16, 4, 0,
         16000, 1600, 32000, 160, 16, 200, [], 1);
     var linear = baseline with { Instructions = 64, FrontendHeartbeats = 64000, KernelHeartbeats = 6400,
