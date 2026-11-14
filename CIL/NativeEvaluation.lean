@@ -14,7 +14,7 @@ namespace CIL
 /-- Only mixed integer arithmetic, comparisons and branches may use this path.
     It cannot dispatch memory, calls, features or another native wrapper. -/
 def nativePureBinary : Instruction → Bool
-  | .add | .sub | .mul | .band | .bor | .bxor | .lt | .ltu | .gt | .gtu | .eq
+  | .add | .sub | .mul | .and | .or | .xor | .clt | .clt_un | .cgt | .cgt_un | .ceq
     | .bgt _ | .ble _ | .bge _ | .blt _ | .beq _ => true
   | _ => false
 

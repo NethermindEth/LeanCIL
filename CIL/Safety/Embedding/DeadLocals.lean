@@ -30,7 +30,7 @@ theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Instruction) 
     (kept : StepKept outcome) :
     step actual op pc args frame stack memory = outcome := by
   have context : StepContext (actual.withLocalsOf expected) actual id op pc pc :=
-    ⟨rfl, rfl, rfl, fun _ => rfl⟩
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, fun _ => rfl⟩
   cases outcome with
   | ok action =>
     have same := step_relabel op _ actual id pc pc args frame stack memory action context stepped

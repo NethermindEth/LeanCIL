@@ -95,9 +95,9 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .local .. | .localAddr _ | .setLocal .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
   | .sub => .reference
-  | .ltu | .gtu | .eq => .reference
-  | .bltu _ | .bgeu _ | .bgtu _ | .bleu _ => .reference
-  | .brzero _ | .brnonzero _ | .beq _ | .bne _ => .reference
+  | .clt_un | .cgt_un | .ceq => .reference
+  | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
+  | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
   | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
   | .divide .. => .numeric
   | .managed _ | .arg .. | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
@@ -125,17 +125,17 @@ theorem argumentUnspecified_map (mapping : AllocationRenaming)
 /-- The finite reference-operation family exposes only the cases that can observe references. -/
 inductive ReferenceStepOperation : CIL.Instruction → Prop where
   | sub : ReferenceStepOperation .sub
-  | ltu : ReferenceStepOperation .ltu
-  | gtu : ReferenceStepOperation .gtu
-  | eq : ReferenceStepOperation .eq
-  | bltu (destination : Nat) : ReferenceStepOperation (.bltu destination)
-  | bgeu (destination : Nat) : ReferenceStepOperation (.bgeu destination)
-  | bgtu (destination : Nat) : ReferenceStepOperation (.bgtu destination)
-  | bleu (destination : Nat) : ReferenceStepOperation (.bleu destination)
-  | brzero (destination : Nat) : ReferenceStepOperation (.brzero destination)
-  | brnonzero (destination : Nat) : ReferenceStepOperation (.brnonzero destination)
+  | clt_un : ReferenceStepOperation .clt_un
+  | cgt_un : ReferenceStepOperation .cgt_un
+  | ceq : ReferenceStepOperation .ceq
+  | blt_un (destination : Nat) : ReferenceStepOperation (.blt_un destination)
+  | bge_un (destination : Nat) : ReferenceStepOperation (.bge_un destination)
+  | bgt_un (destination : Nat) : ReferenceStepOperation (.bgt_un destination)
+  | ble_un (destination : Nat) : ReferenceStepOperation (.ble_un destination)
+  | brfalse (destination : Nat) : ReferenceStepOperation (.brfalse destination)
+  | brtrue (destination : Nat) : ReferenceStepOperation (.brtrue destination)
   | beq (destination : Nat) : ReferenceStepOperation (.beq destination)
-  | bne (destination : Nat) : ReferenceStepOperation (.bne destination)
+  | bne_un (destination : Nat) : ReferenceStepOperation (.bne_un destination)
 
 /-- Reference-family classification supplies its finite case analysis independently of step goals. -/
 theorem referenceStepOperation (operation : CIL.Instruction)

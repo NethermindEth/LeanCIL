@@ -48,7 +48,8 @@ error: method 1 has no local named "borrow"; its named locals:
 example : local_named 1 "borrow" = 0 := rfl
 
 def body (target : Nat) : Method :=
-  { code := [.arg 0, .arg 0, .brzero target, .arg 0, .ret, .arg 0, .ret], locals := [], returnsValue := true }
+  { code := [.arg 0, .arg 0, .brfalse target, .arg 0, .ret, .arg 0, .ret], locals := [],
+    returnsValue := true }
 def program : Program := [{ code := [.ret], locals := [], returnsValue := false }, body 5]
 
 -- A failing binding names the source of the first differing pc, after the unchanged report.
@@ -56,8 +57,8 @@ def program : Program := [{ code := [.ret], locals := [], returnsValue := false 
 error: cil_body: rfl could not prove the method-body binding
 method index 1
 field code: first difference at index 2 (left length 7, right length 7)
-  left:  CIL.Instruction.brzero 5
-  right: CIL.Instruction.brzero 3
+  left:  CIL.Instruction.brfalse 5
+  right: CIL.Instruction.brfalse 3
 source of actual pc 2: src/Math.cs:10:9
 -/
 #guard_msgs (substring := true) in
@@ -67,14 +68,14 @@ example : program[1]? = some (body 3) := by cil_body
 error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 3 maps to actual pc 3
-  expected: CIL.Instruction.const32 0x00000001#32
+  expected: CIL.Instruction.ldc_i4 0x00000001#32
   actual:   CIL.Instruction.arg 0 none
   the instructions differ
   expected pc 2 falls through to it, so it must be actual pc 3
 source of actual pc 3: src/Math.cs:11:13
 -/
 #guard_msgs in
-example : MethodEmbeds program 1 { body 5 with code := [.arg 0, .arg 0, .brzero 5, .const32 1, .ret, .arg 0, .ret] } := by cil_embed
+example : MethodEmbeds program 1 { body 5 with code := [.arg 0, .arg 0, .brfalse 5, .ldc_i4 1, .ret, .arg 0, .ret] } := by cil_embed
 
 -- Methods without sequence points add nothing.
 run_meta do

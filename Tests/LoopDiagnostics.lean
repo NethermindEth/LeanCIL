@@ -20,13 +20,13 @@ theorem layout_valid : layout.Valid := by decide +kernel
 /-- `for (t = default; t.count != value; t.count++) t.sum = addTwo(t.sum); return t.sum;` -/
 @[cil_code] def tally : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 8 0)], localKinds := [.aggregate 8]
-  code := [.localAddr 0, .initAggregate 8, .branch 14, .localAddr 0, .local 0, .fieldAt 4 4,
-    .call 1 1, .setFieldAt 4 4, .localAddr 0, .local 0, .fieldAt 0 4, .const32 1, .add,
-    .setFieldAt 0 4, .local 0, .fieldAt 0 4, .arg 0, .bne 3, .local 0, .fieldAt 4 4, .ret] }
+  code := [.localAddr 0, .initAggregate 8, .br 14, .localAddr 0, .local 0, .fieldAt 4 4,
+    .call 1 1, .setFieldAt 4 4, .localAddr 0, .local 0, .fieldAt 0 4, .ldc_i4 1, .add,
+    .setFieldAt 0 4, .local 0, .fieldAt 0 4, .arg 0, .bne_un 3, .local 0, .fieldAt 4 4, .ret] }
 
 /-- `return x + 2;` -/
 @[cil_code] def addTwo : CIL.Method := {
-  returnsValue := true, locals := [], code := [.arg 0, .const32 2, .add, .ret] }
+  returnsValue := true, locals := [], code := [.arg 0, .ldc_i4 2, .add, .ret] }
 
 /-- The program, with `tally` calling `addTwo` as method 1. -/
 @[cil_code] def program : CIL.Program := [tally, addTwo]
@@ -57,7 +57,7 @@ abbrev State (memory : Memory) (home : Reference) :=
 /-- The loop test, with the input and `count` on the stack. -/
 bind_cutpoint header (memory : Memory) (value : W32) (home : Reference)
     (state : State memory home) :=
-  tally matching (fun op => op matches .bne _) with entry.frame memory home,
+  tally matching (fun op => op matches .bne_un _) with entry.frame memory home,
     [.scalar (.i32 value), .scalar (.i32 state.values.1)], state.memory
 
 /-- The frame lemmas compose by hand: the struct's zeroing and stores are named, the call is
@@ -247,8 +247,8 @@ example : mixed.zeros = [.i32 0, .i32 0, .i32 0, .aggregate (List.replicate 8 0)
     the signed `count` through the struct's address. -/
 @[cil_code] def flagged : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.localAddr 0, .initAggregate 16, .branch 6, .localAddr 0, .const32 1, .setFieldAt 0 1,
-    .local 0, .fieldAt 0 1, .brzero 3, .localAddr 0, .fieldAt 2 2 true, .ret] }
+  code := [.localAddr 0, .initAggregate 16, .br 6, .localAddr 0, .ldc_i4 1, .setFieldAt 0 1,
+    .local 0, .fieldAt 0 1, .brfalse 3, .localAddr 0, .fieldAt 2 2 true, .ret] }
 
 /-- The program of `flagged` alone. -/
 @[cil_code] def flaggedProgram : CIL.Program := [flagged]
@@ -332,9 +332,9 @@ example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memo
     flag byte on the exit path. -/
 @[cil_code] def marked : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.localAddr 0, .initAggregate 16, .branch 9, .localAddr 0, .local 0, .fieldAt 4 4,
-    .const32 1, .add, .setFieldAt 4 4, .local 0, .fieldAt 4 4, .arg 0, .bne 3, .localAddr 0,
-    .const32 1, .setFieldAt 0 1, .local 0, .fieldAt 0 1, .ret] }
+  code := [.localAddr 0, .initAggregate 16, .br 9, .localAddr 0, .local 0, .fieldAt 4 4,
+    .ldc_i4 1, .add, .setFieldAt 4 4, .local 0, .fieldAt 4 4, .arg 0, .bne_un 3, .localAddr 0,
+    .ldc_i4 1, .setFieldAt 0 1, .local 0, .fieldAt 0 1, .ret] }
 
 /-- The program of `marked` alone. -/
 @[cil_code] def markedProgram : CIL.Program := [marked]
@@ -352,7 +352,7 @@ abbrev Marked (memory : Memory) (home : Reference) :=
 /-- The loop test, with the input and `total` on the stack. -/
 bind_cutpoint markedHeader (memory : Memory) (value : W32) (home : Reference)
     (state : Marked memory home) :=
-  marked matching (fun op => op matches .bne _) with markedEntry.frame memory home,
+  marked matching (fun op => op matches .bne_un _) with markedEntry.frame memory home,
     [.scalar (.i32 value), .scalar (.i32 state.values)], state.memory
 
 /-- `cil_loop_finish` takes a store on the exit path through the frame and returns the stored
@@ -430,8 +430,8 @@ open Lean in
 /-- `for (i = 0; i != n; i++) stamp(Unsafe.Add(ref p, i), i); return i;`, with `i` an int local. -/
 @[cil_code] def stamps : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.const32 0, .setLocal 0, .branch 12, .arg 1, .local 0, .memory (.add 4 true),
-    .local 0, .call 1 2, .local 0, .const32 1, .add, .setLocal 0, .local 0, .arg 0, .bne 3,
+  code := [.ldc_i4 0, .setLocal 0, .br 12, .arg 1, .local 0, .memory (.add 4 true),
+    .local 0, .call 1 2, .local 0, .ldc_i4 1, .add, .setLocal 0, .local 0, .arg 0, .bne_un 3,
     .local 0, .ret] }
 
 /-- `*slot = value;` -/
@@ -474,7 +474,7 @@ abbrev Stamping (memory : Memory) (buffer : Reference) (count : Nat) (home : Ref
 /-- The loop test, with the count and the index on the stack. -/
 bind_cutpoint stampsHeader (memory : Memory) (count : W32) (buffer : Reference)
     (home : Reference) (state : Stamping memory buffer count.toNat home) :=
-  stamps matching (fun op => op matches .bne _) with stampsEntry.frame memory home,
+  stamps matching (fun op => op matches .bne_un _) with stampsEntry.frame memory home,
     [.scalar (.i32 count), .scalar (.i32 state.values)], state.memory
 
 /-- The index stays within the count, and the rest of the buffer stays writable. -/
@@ -571,7 +571,7 @@ open Lean Meta in
 /-- `i = (byte) 0x1FF; return i;`, storing the int local through a byte narrowing. -/
 @[cil_code] def narrowed : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.const32 0x1FF, .setLocal 0 (some .unsigned8), .local 0, .ret] }
+  code := [.ldc_i4 0x1FF, .setLocal 0 (some .unsigned8), .local 0, .ret] }
 
 /-- The program of `narrowed` alone. -/
 @[cil_code] def narrowedProgram : CIL.Program := [narrowed]
@@ -779,7 +779,7 @@ example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True 
 
 -- A branch uses no hypothesis, so no fact is named although `setup` and `wellFormed` are in
 -- context; the tactic's summary names the goals it left by obligation tag.
-/-- [CIL.step] pc 2: CIL.Instruction.branch 14
+/-- [CIL.step] pc 2: CIL.Instruction.br 14
   source: unknown, since the proof does not import ExtractedSymbols
   by loop_reaches_next
   changes pc: 1 + 1 ⟶ 14 -/
@@ -848,7 +848,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
 
 -- A tactic that stops without an error, leaving a step for the proof, is recorded as stopped
 -- there, with the instruction it did not take.
-/-- "instruction":"CIL.Instruction.const32 2","method":1,"missing" -/
+/-- "instruction":"CIL.Instruction.ldc_i4 2","method":1,"missing" -/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : Memory) (value : W32) (frame : Frame)

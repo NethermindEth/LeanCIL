@@ -18,7 +18,7 @@ private def vectorType (bits : Nat) (element : String) : TypeExpr :=
 /-- Each object opcode paired with the operation for its validated vector width. -/
 private def operations (bytes : Nat) : List (Nat × Instruction) :=
   [(0x70, .copyObject bytes), (0xfe15, .initAggregate bytes),
-   (0xfe1c, .const32 (BitVec.ofNat 32 bytes)),
+   (0xfe1c, .ldc_i4 (BitVec.ofNat 32 bytes)),
    (0x71, .memory (if bytes == 16 then .load128 else if bytes == 32 then .load256 else .load512)),
    (0x81, .memory (if bytes == 16 then .store128 else if bytes == 32 then .store256 else .store512))]
 

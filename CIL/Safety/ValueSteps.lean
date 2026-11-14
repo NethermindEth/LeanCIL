@@ -115,11 +115,12 @@ elab_rules : command
 
 -- Results stay on the stack; compare-branches expose their condition as an `if` that a fact
 -- can decide.
-cil_value_steps [neg, bnot, convI1, convI2, convU2, convI4, convI8, convU1, convU4, convU8, convU] 1
-cil_value_steps [gt, add, sub, mul, band, bor, bxor, shl, shr, shrUn, lt, ltu, gtu, eq] 2
-cil_value_steps (target : Nat) [bgt, ble, bleu, bltu, bgeu, bgtu, bge, blt, beq, bne] 2
+cil_value_steps [neg, not, conv_i1, conv_i2, conv_u2, conv_i4, conv_i8, conv_u1, conv_u4,
+  conv_u8, conv_u] 1
+cil_value_steps [cgt, add, sub, mul, and, or, xor, shl, shr, shr_un, clt, clt_un, cgt_un, ceq] 2
+cil_value_steps (target : Nat) [bgt, ble, ble_un, blt_un, bge_un, bgt_un, bge, blt, beq, bne_un] 2
 cil_value_steps (targets : List Nat) [switch] 1
-cil_value_steps (target : Nat) [branch] 0
+cil_value_steps (target : Nat) [br] 0
 cil_value_steps [nop] 0
 cil_value_steps (exception : String) [throw] 0
 #print axioms step_throw_eq

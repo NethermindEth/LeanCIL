@@ -118,7 +118,7 @@ and the snapshot forms need it, written `[]` when empty.
 | A loop exit and its postcondition | `cil_loop_finish [facts]`, leaving `case postcondition` |
 | An element write's authority, bound and footprint membership | `cil_loop_obligation [definitions]` |
 | A `Raises` goal | `cil_raise_steps [facts]` |
-| `Extracted.program[i]? = some body` | `cil_body` |
+| `Extracted.program[i]? = some body` | `cil_body`; write `body` as `Extracted.methodN.withCode [...]` so it carries the extraction's `declared` and `environment` |
 
 In a counted form a call is one step. The complete tables are in
 [writing proofs](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS.md#choose-a-tactic).

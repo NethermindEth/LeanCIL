@@ -27,7 +27,7 @@ def scalars (count : Nat) : ScalarCertificate := List.replicate (count + 1) (som
 
 /-- Forward edges, a self edge and backedges retain their exact destinations. -/
 def code (count : Nat) : List Instruction :=
-  (List.range count).map (fun pc => .branch (count - pc)) ++ [.ret]
+  (List.range count).map (fun pc => .br (count - pc)) ++ [.ret]
 
 set_option profiler true in
 /-- Fixed feature validation workload, reduced by the kernel. -/

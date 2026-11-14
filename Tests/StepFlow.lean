@@ -14,7 +14,7 @@ example (h : step body (.bge 7) pc args frame stack m = .ok (.next target stack'
   simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 /-- An unconditional branch does not continue, so it can only resume at its target. -/
-example (h : step body (.branch 9) pc args frame stack m = .ok (.next target stack' frame' m')) : target = 9 := by
+example (h : step body (.br 9) pc args frame stack m = .ok (.next target stack' frame' m')) : target = 9 := by
   simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 /-- An out-of-range switch index falls through, so the fallthrough stays possible. -/

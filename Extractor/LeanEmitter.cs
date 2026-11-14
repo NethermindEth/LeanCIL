@@ -119,6 +119,30 @@ internal static class LeanEmitter
         return layouts.ToArray();
     }
 
+    static string LinkName(int method, int pc) => $"method{method}Link{pc}";
+
+    // The balanced index of the table's call sites, split exactly as FlowIndex.build splits a list.
+    static string LinkIndexLiteral(int method, IReadOnlyList<int> pcs)
+    {
+        var text = new StringBuilder();
+        void Tree(int start, int length)
+        {
+            if (length == 0) text.Append(".empty");
+            else if (length == 1) text.Append($".leaf ({pcs[start]}, {LinkName(method, pcs[start])})");
+            else
+            {
+                var middle = length / 2;
+                text.Append($".branch {middle} (");
+                Tree(start, middle);
+                text.Append(") (");
+                Tree(start + middle, length - middle);
+                text.Append(')');
+            }
+        }
+        Tree(0, pcs.Count);
+        return text.ToString();
+    }
+
     // These definitions guide proof simplification; the full validator still checks every call.
     static string? CallDefinitions(int caller, IReadOnlyList<Operation> operations, int methodCount)
     {
@@ -188,6 +212,9 @@ internal static class LeanEmitter
         }
         LayoutEvidence layoutEvidence = new(types, layoutContext);
         layoutEvidence.EmitLayouts(lean);
+        // One shared constant, so a method literal names the tables instead of repeating them.
+        lean.AppendLine($"@[cil_code] def {FrameMetadata.EnvironmentLean} : LayoutEnvironment := " +
+            "{ rawLayouts := rawLayouts, layouts := computedLayouts }");
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
         genericEvidence.EmitAssemblyMetadata(lean);
         var fieldAccesses = new List<ClassViews.Access>();
@@ -229,7 +256,12 @@ internal static class LeanEmitter
             StaticSite[] sites = [.. m.Body.Instructions.Select((i, pc) => (i, pc))
                 .Where(s => reachable.Contains(s.i) && IsStaticSite(s.i))
                 .Select(s => SiteOf(s.i, s.pc, m, methodIndices, profile))];
-            var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, opaqueLocals, homes, sites);
+            var frame = new FrameMetadata(ReturnsValue(m), locals, kinds, opaqueLocals, homes, sites,
+                genericEvidence.Declared(m));
+            // The table is derived from the operations, so it needs no renumbering beside the code.
+            List<(int Pc, string Link)> linkEntries = [.. ops.Select((op, pc) =>
+                (Pc: pc, Link: op.Link(LeanText.MethodNumber))).Where(entry => entry.Link is not null)
+                .Select(entry => (entry.Pc, entry.Link!))];
             lean.AppendLine($"def method{n}Signature : String := {JsonSerializer.Serialize(m.FullName)}");
             if (MethodSpecialization.Source(m) is { } origin)
             {
@@ -238,8 +270,24 @@ internal static class LeanEmitter
             }
             callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
             if (collectTemplates) templates.Add(new(m.FullName, frame, [.. ops]));
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, code := [");
+            // Each link's text is written once, as a definition the table, the index and its facts name.
+            // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
+            foreach (var (pc, link) in linkEntries)
+                lean.AppendLine($"@[cil_code] def {LinkName(n, pc)} : Link := {link}");
+            var linkTable = "[" + string.Join(", ", linkEntries.Select(entry =>
+                $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]";
+            // Links stay out of the frame: templates share it across profiles, but call indices differ.
+            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
+                $"links := {linkTable}, code := [");
             lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op.ToLean())) + "] }");
+            if (linkEntries.Count > 0)
+            {
+                // The literal index is checked once against the table; each fact then reads it in logarithmic time.
+                var indexLiteral = LinkIndexLiteral(n, [.. linkEntries.Select(entry => entry.Pc)]);
+                lean.AppendLine($"def method{n}LinkIndex : Extraction.FlowIndex (Nat × Link) := {indexLiteral}");
+                lean.AppendLine($"theorem method{n}_linkIndex_valid : " +
+                    $"Extraction.LinkIndexValid method{n}.links method{n}LinkIndex := {Decide}");
+            }
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
@@ -251,17 +299,22 @@ internal static class LeanEmitter
                 $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
             // The command states `method{n}_instruction{pc}` for each pc and proves it in time linear in the body.
             lean.AppendLine($"cil_instruction_equations method{n}");
-            foreach (string field in new[] { "profile", "locals", "localKinds", "returnsValue", "staticSites" })
-            {
-                var value = field switch
-                {
-                    "profile" => "profile",
-                    "locals" => $"[{frame.LocalsLean}]",
-                    "localKinds" => $"[{frame.LocalKindsLean}]",
-                    "returnsValue" => frame.ReturnsValueLean,
-                    _ => $"[{frame.StaticSitesLean}]"
-                };
+            (string Field, string Value)[] facts =
+            [
+                ("profile", "profile"), ("locals", $"[{frame.LocalsLean}]"),
+                ("localKinds", $"[{frame.LocalKindsLean}]"), ("returnsValue", frame.ReturnsValueLean),
+                ("staticSites", $"[{frame.StaticSitesLean}]"), ("declared", frame.Declared),
+                ("environment", FrameMetadata.EnvironmentLean), ("links", linkTable)
+            ];
+            foreach (var (field, value) in facts)
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
+            // One fact per call site lets a stepping proof read its link without evaluating the table lookup.
+            for (var position = 0; position < linkEntries.Count; position++)
+            {
+                var pc = linkEntries[position].Pc;
+                lean.AppendLine($"@[cil_code] theorem method{n}_link{pc} : " +
+                    $"method{n}.linkAt {pc} = some {LinkName(n, pc)} := " +
+                    $"Extraction.linkAt_of_entry (position := {position}) method{n}_linkIndex_valid rfl");
             }
         }
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
@@ -305,9 +358,17 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_intrinsics_validated : Extraction.ExactIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_environment_validated : " +
+                $"Extraction.MethodEnvironmentValid rawLayouts computedLayouts method{n} := rfl");
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts " +
                 $"computedLayouts assemblies methodEvidence imports methodEvidence[{n}] method{n} :=");
-            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, method{n}_intrinsics_validated, method{n}_opaque_validated, method{n}_vector_initializations_validated, method{n}_scalars_validated, method{n}_constrained_validated, method{n}_body_validated⟩");
+            lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
+                $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
+                $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
+                $"method{n}_intrinsics_validated, method{n}_opaque_validated, " +
+                $"method{n}_vector_initializations_validated, method{n}_scalars_validated, " +
+                $"method{n}_constrained_validated, method{n}_body_validated,");
+            lean.AppendLine($"    method{n}_environment_validated⟩");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");

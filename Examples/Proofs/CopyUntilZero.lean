@@ -70,7 +70,7 @@ private abbrev State (memory : Memory) (output : Reference) (room : Nat)
 -- The loop guard observes the remaining span length.
 bind_cutpoint header (memory : Memory) (output : Reference) (room : Nat)
     (home0 home1 : Reference) (state : State memory output room home0 home1) :=
-  copyBody at loop.latch matching (· matches .brnonzero _)
+  copyBody at loop.latch matching (· matches .brtrue _)
   with entry.frame memory state.values.1.view home0 home1,
     [.scalar (.i32 (BitVec.ofNat 32 state.values.1.view.length))], state.memory
 

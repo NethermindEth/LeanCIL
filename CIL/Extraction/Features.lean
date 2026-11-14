@@ -292,11 +292,11 @@ def constantComparison (opcode : Nat) (left right : W32) : Option W32 := do
     | 65028 => some 4 | 65029 => some 9
     | _ => comparisonBranchIndex opcode
   let (operation, negate) ← match index with
-    | 0 => some (Instruction.eq, false) | 5 => some (.eq, true)
-    | 1 => some (.lt, true) | 2 => some (.gt, false)
-    | 3 => some (.gt, true) | 4 => some (.lt, false)
-    | 6 => some (.ltu, true) | 7 => some (.gtu, false)
-    | 8 => some (.gtu, true) | 9 => some (.ltu, false)
+    | 0 => some (Instruction.ceq, false) | 5 => some (.ceq, true)
+    | 1 => some (.clt, true) | 2 => some (.cgt, false)
+    | 3 => some (.cgt, true) | 4 => some (.clt, false)
+    | 6 => some (.clt_un, true) | 7 => some (.cgt_un, false)
+    | 8 => some (.cgt_un, true) | 9 => some (.clt_un, false)
     | _ => none
   let .i32 value ← binary operation (.i32 left) (.i32 right) | none
   return if negate then (if value == 0 then 1 else 0) else value
@@ -478,18 +478,18 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
       | _, _ => false
   if let .stackAlloc _ := emitted then return false
   if let some word := constant32 instruction <|> platformField instruction then
-    return match emitted with | .const32 actual => word == actual | _ => false
+    return match emitted with | .ldc_i4 actual => word == actual | _ => false
   -- Any other static load is never a constant.
-  if instruction.opcode == 126 && (match emitted with | .const32 _ => true | _ => false) then
+  if instruction.opcode == 126 && (match emitted with | .ldc_i4 _ => true | _ => false) then
     return false
   if let .call site := instruction.operand then
     if referenceContentQuery site then
       return match referenceContentConstant layouts site, emitted with
-        | some expected, .const32 actual => instruction.opcode == 40 && expected == actual
+        | some expected, .ldc_i4 actual => instruction.opcode == 40 && expected == actual
         | _, _ => false
     if platformQuery site then
       return match platformConstant site, emitted with
-        | some expected, .const32 actual => instruction.opcode == 40 && expected == actual
+        | some expected, .ldc_i4 actual => instruction.opcode == 40 && expected == actual
         | _, _ => false
     if let some feature := featureGetter site then
       return match emitted with
@@ -534,27 +534,27 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
     | _ => emitted
   return match instruction.opcode, instruction.operand, emitted with
     -- Stack duplication, bitwise operations and exact comparison signedness.
-    | 37, _, .dup | 95, _, .band | 96, _, .bor | 97, _, .bxor | 65025, _, .eq => true
-    | 65026, _, .gt | 65027, _, .gtu | 65028, _, .lt | 65029, _, .ltu => true
+    | 37, _, .dup | 95, _, .and | 96, _, .or | 97, _, .xor | 65025, _, .ceq => true
+    | 65026, _, .cgt | 65027, _, .cgt_un | 65028, _, .clt | 65029, _, .clt_un => true
     -- Branches, short and long forms, must keep their target.
-    | 43, .target x, .branch y | 56, .target x, .branch y
-    | 44, .target x, .brzero y | 57, .target x, .brzero y
-    | 45, .target x, .brnonzero y | 58, .target x, .brnonzero y
+    | 43, .target x, .br y | 56, .target x, .br y
+    | 44, .target x, .brfalse y | 57, .target x, .brfalse y
+    | 45, .target x, .brtrue y | 58, .target x, .brtrue y
     | 46, .target x, .beq y | 59, .target x, .beq y
     | 47, .target x, .bge y | 60, .target x, .bge y
     | 48, .target x, .bgt y | 61, .target x, .bgt y
     | 49, .target x, .ble y | 62, .target x, .ble y
     | 50, .target x, .blt y | 63, .target x, .blt y
-    | 51, .target x, .bne y | 64, .target x, .bne y
-    | 52, .target x, .bgeu y | 65, .target x, .bgeu y
-    | 53, .target x, .bgtu y | 66, .target x, .bgtu y
-    | 54, .target x, .bleu y | 67, .target x, .bleu y
-    | 55, .target x, .bltu y | 68, .target x, .bltu y => x == y
+    | 51, .target x, .bne_un y | 64, .target x, .bne_un y
+    | 52, .target x, .bge_un y | 65, .target x, .bge_un y
+    | 53, .target x, .bgt_un y | 66, .target x, .bgt_un y
+    | 54, .target x, .ble_un y | 67, .target x, .ble_un y
+    | 55, .target x, .blt_un y | 68, .target x, .blt_un y => x == y
     | 69, .targets x, .switch y => x == y
     | 42, _, .ret _ => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
-    | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .branch _ | _, _, .switch _
-    | _, _, .brzero _ | _, _, .brnonzero _ => false
+    | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
+    | _, _, .brfalse _ | _, _, .brtrue _ => false
     | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
@@ -567,7 +567,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod) :=
 def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : Instruction) :
     Bool :=
   match instruction.operand, emitted with
-  | .target target, .branch actual => taken && actual == target
+  | .target target, .br actual => taken && actual == target
   | .target _, .nop => !taken
   | _, _ => false
 
@@ -580,7 +580,7 @@ private def featureOpMatchesAtWith (layouts : Array RawLayout) (raw : RawMethod)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   match role, emitted with
   | some .head, .nop | some .interior, .nop => true
-  | some (.result value), .const32 word => word == if value then 1 else 0
+  | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
   | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
   | some (.raise name), .throw exception => name == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>

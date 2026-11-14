@@ -188,9 +188,25 @@ These regressions cover the extractor's own C# indexes:
   resolve as unknown while random seeds do.
 - Layout computation accumulates field placements in reverse and restores declaration order
   once. `computeLayout_eq_append` proves equality to the complete list-based computation for
-  arbitrary layouts, architectures and nested-layout tables. `Tests.LayoutAccumulation` covers
+  arbitrary layouts, architectures and nested-layout lookups. `Tests.LayoutAccumulation` covers
   order, explicit overlaps, empty layouts, missing children, packing/offset failures and vector
   architecture restrictions.
+- The `Decidable` instance of `LayoutsValid` runs `layoutsValidIndexed`, one pass over the raw
+  and claimed tables, so the emitted `Extracted.layouts_validated` theorem, the layout theorem
+  emitted for each method, import catalog checks and layout projection checks all decide it that
+  way. The pass
+  reads raw entries and claimed layouts through balanced indexes built once, lets each entry read
+  only claimed layouts at earlier positions, and finds closed generic owners through an ordered
+  map keyed by closed type that returns the first match. For `L` layouts with `A` fields in total
+  it costs `O((L + A) log L)` lookups, plus, for each `.apply` node of a generic layout's argument
+  and original field types, one owner lookup keyed by that node's closed subtree.
+  `layoutsValidIndexed_iff` proves the pass equivalent to `LayoutsValid` for arbitrary inputs,
+  and `LayoutTable.indexed_eq` proves the indexed reads equal to the list scans that
+  `computeLayouts` uses. `Tests.LayoutAccumulation` checks that a wrong offset, a wrong size, a
+  child at, after or past its parent, and a wrong length are rejected by both checks. Of the
+  generic cases, a mismatched owner identity is rejected before any owner lookup, while a missing
+  owner, an owner at another position and the wrong one of two same-shaped owners are rejected
+  through the owner index, which also finds the first of two equal closed types.
 - Constrained dispatch validation and lowering each build ordered dispatch candidate indexes
   once per invocation and reuse them across call sites, never across invocations. The indexes
   support type identity, method token/name and explicit interface override lookup. Candidate

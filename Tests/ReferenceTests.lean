@@ -68,7 +68,7 @@ theorem readonly_reference_observed :
 #print axioms readonly_reference_observed
 
 private def compare : CIL.Method := {
-  code := [.arg 0, .arg 1, .eq, .ret], locals := [], returnsValue := true }
+  code := [.arg 0, .arg 1, .ceq, .ret], locals := [], returnsValue := true }
 
 /-- Compiled equality observes readonly and writable views without changing memory. -/
 theorem mixed_capability_equality :
@@ -77,23 +77,23 @@ theorem mixed_capability_equality :
 #print axioms mixed_capability_equality
 
 private def branch (operation : CIL.Instruction) : CIL.Method := {
-  code := [.arg 0, operation, .const32 0, .ret, .const32 1, .ret]
+  code := [.arg 0, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
   locals := [], returnsValue := true }
 
 /-- Null reference branches select the zero arm. -/
 theorem null_branch :
-    invoke [branch (.brzero 4)] 8 0 [.reference .null] memory =
+    invoke [branch (.brfalse 4)] 8 0 [.reference .null] memory =
       .ok (memory, [.scalar (.i32 1)]) := rfl
 #print axioms null_branch
 
 /-- Non-null readonly references select the nonzero arm without byte access authority. -/
 theorem readonly_branch :
-    invoke [branch (.brnonzero 4)] 8 0 [.readOnlyReference (.address ⟨0, 3⟩)] memory =
+    invoke [branch (.brtrue 4)] 8 0 [.readOnlyReference (.address ⟨0, 3⟩)] memory =
       .ok (memory, [.scalar (.i32 1)]) := rfl
 #print axioms readonly_branch
 
 private def compareBranch (operation : CIL.Instruction) : CIL.Method := {
-  code := [.arg 0, .arg 1, operation, .const32 0, .ret, .const32 1, .ret]
+  code := [.arg 0, .arg 1, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
   locals := [], returnsValue := true }
 
 /-- Equality branches use the same checked comparison as ceq. -/
@@ -104,11 +104,11 @@ theorem reference_beq :
 #print axioms reference_beq
 
 /-- Inequality branches distinguish two positions within the same allocation. -/
-theorem reference_bne :
-    invoke [compareBranch (.bne 5)] 9 0
+theorem reference_bne_un :
+    invoke [compareBranch (.bne_un 5)] 9 0
       [.reference (.address ⟨0, 3⟩), .reference (.address ⟨0, 4⟩)] memory =
       .ok (memory, [.scalar (.i32 1)]) := rfl
-#print axioms reference_bne
+#print axioms reference_bne_un
 
 /-- Existing numeric equality still follows scalar semantics. -/
 theorem scalar_equality_unchanged :
@@ -118,24 +118,24 @@ theorem scalar_equality_unchanged :
 
 /-- An object null cannot serve as a metadata-proven managed reference in a comparison. -/
 theorem object_null_pointer_mix_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 65025, .none⟩ [.reference, .nullObject] .eq = false :=
+    CIL.Extraction.scalarOpMatches ⟨0, 65025, .none⟩ [.reference, .nullObject] .ceq = false :=
   by decide +kernel
 #print axioms object_null_pointer_mix_rejected
 
 /-- The equality certificate checks the operation, not just its stack effect. -/
 theorem changed_reference_comparison_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 65025, .none⟩ [.reference, .reference] .lt = false :=
+    CIL.Extraction.scalarOpMatches ⟨0, 65025, .none⟩ [.reference, .reference] .clt = false :=
   by decide +kernel
 #print axioms changed_reference_comparison_rejected
 
 /-- The null literal cannot be replaced by a numeric zero with the same stack effect. -/
 theorem numeric_null_forgery_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 20, .none⟩ [] (.const32 0) = false := by decide +kernel
+    CIL.Extraction.scalarOpMatches ⟨0, 20, .none⟩ [] (.ldc_i4 0) = false := by decide +kernel
 #print axioms numeric_null_forgery_rejected
 
 /-- The truth-branch certificate binds the original target. -/
 theorem changed_reference_branch_rejected :
-    CIL.Extraction.scalarOpMatches ⟨0, 45, .target 4⟩ [.reference] (.brnonzero 3) = false :=
+    CIL.Extraction.scalarOpMatches ⟨0, 45, .target 4⟩ [.reference] (.brtrue 3) = false :=
   by decide +kernel
 #print axioms changed_reference_branch_rejected
 
@@ -200,7 +200,7 @@ private def writableMemory : Memory := { memory with
 
 /-- Offset then store a word; only the base reference's capability varies. -/
 private def offsetStore : CIL.Method := {
-  code := [.arg 0, .const32 4, .memory (.add 1 true), .const32 7, .storeScalar 4, .ret]
+  code := [.arg 0, .ldc_i4 4, .memory (.add 1 true), .ldc_i4 7, .storeScalar 4, .ret]
   locals := [], returnsValue := false }
 
 /-- A store through an offset readonly reference faults, while the writable base stores. -/

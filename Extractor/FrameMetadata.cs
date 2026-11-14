@@ -63,12 +63,16 @@ internal sealed record StaticSite(int Pc, StaticIdentityRecord Identity, string 
 
 /// <summary>
 /// The frame of one method: whether it returns a value, its locals with their initial values and kinds, the
-/// arguments held in locals, the vector locals whose value stays opaque and the static sites its code reads.
+/// arguments held in locals, the vector locals whose value stays opaque, the static sites its code reads and
+/// the Lean term of its declared signature. The shared layout environment is named by the emitted file.
 /// </summary>
 internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> Locals,
     ValueList<LocalKind> LocalKinds, ValueList<int> OpaqueVectorLocals,
-    ValueList<ParameterHome> ParameterHomes, ValueList<StaticSite> StaticSites)
+    ValueList<ParameterHome> ParameterHomes, ValueList<StaticSite> StaticSites, string Declared)
 {
+    /// <summary>The environment value: the file's shared constant, or a template's parameter.</summary>
+    internal const string EnvironmentLean = "environment";
+
     /// <summary>The method reads or addresses at least one static field.</summary>
     internal bool HasStaticSites => StaticSites.Count != 0;
 
@@ -103,7 +107,8 @@ internal sealed record FrameMetadata(bool ReturnsValue, ValueList<InitialValue> 
     internal string ToLean(Func<int, string> calleeName) =>
         $"returnsValue := {ReturnsValueLean}, locals := [{LocalsLean}], localKinds := [{LocalKindsLean}], " +
         $"opaqueVectorLocals := [{OpaqueVectorLocalsLean}], parameterHomes := [{ParameterHomesLean}], " +
-        $"staticSites := [{StaticSitesLeanWith(calleeName)}]";
+        $"staticSites := [{StaticSitesLeanWith(calleeName)}], declared := {Declared}, " +
+        $"environment := {EnvironmentLean}";
 
     string StaticSitesLeanWith(Func<int, string> calleeName) =>
         string.Join(", ", StaticSites.Select(site => site.ToLean(calleeName)));

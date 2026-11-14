@@ -42,7 +42,7 @@ bind_entry entry (value limit : W32) := untilBody
   with [.scalar (.i32 value), .scalar (.i32 limit)] from Memory.empty
   allocating Memory.empty_wellFormed
 private def guard : Nat := instructionLocation untilBody fun op =>
-  match op with | .brnonzero _ => true | _ => false
+  match op with | .brtrue _ => true | _ => false
 /-- The remaining count and the successful calls so far, held by the frame's two locals. -/
 private abbrev State (remaining counted : Reference) :=
   FrameState [] Memory.empty [.word32, .word32] (W32 × W32)

@@ -60,17 +60,17 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
-  | .const32 _ | .const64 _ | .arg .. | .local .. => some (0, 1)
-  | .neg | .bnot | .convI1 | .convI2 | .convU2 | .convI8 | .convI4 | .convU1
-  | .convU4 | .convU8 | .convU | .checkedConvert ..
+  | .ldc_i4 _ | .ldc_i8 _ | .arg .. | .local .. => some (0, 1)
+  | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
+  | .conv_u4 | .conv_u8 | .conv_u | .checkedConvert ..
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
   | .aggregateFieldAt .. | .objectTest .. => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
-  | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
-  | .lt | .ltu | .gt | .gtu | .eq | .divide .. | .checkedArithmetic .. => some (2, 1)
+  | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
+  | .clt | .clt_un | .cgt | .cgt_un | .ceq | .divide .. | .checkedArithmetic .. => some (2, 1)
   | .nativeBinary operation => match operation with
-    | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
-    | .lt | .ltu | .gt | .gtu | .eq | .divide .. | .checkedArithmetic .. => some (2, 1)
+    | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
+    | .clt | .clt_un | .cgt | .cgt_un | .ceq | .divide .. | .checkedArithmetic .. => some (2, 1)
     | _ => none
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .store64 | .copyObject _
@@ -85,8 +85,8 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .memory operation => some (memoryFeatureEffect operation)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
   | .localAddr _ | .setLocal .. | .initializeSpanLocal ..
-  | .feature _ | .ret _ | .throw _ | .unsupported _ | .branch _ | .switch _ | .brzero _
-  | .brnonzero _ | .bgt _ | .ble _ | .bleu _ | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _
-  | .beq _ | .bne _ => none
+  | .feature _ | .ret _ | .throw _ | .unsupported _ | .br _ | .switch _ | .brfalse _
+  | .brtrue _ | .bgt _ | .ble _ | .ble_un _ | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _
+  | .blt _ | .beq _ | .bne_un _ => none
 
 end CIL.Extraction

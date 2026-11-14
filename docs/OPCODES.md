@@ -671,7 +671,7 @@ emitted as unsupported placeholders
 ([feature getters and profiles](SIMD.md#feature-getters-profiles-and-execution-restrictions)).
 Execution that reaches a placeholder fails.
 
-Exact `IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` getters produce `8`, `8`
+Exact `IntPtr.Size`, `UIntPtr.Size` and `System.Environment.Is64BitProcess` getters produce `8`, `8`
 and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
 `ldsfld BitConverter.IsLittleEndian` produces `true`, since every valid profile is
 little-endian. The extractor checks the exact System.Runtime field and that it is

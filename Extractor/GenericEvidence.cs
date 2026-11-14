@@ -261,11 +261,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 $"operand := {operand} }}";
         });
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
-        var classOwner = method.HasThis && ObjectTypes.Is(method.DeclaringType);
+        var classOwner = ObjectReceiver(method);
         var objectReceiver = Bool(classOwner);
         var objectFields = classOwner ? ObjectTypes.Fields(method.DeclaringType).Length : 0;
         var objectBases = classOwner ? ObjectTypes.BaseList(method.DeclaringType) : "[]";
-        var parameters = List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType)));
+        var (parameters, returnType) = SignatureTypes(method);
         var locals = Locals(method);
         // Lines break only after a comma, so the emitted definition stays on one line.
         return $$"""
@@ -277,11 +277,31 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             hasThis := {{Bool(method.HasThis)}},
             explicitThis := {{Bool(method.ExplicitThis)}}, callingConvention := {{(byte)method.CallingConvention}},
             attributes := {{(uint)method.Attributes}}, implementation := {{(uint)method.ImplAttributes}},
-            returnType := {{Type(InitAccessors.Return(method.ReturnType))}}, parameters := {{parameters}},
+            returnType := {{returnType}}, parameters := {{parameters}},
             locals := {{locals}}, initLocals := {{Bool(method.Body.InitLocals)}},
             maxStack := {{method.Body.MaxStackSize}}, genericParameters := {{List(constraints)}},
             code := {{List(code)}} }
             """.ReplaceLineEndings(" ");
+    }
+
+    static bool ObjectReceiver(MethodDefinition method) =>
+        method.HasThis && ObjectTypes.Is(method.DeclaringType);
+
+    // The generic context is set here, so a type-level parameter is numbered by this method, not the last one.
+    (string Parameters, string ReturnType) SignatureTypes(MethodDefinition method)
+    {
+        methodParameterCount = method.GenericParameters.Count;
+        return (List(method.Parameters.Select(parameter => Parameter(parameter.ParameterType))),
+            Type(InitAccessors.Return(method.ReturnType)));
+    }
+
+    /// <summary>The method's DeclaredSignature: the receiver kind and types of method{n}Closed.</summary>
+    internal string Declared(MethodDefinition method)
+    {
+        var receiver = method.HasThis
+            ? $"receiver := some .{(ObjectReceiver(method) ? "object" : "reference")}, " : "";
+        var (parameters, returnType) = SignatureTypes(method);
+        return $"{{ {receiver}parameters := {parameters}, returnType := {returnType} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,

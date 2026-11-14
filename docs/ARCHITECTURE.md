@@ -52,7 +52,8 @@ order.
 - Contract refinement derives a public interface from a stronger proved contract; that interface
   can be exported and imported by callers.
 - `cil_embed [facts]` binds a shared body template to an extraction using proved feature flag and
-  callee equalities. Local definitions also work without a fact list; relevant flags left
+  callee equalities; the template carries the extraction's declared signature and layout environment.
+  Local definitions also work without a fact list; relevant flags left
   unconstrained are rejected, and the kernel checks the complete instruction map.
 - `leancil templates shared scalar-extraction sse42-extraction v3-extraction` generates the
   shared bodies from compiled CIL, including per-instruction equations and a binding module for

@@ -115,6 +115,12 @@ workflow.
   batch compilation/replay time.
 - `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
   unchecked declaration reaches, and fails, independent kernel replay.
+- `GenericEvidence` mutates the emitted `declared` signature (a parameter, the return type, the
+  receiver and its kind), the call-link table (a changed callee, a dropped entry, an entry at the
+  wrong pc or at a non-call) and the shared layout environment. Each fails its own conjunct with the
+  kernel's failed-decision or definitional-equality message. A changed call target moves its link
+  definition too, so only the call binding can reject it, and each mutation fails the fixture when its
+  text replacement matched nothing.
 - `GenericEvidence` mutates the body evidence of its first sample: a body byte, the header, a token
   operand byte, a token table key, a token table operand, an emitted instruction offset, `maxStack` and
   a branch index. Each must fail a body obligation with the kernel's failed-decision message, so a
@@ -258,7 +264,7 @@ processes, each with its private process and worker checks. Run one with
 | `compile-check` | `Tests/ConsumerComponents.cs` | The components fixture run with `--compile-check` |
 | `support-union` | `Tests/ConsumerSupportUnion.cs` | A fixed three-extraction consumer batch in two orders. Support imported only by later groups must build and replay once; direct and indirect extraction-dependent modules must replay in every consuming group, including repeated import commands on one line. Compiled import headers are authoritative when scheduling misses an import. |
 | `certificate-reuse` | `Tests/ConsumerCertificateReuse.cs` | Four independent verifier processes with distinct proof sources. Unchanged generated certificates keep their authenticated build outputs and run no certificate `lake build`. Reuse requires the complete certificate module parts and traces, unchanged authenticated restored artifacts, and the source/import closure binding. Changed extraction text and self-rehashed corrupt artifacts force rebuilding `Extracted`. Every successful request independently replays `Extracted` and the proof and audits the certificate. Expected rejection groups keep the separate `ExtractionAudit` module. Generated-source tampering is rejected before receipt reuse, and proof code cannot replace restored or freshly built certificate artifacts; both rejection paths remove a stale report. |
-| `components` | `Tests/ConsumerComponents.cs` | Four independently certified wrappers around one helper. The common profile/layout and helper modules must compile and replay once, while all four complete extraction certificates must replay. Profile, helper and call-target changes invalidate their component identities; a consumer source shadowing a generated component must fail without a certificate. |
+| `components` | `Tests/ConsumerComponents.cs` | Four independently certified wrappers around one helper. The common profile/layout and helper modules must compile and replay once, while all four complete extraction certificates must replay. Profile, helper and call-target changes invalidate their component identities. A helper whose callee sits at another index in a second extraction shares only the header with it, and with method numbers and imports erased its two texts differ only in its call and its link; a consumer source shadowing a generated component must fail without a certificate. |
 | `fingerprints` | `Tests/ConsumerFingerprintReuse.cs` | Authenticated canonical fingerprints across independent verifier processes, using two framework modules and a multipart fixture: corrupt receipts, changed or missing parts, module names, auditor bytes, fresh and disabled caches, diagnostic normalization, source/import invalidation and kernel replay. |
 | `certified-fingerprints` | `Tests/CertifiedFingerprints.cs` | Direct normalization compared with an authenticated prepared-library table while local receipts are disabled: identical canonical results across independent receivers, relocation, renamed modules, changed parts and native tools, metadata mutation before publication and consumption, and self-rehashed corruption. The fixture uses two framework modules plus one consumer module. |
 
@@ -332,7 +338,14 @@ performance fixture is never supplied to a verifier as a certified library.
   compositional certificate and a monolithic certificate that the elaborator's decide refuses at once,
   since only the kernel may evaluate the body and metadata check. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
-  The consumer verifies the original extraction.
+  The consumer verifies the original extraction. The fixture then checks the emitted
+  `Extracted.layouts_validated` theorem over a chain of nested structs, each holding the one
+  before it, and over a chain of generic structs, each holding the previous distinct closed
+  generic owner, and the emitted `Extracted.method0_layouts_validated` theorem over the nested
+  chain. It compiles them with
+  `-DElab.async=false` so kernel heartbeats are counted and under `lean -M 8192`, and requires
+  axioms `[propext, Classical.choice, Quot.sound]`; heartbeats per layout may grow by at most 1.5
+  times from chains of 64 to chains of 512.
 
 ### Proof workspace
 
@@ -400,7 +413,9 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
   read access and rejection of an adapter that would remove the restriction, plus readonly
   `GetReference` results for nonempty, empty and out-of-extent views and field loads, field
-  addresses and rejected field stores through restricted references. Both run in the `evidence`
+  addresses and rejected field stores through restricted references. It evaluates the readonly
+  rule of `ScalarFlowValid` at single sites, which rejects a writable address under a prefix, a
+  prefix with an operand and both sites of a branch to the address. Both run in the `evidence`
   suite.
 - `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
   covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper

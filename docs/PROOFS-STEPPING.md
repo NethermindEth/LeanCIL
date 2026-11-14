@@ -21,7 +21,7 @@ import CIL.Safety.SymbolicExecution
 namespace ProofGuide
 
 @[cil_code] def arithmeticMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .const32 1, .shl, .add, .const32 0, .gtu, .ret]
+  code := [.arg 0, .arg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
   locals := [], returnsValue := true }
 
 theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :

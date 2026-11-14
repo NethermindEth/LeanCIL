@@ -18,7 +18,7 @@ set_option maxRecDepth 4096
   profile := profile, returnsValue := true, locals := []
   code := [.arg 0, .intrinsic (.vector (.create64 256)) 1,
     .arg 1, .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 operation) 2,
-    .const32 lane, .intrinsic (.vector (.extract64 256)) 2, .ret] }
+    .ldc_i4 lane, .intrinsic (.vector (.extract64 256)) 2, .ret] }
 
 /-- Broadcasting a word does not observe any unspecified bits. -/
 theorem checked_broadcast256 (word : W64) :
@@ -132,7 +132,7 @@ theorem checked_broadcast_andNot (left right : W64) :
   localKinds := [.vector128], opaqueVectorLocals := [0]
   code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .setLocal 0,
     .arg 0, .intrinsic (.vector (.create64 256)) 1, .local 0,
-    .intrinsic (.avx2 operation) 2, .const32 lane,
+    .intrinsic (.avx2 operation) 2, .ldc_i4 lane,
     .intrinsic (.vector (.extract64 256)) 2, .ret] }
 
 /-- Creating an unsafe scalar vector records only the low lane. -/

@@ -13,11 +13,11 @@ def method0Signature : String := "System.UInt64 Outcomes.Calls::Root(System.UInt
 def method1Signature : String := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)"
 def method2Signature : String := "System.UInt64 Outcomes.Calls::Percent(System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
+  [.arg 0, .call 1 1, .ldc_i4 1, .conv_i8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 2 1, .brzero 5, .arg 0, .ret, .nop, .nop, .throw "System.ArgumentException"] }
+  [.arg 0, .call 2 1, .brfalse 5, .arg 0, .ret, .nop, .nop, .throw "System.ArgumentException"] }
 @[cil_code] def method2 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 (BitVec.ofInt 32 100), .convI8, .bleu 7, .nop, .nop,
+  [.arg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
     .throw "System.ArgumentOutOfRangeException", .arg 0, .ret] }
 @[cil_code] def program : Program := [method0, method1, method2]
 def signatures : List String := [method0Signature, method1Signature, method2Signature]
@@ -185,7 +185,7 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
 /-! A raised outcome is exactly `.thrown`: no other fault satisfies it at any fuel. -/
 
 @[cil_code] def stuck : CIL.Method := { returnsValue := false, locals := [], code := [.unsupported "fixture"] }
-@[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.branch 0] }
+@[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 
 example (m : Memory) : ¬ Raises [stuck] 0 [] m "System.Exception" := by
   rintro ⟨fuel, fault, ran, thrown⟩

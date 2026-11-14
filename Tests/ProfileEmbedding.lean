@@ -33,7 +33,7 @@ abbrev unreachable : Instruction := .unsupported "Unreachable under selected pro
 /-- One body over two feature flags and a callee, shared by all extraction profiles. -/
 def template (profile : FeatureProfile) (sse42 avx2 : Bool) (callee : Nat) : Method := {
   profile, returnsValue := true, locals := [], code := [
-    .feature .avx2, .brzero 6,
+    .feature .avx2, .brfalse 6,
     if avx2 then .arg 0 else unreachable,
     if avx2 then .arg 1 else unreachable,
     if avx2 then .call callee 2 else unreachable,
@@ -44,7 +44,7 @@ def template (profile : FeatureProfile) (sse42 avx2 : Bool) (callee : Nat) : Met
 /-- An extracted layout has two extra dead instructions before the scalar branch target. -/
 def extracted (profile : FeatureProfile) (callee : Nat) : Method := {
   profile, returnsValue := true, locals := [], code := [
-    .feature .avx2, .brzero 8,
+    .feature .avx2, .brfalse 8,
     if profile.avx2 then .arg 0 else unreachable,
     if profile.avx2 then .arg 1 else unreachable,
     if profile.avx2 then .call callee 2 else unreachable,
@@ -120,7 +120,7 @@ example (callee : Nat) (called : callee = 4) :
 /-- error: cil_embed: the expected body does not embed -/
 #guard_msgs (substring := true) in
 example : MethodEmbeds
-    [{ extracted portable 3 with code := (extracted portable 3).code.set 1 (.brzero 9) }] 0
+    [{ extracted portable 3 with code := (extracted portable 3).code.set 1 (.brfalse 9) }] 0
     (template portable false false 3) := by
   cil_embed
 

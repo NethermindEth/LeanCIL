@@ -222,7 +222,7 @@ controls.Check(replay: false);
 var rejected = new RejectedEvidence(Path.Combine(root, "EvidenceRejections"));
 foreach (var (name, before, after) in new[]
 {
-    ("AreSame", ".eq", ".ltu"),
+    ("AreSame", ".ceq", ".clt_un"),
     ("ByteOffset", ".memory .byteOffset", ".sub"),
     ("AddSigned", ".memory (.add 1 true)", ".memory (.add 8 true)"),
     ("AddUnsigned", ".memory (.add 1 false)", ".memory (.add 1 true)"),

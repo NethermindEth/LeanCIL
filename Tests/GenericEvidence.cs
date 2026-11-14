@@ -107,8 +107,15 @@ string ChangeDefinition(string source, string name, Func<string, string> change)
     var start = source.IndexOf("def " + name + " :", StringComparison.Ordinal);
     if (start < 0) throw new InvalidOperationException("Missing definition " + name);
     var end = source.IndexOf('\n', start);
-    return source[..start] + change(source[start..end]) + source[end..];
+    var changed = change(source[start..end]);
+    // A replacement that matched nothing would leave a fixture rejected for another reason.
+    if (changed == source[start..end]) throw new InvalidOperationException("Mutation did not change " + name);
+    return source[..start] + changed + source[end..];
 }
+string Replaced(string text, string before, string after) =>
+    text.Contains(before, StringComparison.Ordinal)
+        ? text.Replace(before, after, StringComparison.Ordinal)
+        : throw new InvalidOperationException("Missing mutation target: " + before);
 void Reject(int sample, string name, Func<string, string> mutate,
     string? theorem = "method1_specialization_validated", string diagnostic = "error:")
 {
@@ -148,19 +155,24 @@ Reject(0, "altered-opcode", source => ChangeDefinition(source, "method1Closed",
     line => line.Replace("opcode := 2,", "opcode := 3,")));
 Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed",
     line => line.Replace("operand := .target 4", "operand := .target 3")));
-Reject(0, "wrong-managed-target", source => source.Replace(".call 1 1", ".call 0 1"), "method0_calls_validated");
+// A failed kernel decision prints this text; a mutation that only breaks parsing does not.
+const string decisionFailed = "proved that the proposition";
+// The link moves with the call, so only the binding check can reject the changed target.
+Reject(0, "wrong-managed-target", source => ChangeDefinition(Replaced(source, ".call 1 1", ".call 0 1"),
+    "method0Link1", line => Replaced(line, ".direct 1", ".direct 0")), "method0_calls_validated",
+    decisionFailed);
 Console.WriteLine("PASS original-metadata generic substitution, complete managed-call binding and malformed evidence rejection");
 // Each mutation changes one fact of the first sample's body evidence, so only the decoding check can reject it;
 // the unmutated obligation is checked as the positive control.
 const string bodyTheorem = "method0_body_validated";
 // The tactic that proves a body obligation names the method and the failure when the kernel refutes it; a mutation
 // that only breaks parsing prints other text, and the unmutated obligation is the positive control.
-const string decisionFailed = "the decoded method does not match its body bytes or metadata";
+const string bodyDecisionFailed = "the decoded method does not match its body bytes or metadata";
 // A mutated body obligation must fail to elaborate and its negation must be proved by the kernel: the second file
 // keeps the mutated definitions and replaces the obligation by `bodyMatches ... = false`.
 void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change)
 {
-    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, decisionFailed);
+    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, bodyDecisionFailed);
     var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")),
         definition, change);
     var refutation = theorem[..^"_body_validated".Length] + "_body_refuted";
@@ -236,6 +248,37 @@ Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true"
 Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"), "method1_shape_validated");
 Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"),
     "method1_shape_validated");
+
+// The declared signature, call links and layout environment are each checked against their own evidence.
+const string word = "Extraction.runtimeScope \"System.UInt64\"";
+Reject(0, "wrong-declared-parameter", source => ChangeDefinition(source, "method0", line =>
+    line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]")),
+    "method0_shape_validated",
+    decisionFailed);
+Reject(0, "wrong-declared-return", source => ChangeDefinition(source, "method0", line =>
+    line.Replace($"returnType := .atom {word} }}", $"returnType := .atom {word.Replace("UInt64", "UInt32")} }}")),
+    "method0_shape_validated",
+    decisionFailed);
+Reject(14, "missing-declared-receiver", source => ChangeDefinition(source, "method1", line =>
+    line.Replace("receiver := some .reference, ", "")), "method1_shape_validated",
+    decisionFailed);
+Reject(14, "wrong-declared-receiver-kind", source => ChangeDefinition(source, "method1", line =>
+    line.Replace("receiver := some .reference", "receiver := some .object")), "method1_shape_validated",
+    decisionFailed);
+Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
+    line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
+Reject(0, "dropped-link", source => ChangeDefinition(source, "method0", line =>
+    line.Replace("links := [(1, method0Link1)]", "links := []")), "method0_calls_validated",
+    decisionFailed);
+Reject(0, "link-at-wrong-pc", source => ChangeDefinition(source, "method0", line =>
+    line.Replace("links := [(1, method0Link1)]", "links := [(0, method0Link1)]")),
+    "method0_calls_validated", decisionFailed);
+Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1", line =>
+    line.Replace("links := []", "links := [(0, method0Link1)]")), "method1_calls_validated",
+    decisionFailed);
+Reject(0, "wrong-environment", source => ChangeDefinition(source, "environment", line =>
+    line.Replace("layouts := computedLayouts", "layouts := #[⟨⟨4, []⟩, 4⟩]")), "method0_environment_validated",
+    "not definitionally equal");
 
 foreach (var (selector, index) in samples.Select((selector, index) => (selector, index)))
 {

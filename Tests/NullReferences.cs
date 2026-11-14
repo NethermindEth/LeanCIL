@@ -81,7 +81,7 @@ foreach (var item in cases) Console.WriteLine($"PASS {item.Name}: {item.Claims.L
 // An operation with the helper's stack effect cannot stand in for it: only the call binding rejects these.
 foreach (var (name, helper, forgery) in new[]
 {
-    ("IsNull", ".memory .nullRef", ".const64 0"),
+    ("IsNull", ".memory .nullRef", ".ldc_i8 0"),
     ("IsLive", ".memory .isNullRef", ".memory .asRef")
 })
 {

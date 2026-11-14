@@ -84,7 +84,7 @@ private def guardRaw := raw [i 2, i 45 (.target 5), i 114 (.text "zero"), i 115 
 private def guardStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none], state [], state [none]]
 private def guardCode : List Instruction :=
-  [.arg 0, .brnonzero 5, .nop, .nop, .throw "System.ArgumentException", .arg 0, .ret none]
+  [.arg 0, .brtrue 5, .nop, .nop, .throw "System.ArgumentException", .arg 0, .ret none]
 
 example : FeatureFlowValid #[] (fun _ => none) guardRaw .scalar guardStates
     (List.replicate 7 true) guardCode := by decide
@@ -100,7 +100,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
 private def enteredRaw := raw [i 2, i 37, i 45 (.target 6), i 38, i 114 (.text "zero"), i 115 argument, i 122]
 example : ¬ FeatureFlowValid #[] (fun _ => none) enteredRaw .scalar
     [state [], state [none], state [none, none], state [none], state [], state [none], state [none]]
-    (List.replicate 7 true) [.arg 0, .dup, .brnonzero 6, .pop, .nop, .nop, .throw "System.ArgumentException"] := by decide
+    (List.replicate 7 true) [.arg 0, .dup, .brtrue 6, .pop, .nop, .nop, .throw "System.ArgumentException"] := by decide
 
 /-- An adjacent raw null is the only operand admitted by the null-throw fold. -/
 theorem null_throw_encoding :
@@ -122,10 +122,10 @@ theorem null_throw_entry :
     FeatureFlowValid #[] (fun _ => none) (raw [i 20, i 43 (.target 2), i 20, i 122]) .scalar
       [state [], state [none], state [none], state [none, none]]
       [true, true, true, true]
-      [.memory .nullRef, .branch 2, .nop, .throw "System.NullReferenceException"] ∧
+      [.memory .nullRef, .br 2, .nop, .throw "System.NullReferenceException"] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (raw [i 20, i 43 (.target 3), i 20, i 122]) .scalar
       [state [], state [none], none, state [none]] [true, true, false, true]
-      [.memory .nullRef, .branch 3, .unsupported "dead", .throw "System.NullReferenceException"] :=
+      [.memory .nullRef, .br 3, .unsupported "dead", .throw "System.NullReferenceException"] :=
   by decide +kernel
 #print axioms null_throw_entry
 

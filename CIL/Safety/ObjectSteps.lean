@@ -201,8 +201,8 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
 #print axioms virtualCall_null
 
 /-- `ceq` on two object references pushes their identity comparison. -/
-@[cil_step high] theorem step_eq_object_eq (left right : ManagedReference) (rest : List Value) :
-    step body .eq pc args frame (.object right :: .object left :: rest) memory = do
+@[cil_step high] theorem step_ceq_object_eq (left right : ManagedReference) (rest : List Value) :
+    step body .ceq pc args frame (.object right :: .object left :: rest) memory = do
       let equal ← objectEqual memory left right
       return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame memory :=
   rfl
@@ -216,32 +216,33 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
   rfl
 
 /-- `bne.un` on two object references branches when they are different instances. -/
-@[cil_step high] theorem step_bne_object_eq (target : Nat) (left right : ManagedReference)
+@[cil_step high] theorem step_bne_un_object_eq (target : Nat) (left right : ManagedReference)
     (rest : List Value) :
-    step body (.bne target) pc args frame (.object right :: .object left :: rest) memory = do
+    step body (.bne_un target) pc args frame (.object right :: .object left :: rest) memory = do
       let equal ← objectEqual memory left right
       return .next (if equal then pc + 1 else target) rest frame memory :=
   rfl
 
 /-- `cgt.un` of an object reference against null pushes whether the reference is present. -/
-@[cil_step high] theorem step_gtu_object_eq (left right : ManagedReference) (rest : List Value) :
-    step body .gtu pc args frame (.object right :: .object left :: rest) memory = do
+@[cil_step high] theorem step_cgt_un_object_eq (left right : ManagedReference)
+    (rest : List Value) :
+    step body .cgt_un pc args frame (.object right :: .object left :: rest) memory = do
       let present ← objectAboveNull memory left right
       return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame memory :=
   rfl
 
 /-- `brfalse` on an object reference branches when it is null. -/
-@[cil_step high] theorem step_brzero_object_eq (target : Nat) (value : ManagedReference)
+@[cil_step high] theorem step_brfalse_object_eq (target : Nat) (value : ManagedReference)
     (rest : List Value) :
-    step body (.brzero target) pc args frame (.object value :: rest) memory = do
+    step body (.brfalse target) pc args frame (.object value :: rest) memory = do
       let present ← objectNonNull memory value
       return .next (if present then pc + 1 else target) rest frame memory :=
   rfl
 
 /-- `brtrue` on an object reference branches when it is present. -/
-@[cil_step high] theorem step_brnonzero_object_eq (target : Nat) (value : ManagedReference)
+@[cil_step high] theorem step_brtrue_object_eq (target : Nat) (value : ManagedReference)
     (rest : List Value) :
-    step body (.brnonzero target) pc args frame (.object value :: rest) memory = do
+    step body (.brtrue target) pc args frame (.object value :: rest) memory = do
       let present ← objectNonNull memory value
       return .next (if present then target else pc + 1) rest frame memory :=
   rfl
@@ -689,12 +690,12 @@ theorem storeArraySlot_whole {memory : Memory} {field array : Reference}
 
 end ObjectEquations
 
-#print axioms step_eq_object_eq
+#print axioms step_ceq_object_eq
 #print axioms step_beq_object_eq
-#print axioms step_bne_object_eq
-#print axioms step_gtu_object_eq
-#print axioms step_brzero_object_eq
-#print axioms step_brnonzero_object_eq
+#print axioms step_bne_un_object_eq
+#print axioms step_cgt_un_object_eq
+#print axioms step_brfalse_object_eq
+#print axioms step_brtrue_object_eq
 #print axioms step_objectTest_eq
 #print axioms step_nullObject_eq
 #print axioms step_newReferenceArray_i32_eq
