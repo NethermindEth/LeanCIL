@@ -257,9 +257,10 @@ theorem unknown_declared (type : TypeExpr) :
 #print axioms unknown_declared
 
 /--
-error: cil_resolution_facts: return narrowing of Tests.ResolutionFacts.Generated.unknown is unresolved
+error: cil_resolution_facts: return narrowing of
+Tests.ResolutionFacts.Generated.unknown is unresolved
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 cil_resolution_facts unknown
 
 example (type : TypeExpr) (expected : Option NarrowKind)

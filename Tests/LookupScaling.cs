@@ -120,7 +120,8 @@ void ReturnResolutionCosts()
             }
             var instructions = dimension == "body" ? string.Join(", ", Enumerable.Repeat(".nop", size)) : "";
             var layouts = dimension is "layouts" or "enum-layouts" ? string.Join(", ", Enumerable.Repeat(
-                "{ identity := \"Point\", explicit := false, packing := 0, declaredSize := 0, fields := [] }", size)) : "";
+                "{ identity := \"Point\", explicit := false, packing := 0, declaredSize := 0, fields := [] }",
+                size)) : "";
             source.AppendLine($"def rawLayouts : List RawLayout := [{layouts}]");
             var methods = dimension == "methods" ? size : 1;
             for (var index = 0; index < methods; index++)
