@@ -151,6 +151,15 @@ example : featureOpMatches #[] booleanRaw (i 6) (.local 0) = true := by decide +
 example : featureOpMatches #[] booleanRaw (i 10) (.setLocal 0) = true := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 6) (.local 1) = false := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 10) (.local 0) = false := by decide +kernel
+-- Taking the address of a span local or of an argument home binds only the address instruction,
+-- whose step pushes the span's view; a load in its place is rejected.
+private def spanRaw := raw [i 18 (.local 0), i 15 (.argument 0)]
+  [.apply (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.UInt32")] .void
+example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.localAddr 0) = true := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.local 0) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.localAddr 1) = true := by
+  decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.local 1) = false := by decide +kernel
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/
