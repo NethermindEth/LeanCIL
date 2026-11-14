@@ -1,6 +1,6 @@
 import StrictBinding.Image
 import StrictBinding.Sha256
-import StrictBinding.Sha1
+import CIL.Crypto.Sha1
 import StrictBinding.Pe
 import StrictBinding.Tables
 import StrictBinding.Identity

@@ -1,16 +1,16 @@
-import StrictBinding.Sha256
+import CIL.Crypto.Words
 
 /-!
 # SHA-1 and public key tokens
 
 FIPS 180-4 SHA-1 for kernel evaluation, sharing the padding and word helpers of
-`StrictBinding.Sha256`. SHA-1 appears only in the strong-name public key token of an assembly
+`CIL.Crypto`. SHA-1 appears only in the strong-name public key token of an assembly
 identity: the token is the last eight bytes of the SHA-1 of the public key, reversed.
 -/
 
-namespace StrictBinding.Sha1
+namespace CIL.Crypto.Sha1
 
-open StrictBinding.Sha256 (add xor3 choose majority blockWords padded wordsValue)
+open CIL.Crypto (add xor3 choose majority blockWords padded wordsValue)
 
 /-- Rotation of a 32-bit word to the left. -/
 def rotl (word amount : Nat) : Nat :=
@@ -52,7 +52,7 @@ def compress (state : List Nat) (block : Nat) : List Nat :=
     | _ => []
   | _ => []
 
-/-- All blocks applied in order, as in `StrictBinding.Sha256.hashBlocks`. -/
+/-- All blocks applied in order, evaluating each block's state once. -/
 def hashBlocks : List Nat → List Nat → List Nat
   | state, [] => state
   | state, block :: blocks =>
@@ -68,4 +68,4 @@ def ofBytes (bytes : List Nat) : Nat :=
 def keyToken (key : List Nat) : Nat :=
   littleEndian 8 (ofBytes key % 2 ^ 64)
 
-end StrictBinding.Sha1
+end CIL.Crypto.Sha1
