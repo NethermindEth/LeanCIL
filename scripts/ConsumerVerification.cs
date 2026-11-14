@@ -299,9 +299,11 @@ partial class Program
 
     // Called only after the workspace's replay, audits, rechecks and source-stability checks passed.
     void AddExportedSupport(ConsumerSupportExport export, string session, string root, SortedDictionary<string, string> inputs,
-        Dictionary<string, string> independent, Dictionary<string, string[]> graph, string? collected)
+        Dictionary<string, string> independent, Dictionary<string, string[]> graph, string? collected,
+        bool publishReceipts = true, Action? requireStable = null)
     {
-        var fingerprints = PortableConsumerModuleParts(session, independent);
+        var fingerprints = PortableConsumerModuleParts(session, independent, publishReceipts);
+        requireStable?.Invoke();
         var record = collected is null ? null : ReadConsumerSupportRecord(Path.Combine(collected, ConsumerSupportRecordName));
         var sources = PortableConsumerSources(root, inputs);
         lock (export.Gate)
@@ -458,8 +460,8 @@ partial class Program
         return modules.Where(pair => names.Contains(pair.Key)).ToDictionary(StringComparer.Ordinal);
     }
 
-    HashSet<string> ImportedConsumerSupport(string session, TrustedSupport[] trusted, Dictionary<string, string> modules,
-        bool publishReceipts = true)
+    HashSet<string> ImportedConsumerSupport(string session, TrustedSupport[] trusted,
+        Dictionary<string, string> modules, bool publishReceipts = true)
     {
         if (trusted.Length == 0) return [];
         var fingerprints = PortableConsumerModuleParts(session,
@@ -2221,12 +2223,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     var unchanged = directory.Equals(frameworkModules, comparison) &&
                         module.Count() == certifiedCounts.GetValueOrDefault(module.Key) &&
                         module.All(pair => certifiedBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
-                    bool preparedBinding = bindingModules is not null && directory.Equals(bindingModules, comparison) &&
+                    bool preparedBinding = bindingModules is not null &&
+                        directory.Equals(bindingModules, comparison) &&
                         module.Count() == preparedCounts.GetValueOrDefault(module.Key) &&
-                        module.All(pair => preparedArtifacts!.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
+                        module.All(pair => preparedArtifacts!.TryGetValue(pair.Key, out var hash) &&
+                            hash == pair.Value);
                     if (deep is not null && !preparedBinding &&
-                        (module.Key == "StrictBinding" || module.Key.StartsWith("StrictBinding.", StringComparison.Ordinal)))
-                        throw new InvalidDataException("Consumer module shadows the prepared StrictBinding library: " + module.Key);
+                        (module.Key == "StrictBinding" ||
+                            module.Key.StartsWith("StrictBinding.", StringComparison.Ordinal)))
+                        throw new InvalidDataException(
+                            "Consumer module shadows the prepared StrictBinding library: " + module.Key);
                     if (!unchanged && (module.Key == "CIL" || module.Key.StartsWith("CIL.", StringComparison.Ordinal)))
                         baseUnchanged = false;
                     var certifiedSupport = supportUnchanged && module.All(pair =>
@@ -2496,9 +2502,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     if (exporting)
                     {
                         RequireDeepStable();
+                        void RequireNormalizedSupportStable()
+                        {
+                            Stage(proceeding, "support normalization");
+                            Recheck(proceeding);
+                            foreach (var member in proceeding)
+                                if (!Live(member))
+                                    throw outcomes[member].Error ?? new InvalidOperationException(
+                                        "Consumer request ended during support normalization.");
+                            RequireDeepStable();
+                        }
                         AddExportedSupport(export, session, root, before[proceeding[0]],
                             currentArtifacts.Where(pair => !dependent.Contains(pair.Key) &&
-                                (deep is null || !excluded.Contains(pair.Key))).ToDictionary(), graph, collected);
+                                (deep is null || !excluded.Contains(pair.Key))).ToDictionary(), graph, collected,
+                            publishReceipts: deep is null,
+                            requireStable: deep is null ? null : RequireNormalizedSupportStable);
                     }
                     if (collected is not null)
                     {
@@ -2549,7 +2567,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 var report = new Report(CertificateSchema, Sha(requests[i].Assembly), identities[i],
                     requests[i].Theorem, audits[i].Axioms, audits[i].Audit, before[i],
                     deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
-                        new(bindingSourcesKey!, File.ReadAllText(Path.Combine(bindingSession!, "lean-toolchain")).Trim(),
+                        new(bindingSourcesKey!,
+                            File.ReadAllText(Path.Combine(bindingSession!, "lean-toolchain")).Trim(),
                             Sha(LeanExecutable))),
                     libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0

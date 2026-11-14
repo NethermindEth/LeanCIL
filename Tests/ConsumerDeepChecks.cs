@@ -48,7 +48,8 @@ foreach (int count in new[] { 64, 256, 1024 })
     var selected = ConsumerSupportModules(Manifests(), modules);
     if (selected.Count != count || manifestVisits != count || keyVisits != count)
         throw new InvalidOperationException("Portable support selection repeatedly scanned its manifests.");
-    Console.WriteLine($"PASS {count} portable manifests selected with {manifestVisits} manifest and {keyVisits} key visits");
+    Console.WriteLine($"PASS {count} portable manifests selected with {manifestVisits} manifest " +
+        $"and {keyVisits} key visits");
 }
 if (args is ["--inventory"]) return;
 
@@ -109,6 +110,16 @@ Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", At("artifacts/ConsumerDe
 Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
 try
 {
+    if (args is ["--export-support"])
+    {
+        CheckExportMutation();
+        return;
+    }
+    if (args is ["--export-original"])
+    {
+        CheckExportMutation(originalProofMutation: true);
+        return;
+    }
     var ordinary = Verify(verification, deep: false);
     if (ordinary.binding.mode != BindingMode.Default || verification.bindingPreparation is not null)
         throw new InvalidOperationException("Ordinary consumer verification prepared deep checks.");
@@ -295,7 +306,8 @@ try
             !Directory.EnumerateFiles(SuccessCacheRoot, "fingerprints.json", SearchOption.AllDirectories)
                 .Any(path => !fingerprintsBefore.Contains(path)))
             throw new InvalidOperationException("Ordinary portable control did not publish a normalization receipt.");
-        Console.WriteLine("PASS rejected deep portable support publishes no normalization receipt; ordinary control does");
+        Console.WriteLine("PASS rejected deep portable support publishes no normalization receipt; " +
+            "ordinary control does");
     }
     finally
     {
@@ -304,6 +316,8 @@ try
         File.WriteAllText(configuration, originalConfiguration);
         File.Delete(portableModule);
     }
+    CheckExportMutation();
+    CheckExportMutation(originalProofMutation: true);
 
     void RequireOrdinaryReceipts()
     {
@@ -320,6 +334,66 @@ finally
 Report Verify(Program program, bool deep = true, Action<string>? stage = null) =>
     program.VerifyConsumer(image, proof, output, "ExampleProof.correctness", package, null, stage,
         deep ? inputs : null);
+
+void CheckExportMutation(bool originalProofMutation = false)
+{
+    var mutationName = originalProofMutation ? "original-proof" : "deep-source";
+    var export = Path.Combine(fixture.Root, "MutatedExport-" + mutationName);
+    var trace = Path.Combine(fixture.Root, "ExportTrace-" + mutationName);
+    var marker = Path.Combine(fixture.Root, "normalization-mutation-" + mutationName + ".txt");
+    var configuration = Path.Combine(package, "lakefile.toml");
+    var originalConfiguration = File.ReadAllText(configuration);
+    var originalProof = File.ReadAllText(proof);
+    var token = Guid.NewGuid().ToString("N");
+    var source = Path.Combine(package, "ExportSupport.lean");
+    File.WriteAllText(source, "def exportSupport : String := \"" + token + "\"\n");
+    File.AppendAllText(configuration, "\n[[lean_lib]]\nname = \"ExportSupport\"\n");
+    File.WriteAllText(proof, "import ExportSupport\n" + originalProof + "\n-- " + token + "\n");
+    var variables = new[] { "LEANCIL_EXPORT_CONSUMER_SUPPORT", "LEANCIL_CONSUMER_SUPPORT",
+        "LEANCIL_CONSUMER_SUPPORT_SHA256", "LEANCIL_TRACE_DIRECTORY" }
+        .ToDictionary(name => name, Environment.GetEnvironmentVariable);
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_EXPORT_CONSUMER_SUPPORT", export);
+        Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT", null);
+        Environment.SetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256", null);
+        Environment.SetEnvironmentVariable("LEANCIL_TRACE_DIRECTORY", trace);
+        var receipts = Receipts();
+        ExpectFailure(() => Verify(verification, stage: stage =>
+        {
+            if (stage != "support normalization") return;
+            var session = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+                .Single(candidate => File.Exists(Path.Combine(candidate, "LeanCILProof.lean")) &&
+                    File.ReadAllText(Path.Combine(candidate, "LeanCILProof.lean"))
+                        .Contains(token, StringComparison.Ordinal));
+            var target = originalProofMutation ? proof :
+                Path.Combine(session, ".deep-checks/BindingAudit/Bodies.lean");
+            File.AppendAllText(target, "\n-- changed\n");
+            File.WriteAllText(marker, "mutated");
+        }), originalProofMutation ? "Inputs changed during consumer verification" : "Deep-check source changed");
+        var normalization = File.ReadLines(Path.Combine(trace, TraceFile))
+            .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
+            .Single(record => record.GetProperty("stage").GetString() == "Canonical module fingerprints");
+        var command = normalization.GetProperty("command").EnumerateArray()
+            .Select(value => value.GetString()).ToArray();
+        var serializedIndex = Array.IndexOf(command, "serialized");
+        if (!File.Exists(marker) || serializedIndex < 0 ||
+            !int.TryParse(command[serializedIndex + 1], out var serialized) || serialized == 0)
+            throw new InvalidOperationException("Export mutation did not follow actual module normalization.");
+        RequireNoPublication(receipts);
+        if (Directory.Exists(export) && Directory.EnumerateFiles(export, "*.json").Any())
+            throw new InvalidOperationException("Rejected deep export published a support manifest.");
+        Console.WriteLine("PASS deep export " + mutationName +
+            " normalization mutation leaves no receipts, manifest or verified report");
+    }
+    finally
+    {
+        foreach (var (name, value) in variables) Environment.SetEnvironmentVariable(name, value);
+        File.WriteAllText(configuration, originalConfiguration);
+        File.WriteAllText(proof, originalProof);
+        File.Delete(source);
+    }
+}
 
 static void CheckDeep(Report report)
 {
