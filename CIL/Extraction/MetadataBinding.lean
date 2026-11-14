@@ -367,7 +367,8 @@ def MethodSite.contractName (site : MethodSite) (frame : Frame) : Option (List N
     let returned ← substituteResolved (some arguments) (some []) resolveFuel site.result
     let result ← cecilName false resolveFuel returned
     let parameters ← site.parameters.mapM fun type => do
-      cecilName false resolveFuel (← substituteResolved (some arguments) (some []) resolveFuel type)
+      let substituted ← substituteResolved (some arguments) (some []) resolveFuel type
+      cecilName false resolveFuel substituted
     let name := site.name ++ [60] ++ (argumentNames.intersperse [44]).flatten ++ [62] ++
       bytesOf "|definition|" ++ contractHex definition ++ bytesOf "|arguments|" ++
       (keys.map contractPart).flatten
