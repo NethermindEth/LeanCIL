@@ -9,13 +9,102 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ConsumerTraceDirectory.cs
 
+using System.Diagnostics;
+using System.Text.Json;
+
+if (args is not ([] or ["--audit-only"] or ["--results-only"]))
+    throw new ArgumentException("Usage: JointReplay.cs [--audit-only|--results-only]");
+CheckSeparateReplayResults();
+if (args is ["--results-only"]) return;
 using var verification = new Program();
-if (args is not ([] or ["--audit-only"]))
-    throw new ArgumentException("Usage: JointReplay.cs [--audit-only]");
 var root = At("artifacts/JointReplay");
 if (Directory.Exists(root)) Directory.Delete(root, true);
 Directory.CreateDirectory(root);
 var environment = new Dictionary<string, string> { ["LEAN_SYSROOT"] = verification.Toolchain };
+
+void CheckSeparateReplayResults()
+{
+    const string success = """{"module":"A","milliseconds":1}""";
+    const string failure = """{"module":"A","error":"rejected"}""";
+    void Reject(string[] targets, int code, string output)
+    {
+        try { ParseSeparateReplayResults(targets, code, output); }
+        catch (InvalidDataException) { return; }
+        throw new InvalidOperationException("Invalid replay result was accepted: " + output);
+    }
+    if (ParseSeparateReplayResults(["A"], 0, "progress\r\n  " + success + " \r\nfinished").Count != 0 ||
+        ParseSeparateReplayResults(["A"], 1, failure)["A"] != "rejected" ||
+        ParseSeparateReplayResults([], 0, "progress\n").Count != 0)
+        throw new InvalidOperationException("Valid replay results changed");
+    var mixed = ParseSeparateReplayResults(["A", "B"], 7,
+        success + "\n" + """{"error":"kernel rejected B","module":"B"}""");
+    if (mixed.Count != 1 || mixed["B"] != "kernel rejected B")
+        throw new InvalidOperationException("Replay failure ownership changed");
+    if (ParseSeparateReplayResults(["A"], 0,
+        """{"milliseconds":18446744073709551615,"module":"A"}""").Count != 0)
+        throw new InvalidOperationException("Maximum elapsed value was rejected");
+    Reject(["A"], 0, success + "\n" + success);
+    Reject(["A"], 1, failure + "\n" + failure);
+    Reject(["A"], 1, success + "\n" + failure);
+    Reject(["A"], 0, success + "\n" + success.Replace("A", "B", StringComparison.Ordinal));
+    Reject(["A"], 1, success + "\n" + failure.Replace("A", "B", StringComparison.Ordinal));
+    Reject(["A", "B"], 0, success);
+    Reject(["A"], 1, success);
+    Reject(["A"], 0, failure);
+    Reject(["A"], 0, "");
+    Reject(["A"], 0, success.Replace("A", "a", StringComparison.Ordinal));
+    Reject([], 0, success);
+    Reject([], 1, "");
+    Reject(["A", "A"], 0, success);
+    Reject([""], 0, "");
+    Reject([" "], 0, "");
+    try { SeparateReplayTargets(["A", "A"]); throw new Exception("Duplicate input targets accepted"); }
+    catch (InvalidDataException) { }
+    foreach (var malformed in new[]
+    {
+        "{", "{}", "{invalid", success + " trailing", """{"milliseconds":0}""",
+        """{"module":"A"}""", """{"module":null,"milliseconds":0}""",
+        """{"module":"","milliseconds":0}""", """{"module":" ","milliseconds":0}""",
+        """{"module":"A","module":"A","milliseconds":0}""",
+        """{"module":"A","milliseconds":0,"milliseconds":1}""",
+        """{"module":"A","error":"one","error":"two"}""",
+        """{"module":"A","milliseconds":0,"extra":true}""",
+        """{"module":"A","milliseconds":0,"error":"rejected"}"""
+    }) Reject(["A"], 0, success + "\n" + malformed);
+    foreach (var invalidElapsed in new[] { "-1", "1.5", "1.0", "1e0", "18446744073709551616",
+        "null", "true", "\"1\"", "[]", "{}" })
+        Reject(["A"], 0, "{\"module\":\"A\",\"milliseconds\":" + invalidElapsed + "}");
+    foreach (var invalidError in new[] { "null", "true", "1", "\"\"", "[]", "{}" })
+        Reject(["A"], 1, "{\"module\":\"A\",\"error\":" + invalidError + "}");
+    Console.WriteLine("PASS separate replay exact records, target coverage, field types and exit status");
+
+    long previousBytes = 0;
+    double previousMilliseconds = 0;
+    foreach (int count in new[] { 256, 1024, 4096 })
+    {
+        var targets = Enumerable.Range(0, count).Select(index => "Module" + index).ToArray();
+        var output = string.Join('\n', targets.Select(module => JsonSerializer.Serialize(new { module, milliseconds = 1 })));
+        for (int warm = 0; warm < 4; warm++) ParseSeparateReplayResults(targets, 0, output);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ParseSeparateReplayResults(targets, 0, output);
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        const int repetitions = 16;
+        var samples = new double[9];
+        for (int sample = 0; sample < samples.Length; sample++)
+        {
+            var timer = Stopwatch.StartNew();
+            for (int repeat = 0; repeat < repetitions; repeat++) ParseSeparateReplayResults(targets, 0, output);
+            samples[sample] = timer.Elapsed.TotalMilliseconds / repetitions;
+        }
+        Array.Sort(samples);
+        double milliseconds = samples[samples.Length / 2];
+        if (previousBytes != 0 && (bytes > previousBytes * 6 || milliseconds > previousMilliseconds * 6 + 1))
+            throw new InvalidOperationException("Separate replay parsing exceeded its growth bound");
+        Console.WriteLine($"PASS replay parsing {count}: {bytes} allocated bytes, {milliseconds:F3} ms");
+        previousBytes = bytes;
+        previousMilliseconds = milliseconds;
+    }
+}
 
 void Compile(string module, string source)
 {
