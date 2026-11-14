@@ -171,6 +171,71 @@ theorem rejects_an_address_in_two_sections :
 
 /-! ## Heap entries and identity -/
 
+/-- The fixture identity with selected Assembly flags and key bytes in its blob heap. -/
+private def identityWithKey (flags : Nat) (key : List Nat) :
+    Except AuditError (List Nat) := do
+  let (view, layout) ← fixtureLayout
+  let (flagsOffset, _) ← layout.cellAt (tokenOf 0x20 1) 5
+  let (keyOffset, keyWidth) ← layout.cellAt (tokenOf 0x20 1) 6
+  let bytes ← view.bytes 0 StrictFixture.image.length
+  let bytes := (List.range 4).foldl
+    (fun bytes index => bytes.set (flagsOffset + index) (flags / 256 ^ index % 256)) bytes
+  let bytes := (List.range keyWidth).foldl
+    (fun bytes index => bytes.set (keyOffset + index) 0) bytes
+  let blob := key.length :: key
+  let changed ← ImageView.ofImage (ImageBytes.ofBytes (bytes ++ blob))
+  let pe := { layout.pe with blobs := { start := bytes.length, size := blob.length } }
+  assemblyIdentity changed { layout with pe := pe }
+
+/-- An unflagged eight-byte key is already a token, in display byte order. -/
+theorem assembly_uses_unflagged_token :
+    (identityWithKey 0 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption =
+      some (asciiOf
+        "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=00ab0000000000cd") := by
+  decide +kernel
+#print axioms assembly_uses_unflagged_token
+
+/-- Empty key blobs have no token with either PublicKey flag value. -/
+theorem assembly_empty_key_has_no_token :
+    (identityWithKey 0 []).toOption = some (asciiOf
+      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=null") ∧
+    (identityWithKey 1 []).toOption = (identityWithKey 0 []).toOption := by
+  decide +kernel
+#print axioms assembly_empty_key_has_no_token
+
+/-- A flagged full key uses the reversed low eight SHA-1 digest bytes. -/
+theorem assembly_hashes_flagged_key :
+    (identityWithKey 1 (asciiOf "abc")).toOption = some (asciiOf
+      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=9dd8d09c6cc25078") := by
+  decide +kernel
+#print axioms assembly_hashes_flagged_key
+
+/-- Flags other than PublicKey preserve both key interpretations. -/
+theorem assembly_ignores_other_key_flags :
+    (identityWithKey 0x8100 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption =
+      (identityWithKey 0 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption ∧
+    (identityWithKey 0x8101 (asciiOf "abc")).toOption =
+      (identityWithKey 1 (asciiOf "abc")).toOption := by
+  decide +kernel
+#print axioms assembly_ignores_other_key_flags
+
+/-- Nonempty unflagged blobs must have exactly eight bytes. -/
+theorem assembly_rejects_invalid_token_widths :
+    failsWith (identityWithKey 0 [1]) (.tables (.invalidPublicKeyToken 1)) = true ∧
+    failsWith (identityWithKey 0 (List.replicate 7 0))
+      (.tables (.invalidPublicKeyToken 7)) = true ∧
+    failsWith (identityWithKey 0 (List.replicate 9 0))
+      (.tables (.invalidPublicKeyToken 9)) = true := by
+  decide +kernel
+#print axioms assembly_rejects_invalid_token_widths
+
+/-- An eight-byte zero token remains distinct from an absent token. -/
+theorem assembly_preserves_zero_token :
+    (identityWithKey 0 (List.replicate 8 0)).toOption = some (asciiOf
+      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=0000000000000000") := by
+  decide +kernel
+#print axioms assembly_preserves_zero_token
+
 theorem spells_version_components :
     decimal 0 = asciiOf "0" ∧ decimal 7 = asciiOf "7" ∧ decimal 10 = asciiOf "10" ∧
     decimal 65535 = asciiOf "65535" := by
