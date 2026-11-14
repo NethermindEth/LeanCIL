@@ -352,7 +352,7 @@ private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : 
     | some _ => true
 
 /-- A generic type application split into its constructor and ordered arguments. -/
-private def appliedArguments : TypeExpr → TypeExpr × List TypeExpr
+def appliedArguments : TypeExpr → TypeExpr × List TypeExpr
   | .apply constructor argument =>
     let (head, arguments) := appliedArguments constructor
     (head, arguments ++ [argument])

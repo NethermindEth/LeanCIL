@@ -19,10 +19,10 @@ private def nativeType : TypeExpr := .atom runtime "System.IntPtr"
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
 /-- The pinned assembly owning `Scope::Fixture`; every certificate attributes its bodies to it. -/
 private def scope : AssemblyPin :=
-  { identity := "Scope" }
+  { identity := "Scope, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" }
 private def raw (code : List RawInstruction) (parameters : List TypeExpr := [word, word]) : RawMethod := {
-  token := 1, owner := "Scope::Fixture", hasThis := false, explicitThis := false,
-  callingConvention := 0, attributes := 0, implementation := 0,
+  token := 0x06000001, owner := scope.identity ++ "::Fixture", hasThis := false,
+  explicitThis := false, callingConvention := 0, attributes := 0, implementation := 0,
   returnType := word, parameters, locals := [], initLocals := true, maxStack := 2,
   genericParameters := [], code }
 /-- The declared signature of the two-word-parameter, word-returning methods `raw` builds. -/
@@ -165,18 +165,20 @@ private def addEvidence : MethodEvidence := withBody {
 private def addMethod : Method :=
   { locals := [], returnsValue := true, declared := wordPair, code := addCode }
 
-example : TranslationValid [] #[] [addEvidence] [] [addMethod] := by decide
-example : ¬ TranslationValid [] #[] [addEvidence] [] [{ addMethod with code := addCode.set 2 .sub }] := by decide
+example : TranslationValid [] #[] [] [addEvidence] [] [addMethod] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] [addEvidence] []
+    [{ addMethod with code := addCode.set 2 .sub }] := by decide +kernel
 -- The declared signature and the layout environment are conjuncts of their own.
 example : ¬ MethodShapeValid [] addRaw { addMethod with declared := {} } := by decide
-example : ¬ TranslationValid [] #[] [addEvidence] [] [{ addMethod with declared := {} }] := by
-  decide
+example : ¬ TranslationValid [] #[] [] [addEvidence] [] [{ addMethod with declared := {} }] := by
+  decide +kernel
 example : ¬ MethodEnvironmentValid [] #[]
     { addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } } := by decide
-example : ¬ TranslationValid [] #[] [addEvidence] []
-    [{ addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } }] := by decide
-example : ¬ TranslationValid [] #[] [{ addEvidence with scalarStates := addStates.set 2 (some [.native, .word32]) }] []
-    [{ addMethod with code := addCode.set 2 (.nativeBinary .add) }] := by decide
+example : ¬ TranslationValid [] #[] [] [addEvidence] []
+    [{ addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } }] := by decide +kernel
+example : ¬ TranslationValid [] #[] []
+    [{ addEvidence with scalarStates := addStates.set 2 (some [.native, .word32]) }] []
+    [{ addMethod with code := addCode.set 2 (.nativeBinary .add) }] := by decide +kernel
 example : ¬ ScalarFlowValid #[] { addRaw with maxStack := 1 } addFeatures addStates addCode := by decide
 example : ¬ ScalarFlowValid #[] addRaw addFeatures (addStates.set 0 (some [.word64])) addCode := by decide
 example : ¬ ScalarFlowValid #[] addRaw addFeatures (addStates.drop 1) addCode := by decide
@@ -191,9 +193,11 @@ private def arithmeticFlagCases : List (Nat × Instruction) := [
   (91, .div), (92, .div_un), (93, .rem), (94, .rem_un), (214, .add_ovf), (215, .add_ovf_un),
   (216, .mul_ovf), (217, .mul_ovf_un), (218, .sub_ovf), (219, .sub_ovf_un)]
 example : arithmeticFlagCases.all (fun (opcode, operation) =>
-    decide (TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by decide
+    decide (TranslationValid [] #[] [] [binaryEvidence opcode] []
+      [binaryMethod operation])) = true := by decide +kernel
 example : arithmeticFlagMutations.all (fun (opcode, operation) =>
-    decide (¬ TranslationValid [] #[] [binaryEvidence opcode] [] [binaryMethod operation])) = true := by decide
+    decide (¬ TranslationValid [] #[] [] [binaryEvidence opcode] []
+      [binaryMethod operation])) = true := by decide +kernel
 
 private def literalRaw := raw [i 33 (.integer (-9223372036854775808)), i 42] []
 private def literalFeatures : FeatureCertificate := [unknown 0, unknown 1]
@@ -205,9 +209,9 @@ private def literalEvidence : MethodEvidence := withBody {
 private def literalMethod : Method := {
   locals := [], returnsValue := true, declared := { returnType := word },
   code := [.ldc_i8 9223372036854775808, .ret] }
-example : TranslationValid [] #[] [literalEvidence] [] [literalMethod] := by decide
-example : ¬ TranslationValid [] #[] [literalEvidence] []
-    [{ literalMethod with code := [.ldc_i8 9223372036854775809, .ret] }] := by decide
+example : TranslationValid [] #[] [] [literalEvidence] [] [literalMethod] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] [literalEvidence] []
+    [{ literalMethod with code := [.ldc_i8 9223372036854775809, .ret] }] := by decide +kernel
 
 private def convertRaw := raw [i 2, i 133, i 42] [word]
 private def convertFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
@@ -219,15 +223,15 @@ private def convertEvidence : MethodEvidence := withBody {
 private def convertMethod : Method := {
   locals := [], returnsValue := true, declared := { parameters := [word], returnType := word },
   code := [.arg 0, .conv_ovf_un .i8, .ret] }
-example : TranslationValid [] #[] [convertEvidence] [] [convertMethod] := by decide
-example : ¬ TranslationValid [] #[] [convertEvidence] []
-    [{ convertMethod with code := [.arg 0, .conv_ovf_un .u8, .ret] }] := by decide
-example : ¬ TranslationValid [] #[] [convertEvidence] []
-    [{ convertMethod with code := [.arg 0, .conv_ovf .i8, .ret] }] := by decide
-example : ¬ TranslationValid [] #[] [convertEvidence] []
+example : TranslationValid [] #[] [] [convertEvidence] [] [convertMethod] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] [convertEvidence] []
+    [{ convertMethod with code := [.arg 0, .conv_ovf_un .u8, .ret] }] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] [convertEvidence] []
+    [{ convertMethod with code := [.arg 0, .conv_ovf .i8, .ret] }] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] [convertEvidence] []
     [{ convertMethod with code := [.arg 0, .conv_ovf_un .i, .ret] }] := by decide +kernel
-example : ¬ TranslationValid [] #[] [convertEvidence] []
-    [{ convertMethod with code := [.arg 0, .conv_i8, .ret] }] := by decide
+example : ¬ TranslationValid [] #[] [] [convertEvidence] []
+    [{ convertMethod with code := [.arg 0, .conv_i8, .ret] }] := by decide +kernel
 
 private def floatRaw (opcode : Nat) := raw [i 23, i opcode, i 106, i 42] []
 private def floatFeatures : FeatureCertificate := [unknown 0, state [some 1], unknown 1, unknown 1]
@@ -245,8 +249,8 @@ example : FeatureFlowValid #[] (fun _ => none) (floatRaw 108) .scalar floatFeatu
     (List.replicate 4 true) floatMethod.code := by decide
 example : scalarTransfer (floatRaw 107) (i 107) [.word32] = some [.other] := by decide
 example : scalarTransfer (floatRaw 108) (i 108) [.word32] = some [.other] := by decide
-example : ¬ TranslationValid [] #[] [floatEvidence 107] [] [floatMethod] := by decide
-example : ¬ TranslationValid [] #[] [floatEvidence 108] [] [floatMethod] := by decide
+example : ¬ TranslationValid [] #[] [] [floatEvidence 107] [] [floatMethod] := by decide +kernel
+example : ¬ TranslationValid [] #[] [] [floatEvidence 108] [] [floatMethod] := by decide +kernel
 -- The scalar flow itself rejects them, since the declared signature is right.
 example : ¬ ScalarFlowValid #[] (floatRaw 107) floatFeatures floatStates floatMethod.code := by
   decide
@@ -287,7 +291,7 @@ private def localMethod : Method := {
   code := [.ldc_i4 1, .neg, .setLocal 0, .local 0, .conv_i8, .ret] }
 example : FeatureFlowValid #[] (fun _ => none) localRaw .scalar localFeatures
     (List.replicate 6 true) localMethod.code := by decide
-example : ¬ TranslationValid [] #[] [localEvidence] [] [localMethod] := by decide
+example : ¬ TranslationValid [] #[] [] [localEvidence] [] [localMethod] := by decide +kernel
 example : ¬ ScalarFlowValid #[] localRaw localFeatures localStates localMethod.code := by decide
 example : MethodShapeValid [] localRaw localMethod := by decide
 
@@ -303,7 +307,7 @@ private def argumentMethod : Method := {
   code := [.ldc_i4 1, .neg, .setLocal 0, .local 0, .conv_i8, .ret] }
 example : FeatureFlowValid #[] (fun _ => none) argumentRaw .scalar argumentFeatures
     (List.replicate 6 true) argumentMethod.code := by decide
-example : ¬ TranslationValid [] #[] [argumentEvidence] [] [argumentMethod] := by decide
+example : ¬ TranslationValid [] #[] [] [argumentEvidence] [] [argumentMethod] := by decide +kernel
 example : ¬ ScalarFlowValid #[] argumentRaw argumentFeatures localStates argumentMethod.code := by
   decide
 example : MethodShapeValid [] argumentRaw argumentMethod := by decide
@@ -317,8 +321,9 @@ example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.set 2 (.n
 example : ¬ ScalarFlowValid #[] { mixedRaw with parameters := [nativeType, word] } addFeatures mixedStates mixedCode := by decide
 
 private def site : CallSite := {
-  declaringType := .atom "Scope" "Fixture",
-  target := .managed 1, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := word, parameterTypes := [word, word] }
+  declaringType := .atom scope.identity "Fixture",
+  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
+  returnsValue := true, returnType := word, parameterTypes := [word, word] }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call { site with returnType := intType })) true (.call 0 2) = false := by decide
 example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] [] (i 40 (.call site)) true (.call 0 2) = false := by decide
@@ -412,7 +417,8 @@ private def faultLocalMethod : Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true,
   declared := { parameters := [word], returnType := intType },
   code := [.arg 0, .setLocal 0, .local 0, .ret] }
-example : TranslationValid [] #[] [faultLocalEvidence] [] [faultLocalMethod] := by decide +kernel
+example : TranslationValid [] #[] [] [faultLocalEvidence] [] [faultLocalMethod] := by
+  decide +kernel
 example : scalarTransfer faultLocalRaw (i 10) [.word64] = none := by decide
 example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.setLocal 0) = true := by decide
 example : scalarStoreFault faultLocalRaw (i 10) [.native] (.setLocal 0) = true := by decide
@@ -423,7 +429,7 @@ example : scalarStoreFault faultLocalRaw (i 10) [.word64] .pop = false := by dec
 example : scalarStoreFault { faultLocalRaw with locals := [] } (i 10) [.word64] (.setLocal 0) = false := by decide
 example : ¬ ScalarFlowValid #[] faultLocalRaw faultLocalFeatures faultLocalStates
     (faultLocalMethod.code.set 1 (.setLocal 1)) := by decide
-example : ¬ TranslationValid [] #[] [faultLocalEvidence] []
+example : ¬ TranslationValid [] #[] [] [faultLocalEvidence] []
     [{ faultLocalMethod with code := faultLocalMethod.code.set 1 .pop }] := by decide
 example (memory : Safety.Memory) (reference : Safety.Reference) (bits : W64) :
     Safety.storeLocal memory (.bytes .word32 reference) (.scalar (.i64 bits)) = .error .invalidState := rfl
@@ -441,7 +447,8 @@ private def nativeHomeMethod : Method := {
   locals := [], parameterHomes := [(0, .word64)], returnsValue := true,
   declared := { parameters := [nativeType, word], returnType := word },
   code := [.arg 1, .setLocal 0, .local 0, .conv_u8, .ret] }
-example : TranslationValid [] #[] [nativeHomeEvidence] [] [nativeHomeMethod] := by decide +kernel
+example : TranslationValid [] #[] [] [nativeHomeEvidence] [] [nativeHomeMethod] := by
+  decide +kernel
 example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.word64] = some [] := by decide
 example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.other] = none := by decide
 example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.word32] = none := by decide
@@ -459,7 +466,8 @@ private def nativeReturnMethod : Method := {
   locals := [], returnsValue := true,
   declared := { parameters := [.byref word], returnType := word },
   code := [.arg 0, .loadScalar 8, .ret] }
-example : TranslationValid [] #[] [nativeReturnEvidence] [] [nativeReturnMethod] := by decide +kernel
+example : TranslationValid [] #[] [] [nativeReturnEvidence] [] [nativeReturnMethod] := by
+  decide +kernel
 example : scalarTransfer nativeReturnRaw (i 42) [.native] = some [] := by decide
 example : scalarTransfer { nativeReturnRaw with returnType := nativeType } (i 42) [.word64] = some [] := by decide
 example : scalarTransfer nativeReturnRaw (i 42) [.other] = none := by decide
@@ -687,7 +695,8 @@ example : ¬ ScalarFlowValid #[] { loopRaw with code := [i 22, i 0, i 43 (.targe
 
 -- Defaulted signature fields are accepted only where they are the true signature.
 private def unsignedSite : CallSite := {
-  target := .managed 1, typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true }
+  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
+  returnsValue := true }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
 /-- External unsigned signatures retain their exact parameter and return metadata. -/
@@ -725,9 +734,9 @@ private def holeMethod (emitted : Instruction) : Method :=
   { locals := [], returnsValue := true, declared := wordPair, code := holeCode emitted }
 /-- A scalar opcode cannot be replaced by an unrelated instruction with the same stack effect. -/
 private theorem scalar_opcode_cases :
-    (TranslationValid [] #[] [holeEvidence 88 (holeStates.set 3 (some [.word64]))] []
+    (TranslationValid [] #[] [] [holeEvidence 88 (holeStates.set 3 (some [.word64]))] []
       [holeMethod .add]) ∧
-    (¬ TranslationValid [] #[] [holeEvidence 149 holeStates] [] [holeMethod .add]) := by
+    (¬ TranslationValid [] #[] [] [holeEvidence 149 holeStates] [] [holeMethod .add]) := by
   decide +kernel
 
 #print axioms scalar_opcode_cases
@@ -1042,8 +1051,45 @@ theorem fixtures_carry_their_bodies :
       localEvidence, argumentEvidence, faultLocalEvidence, nativeHomeEvidence,
       nativeReturnEvidence, holeEvidence 88 holeStates, holeEvidence 149 holeStates] ++
       (arithmeticFlagCases ++ arithmeticFlagMutations).map fun entry =>
-        binaryEvidence entry.1).all (fun item => bodyMatches item.body item.original) = true := by
+        binaryEvidence entry.1).all (fun item => bodyMatches item.body item.original []) =
+      true := by
   decide +kernel
 #print axioms fixtures_carry_their_bodies
 
+/-! ## Only the kernel decides the body and metadata check
+
+The elaborator evaluates a call by name, so a certificate whose evidence carries a computed
+metadata slice would be unfolded again at every use. `bodyMatches` is irreducible, so `decide`
+refuses at once, within a small heartbeat budget, and `decide +kernel` decides. -/
+
+set_option maxHeartbeats 20000 in
+/-- error: Tactic `decide` failed to reduce -/
+#guard_msgs (substring := true) in
+example : BodyDecodes [] scope addEvidence.body addEvidence.original [] addEvidence.signature := by
+  decide
+
+set_option maxHeartbeats 20000 in
+/-- error: Tactic `decide` failed to reduce -/
+#guard_msgs (substring := true) in
+example : TranslationValid [] #[] [] [addEvidence] [] [addMethod] := by decide
+
+set_option maxHeartbeats 20000 in
+/-- error: Tactic `decide` failed to reduce -/
+#guard_msgs (substring := true) in
+example : MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence addMethod := by decide
+
+/-- A method with eight times the parameters and four times the locals of `addRaw`. -/
+private def wideRaw : RawMethod :=
+  { addRaw with parameters := List.replicate 16 word, locals := List.replicate 8 intType }
+
+-- The fixture encoder reduces in the elaborator, within a small budget, at both sizes.
+set_option maxHeartbeats 100000 in
+example : (encodeBody scope addRaw).isSome = true := by decide
+
+set_option maxHeartbeats 100000 in
+example : (encodeBody scope wideRaw).isSome = true := by decide
+example : (encodeBody scope addRaw).isSome = true := by decide +kernel
+example : BodyDecodes [] scope addEvidence.body addEvidence.original [] addEvidence.signature := by
+  decide +kernel
+example : MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence addMethod := by decide +kernel
 end Tests.ScalarEvidence

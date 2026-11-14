@@ -422,7 +422,9 @@ internal static partial class Program
                 staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = extractorHash,
+                // Where each body sits in the image is recorded here, outside the Lean evidence, for the strict audit.
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
+                    bodyAddress = ((MethodDefinition)pinned.Original(m.Module).LookupToken(m.MetadataToken)).RVA,
                     specialization = MethodSpecialization.Source(m),
                     locals = m.Body.Variables.Select(v => v.VariableType.FullName),
                     instructions = m.Body.Instructions.Select(i => i.ToString()) }),

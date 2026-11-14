@@ -34,6 +34,27 @@ name = "Tests.BodyEncoding"
 name = "Tests.BodyDecoding"
 
 [[lean_lib]]
+name = "Tests.BodyLiteral"
+
+[[lean_lib]]
+name = "Tests.KernelEquation"
+
+[[lean_lib]]
+name = "Tests.MetadataBuilder"
+
+[[lean_lib]]
+name = "Tests.MetadataDecoding"
+
+[[lean_lib]]
+name = "Tests.MetadataWorld"
+
+[[lean_lib]]
+name = "Tests.MetadataBinding"
+
+[[lean_lib]]
+name = "Tests.GenericOwnerScaling"
+
+[[lean_lib]]
 name = "Tests.LiteralDisplay"
 
 [[lean_lib]]
