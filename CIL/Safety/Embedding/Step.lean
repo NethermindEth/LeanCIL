@@ -26,27 +26,33 @@ theorem nativeBinaryValues_relabel (r : Nat → Nat) (op : Instruction) (pc q : 
     nativeBinaryValues (op.relabel r) q x y = .ok (r target, values) := by
   unfold nativeBinaryValues at h ⊢
   simp only [bind, Except.bind] at h ⊢
-  rw [widenNativeOperand_relabel]
+  rw [widenNativeOperand_relabel, divideKind?_relabel, checkedKind?_relabel,
+    nativePureBinary_relabel]
   split at h
   rotate_right
   · cases h
   all_goals
     try simp only at h ⊢
-    cases op <;> simp only [Instruction.relabel, nativePureBinary, Bool.false_eq_true, ↓reduceIte,
-      reduceCtorEq] at h ⊢
-    all_goals (split at h <;> (try (cases h; done)))
-    all_goals rename_i found
+    rcases divided : op.divideKind? with _ | ⟨signed, remainder⟩ <;>
+      rcases checked : op.checkedKind? with _ | ⟨kind, signedness⟩ <;>
+      simp only [divided, checked] at h ⊢
+    -- Faulting arithmetic resumes at the successor; a pure operation relabels its own target.
     all_goals first
-      | ((try simp only [found])
+      | (split at h
+         · cases h
          simp only [pure, Except.pure] at h ⊢
          cases h
-         rw [next]
-         done)
-      | (have stepped := base_relabel_of_nativePure _ rfl r pc q _ _ _ _ _ (fun _ => next) found
-         simp only [Instruction.relabel] at stepped
-         rw [stepped]
-         cases h
-         rfl)
+         rw [next])
+      | (by_cases pure : nativePureBinary op = true
+         · simp only [pure, ite_true] at h ⊢
+           split at h
+           · rename_i found
+             rw [base_relabel_of_nativePure op pure r pc q _ _ _ _ _ (fun _ => next) found]
+             cases h
+             rfl
+           · cases h
+         · simp only [pure, Bool.false_eq_true, ite_false] at h
+           cases h)
 
 end CIL.Embedding
 
@@ -300,19 +306,29 @@ theorem step_relabel_nativeBinary (operation : Instruction) :
          simp only [native, Except.mapError, ok_bind_eq] at h ⊢
          lockstep)
 
-theorem step_relabel_divide (signed remainder : Bool) : StepRelabel (.divide signed remainder) := by
+/-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
+theorem step_relabel_faulting (op : Instruction)
+    (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
+  cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
+    Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
+  all_goals stack_cases =>
+    first | fallback_vacuous | lockstep
+
+#print axioms step_relabel_faulting
+
+/-- A successful checked conversion of a signed operand is matched by the relabeled step. -/
+theorem step_relabel_conv_ovf (target : ConvTarget) : StepRelabel (.conv_ovf target) := by
   stack_cases =>
     first | fallback_vacuous | lockstep
 
-theorem step_relabel_checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool) :
-    StepRelabel (.checkedArithmetic kind signed) := by
+#print axioms step_relabel_conv_ovf
+
+/-- A successful checked conversion of an unsigned operand is matched by the relabeled step. -/
+theorem step_relabel_conv_ovf_un (target : ConvTarget) : StepRelabel (.conv_ovf_un target) := by
   stack_cases =>
     first | fallback_vacuous | lockstep
 
-theorem step_relabel_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
-    StepRelabel (.checkedConvert width signed unsignedInput) := by
-  stack_cases =>
-    first | fallback_vacuous | lockstep
+#print axioms step_relabel_conv_ovf_un
 
 theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
     StepRelabel (.arg index narrow) := by
@@ -680,10 +696,10 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
          all_goals simp only [FrameAction.relabel]
          all_goals rw [context.next rfl])
   case nativeBinary operation => exact step_relabel_nativeBinary operation
-  case divide signed remainder => exact step_relabel_divide signed remainder
-  case checkedArithmetic kind signed => exact step_relabel_checkedArithmetic kind signed
-  case checkedConvert width signed unsignedInput =>
-    exact step_relabel_checkedConvert width signed unsignedInput
+  case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
+    | mul_ovf_un => exact step_relabel_faulting _ rfl
+  case conv_ovf target => exact step_relabel_conv_ovf target
+  case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case arg index narrow => exact step_relabel_arg index narrow
   case «local» index narrow => exact step_relabel_local index narrow
   case initializeSpanLocal index constructor =>
@@ -716,7 +732,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case beq target => exact step_relabel_beq target
   case bne_un target => exact step_relabel_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
-    | conv_u4 | conv_u8 | conv_u | not | add | mul | and | or | xor | shl | shr | shr_un
+    | conv_u4 | conv_u8 | conv_u | conv_i | not | add | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
@@ -762,6 +778,9 @@ theorem step_relabel_conv_u1 : StepRelabel .conv_u1 := step_relabel _
 theorem step_relabel_conv_u4 : StepRelabel .conv_u4 := step_relabel _
 theorem step_relabel_conv_u8 : StepRelabel .conv_u8 := step_relabel _
 theorem step_relabel_conv_u : StepRelabel .conv_u := step_relabel _
+/-- A successful `conv_i` step is matched by the relabeled step at the renamed pc. -/
+theorem step_relabel_conv_i : StepRelabel .conv_i := step_relabel _
+#print axioms step_relabel_conv_i
 theorem step_relabel_not : StepRelabel .not := step_relabel _
 theorem step_relabel_add : StepRelabel .add := step_relabel _
 theorem step_relabel_mul : StepRelabel .mul := step_relabel _
@@ -928,19 +947,31 @@ theorem step_raise_nativeBinary (operation : Instruction) :
            simp only [native, Except.mapError, ok_bind_eq] at h ⊢
            raise_lockstep)
 
-theorem step_raise_divide (signed remainder : Bool) : StepRaise (.divide signed remainder) := by
+/-- Division, remainder and overflow-checked arithmetic raise in lockstep with their
+    relabeling. -/
+theorem step_raise_faulting (op : Instruction)
+    (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRaise op := by
+  cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
+    Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
+  all_goals stack_cases =>
+    first | fallback_raise_vacuous | raise_lockstep
+
+#print axioms step_raise_faulting
+
+/-- A throwing checked conversion of a signed operand throws the same from the relabeled step. -/
+theorem step_raise_conv_ovf (target : ConvTarget) : StepRaise (.conv_ovf target) := by
   stack_cases =>
     first | fallback_raise_vacuous | raise_lockstep
 
-theorem step_raise_checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool) :
-    StepRaise (.checkedArithmetic kind signed) := by
+#print axioms step_raise_conv_ovf
+
+/-- A throwing checked conversion of an unsigned operand throws the same from the relabeled
+    step. -/
+theorem step_raise_conv_ovf_un (target : ConvTarget) : StepRaise (.conv_ovf_un target) := by
   stack_cases =>
     first | fallback_raise_vacuous | raise_lockstep
 
-theorem step_raise_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
-    StepRaise (.checkedConvert width signed unsignedInput) := by
-  stack_cases =>
-    first | fallback_raise_vacuous | raise_lockstep
+#print axioms step_raise_conv_ovf_un
 
 theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := by
   plain_cases
@@ -1218,10 +1249,10 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
             dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢ <;>
             first | cases h | raise_lockstep)
   case nativeBinary operation => exact step_raise_nativeBinary operation
-  case divide signed remainder => exact step_raise_divide signed remainder
-  case checkedArithmetic kind signed => exact step_raise_checkedArithmetic kind signed
-  case checkedConvert width signed unsignedInput =>
-    exact step_raise_checkedConvert width signed unsignedInput
+  case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
+    | mul_ovf_un => exact step_raise_faulting _ rfl
+  case conv_ovf target => exact step_raise_conv_ovf target
+  case conv_ovf_un target => exact step_raise_conv_ovf_un target
   case arg index narrow =>
     plain_cases
     cases narrow <;> dsimp only at h ⊢ <;> lookup_raise
@@ -1276,7 +1307,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case beq target => exact step_raise_beq target
   case bne_un target => exact step_raise_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
-    | conv_u4 | conv_u8 | conv_u | not | add | mul | and | or | xor | shl | shr | shr_un
+    | conv_u4 | conv_u8 | conv_u | conv_i | not | add | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar

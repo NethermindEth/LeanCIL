@@ -65,12 +65,14 @@ namespace CIL.Safety
 -- How many stack operands each instruction observes.
 @[cil_guard] theorem guard_nativeBinary (op : CIL.Instruction) :
     observerCount (.nativeBinary op) = 2 := rfl
-@[cil_guard] theorem guard_checkedConvert (width : Nat) (signed unsigned : Bool) :
-    observerCount (.checkedConvert width signed unsigned) = 1 := rfl
-@[cil_guard] theorem guard_checkedArithmetic (kind : CIL.CheckedBinaryKind) (signed : Bool) :
-    observerCount (.checkedArithmetic kind signed) = 2 := rfl
-@[cil_guard] theorem guard_divide (signed remainder : Bool) :
-    observerCount (.divide signed remainder) = 2 := rfl
+/-- A checked conversion of a signed operand observes its one operand. -/
+@[cil_guard] theorem guard_conv_ovf (target : CIL.ConvTarget) :
+    observerCount (.conv_ovf target) = 1 := rfl
+#print axioms guard_conv_ovf
+/-- A checked conversion of an unsigned operand observes its one operand. -/
+@[cil_guard] theorem guard_conv_ovf_un (target : CIL.ConvTarget) :
+    observerCount (.conv_ovf_un target) = 1 := rfl
+#print axioms guard_conv_ovf_un
 @[cil_guard] theorem guard_arg (index : Nat) (narrow : Option CIL.NarrowKind) :
     observerCount (.arg index narrow) = 0 := rfl
 @[cil_guard] theorem guard_call (callee argc : Nat) :

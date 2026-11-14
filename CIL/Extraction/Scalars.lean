@@ -233,29 +233,24 @@ private def scalarEncodingMatches (opcode : Nat) (emitted : Instruction) : Bool 
   match opcode, emitted with
   -- Arithmetic, division and remainder.
   | 88, .add | 89, .sub | 90, .mul => true
-  | 91, .divide true false | 92, .divide false false
-  | 93, .divide true true | 94, .divide false true => true
+  | 91, .div | 92, .div_un | 93, .rem | 94, .rem_un => true
   -- Bitwise, shifts, `neg` and `not`.
   | 95, .and | 96, .or | 97, .xor | 98, .shl | 99, .shr | 100, .shr_un
   | 101, .neg | 102, .not => true
-  -- Conversions; `checkedConvert width signed unsignedInput`.
+  -- Conversions, wrapping and overflow-checked.
   | 103, .conv_i1 | 104, .conv_i2 | 105, .conv_i4 | 106, .conv_i8 | 109, .conv_u4
   | 110, .conv_u8 => true
-  | 130, .checkedConvert 8 true true | 131, .checkedConvert 16 true true
-  | 132, .checkedConvert 32 true true | 133, .checkedConvert 64 true true
-  | 134, .checkedConvert 8 false true | 135, .checkedConvert 16 false true
-  | 136, .checkedConvert 32 false true | 137, .checkedConvert 64 false true
-  | 138, .checkedConvert 64 true true | 139, .checkedConvert 64 false true
-  | 179, .checkedConvert 8 true false | 180, .checkedConvert 8 false false
-  | 181, .checkedConvert 16 true false | 182, .checkedConvert 16 false false
-  | 183, .checkedConvert 32 true false | 184, .checkedConvert 32 false false
-  | 185, .checkedConvert 64 true false | 186, .checkedConvert 64 false false => true
-  | 209, .conv_u2 | 210, .conv_u1 | 211, .conv_i8 | 224, .conv_u => true
-  | 212, .checkedConvert 64 true false | 213, .checkedConvert 64 false false => true
+  | 130, .conv_ovf_un .i1 | 131, .conv_ovf_un .i2 | 132, .conv_ovf_un .i4
+  | 133, .conv_ovf_un .i8 | 134, .conv_ovf_un .u1 | 135, .conv_ovf_un .u2
+  | 136, .conv_ovf_un .u4 | 137, .conv_ovf_un .u8 | 138, .conv_ovf_un .i
+  | 139, .conv_ovf_un .u => true
+  | 179, .conv_ovf .i1 | 180, .conv_ovf .u1 | 181, .conv_ovf .i2 | 182, .conv_ovf .u2
+  | 183, .conv_ovf .i4 | 184, .conv_ovf .u4 | 185, .conv_ovf .i8 | 186, .conv_ovf .u8 => true
+  | 209, .conv_u2 | 210, .conv_u1 | 211, .conv_i | 224, .conv_u => true
+  | 212, .conv_ovf .i | 213, .conv_ovf .u => true
   -- Overflow-checked arithmetic and comparisons.
-  | 214, .checkedArithmetic .add true | 215, .checkedArithmetic .add false
-  | 216, .checkedArithmetic .mul true | 217, .checkedArithmetic .mul false
-  | 218, .checkedArithmetic .sub true | 219, .checkedArithmetic .sub false => true
+  | 214, .add_ovf | 215, .add_ovf_un | 216, .mul_ovf | 217, .mul_ovf_un
+  | 218, .sub_ovf | 219, .sub_ovf_un => true
   | 65025, .ceq | 65026, .cgt | 65027, .cgt_un | 65028, .clt | 65029, .clt_un => true
   | _, _ => false
 
@@ -368,11 +363,12 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
 /-- Operations computing a scalar from operands or a literal; only a covered encoding may
     emit one. -/
 private def scalarEmission : Instruction → Bool
-  | .ldc_i4 _ | .ldc_i8 _ | .add | .sub | .mul | .divide .. | .and | .or | .xor | .shl
+  | .ldc_i4 _ | .ldc_i8 _ | .add | .sub | .mul | .and | .or | .xor | .shl
   | .shr | .shr_un | .neg | .not | .ceq | .clt | .clt_un | .cgt | .cgt_un | .conv_i1
   | .conv_i2 | .conv_i4 | .conv_i8 | .conv_u1 | .conv_u2 | .conv_u4 | .conv_u8 | .conv_u
-  | .checkedConvert ..
-  | .checkedArithmetic .. | .nativeBinary _
+  | .conv_i | .conv_ovf _ | .conv_ovf_un _
+  | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un
+  | .mul_ovf | .mul_ovf_un | .nativeBinary _
   | .beq _ | .bge _ | .bgt _ | .ble _ | .blt _ | .bne_un _ | .bge_un _ | .bgt_un _
   | .ble_un _ | .blt_un _ => true
   | _ => false
