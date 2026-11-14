@@ -60,7 +60,7 @@ try
     };
     void CheckPromotion(string label, bool expected, string completeIdentity = "full",
         Action<SortedDictionary<string, string>>? mutateModules = null, Action<string>? mutateEntry = null,
-        bool unstable = false)
+        Action? requireStable = null)
     {
         var extractionKey = "extraction-" + label;
         var proofKey = "proof-" + label;
@@ -76,7 +76,7 @@ try
         verifier.PromoteStandaloneCache(promotion, completeIdentity, modules, () =>
         {
             guards++;
-            if (unstable) throw new InvalidOperationException("Changed complete library fixture");
+            requireStable?.Invoke();
         });
         var environment = verifier.StandaloneEnvironmentKey(completeIdentity, modules);
         var promotedExtraction = StandaloneExtractionKey(environment, label);
@@ -97,19 +97,52 @@ try
         mutateEntry: entry => File.AppendAllText(Path.Combine(entry, "receipt.json"), " "));
     CheckPromotion("changed-artifact", false,
         mutateEntry: entry => File.AppendAllText(Path.Combine(entry, "files", "Proof.olean"), "corruption"));
-    CheckPromotion("changed-complete-library", false, unstable: true);
+    var privateLibraryDirectory = Path.Combine(directory, "private-library");
+    Directory.CreateDirectory(privateLibraryDirectory);
+    var privateArtifact = Path.Combine(privateLibraryDirectory, "CIL.olean");
+    File.WriteAllText(privateArtifact, "certified");
+    using (var privateLibrary = new Program
+    {
+        library = privateLibraryDirectory, ownsLibrary = true,
+        libraryManifest = CacheFiles(privateLibraryDirectory)
+    })
+    {
+        if (privateLibrary.libraryStamps is not null)
+            throw new Exception("Private library fixture unexpectedly has a read-in-place guard");
+        CheckPromotion("private-library", true, requireStable: privateLibrary.RequireCertifiedLibraryContents);
+        var timestamp = File.GetLastWriteTimeUtc(privateArtifact);
+        File.WriteAllText(privateArtifact, "corrupted");
+        File.SetLastWriteTimeUtc(privateArtifact, timestamp);
+        CheckPromotion("changed-private-library", false,
+            requireStable: privateLibrary.RequireCertifiedLibraryContents);
+        File.Delete(privateArtifact);
+        CheckPromotion("missing-private-artifact", false,
+            requireStable: privateLibrary.RequireCertifiedLibraryContents);
+        File.WriteAllText(privateArtifact, "certified");
+        File.WriteAllText(privateArtifact + ".private", "unchecked");
+        CheckPromotion("added-private-artifact", false,
+            requireStable: privateLibrary.RequireCertifiedLibraryContents);
+    }
     Console.WriteLine("PASS complete-library promotion preserves exact families, identity and " +
         "authenticated artifacts");
     long previousAllocation = 0;
+    long previousComparisons = 0;
     foreach (var count in new[] { 256, 1024, 4096 })
     {
-        var beforeModules = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        long comparisons = 0;
+        var comparer = Comparer<string>.Create((left, right) =>
+        {
+            comparisons++;
+            return string.CompareOrdinal(left, right);
+        });
+        var beforeModules = new SortedDictionary<string, string>(comparer);
         for (var index = 0; index < count; index++) beforeModules[$"CIL/M{index:D5}.olean"] = "hash";
-        var afterModules = new SortedDictionary<string, string>(beforeModules, StringComparer.Ordinal)
+        var afterModules = new SortedDictionary<string, string>(beforeModules, comparer)
         {
             ["CIL/Outside.olean"] = "outside"
         };
         ModuleArtifactsPreserved(beforeModules, afterModules);
+        comparisons = 0;
         var allocationStart = GC.GetAllocatedBytesForCurrentThread();
         var timer = System.Diagnostics.Stopwatch.StartNew();
         for (var repeat = 0; repeat < 32; repeat++)
@@ -121,9 +154,12 @@ try
         var allocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
         if (previousAllocation > 0 && allocated > previousAllocation * 6)
             throw new Exception("Complete-library environment allocation grew superlinearly");
+        if (previousComparisons > 0 && comparisons > previousComparisons * 6)
+            throw new Exception("Complete-library dependency comparisons grew superlinearly");
         previousAllocation = allocated;
+        previousComparisons = comparisons;
         Console.WriteLine($"PASS complete-library environment {count} modules: {allocated} bytes, " +
-            $"{timer.Elapsed.TotalMilliseconds:F2} ms for 32 checks");
+            $"{comparisons} comparisons, {timer.Elapsed.TotalMilliseconds:F2} ms for 32 checks");
     }
     // Publishing closure A must not carry unrelated B from the same session.
     var session = Path.Combine(directory, "session");

@@ -40,6 +40,8 @@ partial class Program : IDisposable
     string? publishedLibrary;
     /// <summary>Length and write time of each file of a library read in place, as it was when opened.</summary>
     SortedDictionary<string, string>? libraryStamps;
+    /// <summary>The independently retained manifest of the authenticated or kernel-replayed library.</summary>
+    SortedDictionary<string, string>? libraryManifest;
     /// <summary>
     /// Every module of the open library when it is a closure entry, which holds only those; null for the
     /// whole library. <see cref="libraryKey"/> then names exactly this list.
@@ -1205,6 +1207,13 @@ partial class Program : IDisposable
                 Path.Combine(library!, changed));
     }
 
+    /// <summary>Requires every library file to retain its certified bytes, including in a private build.</summary>
+    void RequireCertifiedLibraryContents()
+    {
+        if (libraryManifest is null || !Same(libraryManifest, CacheFiles(library!)))
+            throw new InvalidOperationException("The certified library contents changed during verification");
+    }
+
     // The pinned manifest binds the source snapshot before copying. Hash exactly the bytes
     // written to the private destination; callers independently verify that destination.
     static bool CopyCertifiedLibrary(string source, string destination, string? trustedDigest,
@@ -2121,6 +2130,7 @@ partial class Program : IDisposable
         }
         // Lake rebuilds a module it finds stale into the library; no build of this process may have done so.
         libraryStamps = ownsLibrary ? null : libraryStamps ?? FileStamps(library);
+        libraryManifest = new(manifest, StringComparer.Ordinal);
         baseModules = new(manifest.Where(pair => pair.Key.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal))
             .ToDictionary(pair => pair.Key[compiledPrefix.Length..], pair => pair.Value), StringComparer.Ordinal);
@@ -4565,7 +4575,7 @@ partial class Program : IDisposable
             standaloneCachePromotion = null;
             if (promotion is not null)
                 PromoteStandaloneCache(promotion, whole.fullLibraryKey!, whole.SessionModules(whole.session!),
-                    whole.RequireUnchangedLibrary);
+                    whole.RequireCertifiedLibraryContents);
         }
         // Whatever stopped the build, the caller reports it; nothing may escape as an unhandled error here.
         catch (Exception error)
