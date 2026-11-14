@@ -2,6 +2,9 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../Extractor/StaticIdentity.cs
 #:include ImportReviewRegressions.cs
 

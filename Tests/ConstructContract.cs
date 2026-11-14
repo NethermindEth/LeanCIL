@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // One caller proof, unedited, must verify against a build whose constructors are reimplemented;
 // a build whose constructor stores the wrong value must fail the constructor proof and violate its contract.

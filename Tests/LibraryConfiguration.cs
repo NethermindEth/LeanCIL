@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // The certified library is bound to the lakefile it is built from, so editing a test library must
 // not rebuild CIL, while every setting that can change the CIL build or its auditor must.

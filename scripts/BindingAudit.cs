@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 
 // The opt-in strict binding audit: kernel-checked proof that the method bodies of an extraction are the bytes of
-// assembly files whose SHA-256 digests the caller states. Nothing here is read by `check`, `extract` or `verify`.
+// assembly files whose SHA-256 digests the caller states.
 partial class Program
 {
     internal const string BindingAuditUsage =
@@ -32,15 +32,14 @@ partial class Program
     /// <summary>Artifacts and requests that must join the caller's extraction and proof audit.</summary>
     sealed record DeepSessionContribution(string[] Modules, BindingRequest[] Requests,
         SortedDictionary<string, string> Artifacts, SortedDictionary<string, string> Hashes,
-        SortedDictionary<string, string> SourceHashes)
+        SortedDictionary<string, string> SourceHashes, string SourceDirectory)
     {
         internal void RequireStable()
         {
             if (!Same(Hashes, BindingArtifactHashes(Artifacts.Values)))
                 throw new InvalidDataException("Deep-check artifact changed");
-            foreach (var (path, hash) in SourceHashes)
-                if (!File.Exists(path) || Sha(path) != hash)
-                    throw new InvalidDataException("Deep-check source changed: " + path);
+            if (!Directory.Exists(SourceDirectory) || !Same(SourceHashes, BindingSourceHashes(SourceDirectory)))
+                throw new InvalidDataException("Deep-check source changed: " + SourceDirectory);
         }
 
         internal void RequireAudited(AuditedOleans audited)
@@ -49,6 +48,11 @@ partial class Program
             foreach (var (module, path) in Artifacts) RequireAuditedModule(audited, module, path);
         }
     }
+
+    /// <summary>The exact generated source inventory in the contribution's owned directory.</summary>
+    static SortedDictionary<string, string> BindingSourceHashes(string directory) =>
+        HashFiles(Directory.EnumerateFiles(directory, "*.lean", SearchOption.AllDirectories)
+            .Select(path => (path, path)));
 
     /// <summary>Hashes the exact compiled module families, enumerating each containing directory once.</summary>
     static SortedDictionary<string, string> BindingArtifactHashes(IEnumerable<string> artifacts)
@@ -79,14 +83,14 @@ partial class Program
 
     /// <summary>Builds deep modules against the caller's existing extraction in its verification session.</summary>
     DeepSessionContribution BuildDeepSession(string session, string leanPath, string extractedOlean,
-        ExtractionIdentity identity, DeepCheckInputs inputs)
+        ExtractionIdentity identity, IReadOnlyList<DeepCheckInputs.Pin> matchedPins)
     {
         session = Path.GetFullPath(session);
         extractedOlean = Path.GetFullPath(extractedOlean);
         if (!File.Exists(extractedOlean)) throw new FileNotFoundException("Missing extraction module", extractedOlean);
         var extractedHashes = BindingArtifactHashes([extractedOlean]);
         Dictionary<string, byte[]> bytes = new(StringComparer.Ordinal);
-        var pins = inputs.MatchPins(identity.Root).Select(pin =>
+        var pins = matchedPins.Select(pin =>
         {
             if (!bytes.TryGetValue(pin.Image.Digest, out var snapshot))
                 bytes.Add(pin.Image.Digest, snapshot = pin.Image.Bytes.ToArray());
@@ -100,6 +104,7 @@ partial class Program
             throw new InvalidOperationException("Deep-check modules already exist in the session: " + directory);
         Directory.CreateDirectory(directory);
         WriteBindingSources(plan);
+        var sources = BindingSourceHashes(directory);
         var failures = BuildBindingModules(plan, leanPath, buildExtracted: false);
         if (failures.Count != 0)
             throw new InvalidOperationException("Deep-check module build failed: " +
@@ -107,18 +112,16 @@ partial class Program
         var requests = BindingRequests(plan);
         string[] modules = [.. requests.Select(request => request.Module).Distinct(StringComparer.Ordinal)];
         SortedDictionary<string, string> artifacts = new(StringComparer.Ordinal) { ["Extracted"] = extractedOlean };
-        SortedDictionary<string, string> sources = new(StringComparer.Ordinal);
         foreach (var module in modules.Where(module => module != "Extracted"))
         {
             var source = ModuleSource(session, module);
             var artifact = Path.ChangeExtension(source, ".olean");
             artifacts.Add(module, artifact);
-            sources.Add(source, Sha(source));
         }
         if (!Same(extractedHashes, BindingArtifactHashes([extractedOlean])))
             throw new InvalidDataException("Deep-check artifact changed: " + extractedOlean);
         DeepSessionContribution contribution = new(modules, requests, artifacts,
-            BindingArtifactHashes(artifacts.Values), sources);
+            BindingArtifactHashes(artifacts.Values), sources, directory);
         contribution.RequireStable();
         return contribution;
     }
@@ -131,6 +134,41 @@ partial class Program
 
     sealed record BindingReport(string Extraction, string GeneratedSha256, BindingImagePin[] Images,
         BindingItem[] Items, string[] Axioms, string SourcesKey, string Toolchain, string LeanVersion);
+
+    /// <summary>The facts established by a complete, stable joint deep audit.</summary>
+    static BindingSection DeepBindingSection(DeepCheckInputs inputs, IReadOnlyList<DeepCheckInputs.Pin> pins,
+        StatementSources sources)
+    {
+        var pinnedDigests = pins.Select(pin => pin.Image.Digest).ToHashSet(StringComparer.Ordinal);
+        ImageResult[] images =
+        [
+            .. pins.Select(pin => new ImageResult(pin.Identity, pin.Image.Digest, ImageRole.Pinned,
+                BindingStatus.Reconfirmed, "BindingAudit.I" + pin.Image.Digest + ".digest", null)),
+            .. inputs.Images.Where(image => !pinnedDigests.Contains(image.Digest)).Select(image =>
+                new ImageResult(image.Path, image.Digest, ImageRole.Unused, BindingStatus.NotCovered, null,
+                    "no extraction pin or checked binding claim names this image"))
+        ];
+        BindingFactResult[] facts = [.. Enum.GetValues<BindingFact>().Select(fact =>
+            fact == BindingFact.BodyBytes
+                ? new BindingFactResult(fact, BindingStatus.Reconfirmed, "BindingAudit.bodies", null)
+                : new BindingFactResult(fact, BindingStatus.NotCovered, null, fact switch
+                {
+                    BindingFact.MetadataRows =>
+                        "no checked theorem binds the carried metadata rows and heap entries to the pinned images",
+                    BindingFact.PlatformTypeKinds => "no check reads platform type kinds from an image",
+                    BindingFact.EnumUnderlyingTypes => "no check reads platform enum underlying types from an image",
+                    BindingFact.ValueTupleFieldOrder => "no check reads platform tuple field order from an image",
+                    BindingFact.ObjectFields => "no check reads System.Object fields from an image",
+                    BindingFact.LayoutContent => "no check reads field offsets, sizes or attributes from the image",
+                    BindingFact.DispatchCatalogs => "no check reads the types of an image",
+                    BindingFact.StaticData => "no check reads static data from the image",
+                    BindingFact.GenericConstraints => "no check reads constraints from the image",
+                    BindingFact.PublicKeyTokens => "no check compares a reference's token with the key of its image",
+                    BindingFact.ImportIdentities => "no check recomputes an import identity from its image",
+                    _ => throw new InvalidOperationException("Missing binding fact result: " + fact)
+                }))];
+        return new(BindingMode.Deep, new(inputs.Path, inputs.Digest), sources, images, facts);
+    }
 
     const string Reconfirmed = "reconfirmed";
     const string Matched = "matches the pinned digest";
@@ -167,7 +205,7 @@ partial class Program
     static readonly (string Id, string Title, string Reason)[] UncoveredBindingFacts =
     [
         ("metadata-rows", "Copied metadata rows and heap entries",
-            "the extraction's evidence carries no copied metadata rows or heap entries to check"),
+            "no checked theorem binds the carried metadata rows and heap entries to the pinned images"),
         ("static-data", "Initial values of static data", "no check reads static data from the image"),
         ("layouts", "Type layouts", "no check reads field offsets, sizes or attributes from the image"),
         ("key-tokens", "Public key tokens of referenced assemblies",
@@ -314,7 +352,8 @@ partial class Program
 
     /// <summary>The exact library and session artifacts certified for the strict binding sources.</summary>
     sealed record BindingLibraryPreparation(string Library, string LibraryKey, string Toolchain,
-        SortedDictionary<string, string> BaseArtifacts, SortedDictionary<string, string> SessionArtifacts);
+        SortedDictionary<string, string> BaseArtifacts, SortedDictionary<string, string> SessionArtifacts,
+        SortedDictionary<string, string> CertifiedArtifacts);
 
     /// <summary>
     /// The session package with the strict binding library built on the certified library and kernel-replayed, once
@@ -347,7 +386,9 @@ partial class Program
         {
             if (bindingSession != session || prepared.Library != library || prepared.LibraryKey != libraryKey ||
                 prepared.Toolchain != toolchain || bindingSourcesKey != BindingSourcesKey(session) ||
-                !Same(prepared.BaseArtifacts, beforeBase) || !Same(prepared.SessionArtifacts, beforeSession))
+                !Same(prepared.BaseArtifacts, beforeBase) ||
+                !BindingArtifactsPreserved(prepared.SessionArtifacts, beforeSession) ||
+                !BindingArtifactsPreserved(prepared.CertifiedArtifacts, current))
                 throw new InvalidOperationException("The prepared StrictBinding library changed");
             return;
         }
@@ -376,7 +417,8 @@ partial class Program
         bindingSession = session;
         bindingSourcesKey = sourcesKey;
         bindingLeanVersion = leanVersion;
-        bindingPreparation = new(library, libraryKey, toolchain, afterBase, afterSession);
+        bindingPreparation = new(library, libraryKey, toolchain, afterBase, afterSession,
+            new(current, StringComparer.Ordinal));
     }
 
     /// <summary>Existing module families retain exactly their artifacts; additional families are permitted.</summary>

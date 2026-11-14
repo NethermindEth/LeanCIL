@@ -2,6 +2,8 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BindingImage.cs
 #:include StrictBindingFacts.cs
 #:include MultiAssemblyFixture.cs

@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // The outcome proofs verify against the compiled build; an off-by-one threshold or a different
 // exception type must fail them and provably violate the callee's contract.

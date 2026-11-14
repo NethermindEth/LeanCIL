@@ -365,7 +365,7 @@ Valid: strict binding audit of /work/artifacts/Add
   Image Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: SHA-256 a9351b77...abe4 stated
   SHA-256 digest of Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: reconfirmed (BindingAudit.Ia9351b77...abe4.digest)
   PE container and method body locations: reconfirmed (BindingAudit.bodies)
-  Copied metadata rows and heap entries: not covered (the extraction's evidence carries no copied metadata rows or heap entries to check)
+  Copied metadata rows and heap entries: not covered (no checked theorem binds the carried metadata rows and heap entries to the pinned images)
   Initial values of static data: not covered (no check reads static data from the image)
   Type layouts: not covered (no check reads field offsets, sizes or attributes from the image)
   Public key tokens of referenced assemblies: not covered (no check compares a reference's token with the key of its image)

@@ -166,7 +166,8 @@ File.WriteAllText(proofSource, """
     """);
 Compile(proofSource);
 File.WriteAllBytes(image, [0]);
-var contribution = verification.BuildDeepSession(session, search, extractedOlean, identity, inputs);
+var contribution = verification.BuildDeepSession(session, search, extractedOlean, identity,
+    inputs.MatchPins(identity.Root));
 if (File.Exists(extractedSource)) throw new InvalidOperationException("Deep checks copied extraction source");
 if (!contribution.Modules.Contains("BindingAudit.I" + digest))
     throw new InvalidOperationException("Image module does not use the complete digest");

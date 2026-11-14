@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // One proof file, unedited, must verify against two builds of a method with two loops and
 // two calls to one helper; the second inserts a statement before the first loop.

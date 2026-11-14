@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // PDB names and locations only locate: extraction is byte-identical without a PDB, a proof
 // naming locals by scope survives an inserted local, and diagnostics gain `file:line:column`.

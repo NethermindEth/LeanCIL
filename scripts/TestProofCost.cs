@@ -3,6 +3,9 @@
 #:include ProofCostReport.cs
 #:include CertificateCases.cs
 #:include Verification.cs
+#:include BindingAudit.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 #:include CertifiedLibraryDonor.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationGroupRunner.cs

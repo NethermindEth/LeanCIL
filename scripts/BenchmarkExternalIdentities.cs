@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include BindingAudit.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 #:include ../Extractor/ExternalIdentityEvidence.cs
 
 using System.Diagnostics;

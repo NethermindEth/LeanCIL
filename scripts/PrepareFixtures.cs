@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
+#:include BindingAudit.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 
 using System.Runtime.InteropServices;
 using System.Text.Json;

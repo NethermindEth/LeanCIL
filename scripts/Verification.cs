@@ -3773,9 +3773,16 @@ partial class Program : IDisposable
     static void RequireOnlyAdded(SortedDictionary<string, string> bound, SortedDictionary<string, string> built,
         params string[] modules)
     {
+        var permitted = modules.ToHashSet(StringComparer.Ordinal);
+        bool Permitted(string artifact)
+        {
+            var marker = artifact.IndexOf(".olean", StringComparison.Ordinal);
+            if (marker < 0) return false;
+            var end = marker + ".olean".Length;
+            return (end == artifact.Length || artifact[end] == '.') && permitted.Contains(artifact[..marker]);
+        }
         if (bound.Any(pair => !built.TryGetValue(pair.Key, out var hash) || hash != pair.Value) ||
-            built.Keys.Any(name => !bound.ContainsKey(name) &&
-                !modules.Any(module => name.StartsWith(module + ".olean", StringComparison.Ordinal))))
+            built.Keys.Any(name => !bound.ContainsKey(name) && !Permitted(name)))
             throw new InvalidOperationException("Compiled artifacts changed during verification");
     }
 
@@ -4044,7 +4051,7 @@ partial class Program : IDisposable
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
-        string? settings = null, Action<string>? stage = null)
+        string? settings = null, Action<string>? stage = null, DeepCheckInputs? deepChecks = null)
     {
         assembly = Path.GetFullPath(assembly);
         proof = Path.GetFullPath(proof);
@@ -4057,7 +4064,7 @@ partial class Program : IDisposable
 
         var reportPath = Path.Combine(output, "verified.json");
 
-        if (check)
+        if (check && deepChecks is null)
         {
             var old = ReadCertificate(File.ReadAllText(reportPath), BindingMode.Default, out var problem) ??
                 throw new InvalidOperationException("Stale verification report: " + problem);
@@ -4099,6 +4106,7 @@ partial class Program : IDisposable
         if (before["proof:" + proof] != proofSourceHash)
             throw new InvalidOperationException("Proof inputs changed before their source snapshot");
         ExtractionIdentity extraction = ExtractionIdentity.Read(output);
+        var matchedPins = deepChecks?.MatchPins(extraction.Root);
         referenceOnlyAuthoring = ReferenceOnlyImports(extraction);
         string[] selected = SelectionModules.Selected(
             SourceImport().Matches(proofSource).Select(import => import.Groups[1].Value), extraction.Root, proof);
@@ -4115,6 +4123,7 @@ partial class Program : IDisposable
         stage?.Invoke("Lean library build");
         var closureRoots = ClosureRoots(proofSource, output, symbolsSource, extraction);
         var session = Library(before, closureRoots: closureRoots);
+        if (deepChecks is not null) PrepareBindingLibrary(session);
         RequireReplayedImports(closureRoots ?? []);
         HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
         var support = Regex.Matches(proofSource, @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
@@ -4233,8 +4242,19 @@ partial class Program : IDisposable
                     File.Copy(path, Path.Combine(publication, Path.GetFileName(path)));
                 extractionPublication = publication;
             }
-            // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
             var bound = OleanHashes(fresh, session);
+            DeepSessionContribution? deep = null;
+            if (deepChecks is not null)
+            {
+                stage?.Invoke("deep checks");
+                deep = BuildDeepSession(fresh, leanPath, Path.Combine(fresh, "Extracted.olean"),
+                    extraction, matchedPins!);
+                var next = OleanHashes(fresh, session);
+                RequireOnlyAdded(bound, next,
+                    [.. deep.Modules.Where(module => module != "Extracted").Select(module => module.Replace('.', '/'))]);
+                bound = next;
+            }
+            // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
             // A keyed module only re-exports its plain one, which is what the audits below read.
             void BuildSelected(bool symbolsModules)
             {
@@ -4337,6 +4357,16 @@ partial class Program : IDisposable
             }
             RequireStagedProofSources();
             var built = OleanHashes(fresh, session);
+            void RequireDeepStable()
+            {
+                if (deep is null) return;
+                deep.RequireStable();
+                if (!Same(built, OleanHashes(fresh, session)) ||
+                    bindingSourcesKey != BindingSourcesKey(session) ||
+                    bindingPreparation!.Toolchain != BindingToolchainKey(session))
+                    throw new InvalidOperationException("Deep-check sources, toolchain or compiled artifacts changed");
+                RequireStagedProofSources();
+            }
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
             RequireReplayedImports(fresh, session);
@@ -4355,6 +4385,14 @@ partial class Program : IDisposable
                 .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
             AuditRequest[] proofAudits =
                 [ProofTheorem(theorem, extraction), ExtractionCertificate("Extracted.translation_valid")];
+            if (deep is not null)
+            {
+                if (deep.Requests.Any(request => request.Audit.name == theorem))
+                    throw new InvalidOperationException("Proof theorem collides with a deep-check request: " + theorem);
+                replay = [.. replay.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
+                auditModules = [.. auditModules.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
+                proofAudits = [proofAudits[0], .. deep.Requests.Select(request => request.Audit)];
+            }
             AuditedOleans? audited = null;
             // A caller that ends the run at the stage after the proof check must do so before the display starts.
             var replays = replay.Length > 0;
@@ -4405,12 +4443,14 @@ partial class Program : IDisposable
             if (HasContractImports(extraction))
                 RequireAuditedModule(audited, "ExtractedImports", Path.Combine(fresh, "ExtractedImports.olean"));
             RequireAuditedConstants(audited);
+            deep?.RequireAudited(audited);
+            var auditedTheorems = audited.theorems.ToDictionary(result => result.name, StringComparer.Ordinal);
+            foreach (var request in proofAudits) AuditedAxioms(auditedTheorems[request.name]);
             stage?.Invoke("extraction certificate audit");
-            AuditedAxioms(audited.theorems[1]);
-            extractionAudit = AuditText(audited.theorems[1]);
+            extractionAudit = AuditText(auditedTheorems["Extracted.translation_valid"]);
             stage?.Invoke("theorem audit");
-            axioms = AuditedAxioms(audited.theorems[0]);
-            audit = AuditText(audited.theorems[0]);
+            axioms = AuditedAxioms(auditedTheorems[theorem]);
+            audit = AuditText(auditedTheorems[theorem]);
             RequireOriginalProofSources();
             RequireStagedProofSources();
             RequireOriginalProofSources();
@@ -4419,7 +4459,8 @@ partial class Program : IDisposable
             // The display is published only here, after every check above, and never feeds a check.
             if (viewsStatement)
                 VerifiedStatement = statementCached ? ReadStatementView(statementView) : viewed;
-            if (!proofRestored)
+            RequireDeepStable();
+            void PublishProof()
             {
                 var publication = Path.Combine(fresh, "proof-cache");
                 Directory.CreateDirectory(publication);
@@ -4430,8 +4471,9 @@ partial class Program : IDisposable
                 RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
                 PublishSuccess(proofKey, publication);
             }
+            if (!proofRestored && deep is null) PublishProof();
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
-            if (extractionPublication is not null)
+            if (extractionPublication is not null && deep is null)
             {
                 PublishSuccess(extractedKey, extractionPublication);
             }
@@ -4447,12 +4489,16 @@ partial class Program : IDisposable
                 throw new InvalidOperationException("Inputs changed during verification");
             // An editor package requires the same library by path and may have built into it meanwhile.
             RequireUnchangedLibrary();
+            RequireDeepStable();
 
             var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
             RequireImplementationImports(extraction);
             var report = new Report(CertificateSchema, Sha(assembly), identityHash, theorem, axioms, audit, before,
-                BindingSection.Default, libraryKey, libraryBuild, extractionAudit, initializedTypes,
+                deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
+                    new(bindingSourcesKey!, File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(),
+                        Sha(LeanExecutable))),
+                libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction.Root),
                 opaqueStaticValues: OpaqueStaticValues(extraction.Root),
                 contractImports: ContractImportAssumptions(extraction.Root),
@@ -4461,6 +4507,10 @@ partial class Program : IDisposable
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
                 initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
+            RequireDeepStable();
+            if (!proofRestored && deep is not null) PublishProof();
+            if (deep is not null && extractionPublication is not null)
+                PublishSuccess(extractedKey, extractionPublication);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
             completesLibrary = libraryModules is not null;
 

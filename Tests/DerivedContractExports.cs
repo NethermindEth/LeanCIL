@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // A library proves exact internal contracts against its actual extraction and exports weaker public
 // contracts derived only by Holds.weaken; separately compiled callers verify from the sidecar alone.
