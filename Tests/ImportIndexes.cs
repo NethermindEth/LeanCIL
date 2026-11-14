@@ -178,7 +178,8 @@ try
             rejected.Message.StartsWith("Import implementation SHA-256 mismatch:", StringComparison.Ordinal)) { }
         if (failedReaders.Length != 1) throw new Exception("Failure did not follow a registered import.");
         Released(failedReaders);
-        Console.WriteLine("PASS import metadata release, child ownership, changed context and failed constructor cleanup");
+        Console.WriteLine("PASS import metadata release, child ownership, changed context " +
+            "and failed constructor cleanup");
     }
     using (var empty = (IDisposable)Activator.CreateInstance(resolutionType, hiddenInstance, null,
         [Array.CreateInstance(sourceType, 0)], null)!) { }
