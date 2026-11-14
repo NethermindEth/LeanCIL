@@ -31,7 +31,8 @@ internal static partial class ProofOutline
             ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
             StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.And
                 or StackOpcode.Or or StackOpcode.Xor or StackOpcode.Nop or
-                StackOpcode.ConvI8 or StackOpcode.ConvU8 or StackOpcode.ConvU4 or StackOpcode.ConvI4 };
+                StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.ConvU8 or StackOpcode.ConvU4 or
+                StackOpcode.ConvI4 };
 
         /// <summary>The proposition a conditional branch tests of its `bits`-bit operands' terms, and whether it
         /// is taken when the proposition holds; signed comparisons read the words through `toInt`. A literal
@@ -1464,7 +1465,7 @@ internal static partial class ProofOutline
                     stack.Add(new Number($"({a.Term} {symbol} {b.Term})", a.Width));
                 else stack.Add(new Unknown("arithmetic on a value the outline cannot name"));
             }
-            else if (op is StackOperation { Kind: StackOpcode.ConvI8 or StackOpcode.ConvU8 })
+            else if (op is StackOperation { Kind: StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.ConvU8 })
             {
                 var value = Pop();
                 stack.Add(value is Number { Literal: true, Width: 4 } literal ? literal with { Width = 8 }

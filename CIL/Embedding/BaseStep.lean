@@ -175,6 +175,9 @@ theorem base_relabel_conv_u1 : BaseRelabel (.conv_u1) := by base_relabel_unary
 theorem base_relabel_conv_u4 : BaseRelabel (.conv_u4) := by base_relabel_unary
 theorem base_relabel_conv_u8 : BaseRelabel (.conv_u8) := by base_relabel_unary
 theorem base_relabel_conv_u : BaseRelabel (.conv_u) := by base_relabel_unary
+/-- Relabeling `conv_i` maps its successor when the fallthrough pc is mapped consistently. -/
+theorem base_relabel_conv_i : BaseRelabel (.conv_i) := by base_relabel_unary
+#print axioms base_relabel_conv_i
 theorem base_relabel_not : BaseRelabel (.not) := by base_relabel_unary
 theorem base_relabel_add : BaseRelabel (.add) := by base_relabel_binary
 theorem base_relabel_sub : BaseRelabel (.sub) := by base_relabel_binary
@@ -237,6 +240,20 @@ theorem widenNativeOperand_relabel (r : Nat → Nat) (op : Instruction) :
 theorem nativePureBinary_relabel (r : Nat → Nat) (op : Instruction) :
     nativePureBinary (op.relabel r) = nativePureBinary op := by
   cases op <;> rfl
+
+/-- Relabeling keeps the flags of a division or remainder. -/
+theorem divideKind?_relabel (r : Nat → Nat) (op : Instruction) :
+    (op.relabel r).divideKind? = op.divideKind? := by
+  cases op <;> rfl
+
+#print axioms divideKind?_relabel
+
+/-- Relabeling keeps the flags of overflow-checked arithmetic. -/
+theorem checkedKind?_relabel (r : Nat → Nat) (op : Instruction) :
+    (op.relabel r).checkedKind? = op.checkedKind? := by
+  cases op <;> rfl
+
+#print axioms checkedKind?_relabel
 
 /-- Every value-only instruction a native-width wrapper may carry satisfies `BaseRelabel`. -/
 theorem base_relabel_of_nativePure (op : Instruction) (pure : nativePureBinary op = true) :

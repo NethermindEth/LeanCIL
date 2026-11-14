@@ -445,7 +445,8 @@ internal static partial class ProofOutline
                     stack.Add(new Word(left.Term is null || right.Term is null ? null
                         : $"({left.Term} {symbol} {right.Term})", left.Width));
                 }
-                else if (op is StackOperation { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 } widening)
+                else if (op is StackOperation { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI }
+                    widening)
                 {
                     if (Pop() is not Word { Width: 4 } word)
                         return Stop("a widening of a value the outline cannot name");

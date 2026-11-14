@@ -26,8 +26,17 @@ def truth : Value → Option Bool
     operand. Comparisons push `1` or `0` as an `i32`; shift counts are taken modulo the width. -/
 def binary (op : Instruction) (a b : Value) : Option Value :=
   match op, a, b with
-  | .divide signed remainder, x, y => (divideValues signed remainder x y).toOption
-  | .checkedArithmetic kind signed, x, y => (checkedValues kind signed x y).toOption
+  -- Division, remainder and overflow-checked arithmetic; a fault gives no value.
+  | .div, x, y => (divideValues true false x y).toOption
+  | .div_un, x, y => (divideValues false false x y).toOption
+  | .rem, x, y => (divideValues true true x y).toOption
+  | .rem_un, x, y => (divideValues false true x y).toOption
+  | .add_ovf, x, y => (checkedValues .add true x y).toOption
+  | .add_ovf_un, x, y => (checkedValues .add false x y).toOption
+  | .sub_ovf, x, y => (checkedValues .sub true x y).toOption
+  | .sub_ovf_un, x, y => (checkedValues .sub false x y).toOption
+  | .mul_ovf, x, y => (checkedValues .mul true x y).toOption
+  | .mul_ovf_un, x, y => (checkedValues .mul false x y).toOption
   -- Wrapping arithmetic and bitwise operations.
   | .add, .i64 x, .i64 y => some (.i64 (x + y))
   | .add, .i32 x, .i32 y => some (.i32 (x + y))
@@ -80,8 +89,9 @@ theorem binary_native_shift_count (operation : Instruction) (value : Value) (cou
     conversion truncates, then sign- or zero-extends back to `i32`. -/
 def unary (op : Instruction) (value : Value) : Option Value :=
   match op, value with
-  | .checkedConvert width signed unsignedInput, value =>
-    (convertInteger width signed unsignedInput value).toOption
+  | .conv_ovf target, value => (convertInteger target.width target.signed false value).toOption
+  | .conv_ovf_un target, value =>
+    (convertInteger target.width target.signed true value).toOption
   | .neg, .i32 w => some (.i32 (-w))
   | .neg, .i64 w => some (.i64 (-w))
   | .not, .i64 w => some (.i64 (~~~w))
@@ -102,6 +112,8 @@ def unary (op : Instruction) (value : Value) : Option Value :=
   -- To 64 bits.
   | .conv_i8, .i32 w => some (.i64 (w.signExtend 64))
   | .conv_i8, .i64 w => some (.i64 w)
+  | .conv_i, .i32 w => some (.i64 (w.signExtend 64))
+  | .conv_i, .i64 w => some (.i64 w)
   | .conv_u8, .i32 w => some (.i64 (w.zeroExtend 64))
   | .conv_u8, .i64 w => some (.i64 w)
   | .conv_u, .i32 w => some (.i64 (w.zeroExtend 64))
@@ -156,14 +168,17 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
     return .next (pc + 1) rest (write memory (.local frame i) (← narrowValue narrow v))
   -- Arithmetic, through `unary` and `binary`.
   | .neg, v :: rest | .not, v :: rest
-  | .checkedConvert _ _ _, v :: rest
+  | .conv_ovf _, v :: rest | .conv_ovf_un _, v :: rest
   | .conv_i1, v :: rest | .conv_i2, v :: rest | .conv_u2, v :: rest
   | .conv_i4, v :: rest | .conv_i8, v :: rest | .conv_u1, v :: rest
-  | .conv_u4, v :: rest | .conv_u8, v :: rest | .conv_u, v :: rest =>
+  | .conv_u4, v :: rest | .conv_u8, v :: rest | .conv_u, v :: rest | .conv_i, v :: rest =>
     return .next (pc + 1) ((← unary op v) :: rest) memory
   | .add, b :: a :: rest | .sub, b :: a :: rest
-  | .divide _ _, b :: a :: rest
-  | .checkedArithmetic _ _, b :: a :: rest
+  | .div, b :: a :: rest | .div_un, b :: a :: rest
+  | .rem, b :: a :: rest | .rem_un, b :: a :: rest
+  | .add_ovf, b :: a :: rest | .add_ovf_un, b :: a :: rest
+  | .sub_ovf, b :: a :: rest | .sub_ovf_un, b :: a :: rest
+  | .mul_ovf, b :: a :: rest | .mul_ovf_un, b :: a :: rest
   | .and, b :: a :: rest | .or, b :: a :: rest
   | .mul, b :: a :: rest | .xor, b :: a :: rest
   | .shl, b :: a :: rest | .shr, b :: a :: rest | .shr_un, b :: a :: rest

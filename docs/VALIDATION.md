@@ -102,9 +102,9 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `outcomes` | outcome contracts that name exactly when each exception is thrown |
 | `scaling` | compositional certificate for a six-method call graph and its consumer replay, and the header and per-method struct layout checks at a per-layout cost that does not grow with the table |
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
-| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, at a per-instruction cost that does not grow with the method, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, and type identity equality at a cost that does not grow with the name |
+| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, and the closed argument storage of those native-int locals, at a per-instruction cost that does not grow with the method, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, and type identity equality at a cost that does not grow with the name |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
-| `stepping` | full scalar, checked-memory, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth and hypotheses bodies with per-instruction heartbeat, proof-size and latency budgets |
+| `stepping` | full scalar, checked-memory, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses and faulting bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, and the strict binding library and audit |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches and self-admission |
@@ -174,7 +174,7 @@ dotnet run --file scripts/Test.cs -- --suite stepping
 ```
 
 The `stepping` suite generates explicit scalar, checked-memory, accumulate, locals, contract,
-loop, loop-facts, outcome, lemma, depth and hypotheses bodies and proves each end to end. The
+loop, loop-facts, outcome, lemma, depth, hypotheses and faulting bodies and proves each end to end. The
 scalar, memory, accumulate and locals bodies have 16, 64 and 256 instructions, and the accumulate
 body also 1,024. The memory bodies repeat an idempotent checked store and reload, so the
 operation facts stay constant as the instruction count grows. The accumulate, contract, loop,
@@ -186,7 +186,9 @@ lemma body by `cil_checked_steps` with a universe-polymorphic lemma among its fa
 bodies store a
 reference into each of eight locals of a literal frame per cycle. The depth bodies push 8, 32 and
 128 values and add them all. The hypotheses body is a 62-instruction accumulate body proved with 16,
-64 and 256 equations in scope. The suite uses the proof-cost measuring frontend, with three
+64 and 256 equations in scope. The faulting bodies have 17 and 62 instructions and repeat `div`,
+`rem`, `add.ovf` and `conv.ovf.i4` over the arguments, each advanced by a supplied fact that the
+operation does not fault. The suite uses the proof-cost measuring frontend, with three
 sequential proof compilations and a header-only baseline per scalar, memory, accumulate and locals
 body up to 256 instructions, and one compilation for every other body.
 

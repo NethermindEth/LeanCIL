@@ -472,26 +472,50 @@ def nativeDispatchContext (raw : RawMethod) : NativeDispatchContext := Id.run do
     if instruction.opcode != 65044 then previous := some instruction
   return ⟨signature, locals⟩
 
-/-- A native pointer is an input table view; only raw target-feeding integer locals are callable. -/
+/-- A native pointer is an input table view; only raw target-feeding integer locals, those
+    `pointer` holds, are callable. -/
 def nativeDispatchStorage (context : NativeDispatchContext) (type : TypeExpr)
-    (localIndex : Option Nat := none) : Option StorageType := do
+    (localIndex : Option Nat := none) (pointer : Nat → Bool := context.pointerLocals.contains) :
+    Option StorageType := do
   let signature ← context.signature
   if let .pointer element := type then
     if nativeDispatchInteger element then return .methodTable signature
-  if nativeDispatchInteger type && localIndex.any context.pointerLocals.contains then
+  if nativeDispatchInteger type && localIndex.any pointer then
     return .methodPointer signature
   none
 
-/-- Closed argument and local storage, including typed span views, and argument accesses. -/
-def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments := do
-  let context := nativeDispatchContext closed
+/-- Closed argument and local storage, including typed span views, and argument accesses, where
+    `pointer` holds the locals a `calli` consumes. -/
+def closedArgumentsWith (layouts : List RawLayout) (closed : RawMethod)
+    (context : NativeDispatchContext) (pointer : Nat → Bool) : Option RawArguments := do
   let parameters ← closed.parameters.mapM fun type =>
     nativeDispatchStorage context type <|> typeStorage layouts type
   let locals ← closed.locals.zipIdx.mapM fun (type, index) =>
-    nativeDispatchStorage context type (some index) <|> typeStorage layouts type
+    nativeDispatchStorage context type (some index) pointer <|> typeStorage layouts type
   let code ← closed.code.mapM argumentOperation
   let receiver := if closed.objectReceiver then StorageType.object else .reference
   return ⟨(if closed.hasThis then [receiver] else []) ++ parameters, locals, code⟩
+
+/-- Closed argument and local storage, including typed span views, and argument accesses, with
+    the locals a `calli` consumes read from a `Std.TreeSet` built once per body. -/
+def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments :=
+  let context := nativeDispatchContext closed
+  closedArgumentsWith layouts closed context
+    (Std.TreeSet.ofList context.pointerLocals compare).contains
+
+/-- Reading pointer locals from a set built once gives exactly the storage that scanning the
+    pointer local list at each local gives. -/
+theorem closedArguments_eq_list (layouts : List RawLayout) (closed : RawMethod) :
+    closedArguments layouts closed = closedArgumentsWith layouts closed
+      (nativeDispatchContext closed) (nativeDispatchContext closed).pointerLocals.contains := by
+  have pointer : (Std.TreeSet.ofList (nativeDispatchContext closed).pointerLocals
+      compare).contains = (nativeDispatchContext closed).pointerLocals.contains := by
+    funext index
+    rw [Std.TreeSet.contains_ofList]
+  dsimp only [closedArguments]
+  rw [pointer]
+
+#print axioms closedArguments_eq_list
 
 /-- `closed` is `original` instantiated at `arguments`, and `parameterInput` is the
     argument metadata derived from it. -/
