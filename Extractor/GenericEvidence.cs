@@ -212,16 +212,15 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         ? LayoutEvidence.Identity(modifier.ModifierType) + "!" + LayoutEvidence.Identity(modifier.ElementType)
         : LayoutEvidence.InterfaceIdentity(type);
 
+    static readonly string ValueTypeConstraint = TypeTests.RuntimeScope + "::System.ValueType";
+    static readonly string UnmanagedTypeConstraint = TypeTests.RuntimeScope +
+        "::System.Runtime.InteropServices.UnmanagedType!" + ValueTypeConstraint;
+
     static string Constraint(TypeReference type)
     {
         var identity = ConstraintType(type);
-        return identity switch
-        {
-            TypeTests.RuntimeScope + "::System.ValueType" => "Extraction.valueTypeConstraint",
-            TypeTests.RuntimeScope + "::System.Runtime.InteropServices.UnmanagedType!" +
-                TypeTests.RuntimeScope + "::System.ValueType" => "Extraction.unmanagedTypeConstraint",
-            _ => Quote(identity)
-        };
+        return identity == ValueTypeConstraint ? "Extraction.valueTypeConstraint" :
+            identity == UnmanagedTypeConstraint ? "Extraction.unmanagedTypeConstraint" : Quote(identity);
     }
 
     // A constraint naming generic parameters, such as `T : I<T>`, is closed per instantiation in Lean.

@@ -7,7 +7,7 @@ internal static class ValueTuples
 {
     internal static bool Is(TypeReference type) =>
         type is GenericInstanceType { ElementType.FullName: "System.ValueTuple`2", GenericArguments.Count: 2 } tuple &&
-        RuntimeModels.ExactScope(tuple.ElementType.Scope, "System.Runtime");
+        RuntimeModels.ExactScope(tuple.ElementType.Scope, PlatformAssemblies.SystemRuntime);
 
     // Item1 and Item2 with the instance's type arguments, checked against the resolved runtime definition.
     internal static MetadataValidation.InstanceField[] Fields(TypeReference type)

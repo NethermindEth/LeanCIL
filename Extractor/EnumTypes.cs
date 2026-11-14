@@ -59,14 +59,15 @@ internal static class EnumTypes
         if (!reference.IsValueType || type.HasGenericParameters || !type.IsSealed || type.HasInterfaces ||
             !type.IsAutoLayout ||
             type.BaseType is not { FullName: "System.Enum" } parent ||
-            !RuntimeModels.ExactScope(parent.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(parent.Scope, PlatformAssemblies.SystemRuntime) ||
             type.Module != reference.Module || type.Methods.Count != 0 ||
             fields.Length != 1 || fields[0].Name != "value__" ||
             !fields[0].IsSpecialName || !fields[0].IsRuntimeSpecialName ||
             (activeScope?.Count(type) ?? type.Module.GetTypes().Count(t => t.FullName == type.FullName)) != 1)
             throw new InvalidDataException($"Unsupported enum metadata: {reference.FullName}");
         var storage = fields[0].FieldType;
-        if (storage is TypeSpecification || !RuntimeModels.ExactScope(storage.Scope, "System.Runtime") ||
+        if (storage is TypeSpecification ||
+            !RuntimeModels.ExactScope(storage.Scope, PlatformAssemblies.SystemRuntime) ||
             storage.FullName is not ("System.SByte" or "System.Byte" or "System.Int16" or
             "System.UInt16" or "System.Int32" or "System.UInt32" or "System.Int64" or "System.UInt64"))
             throw new InvalidDataException($"Unsupported enum underlying type: {reference.FullName}");

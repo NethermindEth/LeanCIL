@@ -6,11 +6,6 @@ internal static class RuntimeModels
 {
     private static string Vector(int width, string element) => $"System.Runtime.Intrinsics.Vector{width}`1<{element}>";
 
-    private static readonly Version RuntimeAssemblyVersion = new(11, 0, 0, 0);
-    // The Open key signs System.Memory and System.Runtime.Intrinsics; the Microsoft key signs the rest.
-    private const string OpenKeyToken = "cc7b13ffcd2ddd51";
-    private const string MicrosoftKeyToken = "b03f5f7f11d50a3a";
-
     private static readonly int[] VectorWidths = [128, 256, 512];
     private static readonly string[] VectorElements =
     [
@@ -38,10 +33,9 @@ internal static class RuntimeModels
     private const string UInt64Pair = "System.ValueTuple`2<System.UInt64,System.UInt64>";
     private const string Unsafe = "System.Runtime.CompilerServices.Unsafe";
 
-    internal static bool ExactScope(IMetadataScope scope, string name) => scope is AssemblyNameReference assembly &&
-        assembly.Name == name && assembly.Version == RuntimeAssemblyVersion &&
-        string.IsNullOrEmpty(assembly.Culture) && Convert.ToHexString(assembly.PublicKeyToken).ToLowerInvariant() ==
-            (name is "System.Runtime.Intrinsics" or "System.Memory" ? OpenKeyToken : MicrosoftKeyToken);
+    /// <summary>Whether a scope is the row that names <paramref name="platform"/>, column for column.</summary>
+    internal static bool ExactScope(IMetadataScope scope, AssemblyName platform) =>
+        scope is AssemblyNameReference row && AssemblyName.Of(row) == platform;
 
     internal static bool SupportedType(TypeReference type)
     {
@@ -56,7 +50,8 @@ internal static class RuntimeModels
         VectorWidths.Any(width => VectorElements.Any(element => name == Vector(width, element)));
 
     internal static bool HasRuntimeValueTypeBase(TypeDefinition type) =>
-        type.BaseType is { FullName: "System.ValueType" } parent && ExactScope(parent.Scope, "System.Runtime");
+        type.BaseType is { FullName: "System.ValueType" } parent &&
+        ExactScope(parent.Scope, PlatformAssemblies.SystemRuntime);
 
     internal static void ValidateTypeIdentity(TypeReference type, ModuleDefinition module,
         string architecture = "scalar")
@@ -108,10 +103,11 @@ internal static class RuntimeModels
         "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1" or
         "System.Runtime.Intrinsics.Vector512`1" or "System.ValueTuple`2";
 
-    private static string DefiningAssembly(string name) =>
-        name is "System.Buffers.Binary.BinaryPrimitives" or "System.MemoryExtensions" ? "System.Memory" :
-        name.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal) ? "System.Runtime.Intrinsics" :
-        "System.Runtime";
+    private static AssemblyName DefiningAssembly(string name) =>
+        name is "System.Buffers.Binary.BinaryPrimitives" or "System.MemoryExtensions"
+            ? PlatformAssemblies.SystemMemory :
+        name.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal)
+            ? PlatformAssemblies.SystemRuntimeIntrinsics : PlatformAssemblies.SystemRuntime;
 
     internal static void ValidateSignature(MethodReference reference, string architecture = "scalar")
     {
@@ -132,7 +128,8 @@ internal static class RuntimeModels
         reference is { Name: ".ctor", HasThis: true, ExplicitThis: false, Parameters.Count: 0 } &&
         reference is not GenericInstanceMethod && reference.CallingConvention == MethodCallingConvention.Default &&
         reference.ReturnType.MetadataType == MetadataType.Void &&
-        reference.DeclaringType is { FullName: "System.Object" } owner && ExactScope(owner.Scope, "System.Runtime");
+        reference.DeclaringType is { FullName: "System.Object" } owner &&
+        ExactScope(owner.Scope, PlatformAssemblies.SystemRuntime);
 
     internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
     {
@@ -144,8 +141,8 @@ internal static class RuntimeModels
                  "CopyTo" or "TryCopyTo" or "get_IsEmpty" or "GetPinnableReference")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
-        if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" &&
-            !ExactScope(reference.DeclaringType.Scope, scope))
+        if (PlatformAssemblies.Claimed(reference.DeclaringType.Scope) is { } platform &&
+            !ExactScope(reference.DeclaringType.Scope, platform))
             throw new InvalidDataException(
                 $"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
         Operation? op = scope switch

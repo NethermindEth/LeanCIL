@@ -56,9 +56,10 @@ internal static class GenericStructs
                 if (DirectInterfaceConstraint(type, argument, definition.Module)) continue;
                 if (type is RequiredModifierType modifier &&
                     modifier.ModifierType.FullName == "System.Runtime.InteropServices.UnmanagedType" &&
-                    RuntimeModels.ExactScope(modifier.ModifierType.Scope, "System.Runtime"))
+                    RuntimeModels.ExactScope(modifier.ModifierType.Scope, PlatformAssemblies.SystemRuntime))
                     type = modifier.ElementType;
-                if (type.FullName != "System.ValueType" || !RuntimeModels.ExactScope(type.Scope, "System.Runtime"))
+                if (type.FullName != "System.ValueType" ||
+                    !RuntimeModels.ExactScope(type.Scope, PlatformAssemblies.SystemRuntime))
                     throw new InvalidDataException("Unsupported generic struct constraint type");
             }
         }
