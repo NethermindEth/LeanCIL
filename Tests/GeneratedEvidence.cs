@@ -5,6 +5,23 @@ using System.Text.RegularExpressions;
 
 partial class Program
 {
+    // Heartbeats count the elaborator's and the kernel's work on one thread, so they repeat exactly where compile
+    // time varies with the machine's load. Returns the count `text` costs, imports included, and Lean's output.
+    static (long Heartbeats, string Output) CountHeartbeats(string path, string text)
+    {
+        File.WriteAllText(path, text + "\n#eval show IO Nat from IO.getNumHeartbeats\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("A measured file depends on sorryAx: " + path);
+        var count = HeartbeatCount().Match(output);
+        if (!count.Success) throw new InvalidOperationException("Missing heartbeat count:\n" + output);
+        return (long.Parse(count.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), output);
+    }
+
+    // The line `#eval show IO Nat from IO.getNumHeartbeats` prints.
+    [GeneratedRegex(@"(?m)^([0-9]+)\r?$")]
+    private static partial Regex HeartbeatCount();
+
     /// <summary>One instruction of an extracted method, as its definition in `Extracted.lean` writes it.</summary>
     sealed record ExtractedInstruction(int Method, int Pc, string Op);
 
