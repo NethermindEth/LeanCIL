@@ -8,13 +8,13 @@ partial class Program
 
         internal string[] Cli { get; } = ["dotnet", ExtractorPath];
 
-        /// <summary>Writes a Release net10.0 project and returns its directory.</summary>
+        /// <summary>Writes a Release net11.0 project and returns its directory.</summary>
         internal string Project(string name, string assembly, string properties = "", string references = "")
         {
             string directory = Path.Combine(Root, name);
             Directory.CreateDirectory(directory);
             File.WriteAllText(Path.Combine(directory, name + ".csproj"), $"""
-                <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>
+                <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
                 <AssemblyName>{assembly}</AssemblyName><Optimize>true</Optimize>{properties}</PropertyGroup>
                 <ItemGroup>{references}</ItemGroup></Project>
                 """);

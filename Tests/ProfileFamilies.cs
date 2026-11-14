@@ -12,7 +12,7 @@ var package = Path.Combine(root, "Package");
 Directory.CreateDirectory(assemblyRoot);
 Directory.CreateDirectory(package);
 File.WriteAllText(Path.Combine(assemblyRoot, "Family.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
 <Optimize>true</Optimize></PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(assemblyRoot, "Family.cs"), """
@@ -128,7 +128,7 @@ var callerPackage = Path.Combine(root, "Caller");
 Directory.CreateDirectory(app);
 Directory.CreateDirectory(callerPackage);
 File.WriteAllText(Path.Combine(app, "App.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
 <Optimize>true</Optimize></PropertyGroup><ItemGroup>
 <ProjectReference Include="../Assembly/Family.csproj" /></ItemGroup></Project>
 """);

@@ -133,7 +133,7 @@ internal static class ImportResolver
         {
             if (!selected.TryGetValue(name, out RuntimeAsset? asset))
                 throw new InvalidDataException(
-                    "Requested import is not a net10.0 asset in the supplied manifests: " + name);
+                    "Requested import is not a net11.0 asset in the supplied manifests: " + name);
             resolved.Add(ResolveImport(name, asset, applicationDirectory, roots, Read));
         }
         return (rid, fallback ?? [], resolved.ToArray());

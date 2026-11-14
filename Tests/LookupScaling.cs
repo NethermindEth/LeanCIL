@@ -74,9 +74,9 @@ Dictionary<string, long> TypeDecisionCosts()
     File.WriteAllText(path, """
         import CIL.Identity
         open CIL Lean Elab Command
-        /-- The core library assembly of .NET 10. -/
+        /-- The core library assembly of .NET 11. -/
         def runtime : AssemblyName :=
-          { name := name!"System.Runtime", version := { major := 10, minor := 0, build := 0, revision := 0 },
+          { name := name!"System.Runtime", version := { major := 11, minor := 0, build := 0, revision := 0 },
             culture := name!"", publicKeyToken := some 0xb03f5f7f11d50a3a }
         /-- Logs what `decide +kernel` costs beyond elaborating the statement. -/
         elab "#kernel_cost " label:str statement:term : command => do
@@ -112,7 +112,7 @@ var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Lookups.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
 </Project>
 """);
 string Method(string name, int statements) =>

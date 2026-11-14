@@ -5,7 +5,9 @@ import CIL.Safety.SymbolicExecution
 namespace Tests.ExtractionGenerics
 open CIL CIL.Extraction
 
-def word : TypeExpr := .atom "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" "System.UInt64"
+def word : TypeExpr := .atom
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+  "System.UInt64"
 def raw : RawMethod := {
   token := 1, owner := "Test::Owner", hasThis := false, explicitThis := false,
   callingConvention := 16, attributes := 0, implementation := 0,

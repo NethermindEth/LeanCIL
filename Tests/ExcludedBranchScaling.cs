@@ -11,7 +11,8 @@ var directory = At("artifacts/ExcludedBranchScaling");
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Excluded.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<Optimize>true</Optimize></PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(source, "Excluded.cs"),
     "public static class Excluded { public static ulong Accumulate(ulong x, ulong y) { " +

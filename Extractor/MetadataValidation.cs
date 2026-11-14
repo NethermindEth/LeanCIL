@@ -436,6 +436,11 @@ internal static class MetadataValidation
 
     const string OpenGenericMethod = "Unsupported method metadata: open generic method";
     const string OpenGenericMember = "Unsupported method metadata: member of an open generic type";
+    // The runtime-async implementation flag, absent from Cecil 0.11.6: such a body returns the awaited result and
+    // the runtime builds the declared task, so the translated body would not compute the method's return value.
+    const MethodImplAttributes RuntimeAsync = (MethodImplAttributes)0x2000;
+    const string RuntimeAsyncMethod = "Unsupported method metadata: runtime-async method\n" +
+        "  Its body returns the awaited result, not the declared task.";
 
     // With `blocked`, failures after the selector resolves, the entry's shape included, are recorded
     // and the walk continues past them; without it, the first failure throws. Only profile-reachable
@@ -453,7 +458,7 @@ internal static class MetadataValidation
         string? Attribute(string name) => module.Assembly.CustomAttributes
             .SingleOrDefault(a => a.AttributeType.FullName == name)?.ConstructorArguments.Single().Value as string;
         if ((module.Assembly.Name.FullName != assemblyIdentity && module.Assembly.Name.Name != assemblyIdentity) ||
-            Attribute("System.Runtime.Versioning.TargetFrameworkAttribute") != ".NETCoreApp,Version=v10.0" ||
+            Attribute("System.Runtime.Versioning.TargetFrameworkAttribute") != ".NETCoreApp,Version=v11.0" ||
             // MSBuild configuration names are case-insensitive: `-c release` stamps "release".
             !string.Equals(Attribute("System.Reflection.AssemblyConfigurationAttribute"), "Release",
                 StringComparison.OrdinalIgnoreCase) ||
@@ -552,6 +557,8 @@ internal static class MetadataValidation
                     (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
                         MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0)
                     throw new InvalidDataException("Unsupported method metadata: no managed IL body");
+                if ((method.ImplAttributes & RuntimeAsync) != 0)
+                    throw new InvalidDataException(RuntimeAsyncMethod);
             }, named: true)) return;
             // Every other rejection is its own blocker; the body and callees are still analysed.
             void Reject(Func<bool> rejected, string reason) => Check(method, null, () =>

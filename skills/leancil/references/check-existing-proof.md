@@ -26,7 +26,7 @@ Read this when the user has a `.lean` file that imports `Extracted` and states a
 
 ```sh
 dotnet build path/to/Lib.csproj -c Release
-leancil extract path/to/bin/Release/net10.0/Lib.dll 'Type::Method(ulong,ulong)' artifacts/Method [profile]
+leancil extract path/to/bin/Release/net11.0/Lib.dll 'Type::Method(ulong,ulong)' artifacts/Method [profile]
 leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.correctness
 ```
 

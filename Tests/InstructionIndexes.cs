@@ -96,7 +96,7 @@ if (Translate(choose) != ".switch [2, 2]") throw new Exception("Switch target or
 if (Link(choose) is not null) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
 var runtimeScope = AssemblyNameReference.Parse(
-    "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
+    "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
 module.TypeSystem.UInt64.Scope = runtimeScope;
 var valueType = new TypeReference("System", "ValueType", module, runtimeScope);
 var inner = new TypeDefinition("Fixture", "ZInner", Mono.Cecil.TypeAttributes.Public |
@@ -167,7 +167,7 @@ if (!ReferenceEquals(contextFields.Invoke(freshContext, [inner]), contextFields.
     (int)contextFieldIndex.Invoke(freshContext, [inner, duplicateField, false])! != -1)
     throw new Exception("Field snapshots lost field identity or instance order");
 var intrinsicsScope = AssemblyNameReference.Parse(
-    "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
+    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
 var vector = new GenericInstanceType(new TypeReference("System.Runtime.Intrinsics", "Vector256`1",
     module, intrinsicsScope, true));
 vector.GenericArguments.Add(module.TypeSystem.UInt64);

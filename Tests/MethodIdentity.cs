@@ -18,7 +18,8 @@ string Build(string name, string body)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Identity.csproj"), """
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Identity.cs"), "namespace Identity; public static class Calls { " + body + " }");
     Run(["dotnet", "build", Path.Combine(source, "Identity.csproj"), "-c", "Release"]);

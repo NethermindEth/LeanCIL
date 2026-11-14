@@ -362,7 +362,7 @@ private def genericFieldType (table : LayoutTable) : TypeExpr → Option FieldTy
     | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
     | _ => none
   | .apply (.constructor scope name) (.atom elementScope element) =>
-    if scope != "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, " ++
+    if scope != "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, " ++
         "PublicKeyToken=cc7b13ffcd2ddd51" || elementScope != runtimeScope ||
         element ∉ ["System.Byte", "System.Int32", "System.UInt32",
           "System.Int64", "System.UInt64"] then none else
@@ -386,7 +386,7 @@ def genericOwnerIdentity (owner : TypeExpr) (arguments : List TypeExpr) : Option
 def valueTypeConstraint : String :=
   { toByteArray := ⟨#[
       83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44, 32,
-      86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46, 48,
+      86, 101, 114, 115, 105, 111, 110, 61, 49, 49, 46, 48, 46, 48, 46, 48,
       44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97,
       108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101,
       110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48, 97,
@@ -403,7 +403,7 @@ theorem valueTypeConstraint_eq :
 def unmanagedTypeConstraint : String :=
   { toByteArray := ⟨#[
       83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44, 32,
-      86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46, 48,
+      86, 101, 114, 115, 105, 111, 110, 61, 49, 49, 46, 48, 46, 48, 46, 48,
       44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114, 97,
       108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107, 101,
       110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48, 97,
@@ -411,7 +411,7 @@ def unmanagedTypeConstraint : String :=
       109, 101, 46, 73, 110, 116, 101, 114, 111, 112, 83, 101, 114, 118, 105, 99,
       101, 115, 46, 85, 110, 109, 97, 110, 97, 103, 101, 100, 84, 121, 112, 101,
       33, 83, 121, 115, 116, 101, 109, 46, 82, 117, 110, 116, 105, 109, 101, 44,
-      32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 48, 46, 48, 46, 48, 46,
+      32, 86, 101, 114, 115, 105, 111, 110, 61, 49, 49, 46, 48, 46, 48, 46,
       48, 44, 32, 67, 117, 108, 116, 117, 114, 101, 61, 110, 101, 117, 116, 114,
       97, 108, 44, 32, 80, 117, 98, 108, 105, 99, 75, 101, 121, 84, 111, 107,
       101, 110, 61, 98, 48, 51, 102, 53, 102, 55, 102, 49, 49, 100, 53, 48,

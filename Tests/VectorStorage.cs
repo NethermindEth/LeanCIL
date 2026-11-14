@@ -18,7 +18,8 @@ var root = At("artifacts/VectorStorage");
 var source = Path.Combine(root, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Storage.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AllowUnsafeBlocks>true</AllowUnsafeBlocks><Optimize>true</Optimize></PropertyGroup></Project>
 """);
 var elements = new[] { ("byte", typeof(byte)), ("int", typeof(int)), ("uint", typeof(uint)),
     ("long", typeof(long)), ("ulong", typeof(ulong)) };
@@ -303,7 +304,7 @@ foreach (var (name, changed) in new[]
 {
     ("portable-operation", portableBaseline.Replace(".vector (.band 128)", ".vector (.bor 128)")),
     ("portable-element", RawOnly(portableBaseline, text => text.Replace("System.Byte", "System.Int64"))),
-    ("portable-scope", RawOnly(portableBaseline, text => text.Replace("Version=10.0.0.0", "Version=9.0.0.0"))),
+    ("portable-scope", RawOnly(portableBaseline, text => text.Replace("Version=11.0.0.0", "Version=9.0.0.0"))),
     ("portable-width", portableBaseline.Replace(".vector (.band 128)", ".vector (.band 256)")),
     ("portable-arity", portableBaseline.Replace(".intrinsic (.vector (.band 128)) 2",
         ".intrinsic (.vector (.band 128)) 1")),
