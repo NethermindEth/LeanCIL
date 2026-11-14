@@ -3,6 +3,9 @@
 #:package Mono.Cecil
 #:include ../Extractor/MetadataFieldPrefix.cs
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Reflection;
 using Mono.Cecil;

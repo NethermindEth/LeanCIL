@@ -3,6 +3,9 @@
 #:include ConsumerTraceDirectory.cs
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ImportReviewRegressions.cs
 #:include StagedBundleMutation.cs
 

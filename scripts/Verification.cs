@@ -40,6 +40,8 @@ partial class Program : IDisposable
     string? publishedLibrary;
     /// <summary>Length and write time of each file of a library read in place, as it was when opened.</summary>
     SortedDictionary<string, string>? libraryStamps;
+    /// <summary>The independently retained manifest of the authenticated or kernel-replayed library.</summary>
+    SortedDictionary<string, string>? libraryManifest;
     /// <summary>
     /// Every module of the open library when it is a closure entry, which holds only those; null for the
     /// whole library. <see cref="libraryKey"/> then names exactly this list.
@@ -47,6 +49,7 @@ partial class Program : IDisposable
     string[]? libraryModules;
     /// <summary>A report was written against a closure entry, so the whole library is still to be built.</summary>
     bool completesLibrary;
+    StandaloneCachePromotion? standaloneCachePromotion;
     /// <summary>The use locks of the cache entries this process reads in place, held until it is disposed.</summary>
     readonly List<FileStream> entryUses = [];
     /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
@@ -1030,6 +1033,7 @@ partial class Program : IDisposable
     string? incrementalLibrary { get; init; }
     string? incrementalDigest { get; init; }
     string? libraryKey;
+    string? fullLibraryKey;
     string? libraryBuild;
 
     // This descriptor is distributed inside the installed CLI, not read from the downloaded archive.
@@ -1201,6 +1205,13 @@ partial class Program : IDisposable
                 libraryStamps.GetValueOrDefault(name) != current.GetValueOrDefault(name)) is { } changed)
             throw new InvalidOperationException("The certified library changed on disk during verification: " +
                 Path.Combine(library!, changed));
+    }
+
+    /// <summary>Requires every library file to retain its certified bytes, including in a private build.</summary>
+    void RequireCertifiedLibraryContents()
+    {
+        if (libraryManifest is null || !Same(libraryManifest, CacheFiles(library!)))
+            throw new InvalidOperationException("The certified library contents changed during verification");
     }
 
     // The pinned manifest binds the source snapshot before copying. Hash exactly the bytes
@@ -1949,6 +1960,7 @@ partial class Program : IDisposable
         }
 
         (libraryKey, var sources) = LibraryIdentity(common);
+        fullLibraryKey = libraryKey;
         static bool Set(string variable) => string.Equals(Environment.GetEnvironmentVariable(variable), "true",
             StringComparison.OrdinalIgnoreCase);
         var fresh = freshLibrary || !editorLibrary && (Set("CI") || Set("GITHUB_ACTIONS"));
@@ -2118,6 +2130,7 @@ partial class Program : IDisposable
         }
         // Lake rebuilds a module it finds stale into the library; no build of this process may have done so.
         libraryStamps = ownsLibrary ? null : libraryStamps ?? FileStamps(library);
+        libraryManifest = new(manifest, StringComparer.Ordinal);
         baseModules = new(manifest.Where(pair => pair.Key.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal))
             .ToDictionary(pair => pair.Key[compiledPrefix.Length..], pair => pair.Value), StringComparer.Ordinal);
@@ -3773,9 +3786,16 @@ partial class Program : IDisposable
     static void RequireOnlyAdded(SortedDictionary<string, string> bound, SortedDictionary<string, string> built,
         params string[] modules)
     {
+        var permitted = modules.ToHashSet(StringComparer.Ordinal);
+        bool Permitted(string artifact)
+        {
+            var marker = artifact.IndexOf(".olean", StringComparison.Ordinal);
+            if (marker < 0) return false;
+            var end = marker + ".olean".Length;
+            return (end == artifact.Length || artifact[end] == '.') && permitted.Contains(artifact[..marker]);
+        }
         if (bound.Any(pair => !built.TryGetValue(pair.Key, out var hash) || hash != pair.Value) ||
-            built.Keys.Any(name => !bound.ContainsKey(name) &&
-                !modules.Any(module => name.StartsWith(module + ".olean", StringComparison.Ordinal))))
+            built.Keys.Any(name => !bound.ContainsKey(name) && !Permitted(name)))
             throw new InvalidOperationException("Compiled artifacts changed during verification");
     }
 
@@ -4044,7 +4064,7 @@ partial class Program : IDisposable
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
-        string? settings = null, Action<string>? stage = null)
+        string? settings = null, Action<string>? stage = null, DeepCheckInputs? deepChecks = null)
     {
         assembly = Path.GetFullPath(assembly);
         proof = Path.GetFullPath(proof);
@@ -4057,7 +4077,7 @@ partial class Program : IDisposable
 
         var reportPath = Path.Combine(output, "verified.json");
 
-        if (check)
+        if (check && deepChecks is null)
         {
             var old = ReadCertificate(File.ReadAllText(reportPath), BindingMode.Default, out var problem) ??
                 throw new InvalidOperationException("Stale verification report: " + problem);
@@ -4099,6 +4119,7 @@ partial class Program : IDisposable
         if (before["proof:" + proof] != proofSourceHash)
             throw new InvalidOperationException("Proof inputs changed before their source snapshot");
         ExtractionIdentity extraction = ExtractionIdentity.Read(output);
+        var matchedPins = deepChecks?.MatchPins(extraction.Root);
         referenceOnlyAuthoring = ReferenceOnlyImports(extraction);
         string[] selected = SelectionModules.Selected(
             SourceImport().Matches(proofSource).Select(import => import.Groups[1].Value), extraction.Root, proof);
@@ -4115,6 +4136,11 @@ partial class Program : IDisposable
         stage?.Invoke("Lean library build");
         var closureRoots = ClosureRoots(proofSource, output, symbolsSource, extraction);
         var session = Library(before, closureRoots: closureRoots);
+        if (deepChecks is not null) PrepareBindingLibrary(session);
+        void RequireDeepBindingStable()
+        {
+            if (deepChecks is not null) RequirePreparedBindingLibrary();
+        }
         RequireReplayedImports(closureRoots ?? []);
         HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
         var support = Regex.Matches(proofSource, @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
@@ -4139,6 +4165,7 @@ partial class Program : IDisposable
                     {
                         var restored = ModuleArtifacts(staging);
                         CopyTree(staging, session);
+                        RequireDeepBindingStable();
                         foreach (var (name, hash) in restored) certifiedModules![name] = hash;
                         supportCacheHits++;
                         CacheProgress("certified dependencies: " + entry);
@@ -4146,6 +4173,7 @@ partial class Program : IDisposable
                     else
                     {
                         Run(["lake", "build", .. support], session, progress: "Building proof dependencies: " + entry);
+                        RequireDeepBindingStable();
                         var current = SessionModules(session);
                         var altered = certifiedModules!.Any(pair => !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
                         var changed = (altered ? current : current.Where(pair => !certifiedModules!.ContainsKey(pair.Key)))
@@ -4156,6 +4184,7 @@ partial class Program : IDisposable
                             Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), .. changed],
                                 leanPath: SessionLeanPath(session), progress: "Kernel replay of proof dependencies: " + entry);
                         }
+                        RequireDeepBindingStable();
                         certifiedModules = current;
                         CopySupportArtifacts(session, staging, supportSources);
                         PublishSuccess(supportKey, staging);
@@ -4165,6 +4194,7 @@ partial class Program : IDisposable
                 preparedSupport.Add(supportKey);
             }
         }
+        RequireDeepBindingStable();
 
         RequireOriginalProofSources();
         var identityHash = extraction.Sha256;
@@ -4207,13 +4237,15 @@ partial class Program : IDisposable
             {
                 stage?.Invoke("kernel replay");
                 ReplayCheckedModules(changedModules, leanPath, "Kernel replay of proof dependencies: " + entry);
+                RequireDeepBindingStable();
                 certifiedModules = currentModules;
             }
+            RequireDeepBindingStable();
             // Full artifact identities include transitive support dependencies and every
             // olean part. Cached success is never inferred from an unsigned manifest.
-            var environmentKey = ContentKey("certified-modules-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" + JsonSerializer.Serialize(currentModules));
-            var extractedKey = ContentKey("extraction-audit-v3-direct-certificate\n" + environmentKey + "\n" +
-                Sha(Path.Combine(fresh, "Extracted.lean")));
+            var environmentKey = StandaloneEnvironmentKey(libraryKey!, currentModules);
+            var extractionSuffix = "\n" + Sha(Path.Combine(fresh, "Extracted.lean"));
+            var extractedKey = StandaloneExtractionKey(environmentKey, extractionSuffix);
             string? extractionPublication = null;
             if (RestoreSuccess(extractedKey, fresh))
             {
@@ -4233,8 +4265,20 @@ partial class Program : IDisposable
                     File.Copy(path, Path.Combine(publication, Path.GetFileName(path)));
                 extractionPublication = publication;
             }
-            // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
             var bound = OleanHashes(fresh, session);
+            DeepSessionContribution? deep = null;
+            if (deepChecks is not null)
+            {
+                stage?.Invoke("deep checks");
+                deep = BuildDeepSession(fresh, leanPath, Path.Combine(fresh, "Extracted.olean"),
+                    extraction, matchedPins!);
+                var next = OleanHashes(fresh, session);
+                RequireOnlyAdded(bound, next,
+                    [.. deep.Modules.Where(module => module != "Extracted")
+                        .Select(module => module.Replace('.', '/'))]);
+                bound = next;
+            }
+            // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
             // A keyed module only re-exports its plain one, which is what the audits below read.
             void BuildSelected(bool symbolsModules)
             {
@@ -4308,10 +4352,11 @@ partial class Program : IDisposable
             }
             RequireStagedProofSources();
             // Cached proofs carry their Lean messages and statement display.
-            var proofKey = ContentKey("theorem-audit-v3\n" + extractedKey + "\n" + proofSourceHash + "\n" +
+            var proofSuffix = "\n" + proofSourceHash + "\n" +
                 (symbols ? symbolsSourceHash + "\n" : "") +
                 SemanticExtractionIdentity(extraction) + "\n" + JsonSerializer.Serialize(extraction.Sources) + "\n" +
-                JsonSerializer.Serialize(acceptedInterfaceArtifacts) + "\n" + theorem + ProofOptionsKey);
+                JsonSerializer.Serialize(acceptedInterfaceArtifacts) + "\n" + theorem + ProofOptionsKey;
+            var proofKey = StandaloneProofKey(extractedKey, proofSuffix);
             var proofRestored = RestoreSuccess(proofKey, fresh);
             if (proofRestored)
             {
@@ -4337,6 +4382,17 @@ partial class Program : IDisposable
             }
             RequireStagedProofSources();
             var built = OleanHashes(fresh, session);
+            void RequireDeepStable()
+            {
+                if (deep is null) return;
+                deep.RequireStable();
+                if (!Same(built, OleanHashes(fresh, session)) ||
+                    bindingSourcesKey != BindingSourcesKey(session) ||
+                    bindingPreparation!.Toolchain != BindingToolchainKey(session))
+                    throw new InvalidOperationException("Deep-check sources, toolchain or compiled artifacts changed");
+                RequireDeepBindingStable();
+                RequireStagedProofSources();
+            }
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
             RequireReplayedImports(fresh, session);
@@ -4355,10 +4411,20 @@ partial class Program : IDisposable
                 .. HasContractImports(extraction) ? ["ExtractedImports"] : Array.Empty<string>()];
             AuditRequest[] proofAudits =
                 [ProofTheorem(theorem, extraction), ExtractionCertificate("Extracted.translation_valid")];
+            if (deep is not null)
+            {
+                if (deep.Requests.Any(request => request.Audit.name == theorem))
+                    throw new InvalidOperationException(
+                        "Proof theorem collides with a deep-check request: " + theorem);
+                replay = [.. replay.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
+                auditModules = [.. auditModules.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
+                proofAudits = [proofAudits[0], .. deep.Requests.Select(request => request.Audit)];
+            }
             AuditedOleans? audited = null;
             // A caller that ends the run at the stage after the proof check must do so before the display starts.
             var replays = replay.Length > 0;
             stage?.Invoke(replays ? "kernel replay" : "theorem audit");
+            RequireDeepBindingStable();
             // The display runs beside replay and audit; it feeds no check and is read only after all of them.
             var statementView = Path.Combine(fresh, StatementViewFile);
             var statementCached = proofRestored && File.Exists(statementView);
@@ -4405,12 +4471,14 @@ partial class Program : IDisposable
             if (HasContractImports(extraction))
                 RequireAuditedModule(audited, "ExtractedImports", Path.Combine(fresh, "ExtractedImports.olean"));
             RequireAuditedConstants(audited);
+            deep?.RequireAudited(audited);
+            var auditedTheorems = audited.theorems.ToDictionary(result => result.name, StringComparer.Ordinal);
+            foreach (var request in proofAudits) AuditedAxioms(auditedTheorems[request.name]);
             stage?.Invoke("extraction certificate audit");
-            AuditedAxioms(audited.theorems[1]);
-            extractionAudit = AuditText(audited.theorems[1]);
+            extractionAudit = AuditText(auditedTheorems["Extracted.translation_valid"]);
             stage?.Invoke("theorem audit");
-            axioms = AuditedAxioms(audited.theorems[0]);
-            audit = AuditText(audited.theorems[0]);
+            axioms = AuditedAxioms(auditedTheorems[theorem]);
+            audit = AuditText(auditedTheorems[theorem]);
             RequireOriginalProofSources();
             RequireStagedProofSources();
             RequireOriginalProofSources();
@@ -4419,7 +4487,8 @@ partial class Program : IDisposable
             // The display is published only here, after every check above, and never feeds a check.
             if (viewsStatement)
                 VerifiedStatement = statementCached ? ReadStatementView(statementView) : viewed;
-            if (!proofRestored)
+            RequireDeepStable();
+            void PublishProof()
             {
                 var publication = Path.Combine(fresh, "proof-cache");
                 Directory.CreateDirectory(publication);
@@ -4430,8 +4499,9 @@ partial class Program : IDisposable
                 RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
                 PublishSuccess(proofKey, publication);
             }
+            if (!proofRestored && deep is null) PublishProof();
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
-            if (extractionPublication is not null)
+            if (extractionPublication is not null && deep is null)
             {
                 PublishSuccess(extractedKey, extractionPublication);
             }
@@ -4447,12 +4517,16 @@ partial class Program : IDisposable
                 throw new InvalidOperationException("Inputs changed during verification");
             // An editor package requires the same library by path and may have built into it meanwhile.
             RequireUnchangedLibrary();
+            RequireDeepStable();
 
             var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
             RequireImplementationImports(extraction);
             var report = new Report(CertificateSchema, Sha(assembly), identityHash, theorem, axioms, audit, before,
-                BindingSection.Default, libraryKey, libraryBuild, extractionAudit, initializedTypes,
+                deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
+                    new(bindingSourcesKey!, File.ReadAllText(Path.Combine(session, "lean-toolchain")).Trim(),
+                        Sha(LeanExecutable))),
+                libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction.Root),
                 opaqueStaticValues: OpaqueStaticValues(extraction.Root),
                 contractImports: ContractImportAssumptions(extraction.Root),
@@ -4461,8 +4535,15 @@ partial class Program : IDisposable
                 compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
                 initializationAssumptions: InitializationAssumptions(extraction.Root), libraryModules: libraryModules);
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
+            RequireDeepStable();
+            if (!proofRestored && deep is not null) PublishProof();
+            if (deep is not null && extractionPublication is not null)
+                PublishSuccess(extractedKey, extractionPublication);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
             completesLibrary = libraryModules is not null;
+            standaloneCachePromotion = completesLibrary && deep is null && UseSuccessCache
+                ? new(fullLibraryKey!, new(currentModules, StringComparer.Ordinal),
+                    extractedKey, extractionSuffix, proofKey, proofSuffix) : null;
 
             return report;
         }
@@ -4502,6 +4583,11 @@ partial class Program : IDisposable
         {
             using var whole = new Program();
             whole.Library(Inputs(At("CIL.lean")));
+            var promotion = standaloneCachePromotion;
+            standaloneCachePromotion = null;
+            if (promotion is not null)
+                PromoteStandaloneCache(promotion, whole.fullLibraryKey!, whole.SessionModules(whole.session!),
+                    whole.RequireCertifiedLibraryContents);
         }
         // Whatever stopped the build, the caller reports it; nothing may escape as an unhandled error here.
         catch (Exception error)
@@ -4509,6 +4595,52 @@ partial class Program : IDisposable
             throw new InvalidOperationException("The verified result above stands and its certificate is " +
                 "written, but the whole certified library was not built: " + error.Message, error);
         }
+    }
+
+    /// <summary>Authenticated successes checked in an exact compiled environment before library completion.</summary>
+    sealed record StandaloneCachePromotion(string FullLibraryKey, SortedDictionary<string, string> Modules,
+        string ExtractionKey, string ExtractionSuffix, string ProofKey, string ProofSuffix);
+
+    string StandaloneEnvironmentKey(string key, SortedDictionary<string, string> modules) =>
+        ContentKey("certified-modules-v1\n" + VerificationPolicy + "\n" + key + "\n" +
+            JsonSerializer.Serialize(modules));
+
+    static string StandaloneExtractionKey(string environment, string suffix) =>
+        ContentKey("extraction-audit-v3-direct-certificate\n" + environment + suffix);
+
+    static string StandaloneProofKey(string extraction, string suffix) =>
+        ContentKey("theorem-audit-v3\n" + extraction + suffix);
+
+    /// <summary>
+    /// Reuses authenticated successes only across a byte-identical extension of their module families.
+    /// </summary>
+    void PromoteStandaloneCache(StandaloneCachePromotion promotion, string completeKey,
+        SortedDictionary<string, string> completeModules, Action requireStable)
+    {
+        if (!UseSuccessCache || promotion.FullLibraryKey != completeKey ||
+            !ModuleArtifactsPreserved(promotion.Modules, completeModules)) return;
+        var environment = StandaloneEnvironmentKey(completeKey, completeModules);
+        var extraction = StandaloneExtractionKey(environment, promotion.ExtractionSuffix);
+        var proof = StandaloneProofKey(extraction, promotion.ProofSuffix);
+        var staging = Path.Combine(Path.GetTempPath(), "leancil-promotion-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var (original, promoted) in new[]
+                { (promotion.ExtractionKey, extraction), (promotion.ProofKey, proof) })
+            {
+                var destination = Path.Combine(staging, promoted);
+                Directory.CreateDirectory(destination);
+                if (!RestoreSuccess(original, destination)) continue;
+                // Completion must retain its authenticated inputs through cache publication.
+                requireStable();
+                PublishSuccess(promoted, destination);
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Console.Error.WriteLine("warning: completed-library success cache not updated: " + error.Message);
+        }
+        finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
 }
 /// <summary>

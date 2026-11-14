@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ConsumerTraceDirectory.cs
@@ -136,4 +139,3 @@ var measurements = new
 };
 File.WriteAllText(Path.Combine(importedRoot, "timings.json"), JsonSerializer.Serialize(measurements, Json));
 Console.WriteLine("PASS CLI imported helper preparation counts: " + JsonSerializer.Serialize(measurements));
-

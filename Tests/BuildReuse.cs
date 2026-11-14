@@ -1,6 +1,9 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // Reusing a parent's build requires matching source and output bytes, not an environment flag.
 var buildElapsed = System.Diagnostics.Stopwatch.StartNew();

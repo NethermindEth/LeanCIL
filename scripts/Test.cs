@@ -3,6 +3,9 @@
 #:property EnforceCodeStyleInBuild=true
 #:property GenerateDocumentationFile=true
 #:include Verification.cs
+#:include BindingAudit.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 #:include BatchVerification.cs
 #:include CoreExamples.cs
 #:include CertificateCases.cs

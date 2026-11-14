@@ -3,6 +3,9 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include PinnedMetadata.cs
+#:include ../scripts/BindingAudit.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Collections;
 using System.Reflection;
