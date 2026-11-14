@@ -207,16 +207,17 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
     sealed class Collection(PinnedAssemblies pinned)
     {
         readonly List<Slice> slices = [];
+        readonly Dictionary<ModuleDefinition, Slice> byModule = [];
 
         internal PinnedAssemblies Pinned => pinned;
 
         internal Slice SliceOf(ModuleDefinition module)
         {
             var original = pinned.Original(module);
-            var existing = slices.Find(slice => slice.Module == original);
-            if (existing is not null) return existing;
+            if (byModule.TryGetValue(original, out var existing)) return existing;
             var created = new Slice(this, original, slices.Count);
             slices.Add(created);
+            byModule.Add(original, created);
             return created;
         }
 
