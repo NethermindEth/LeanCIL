@@ -17,7 +17,8 @@ string Build(string name, string helpers)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Contracts.csproj"), """
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Contracts.cs"), "namespace Contracts; public static class Calls { " + helpers + Root + " }");
     Run(["dotnet", "build", Path.Combine(source, "Contracts.csproj"), "-c", "Release"]);

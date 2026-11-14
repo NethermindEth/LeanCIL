@@ -7,8 +7,10 @@ open CIL CIL.Extraction
 
 namespace Tests.ExactIntrinsics
 
-private def scope := "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-private def runtimeScope := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+private def scope :=
+  "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+private def runtimeScope :=
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 private def vectorType (width : String) : TypeExpr :=
   .apply (.constructor scope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
     (.atom runtimeScope "System.UInt64")

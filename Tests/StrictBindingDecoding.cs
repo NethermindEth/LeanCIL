@@ -111,16 +111,16 @@ partial class Program
             pure 1
         """;
 
-    /// <summary>The newest platform reference assembly System.Runtime of the .NET 10 reference pack.</summary>
+    /// <summary>The newest platform reference assembly System.Runtime of the .NET 11 reference pack.</summary>
     static string PlatformReference()
     {
         var runtime = Path.GetFullPath(Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
         var packs = Path.Combine(Environment.GetEnvironmentVariable("DOTNET_ROOT") ?? runtime, "packs",
             "Microsoft.NETCore.App.Ref");
-        return Directory.EnumerateDirectories(packs, "10.*")
-            .Select(directory => Path.Combine(directory, "ref", "net10.0", "System.Runtime.dll")).Where(File.Exists)
+        return Directory.EnumerateDirectories(packs, "11.*")
+            .Select(directory => Path.Combine(directory, "ref", "net11.0", "System.Runtime.dll")).Where(File.Exists)
             .OrderByDescending(path => Version.Parse(Path.GetFileName(
                 Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(path)))!)))
-            .FirstOrDefault() ?? throw new FileNotFoundException("No .NET 10 reference pack under " + packs);
+            .FirstOrDefault() ?? throw new FileNotFoundException("No .NET 11 reference pack under " + packs);
     }
 }

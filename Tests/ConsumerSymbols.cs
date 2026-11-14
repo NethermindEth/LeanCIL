@@ -31,7 +31,8 @@ string Build(string name, string first, string debugType)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Names.csproj"), $"""
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize><DebugType>{debugType}</DebugType></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize><DebugType>{debugType}</DebugType></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Names.cs"), string.Join("\n",
         "namespace Names;",

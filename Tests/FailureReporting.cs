@@ -19,7 +19,8 @@ string Build(string name, string helpers)
     var source = Path.Combine(root, name);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Contracts.csproj"), """
-    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+    <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+    <Optimize>true</Optimize></PropertyGroup></Project>
     """);
     File.WriteAllText(Path.Combine(source, "Contracts.cs"), "namespace Contracts; public static class Calls { " + helpers +
         "public static void Root(ref ulong r, in ulong b) { AddTo(in r, in b, out r); r = Mix(r, b); } }");

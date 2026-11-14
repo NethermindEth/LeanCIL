@@ -14,7 +14,7 @@ string Project(string name, string? reference, string source)
     var directory = Path.Combine(root, name);
     Directory.CreateDirectory(directory);
     File.WriteAllText(Path.Combine(directory, name + ".csproj"),
-        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework>" +
+        "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net11.0</TargetFramework>" +
         "<AssemblyName>InitializationFixture." + name + "</AssemblyName><Optimize>true</Optimize></PropertyGroup>" +
         (reference is null ? "" : "<ItemGroup><ProjectReference Include=\"../" + reference + "/" + reference +
             ".csproj\" /></ItemGroup>") + "</Project>");
