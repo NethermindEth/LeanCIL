@@ -56,9 +56,6 @@ internal static class InstructionTranslation
             nativeOperands.Incoming.TryGetValue(i, out var tailStack) &&
             tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
             throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
-        if (i.OpCode.Code == Code.Add && nativeOperands.Incoming.TryGetValue(i, out var incoming) &&
-            incoming.Length >= 2 && NativeOperands.ReferenceAddition(incoming[^2], incoming[^1]))
-            return MemoryOperation.Of(new AddOffset(1, true));
         if (i.OpCode.Code == Code.Readonly)
         {
             Arrays.ValidateReadOnly(instructions, i);

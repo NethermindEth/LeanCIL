@@ -514,6 +514,18 @@ theorem step_relabel_bne_un (target : Nat) : StepRelabel (.bne_un target) := by
 #print axioms step_relabel_bne_un
 
 /-- Relabel scalar or reference observations while preserving their result. -/
+theorem step_relabel_add : StepRelabel .add := by
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_add
+
+/-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_sub : StepRelabel .sub := by
   stack_cases =>
     first
@@ -647,6 +659,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case ret => exact step_relabel_ret
   case throw exception => exact step_relabel_throw exception
   case unsupported description => exact step_relabel_unsupported description
+  case add => exact step_relabel_add
   case sub => exact step_relabel_sub
   case clt_un => exact step_relabel_clt_un
   case cgt_un => exact step_relabel_cgt_un
@@ -661,7 +674,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case beq target => exact step_relabel_beq target
   case bne_un target => exact step_relabel_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
-    | conv_u4 | conv_u8 | conv_u | conv_i | not | add | mul | and | or | xor | shl | shr | shr_un
+    | conv_u4 | conv_u8 | conv_u | conv_i | not | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
@@ -711,7 +724,6 @@ theorem step_relabel_conv_u : StepRelabel .conv_u := step_relabel _
 theorem step_relabel_conv_i : StepRelabel .conv_i := step_relabel _
 #print axioms step_relabel_conv_i
 theorem step_relabel_not : StepRelabel .not := step_relabel _
-theorem step_relabel_add : StepRelabel .add := step_relabel _
 theorem step_relabel_mul : StepRelabel .mul := step_relabel _
 theorem step_relabel_and : StepRelabel .and := step_relabel _
 theorem step_relabel_or : StepRelabel .or := step_relabel _
@@ -1033,6 +1045,16 @@ theorem step_raise_bne_un (target : Nat) : StepRaise (.bne_un target) := by
 #print axioms step_raise_bne_un
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
+theorem step_raise_add : StepRaise .add := by
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
+        | raise_lockstep
+
+#print axioms step_raise_add
+
+/-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_sub : StepRaise .sub := by
   stack_cases =>
     first
@@ -1190,6 +1212,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case unsupported =>
     plain_cases
     fallback_raise_vacuous
+  case add => exact step_raise_add
   case sub => exact step_raise_sub
   case clt_un => exact step_raise_clt_un
   case cgt_un => exact step_raise_cgt_un
@@ -1204,7 +1227,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case beq target => exact step_raise_beq target
   case bne_un target => exact step_raise_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
-    | conv_u4 | conv_u8 | conv_u | conv_i | not | add | mul | and | or | xor | shl | shr | shr_un
+    | conv_u4 | conv_u8 | conv_u | conv_i | not | mul | and | or | xor | shl | shr | shr_un
     | clt | br | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar

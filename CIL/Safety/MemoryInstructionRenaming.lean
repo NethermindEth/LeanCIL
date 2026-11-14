@@ -269,7 +269,7 @@ private theorem Memory.Renamed.arrayTransferInstructionResult {mapping : Allocat
         at observable ⊢)
 #print axioms Memory.Renamed.arrayTransferInstructionResult
 /-- Checked reference addition transports either operand order to the same allocation. -/
-private theorem Memory.Renamed.referenceAddInstructionResult {mapping : AllocationRenaming}
+theorem Memory.Renamed.referenceAddInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
     (related : Memory.Renamed mapping scopes source target) (size : Nat) (signed : Bool)
     (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
