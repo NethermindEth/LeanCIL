@@ -31,6 +31,66 @@ static Measurement Tree(string label, params Row[] rows) => new(Schema, label, [
 static Comparison Against(Row before, Row after, params Accepted[] accepted) =>
     Compare(Tree("base", before), Tree("head", after), accepted);
 
+// Importers must share the task even while its compiled file is being written.
+var moduleTasks = new ModuleTasks();
+var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var completed = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+var measurements = 0;
+Task<string?> SharedMeasurement(string _)
+{
+    Interlocked.Increment(ref measurements);
+    started.TrySetResult();
+    return completed.Task;
+}
+var importers = Enumerable.Range(0, 128).Select(_ =>
+    Task.Run(() => moduleTasks.Get("Shared", SharedMeasurement))).ToArray();
+await started.Task;
+Require(importers.All(task => !task.IsCompleted), "importers wait for the whole shared measurement");
+completed.SetResult("measurement failed");
+await Task.WhenAll(importers);
+Require(measurements == 1 && importers.All(task => task.Result == "measurement failed"),
+    "parallel importers measure a shared module once and retain its failure");
+Require(await moduleTasks.Get("Shared", SharedMeasurement) == "measurement failed" && measurements == 1,
+    "subsequent imports reuse the completed measurement");
+
+// A long import chain uses queued tasks rather than one native stack frame per module.
+foreach (var depth in new[] { 1_000, 10_000 })
+{
+    var imports = new ModuleImports();
+    var reads = 0;
+    string[] ReadImports(string name)
+    {
+        reads++;
+        var index = int.Parse(name, System.Globalization.CultureInfo.InvariantCulture);
+        return index == depth ? [] : [(index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)];
+    }
+    Require(imports.Resolve("0", ReadImports).Failure is null && reads == depth + 1 &&
+        imports.Resolve("1", ReadImports).Failure is null && reads == depth + 1,
+        $"a chain of {depth} imports is checked once without recursive traversal");
+    var chain = new ModuleTasks();
+    var visited = 0;
+    Task<string?> Visit(string name)
+    {
+        Interlocked.Increment(ref visited);
+        var index = int.Parse(name, System.Globalization.CultureInfo.InvariantCulture);
+        return index == depth ? Task.FromResult<string?>(null)
+            : chain.Get((index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), Visit);
+    }
+    Require(await chain.Get("0", Visit) is null && visited == depth + 1,
+        $"a chain of {depth} imports measures each module once without recursive scheduling");
+}
+
+var cycle = new ModuleImports();
+Require(cycle.Resolve("Left", name => name == "Left" ? ["Right"] : ["Left"]).Failure is not null,
+    "cyclic imports fail before their measurements can wait for each other");
+var diamond = new ModuleImports();
+var diamondReads = 0;
+Require(diamond.Resolve("Root", name =>
+{
+    diamondReads++;
+    return name switch { "Root" => ["Left", "Right"], "Left" or "Right" => ["Shared"], _ => [] };
+}).Failure is null && diamondReads == 4, "a shared import is read once in a diamond");
+
 // A proof that costs more than the threshold and the floor allow is what the check exists to stop.
 var inflated = Against(Proof("slow", 10_000_000), Proof("slow", 12_000_000));
 Require(inflated.Failed && inflated.Regressions.Single() is { Name: "slow", Measure: "heartbeats" },
