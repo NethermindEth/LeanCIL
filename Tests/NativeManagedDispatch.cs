@@ -109,13 +109,21 @@ evidence.Add(path, "PASS native supplied-table cycle, exception, scalar local an
 var rejected = new RejectedEvidence(root);
 var load = Regex.Match(scalar, @"(?m)^  \.managed \(\.tableLoad [^\r\n]+$").Value;
 if (load.Length == 0) throw new InvalidOperationException("Missing native table load");
+// The dispatcher's table offset is the decoded add that feeds its table load, and raw add at offset 21 of its
+// original and closed bodies; the handler's own add is left unchanged.
+const string tableLoadLine = "\n  .managed (.tableLoad";
+const string emittedAdd = "  .add," + tableLoadLine;
+const string rawAdd = "{ offset := 21, opcode := 88, operand := .none }";
 foreach (var (name, mutated) in new[]
 {
     ("signature", scalar.Replace(load, load.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal),
         StringComparison.Ordinal)),
     ("raw-load", scalar.Replace("opcode := 77, operand := .none", "opcode := 76, operand := .none",
         StringComparison.Ordinal)),
-    ("offset", scalar.Replace(".managed .tableOffset", ".add", StringComparison.Ordinal)),
+    ("emitted-sub", ReplaceExactly(scalar, emittedAdd, "  .sub," + tableLoadLine, 1)),
+    ("emitted-add-ovf", ReplaceExactly(scalar, emittedAdd, "  .add_ovf," + tableLoadLine, 1)),
+    ("raw-sub", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 89, operand := .none }", 2)),
+    ("raw-operand", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 88, operand := .local 0 }", 2)),
     ("input", scalar.Replace(".pointer (.atom Extraction.runtimeScope \"System.IntPtr\")",
         ".pointer (.atom Extraction.runtimeScope \"System.Int64\")", StringComparison.Ordinal))
 })
@@ -178,3 +186,12 @@ rejected.Add(wrongAdditionPath, "PASS independently rejected commuted subtractio
     "Extraction.ScalarFlowValid");
 evidence.Check();
 rejected.Check();
+
+// Replaces `original` only where it occurs exactly `count` times, so a mutation changes exactly the evidence it names.
+static string ReplaceExactly(string text, string original, string replacement, int count)
+{
+    var found = Regex.Count(text, Regex.Escape(original));
+    if (found != count)
+        throw new InvalidOperationException($"Expected {count} occurrences, found {found}: {original}");
+    return text.Replace(original, replacement, StringComparison.Ordinal);
+}

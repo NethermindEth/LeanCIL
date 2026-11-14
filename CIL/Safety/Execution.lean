@@ -146,14 +146,6 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
       let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
       return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
     return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
-  | .tableOffset, .scalar offset :: .methodTable table :: rest
-  | .tableOffset, .methodTable table :: .scalar offset :: rest =>
-    let offset ← match offset with
-      | .i32 bits => .ok (bits.signExtend 64)
-      | .i64 bits => .ok bits
-      | _ => .error .invalidState
-    let selected ← checkedAt .null nativeMethodWidth (addNativeTable table memory offset)
-    return .next (pc + 1) (.methodTable selected :: rest) frame memory
   | .tableLoad signature, .methodTable table :: rest =>
     if table.signature != signature then .error .invalidState else pure ()
     let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table memory)
@@ -263,6 +255,15 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .add, .readOnlyReference _ :: .scalar _ :: _ =>
     let (memory, values) ← referenceAddInstruction 1 true stack m
     return .next (pc + 1) values frame memory
+  -- A native table offset is a byte count; the cursor keeps the table's identities.
+  | .add, .scalar offset :: .methodTable table :: rest
+  | .add, .methodTable table :: .scalar offset :: rest =>
+    let offset ← match offset with
+      | .i32 bits => .ok (bits.signExtend 64)
+      | .i64 bits => .ok bits
+      | _ => .error .invalidState
+    let selected ← checkedAt .null nativeMethodWidth (addNativeTable table m offset)
+    return .next (pc + 1) (.methodTable selected :: rest) frame m
   | .sub, .scalar offset :: .reference value :: rest =>
     let result ← referenceSubtract m value offset
     return .next (pc + 1) (.reference result :: rest) frame m

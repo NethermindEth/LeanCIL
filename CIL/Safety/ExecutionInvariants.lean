@@ -378,6 +378,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
                 apply ValuesValid.cons
                 · first
                   | rfl
+                  | trivial
                   | exact (checkedValue_valid _ _ _ (by assumption)).2
                   | exact objectTest_valid (by assumption)
                   | exact (referenceSubtract_valid _ _ _ _ (by assumption)).1

@@ -513,7 +513,7 @@ theorem step_relabel_bne_un (target : Nat) : StepRelabel (.bne_un target) := by
 
 #print axioms step_relabel_bne_un
 
-/-- Relabel scalar or reference observations while preserving their result. -/
+/-- Relabel scalar, reference or native table operands while preserving their result. -/
 theorem step_relabel_add : StepRelabel .add := by
   stack_cases =>
     first
@@ -522,6 +522,10 @@ theorem step_relabel_add : StepRelabel .add := by
         | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+        | (split at h
+           all_goals repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           all_goals cases h
+           all_goals simp only [FrameAction.relabel, context.next rfl, Pure.pure, Except.pure])
 
 #print axioms step_relabel_add
 
@@ -1044,13 +1048,14 @@ theorem step_raise_bne_un (target : Nat) : StepRaise (.bne_un target) := by
 
 #print axioms step_raise_bne_un
 
-/-- Reference observations preserve exceptional outcomes under relabeling. -/
+/-- Reference and native table additions preserve exceptional outcomes under relabeling. -/
 theorem step_raise_add : StepRaise .add := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
+        | (split at h <;> raise_lockstep)
 
 #print axioms step_raise_add
 
