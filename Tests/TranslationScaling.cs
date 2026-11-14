@@ -62,8 +62,8 @@ Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the 
 
 // The kernel decides the monolithic certificate. Its heartbeats and peak memory per added method of the call graph
 // may not grow with the number of methods: superlinear growth would make the check unusable on large extractions
-// even though only the kernel may run it.
-const double AllowedKernelGrowth = 1.5;
+// even though only the kernel may run it. Measured: 0.96 in heartbeats, 0.92 in memory.
+const double AllowedKernelGrowth = 1.2;
 (long Heartbeats, double Gigabytes) KernelCost(int methodCount)
 {
     var work = Path.Combine(directory, "Kernel" + methodCount);
