@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -19,25 +19,44 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>A referenced assembly on disk with the hash it must still have, if one was recorded.</summary>
     internal sealed record Source(string Path, string? ExpectedSha256 = null);
 
-    /// <summary>An assembly's identity: its simple name, version, culture and public key token.</summary>
-    readonly record struct Identity(string Name, Version Version, string Culture, ulong PublicKeyToken)
+    /// <summary>An immutable assembly row, decoded once when resolution first requests it.</summary>
+    sealed class IdentityRow(MetadataImage image, uint token)
     {
-        internal static Identity Of(AssemblyNameReference name) => new(name.Name, name.Version, name.Culture ?? "",
-            name.PublicKeyToken is { Length: 8 } token ? BinaryPrimitives.ReadUInt64BigEndian(token) : 0);
+        AssemblyName? identity;
+
+        internal AssemblyName Read()
+        {
+            if (identity is not null) return identity;
+            bool definition = token == 0x20000001;
+            uint flags = definition ? (uint)image.Reader.GetAssemblyDefinition().Flags :
+                (uint)image.Reader.GetAssemblyReference(
+                    MetadataTokens.AssemblyReferenceHandle((int)(token & 0xffffff))).Flags;
+            uint allowed = definition ? 0xc001u : 0x0001u;
+            if ((flags & ~allowed) != 0)
+                throw new InvalidDataException("Unsupported assembly identity flags in image row");
+            return identity = image.AssemblyIdentity(token) ??
+                throw new InvalidDataException("Invalid assembly identity in image row");
+        }
     }
 
     [ThreadStatic]
     static PinnedAssemblies? active;
 
     readonly PinnedAssemblies? previous;
-    readonly DefaultAssemblyResolver platform = new();
-    readonly Dictionary<string, ModuleDefinition> modules = new(StringComparer.Ordinal);
+    readonly Dictionary<AssemblyName, ModuleDefinition> modules = [];
     // One platform assembly per identity, so two references to one platform type resolve to one definition.
-    readonly Dictionary<Identity, AssemblyDefinition> platformAssemblies = [];
+    readonly Dictionary<AssemblyName, AssemblyDefinition> platformAssemblies = [];
+    readonly Dictionary<MetadataName, AssemblyDefinition> platformByName = [];
+    readonly Dictionary<MetadataName, string> platformPaths = PlatformPaths();
+    readonly Dictionary<AssemblyNameReference, IdentityRow> identityRows = new(ReferenceEqualityComparer.Instance);
+    readonly Dictionary<MetadataImage, Dictionary<uint, IdentityRow>> rowsByImage = [];
+    readonly Dictionary<ModuleDefinition, AssemblyNameReference[]> registrations = [];
+    readonly Dictionary<ModuleDefinition, MemoryStream> ownedModules = [];
+    bool disposed;
     readonly Dictionary<ModuleDefinition, ModuleDefinition> originals = [];
     readonly Dictionary<ModuleDefinition, ModuleDefinition> working = [];
     readonly Dictionary<ModuleDefinition, int> indices = [];
-    readonly Dictionary<string, ModuleDefinition> byName = new(StringComparer.Ordinal);
+    readonly Dictionary<MetadataName, ModuleDefinition> byName = [];
     readonly Dictionary<ModuleDefinition, byte[]> images = [];
     readonly Dictionary<byte[], PEReader> readers = [];
     readonly Dictionary<PEReader, MetadataImage> metadata = [];
@@ -63,66 +82,86 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         Func<string, Program.ExtractionBatch.AssemblySnapshot>? readReference = null)
     {
         previous = active;
-        // Only the runtime's trusted platform list may answer; no directory is searched.
-        foreach (string directory in platform.GetSearchDirectories()) platform.RemoveSearchDirectory(directory);
-        Selected = Read(selected);
-        SelectedPin = new(Selected.Assembly.Name.FullName, Selected.Mvid, selectedHash);
-        modules.Add(SelectedPin.Identity, Selected);
-        byName.TryAdd(Selected.Assembly.Name.Name, Selected);
-        AddOriginal(Selected, selected);
-        foreach (Source source in sources)
+        try
         {
-            byte[] bytes;
-            string hash;
-            if (readReference?.Invoke(source.Path) is { } image) (bytes, hash) = (image.Bytes, image.Hash);
-            else hash = Convert.ToHexStringLower(SHA256.HashData(bytes = File.ReadAllBytes(source.Path)));
-            if (source.ExpectedSha256 is { } expected && !string.Equals(expected, hash, StringComparison.Ordinal))
-                throw new InvalidDataException($"Referenced assembly hash mismatch: {CliPaths.Display(source.Path)}\n" +
-                    $"  Expected SHA-256: {expected}\n  Actual SHA-256: {hash}");
-            ModuleDefinition module = Read(bytes);
-            string identity = module.Assembly?.Name.FullName ??
-                throw new InvalidDataException(
-                    "Referenced module has no assembly metadata: " + CliPaths.Display(source.Path));
-            if (Platform(module.Assembly.Name))
-                throw new InvalidDataException("Platform assemblies are runtime models, not references: " + identity);
-            if (!modules.TryAdd(identity, module))
-                throw new InvalidDataException("Duplicate pinned assembly identity: " + identity);
-            byName.TryAdd(module.Assembly.Name.Name, module);
-            AddOriginal(module, bytes);
-            references.Add((new(identity, module.Mvid, hash), Path.GetFullPath(source.Path), module));
+            Selected = ReadPin(selected);
+            SelectedPin = new(Selected.Assembly.Name.FullName, Selected.Mvid, selectedHash);
+            AssemblyName selectedIdentity = IdentityOf(Selected.Assembly.Name);
+            modules.Add(selectedIdentity, Selected);
+            byName.TryAdd(selectedIdentity.Name, Selected);
+            AddOriginal(Selected, selected);
+            foreach (Source source in sources)
+            {
+                byte[] bytes;
+                string hash;
+                if (readReference?.Invoke(source.Path) is { } image) (bytes, hash) = (image.Bytes, image.Hash);
+                else hash = Convert.ToHexStringLower(SHA256.HashData(bytes = File.ReadAllBytes(source.Path)));
+                if (source.ExpectedSha256 is { } expected && !string.Equals(expected, hash, StringComparison.Ordinal))
+                    throw new InvalidDataException(
+                        $"Referenced assembly hash mismatch: {CliPaths.Display(source.Path)}\n" +
+                        $"  Expected SHA-256: {expected}\n  Actual SHA-256: {hash}");
+                ModuleDefinition module = ReadPin(bytes);
+                string identity = module.Assembly.Name.FullName;
+                AssemblyName key = IdentityOf(module.Assembly.Name);
+                if (Platform(key))
+                    throw new InvalidDataException(
+                        "Platform assemblies are runtime models, not references: " + identity);
+                if (!modules.TryAdd(key, module))
+                    throw new InvalidDataException("Duplicate pinned assembly identity: " + identity);
+                byName.TryAdd(key.Name, module);
+                AddOriginal(module, bytes);
+                references.Add((new(identity, module.Mvid, hash), Path.GetFullPath(source.Path), module));
+            }
+            active = this;
         }
-        active = this;
+        catch { Dispose(); throw; }
     }
 
-    ModuleDefinition Read(byte[] bytes) => StaticData.ReadModule(bytes, this);
+    ModuleDefinition Read(byte[] bytes)
+    {
+        MemoryStream? stream = null;
+        ModuleDefinition? module = null;
+        try
+        {
+            module = StaticData.ReadModule(bytes, this, retained => stream = retained);
+            ownedModules.Add(module, stream!);
+            return module;
+        }
+        catch { module?.Dispose(); stream?.Dispose(); throw; }
+    }
+
+    ModuleDefinition ReadPin(byte[] bytes)
+    {
+        ModuleDefinition module = Read(bytes);
+        images.Add(module, bytes);
+        RegisterRows(module, Metadata(module));
+        return module;
+    }
 
     // The working module and its untouched copy are two readings of the same image.
     void AddOriginal(ModuleDefinition module, byte[] image)
     {
-        ModuleDefinition original = StaticData.ReadModule(image, this);
+        ModuleDefinition original = ReadPin(image);
         originals.Add(module, original);
         working.Add(original, module);
         indices.Add(module, indices.Count);
-        images.Add(module, image);
-        images.Add(original, image);
     }
 
     /// <summary>The pinned set of the current extraction, or none outside one.</summary>
     internal static PinnedAssemblies? Active => active;
 
     // Platform keys: only the extractor's trusted platform assemblies can answer these names.
-    static bool Platform(AssemblyNameReference name) => name.PublicKeyToken is { Length: 8 } token &&
-        PlatformAssemblies.KeyTokens.Contains(BinaryPrimitives.ReadUInt64BigEndian(token));
+    static bool Platform(AssemblyName name) => name.PublicKeyToken is { } token &&
+        PlatformAssemblies.KeyTokens.Contains(token);
 
     /// <summary>Whether <paramref name="module"/> is one of the pinned modules.</summary>
-    internal bool Contains(ModuleDefinition module) =>
-        modules.TryGetValue(module.Assembly.Name.FullName, out var pinned) && pinned == module;
+    internal bool Contains(ModuleDefinition module) => indices.ContainsKey(module);
 
     /// <summary>The pinned module a type's scope names, if any.</summary>
     internal ModuleDefinition? ModuleOf(TypeReference type) => type.Scope switch
     {
         ModuleDefinition module when Contains(module) => module,
-        AssemblyNameReference name when modules.TryGetValue(name.FullName, out var module) => module,
+        AssemblyNameReference name when modules.TryGetValue(IdentityOf(name), out var module) => module,
         _ => null
     };
 
@@ -167,14 +206,33 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     internal void RegisterIdentityImage(ModuleDefinition module, byte[] bytes)
     {
         var reader = new PEReader(ImmutableCollectionsMarshal.AsImmutableArray(bytes));
-        try { identityImages.Add(module, (reader, new MetadataImage(reader))); }
-        catch { reader.Dispose(); throw; }
+        MetadataImage? image = null;
+        bool registered = false;
+        try
+        {
+            image = new MetadataImage(reader);
+            RegisterRows(module, image);
+            registered = true;
+            identityImages.Add(module, (reader, image));
+        }
+        catch
+        {
+            if (registered) UnregisterRows(module);
+            if (image is not null) rowsByImage.Remove(image);
+            reader.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Releases an import's metadata when its owning resolution ends.</summary>
     internal void UnregisterIdentityImage(ModuleDefinition module)
     {
-        if (identityImages.Remove(module, out var image)) image.Reader.Dispose();
+        if (identityImages.Remove(module, out var image))
+        {
+            UnregisterRows(module);
+            rowsByImage.Remove(image.Metadata);
+            image.Reader.Dispose();
+        }
     }
 
     /// <summary>The raw identity rows of an executable pin or a verified contract import.</summary>
@@ -194,21 +252,27 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// mismatch never falls back to the typed-import path.</summary>
     internal void RejectMismatch(AssemblyNameReference name)
     {
-        if (!modules.ContainsKey(name.FullName) && byName.ContainsKey(name.Name))
+        AssemblyName identity = IdentityOf(name);
+        if (!modules.ContainsKey(identity) && byName.ContainsKey(identity.Name))
             Resolve(name);
     }
 
     /// <summary>Whether <see cref="Resolve(AssemblyNameReference)"/> answers the reference rather than rejecting it.
     /// </summary>
-    internal bool Resolves(AssemblyNameReference name) => modules.ContainsKey(name.FullName) || Platform(name);
+    internal bool Resolves(AssemblyNameReference name)
+    {
+        AssemblyName identity = IdentityOf(name);
+        return modules.ContainsKey(identity) || Platform(identity);
+    }
 
     public AssemblyDefinition Resolve(AssemblyNameReference name) => Resolve(name, new ReaderParameters());
 
     public AssemblyDefinition Resolve(AssemblyNameReference name, ReaderParameters parameters)
     {
-        if (modules.TryGetValue(name.FullName, out var module)) return module.Assembly;
-        if (Platform(name)) return PlatformAssembly(name);
-        var named = byName.GetValueOrDefault(name.Name);
+        AssemblyName identity = IdentityOf(name);
+        if (modules.TryGetValue(identity, out var module)) return module.Assembly;
+        if (Platform(identity)) return PlatformAssembly(identity);
+        var named = byName.GetValueOrDefault(identity.Name);
         throw new InvalidDataException(named is null
             ? $"Unpinned assembly reference: {name.FullName}\n" +
                 $"  Pass --reference <path to {name.Name}.dll> to extract from it."
@@ -218,29 +282,123 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
 
     // Keyed by the requested identity and by the identity of the assembly read, since the runtime can answer a
     // reference of another version with an assembly already read.
-    AssemblyDefinition PlatformAssembly(AssemblyNameReference name)
+    AssemblyDefinition PlatformAssembly(AssemblyName requested)
     {
-        Identity requested = Identity.Of(name);
         if (platformAssemblies.TryGetValue(requested, out AssemblyDefinition? assembly)) return assembly;
-        // The platform's own references resolve here too, so every platform module is read once.
-        assembly = platform.Resolve(name, new ReaderParameters { AssemblyResolver = this });
-        if (platformAssemblies.TryGetValue(Identity.Of(assembly.Name), out AssemblyDefinition? read))
+        if (platformByName.TryGetValue(requested.Name, out assembly))
         {
-            assembly.Dispose();
-            assembly = read;
+            RequirePlatformIdentity(requested, IdentityOf(assembly.Name));
+            platformAssemblies.Add(requested, assembly);
+            return assembly;
         }
-        else platformAssemblies.Add(Identity.Of(assembly.Name), assembly);
-        platformAssemblies.TryAdd(requested, assembly);
-        return assembly;
+        if (!platformPaths.TryGetValue(requested.Name, out string? path))
+            throw new InvalidDataException("No exact trusted platform assembly: " + requested.ToDisplay());
+        byte[] bytes = File.ReadAllBytes(path);
+        ModuleDefinition module = Read(bytes);
+        try
+        {
+            RegisterIdentityImage(module, bytes);
+            AssemblyName loaded = IdentityOf(module.Assembly.Name);
+            RequirePlatformIdentity(requested, loaded);
+            if (platformAssemblies.TryGetValue(loaded, out assembly)) ReleaseModule(module);
+            else platformAssemblies.Add(loaded, assembly = module.Assembly);
+            platformByName.Add(loaded.Name, assembly);
+            platformAssemblies.TryAdd(requested, assembly);
+            return assembly;
+        }
+        catch { ReleaseModule(module); throw; }
+    }
+
+    static void RequirePlatformIdentity(AssemblyName requested, AssemblyName loaded)
+    {
+        if (loaded.Name != requested.Name || loaded.Culture != requested.Culture ||
+            loaded.PublicKeyToken != requested.PublicKeyToken || !Platform(loaded))
+            throw new InvalidDataException("Trusted platform assembly identity mismatch: " + requested.ToDisplay());
+    }
+
+    static Dictionary<MetadataName, string> PlatformPaths()
+    {
+        var paths = new Dictionary<MetadataName, string>();
+        if (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") is not string trusted) return paths;
+        foreach (string path in trusted.Split(Path.PathSeparator))
+            if (string.Equals(Path.GetExtension(path), ".dll", StringComparison.OrdinalIgnoreCase))
+                paths[MetadataName.OfText(Path.GetFileNameWithoutExtension(path))] = path;
+        return paths;
+    }
+
+    AssemblyName IdentityOf(AssemblyNameReference name) => identityRows.TryGetValue(name, out var row)
+        ? row.Read() : throw new InvalidDataException("Assembly reference without registered image provenance");
+
+    void RegisterRows(ModuleDefinition module, MetadataImage image)
+    {
+        IdentityRows.RequireModule(image, module);
+        if (registrations.ContainsKey(module))
+            throw new InvalidDataException("Module identity already registered");
+        if (module.Assembly is null || module.MetadataKind != MetadataKind.Ecma335 ||
+            module.AssemblyReferences.Count != image.Count(0x23))
+            throw new InvalidDataException("Assembly references do not match image rows");
+        AssemblyNameReference[] names = [module.Assembly.Name, .. module.AssemblyReferences];
+        for (int index = 0; index < names.Length; index++)
+        {
+            uint token = index == 0 ? 0x20000001 : 0x23000000 + (uint)index;
+            if (names[index].MetadataToken.ToUInt32() != token || identityRows.ContainsKey(names[index]))
+                throw new InvalidDataException("Assembly reference without an original image row");
+        }
+        bool knownImage = rowsByImage.TryGetValue(image, out var rows);
+        rows ??= [];
+        if (!rows.TryGetValue(0x20000001, out var definition))
+            rows.Add(0x20000001, definition = new(image, 0x20000001));
+        definition.Read();
+        if (!knownImage) rowsByImage.Add(image, rows);
+        foreach (AssemblyNameReference name in names)
+        {
+            uint token = name.MetadataToken.ToUInt32();
+            if (!rows.TryGetValue(token, out var row)) rows.Add(token, row = new(image, token));
+            identityRows.Add(name, row);
+        }
+        registrations.Add(module, names);
+    }
+
+    void UnregisterRows(ModuleDefinition module)
+    {
+        if (registrations.Remove(module, out var names))
+            foreach (AssemblyNameReference name in names) identityRows.Remove(name);
+    }
+
+    void ReleaseModule(ModuleDefinition module)
+    {
+        UnregisterIdentityImage(module);
+        if (!ownedModules.Remove(module, out var stream)) return;
+        module.Dispose();
+        stream.Dispose();
     }
 
     public void Dispose()
     {
-        active = previous;
-        platform.Dispose();
-        foreach (AssemblyDefinition assembly in platformAssemblies.Values.Distinct()) assembly.Dispose();
+        if (disposed) return;
+        disposed = true;
+        if (active == this) active = previous;
         foreach (PEReader reader in readers.Values) reader.Dispose();
         foreach (var image in identityImages.Values) image.Reader.Dispose();
-        foreach (ModuleDefinition module in modules.Values.Concat(originals.Values)) module.Dispose();
+        foreach (var (module, stream) in ownedModules)
+        {
+            module.Dispose();
+            stream.Dispose();
+        }
+        identityRows.Clear();
+        rowsByImage.Clear();
+        registrations.Clear();
+        ownedModules.Clear();
+        identityImages.Clear();
+        modules.Clear();
+        platformAssemblies.Clear();
+        platformByName.Clear();
+        images.Clear();
+        readers.Clear();
+        metadata.Clear();
+        indices.Clear();
+        originals.Clear();
+        working.Clear();
+        byName.Clear();
     }
 }

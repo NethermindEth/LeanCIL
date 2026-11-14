@@ -16,15 +16,32 @@ internal static class StaticData
     /// Reads a module from its image and records the image's section headers, which <see cref="Validate"/>
     /// requires to admit any static data of that module.
     /// </summary>
-    internal static ModuleDefinition ReadModule(byte[] assembly, IAssemblyResolver? resolver = null)
+    internal static ModuleDefinition ReadModule(byte[] assembly, IAssemblyResolver? resolver = null,
+        Action<MemoryStream>? retainStream = null)
     {
         SectionHeader[] headers;
         using (PEReader image = new(new MemoryStream(assembly, writable: false)))
             headers = [.. image.PEHeaders.SectionHeaders];
-        ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(assembly, writable: false),
-            resolver is null ? new ReaderParameters() : new ReaderParameters { AssemblyResolver = resolver });
-        sections.AddOrUpdate(module, headers);
-        return module;
+        var stream = new MemoryStream(assembly, writable: false);
+        ModuleDefinition? module = null;
+        try
+        {
+            module = ModuleDefinition.ReadModule(stream, new ReaderParameters
+            {
+                AssemblyResolver = resolver,
+                ReadingMode = ReadingMode.Deferred,
+                ReadSymbols = false
+            });
+            sections.AddOrUpdate(module, headers);
+            retainStream?.Invoke(stream);
+            return module;
+        }
+        catch
+        {
+            module?.Dispose();
+            stream.Dispose();
+            throw;
+        }
     }
 
     internal static FieldDefinition Validate(FieldReference reference, ModuleDefinition module)

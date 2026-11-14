@@ -477,8 +477,9 @@ span parameters are rejected.
 
 C# encodes an `in` parameter of a virtual, abstract or interface member, and of its explicit
 implementations, as `T& modreq(System.Runtime.InteropServices.InAttribute)`. The modifier is
-admitted only directly on a by-reference parameter and only with the exact `System.Runtime`
-scope, and the parameter then behaves as a non-virtual `in` parameter of the same type: an
+admitted only directly on a by-reference parameter, with a top-level metadata reference whose
+namespace is `System.Runtime.InteropServices`, name is `InAttribute` and raw assembly scope is
+exactly `System.Runtime`. The parameter behaves as a non-virtual `in` parameter of the same type: an
 ordinary reference, or the referenced view for an admitted span type (see
 [span reference parameters](#span-reference-parameters)). Selectors, recorded signatures,
 specialization keys and constrained-slot matching keep the modifier. A method whose declaring
@@ -493,8 +494,9 @@ signatures admit no modifier.
 C# marks an `init` accessor by returning
 `System.Void modreq(System.Runtime.CompilerServices.IsExternalInit)`, and the accessor runs as
 the void method it is, as an entry or behind a call. The modifier is admitted only directly on
-`System.Void`. Like C#, the extractor recognizes the marker by its full name from any assembly,
-so a library that declares its own `IsExternalInit` for an older framework is admitted too.
+`System.Void`. The extractor requires a top-level metadata type whose namespace is
+`System.Runtime.CompilerServices` and name is `IsExternalInit`, from any assembly. A library
+that declares its own marker for an older framework is admitted too.
 Selectors, recorded entries and the Lean signature string keep the modifier; a method whose
 declaring type also has a modifier-only twin is rejected
 ([arrays, views and bulk memory](SOUNDNESS-RUNTIME.md#arrays-views-and-bulk-memory)).
