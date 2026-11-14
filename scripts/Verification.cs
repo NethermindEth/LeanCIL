@@ -3803,48 +3803,93 @@ partial class Program : IDisposable
     sealed class BindingModeNames() : ExactNames<BindingMode>((BindingMode.Default, "default"),
         (BindingMode.Deep, "deep"));
 
+    /// <summary>Why a deep run read an assembly image.</summary>
+    [JsonConverter(typeof(ImageRoleNames))]
+    internal enum ImageRole
+    {
+        /// <summary>An assembly `identity.json` pins: the selected assembly or one it references.</summary>
+        Pinned,
+        /// <summary>A platform reference assembly a binding fact's claims name.</summary>
+        Platform,
+        /// <summary>An image of the digest file that no pin and no claim names.</summary>
+        Unused
+    }
+
+    sealed class ImageRoleNames() : ExactNames<ImageRole>((ImageRole.Pinned, "pinned"),
+        (ImageRole.Platform, "platform"), (ImageRole.Unused, "unused"));
+
+    /// <summary>The digest file a deep run read, by its path and its own SHA-256.</summary>
+    internal sealed record DigestFile([property: JsonRequired] string path, [property: JsonRequired] string sha256);
+
+    /// <summary>The sources a deep run's statements were checked with: StrictBinding's key and the Lean toolchain.
+    /// </summary>
+    internal sealed record StatementSources([property: JsonRequired] string strictBinding,
+        [property: JsonRequired] string leanToolchain, [property: JsonRequired] string lean);
+
+    /// <summary>
+    /// One image a deep run read: its display identity, SHA-256, role and status, with the theorem that reconfirmed
+    /// its digest or why it is not covered.
+    /// </summary>
+    internal sealed record ImageResult([property: JsonRequired] string identity, [property: JsonRequired] string sha256,
+        [property: JsonRequired] ImageRole role, [property: JsonRequired] BindingStatus status, string? theorem,
+        string? reason);
+
     /// <summary>One binding fact's status, with the theorem that reconfirmed it or why it is not covered.</summary>
     internal sealed record BindingFactResult([property: JsonRequired] BindingFact id,
         [property: JsonRequired] BindingStatus status, string? theorem, string? reason);
 
     /// <summary>
-    /// The binding section of a certificate: the run's mode and the status of every binding fact, each listed
-    /// once, in the order `BindingFact` declares them.
+    /// The binding section of a certificate: the run's mode, the digest file, statement sources and images a deep
+    /// run read, and the status of every binding fact, each listed once, in the order `BindingFact` declares them.
     /// </summary>
     internal sealed record BindingSection([property: JsonRequired] BindingMode mode,
+        [property: JsonRequired] DigestFile? digests, [property: JsonRequired] StatementSources? sources,
+        [property: JsonRequired] ImageResult[] images,
         [property: JsonRequired] BindingFactResult[] facts)
     {
-        /// <summary>The section of a default run, which trusts every fact.</summary>
-        internal static BindingSection Default => new(BindingMode.Default, [.. Enum.GetValues<BindingFact>()
-            .Select(fact => new BindingFactResult(fact, BindingStatus.Trusted, null, null))]);
+        /// <summary>The section of a default run, which reads no image and trusts every fact.</summary>
+        internal static BindingSection Default => new(BindingMode.Default, null, null, [],
+            [.. Enum.GetValues<BindingFact>().Select(fact => new BindingFactResult(fact, BindingStatus.Trusted,
+                null, null))]);
     }
 
     /// <summary>
     /// Why `binding` is not the section of a certificate that a run of mode `required` accepts, or null when it
-    /// is: every fact once and in order, each trusted in a default run and reconfirmed with its theorem or not
-    /// covered with its reason in a deep one.
+    /// is: every fact once and in order; in a default run no digest file, sources or image and every fact
+    /// trusted; in a deep one the digest file and sources named and each fact and image reconfirmed with its
+    /// theorem or not covered with its reason.
     /// </summary>
     static string? BindingProblem(BindingSection? binding, BindingMode required)
     {
-        if (binding?.facts is not { } facts) return "it has no binding section";
+        if (binding?.facts is not { } facts || binding.images is not { } images) return "it has no binding section";
         if (binding.mode != required)
             return $"its binding section is from a {binding.mode} run, and this run accepts only {required}";
+        if (required == BindingMode.Default
+            ? binding.digests is not null || binding.sources is not null || images.Length != 0
+            : binding.digests is null || binding.sources is null || images.Any(image => image is null ||
+                !Settled(image.status, image.theorem, image.reason)))
+            return $"its binding section's digest file, sources or images do not fit a {required} run";
         var declared = Enum.GetValues<BindingFact>().Select(fact => (BindingFact?)fact);
         if (!facts.Select(fact => fact?.id).SequenceEqual(declared))
             return "its binding section does not list every binding fact once, in order";
-        static bool Stated(string? text) => !string.IsNullOrWhiteSpace(text);
         var wrong = facts.FirstOrDefault(fact => required == BindingMode.Default
             ? fact.status != BindingStatus.Trusted || fact.theorem is not null || fact.reason is not null
-            : fact.status switch
-            {
-                BindingStatus.Reconfirmed => !Stated(fact.theorem) || fact.reason is not null,
-                BindingStatus.NotCovered => !Stated(fact.reason) || fact.theorem is not null,
-                _ => true
-            });
+            : !Settled(fact.status, fact.theorem, fact.reason));
         return wrong is null ? null
             : $"its binding fact {wrong.id} is {wrong.status} with theorem {wrong.theorem ?? "none"} and reason " +
                 $"{wrong.reason ?? "none"}, which a {required} run does not issue";
     }
+
+    /// <summary>
+    /// Whether a deep run's verified certificate can report this outcome: reconfirmed by a named theorem, or not
+    /// covered for a stated reason.
+    /// </summary>
+    static bool Settled(BindingStatus status, string? theorem, string? reason) => status switch
+    {
+        BindingStatus.Reconfirmed => !string.IsNullOrWhiteSpace(theorem) && reason is null,
+        BindingStatus.NotCovered => !string.IsNullOrWhiteSpace(reason) && theorem is null,
+        _ => false
+    };
 
     /// <summary>
     /// The certificate `text` holds when a run of mode `required` accepts it; otherwise null, with `problem`

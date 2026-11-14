@@ -72,6 +72,9 @@ void Verified(params string[] options)
     var binding = report.GetProperty("binding");
     var facts = binding.GetProperty("facts").EnumerateArray().ToArray();
     if (binding.GetProperty("mode").GetString() != "default" ||
+        binding.GetProperty("digests").ValueKind != JsonValueKind.Null ||
+        binding.GetProperty("sources").ValueKind != JsonValueKind.Null ||
+        binding.GetProperty("images").GetArrayLength() != 0 ||
         !facts.Select(fact => fact.GetProperty("id").GetString()).SequenceEqual(bindingFacts) ||
         facts.Any(fact => fact.GetProperty("status").GetString() != "trusted" ||
             fact.GetProperty("theorem").ValueKind != JsonValueKind.Null ||

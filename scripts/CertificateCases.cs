@@ -8,12 +8,25 @@ static class CertificateCases
 {
     static JsonArray Facts(JsonNode report) => report["binding"]!["facts"]!.AsArray();
 
-    /// <summary>The valid default certificate `valid` as a deep run writes it: each fact reconfirmed by a theorem.
+    /// <summary>
+    /// The valid default certificate `valid` as a deep run writes it: the digest file and sources named, one
+    /// pinned image and each fact reconfirmed by a theorem.
     /// </summary>
     internal static string Deep(string valid)
     {
         var report = JsonNode.Parse(valid)!;
-        report["binding"]!["mode"] = "deep";
+        var binding = report["binding"]!;
+        binding["mode"] = "deep";
+        binding["digests"] = new JsonObject { ["path"] = "pins.sha256", ["sha256"] = new string('0', 64) };
+        binding["sources"] = new JsonObject
+        {
+            ["strictBinding"] = "key", ["leanToolchain"] = "leanprover/lean4:v4", ["lean"] = new string('1', 64)
+        };
+        binding["images"] = new JsonArray(new JsonObject
+        {
+            ["identity"] = "Examples", ["sha256"] = new string('2', 64), ["role"] = "pinned",
+            ["status"] = "reconfirmed", ["theorem"] = "BindingAudit.I0.digest", ["reason"] = null
+        });
         foreach (var fact in Facts(report))
         {
             fact!["status"] = "reconfirmed";
@@ -49,6 +62,10 @@ static class CertificateCases
         yield return Changed("a fact without a status", report => Facts(report)[0]!.AsObject().Remove("status"));
         yield return Changed("a trusted fact naming a theorem",
             report => Facts(report)[0]!["theorem"] = "BindingAudit.bodies");
+        yield return Changed("a default section naming a digest file", report => report["binding"]!["digests"] =
+            JsonNode.Parse(Deep(valid))!["binding"]!["digests"]!.DeepClone());
+        yield return Changed("a default section without its images",
+            report => report["binding"]!.AsObject().Remove("images"));
         yield return ("a deep run's certificate", Deep(valid));
     }
 }

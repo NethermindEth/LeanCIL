@@ -447,7 +447,8 @@ or `--proof` takes no proof from an earlier certificate.
 
 The `core` suite checks that `verify` refuses a certificate of schema 4, one without a binding
 section, one whose binding facts are missing, reordered, repeated or unknown, one with an unknown,
-numeric, absent or misplaced status, and one whose binding section has mode `deep`. Its consumer test republishes an
+numeric, absent or misplaced status, one whose default section names a digest file or lacks its
+images, and one whose binding section has mode `deep`. Its consumer test republishes an
 authenticated proof receipt with an unknown status and checks that the next run verifies afresh.
 `scripts/TestProofCost.cs` checks that the proof cost measurement refuses the same certificates.
 

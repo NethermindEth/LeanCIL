@@ -148,6 +148,12 @@ using (var publisher = new Program())
             File.WriteAllText(Path.Combine(unknownStatus, "report.json"), certificate.ToJsonString());
             DeleteTree(entry);
             publisher.PublishSuccess(Path.GetFileName(entry), unknownStatus);
+            // The edited receipt must be the authenticated entry the run restores, or the miss proves nothing.
+            var published = unknownStatus + "-published";
+            if (!publisher.RestoreSuccess(Path.GetFileName(entry), published) ||
+                !File.ReadAllText(Path.Combine(published, "report.json")).Contains("\"assumed\"",
+                    StringComparison.Ordinal))
+                throw new InvalidOperationException("The edited consumer receipt was not published authenticated.");
         }
         Verify();
         var refreshed = JsonSerializer.Deserialize<JsonElement>(
@@ -166,6 +172,10 @@ using (var publisher = new Program())
         DeleteTree(originalReceipts);
     }
 }
+Verify();
+var reused = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+if (reused.GetProperty("libraryBuild").GetString() != "consumer-proof-cache")
+    throw new InvalidOperationException("The restored consumer receipt was not reused.");
 Console.WriteLine("PASS a consumer receipt with a certificate this tool refuses is verified afresh");
 
 // A distinct extraction identity must recheck the extraction-dependent proof,

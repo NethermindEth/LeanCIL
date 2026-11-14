@@ -18,6 +18,9 @@
   "specification": [],
   "binding": {
     "mode": "default",
+    "digests": null,
+    "sources": null,
+    "images": [],
     "facts": [
       {
         "id": "body-bytes",

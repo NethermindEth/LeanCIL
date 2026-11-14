@@ -374,7 +374,9 @@ try
             verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput,
                 check: true);
         }
-        catch (InvalidOperationException error) when (error.Message.Contains("Stale verification report"))
+        // Only the certificate rule words its refusal this way; a later input check would not.
+        catch (InvalidOperationException error) when (error.Message.StartsWith("Stale verification report: ",
+            StringComparison.Ordinal))
         {
             failed = true;
         }
@@ -386,6 +388,7 @@ finally
 {
     File.WriteAllText(reportPath, savedReport);
 }
+verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
 // A default certificate serves only a default run, and a well-formed deep one only a deep run.
 if (CertificateProblem(savedReport, BindingMode.Default) is { } defaultProblem)
     throw new InvalidOperationException("Default certificate refused: " + defaultProblem);
