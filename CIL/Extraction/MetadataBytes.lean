@@ -997,10 +997,14 @@ instance decideAllIdentified : (assemblies : List AssemblyMetadata) →
 
 theorem AllIdentified.nil : AllIdentified [] [] := trivial
 
+#print axioms AllIdentified.nil
+
 theorem AllIdentified.cons {assembly : AssemblyMetadata} {identity : List Nat}
     {assemblies : List AssemblyMetadata} {identities : List (List Nat)}
     (first : AssemblyIdentified assembly identity) (rest : AllIdentified assemblies identities) :
     AllIdentified (assembly :: assemblies) (identity :: identities) := ⟨first, rest⟩
+
+#print axioms AllIdentified.cons
 
 /-- Each slice's assembly spells the identity listed for it, in the slices' order. -/
 abbrev AssembliesIdentified (metadata : MethodMetadata) (identities : List (List Nat)) : Prop :=
