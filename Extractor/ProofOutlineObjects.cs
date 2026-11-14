@@ -348,7 +348,7 @@ internal static partial class ProofOutline
                     if (item is Values loaded) Steps.Add(new ArrayUse(loaded.Array, stores));
                     stack.Add(item);
                 }
-                else if (op is SetLocal setLocal && !NarrowLocal(spec.Method, setLocal.Index))
+                else if (op is SetLocal setLocal)
                 {
                     if (Pop() is not { } item) return Stop("a local store of an empty stack");
                     // An array home checks the view it takes and the view it gives back.
@@ -361,7 +361,7 @@ internal static partial class ProofOutline
                     }
                     locals[setLocal.Index] = item;
                 }
-                else if (op is Local local && !NarrowLocal(spec.Method, local.Index))
+                else if (op is Local local)
                 {
                     if (!locals.TryGetValue(local.Index, out var item))
                         return Stop("a local the body reads before it stores it");
