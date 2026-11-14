@@ -38,7 +38,16 @@ using (var assembly = AssemblyDefinition.CreateAssembly(new("Collision", new(1, 
             Mono.Cecil.TypeAttributes.Public | Mono.Cecil.TypeAttributes.Sealed |
             Mono.Cecil.TypeAttributes.SequentialLayout,
             new TypeReference("System", "ValueType", module, runtime));
-        if (name == "G`1") type.GenericParameters.Add(new GenericParameter("T", type));
+        if (name == "G`1")
+        {
+            type.GenericParameters.Add(new GenericParameter("T", type));
+            var member = new MethodDefinition("ConstantOwner", Mono.Cecil.MethodAttributes.Public |
+                Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+            type.Methods.Add(member);
+            member.GenericParameters.Add(new GenericParameter("U", member));
+            member.Body.Instructions.Add(Instruction.Create(OpCodes.Ldc_I4_1));
+            member.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        }
         module.Types.Add(type);
     }
     var owner = new TypeDefinition("Fixture", "Methods", Mono.Cecil.TypeAttributes.Public);
@@ -141,7 +150,28 @@ using (var pinned = new PinnedMetadata(extractor, path))
     Reject(() => Field(split[1]), "Colliding field types passed member/definition validation");
     var constrained = extractor.GetType("Nethermind.LeanCIL.ConstrainedCalls", true)!;
     var indexType = constrained.GetNestedType("TargetIndex", Static)!;
-    var targetIndex = Activator.CreateInstance(indexType, Instance, null, [new[] { first, second }], null)!;
+    var genericOwnerMethod = generic.ElementType.Resolve().Methods.Single();
+    var otherOwner = new GenericInstanceType(generic.ElementType);
+    otherOwner.GenericArguments.Add(module.TypeSystem.UInt32);
+    MethodDefinition CloseOwner(GenericInstanceType declaring)
+    {
+        var member = new MethodReference(genericOwnerMethod.Name, genericOwnerMethod.ReturnType, declaring)
+        {
+            CallingConvention = genericOwnerMethod.CallingConvention
+        };
+        member.GenericParameters.Add(new GenericParameter("U", member));
+        var reference = new GenericInstanceMethod(member);
+        reference.GenericArguments.Add(module.TypeSystem.Int64);
+        try { return (MethodDefinition)instantiate.Invoke(session, [reference])!; }
+        catch (TargetInvocationException error) { throw error.InnerException!; }
+    }
+    var firstOwner = CloseOwner(generic);
+    var secondOwner = CloseOwner(otherOwner);
+    Require(!ReferenceEquals(firstOwner, secondOwner), "Distinct owner arguments reused one specialization clone");
+    Require(ReferenceEquals(firstOwner, CloseOwner(generic)) && ReferenceEquals(secondOwner, CloseOwner(otherOwner)),
+        "Closed owners did not retain their respective specialization clones");
+    var targetIndex = Activator.CreateInstance(indexType, Instance, null,
+        [new[] { first, second, firstOwner, secondOwner }], null)!;
     var resolutionType = constrained.GetNestedType("Resolution", Static)!;
     foreach (var (argument, expected) in new[] { (types[0], first), (types[1], second) })
     {
@@ -149,6 +179,18 @@ using (var pinned = new PinnedMetadata(extractor, path))
             [owner, method, method, owner, new[] { argument }], null)!;
         Require(ReferenceEquals(indexType.GetMethod("Find", Instance)!.Invoke(targetIndex, [resolution]), expected),
             "Constrained lookup disagrees with specialization identity");
+    }
+    foreach (var (declaring, expected) in new[] { (generic, firstOwner), (otherOwner, secondOwner) })
+    {
+        var resolution = Activator.CreateInstance(resolutionType, Instance, null,
+            [generic.ElementType.Resolve(), genericOwnerMethod, genericOwnerMethod, declaring,
+                new[] { module.TypeSystem.Int64 }], null)!;
+        Require(ReferenceEquals(indexType.GetMethod("Find", Instance)!.Invoke(targetIndex, [resolution]), expected),
+            "Constrained lookup merged different closed generic owners");
+        var retained = (IReadOnlyList<TypeReference>)specialization.GetMethod("OwnerArguments", Static)!
+            .Invoke(null, [expected])!;
+        Require(retained.Count == 1 && ReferenceEquals(retained[0], declaring.GenericArguments[0]),
+            "Specialized owner arguments were not retained");
     }
     var namedPrimitive = owner.Fields.Single(field => field.Name == "NamedPrimitive").FieldType;
     Equal(module.TypeSystem.Int32, namedPrimitive, true, "Equal scoped primitive rows differ");
@@ -347,6 +389,14 @@ using (var pinned = new PinnedMetadata(extractor, path))
         Require(Counter("EdgeVisits") - edges == 6 * size, "DAG edges were expanded");
         Require(Counter("TrieProbes") - probes <= 12 * size + 30, "Signature interning expanded a DAG");
         Equal(left, Diamond(size, split[1]), false, "Unequal DAG leaf was erased");
+        var differentSharing = new GenericInstanceType(generic.ElementType);
+        differentSharing.GenericArguments.Add(Diamond(size - 1, split[0]));
+        differentSharing.GenericArguments.Add(Diamond(size - 1, split[0]));
+        Require(!ReferenceEquals(differentSharing.GenericArguments[0], differentSharing.GenericArguments[1]),
+            "Different-sharing fixture reused its child objects");
+        Equal(left, differentSharing, true, "Canonical identity depends on DAG sharing");
+        differentSharing.GenericArguments[1] = Diamond(size - 1, split[1]);
+        Equal(left, differentSharing, false, "Different-sharing comparison erased an unequal leaf");
         var wide = new GenericInstanceType(generic.ElementType);
         for (int index = 0; index < size; index++) wide.GenericArguments.Add(left);
         long wideNodes = Counter("NodeVisits"), wideEdges = Counter("EdgeVisits");
