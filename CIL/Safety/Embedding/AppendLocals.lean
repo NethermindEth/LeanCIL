@@ -690,7 +690,8 @@ theorem step_appendLocals_add :
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .add pc stack frame extra memory
+  append_stack_cases using
+    fallback_appendLocals body.profile .add pc _ frame extra memory
 
 #print axioms step_appendLocals_add
 

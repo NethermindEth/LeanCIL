@@ -349,6 +349,10 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
         apply instruction_contract
         assumption
     | solve |
+        apply StepContract.instruction
+        apply referenceAddInstruction_contract
+        assumption
+    | solve |
         refine StepContract.of_effect ?_ ?_
         · first
           | exact .memory (.ordinary (.unchanged _))

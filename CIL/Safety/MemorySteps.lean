@@ -298,6 +298,70 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) (value :: rest) frame memory := by
   memory_step_proof
 
+/-- Adding a signed 32-bit byte offset preserves the reference checks. -/
+@[cil_step high] theorem step_add_reference_i32_eq (offset : CIL.W32)
+    (reference : ManagedReference) (rest : List Value) :
+    step body .add pc args frame
+      (.scalar (.i32 offset) :: .reference reference :: rest) memory = do
+      let address ← referenceAt reference
+      let result ← checkedAt reference 0
+        (add memory address 1 (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.reference (.address result) :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_add_reference_i32_eq
+
+/-- Adding a signed 64-bit byte offset preserves the reference checks. -/
+@[cil_step high] theorem step_add_reference_i64_eq (offset : CIL.W64)
+    (reference : ManagedReference) (rest : List Value) :
+    step body .add pc args frame
+      (.scalar (.i64 offset) :: .reference reference :: rest) memory = do
+      let address ← referenceAt reference
+      let result ← checkedAt reference 0
+        (add memory address 1 (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.reference (.address result) :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_add_reference_i64_eq
+
+/-- Commuting the scalar and reference preserves byte-offset execution. -/
+@[cil_step high] theorem step_add_commuted_eq (offset : CIL.Value)
+    (reference : ManagedReference) (rest : List Value) :
+    step body .add pc args frame (.reference reference :: .scalar offset :: rest) memory =
+      step body .add pc args frame (.scalar offset :: .reference reference :: rest) memory := by
+  rfl
+#print axioms step_add_commuted_eq
+
+/-- Adding a signed 32-bit byte offset preserves the reference checks and readonly capability. -/
+@[cil_step high] theorem step_add_readOnly_i32_eq (offset : CIL.W32)
+    (reference : ManagedReference) (rest : List Value) :
+    step body .add pc args frame
+      (.scalar (.i32 offset) :: .readOnlyReference reference :: rest) memory = do
+      let address ← referenceAt reference
+      let result ← checkedAt reference 0
+        (add memory address 1 (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.readOnlyReference (.address result) :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_add_readOnly_i32_eq
+
+/-- Adding a signed 64-bit byte offset preserves the reference checks and readonly capability. -/
+@[cil_step high] theorem step_add_readOnly_i64_eq (offset : CIL.W64)
+    (reference : ManagedReference) (rest : List Value) :
+    step body .add pc args frame
+      (.scalar (.i64 offset) :: .readOnlyReference reference :: rest) memory = do
+      let address ← referenceAt reference
+      let result ← checkedAt reference 0
+        (add memory address 1 (BitVec.ofInt 64 offset.toInt))
+      return .next (pc + 1) (.readOnlyReference (.address result) :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_add_readOnly_i64_eq
+
+/-- Commuting the scalar and reference preserves byte-offset execution. -/
+@[cil_step high] theorem step_add_readOnly_commuted_eq (offset : CIL.Value)
+    (reference : ManagedReference) (rest : List Value) :
+    step body .add pc args frame (.readOnlyReference reference :: .scalar offset :: rest) memory =
+      step body .add pc args frame (.scalar offset :: .readOnlyReference reference :: rest) memory := by
+  rfl
+#print axioms step_add_readOnly_commuted_eq
+
 /-- Commuted reference offsets reuse the scalar-first memory step equations. -/
 @[cil_step high] theorem step_memory_add_commuted_eq (size : Nat) (signed : Bool)
     (reference : ManagedReference) (offset : CIL.Value) (rest : List Value) :
