@@ -499,6 +499,8 @@ structure IndexTables where
   instanceBefore : SearchTree Nat
   /-- For each carried TypeDef whose fields are all carried, its number of instance fields. -/
   instanceTotal : SearchTree Nat
+  /-- Each owner's first carried generic parameter token and number of carried parameters. -/
+  genericOwners : SearchTree (Nat × Nat)
   deriving DecidableEq, Repr
 
 /-! ## One slice, indexed -/
@@ -880,6 +882,50 @@ private def linkEntries : List MetadataLink → List (Nat × (Nat × Nat))
   | link :: rest =>
     (link.kind * 0x100000000 + link.source, (link.slice, link.target)) :: linkEntries rest
 
+/-- Group owner-sorted parameter tokens into first-token and count entries. -/
+private def genericOwnerGroups : List (Nat × Nat) → List (Nat × (Nat × Nat))
+  | [] => []
+  | (owner, first) :: rest => collect owner first 1 rest
+where
+  /-- Finish each owner's group before starting the next owner. -/
+  collect (owner first count : Nat) : List (Nat × Nat) → List (Nat × (Nat × Nat))
+    | [] => [(owner, (first, count))]
+    | (nextOwner, token) :: rest =>
+      if nextOwner == owner then collect owner first (count + 1) rest
+      else (owner, (first, count)) :: collect nextOwner token 1 rest
+
+/-- Merge owner/token ordered entries within a bound of their combined lengths. -/
+private def mergeGenericOwners :
+    Nat → List (Nat × Nat) → List (Nat × Nat) → List (Nat × Nat)
+  | _, [], right => right
+  | _, left, [] => left
+  | 0, _, _ => []
+  | fuel + 1, left :: leftRest, right :: rightRest =>
+    if left.1 < right.1 || (left.1 == right.1 && left.2 ≤ right.2) then
+      left :: mergeGenericOwners fuel leftRest (right :: rightRest)
+    else right :: mergeGenericOwners fuel (left :: leftRest) rightRest
+
+/-- Sort parameter entries by owner/token with structurally bounded O(n log n) recursion. -/
+private def sortGenericOwners : Nat → List (Nat × Nat) → List (Nat × Nat)
+  | 0, entries => entries
+  | _ + 1, [] => []
+  | _ + 1, [entry] => [entry]
+  | fuel + 1, entries =>
+    let count := entries.length
+    let halves := entries.splitAt (count / 2)
+    mergeGenericOwners count (sortGenericOwners fuel halves.1)
+      (sortGenericOwners fuel halves.2)
+
+/-- Index every carried generic parameter by its decoded owner in O(n log n) time. -/
+private def genericOwnerEntries (index : MetadataIndex) :
+    Except MetadataError (SearchTree (Nat × Nat)) := do
+  let entries ← index.rows.toList.foldlM (fun found (token, _) => do
+    if metadataTableOf token != Table.genericParam then return found
+    let parameter ← index.genericParam token
+    return (parameter.owner, token) :: found) []
+  let ordered := sortGenericOwners entries.length entries
+  SearchTree.ofEntries (genericOwnerGroups ordered)
+
 /-- The lookup structures of a slice, built from its bytes: its entries as trees, and the instance
     field counts of its carried types. -/
 def MetadataSlice.tables (slice : MetadataSlice) : Except MetadataError IndexTables := do
@@ -896,11 +942,16 @@ def MetadataSlice.tables (slice : MetadataSlice) : Except MetadataError IndexTab
       userStrings := userStrings
       links := links
       instanceBefore := .leaf
-      instanceTotal := .leaf }
-  let (before, total) ←
-    fieldCountEntries
-      { toIndexTables := bare, header := header, corlib := slice.corlib, identity := [] }
-  .ok { bare with instanceBefore := before, instanceTotal := total }
+      instanceTotal := .leaf
+      genericOwners := .leaf }
+  let index : MetadataIndex :=
+    { toIndexTables := bare, header := header, corlib := slice.corlib, identity := [] }
+  let (before, total) ← fieldCountEntries index
+  let genericOwners ← genericOwnerEntries index
+  .ok { bare with
+    instanceBefore := before
+    instanceTotal := total
+    genericOwners := genericOwners }
 
 /-- The index of a slice given its tables and the identity its assembly spells, which an
     `AssemblyIdentified` fact ties, with the assembly's header, to the assembly's bytes and to

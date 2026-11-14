@@ -366,7 +366,8 @@ private def receiverWorld (baseName : String) (interfaceType hasThis generic : B
 
 /-- The complete receiver binding result for a metadata owner and a claimed receiver bit. -/
 private def receiverIdentity (baseName : String) (interfaceType hasThis objectReceiver : Bool)
-    (generic : Bool := false) : Except MetadataError MethodNames := do
+    (generic : Bool := false) (omitLink omitParameters : Bool := false) :
+    Except MetadataError MethodNames := do
   let fixture := build (receiverWorld baseName interfaceType hasThis generic)
     (bytesOf "T") ownIdentity
   let method : RawMethod :=
@@ -374,11 +375,60 @@ private def receiverIdentity (baseName : String) (interfaceType hasThis objectRe
       explicitThis := false, callingConvention := 0, attributes := if hasThis then 0x86 else 0x96,
       implementation := 0, returnType := .void, parameters := [], locals := [],
       initLocals := false, maxStack := 8, genericParameters := [], code := [],
-      ownerParameters := if generic then [{ flags := 0, types := [] }] else [],
+      ownerParameters := if generic && !omitParameters then [{ flags := 0, types := [] }] else [],
       objectReceiver := objectReceiver }
-  let env : MetadataEnv := { slices := [← fixture.1.index] }
-  methodIdentityValid env method (if generic then [.primitive 8] else [])
-    (if generic then [int32] else [])
+  let metadata := if omitLink then
+      { fixture.1 with links := fixture.1.links.filter (·.kind != linkGenericParams) }
+    else fixture.1
+  let env : MetadataEnv := { slices := [← metadata.index] }
+  methodIdentityValid env method (if generic && !omitParameters then [.primitive 8] else [])
+    (if generic && !omitParameters then [int32] else [])
+
+/-- Carried owner parameters remain binding when their optional link is absent. -/
+theorem binds_generic_owner_without_link :
+    (receiverIdentity "Object" false false false true true false).isOk = true ∧
+    (receiverIdentity "Object" false false false true true true).isOk = false := by
+  decide +kernel
+/-- info: 'Tests.MetadataBinding.binds_generic_owner_without_link' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms binds_generic_owner_without_link
+
+/-- A parameter table whose entries give a parameter number and its coded owner. -/
+private def parameterWorld (parameters : List (Nat × Nat)) : MetadataSlice :=
+  (build (parameters.mapM fun (number, owner) =>
+    row Table.genericParam [number, 0, owner, 0]) (bytesOf "T") ownIdentity).1
+
+/-- Read the first type's parameters after changing the carried rows or their optional link. -/
+private def parameterResult (parameters : List (Nat × Nat))
+    (linkTarget : Option (Nat × Nat) := none) (omitted : List Nat := []) :
+    Except MetadataError (List GenericParamRow) := do
+  let metadata := parameterWorld parameters
+  let metadata := { metadata with
+    rows := metadata.rows.filter fun (token, _) => !omitted.contains (tokenRow token)
+    links := match linkTarget with
+      | none => []
+      | some (position, target) => [⟨linkGenericParams, 0x02000001, position, target⟩] }
+  let index ← metadata.indexWith (← metadata.tables) []
+  index.genericParameters 0 0x02000001
+
+/-- Generic owners accept complete zero-based runs and reject conflicting or incomplete rows. -/
+theorem checks_all_carried_generic_parameters :
+    (parameterResult []).isOk = true ∧
+    (parameterResult [(0, 2), (1, 2), (0, 4)]).isOk = true ∧
+    (parameterResult [(0, 3), (0, 2)]).isOk = true ∧
+    (parameterResult [(0, 2)] (some (0, 0x2A000001))).isOk = true ∧
+    (parameterResult [(0, 2)] (some (1, 0x2A000001))).isOk = false ∧
+    (parameterResult [(0, 2), (0, 4)] (some (0, 0x2A000002))).isOk = false ∧
+    (parameterResult [(0, 4)] (some (0, 0x2A000001))).isOk = false ∧
+    (parameterResult [(0, 2), (1, 2)] (some (0, 0x2A000002))).isOk = false ∧
+    (parameterResult [(0, 2), (1, 2)] none [1]).isOk = false ∧
+    (parameterResult [(0, 2), (1, 2)] none [2]).isOk = false ∧
+    (parameterResult [(0, 2), (0, 4), (1, 2)]).isOk = false ∧
+    (parameterResult [(0, 2), (2, 2)]).isOk = false := by decide +kernel
+/-- info: 'Tests.MetadataBinding.checks_all_carried_generic_parameters' depends on axioms:
+[propext] -/
+#guard_msgs in
+#print axioms checks_all_carried_generic_parameters
 
 /-- Class receivers are objects; value and enum receivers are managed references. -/
 theorem accepts_matching_receivers :

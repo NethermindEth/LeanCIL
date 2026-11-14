@@ -478,20 +478,24 @@ private def genericRun (index : MetadataIndex) (owner : Nat) :
       if entry.owner != owner then .ok []
       else do .ok (entry :: (← genericRun index owner fuel (row + 1)))
 
-/-- The generic parameters of a `TypeDef` or `MethodDef`, numbered from 0 in order. The link
-    names the first row of the run; the row before it must name another owner, so the run is
-    not cut short. -/
-def MetadataIndex.genericParameters (index : MetadataIndex) (owner : Nat) :
+/-- Every carried parameter of an owner belongs to its contiguous zero-based run. An optional
+    link must name its first row in the current metadata position. -/
+def MetadataIndex.genericParameters (index : MetadataIndex) (position owner : Nat) :
     Except MetadataError (List GenericParamRow) :=
-  match index.link linkGenericParams owner with
-  | none => .ok []
-  | some (_, first) => do
+  match index.genericOwners.find? owner with
+  | none =>
+    if (index.link linkGenericParams owner).isSome then .error (.unresolvedMember owner)
+    else .ok []
+  | some (first, count) => do
+    if (index.link linkGenericParams owner).any (· != (position, first)) then
+      throw (.unresolvedMember owner)
     if first != tokenOf Table.genericParam (tokenRow first) || tokenRow first == 0 then
       throw (.tokenOutOfScope first)
     if 1 < tokenRow first then
       if (← index.genericParam (first - 1)).owner == owner then throw (.unresolvedMember owner)
     let run ← genericRun index owner (index.header.rows Table.genericParam) (tokenRow first)
-    if (run.zipIdx.all fun (entry, position) => entry.number == position) then .ok run
+    if run.length == count &&
+        (run.zipIdx.all fun (entry, number) => entry.number == number) then .ok run
     else .error (.unresolvedMember owner)
 
 /-- Whether generic parameter rows have the attribute flags the extractor states. -/
@@ -601,8 +605,8 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
       method.callingConvention != convention % 0x20 then throw (.methodMismatch method.token)
   let ownerToken ← env.declaringType 0 method.token
   let owner ← typeDefNamed env 0 resolveFuel ownerToken
-  let methodParameters ← index.genericParameters method.token
-  let ownerParameters ← index.genericParameters ownerToken
+  let methodParameters ← index.genericParameters 0 method.token
+  let ownerParameters ← index.genericParameters 0 ownerToken
   if methodParameters.length != signature.genericArity ||
       !flagsAgree methodParameters method.genericParameters ||
       !flagsAgree ownerParameters method.ownerParameters || method.ownerArgumentCount != 0 then

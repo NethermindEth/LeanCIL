@@ -52,6 +52,9 @@ name = "Tests.MetadataWorld"
 name = "Tests.MetadataBinding"
 
 [[lean_lib]]
+name = "Tests.GenericOwnerScaling"
+
+[[lean_lib]]
 name = "Tests.LiteralDisplay"
 
 [[lean_lib]]
