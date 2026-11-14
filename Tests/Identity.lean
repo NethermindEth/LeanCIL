@@ -598,7 +598,8 @@ def checkAssemblyComponentOrder : IO Unit := do
     (⟨⟨1⟩, ⟨1, 1, 1, 2⟩, ⟨2⟩, some 0⟩, { lower with version := ⟨1, 1, 2, 1⟩ }),
     ({ lower with culture := upper.culture, publicKeyToken := upper.publicKeyToken },
       { lower with version := ⟨1, 1, 1, 2⟩ }),
-    ({ lower with publicKeyToken := upper.publicKeyToken }, { lower with culture := upper.culture }),
+    ({ lower with publicKeyToken := upper.publicKeyToken },
+      { lower with culture := upper.culture }),
     (lower, { lower with publicKeyToken := some 0 }),
     ({ lower with publicKeyToken := some 0 }, { lower with publicKeyToken := some 1 })]
   for (left, right) in pairs do
