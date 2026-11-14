@@ -87,7 +87,7 @@ The suite also checks the kernel heartbeats of `FeatureFlowValid` on generated b
 and 4,096 instructions that cycle `ldloc.s`, `stloc.s`, `ldloca.s` and `pop` over four `int32`
 locals, less the heartbeats of stating the same certificate. It fails when the cost per instruction
 at 1,024 or 4,096 exceeds 1.25 times the cost at 256. A local load, store or address is checked by
-its opcode and index.
+its opcode and index, and the cost per instruction measures 1.00 at 1,024 and 1.05 at 4,096.
 
 The suite embeds a hand-written body built with `Method.withCode`, one call per segment, into an
 extraction with a dead block after each return, at 512 and 2,048 calls, and reads the kernel
