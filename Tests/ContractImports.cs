@@ -275,7 +275,7 @@ if (!stages.Where(stage => stage.GetProperty("exitCode").GetInt32() == 0 &&
 if (!verified.Contains("Conditional verification: assumes _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
+if (report.GetProperty("schema").GetInt32() != 5 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
     report.GetProperty("imports")[0].GetProperty("acceptedVia").GetString() != "published-certification" ||
     !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");

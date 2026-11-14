@@ -7,6 +7,7 @@
 #:include MultiAssemblyGenerics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include StrictBindingFacts.cs
 #:include StrictBindingDecoding.cs
 #:include StrictBindingScaling.cs
@@ -22,6 +23,8 @@ string root = fixture.Root;
 string[] cli = fixture.Cli;
 const string libName = "MultiFixture.Lib";
 const string unsigned = ", Culture=neutral, PublicKeyToken=null";
+Run(["dotnet", "run", "--file", At("Tests/DeepCheckInputs.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/DeepSession.cs")]);
 const string libraryText = """
 namespace MultiFixture;
 public struct Cell { public ulong Value; }

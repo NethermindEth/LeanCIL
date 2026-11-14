@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 partial class Program : IDisposable
@@ -3778,8 +3779,223 @@ partial class Program : IDisposable
             throw new InvalidOperationException("Compiled artifacts changed during verification");
     }
 
+    /// <summary>The version of the certificate `verified.json` holds; every reader rejects any other.</summary>
+    internal const int CertificateSchema = 5;
+
+    /// <summary>
+    /// A fact the default verification trusts about the assembly images, which a deep check reconfirms from them.
+    /// </summary>
+    [JsonConverter(typeof(BindingFactNames))]
+    internal enum BindingFact
+    {
+        /// <summary>Each body is the image's bytes at the offset the section table maps its MethodDef RVA to.
+        /// </summary>
+        BodyBytes,
+        /// <summary>The carried table header, rows and heap entries are the image's bytes at their positions.
+        /// </summary>
+        MetadataRows,
+        /// <summary>Each platform type relied on is the value type, class or enum the extraction took it for.
+        /// </summary>
+        PlatformTypeKinds,
+        /// <summary>Each platform enum relied on has the underlying type the extraction took.</summary>
+        EnumUnderlyingTypes,
+        /// <summary>Each value tuple relied on has the field order the extraction took.</summary>
+        ValueTupleFieldOrder,
+        /// <summary>`System.Object` has no instance fields.</summary>
+        ObjectFields,
+        /// <summary>The raw layouts are the contents of their TypeDefs.</summary>
+        LayoutContent,
+        /// <summary>Each dispatch catalog lists every class of the slot's image that reaches the slot.</summary>
+        DispatchCatalogs,
+        /// <summary>The RVA static field bytes are the image's.</summary>
+        StaticData,
+        /// <summary>The generic parameters and their constraints are the rows'.</summary>
+        GenericConstraints,
+        /// <summary>The AssemblyRef public key tokens are the tokens of the referenced images' keys.</summary>
+        PublicKeyTokens,
+        /// <summary>The hashed part of each generic import identity is the hash of its definition key.</summary>
+        ImportIdentities
+    }
+
+    /// <summary>What a run established about one binding fact.</summary>
+    [JsonConverter(typeof(BindingStatusNames))]
+    internal enum BindingStatus
+    {
+        /// <summary>The run relied on the fact without checking it; only a default run reports it.</summary>
+        Trusted,
+        /// <summary>A kernel-replayed, axiom-audited theorem states the fact for the pinned images.</summary>
+        Reconfirmed,
+        /// <summary>The run did not check the fact, for the reason it records.</summary>
+        NotCovered,
+        /// <summary>A check of the fact did not pass.</summary>
+        Failed
+    }
+
+    /// <summary>Whether a run trusted the binding facts or ran the deep checks on them.</summary>
+    [JsonConverter(typeof(BindingModeNames))]
+    internal enum BindingMode
+    {
+        /// <summary>The run trusted every binding fact.</summary>
+        Default,
+        /// <summary>The run ran the deep checks.</summary>
+        Deep
+    }
+
+    /// <summary>Reads and writes an enum as one exact name per value; any other token is a `JsonException`.</summary>
+    abstract class ExactNames<T>(params (T Value, string Name)[] names) : JsonConverter<T> where T : struct, Enum
+    {
+        readonly Dictionary<string, T> values = names.ToDictionary(entry => entry.Name, entry => entry.Value,
+            StringComparer.Ordinal);
+        readonly Dictionary<T, string> texts = names.ToDictionary(entry => entry.Value, entry => entry.Name);
+
+        public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+            reader.TokenType == JsonTokenType.String && values.TryGetValue(reader.GetString()!, out var value) ? value
+                : throw new JsonException($"a {typeof(T).Name} is one of {string.Join(", ", texts.Values)}");
+
+        public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(texts[value]);
+    }
+
+    sealed class BindingFactNames() : ExactNames<BindingFact>(
+        (BindingFact.BodyBytes, "body-bytes"), (BindingFact.MetadataRows, "metadata-rows"),
+        (BindingFact.PlatformTypeKinds, "platform-type-kinds"),
+        (BindingFact.EnumUnderlyingTypes, "enum-underlying-types"),
+        (BindingFact.ValueTupleFieldOrder, "value-tuple-field-order"), (BindingFact.ObjectFields, "object-fields"),
+        (BindingFact.LayoutContent, "layout-content"), (BindingFact.DispatchCatalogs, "dispatch-catalogs"),
+        (BindingFact.StaticData, "static-data"), (BindingFact.GenericConstraints, "generic-constraints"),
+        (BindingFact.PublicKeyTokens, "public-key-tokens"), (BindingFact.ImportIdentities, "import-identities"));
+
+    sealed class BindingStatusNames() : ExactNames<BindingStatus>((BindingStatus.Trusted, "trusted"),
+        (BindingStatus.Reconfirmed, "reconfirmed"), (BindingStatus.NotCovered, "not covered"),
+        (BindingStatus.Failed, "failed"));
+
+    sealed class BindingModeNames() : ExactNames<BindingMode>((BindingMode.Default, "default"),
+        (BindingMode.Deep, "deep"));
+
+    /// <summary>Why a deep run read an assembly image.</summary>
+    [JsonConverter(typeof(ImageRoleNames))]
+    internal enum ImageRole
+    {
+        /// <summary>An assembly `identity.json` pins: the selected assembly or one it references.</summary>
+        Pinned,
+        /// <summary>A platform reference assembly a binding fact's claims name.</summary>
+        Platform,
+        /// <summary>An image of the digest file that no pin and no claim names.</summary>
+        Unused
+    }
+
+    sealed class ImageRoleNames() : ExactNames<ImageRole>((ImageRole.Pinned, "pinned"),
+        (ImageRole.Platform, "platform"), (ImageRole.Unused, "unused"));
+
+    /// <summary>The digest file a deep run read, by its path and its own SHA-256.</summary>
+    internal sealed record DigestFile([property: JsonRequired] string path, [property: JsonRequired] string sha256);
+
+    /// <summary>The sources a deep run's statements were checked with: StrictBinding's key and the Lean toolchain.
+    /// </summary>
+    internal sealed record StatementSources([property: JsonRequired] string strictBinding,
+        [property: JsonRequired] string leanToolchain, [property: JsonRequired] string lean);
+
+    /// <summary>
+    /// One image a deep run read: its display identity, SHA-256, role and status, with the theorem that reconfirmed
+    /// its digest or why it is not covered.
+    /// </summary>
+    internal sealed record ImageResult([property: JsonRequired] string identity,
+        [property: JsonRequired] string sha256, [property: JsonRequired] ImageRole role,
+        [property: JsonRequired] BindingStatus status, string? theorem, string? reason);
+
+    /// <summary>One binding fact's status, with the theorem that reconfirmed it or why it is not covered.</summary>
+    internal sealed record BindingFactResult([property: JsonRequired] BindingFact id,
+        [property: JsonRequired] BindingStatus status, string? theorem, string? reason);
+
+    /// <summary>
+    /// The binding section of a certificate: the run's mode, the digest file, statement sources and images a deep
+    /// run read, and the status of every binding fact, each listed once, in the order `BindingFact` declares them.
+    /// </summary>
+    internal sealed record BindingSection([property: JsonRequired] BindingMode mode,
+        [property: JsonRequired] DigestFile? digests, [property: JsonRequired] StatementSources? sources,
+        [property: JsonRequired] ImageResult[] images,
+        [property: JsonRequired] BindingFactResult[] facts)
+    {
+        /// <summary>The section of a default run, which reads no image and trusts every fact.</summary>
+        internal static BindingSection Default => new(BindingMode.Default, null, null, [],
+            [.. Enum.GetValues<BindingFact>().Select(fact => new BindingFactResult(fact, BindingStatus.Trusted,
+                null, null))]);
+    }
+
+    /// <summary>
+    /// Why `binding` is not the section of a certificate that a run of mode `required` accepts, or null when it
+    /// is: every fact once and in order; in a default run no digest file, sources or image and every fact
+    /// trusted; in a deep one the digest file and sources named and each fact and image reconfirmed with its
+    /// theorem or not covered with its reason.
+    /// </summary>
+    static string? BindingProblem(BindingSection? binding, BindingMode required)
+    {
+        if (binding?.facts is not { } facts || binding.images is not { } images) return "it has no binding section";
+        if (binding.mode != required)
+            return $"its binding section is from a {binding.mode} run, and this run accepts only {required}";
+        if (required == BindingMode.Default
+            ? binding.digests is not null || binding.sources is not null || images.Length != 0
+            : binding.digests is null || string.IsNullOrWhiteSpace(binding.digests.path) ||
+                !Sha256Text(binding.digests.sha256) || binding.sources is null ||
+                string.IsNullOrWhiteSpace(binding.sources.leanToolchain) ||
+                !Sha256Text(binding.sources.strictBinding) || !Sha256Text(binding.sources.lean) ||
+                images.Any(image => image is null || string.IsNullOrWhiteSpace(image.identity) ||
+                    !Sha256Text(image.sha256) || !Settled(image.status, image.theorem, image.reason)))
+            return $"its binding section's digest file, sources or images do not fit a {required} run";
+        var declared = Enum.GetValues<BindingFact>().Select(fact => (BindingFact?)fact);
+        if (!facts.Select(fact => fact?.id).SequenceEqual(declared))
+            return "its binding section does not list every binding fact once, in order";
+        var wrong = facts.FirstOrDefault(fact => required == BindingMode.Default
+            ? fact.status != BindingStatus.Trusted || fact.theorem is not null || fact.reason is not null
+            : !Settled(fact.status, fact.theorem, fact.reason));
+        return wrong is null ? null
+            : $"its binding fact {wrong.id} is {wrong.status} with theorem {wrong.theorem ?? "none"} and reason " +
+                $"{wrong.reason ?? "none"}, which a {required} run does not issue";
+    }
+
+    /// <summary>Whether a digest contains exactly the 64 hexadecimal digits of a SHA-256 value.</summary>
+    static bool Sha256Text(string? digest) => digest is { Length: 64 } && digest.All(char.IsAsciiHexDigit);
+
+    /// <summary>
+    /// Whether a deep run's verified certificate can report this outcome: reconfirmed by a named theorem, or not
+    /// covered for a stated reason.
+    /// </summary>
+    static bool Settled(BindingStatus status, string? theorem, string? reason) => status switch
+    {
+        BindingStatus.Reconfirmed => !string.IsNullOrWhiteSpace(theorem) && reason is null,
+        BindingStatus.NotCovered => !string.IsNullOrWhiteSpace(reason) && theorem is null,
+        _ => false
+    };
+
+    /// <summary>
+    /// The certificate `text` holds when a run of mode `required` accepts it; otherwise null, with `problem`
+    /// saying why. A certificate of another schema, mode or fact list is never read.
+    /// </summary>
+    static Report? ReadCertificate(string text, BindingMode required, out string? problem)
+    {
+        Report? report;
+        try { report = JsonSerializer.Deserialize<Report>(text); }
+        catch (JsonException error)
+        {
+            problem = "it is not a certificate: " + error.Message;
+            return null;
+        }
+        problem = report is null ? "it is empty"
+            : report.schema != CertificateSchema ? $"its schema is {report.schema}, not {CertificateSchema}"
+            : BindingProblem(report.binding, required);
+        return problem is null ? report : null;
+    }
+
+    /// <summary>Why `text` is not a certificate a run of mode `required` accepts, or null when it is.</summary>
+    internal static string? CertificateProblem(string text, BindingMode required)
+    {
+        ReadCertificate(text, required, out var problem);
+        return problem;
+    }
+
     sealed record Report(int schema, string assemblySha256, string identitySha256, string theorem, string[] axioms,
-        string theoremAudit, SortedDictionary<string, string> inputs, string? libraryKey = null, string? libraryBuild = null,
+        string theoremAudit, SortedDictionary<string, string> inputs, BindingSection binding,
+        string? libraryKey = null, string? libraryBuild = null,
         string? extractionAudit = null, string[]? initializedTypes = null,
         string? batchSourceSha256 = null, string? batchTheorem = null, string? consumerSupportSha256 = null,
         string[]? staticValues = null, string[]? contractImports = null, PublishedImport[]? imports = null,
@@ -3843,10 +4059,12 @@ partial class Program : IDisposable
 
         if (check)
         {
-            var old = JsonSerializer.Deserialize<Report>(File.ReadAllText(reportPath)) ?? throw new InvalidOperationException("Missing report");
+            var old = ReadCertificate(File.ReadAllText(reportPath), BindingMode.Default, out var problem) ??
+                throw new InvalidOperationException("Stale verification report: " + problem);
             RunExtractor(Extract("check", assembly, identity, entry, output, profile));
 
-            if (old.schema != 4 || string.IsNullOrWhiteSpace(old.extractionAudit) || !Same(old.inputs, Inputs(proof, settings)) || old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
+            if (string.IsNullOrWhiteSpace(old.extractionAudit) || !Same(old.inputs, Inputs(proof, settings)) ||
+                old.identitySha256 != Sha(Path.Combine(output, "identity.json")) ||
                 old.theorem != theorem || old.assemblySha256 != Sha(assembly) ||
                 (old.batchSourceSha256 is not null && (string.IsNullOrWhiteSpace(old.batchTheorem) ||
                     old.batchSourceSha256 != Sha(Path.Combine(output, "Batch.lean")))))
@@ -4233,7 +4451,8 @@ partial class Program : IDisposable
             var initializedTypes = extraction.Root.TryGetProperty("initializedTypes", out var assumptions)
                 ? assumptions.Deserialize<string[]>() : [];
             RequireImplementationImports(extraction);
-            var report = new Report(4, Sha(assembly), identityHash, theorem, axioms, audit, before, libraryKey, libraryBuild, extractionAudit, initializedTypes,
+            var report = new Report(CertificateSchema, Sha(assembly), identityHash, theorem, axioms, audit, before,
+                BindingSection.Default, libraryKey, libraryBuild, extractionAudit, initializedTypes,
                 staticValues: StaticValueAssumptions(extraction.Root),
                 opaqueStaticValues: OpaqueStaticValues(extraction.Root),
                 contractImports: ContractImportAssumptions(extraction.Root),

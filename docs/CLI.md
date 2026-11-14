@@ -363,7 +363,7 @@ The report has one line per image and one per item:
 Valid: strict binding audit of /work/artifacts/Add
   Certificate: Extracted.translation_valid audited with the binding theorems; generatedSha256 ceba1286...4924
   Image Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: SHA-256 a9351b77...abe4 stated
-  SHA-256 digest of Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: reconfirmed (BindingAudit.Ia9351b776ddd5e75.digest)
+  SHA-256 digest of Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: reconfirmed (BindingAudit.Ia9351b77...abe4.digest)
   PE container and method body locations: reconfirmed (BindingAudit.bodies)
   Copied metadata rows and heap entries: not covered (the extraction's evidence carries no copied metadata rows or heap entries to check)
   Initial values of static data: not covered (no check reads static data from the image)
@@ -1041,6 +1041,17 @@ Verified: ExampleProof.addTwo_holds
   its arguments or recurses is printed as Lean elaborates it, in terms of the auxiliary
   definitions it compiles to, and the field accessors of a structure the proof declares are not
   listed. Definitions of modules the proof imports are named in the statement and not printed.
+- `verified.json` is the certificate, schema 5. Its `binding` section has the run's `mode`, the
+  `digests` file, statement `sources` and `images` the run read, and, as `facts`, every fact about
+  the assembly image that verification trusts, each with its `id`, `status`, `theorem` and
+  `reason`, in this order: `body-bytes`, `metadata-rows`, `platform-type-kinds`,
+  `enum-underlying-types`, `value-tuple-field-order`, `object-fields`, `layout-content`,
+  `dispatch-catalogs`, `static-data`, `generic-constraints`, `public-key-tokens` and
+  `import-identities`. `verify` writes `mode` `default`, reads no digest file, sources or image,
+  and lists every fact as `trusted`, with no theorem or reason.
+  `verify` accepts no certificate of another schema, mode or fact list, nor one with a missing,
+  repeated or reordered fact or an unknown status: a cached result whose certificate it refuses
+  is verified again.
 - `Lean messages` lists the informational and warning messages of the proof file, such as
   `#check`, `#eval` and `#print axioms` output, at `file:line:column` in the proof. The first 60
   lines are shown; `proof-messages.txt` in the artifact directory holds the full text, and the
@@ -1228,10 +1239,12 @@ writes `failed.json` with kind `refutation`, located at the theorem's name.
 
 `leancil verify ... --format json` prints one JSON report on stdout instead of the text report,
 and nothing on stderr except [stage progress](#stage-progress); the exit code is the same as
-without it. `--format text` is the default. The report has `schema` 1, `result` (`verified` or
+without it. `--format text` is the default. The report has `schema` 2, `result` (`verified` or
 `failed`), the `stage` that failed, the `theorem`, `method`, `proof` and `output`, and on success
 the `axioms`, the `statement` and its `specification`, the definitions
-[`Specification:`](#reading-the-report) prints, each with its `name` and `text`. The proof's own
+[`Specification:`](#reading-the-report) prints, each with its `name` and `text`, and the
+certificate's [`binding`](#reading-the-report) section; a run that issued no certificate has
+`binding` `null` and says so in `unknown.binding`. The proof's own
 Lean messages are in `messages`, and `rerun` repeats the run. With `--goals`, `goals` lists each
 open goal with its `file`, `line`, `column`, `kind` (`sorry`, `failing tactic` or `unsolved`) and
 `goal`; without it `goals` is `null` and `unknown.goals` says why, as it does when the run stopped
@@ -1343,7 +1356,7 @@ library implementation proof source, artifact or full bundle is required.
 [Contract interfaces](CONTRACT-INTERFACES.md) gives the `extract` options and required pins, the
 sidecar schema and its checks, and the form the caller theorem must have.
 
-A schema-4 `verified.json` contains `imports[]` with `acceptedVia` set to
+A `verified.json` contains `imports[]` with `acceptedVia` set to
 `published-certification`, the implementation SHA-256, interface digest,
 certification theorem/statement/digest, `sidecarSha256`, `certificationAuthenticated`
 (always `false`: no pinned digest covers the certification text) and deployment
