@@ -3,7 +3,7 @@
 #:package Mono.Cecil
 #:include ../Extractor/MetadataFieldPrefix.cs
 #:include ../scripts/Verification.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs

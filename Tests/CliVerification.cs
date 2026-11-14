@@ -1,7 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
@@ -40,6 +40,8 @@ if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("LEANCIL_CERTIF
     Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY_SHA256", producer.PrepareLibrary(preparedLibrary));
     Environment.SetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY", preparedLibrary);
 }
+
+Run(["dotnet", "run", "--file", At("Tests/DeepCli.cs"), "--", .. args], progress: "Deep verification CLI");
 
 void Verified(params string[] options)
 {
