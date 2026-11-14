@@ -551,7 +551,8 @@ theorem operand_kinds_agree_with_cecil :
 theorem rejects_pinned_identities_other_than_the_pins (method : RawMethod)
     (arguments : List TypeExpr) (signature : String) :
     ¬ BodyDecodes [pin] pin (evidence tinyBytes) method arguments signature ∧
-    ¬ BodyDecodes [pin] pin { evidence tinyBytes with pinned := [bytesOf "U"] } method arguments
+    ¬ BodyDecodes [pin] pin
+      { evidence tinyBytes with pinned := PinnedIndex.ofIdentities [bytesOf "U"] } method arguments
       signature :=
   ⟨fun decodes => absurd decodes.2.2.2.1 (by decide),
     fun decodes => absurd decodes.2.2.2.1 (by decide +kernel)⟩
@@ -567,7 +568,8 @@ private def ownWithLibVersion2 : MetadataSlice :=
 private def rejectsWithLibPinned (ownSlice : MetadataSlice) (token : Nat) (operand : RawOperand)
     (error : MetadataError) : Bool :=
   match (do
-    let env ← { own := ownSlice, others := [lib] : MethodMetadata }.environment [bytesOf libScope]
+    let env ← { own := ownSlice, others := [lib] : MethodMetadata }.environment
+      (PinnedIndex.ofIdentities [bytesOf libScope])
     checkEntry env 0 token operand) with
   | .error found => found == error
   | .ok _ => false

@@ -364,3 +364,6 @@ name = "Tests.StrictBinding"
 
 [[lean_lib]]
 name = "Tests.MetadataAssemblies"
+
+[[lean_lib]]
+name = "Tests.PinnedIndexScaling"
