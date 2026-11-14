@@ -19,6 +19,11 @@ using Srm = System.Reflection.Metadata;
 // Every identity of the corpus is rendered with ToLean(), elaborated by Lean, and shown by CIL/Identity.lean's
 // display; that text must equal ToDisplay(). Each record is first checked against the raw metadata rows it reads.
 var clock = Stopwatch.StartNew();
+if (args.Contains("--heap-bounds-only", StringComparer.Ordinal))
+{
+    CheckHeapBounds();
+    return;
+}
 if (args.Contains("--raw-names-only", StringComparer.Ordinal))
 {
     CheckRawNames(At("artifacts/Identities/Unusual.dll"));
@@ -31,6 +36,7 @@ if (args.Contains("--code-cost", StringComparer.Ordinal))
 }
 CheckScaling();
 if (args.Contains("--scaling-only", StringComparer.Ordinal)) return;
+CheckHeapBounds();
 var directory = At("artifacts/Identities");
 Directory.CreateDirectory(directory);
 var examplesPath = At("Examples/Assembly/bin/Examples.dll");
@@ -401,6 +407,82 @@ static void CheckEquality(string path, ReaderParameters parameters, IdentityCorp
     if (!types.All(first.Contains) || again.GetTypes().Count() != types.Count)
         throw new InvalidOperationException("A second reading of Examples.dll gives other type identities");
     Console.WriteLine($"PASS {types.Count} type identities of a second reading equal the first");
+}
+
+static void CheckHeapBounds()
+{
+    using var assembly = AssemblyDefinition.CreateAssembly(
+        new AssemblyNameDefinition("HeapBounds", new Version(1, 0)) { PublicKey = new byte[32768] },
+        "HeapBounds", ModuleKind.Dll);
+    var module = assembly.MainModule;
+    var holder = new TypeDefinition("", "Holder", TypeAttributes.Public);
+    module.Types.Add(holder);
+    var method = new MethodDefinition("Literal", MethodAttributes.Public | MethodAttributes.Static,
+        module.TypeSystem.Void);
+    holder.Methods.Add(method);
+    method.Body.Instructions.Add(Instruction.Create(OpCodes.Ldstr, new string('x', 32768)));
+    method.Body.Instructions.Add(Instruction.Create(OpCodes.Pop));
+    method.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+    using var stream = new MemoryStream();
+    assembly.Write(stream);
+    byte[] original = stream.ToArray();
+    using var pe = new PEReader(new MemoryStream(original));
+    var metadata = new MetadataImage(pe);
+
+    void Reject(Action action, string label)
+    {
+        try { action(); }
+        catch (BadImageFormatException) { return; }
+        throw new InvalidOperationException($"Accepted invalid heap entry: {label}");
+    }
+
+    void Check(HeapIndex heap, byte[] entry, bool valid)
+    {
+        int size = metadata.Reader.GetHeapSize(heap);
+        int offset = size - entry.Length;
+        if (heap == HeapIndex.String && !valid)
+        {
+            // SRM excludes trailing zero padding from the string heap's reported size.
+            int physicalEnd = metadata.Reader.GetHeapMetadataOffset(HeapIndex.UserString) -
+                metadata.Reader.GetHeapMetadataOffset(heap);
+            entry = Enumerable.Repeat((byte)0xFF, physicalEnd - offset).ToArray();
+        }
+        byte[] changed = (byte[])original.Clone();
+        int start = pe.PEHeaders.MetadataStartOffset + metadata.Reader.GetHeapMetadataOffset(heap) + offset;
+        entry.CopyTo(changed, start);
+        using var changedPe = new PEReader(new MemoryStream(changed));
+        var changedMetadata = new MetadataImage(changedPe);
+        byte[] Read() => heap == HeapIndex.String
+            ? changedMetadata.StringEntry(offset) : changedMetadata.SizedEntry(heap, offset);
+        if (valid)
+        {
+            if (!Read().AsSpan().SequenceEqual(entry))
+                throw new InvalidOperationException($"Changed exact heap bytes: {heap}/{entry.Length}");
+        }
+        else Reject(() => Read(), $"{heap}/{Convert.ToHexString(entry)}");
+    }
+
+    Check(HeapIndex.String, [0], true);
+    Check(HeapIndex.String, [0xFF], false);
+    Reject(() => metadata.StringEntry(-1), "negative string offset");
+    Reject(() => metadata.StringEntry(metadata.Reader.GetHeapSize(HeapIndex.String)), "string heap end");
+    foreach (var heap in new[] { HeapIndex.Blob, HeapIndex.UserString })
+    {
+        Reject(() => metadata.SizedEntry(heap, -1), "negative sized offset");
+        Reject(() => metadata.SizedEntry(heap, metadata.Reader.GetHeapSize(heap)), "sized heap end");
+        foreach (byte[] entry in new byte[][]
+            { [0x80], [0xC0], [0xC0, 0], [0xC0, 0, 0], [1], [0x80, 1], [0xC0, 0, 0, 1], [0xE0], [0xFF] })
+            Check(heap, entry, false);
+        foreach (int length in new[] { 0, 1, 127, 128, 16383, 16384 })
+        {
+            byte[] header = length < 128 ? [(byte)length] : length < 16384
+                ? [(byte)(0x80 | (length >> 8)), (byte)length]
+                : [(byte)(0xC0 | (length >> 24)), (byte)(length >> 16), (byte)(length >> 8), (byte)length];
+            Check(heap, [.. header, .. new byte[length]], true);
+        }
+    }
+    Reject(() => metadata.SizedEntry(HeapIndex.String, 0), "wrong sized heap");
+    Console.WriteLine("PASS exact heap boundaries, malformed entries, and 1/2/4-byte lengths");
 }
 
 // The rows of an assembly hold what no example does: a culture, a zero token, names whose display falls back
