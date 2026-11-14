@@ -47,7 +47,8 @@ internal sealed class MethodSpecialization(ModuleDefinition module, string archi
             StructuralSignatures.Current.Type(member.ReturnType) !=
                 StructuralSignatures.Current.Type(definition.ReturnType) ||
             StructuralSignatures.Current.Ordered(member.Parameters.Select(parameter => parameter.ParameterType)) !=
-                StructuralSignatures.Current.Ordered(definition.Parameters.Select(parameter => parameter.ParameterType)) ||
+                StructuralSignatures.Current.Ordered(
+                    definition.Parameters.Select(parameter => parameter.ParameterType)) ||
             (declaringArguments.Length != 0 && !definition.IsStatic && !GenericStructs.Is(reference.DeclaringType)) ||
             (definition.IsConstructor && (methodArguments.Length != 0 || definition.IsStatic)) ||
             !definition.HasBody || definition.Body.ExceptionHandlers.Count != 0 ||
