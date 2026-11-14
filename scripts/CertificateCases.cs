@@ -22,7 +22,8 @@ static class CertificateCases
         return report.ToJsonString();
     }
 
-    /// <summary>Each variant of the valid default certificate `valid` that a default reader refuses, by name.</summary>
+    /// <summary>Each variant of the valid default certificate `valid` that a default reader refuses, by name.
+    /// </summary>
     internal static IEnumerable<(string Case, string Text)> Refused(string valid)
     {
         (string, string) Changed(string name, Action<JsonNode> change)
