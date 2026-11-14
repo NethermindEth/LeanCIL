@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ProofCostReport.cs
+#:include CertificateCases.cs
 #:include Verification.cs
 #:include CertifiedLibraryDonor.cs
 #:include ExportVerificationSuites.cs
@@ -373,6 +374,39 @@ Require(reports["wordreader"] is { Failed: true } unmeasured &&
     "a source with a published base and no head rows fails");
 Require(Report(["core", "loops"], PublishedRows(null, null, "measurer", "base commit"),
     Path.Combine(scratch, "head"), [], DefaultThresholdPercent).All(report => report.Comparison is null),
-    "a merge base main published nothing for compares no source");Directory.Delete(scratch, true);
+    "a merge base main published nothing for compares no source");
+
+// The measurement reads a verified output's proof only from a certificate a default run accepts.
+var certificateRoot = Path.Combine(scratch, "certificates");
+var certificateLibrary = Path.Combine(scratch, "certificate-library");
+Directory.CreateDirectory(certificateLibrary);
+File.WriteAllText(Path.Combine(certificateLibrary, "CIL.olean"), "");
+var validCertificate = JsonSerializer.Serialize(new Report(CertificateSchema, "assembly", "identity",
+    "ExampleProof.correctness", [], "audit", new(StringComparer.Ordinal), BindingSection.Default));
+Require(CertificateProblem(validCertificate, BindingMode.Default) is null,
+    "the measurement's sample certificate is one a default run accepts");
+foreach (var certificate in CertificateCases.AcceptedDeep(validCertificate))
+    Require(CertificateProblem(certificate, BindingMode.Deep) is null,
+        "a deep certificate accepts valid digests and settled outcomes");
+var acceptedMalformed = CertificateCases.RefusedDeep(validCertificate)
+    .Where(test => CertificateProblem(test.Text, BindingMode.Deep) is null).Select(test => test.Case).ToArray();
+Require(acceptedMalformed.Length == 0,
+    "deep metadata refuses malformed values: " + string.Join(", ", acceptedMalformed));
+var refusedCertificates = CertificateCases.Refused(validCertificate).ToArray();
+foreach (var (index, (_, text)) in refusedCertificates.Index())
+{
+    var refusedOutput = Path.Combine(certificateRoot, "case" + index);
+    Directory.CreateDirectory(refusedOutput);
+    File.WriteAllText(Path.Combine(refusedOutput, "Extracted.lean"), "");
+    File.WriteAllText(Path.Combine(refusedOutput, "verified.json"), text);
+}
+var refusedMeasurement = Measure(scratch, certificateLibrary, Path.Combine(scratch, "certificate-work"), false,
+    [certificateRoot], [], 1, "certificates");
+foreach (var (index, (name, _)) in refusedCertificates.Index())
+    Require(refusedMeasurement.Unmeasured.Any(lost => lost.Group == "case" + index &&
+        lost.Reason.StartsWith("the report is not a certificate verify accepts", StringComparison.Ordinal)),
+        "a report with " + name + " is not measured");
+Require(refusedMeasurement.Rows.Count == 0, "no module of an output with a refused certificate is measured");
+Directory.Delete(scratch, true);
 
 Console.WriteLine("All proof cost checks passed.");

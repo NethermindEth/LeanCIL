@@ -539,8 +539,15 @@ internal static partial class ProofCostReport
         {
             var output = Path.GetRelativePath(artifacts, directory).Replace('\\', '/');
             var stage = Path.Combine(work, "verified", output.Replace('/', Path.DirectorySeparatorChar));
+            var certificate = File.ReadAllText(Path.Combine(directory, "verified.json"));
+            // A report no default run would accept names no proof this measurement can trust.
+            if (Program.CertificateProblem(certificate, Program.BindingMode.Default) is { } problem)
+            {
+                Lost.Add(new Unmeasured(output, "the report is not a certificate verify accepts: " + problem));
+                return;
+            }
             Directory.CreateDirectory(stage);
-            using var report = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "verified.json")));
+            using var report = JsonDocument.Parse(certificate);
             var proofs = report.RootElement.TryGetProperty("inputs", out var inputs)
                 ? inputs.EnumerateObject().Where(input => input.Name.StartsWith("proof:", StringComparison.Ordinal))
                     .Select(input => (Path: input.Name["proof:".Length..], Sha256: input.Value.GetString())).ToArray()

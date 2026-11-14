@@ -1632,8 +1632,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 try
                 {
                     if (!RestoreSuccess(proofKeys[i], receipt)) continue;
-                    var report = JsonSerializer.Deserialize<Report>(File.ReadAllText(Path.Combine(receipt, "report.json")))!;
-                    if (report.schema != 4) continue;
+                    // A receipt whose certificate this run does not accept is a miss, never a failure.
+                    if (ReadCertificate(File.ReadAllText(Path.Combine(receipt, "report.json")), BindingMode.Default,
+                        out _) is not { } report) continue;
                     var cachedMessages = Path.Combine(receipt, ProofMessagesFile);
                     outcomes[i].Messages = File.Exists(cachedMessages)
                         ? JsonSerializer.Deserialize<ProofMessage[]>(File.ReadAllText(cachedMessages)) : null;
@@ -1655,7 +1656,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 JsonElement current = extractions[i].Root;
                 var report = JsonSerializer.Deserialize<Report>(outcomes[i].Detail!)! with
                 {
-                    schema = 4, identitySha256 = identities[i],
+                    identitySha256 = identities[i],
                     assemblySha256 = Sha(requests[i].Assembly), inputs = before[i], imports = PublishedImports(current),
                     contractImports = ContractImportAssumptions(current), contractDependencies = DeploymentDependencies(current)
                 };
@@ -2364,8 +2365,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     ? assumptions.Deserialize<string[]>() : [];
                 RequireImplementationImports(extractions[i]);
                 fullResults.TryGetValue(i, out FullImportResult? fullResult);
-                var report = new Report(4, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
-                    audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
+                var report = new Report(CertificateSchema, Sha(requests[i].Assembly), identities[i],
+                    requests[i].Theorem, audits[i].Axioms, audits[i].Audit, before[i], BindingSection.Default,
+                    libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
                     staticValues: StaticValueAssumptions(extraction),

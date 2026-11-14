@@ -236,7 +236,7 @@ an interface macro or elaborator cannot forge a closure. The compiled interface
 artifacts are hashed before replay and must keep those hashes after the audit
 and before each later step. Consumer workspaces also
 reject source-name collisions and include their hashes in snapshot checks.
-Schema-4 reports list `imports` accepted via `published-certification`, as well
+A `verified.json` certificate lists `imports` accepted via `published-certification`, as well
 as `contractImports`; CLI output states the conditional assumptions and deployment
 obligations.
 Hashes and certification records never discharge those assumptions.

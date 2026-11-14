@@ -34,6 +34,7 @@
     <Compile Include="../scripts/VerifyReports.cs" Link="VerifyReports.cs" />
     <Compile Include="../scripts/LibraryAudit.cs" Link="LibraryAudit.cs" />
     <Compile Include="../scripts/BindingAudit.cs" Link="BindingAudit.cs" />
+    <Compile Include="../scripts/DeepCheckInputs.cs" Link="DeepCheckInputs.cs" />
     <Compile Include="../scripts/BindingImage.cs" Link="BindingImage.cs" />
     <Content Include="../CIL/**/*.lean;../CIL.lean;../StrictBinding/**/*.lean;../StrictBinding.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
       <Link>verification/%(Identity)</Link>

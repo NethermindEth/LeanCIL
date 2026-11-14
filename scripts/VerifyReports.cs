@@ -7,8 +7,11 @@ using System.Text.RegularExpressions;
 // FailureReports' taxonomy, the failure records `CIL.Observe` logs and the integrity-checked manifest.
 internal static partial class VerifyReports
 {
-    /// <summary>The version of the report's shape; a change that removes or renames a field increments it.</summary>
-    internal const int Schema = 1;
+    /// <summary>
+    /// The version of the report's shape; a change that removes or renames a field, or adds one a reader must check,
+    /// increments it.
+    /// </summary>
+    internal const int Schema = 2;
 
     /// <summary>The version of the `verify-batch --format json` document's shape, which holds one report per request.
     /// </summary>
@@ -264,11 +267,12 @@ internal static partial class VerifyReports
     /// <param name="proofChecked">Whether Lean checked the proof, so its trace messages exist.</param>
     /// <param name="goalsRequested">Whether `--goals` asked for the goal at each `sorry` and failing tactic.</param>
     /// <param name="specification">The proof module's definitions the statement is stated with, when read.</param>
+    /// <param name="binding">The binding section of the certificate the run issued; null when it issued none.</param>
     internal static JsonObject Result(string result, FailureReports.Report? failure, string theorem, string proof,
         string output, string? proofRoot, string? stage, string[]? axioms, string? statement,
         IEnumerable<(string Severity, int Line, int Column, string Text)> messages, bool traceRequested = false,
         bool proofChecked = true, bool goalsRequested = false,
-        IEnumerable<(string Name, string Text)>? specification = null)
+        IEnumerable<(string Name, string Text)>? specification = null, Program.BindingSection? binding = null)
     {
         var all = messages.ToArray();
         var methods = Methods(output);
@@ -299,6 +303,7 @@ internal static partial class VerifyReports
         if (!goalsRequested || !proofChecked)
             unknown["goals"] = goalsRequested ? "the proof was not checked, so no goal was read"
                 : "not requested; --goals reports the goal at each sorry and failing tactic";
+        if (binding is null) unknown["binding"] = "the run issued no certificate";
         return new JsonObject
         {
             ["schema"] = Schema,
@@ -313,6 +318,8 @@ internal static partial class VerifyReports
             // The definitions of the proof module the statement names, as Lean prints their elaborated bodies.
             ["specification"] = specification is null ? null : new JsonArray([.. specification.Select(definition =>
                 (JsonNode?)new JsonObject { ["name"] = definition.Name, ["text"] = definition.Text })]),
+            // The certificate's binding section: the status of each fact the default verification trusts.
+            ["binding"] = binding is null ? null : JsonSerializer.SerializeToNode(binding),
             ["failures"] = failures,
             // The proof's own messages; the observer's records are in `failures`, its steps in `trace` and
             // the open goals in `goals`.
