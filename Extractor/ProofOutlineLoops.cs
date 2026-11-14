@@ -192,7 +192,8 @@ internal static partial class ProofOutline
             var imports = new List<string> { "CIL.Verification", "CIL.StructuralLabels" };
             if (callees.Count > 0) imports.Add("CIL.MethodIdentity");
             imports.Add("CIL.Safety.LoopScaffold");
-            if (body.Operations.Any(op => op is Memory { Operation: AddOffset }) &&
+            if (body.Operations.Any(op => op is Memory { Operation: AddOffset } or
+                    StackOperation { Kind: StackOpcode.Add }) &&
                 spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
                 callees.Keys.Any(index => Branches(extraction, index)) || Indexed.Any())
                 imports.Add("CIL.Safety.LoopObligations");
@@ -587,6 +588,15 @@ internal static partial class ProofOutline
         /// <summary>The infix operator of a word operation the walks name, or null for any other operation.</summary>
         static string? Arithmetic(Operation operation) =>
             operation is StackOperation { IsArithmetic: true } arithmetic ? arithmetic.Symbol : null;
+
+        /// <summary>The byte stride of a signed reference addition.</summary>
+        static int? ReferenceStride(Operation operation) => operation switch
+        {
+            Memory { Operation: AddOffset { Signed: true, Stride: <= int.MaxValue } offset } =>
+                Convert.ToInt32(offset.Stride),
+            StackOperation { Kind: StackOpcode.Add } => 1,
+            _ => null
+        };
 
         /// <summary>The operation reads an unsigned element of <paramref name="width"/> bytes.</summary>
         static bool ReadsWidth(Operation operation, int width) => operation switch
@@ -1467,6 +1477,21 @@ internal static partial class ProofOutline
                 var width = constant.Width == 64 ? 8 : 4;
                 stack.Add(new Number(ConstantTerm(constant), width, Value: constant.Numeral ? constant.Value : null));
             }
+            else if (ReferenceStride(op) is int stride && current is not null &&
+                !state.Called && stack.Count >= 2 &&
+                stack[^1] is Number { Width: 4, Narrow: false } referenceIndex &&
+                stack[^2] is ReferenceArgument reference &&
+                spec.Parameters.Any(parameter => parameter.Name == reference.Name &&
+                    parameter.Shape == ParameterShape.Reference))
+            {
+                stack.RemoveRange(stack.Count - 2, 2);
+                stack.Add(new AddedReference(reference.Name, referenceIndex.Term, stride));
+            }
+            else if (op is StackOperation { Kind: StackOpcode.Add } && stack.Count >= 2 &&
+                (stack[^1] is ReferenceArgument or AddedReference ||
+                    stack[^2] is ReferenceArgument or AddedReference))
+                return Stop("a reference addition other than a reference argument followed by a 32-bit index " +
+                    "before a call in the iteration");
             else if (Arithmetic(op) is { } symbol)
             {
                 var right = Pop();
@@ -1608,16 +1633,6 @@ internal static partial class ProofOutline
             else if (op is Jump) return Event.Branch;
             else if (op is Call { Kind: CallKind.Static or CallKind.Instance }) return Event.Call;
             else if (op is Return) return Event.Return;
-            else if (op is Memory { Operation: AddOffset { Signed: true, Stride: <= int.MaxValue } offset }
-                && current is not null &&
-                !state.Called && stack.Count >= 2 &&
-                stack[^1] is Number { Width: 4, Narrow: false } index && stack[^2] is ReferenceArgument reference &&
-                spec.Parameters.Any(parameter => parameter.Name == reference.Name &&
-                    parameter.Shape == ParameterShape.Reference))
-            {
-                stack.RemoveRange(stack.Count - 2, 2);
-                stack.Add(new AddedReference(reference.Name, index.Term, Convert.ToInt32(offset.Stride)));
-            }
             else if (op is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 4 or 8 }
                 && stack.Count >= 2 &&
                 stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })
