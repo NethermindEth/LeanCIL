@@ -130,12 +130,13 @@ library and tactic regressions kernel-check the resulting proofs.
     one word, with no frame lemma, memory or store named: the loop tactics step through the
     local's stores, carry the `Unsafe.Add` result and write authority, and cross the call with
     the frame after it. Without the `Unsafe.Add` fact the tactics stop at the add and the failure
-    names that fact; the tactics stop at a narrowing local store; without the index bound the
-    failure at the call names the footprint side condition; for an unformed argument the failure
-    names the argument check; and for a contract input whose arguments differ from the stack the
-    failure names both the arguments and the stack.
+    names that fact; without the index bound the failure at the call names the footprint side
+    condition; for an unformed argument the failure names the argument check; and for a contract
+    input whose arguments differ from the stack the failure names both the arguments and the stack.
   - At a return `cil_loop_finish` closes the results and confinement and leaves the rest of the
     postcondition open.
+  - `cil_loop_finish` steps a store of 0x1FF to a byte local, its load and the return, and closes
+    the postcondition that the result is 0xFF, the low byte the local's slot keeps.
   - The proofs select what the tactics leave by its obligation tag, so a dropped or renamed tag
     fails the build: `invariant` and `measure` after `cil_loop_recurse`,
     `precondition.stampMethod` for a named callee's open precondition, the third conjunct's

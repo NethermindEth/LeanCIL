@@ -103,14 +103,14 @@ example : FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar it
 -- The receiver must stay on the stack: a real store or address is not the fold.
 example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true)
-    (itemOps.set 1 (.setLocal 0 none)) := by decide
+    (itemOps.set 1 (.setLocal 0)) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true)
     (itemOps.set 2 (.localAddr 0)) := by decide
 
 -- Span locals outside a receiver fold retain ordinary load/store flow.
 private def loadCode := [i 2, i 10, i 6, i 42]
-private def loadOps : List Instruction := [.arg 0, .setLocal 0 none, .local 0 none, .ret none]
+private def loadOps : List Instruction := [.arg 0, .setLocal 0, .local 0, .ret none]
 private def loadStates : FeatureCertificate := [state [], state [none], state [], state [none]]
 example : FeatureFlowValid #[] (fun _ => none) (raw [intType] loadCode) .scalar loadStates
     (List.replicate 4 true) loadOps := by decide

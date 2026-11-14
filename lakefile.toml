@@ -40,6 +40,9 @@ name = "Tests.LiteralDisplay"
 name = "Tests.Identity"
 
 [[lean_lib]]
+name = "Tests.ResolutionFacts"
+
+[[lean_lib]]
 name = "Tests.Automation"
 
 [[lean_lib]]
