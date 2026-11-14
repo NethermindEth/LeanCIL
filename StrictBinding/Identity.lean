@@ -7,8 +7,8 @@ import StrictBinding.Sha1
 Reads entries of the `#Strings` and `#Blob` heaps and spells the identity of the assembly an
 image defines from its Assembly row, in the form the extractor records:
 `Name, Version=a.b.c.d, Culture=neutral, PublicKeyToken=0123456789abcdef`. The token is the
-strong-name token of the public key (`StrictBinding.Sha1.keyToken`), or `null` for an unsigned
-assembly. A pinned image must spell the identity it is pinned under.
+strong-name token of a flagged public key (`StrictBinding.Sha1.keyToken`), the eight-byte token
+of an unflagged key, or `null` for an unsigned assembly.
 -/
 
 namespace StrictBinding
@@ -94,6 +94,14 @@ def hexDigits (count value : Nat) : List Nat :=
     let digit := value / 16 ^ (count - 1 - place) % 16
     if digit < 10 then 48 + digit else 87 + digit
 
+/-- The token of key bytes read from an image, respecting the Assembly PublicKey flag. -/
+def assemblyKeyToken (flags : Nat) (key : List Nat) : Except AuditError (Option Nat) := do
+  if key.isEmpty then return none
+  if flags % 2 == 1 then return some (Sha1.keyToken key)
+  let width := key.length
+  if width != 8 then throw (.tables (.invalidPublicKeyToken width))
+  pure (some (bytesValue key))
+
 /-- The code points of the identity the Assembly row spells. -/
 def assemblyIdentity (view : ImageView) (layout : MetadataLayout) :
     Except AuditError (List Nat) := do
@@ -102,12 +110,14 @@ def assemblyIdentity (view : ImageView) (layout : MetadataLayout) :
   let minor ← layout.cell view row 2
   let build ← layout.cell view row 3
   let revision ← layout.cell view row 4
+  let flags ← layout.cell view row 5
   let key ← layout.blobAt view (← layout.cell view row 6)
   let name ← layout.stringText view (← layout.cell view row 7)
   let culture ← layout.stringText view (← layout.cell view row 8)
   let version := decimal major ++ [46] ++ decimal minor ++ [46] ++ decimal build ++ [46] ++
     decimal revision
-  let token := if key.isEmpty then asciiOf "null" else hexDigits 16 (Sha1.keyToken key)
+  let token ← assemblyKeyToken flags key
+  let token := token.map (hexDigits 16) |>.getD (asciiOf "null")
   pure (name ++ asciiOf ", Version=" ++ version ++ asciiOf ", Culture=" ++
     (if culture.isEmpty then asciiOf "neutral" else culture) ++ asciiOf ", PublicKeyToken=" ++
     token)
