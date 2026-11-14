@@ -77,15 +77,16 @@ theorem computed_placement {body : CIL.Method} {start : Nat} (index : Fin 4)
 #guard_msgs in
 example : repeatedBody.code[30]? = some .ret := by cil_lookup []
 
-/-- A placement supplies the budget even when the rest of the method is abstract. -/
+/-- A placement and return metadata suffice even when the rest of the method is abstract. -/
 theorem placed_run {program : CIL.Program} {method start : Nat} {body : CIL.Method}
     (found : program[method]? = some body)
     (placed : CodeAt body start [.arg 0, .arg 1, .add, .ret])
-    (returns : body.returnsValue = true) (frame : Frame) (memory : Memory)
+    (returns : body.returnsValue = true) (narrow : body.returnNarrow = none)
+    (frame : Frame) (memory : Memory)
     (left right : CIL.W64) :
     ∃ fuel, run program fuel method start [.scalar (.i64 left), .scalar (.i64 right)]
         frame [] memory = .ok (leaveFrame frame memory, [.scalar (.i64 (left + right))]) := by
-  cil_checked_steps [found, placed, returns]
+  cil_checked_steps [found, placed, returns, narrow]
 
 #print axioms placed_run
 

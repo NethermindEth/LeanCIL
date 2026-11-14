@@ -395,10 +395,9 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
          | (split <;> try simp only [*, Bool.false_eq_true, ite_false])
          skip)
       all_goals
-        rename_i narrow
-        cases narrow with
+        cases narrowing : sourceBody.returnNarrow with
         | none =>
-          simp only [returnFrom, List.length_map]
+          simp only [narrowing, returnFrom, List.length_map]
           by_cases sized : stack.length = (if sourceBody.returnsValue then 1 else 0)
           · simp only [sized, ↓reduceIte]
             apply (related.checkedValues stack bounds).bind

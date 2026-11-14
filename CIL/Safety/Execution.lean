@@ -6,6 +6,7 @@ import CIL.Safety.ReferenceObservations
 import CIL.Safety.HeapObjects
 import CIL.Safety.NativeMethodTables
 import CIL.NativeEvaluation
+import CIL.Resolution
 
 /-!
 # Checked interpreter
@@ -434,7 +435,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory
   | .throw exception, _ => .error (.thrown exception)
-  | .ret narrow, _ => returnFrom narrow body.returnsValue stack m
+  | .ret, _ => returnFrom body.returnNarrow body.returnsValue stack m
   | .newArray element, .scalar length :: rest =>
     let (view, memory) ← newArray m element length
     return .next (pc + 1) (.array view :: rest) frame memory
@@ -447,7 +448,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       if stack.length < argc then .error .invalidState else
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false pc [] values (fun _ => none) body.profile | .error .invalidState
+          CIL.step op false none pc [] values (fun _ => none) body.profile | .error .invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue m)
         return .next target (result ++ stack.drop argc) frame m
     | none =>

@@ -12,6 +12,11 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
+if (args.Contains("--return-step-only", StringComparer.Ordinal))
+{
+    ReturnResolutionCosts(stepOnly: true);
+    return;
+}
 CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
@@ -71,7 +76,7 @@ var directory = At("artifacts/LookupScaling");
 Directory.CreateDirectory(directory);
 
 // Signature facts inspect a return head; code and unrelated layout entries stay outside that inspection.
-void ReturnResolutionCosts()
+void ReturnResolutionCosts(bool stepOnly = false)
 {
     var resolutionDirectory = At("artifacts/LookupScaling/ReturnResolution");
     Directory.CreateDirectory(resolutionDirectory);
@@ -87,13 +92,16 @@ void ReturnResolutionCosts()
         !WithinGrowth(controlSizes.Select(size => (size, 32.0)).ToArray(), perItem: false) ||
         WithinGrowth(controlSizes.Select(size => (size, (double)size)).ToArray(), perItem: false))
         throw new InvalidOperationException("Return resolution growth check failed its normalization controls.");
-    foreach (var dimension in new[] { "methods", "depth", "body", "layouts", "enum-depth", "enum-layouts" })
+    var dimensions = stepOnly ? new[] { "step-methods", "step-body" } :
+        ["methods", "depth", "body", "layouts", "enum-depth", "enum-layouts", "step-methods", "step-body"];
+    foreach (var dimension in dimensions)
     {
         var samples = new List<(int Size, long Facts, long Simplifier)>();
         foreach (var size in new[] { 32, 128, 512 })
         {
             var source = new StringBuilder("""
                 import CIL.Safety.ValueSteps
+                import CIL.Safety.StepComposition
                 open CIL CIL.Extraction Lean Elab Command
                 set_option maxRecDepth 8192
                 /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
@@ -120,12 +128,13 @@ void ReturnResolutionCosts()
                     ".array (.aggregate \"Point\" 0)" + new string(')', depth);
                 expected = "none";
             }
-            var instructions = dimension == "body" ? string.Join(", ", Enumerable.Repeat(".nop", size)) : "";
+            var instructions = dimension is "body" or "step-body"
+                ? string.Join(", ", Enumerable.Repeat(".nop", size)) : "";
             var layouts = dimension is "layouts" or "enum-layouts" ? string.Join(", ", Enumerable.Repeat(
                 "{ identity := \"Point\", explicit := false, packing := 0, declaredSize := 0, fields := [] }",
                 size)) : "";
             source.AppendLine($"def rawLayouts : List RawLayout := [{layouts}]");
-            var methods = dimension == "methods" ? size : 1;
+            var methods = dimension is "methods" or "step-methods" ? size : 1;
             for (var index = 0; index < methods; index++)
             {
                 source.AppendLine($$"""
@@ -136,6 +145,18 @@ void ReturnResolutionCosts()
                     theorem body{{index}}_declared :
                       body{{index}}.declared = { returnType := {{type}} } := rfl
                     #resolution_cost "fact" in cil_resolution_facts body{{index}}
+                    """);
+                if (dimension.StartsWith("step-", StringComparison.Ordinal))
+                    source.AppendLine($$"""
+                    #resolution_cost "simplifier" in
+                    theorem body{{index}}_simplified (frame : Safety.Frame) (memory : Safety.Memory) :
+                        Safety.step body{{index}} .ret 0 [] frame [.scalar (.i32 300)] memory =
+                          .ok (.returned [.scalar (.i32 44)] memory) := by
+                      simp only [Safety.step_ret_eq, body{{index}}_returnsValue,
+                        body{{index}}_returnNarrow]
+                      rfl
+                    """);
+                else source.AppendLine($$"""
                     #resolution_cost "simplifier" in
                     theorem body{{index}}_simplified : body{{index}}.returnNarrow = {{expected}} := by
                       simp only [cil_step]
@@ -159,7 +180,8 @@ void ReturnResolutionCosts()
         {
             var measured = samples.Select(sample =>
                 (sample.Size, (double)(simplifier ? sample.Simplifier : sample.Facts))).ToArray();
-            if (!WithinGrowth(measured, perItem: dimension is "methods" or "depth" or "enum-depth"))
+            if (!WithinGrowth(measured,
+                perItem: dimension is "methods" or "depth" or "enum-depth" or "step-methods"))
                 throw new InvalidOperationException($"Superlinear return resolution {dimension}: " +
                     string.Join("; ", measured));
             Console.WriteLine($"PASS return resolution {(simplifier ? "simplifier" : "fact")} {dimension}: " +

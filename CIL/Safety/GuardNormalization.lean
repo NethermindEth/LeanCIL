@@ -115,8 +115,8 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_unsupported (description : String) :
     observerCount (.unsupported description) = 0 := rfl
 /-- Return observes at most the first stack value, regardless of narrowing. -/
-@[cil_guard] theorem guard_ret (narrow : Option CIL.NarrowKind) :
-    observerCount (.ret narrow) = 1 := rfl
+@[cil_guard] theorem guard_ret :
+    observerCount .ret = 1 := rfl
 
 #print axioms guard_ret
 @[cil_guard] theorem guard_loadAggregate (size : Nat) :

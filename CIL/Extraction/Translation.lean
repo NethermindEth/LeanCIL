@@ -105,13 +105,12 @@ private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstructio
     | _ => false
   | _, _ => false
 
-/-- Check return conversions and static loads using precomputed instruction and site indexes. -/
-def methodShapeInstructions (layouts : List RawLayout) (closed : RawMethod)
+/-- Check static loads using precomputed instruction and site indexes. -/
+def methodShapeInstructions (closed : RawMethod)
     (method : Method) : Bool :=
   let raw := FlowIndex.ofList closed.code
   let sites := firstEntryIndex method.staticSites
   method.code.zipIdx.all fun (op, pc) => match op with
-    | .ret narrow => narrow == declaredNarrow layouts closed.returnType
     | .memory (.staticValue _) => staticLoadMatches 126 (raw.get? pc) sites[pc]?
     | .memory (.staticAddress _) =>
       if (sites[pc]?.bind (·.initializer)).isSome then
@@ -119,11 +118,10 @@ def methodShapeInstructions (layouts : List RawLayout) (closed : RawMethod)
     | _ => true
 
 /-- Indexed instruction-shape checks agree with direct list lookups at every emitted pc. -/
-theorem methodShapeInstructions_eq_scan (layouts : List RawLayout) (closed : RawMethod)
+theorem methodShapeInstructions_eq_scan (closed : RawMethod)
     (method : Method) :
-    methodShapeInstructions layouts closed method = method.code.zipIdx.all (fun (op, pc) =>
+    methodShapeInstructions closed method = method.code.zipIdx.all (fun (op, pc) =>
       match op with
-      | .ret narrow => narrow == declaredNarrow layouts closed.returnType
       | .memory (.staticValue _) => staticLoadMatches 126 closed.code[pc]?
           ((method.staticSites.find? (fun site => site.1 == pc)).map Prod.snd)
       | .memory (.staticAddress _) =>
@@ -143,15 +141,15 @@ def _root_.CIL.DeclaredSignature.ofRaw (closed : RawMethod) : DeclaredSignature 
   returnType := closed.returnType
 
 /-- Bind non-instruction method fields that affect frame setup and return behavior. -/
-def MethodShapeValid (layouts : List RawLayout) (closed : RawMethod) (method : Method) : Prop :=
+def MethodShapeValid (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
   method.declared = DeclaredSignature.ofRaw closed ∧
   method.locals = method.localKinds.map (fun kind =>
     if closed.initLocals then initialLocal kind else .unmodeled) ∧
-  methodShapeInstructions layouts closed method = true
+  methodShapeInstructions closed method = true
 
-instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) :
-    Decidable (MethodShapeValid layouts closed method) :=
+instance (closed : RawMethod) (method : Method) :
+    Decidable (MethodShapeValid closed method) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- The method's environment is the program's layout tables, so every method of one extraction
@@ -163,7 +161,7 @@ def MethodEnvironmentValid (rawLayouts : List RawLayout) (layouts : Array Comput
 /-- Valid signature and environment metadata determine return narrowing independently of code. -/
 theorem returnNarrow_of_shape {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {closed : RawMethod} {method : Method}
-    (shape : MethodShapeValid rawLayouts closed method)
+    (shape : MethodShapeValid closed method)
     (environment : MethodEnvironmentValid rawLayouts layouts method) :
     method.returnNarrow = declaredNarrow rawLayouts closed.returnType := by
   have returns := shape.2.1
@@ -195,7 +193,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ManagedCallsValid (specializationTable all) imports
     (lowerConstrainedRaw item.dispatchTypes item.closed) item.reachable method ∧
   LayoutUsesComplete rawLayouts item.closed item.parameterInput item.reachable item.layoutUses ∧
-  MethodShapeValid rawLayouts item.closed method ∧
+  MethodShapeValid item.closed method ∧
   UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
   ExactIntrinsicsValid item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧

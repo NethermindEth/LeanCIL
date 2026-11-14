@@ -169,7 +169,7 @@ example : TranslationValid [] #[] [] [addEvidence] [] [addMethod] := by decide +
 example : ¬ TranslationValid [] #[] [] [addEvidence] []
     [{ addMethod with code := addCode.set 2 .sub }] := by decide +kernel
 -- The declared signature and the layout environment are conjuncts of their own.
-example : ¬ MethodShapeValid [] addRaw { addMethod with declared := {} } := by decide
+example : ¬ MethodShapeValid addRaw { addMethod with declared := {} } := by decide
 example : ¬ TranslationValid [] #[] [] [addEvidence] [] [{ addMethod with declared := {} }] := by
   decide +kernel
 example : ¬ MethodEnvironmentValid [] #[]
@@ -256,7 +256,7 @@ example : ¬ ScalarFlowValid #[] (floatRaw 107) floatFeatures floatStates floatM
   decide
 example : ¬ ScalarFlowValid #[] (floatRaw 108) floatFeatures floatStates floatMethod.code := by
   decide
-example : MethodShapeValid [] (floatRaw 107) floatMethod := by decide
+example : MethodShapeValid (floatRaw 107) floatMethod := by decide
 example : ¬ ScalarFlowValid #[] (floatRaw 107) floatFeatures (floatStates.set 2 (some [.other])) floatMethod.code := by decide
 example : ¬ ScalarFlowValid #[] (floatRaw 108) floatFeatures (floatStates.set 2 (some [.other])) floatMethod.code := by decide
 example : scalarTransfer addRaw (i 80) [.reference] = some [.other] := by decide
@@ -293,7 +293,7 @@ example : FeatureFlowValid #[] (fun _ => none) localRaw .scalar localFeatures
     (List.replicate 6 true) localMethod.code := by decide
 example : ¬ TranslationValid [] #[] [] [localEvidence] [] [localMethod] := by decide +kernel
 example : ¬ ScalarFlowValid #[] localRaw localFeatures localStates localMethod.code := by decide
-example : MethodShapeValid [] localRaw localMethod := by decide
+example : MethodShapeValid localRaw localMethod := by decide
 
 private def argumentRaw := raw [i 23, i 108, i 16 (.argument 0), i 2, i 106, i 42] [intType]
 private def argumentFeatures : FeatureCertificate := [unknown 0, state [some 1], unknown 1, unknown 0, unknown 1, unknown 1]
@@ -310,7 +310,7 @@ example : FeatureFlowValid #[] (fun _ => none) argumentRaw .scalar argumentFeatu
 example : ¬ TranslationValid [] #[] [] [argumentEvidence] [] [argumentMethod] := by decide +kernel
 example : ¬ ScalarFlowValid #[] argumentRaw argumentFeatures localStates argumentMethod.code := by
   decide
-example : MethodShapeValid [] argumentRaw argumentMethod := by decide
+example : MethodShapeValid argumentRaw argumentMethod := by decide
 
 private def mixedRaw := { raw [i 2, i 3, i 88, i 42] [nativeType, intType] with returnType := nativeType }
 private def mixedStates : ScalarCertificate := [some [], some [.native], some [.word32, .native], some [.native]]

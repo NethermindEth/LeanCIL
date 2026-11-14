@@ -28,8 +28,8 @@ forwarder's contract is related to the callee's by premises over those two memor
 
 namespace CIL.Safety
 
-/-- What `ret narrow` returns unchanged: any values for a plain `ret`, and a single i32
-    already in the narrow range for a narrowed one. -/
+/-- Values preserved by the method's return storage: any values without narrowing,
+    and a single i32 already in range for narrow storage. -/
 def ReturnsUnchanged : Option CIL.NarrowKind → List Value → Prop
   | none, _ => True
   | some kind, values => ∃ bits, values = [.scalar (.i32 bits)] ∧ kind.extend bits = bits
@@ -56,21 +56,22 @@ theorem plainLoads_unchanged (indices : List Nat) (values : List Value) :
 #print axioms plainLoads_unchanged
 
 /-- The body that performs `loads` in order, calls `callee` with the loaded values and
-    returns its result through `ret narrow`. -/
+    returns its result through `ret`. -/
 def forwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
-    (narrow : Option CIL.NarrowKind) : List CIL.Instruction :=
-  loads.map (fun load => .arg load.1 load.2) ++ [.call callee loads.length, .ret narrow]
+    : List CIL.Instruction :=
+  loads.map (fun load => .arg load.1 load.2) ++ [.call callee loads.length, .ret]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
     `calleeBody`, from a frame that allocates nothing, and declares the callee's return
-    arity. -/
+    arity and return storage `narrow`. -/
 structure Forwards (body calleeBody : CIL.Method) (loads : List (Nat × Option CIL.NarrowKind))
     (callee : Nat) (narrow : Option CIL.NarrowKind) : Prop where
-  code : body.code = forwarderCode loads callee narrow
+  code : body.code = forwarderCode loads callee
   locals : body.locals = []
   localKinds : body.localKinds = []
   parameterHomes : body.parameterHomes = []
   returnsValue : body.returnsValue = calleeBody.returnsValue
+  returnNarrow : body.returnNarrow = narrow
 
 /-- `contract` with the arguments encoded by `args` instead: what a forwarder to a method
     proving `contract` satisfies. -/
@@ -179,34 +180,35 @@ theorem step_call_loaded {body : CIL.Method} {callee pc : Nat} {args : List Valu
 
 #print axioms step_call_loaded
 
-/-- `ret narrow` returns a callee's checked, fully specified result of the declared arity
+/-- `ret` returns a callee's checked, fully specified result of the declared arity
     unchanged. -/
 theorem step_return_unchanged {body : CIL.Method} {narrow : Option CIL.NarrowKind} {pc : Nat}
     {args : List Value} {frame : Frame} {memory : Memory} {values : List Value}
+    (returnNarrow : body.returnNarrow = narrow)
     (arity : values.length = if body.returnsValue then 1 else 0)
     (known : values.any Value.hasUnspecified = false)
     (checked : values.mapM (checkedValue memory) = .ok values)
     (unchanged : ReturnsUnchanged narrow values) :
-    step body (.ret narrow) pc args frame values memory = .ok (.returned values memory) := by
+    step body (.ret) pc args frame values memory = .ok (.returned values memory) := by
   cases narrow with
   | none =>
     have hidden : unspecifiedOperands 1 values = false := by
       simp only [unspecifiedOperands, List.any_eq_false] at known ⊢
       exact fun value member => known value (List.mem_of_mem_take member)
-    simp only [step_ret_eq, returnFrom_none_eq, hidden, Bool.false_eq_true, ↓reduceIte,
+    simp only [step_ret_eq, returnNarrow, returnFrom_none_eq, hidden, Bool.false_eq_true, ↓reduceIte,
       arity, checked,
       Bind.bind, Except.bind, Pure.pure, Except.pure]
   | some kind =>
     obtain ⟨bits, rfl, same⟩ := unchanged
     have returns : body.returnsValue = true := by
       cases returning : body.returnsValue <;> simp_all
-    simp only [step_ret_eq, unspecifiedOperands, List.take_succ_cons, List.take_zero,
+    simp only [step_ret_eq, returnNarrow, unspecifiedOperands, List.take_succ_cons, List.take_zero,
       List.any_cons, List.any_nil, Value.hasUnspecified, CIL.Value.hasUnspecified,
       Bool.false_or, Bool.false_eq_true, ↓reduceIte, returnFrom_narrow_eq, returns, same]
 
 #print axioms step_return_unchanged
 
-/-- From a stack holding a callee's arguments in push order, `call callee; ret narrow`
+/-- From a stack holding a callee's arguments in push order, `call callee; ret`
     returns what the callee's contract promises from the current memory, in the memory
     left once the frame expires. -/
 theorem run_forward_call {Input Output : Type} {contract : MethodContract Input Output}
@@ -216,8 +218,9 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
     (holds : contract.Holds program callee)
     (found : program[method]? = some body) (calleeFound : program[callee]? = some calleeBody)
     (callFetched : body.code[pc]? = some (.call callee (contract.args input).length))
-    (returnFetched : body.code[pc + 1]? = some (.ret narrow))
+    (returnFetched : body.code[pc + 1]? = some (.ret))
     (returnsValue : body.returnsValue = calleeBody.returnsValue)
+    (returnNarrow : body.returnNarrow = narrow)
     (unchanged : ∀ final out, contract.post input memory final out →
       ReturnsUnchanged narrow (contract.results out))
     (permitted : contract.pre input memory)
@@ -249,7 +252,8 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
     (checkedValues_of_valid (survives final _ valid returns))
     (continuation final _ call.framed returns)
   rw [List.append_nil]
-  exact step_return_unchanged arity (invoke_return_known called) (checkedValues_of_valid valid)
+  exact step_return_unchanged returnNarrow arity (invoke_return_known called)
+    (checkedValues_of_valid valid)
     (unchanged final out call.post)
 
 #print axioms run_forward_call
@@ -289,7 +293,7 @@ theorem MethodContract.Holds.forward {Input Output : Type}
       (covered input initial permitted value member).elim (valid value) id
   have length : (contract.args input).length = loads.length := by
     simpa using (congrArg List.length (selected input)).symm
-  have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode loads callee narrow)[pc]? := by
+  have fetched : ∀ pc : Nat, body.code[pc]? = (forwarderCode loads callee)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
   apply WP.adequate.mpr
   refine invoke_exists_of_run found (checkedValues_of_valid forwardedValid)
@@ -303,29 +307,31 @@ theorem MethodContract.Holds.forward {Input Output : Type}
   rw [Nat.zero_add, List.append_nil]
   -- The frame owns nothing, so leaving it keeps the callee's final memory.
   exact run_forward_call holds found calleeFound (by simp [fetched, forwarderCode, length])
-    (by simp [fetched, forwarderCode]) forwards.returnsValue (unchanged input initial) permitted
+    (by simp [fetched, forwarderCode]) forwards.returnsValue forwards.returnNarrow
+    (unchanged input initial) permitted
     (known input initial permitted) (fun _ _ valid _ => valid)
     (fun _ _ framed returns => ⟨framed, returns⟩)
 
 #print axioms MethodContract.Holds.forward
 
 /-- The body that performs `loads` in order, loads the address of local 0, calls `callee`
-    with them and returns its result through `ret narrow`. -/
-def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
-    (narrow : Option CIL.NarrowKind) : List CIL.Instruction :=
+    with them and returns its result through `ret`. -/
+def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat) :
+    List CIL.Instruction :=
   loads.map (fun load => .arg load.1 load.2) ++
-    [.ldloca 0, .call callee (loads.length + 1), .ret narrow]
+    [.ldloca 0, .call callee (loads.length + 1), .ret]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
     `calleeBody`, with the address of its only local, a byte home of `kind` created from
     `initial`, as a last out argument whose contents it drops; it declares the callee's
-    return arity. References, spans, arrays and managed identities allocate no byte home, so
+    return arity and has return storage `narrow`. References, spans, arrays and managed
+    identities allocate no byte home, so
     `kind` excludes them. Any fitting initializer is accepted; the extractor emits
     `.unmodeled` without `InitLocals` and the kind's zero with it. -/
 structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Option CIL.NarrowKind))
     (callee : Nat) (narrow : Option CIL.NarrowKind) (kind : CIL.LocalKind) (initial : CIL.Value) :
     Prop where
-  code : body.code = outForwarderCode loads callee narrow
+  code : body.code = outForwarderCode loads callee
   locals : body.locals = [initial]
   localKinds : body.localKinds = [kind]
   numeric : kind ≠ .reference
@@ -338,6 +344,7 @@ structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Optio
   opaqueVectorLocals : body.opaqueVectorLocals = []
   parameterHomes : body.parameterHomes = []
   returnsValue : body.returnsValue = calleeBody.returnsValue
+  returnNarrow : body.returnNarrow = narrow
 
 /-- What a fresh numeric home created from `initial` holds: nothing known when `initial` is
     `.unmodeled`, and otherwise the bytes of `initial`'s number at the home's width. -/
@@ -478,7 +485,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
   have length : (inner.args (extend input home)).length = loads.length + 1 := by
     rw [split]; simpa using (congrArg List.length loadedSome)
   have fetched : ∀ pc : Nat,
-      body.code[pc]? = (outForwarderCode loads callee narrow)[pc]? := by
+      body.code[pc]? = (outForwarderCode loads callee)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
   have loadedNarrowed : ∀ pair ∈ loads.zip loaded, LoadsUnchanged pair.1.2 pair.2 := by
     intro pair member
@@ -521,7 +528,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     (by
       rw [fetched, outForwarderCode, List.getElem?_append_right (by simp; omega)]
       simp [show loads.length + 1 + 1 - loads.length = 2 by omega])
-    forwards.returnsValue
+    forwards.returnsValue forwards.returnNarrow
     (fun final out satisfied =>
       unchanged input memory home entered final out permitted satisfied)
     calleePre (known input memory home permitted) (fun final values valid returns => ?_)

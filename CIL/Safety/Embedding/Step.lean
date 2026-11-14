@@ -115,7 +115,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false pc [] values (fun _ => none) profile with
+        match CIL.step op false none pc [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -128,7 +128,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false q [] values (fun _ => none) profile with
+        match CIL.step (op.relabel r) false none q [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -446,12 +446,14 @@ theorem step_relabel_memory (operation : MemoryOp) : StepRelabel (.memory operat
   rw [staticInstruction_congr context.statics]
   lockstep
 
-theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow) := by
+theorem step_relabel_ret : StepRelabel .ret := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
-  rw [context.returnsValue]
+  rw [context.returnsValue, show actual.returnNarrow = expected.returnNarrow from by
+    simp only [CIL.Method.returnNarrow, context.returnsValue, context.declared,
+      context.environment]]
   have returned : ∃ values memory, action = .returned values memory := by
     unfold returnFrom at h
     repeat' first
@@ -694,7 +696,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     exact step_relabel_newObject constructor argc owner bases size
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
-  case ret narrow => exact step_relabel_ret narrow
+  case ret => exact step_relabel_ret
   case throw exception => exact step_relabel_throw exception
   case unsupported description => exact step_relabel_unsupported description
   case sub => exact step_relabel_sub
@@ -820,7 +822,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false pc [] values (fun _ => none) profile with
+        match CIL.step op false none pc [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -834,7 +836,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false q [] values (fun _ => none) profile with
+        match CIL.step (op.relabel r) false none q [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -1016,12 +1018,14 @@ theorem step_raise_intrinsic (operation : Intrinsic) (argc : Nat) :
     · simp only [short, ↓reduceIte] at h ⊢
       raise_lockstep
 
-theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) := by
+theorem step_raise_ret : StepRaise .ret := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
-  rw [context.returnsValue]
+  rw [context.returnsValue, show actual.returnNarrow = expected.returnNarrow from by
+    simp only [CIL.Method.returnNarrow, context.returnsValue, context.declared,
+      context.environment]]
   unfold returnFrom at h ⊢
   repeat' first
     | (split at h <;> simp_all only)
@@ -1243,7 +1247,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [staticInstruction_congr context.statics]
     raise_lockstep
-  case ret narrow => exact step_raise_ret narrow
+  case ret => exact step_raise_ret
   case throw =>
     explicit_intro
     exact h

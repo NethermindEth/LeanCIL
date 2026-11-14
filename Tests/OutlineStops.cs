@@ -44,6 +44,55 @@ MethodDefinition Added(ModuleDefinition module, string name, TypeReference resul
     return method;
 }
 
+// Loop callee selection excludes narrow result types even when the helper always throws.
+var throwOnly = Outline("NarrowThrowOnly", "Loops::CountUntil(uint,uint)", module =>
+{
+    var helper = module.GetType("Examples.Loops").Methods.Single(method => method.Name == "Bump");
+    var constructor = (MethodReference)helper.Body.Instructions.Single(instruction =>
+        instruction.OpCode == OpCodes.Newobj).Operand;
+    helper.ReturnType = module.TypeSystem.Byte;
+    helper.Body.Instructions.Clear();
+    helper.Body.Variables.Clear();
+    helper.Body.Instructions.Add(Instruction.Create(OpCodes.Newobj, constructor));
+    helper.Body.Instructions.Add(Instruction.Create(OpCodes.Throw));
+});
+if (throwOnly.Code == 0 || !throwOnly.Output.Contains("callee Bump returns System.Byte", StringComparison.Ordinal))
+    throw new InvalidOperationException("A narrow throw-only helper bypassed callee result selection:\n" +
+        throwOnly.Output + throwOnly.Proof);
+Console.WriteLine("PASS narrow throw-only helper retains its callee selection diagnostic");
+foreach (var (owner, methodName, selector) in new[]
+{
+    ("Arithmetic", "Larger", "Arithmetic::Larger(int,int)"),
+    ("PrimitiveArrays", "ReadInt32", "PrimitiveArrays::ReadInt32(int[],int)"),
+    ("Loops", "Put", "Loops::Put(System.Span`1<System.UInt32>,uint)"),
+    ("Counter", "Read", "Counter::Read()"),
+    ("OutlineCountdown", "Drain", "OutlineCountdown::Drain()")
+})
+{
+    var positive = Outline("WideReturn" + owner, selector, _ => { });
+    if (positive.Code != 0 || positive.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException("Wide return control failed: " + selector + "\n" + positive.Output);
+    var narrow = Outline("NarrowReturn" + owner, selector, module =>
+    {
+        var method = module.GetType("Examples." + owner).Methods.Single(method => method.Name == methodName);
+        if (method.ReturnType.MetadataType == MetadataType.Void)
+        {
+            var processor = method.Body.GetILProcessor();
+            foreach (var returned in method.Body.Instructions.Where(instruction =>
+                instruction.OpCode == OpCodes.Ret).ToArray())
+            {
+                returned.OpCode = OpCodes.Ldc_I4_0;
+                processor.InsertAfter(returned, Instruction.Create(OpCodes.Ret));
+            }
+        }
+        method.ReturnType = module.TypeSystem.Byte;
+    });
+    if (narrow.Code == 0 && !narrow.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException("Narrow return was outlined: " + selector + "\n" + narrow.Proof);
+    Console.WriteLine("PASS declared narrow return outline rejection and wide control: " + owner);
+}
+if (args is ["--return-only"]) return;
+
 // A conditional branch the native-width analysis wraps, in a method over a class instance, is a hole that names
 // the wrapped branch.
 var wrapped = Outline("WrappedObject",

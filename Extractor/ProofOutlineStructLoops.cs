@@ -15,6 +15,7 @@ internal static partial class ProofOutline
     /// authority, and every generated path is checked against the extracted instructions.</summary>
     sealed class ReceiverLoop(Specification spec, Body body, Writer lean)
     {
+        readonly bool plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         string receiver => spec.Parameters[0].Name;
         readonly List<ReceiverField> fields = [];
         readonly Names identifiers = new();
@@ -278,7 +279,7 @@ internal static partial class ProofOutline
                     Walk(no, taken ? pc + 1 : target, indent + "  ", hypothesis, iteration);
                     return;
                 }
-                else if (op is Return { Narrow: null })
+                else if (op is Return && plainReturn)
                 {
                     lean.Wrapped(indent + "cil_loop_finish", ("[" + string.Join(", ", path.Facts
                         .Concat([path.Confined])) + "]").Terms(), "");

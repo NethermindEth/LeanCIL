@@ -355,7 +355,8 @@ internal static class LeanEmitter
         {
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
             lean.AppendLine($"theorem method{n}_constrained_validated : Extraction.ConstrainedCallsValid method{n}DispatchTypes specializedMethods method{n}Closed method{n}Reachable method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_shape_validated : " +
+                $"Extraction.MethodShapeValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_unsafe_validated : Extraction.UnsafeCallsValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
             lean.AppendLine($"theorem method{n}_intrinsics_validated : Extraction.ExactIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");

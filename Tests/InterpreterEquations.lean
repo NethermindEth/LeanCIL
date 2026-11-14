@@ -9,7 +9,8 @@ open Lean
 macro "unfold_dispatch" : tactic => `(tactic| rw [CIL.step.eq_def])
 
 example (returns : Bool) (pc : Nat) (args stack : List CIL.Value) (memory : CIL.Memory) :
-    CIL.step .nop returns pc args stack memory = CIL.step .nop returns pc args stack memory := by
+    CIL.step .nop returns none pc args stack memory =
+      CIL.step .nop returns none pc args stack memory := by
   unfold_dispatch
 
 -- Each lemma must come from its shared module; one generated here would mean importers rebuild it.
@@ -237,62 +238,67 @@ variable (body : Method) (pc : Nat) (args : List Safety.Value)
   (frame : Frame) (memory : Safety.Memory)
 
 /-- A narrowed return with an empty stack reports a malformed execution state. -/
-theorem narrowReturnEmpty (kind : NarrowKind) :
-    Safety.step body (.ret (some kind)) pc args frame [] memory = .error .invalidState := by
-  rw [step_ret_eq]
+theorem narrowReturnEmpty (kind : NarrowKind) (narrow : body.returnNarrow = some kind) :
+    Safety.step body .ret pc args frame [] memory = .error .invalidState := by
+  rw [step_ret_eq, narrow]
   rfl
 #print axioms narrowReturnEmpty
 
 /-- A narrowed return rejects a scalar of the wrong width. -/
-theorem narrowReturnWrongWidth (kind : NarrowKind) (bits : W64) :
-    Safety.step body (.ret (some kind)) pc args frame [.scalar (.i64 bits)] memory =
+theorem narrowReturnWrongWidth (kind : NarrowKind) (bits : W64)
+    (narrow : body.returnNarrow = some kind) :
+    Safety.step body .ret pc args frame [.scalar (.i64 bits)] memory =
       .error .invalidState := by
-  rw [step_ret_eq]
+  rw [step_ret_eq, narrow]
   rfl
 #print axioms narrowReturnWrongWidth
 
 /-- A narrowed return rejects extra stack values. -/
-theorem narrowReturnExtraValue (kind : NarrowKind) (bits extra : W32) :
-    Safety.step body (.ret (some kind)) pc args frame
+theorem narrowReturnExtraValue (kind : NarrowKind) (bits extra : W32)
+    (narrow : body.returnNarrow = some kind) :
+    Safety.step body .ret pc args frame
       [.scalar (.i32 bits), .scalar (.i32 extra)] memory = .error .invalidState := by
-  rw [step_ret_eq]
+  rw [step_ret_eq, narrow]
   rfl
 #print axioms narrowReturnExtraValue
 
 /-- Narrowing cannot turn a void method into a value-returning method. -/
-theorem narrowReturnVoid (returns : body.returnsValue = false) (kind : NarrowKind) (bits : W32) :
-    Safety.step body (.ret (some kind)) pc args frame [.scalar (.i32 bits)] memory =
+theorem narrowReturnVoid (returns : body.returnsValue = false) (bits : W32) :
+    Safety.step body .ret pc args frame [.scalar (.i32 bits)] memory =
       .error .invalidState := by
-  rw [step_ret_eq]
-  change returnFrom (some kind) body.returnsValue [.scalar (.i32 bits)] memory = _
-  rw [returnFrom_narrow_eq, returns]
+  rw [step_ret_eq, Method.returnNarrow_of_void returns]
+  change returnFrom none body.returnsValue [.scalar (.i32 bits)] memory = _
+  rw [returnFrom_none_eq, returns]
   rfl
 #print axioms narrowReturnVoid
 
 /-- A narrowed return extends exactly the single i32 result. -/
-theorem narrowReturnValue (returns : body.returnsValue = true) (kind : NarrowKind) (bits : W32) :
-    Safety.step body (.ret (some kind)) pc args frame [.scalar (.i32 bits)] memory =
+theorem narrowReturnValue (returns : body.returnsValue = true) (kind : NarrowKind) (bits : W32)
+    (narrow : body.returnNarrow = some kind) :
+    Safety.step body .ret pc args frame [.scalar (.i32 bits)] memory =
       .ok (.returned [.scalar (.i32 (kind.extend bits))] memory) := by
-  rw [step_ret_eq]
+  rw [step_ret_eq, narrow]
   change returnFrom (some kind) body.returnsValue [.scalar (.i32 bits)] memory = _
   rw [returnFrom_narrow_eq, returns]
   rfl
 #print axioms narrowReturnValue
 
 /-- A plain return preserves its checked scalar result. -/
-theorem plainReturnValue (returns : body.returnsValue = true) (bits : W32) :
+theorem plainReturnValue (returns : body.returnsValue = true) (bits : W32)
+    (narrow : body.returnNarrow = none) :
     Safety.step body .ret pc args frame [.scalar (.i32 bits)] memory =
       .ok (.returned [.scalar (.i32 bits)] memory) := by
-  rw [step_ret_eq]
+  rw [step_ret_eq, narrow]
   change returnFrom none body.returnsValue [.scalar (.i32 bits)] memory = _
   rw [returnFrom_none_eq, returns]
   rfl
 #print axioms plainReturnValue
 
 /-- A value-returning method rejects an empty plain return. -/
-theorem plainReturnWrongArity (returns : body.returnsValue = true) :
+theorem plainReturnWrongArity (returns : body.returnsValue = true)
+    (narrow : body.returnNarrow = none) :
     Safety.step body .ret pc args frame [] memory = .error .invalidState := by
-  rw [step_ret_eq]
+  rw [step_ret_eq, narrow]
   change returnFrom none body.returnsValue [] memory = _
   rw [returnFrom_none_eq, returns]
   rfl
