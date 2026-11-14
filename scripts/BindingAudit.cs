@@ -16,8 +16,8 @@ partial class Program
     /// <summary>An assembly file the extraction read, with the digest the caller must confirm.</summary>
     sealed record BindingImagePin(string Identity, string Path, string Sha256, string Source, byte[] Bytes)
     {
-        /// <summary>The generated module that holds the file's bytes, named by the start of its digest.</summary>
-        internal string Module => "BindingAudit.I" + Sha256[..16];
+        /// <summary>The generated module that holds the file's bytes, named by its full digest.</summary>
+        internal string Module => "BindingAudit.I" + Sha256;
 
         internal string Theorem => Module + ".digest";
 
@@ -28,6 +28,100 @@ partial class Program
     /// <summary>What a run audits: the extraction, the files it pinned and where the generated modules go.</summary>
     sealed record BindingPlan(string Extraction, string Output, string GeneratedSha256, string IdentitySha256,
         BindingImagePin[] Images, int Methods, int? PageSize = null);
+
+    /// <summary>Artifacts and requests that must join the caller's extraction and proof audit.</summary>
+    sealed record DeepSessionContribution(string[] Modules, BindingRequest[] Requests,
+        SortedDictionary<string, string> Artifacts, SortedDictionary<string, string> Hashes,
+        SortedDictionary<string, string> SourceHashes)
+    {
+        internal void RequireStable()
+        {
+            if (!Same(Hashes, BindingArtifactHashes(Artifacts.Values)))
+                throw new InvalidDataException("Deep-check artifact changed");
+            foreach (var (path, hash) in SourceHashes)
+                if (!File.Exists(path) || Sha(path) != hash)
+                    throw new InvalidDataException("Deep-check source changed: " + path);
+        }
+
+        internal void RequireAudited(AuditedOleans audited)
+        {
+            RequireStable();
+            foreach (var (module, path) in Artifacts) RequireAuditedModule(audited, module, path);
+        }
+    }
+
+    /// <summary>Hashes the exact compiled module families, enumerating each containing directory once.</summary>
+    static SortedDictionary<string, string> BindingArtifactHashes(IEnumerable<string> artifacts)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var families = artifacts.Select(Path.GetFullPath).GroupBy(Path.GetDirectoryName, comparer);
+        List<(string Name, string Path)> files = [];
+        foreach (var family in families)
+        {
+            var expected = family.ToHashSet(comparer);
+            foreach (var artifact in expected)
+                if (!File.Exists(artifact))
+                    throw new InvalidDataException("Deep-check artifact changed: missing " + artifact);
+            foreach (var path in Directory.EnumerateFiles(family.Key!))
+            {
+                var filename = Path.GetFileName(path);
+                var marker = filename.IndexOf(".olean", OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+                if (marker < 0) continue;
+                var end = marker + ".olean".Length;
+                if ((end == filename.Length || filename[end] == '.') &&
+                    expected.Contains(Path.Combine(family.Key!, filename[..end])))
+                    files.Add((path, path));
+            }
+        }
+        return HashFiles(files);
+    }
+
+    /// <summary>Builds deep modules against the caller's existing extraction in its verification session.</summary>
+    DeepSessionContribution BuildDeepSession(string session, string leanPath, string extractedOlean,
+        ExtractionIdentity identity, DeepCheckInputs inputs)
+    {
+        session = Path.GetFullPath(session);
+        extractedOlean = Path.GetFullPath(extractedOlean);
+        if (!File.Exists(extractedOlean)) throw new FileNotFoundException("Missing extraction module", extractedOlean);
+        var extractedHashes = BindingArtifactHashes([extractedOlean]);
+        Dictionary<string, byte[]> bytes = new(StringComparer.Ordinal);
+        var pins = inputs.MatchPins(identity.Root).Select(pin =>
+        {
+            if (!bytes.TryGetValue(pin.Image.Digest, out var snapshot))
+                bytes.Add(pin.Image.Digest, snapshot = pin.Image.Bytes.ToArray());
+            return new BindingImagePin(pin.Identity, pin.Image.Path, pin.Image.Digest, "stated", snapshot);
+        }).ToArray();
+        BindingPlan plan = new(identity.Output, session,
+            identity.Root.GetProperty("generatedSha256").GetString()!, identity.Sha256, pins,
+            identity.Root.GetProperty("methods").GetArrayLength());
+        var directory = Path.Combine(session, "BindingAudit");
+        if (Directory.Exists(directory))
+            throw new InvalidOperationException("Deep-check modules already exist in the session: " + directory);
+        Directory.CreateDirectory(directory);
+        WriteBindingSources(plan);
+        var failures = BuildBindingModules(plan, leanPath, buildExtracted: false);
+        if (failures.Count != 0)
+            throw new InvalidOperationException("Deep-check module build failed: " +
+                string.Join("; ", failures.Select(pair => pair.Key + ": " + pair.Value)));
+        var requests = BindingRequests(plan);
+        string[] modules = [.. requests.Select(request => request.Module).Distinct(StringComparer.Ordinal)];
+        SortedDictionary<string, string> artifacts = new(StringComparer.Ordinal) { ["Extracted"] = extractedOlean };
+        SortedDictionary<string, string> sources = new(StringComparer.Ordinal);
+        foreach (var module in modules.Where(module => module != "Extracted"))
+        {
+            var source = ModuleSource(session, module);
+            var artifact = Path.ChangeExtension(source, ".olean");
+            artifacts.Add(module, artifact);
+            sources.Add(source, Sha(source));
+        }
+        if (!Same(extractedHashes, BindingArtifactHashes([extractedOlean])))
+            throw new InvalidDataException("Deep-check artifact changed: " + extractedOlean);
+        DeepSessionContribution contribution = new(modules, requests, artifacts,
+            BindingArtifactHashes(artifacts.Values), sources);
+        contribution.RequireStable();
+        return contribution;
+    }
 
     /// <summary>One line of the report: a fact the audit covers or does not, and what it found.</summary>
     sealed record BindingItem(string Id, string Title, string Status, string? Theorem = null, string? Reason = null)
@@ -280,7 +374,13 @@ partial class Program
         if (Sha(extracted) != plan.GeneratedSha256 ||
             Sha(Path.Combine(plan.Extraction, "identity.json")) != plan.IdentitySha256)
             throw new InvalidOperationException("The extraction changed while the binding audit read it");
-        foreach (var image in plan.Images)
+        WriteBindingSources(plan);
+    }
+
+    /// <summary>Writes one image module per digest and retains every pinned identity association.</summary>
+    static void WriteBindingSources(BindingPlan plan)
+    {
+        foreach (var image in plan.Images.DistinctBy(image => image.Sha256))
             File.WriteAllText(ModuleSource(plan.Output, image.Module), ImageModuleSource(image));
         File.WriteAllText(ModuleSource(plan.Output, ImagesModule), ImagesModuleSource(plan));
         File.WriteAllText(ModuleSource(plan.Output, BodiesModule), BodiesModuleSource(plan.Methods,
@@ -309,7 +409,8 @@ partial class Program
 
     static string ImagesModuleSource(BindingPlan plan)
     {
-        var imports = string.Concat(plan.Images.Select(image => $"import {image.Module}\n"));
+        var imports = string.Concat(plan.Images.DistinctBy(image => image.Sha256)
+            .Select(image => $"import {image.Module}\n"));
         var entries = string.Join(",\n   ", plan.Images.Select(image =>
             $"{{ identity := {LeanString(image.Identity)}, image := {image.Module}.image }}"));
         return $"""
@@ -407,7 +508,8 @@ partial class Program
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
             new(BodiesModule, new("BindingAudit.bodies", bodies, ApprovedAxioms)),
-            .. plan.Images.Select(image => new BindingRequest(image.Module, new(image.Theorem,
+            .. plan.Images.DistinctBy(image => image.Sha256).Select(image => new BindingRequest(image.Module,
+                new(image.Theorem,
                 App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Sha256)),
                 ApprovedAxioms)))
         ];
@@ -455,7 +557,7 @@ partial class Program
     /// Builds each module and returns the failures by module. The extraction's own module must build, or nothing it
     /// says can be audited; a module that needs a failed one fails with it.
     /// </summary>
-    Dictionary<string, string> BuildBindingModules(BindingPlan plan, string leanPath)
+    Dictionary<string, string> BuildBindingModules(BindingPlan plan, string leanPath, bool buildExtracted = true)
     {
         string? Build(string module)
         {
@@ -465,10 +567,10 @@ partial class Program
                 progress: "Checking " + module, environment: LeanEnvironment);
             return result.Code == 0 ? null : BindingDiagnostic(result.Output);
         }
-        if (Build("Extracted") is { } extractedError)
+        if (buildExtracted && Build("Extracted") is { } extractedError)
             throw new InvalidOperationException("The extraction's Lean module did not build: " + extractedError);
         Dictionary<string, string> failures = new(StringComparer.Ordinal);
-        foreach (var image in plan.Images)
+        foreach (var image in plan.Images.DistinctBy(image => image.Sha256))
             if (Build(image.Module) is { } error) failures[image.Module] = "build: " + error;
         if (plan.Images.Any(image => failures.ContainsKey(image.Module)))
             failures[ImagesModule] = "build: an image module did not build";
