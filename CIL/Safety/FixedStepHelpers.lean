@@ -195,13 +195,15 @@ macro "fixed_fallback" : tactic => `(tactic| (
       | (exfalso
          have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
              CIL.Instruction.add = CIL.Instruction.add →
-             originalStack = Value.scalar offset :: Value.readOnlyReference reference :: tail → False :=
+             originalStack =
+               Value.scalar offset :: Value.readOnlyReference reference :: tail → False :=
            by assumption
          exact excluded _ _ _ rfl rfl)
       | (exfalso
          have excluded : ∀ (reference : ManagedReference) (offset : CIL.Value) (tail : List Value),
              CIL.Instruction.add = CIL.Instruction.add →
-             originalStack = Value.readOnlyReference reference :: Value.scalar offset :: tail → False :=
+             originalStack =
+               Value.readOnlyReference reference :: Value.scalar offset :: tail → False :=
            by assumption
          exact excluded _ _ _ rfl rfl)
       | (exfalso

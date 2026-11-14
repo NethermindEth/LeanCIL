@@ -357,7 +357,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 /-- Commuting the scalar and reference preserves byte-offset execution. -/
 @[cil_step high] theorem step_add_readOnly_commuted_eq (offset : CIL.Value)
     (reference : ManagedReference) (rest : List Value) :
-    step body .add pc args frame (.readOnlyReference reference :: .scalar offset :: rest) memory =
+    step body .add pc args frame
+        (.readOnlyReference reference :: .scalar offset :: rest) memory =
       step body .add pc args frame (.scalar offset :: .readOnlyReference reference :: rest) memory := by
   rfl
 #print axioms step_add_readOnly_commuted_eq
