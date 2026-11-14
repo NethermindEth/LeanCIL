@@ -942,4 +942,80 @@ example (memory : Memory) (left right : CIL.W64) (frame : Frame) :
       ⟨0, frame, [], memory⟩ ⟨3, frame, [.scalar (.i64 (left + right))], memory⟩ := by
   cil_loop_steps [(0 : Nat)]
 
+open Lean Meta Elab Tactic in
+/-- Local reference classification uses the current list and reduces stored slot terms afresh. -/
+theorem localReferenceClassification
+    (_body : CIL.Method) (_memory : Memory) (_home : Reference) (_tail : List LocalSlot) :
+    True := by
+  run_tac withMainContext do
+    let slotType := mkConst ``LocalSlot
+    let body ← Term.elabTerm (mkIdent `_body) none
+    let memory ← Term.elabTerm (mkIdent `_memory) none
+    let home ← Term.elabTerm (mkIdent `_home) none
+    let byteSlot := mkApp2 (mkConst ``LocalSlot.bytes) (mkConst ``CIL.LocalKind.word32) home
+    let spanSlot ← Term.elabTerm (← `(LocalSlot.span 1 true none)) none
+    let unknownTail ← Term.elabTerm (mkIdent `_tail) none
+    let makeList (slots : List Expr) := mkListLit slotType slots
+    let makeStep (locals : Expr) (position : Nat) (load := false) := do
+      let instruction := mkApp (mkConst (if load then ``CIL.Instruction.local
+        else ``CIL.Instruction.localAddr)) (mkNatLit position)
+      let frame ← mkAppM ``Frame.mk #[mkNatLit 0, locals,
+        ← mkListLit (mkConst ``AllocationId) [], mkNatLit 0]
+      let values ← mkListLit (mkConst ``Value) []
+      let result := mkAppN (mkConst ``step)
+        #[body, instruction, mkNatLit 0, values, frame, values, memory]
+      let goal ← mkFreshExprMVar (← mkEq result result)
+      pure (instruction, goal.mvarId!)
+    let check (locals : Expr) (position : Nat) (expected : Bool)
+        (cache : LoopLocalIndex) (load := false) := do
+      let (instruction, goal) ← makeStep locals position load
+      let (actual, cache) ← (loopReadsReferences instruction goal).run cache
+      unless actual == expected do throwError "incorrect local reference classification"
+      pure cache
+    let cache ← check (← makeList [byteSlot]) 0 false {}
+    let cache ← check (← makeList [spanSlot]) 0 true cache
+    let cache ← check (← makeList [byteSlot]) 1 true cache
+    let partialList := mkApp3 (mkConst ``List.cons [Level.zero]) slotType byteSlot unknownTail
+    let cache ← check partialList 0 false cache
+    let _ ← check partialList 1 true cache
+    let unknownSlot ← mkFreshExprMVar slotType
+    let locals ← makeList [unknownSlot]
+    let cache ← check locals 0 true {}
+    unknownSlot.mvarId!.assign byteSlot
+    let _ ← check locals 0 false cache
+    withLetDecl `slot slotType byteSlot fun slot => do
+      let locals ← makeList [slot]
+      let cache ← check locals 0 false {}
+      let declaration ← slot.fvarId!.getDecl
+      let changed := (← getLCtx).modifyLocalDecl declaration.fvarId
+        (fun declaration => declaration.setValue spanSlot)
+      withLCtx changed (← getLocalInstances) do
+        let _ ← check locals 0 true cache
+    withLetDecl `kind (mkConst ``CIL.LocalKind) (mkConst ``CIL.LocalKind.word32) fun kind => do
+      let locals ← makeList [mkApp2 (mkConst ``LocalSlot.bytes) kind home]
+      let cache ← check locals 0 false {} true
+      let changed := (← getLCtx).modifyLocalDecl kind.fvarId!
+        (fun declaration => declaration.setValue (mkConst ``CIL.LocalKind.reference))
+      withLCtx changed (← getLocalInstances) do
+        let _ ← check locals 0 true cache true
+    let measure (localCount addresses : Nat) := do
+      let locals ← makeList (List.replicate localCount byteSlot)
+      let (instruction, goal) ← makeStep locals (localCount - 1)
+      let start ← IO.getNumHeartbeats
+      let mut cache : LoopLocalIndex := {}
+      for _ in [:addresses] do
+        let (reads, updated) ← (loopReadsReferences instruction goal).run cache
+        unless !reads do throwError "a byte address unexpectedly reads a reference"
+        cache := updated
+      return (← IO.getNumHeartbeats) - start
+    let small ← measure 64 64
+    let manyLocals ← measure 512 64
+    let manyBoth ← measure 512 512
+    logInfo m!"local address classification heartbeats: {small}, {manyLocals}, {manyBoth}"
+    unless manyLocals < small * 3 && manyBoth < small * 12 do
+      throwError "local address costs grew too quickly: {small}, {manyLocals}, {manyBoth}"
+  trivial
+
+#print axioms localReferenceClassification
+
 end Tests.LoopDiagnostics
