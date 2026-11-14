@@ -438,6 +438,10 @@ static void CheckAssemblyCache()
         using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes));
         var image = new MetadataImage(pe);
         var references = module.AssemblyReferences;
+        var rawReference = image.Reader.GetAssemblyReference(MetadataTokens.AssemblyReferenceHandle(1));
+        if ((rawReference.Flags & System.Reflection.AssemblyFlags.PublicKey) == 0 ||
+            image.Reader.GetBlobBytes(rawReference.PublicKeyOrToken).Length != keyBytes)
+            throw new InvalidOperationException("Fixture did not preserve its full public key");
         var first = AssemblyName.Of(references[0], image);
         var second = AssemblyName.Of(references[1], image);
         if (first is null || second is null || first == second)
