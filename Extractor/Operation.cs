@@ -143,10 +143,10 @@ internal sealed record Switch(ValueList<int> Targets) : Operation
     internal override string Render(Func<int, string> calleeName) => $".switch [{string.Join(", ", Targets)}]";
 }
 
-/// <summary>A return of the stack value, narrowed to <paramref name="Narrow"/> when set, or of nothing.</summary>
-internal sealed record Return(Narrowing? Narrow) : Operation
+/// <summary>A return whose value and storage width are determined by the method declaration.</summary>
+internal sealed record Return : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => ".ret" + Narrow.Suffix();
+    internal override string Render(Func<int, string> calleeName) => ".ret";
 }
 
 /// <summary>A fault of the named CLR exception type.</summary>

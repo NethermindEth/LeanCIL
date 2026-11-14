@@ -1,8 +1,8 @@
 import Tests.WrapperProofs
 
 /-! Execution facts that the generated Unsafe layout fixtures apply to extracted bodies. Each body
-    takes the declared signature and layout environment an extraction records, which execution
-    does not read, so a fact applies to an extracted body by unification alone. -/
+    takes the declared signature and layout environment an extraction records. Its return metadata
+    must match the reference or integer result that the execution fact guarantees. -/
 
 namespace Tests.UnsafeWrappers
 open CIL.Safety
@@ -15,6 +15,8 @@ def addMethod (size : Nat) (signed : Bool) (profile : CIL.FeatureProfile)
 
 /-- An in-bounds `Unsafe.Add` returns the offset reference. -/
 theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvironment}
+    {element : CIL.Extraction.TypeExpr}
+    (returnedType : declared.returnType = .byref element)
     (size : Nat) (signed : Bool) (profile : CIL.FeatureProfile)
     (memory : Memory) (reference returned : ManagedReference) (offset : CIL.Value)
     (valid : checkedValue memory (.reference reference) = .ok (.reference reference))
@@ -44,7 +46,9 @@ theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvir
     (by simp [step, observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
       Value.hasUnspecified, specified, staticInstruction, operation] <;> rfl)]
   rw [run_return (body := addMethod size signed profile declared environment) rfl rfl
-    (by simp [step, returnFrom, observerCount, unspecifiedOperands, addMethod, result] <;> rfl)
+    (by simp [step, returnFrom, observerCount, unspecifiedOperands, addMethod, result,
+      CIL.Method.returnNarrow, returnedType, CIL.Extraction.declaredNarrow,
+      CIL.Extraction.typeStorage] <;> rfl)
     (by simp [leaveFrame, result] <;> rfl)]
   rfl
 
@@ -86,11 +90,14 @@ example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
 
 /-- The complete checked constant-return wrapper, for every size and caller memory. -/
 theorem size_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvironment}
+    (returnedType : declared.returnType = .atom CIL.Extraction.runtimeScope "System.Int32")
     (size : BitVec 32) (profile : CIL.FeatureProfile) (memory : Memory) :
     (invoke
       [{ profile := profile, code := [.ldc_i4 size, .ret], locals := [], returnsValue := true,
          declared := declared, environment := environment }]
       8 0 [] memory).map Prod.snd = .ok [.scalar (.i32 size)] := by
+  rcases declared with ⟨receiver, parameters, returnType⟩
+  cases returnedType
   rfl
 
 #print axioms add_ok
@@ -113,7 +120,7 @@ private def emittedSize : CIL.Method :=
     environment := emittedEnvironment, links := [], code := [.ldc_i4 4, .ret] }
 
 example : (invoke [emittedSize] 8 0 [] Memory.empty).map Prod.snd = .ok [.scalar (.i32 4)] := by
-  exact size_ok _ _ _
+  exact size_ok rfl _ _ _
 
 /-- `Unsafe.Add` of a byte element in the form an extraction emits. -/
 private def emittedAdd : CIL.Method :=
@@ -136,6 +143,6 @@ example :
       emittedMemory).map Prod.snd = .ok [.reference (.address ⟨0, 1⟩)] ∧
     (invoke [emittedAdd] 8 0 [.reference .null, .scalar (.i32 0)] emittedMemory).map Prod.snd =
       .error ⟨0, 2, .memory .nullDereference .null 0⟩ := by
-  exact ⟨add_ok _ _ _ _ _ _ _ rfl rfl rfl rfl, add_error _ _ _ _ _ _ _ rfl rfl rfl rfl⟩
+  exact ⟨add_ok rfl _ _ _ _ _ _ _ rfl rfl rfl rfl, add_error _ _ _ _ _ _ _ rfl rfl rfl rfl⟩
 
 end Tests.UnsafeWrappers

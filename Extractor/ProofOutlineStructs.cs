@@ -56,6 +56,7 @@ internal static partial class ProofOutline
     static StructWalk WalkStruct(Specification spec, Operation[] ops, Names names)
     {
         var walk = new StructWalk();
+        var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         var receiver = spec.Parameters[0];
         var stack = new Stack<string?>();
         const string Receiver = "\u0000receiver";
@@ -141,7 +142,7 @@ internal static partial class ProofOutline
                 stack.Push(stack.Peek());
             }
             else if (op.IsNop) { }
-            else if (op is Return { Narrow: null } && pc == ops.Length - 1)
+            else if (op is Return && plainReturn && pc == ops.Length - 1)
             {
                 if (spec.Result is not null)
                 {

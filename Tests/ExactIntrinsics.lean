@@ -502,7 +502,7 @@ private def emittedAnd : Method :=
 example : (Safety.invoke [emittedAnd] 256 0 [.scalar (.i64 13), .scalar (.i64 6)]
     Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 4)] := by
   exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastBinary_word profile .band 0 13 6 4
-    Safety.Memory.empty rfl (by decide) (Safety.checked_broadcast_and 13 6))
+    Safety.Memory.empty rfl rfl (by decide) (Safety.checked_broadcast_and 13 6))
 
 /-- `Avx2.ShiftLeftLogical` of a broadcast by a full-width count, in the emitted form. -/
 private def emittedShift : Method :=
@@ -516,7 +516,7 @@ private def emittedShift : Method :=
 example : (Safety.invoke [emittedShift] 256 0 [.scalar (.i64 1), .scalar (.i64 63)]
     Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 9223372036854775808)] := by
   exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastShift profile .shl64Count 0 1 63
-    9223372036854775808 Safety.Memory.empty rfl (by decide)
+    9223372036854775808 Safety.Memory.empty rfl rfl (by decide)
     (Safety.checked_broadcast_shiftLeft 1 63))
 
 end Tests.ExactIntrinsics

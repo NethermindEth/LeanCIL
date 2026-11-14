@@ -654,8 +654,10 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
     throw (.methodMismatch method.token)
   let frame ← env.frame method.genericParameters.length method.ownerParameters.length
   let returned ← env.resolve 0 signature.result
+  let normalizedReturn := declaredReturn returned
+  if hasModifier resolveFuel normalizedReturn then throw (.methodMismatch method.token)
   let parameters ← env.resolveAll 0 signature.parameters
-  if !(frame.admits (declaredReturn returned) method.returnType) ||
+  if !(frame.admits normalizedReturn method.returnType) ||
       parameters.length != method.parameters.length ||
       !(parameters.zip method.parameters).all
         (fun (type, claimed) => frame.admits (declaredParameter type) claimed) then

@@ -84,7 +84,7 @@ private def guardRaw := raw [i 2, i 45 (.target 5), i 114 (.text "zero"), i 115 
 private def guardStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none], state [], state [none]]
 private def guardCode : List Instruction :=
-  [.arg 0, .brtrue 5, .nop, .nop, .throw "System.ArgumentException", .arg 0, .ret none]
+  [.arg 0, .brtrue 5, .nop, .nop, .throw "System.ArgumentException", .arg 0, .ret]
 
 example : FeatureFlowValid #[] (fun _ => none) guardRaw .scalar guardStates
     (List.replicate 7 true) guardCode := by decide

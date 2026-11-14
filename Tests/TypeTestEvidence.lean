@@ -64,7 +64,7 @@ private def foldStates : FeatureCertificate := [state [], state [none], state [n
   state [none, none], state [none, none], state [some 1], state [], state [some 1], none, none]
 private def foldMask := [true, true, true, true, true, true, true, true, false, false]
 private def foldCode : List Instruction :=
-  [.nop, .nop, .nop, .nop, .ldc_i4 1, .brfalse 8, .ldc_i4 1, .ret none, .unsupported "pruned",
+  [.nop, .nop, .nop, .nop, .ldc_i4 1, .brfalse 8, .ldc_i4 1, .ret, .unsupported "pruned",
    .unsupported "pruned"]
 
 example : FeatureFlowValid #[] (fun _ => none)
@@ -83,26 +83,27 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
 example : FeatureFlowValid #[] (fun _ => none) distinctRaw .scalar
     ((foldStates.set 5 (state [some 0])).set 6 none |>.set 7 none |>.set 8 (state []) |>.set 9 (state [some 0]))
     [true, true, true, true, true, true, false, false, true, true]
-    [.nop, .nop, .nop, .nop, .ldc_i4 0, .brfalse 8, .unsupported "pruned", .unsupported "pruned", .ldc_i4 0, .ret none] := by decide
+    [.nop, .nop, .nop, .nop, .ldc_i4 0, .brfalse 8, .unsupported "pruned", .unsupported "pruned",
+      .ldc_i4 0, .ret] := by decide
 
 -- A branch into the operands would reach the comparison with a different emitted stack.
 private def enteredRaw := raw ([i 22, i 43 (.target 4)] ++ test marker marker ++ [i 42])
 example : ¬ FeatureFlowValid #[] (fun _ => none) enteredRaw .scalar
     [state [], state [some 0], none, none, state [some 0], state [none, some 0], state [none, some 0], state [some 1]]
     [true, true, false, false, true, true, true, true]
-    [.ldc_i4 0, .br 4, .unsupported "", .unsupported "", .nop, .nop, .ldc_i4 1, .ret none] := by decide
+    [.ldc_i4 0, .br 4, .unsupported "", .unsupported "", .nop, .nop, .ldc_i4 1, .ret] := by decide
 -- The same facts are accepted once the edge enters at the first operand.
 example : FeatureFlowValid #[] (fun _ => none)
     (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
     [state [], state [some 0], state [some 0], state [none, some 0], state [none, some 0], state [none, none, some 0], state [none, none, some 0], state [some 1, some 0]]
     [true, true, true, true, true, true, true, true]
-    [.ldc_i4 0, .br 2, .nop, .nop, .nop, .nop, .ldc_i4 1, .ret none] := by decide
+    [.ldc_i4 0, .br 2, .nop, .nop, .nop, .nop, .ldc_i4 1, .ret] := by decide
 
 -- Undecided comparisons and stray type handles have no admitted translation.
 private def undecidedRaw := raw (test (.atom "Forwarder" "System.UInt64") word ++ [i 42])
 example : ¬ FeatureFlowValid #[] (fun _ => none) undecidedRaw .scalar
     [state [], state [none], state [none], state [none, none], state [none, none], state [none]]
-    (List.replicate 6 true) [.nop, .nop, .nop, .nop, .ldc_i4 0, .ret none] := by decide
+    (List.replicate 6 true) [.nop, .nop, .nop, .nop, .ldc_i4 0, .ret] := by decide
 example : featureOpMatchesAt #[] foldRaw none (i 208 (.type marker)) (.ldc_i4 0) = false := by decide
 example : featureOpMatchesAt #[] foldRaw none (i 40 equality) (.ceq) = false := by decide
 example : featureOpMatchesAt #[] foldRaw none (i 40 fromHandle) (.conv_u4) = false := by decide
@@ -128,9 +129,9 @@ private def branchKinds (taken : Bool) : ScalarCertificate :=
 private def branchCode (taken : Bool) : List Instruction :=
   [.nop, .nop, .nop, .nop, if taken then .br 7 else .nop,
     if taken then .unsupported "pruned" else .ldc_i4 1,
-    if taken then .unsupported "pruned" else .ret none,
+    if taken then .unsupported "pruned" else .ret,
     if taken then .ldc_i4 0 else .unsupported "pruned",
-    if taken then .ret none else .unsupported "pruned"]
+    if taken then .ret else .unsupported "pruned"]
 
 /-- Short and long equality/inequality branches certify both type-identity outcomes. -/
 theorem reference_type_branches :
@@ -171,7 +172,7 @@ theorem reference_type_results :
       let result := if same then 1 else 0
       let states := (branchStates false).take 5 ++ [state [some result]]
       let kinds := (branchKinds false).take 5 ++ [some [.word32]]
-      let code := [.nop, .nop, .nop, .nop, .ldc_i4 result, .ret none]
+      let code := [.nop, .nop, .nop, .nop, .ldc_i4 result, .ret]
       decide (FeatureFlowValid #[] (fun _ => none)
           body .scalar states (List.replicate 6 true) code) &&
       decide (ScalarFlowValid #[] body states kinds code) &&

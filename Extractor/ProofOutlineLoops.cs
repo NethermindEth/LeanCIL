@@ -26,8 +26,9 @@ internal static partial class ProofOutline
 
         /// <summary>An operation that steps without a branch, a call, a fault or memory: arithmetic, conversions
         /// and the bit counts, which are total.</summary>
-        internal static bool Pure(Operation operation) => operation is
-            Arg { Narrow: null } or Constant { Width: 32 or 64 } or Return { Narrow: null } or
+        internal static bool Pure(Operation operation, bool plainReturn) =>
+            operation is Return ? plainReturn : operation is
+            Arg { Narrow: null } or Constant { Width: 32 or 64 } or
             ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
             StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.And
                 or StackOpcode.Or or StackOpcode.Xor or StackOpcode.Nop or
@@ -523,7 +524,7 @@ internal static partial class ProofOutline
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
             if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
-                !extraction.Emitted[index].Frame.HasNoLocals || ops[3] is not Return { Narrow: null }) return null;
+                !extraction.Emitted[index].Frame.HasNoLocals || ops[3] is not Return) return null;
             if (ops[0] is not Arg { Narrow: null, Index: var reference } ||
                 ops[1] is not Arg { Narrow: null, Index: var word }) return null;
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
@@ -535,9 +536,12 @@ internal static partial class ProofOutline
         }
 
         /// <summary>Whether a callee without locals only computes, so one checked run steps its body.</summary>
-        internal static bool Computes(Extraction extraction, int index) =>
-            extraction.Emitted[index].Frame.HasNoLocals &&
-            extraction.Emitted[index].Operations.All(Body.Pure);
+        internal static bool Computes(Extraction extraction, int index)
+        {
+            var plainReturn = LeanEmitter.Narrow(extraction.Methods[index].ReturnType) is null;
+            return extraction.Emitted[index].Frame.HasNoLocals &&
+                extraction.Emitted[index].Operations.All(op => Body.Pure(op, plainReturn));
+        }
 
         /// <summary>The `Holds` proof of a callee of words that `Computes` or `Branches`, its inputs bound by
         /// `pattern` and named `arguments`: one stepped run, or a split on each test. A `kept` contract's
@@ -564,12 +568,14 @@ internal static partial class ProofOutline
         {
             var callee = extraction.Methods[index];
             var ops = extraction.Emitted[index].Operations;
+            var plainReturn = LeanEmitter.Narrow(callee.ReturnType) is null;
             return !callee.HasThis &&
                 callee.Parameters.All(parameter => ElementWidth(parameter.ParameterType) is not null) &&
                 callee.ReturnType.FullName != "System.Void" && ElementWidth(callee.ReturnType) is not null &&
                 extraction.Emitted[index].Frame.HasNoLocals &&
                 ops.Any(op => Body.Conditional(op) || op is Throw) &&
-                ops.All(op => op is Arg { Narrow: null } or Constant { Width: 32 or 64 } or Return { Narrow: null } or
+                ops.All(op => op is Return ? plainReturn :
+                    op is Arg { Narrow: null } or Constant { Width: 32 or 64 } or
                     Jump or Throw or StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul
                         or StackOpcode.And or StackOpcode.Or or
                         StackOpcode.Xor or StackOpcode.Nop });
@@ -623,7 +629,7 @@ internal static partial class ProofOutline
                     stack.RemoveRange(stack.Count - 2, 2);
                     stack.Add(new($"({left.Term} {symbol} {right.Term})", left.Bits));
                 }
-                else if (op is Return { Narrow: null })
+                else if (op is Return)
                 {
                     var suffix = (++sides).ToString(System.Globalization.CultureInfo.InvariantCulture);
                     var steps = facts.Count == 0 ? "" : $" [{string.Join(", ", facts.Select(fact => fact.Fact))}]";

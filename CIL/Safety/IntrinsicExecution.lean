@@ -6,8 +6,8 @@ import CIL.SIMD.Evaluation256Lemmas
 
 Execution facts for broadcast arithmetic separate instruction dispatch from vector evaluation.
 Concrete runtime comparisons instantiate these facts without reducing the interpreter again. Each
-method takes the declared signature and layout environment an extraction records, which execution
-does not read, so a fact applies to an extracted body by unification alone.
+method takes the declared signature and layout environment an extraction records. The execution
+facts require return storage that preserves the complete 64-bit result.
 -/
 
 namespace CIL.Safety
@@ -45,6 +45,7 @@ theorem checked_extract256 (bits : BitVec 256) (lane : W32) (bound : lane.toNat 
 theorem invoke_broadcastBinary {declared : DeclaredSignature} {environment : LayoutEnvironment}
     (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (left right : W64) (bits : BitVec 256) (memory : Memory)
+    (returnStorage : Extraction.declaredNarrow environment.rawLayouts declared.returnType = none)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 left left left left),
@@ -52,7 +53,8 @@ theorem invoke_broadcastBinary {declared : DeclaredSignature} {environment : Lay
     invoke [broadcastBinaryMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 (Vector.lane64 bits lane.toNat))]) := by
-  cil_checked_steps [available, evaluated, checked_broadcast256,
+  cil_checked_steps [returnStorage, Method.returnNarrow, available, evaluated,
+    checked_broadcast256,
     checked_extract256 bits lane bound]
 
 #print axioms invoke_broadcastBinary
@@ -69,6 +71,7 @@ theorem lane_broadcast256 (word : W64) (lane : Nat) (bound : lane < 4) :
 theorem invoke_broadcastBinary_word {declared : DeclaredSignature}
     {environment : LayoutEnvironment} (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (left right word : W64) (memory : Memory)
+    (returnStorage : Extraction.declaredNarrow environment.rawLayouts declared.returnType = none)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 left left left left),
@@ -78,7 +81,8 @@ theorem invoke_broadcastBinary_word {declared : DeclaredSignature}
       [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 word)]) := by
   simpa only [lane_broadcast256 word lane.toNat bound] using
-    invoke_broadcastBinary profile operation lane left right _ memory available bound evaluated
+    invoke_broadcastBinary profile operation lane left right _ memory returnStorage available bound
+      evaluated
 
 #print axioms invoke_broadcastBinary_word
 
@@ -152,6 +156,7 @@ theorem checked_scalarUnsafe (word : W64) :
 theorem invoke_broadcastShift {declared : DeclaredSignature} {environment : LayoutEnvironment}
     (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (value count word : W64) (memory : Memory)
+    (returnStorage : Extraction.declaredNarrow environment.rawLayouts declared.returnType = none)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 value value value value), .v128Low64 count] =
@@ -159,7 +164,9 @@ theorem invoke_broadcastShift {declared : DeclaredSignature} {environment : Layo
     invoke [broadcastShiftMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 value), .scalar (.i64 count)] memory =
       .ok (memory, [.scalar (.i64 word)]) := by
-  cil_checked_steps [available, evaluated, checked_broadcast256, checked_scalarUnsafe,
+  cil_checked_steps [returnStorage, Method.returnNarrow, available, evaluated,
+    checked_broadcast256,
+    checked_scalarUnsafe,
     checked_extract256, lane_broadcast256, bound, Opaque128Value.value]
 
 #print axioms invoke_broadcastShift

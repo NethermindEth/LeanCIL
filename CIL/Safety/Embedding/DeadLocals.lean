@@ -212,16 +212,21 @@ theorem returnsValue_of_steps (body target : CIL.Method) (frame : Frame) (memory
     target.returnsValue = body.returnsValue := by
   cases original : body.returnsValue <;> cases actual : target.returnsValue
   · rfl
-  · have kept := steps (.ret none) 0 [] frame [] memory (.ok (.returned [] memory))
-      (by simp [step, returnFrom, original, observerCount, unspecifiedOperands,
+  · have kept := steps .ret 0 [] frame [] memory (.ok (.returned [] memory))
+      (by simp [step, returnFrom, CIL.Method.returnNarrow, original,
+        observerCount, unspecifiedOperands,
         Pure.pure, Except.pure]) trivial
-    simp [step, returnFrom, actual, observerCount, unspecifiedOperands] at kept
-  · have kept := steps (.ret none) 0 [] frame [.scalar (.i32 0)] memory
+    cases narrow : target.returnNarrow <;>
+      simp [step, returnFrom, narrow, actual, observerCount, unspecifiedOperands] at kept
+  · have kept := steps .ret 0 [] frame [.scalar (.i32 0)] memory
       (.ok (.returned [.scalar (.i32 0)] memory))
-      (by simp [step, returnFrom, original, observerCount, unspecifiedOperands,
-        Value.hasUnspecified, CIL.Value.hasUnspecified, checkedValue, numericValue,
-        Pure.pure, Except.pure]) trivial
-    simp [step, returnFrom, actual, observerCount, unspecifiedOperands, Value.hasUnspecified,
+      (by
+        cases narrow : body.returnNarrow <;>
+          simp [step, returnFrom, narrow, original, observerCount, unspecifiedOperands,
+            Value.hasUnspecified, CIL.Value.hasUnspecified, checkedValue, numericValue,
+            CIL.NarrowKind.extend_zero, Pure.pure, Except.pure]) trivial
+    simp [step, returnFrom, CIL.Method.returnNarrow, actual, observerCount,
+      unspecifiedOperands, Value.hasUnspecified,
       CIL.Value.hasUnspecified] at kept
   · rfl
 #print axioms returnsValue_of_steps

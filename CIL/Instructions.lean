@@ -203,7 +203,7 @@ inductive Instruction where
   | feature (id : Feature)
   | intrinsic (operation : Intrinsic) (argc : Nat)
   | memory (operation : MemoryOp)
-  | ret (narrow : Option NarrowKind := none)
+  | ret
   /-- Raises an exception of the named type; there are no handlers. -/
   | throw (exception : String)
   | unsupported (description : String)

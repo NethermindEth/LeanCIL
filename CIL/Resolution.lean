@@ -1,4 +1,4 @@
-import CIL.Extraction.Generics
+import CIL.Extraction.TypeStorage
 import CIL.Identity
 
 /-!

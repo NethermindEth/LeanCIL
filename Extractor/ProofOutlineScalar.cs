@@ -30,6 +30,7 @@ internal static partial class ProofOutline
     /// backward jump; null when it does neither, has another operation or splits into too many paths.</summary>
     static ScalarStep? ScalarPaths(Specification spec, Operation[] ops)
     {
+        var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         if (spec.Parameters.Any(parameter => parameter.Shape != ParameterShape.Scalar)) return null;
         var paths = 0;
         var decided = false;
@@ -89,9 +90,10 @@ internal static partial class ProofOutline
                         return null;
                     return new ScalarSplit(condition, pc, holds, holdsStep, fails, failsStep);
                 }
-                else if (op is Return { Narrow: null }) return ++paths > MaxScalarPaths ? null : new ScalarReturn();
+                else if (op is Return && plainReturn)
+                    return ++paths > MaxScalarPaths ? null : new ScalarReturn();
                 else if (op.IsNop) { }
-                else if (Body.Pure(op))
+                else if (Body.Pure(op, plainReturn))
                 {
                     // Conversions and bit counts compute a word the outline does not name; it may be returned.
                     if (stack.Count == 0) return null;

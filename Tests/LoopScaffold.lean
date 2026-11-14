@@ -67,7 +67,7 @@ bind_cutpoint outside (frame : Frame) := body at 99 matching (fun _ => true) wit
 /-- error: Selected cutpoint must exist and match the instruction predicate -/
 #guard_msgs in
 bind_cutpoint wrongShape (frame : Frame) := body at outer.latch matching
-  (fun op => match op with | .ret _ => true | _ => false) with frame
+  (fun op => match op with | .ret => true | _ => false) with frame
 
 end Tests.RepeatedCutpoints
 

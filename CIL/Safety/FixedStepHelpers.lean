@@ -24,7 +24,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
         if stack.length < argc then .error .invalidState else
           let values ← CIL.Safety.scalars (stack.take argc)
           let some (.next destination result _) :=
-            CIL.step operation false pc [] values (fun _ => none) profile |
+            CIL.step operation false none pc [] values (fun _ => none) profile |
               .error .invalidState
           let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
           return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -38,7 +38,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if stack.length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars (stack.take argc)
             let some (.next destination result _) :=
-              CIL.step operation false pc [] values (fun _ => none) profile |
+              CIL.step operation false none pc [] values (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
             return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -51,7 +51,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if (stack.map mapping.value).length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars ((stack.map mapping.value).take argc)
             let some (.next destination result _) :=
-              CIL.step operation false pc [] values (fun _ => none) profile |
+              CIL.step operation false none pc [] values (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue target)
             return FrameAction.next destination (result ++ (stack.map mapping.value).drop argc)
@@ -102,7 +102,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
   | .managed _ | .arg .. | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
   | .tailCall ..
-  | .throw _ | .ret _ => .boundary
+  | .throw _ | .ret => .boundary
   | _ => .other
 
 /-- The dispatcher rejects a narrow argument whose source value contains unspecified bits. -/
@@ -220,7 +220,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,
-      metadata.returnsValue]
+      metadata.returnsValue, metadata.returnNarrow]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
     -- Only the dispatcher's final arm excludes `.managed`, so the guard skips every other arm
@@ -239,7 +239,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          have noCall : ∀ callee argc, operation = .call callee argc → False := by assumption
          have noTailCall : ∀ callee argc, operation = .tailCall callee argc → False := by assumption
          have noThrow : ∀ exception, operation = .throw exception → False := by assumption
-         have noReturn : ∀ narrow, operation = .ret narrow → False := by assumption
+         have noReturn : operation = .ret → False := by assumption
          have noArgument : ∀ position narrow, operation = .arg position narrow → False := by
            intro position narrow
            cases narrow
@@ -251,7 +251,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          all_goals try exact False.elim (noCall _ _ rfl)
          all_goals try exact False.elim (noTailCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)
-         all_goals try exact False.elim (noReturn _ rfl)
+         all_goals try exact False.elim (noReturn rfl)
          all_goals simp only [pureArity, CIL.Safety.instruction] at observable
          all_goals repeat first | cases observable | split at observable)
       | (have numeric : fixedStepFamily operation = .numeric := family

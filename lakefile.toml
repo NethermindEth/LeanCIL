@@ -64,6 +64,12 @@ name = "Tests.Identity"
 name = "Tests.ResolutionFacts"
 
 [[lean_lib]]
+name = "Tests.ReturnOpcode"
+
+[[lean_lib]]
+name = "Tests.ReturnMetadataBinding"
+
+[[lean_lib]]
 name = "Tests.Automation"
 
 [[lean_lib]]

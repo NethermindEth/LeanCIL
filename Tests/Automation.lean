@@ -62,7 +62,8 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 #guard_msgs in #print axioms checked_arithmetic
 
 @[cil_code] def narrowEqualityMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .xor, .ldc_i4 0, .ceq, .ret (some .unsigned8)]
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  code := [.arg 0, .arg 1, .xor, .ldc_i4 0, .ceq, .ret]
   locals := [], returnsValue := true }
 
 def scalarDifference (left right : CIL.W32) : CIL.W32 := left ^^^ right
@@ -86,7 +87,8 @@ theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.F
 #print axioms checked_narrow_return
 
 @[cil_code] def decidedNarrowMethod : CIL.Method := {
-  code := [.ldc_i4 0, .ldc_i4 0, .ceq, .ret (some .unsigned8)]
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  code := [.ldc_i4 0, .ldc_i4 0, .ceq, .ret]
   locals := [], returnsValue := true }
 
 /-- A comparison of literals decides to `1#32` before the narrowed return, which keeps it, so
@@ -296,12 +298,14 @@ example (program : CIL.Program) (index : Nat) (memory : CIL.Safety.Memory) (a b 
 
 /-- A 27-instruction read-only leaf over symbolic memory: each field load comes from a fact, every step from an
     equation, so no step unfolds the dispatcher. -/
-def leafBody (profile : CIL.FeatureProfile) : CIL.Method := { profile, returnsValue := true, locals := [], code := [
+def leafBody (profile : CIL.FeatureProfile) : CIL.Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  profile, returnsValue := true, locals := [], code := [
   .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .xor,
   .arg 0, .fieldAt 8 8, .arg 1, .fieldAt 8 8, .xor, .or,
   .arg 0, .fieldAt 16 8, .arg 1, .fieldAt 16 8, .xor, .or,
   .arg 0, .fieldAt 24 8, .arg 1, .fieldAt 24 8, .xor, .or,
-  .ldc_i4 0, .conv_i8, .ceq, .ret (some .unsigned8)] }
+  .ldc_i4 0, .conv_i8, .ceq, .ret] }
 
 open CIL.Safety in
 theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -560,7 +564,7 @@ theorem feature_step_free_body (program : CIL.Program) (index : Nat) (body : CIL
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cil_checked_steps [wide, code, returns]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [wide, code, returns, narrow]
 
 -- A literal profile decides the test with no fact.
 theorem feature_step_literal_profile (memory : CIL.Safety.Memory) :
@@ -638,7 +642,7 @@ theorem feature_step_evaluate_free_body (program : CIL.Program) (index : Nat) (b
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cil_checked_steps [wide, code, returns]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [wide, code, returns, narrow]
 
 -- A supplied proof term, not just a local name, is normalized to the profile field.
 theorem feature_step_evaluate_term (body : CIL.Method) (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory)
@@ -666,7 +670,7 @@ theorem feature_steps_evaluate_forall (program : CIL.Program) (index : Nat) (bod
     (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) :
     CIL.Safety.run program 3 index 0 [] frame [] memory =
       .ok (CIL.Safety.leaveFrame frame memory, [.scalar (.i32 0)]) := by
-  cil_checked_steps [all, code, returns]
+  cases narrow : body.returnNarrow <;> cil_checked_steps [all, code, returns, narrow]
 
 /-- A fact about a symbolic feature rewrites the pushed test by hand: `cil_step` keeps
     `body.profile.evaluate f` folded instead of splitting on `f`. -/

@@ -138,11 +138,11 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     string BroadcastProof(string operation, int lane, string lemma) =>
         $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word " +
         $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
-        $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
+        $"rfl rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
     string ShiftProof(string operation, int lane, string lemma) =>
         $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift " +
         $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
-        $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
+        $"rfl rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\n" +
         "import CIL.Safety.IntrinsicExecution\nnamespace ExampleProof\n" +
         (wide ? "private theorem ok_of_toOption {error value : Type} {result : Except error value} {expected : value}\n" +

@@ -143,8 +143,9 @@ def returnFromStack (narrow : Option NarrowKind) (returns : Bool)
 
 /-- Executes instruction `op` at `pc`. Binary operands are popped as `b :: a :: rest`, so
     `a` was pushed first. `returns` says whether the method returns a value; `profile`
-    decides feature tests and intrinsic availability. -/
-def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value)
+    decides feature tests and intrinsic availability. `narrow` is the method's return storage. -/
+def step (op : Instruction) (returns : Bool)
+    (narrow : Option NarrowKind) (pc : Nat) (args : List Value)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
   match op, stack with
@@ -247,7 +248,7 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value)
   | .skipInit, .object _ :: rest => return .next (pc + 1) rest memory
   | .skipInit, .ref _ :: rest => return .next (pc + 1) rest memory
   -- Return.
-  | .ret narrow, _ => returnFromStack narrow returns stack memory
+  | .ret, _ => returnFromStack narrow returns stack memory
   | _, _ => none
 
 end CIL

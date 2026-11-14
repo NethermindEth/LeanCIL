@@ -97,7 +97,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
       if stack.length < argc then Except.error ExecutionFault.invalidState else do
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false pc [] values (fun _ => none) profile |
+          CIL.step op false none pc [] values (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue memory)
         pure (FrameAction.next target (result ++ stack.drop argc) (frame.appendLocals extra) memory)
@@ -110,7 +110,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
         if stack.length < argc then Except.error ExecutionFault.invalidState else do
           let values ← scalars (stack.take argc)
           let some (.next target result _) :=
-            CIL.step op false pc [] values (fun _ => none) profile |
+            CIL.step op false none pc [] values (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
           let result ← (result.map Value.scalar).mapM (checkedValue memory)
           pure (FrameAction.next target (result ++ stack.drop argc) frame memory)
@@ -1169,8 +1169,8 @@ theorem step_appendLocals_memory (operation : MemoryOp) :
 #print axioms step_appendLocals_memory
 
 /-- `ret` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_ret (narrow : Option NarrowKind) :
-    StepAppendLocals (.ret narrow) := by
+theorem step_appendLocals_ret :
+    StepAppendLocals .ret := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
@@ -1395,8 +1395,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_intrinsic operation argc
     case memory operation =>
       exact step_appendLocals_memory operation
-    case ret narrow =>
-      exact step_appendLocals_ret narrow
+    case ret =>
+      exact step_appendLocals_ret
     case throw exception =>
       exact step_appendLocals_throw exception
     case unsupported description =>

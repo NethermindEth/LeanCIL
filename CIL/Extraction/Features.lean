@@ -543,7 +543,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | 54, .target x, .ble_un y | 67, .target x, .ble_un y
     | 55, .target x, .blt_un y | 68, .target x, .blt_un y => x == y
     | 69, .targets x, .switch y => x == y
-    | 42, _, .ret _ => true
+    | 42, _, .ret => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
     | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
     | _, _, .brfalse _ | _, _, .brtrue _ => false

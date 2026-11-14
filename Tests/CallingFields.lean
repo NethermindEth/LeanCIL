@@ -221,7 +221,13 @@ def viewResult (value : CIL.Value) : MethodContract Reference Unit where
 
 /-- A wrapper forwards both arguments and the helper's checked result. -/
 @[cil_code] def resultWrapper (narrow : Option CIL.NarrowKind) : CIL.Method :=
-  { locals := [], returnsValue := true, code := forwarderCode (plainLoads [0, 1]) 1 narrow }
+  { locals := [], returnsValue := true, code := forwarderCode (plainLoads [0, 1]) 1,
+    declared := { returnType := match narrow with
+      | none => .atom CIL.Extraction.runtimeScope "System.Int64"
+      | some .signed8 => .atom CIL.Extraction.runtimeScope "System.SByte"
+      | some .unsigned8 => .atom CIL.Extraction.runtimeScope "System.Byte"
+      | some .signed16 => .atom CIL.Extraction.runtimeScope "System.Int16"
+      | some .unsigned16 => .atom CIL.Extraction.runtimeScope "System.UInt16" } }
 
 /-- The same forwarding proof preserves the valid-call precondition and exact result encoding. -/
 theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind)
@@ -242,12 +248,13 @@ theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind
         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) rfl
     apply WP.step rfl rfl (step_load_unchanged (narrow := none) rfl (valid memory) trivial)
     apply WP.returned rfl rfl
-      (step_return_unchanged (narrow := none) rfl
+      (step_return_unchanged (narrow := none) rfl rfl
         (by simpa [Value.hasUnspecified] using known)
         (by simp [valid] <;> rfl) trivial) (by simp [valid] <;> rfl)
     exact ⟨Confined.refl [] memory, (), rfl, rfl⟩
   exact helperHolds.forward (loads := plainLoads [0, 1]) (narrow := narrow)
-    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl,
+      by cases narrow with | none => rfl | some kind => cases kind <;> rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => by simpa only [viewResult, List.any_cons, List.any_nil,
