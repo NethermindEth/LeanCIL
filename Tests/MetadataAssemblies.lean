@@ -41,7 +41,8 @@ theorem version_stems :
 
 /-- Resolve the library type with the supplied assembly order and pins. -/
 private def resolveLibrary (others : List MetadataSlice) (pins : List (List Nat) := []) := do
-  let env := MetadataEnv.ofSlices (← (own.1 :: others).mapM MetadataSlice.index) pins
+  let env := MetadataEnv.ofSlices (← (own.1 :: others).mapM MetadataSlice.index)
+    (pins.foldl AssemblyPrefixes.insert {})
   typeRefNamed env 0 resolveFuel tokens.boxRef none
 
 /-- Compare the exact error while retaining the successful type separately. -/
@@ -80,7 +81,8 @@ private def identity (position : Nat) : List Nat :=
 /-- Construct and query each assembly once, including the pin lookup for a missing version. -/
 private def exercise (base : MetadataIndex) (count : Nat) : Bool := Id.run do
   let indexes := (List.range count).map fun position => { base with identity := identity position }
-  let env := MetadataEnv.ofSlices indexes (indexes.map (·.identity))
+  let env := MetadataEnv.ofSlices indexes
+    ((indexes.map (·.identity)).foldl AssemblyPrefixes.insert {})
   for position in [:count] do
     let scope := identity position
     if env.identities[scope]? != some position then return false

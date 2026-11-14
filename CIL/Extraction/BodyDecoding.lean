@@ -1,4 +1,5 @@
 import CIL.Extraction.MetadataBinding
+import CIL.Extraction.PinnedIndex
 import Std.Data.TreeMap
 
 /-!
@@ -172,7 +173,7 @@ structure BodyEvidence where
   names : MethodNames
   /-- The identity of every assembly the extraction pins, as bytes; `BodyDecodes` ties them to
       the pins. A reference into one of them needs its slice among `metadata`. -/
-  pinned : List (List Nat)
+  pinned : PinnedIndex
   /-- The type arguments of a generic instance, method arguments first, as the types its
       signature names; empty for a method that is not an instance. -/
   instantiation : List ResolvedType := []
@@ -420,19 +421,20 @@ private def checkTable (env : MetadataEnv) (frame : Frame) :
 /-- The metadata of a body as an environment of indexed slices, its own first, over the given
     identities and tables: independent of the number of rows. -/
 def MethodMetadata.environmentWith (metadata : MethodMetadata) (identities : List (List Nat))
-    (tables : List IndexTables) (pinned : List (List Nat)) : Except MetadataError MetadataEnv :=
+    (tables : List IndexTables) (pinned : PinnedIndex) : Except MetadataError MetadataEnv :=
   if tables.length != metadata.others.length + 1 || identities.length != tables.length then
     .error .tablesMismatch
   else do
     let indexed ← (metadata.slices.zip (identities.zip tables)).mapM
       fun (slice, identity, sliceTables) => slice.indexWith sliceTables identity
-    .ok (MetadataEnv.ofSlices indexed (pinned.map assemblyStem))
+    .ok (MetadataEnv.ofSlices indexed pinned.prefixes)
 
 /-- The metadata of a body as an environment of indexed slices, built from its bytes alone. -/
-def MethodMetadata.environment (metadata : MethodMetadata) (pinned : List (List Nat) := []) :
+def MethodMetadata.environment (metadata : MethodMetadata)
+    (pinned : PinnedIndex := PinnedIndex.ofIdentities []) :
     Except MetadataError MetadataEnv := do
   .ok (MetadataEnv.ofSlices (← metadata.slices.mapM MetadataSlice.index)
-    (pinned.map assemblyStem))
+    pinned.prefixes)
 
 /-- Decode a method body: its header and its instructions, with branch operands as instruction
     indices and every token operand checked against the metadata. `arity` is the number of
@@ -495,7 +497,7 @@ abbrev BodyDecodes (pins : List AssemblyPin) (pin : AssemblyPin) (body : BodyEvi
   AssembliesIdentified body.metadata body.identities ∧
     tablesMatch body.metadata body.tables = true ∧
     body.metadata.own.assembly.identity = pin.identity ∧
-    body.pinned.mapM spelled? = some (pins.map (·.identity)) ∧
+    body.pinned.identities.mapM spelled? = some (pins.map (·.identity)) ∧
     body.names.Spell method ∧ body.names.Selects signature ∧
     bodyMatches body method arguments = true
 
