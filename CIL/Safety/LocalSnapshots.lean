@@ -134,7 +134,7 @@ theorem LocalSnapshots.load {body : CIL.Method} {pc index : Nat} {args stack : L
     {frame : Frame} {memory : Memory} {known : Nat → Option CIL.Value}
     (snapshots : LocalSnapshots memory frame.locals known) (value : CIL.Value)
     (specified : known index = some value) :
-    step body (.local index) pc args frame stack memory =
+    step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar value :: stack) frame memory) := by
   obtain ⟨kind, home, stored, number, slot, fits, result, loaded⟩ :=
     snapshots index value specified
@@ -199,7 +199,7 @@ theorem LocalSnapshots.store {body : CIL.Method} {pc index : Nat} {args stack : 
     (slot : frame.locals[index]? = some (.bytes kind home))
     (ready : access memory home (localWidth kind) 1 true = .ok ()) :
     ∃ after,
-      step body (.setLocal index) pc args frame (.scalar value :: stack) memory =
+      step body (.stloc index) pc args frame (.scalar value :: stack) memory =
         .ok (.next (pc + 1) stack frame after) ∧
       LocalSnapshots after frame.locals (rememberLocal known index (localResult kind value)) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧

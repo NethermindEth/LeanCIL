@@ -770,8 +770,8 @@ long LocalAccessCost(int accesses)
           (List.replicate cycles [some ⟨[], unknown⟩, some ⟨[none], unknown⟩, some ⟨[], unknown⟩,
             some ⟨[none], unknown⟩]).flatten ++ [some ⟨[], unknown⟩]
         def codeSegment (index : Nat) : List Instruction :=
-          [.local (index % localCount), .setLocal ((index + 1) % localCount),
-            .localAddr ((index + 2) % localCount), .pop]
+          [.ldloc (index % localCount), .stloc ((index + 1) % localCount),
+            .ldloca ((index + 2) % localCount), .pop]
         def code (cycles : Nat) : List Instruction := (List.range cycles).flatMap codeSegment ++ [.ret]
         """ + "\n";
     var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {cycles}) .scalar (features {cycles}) " +
@@ -812,7 +812,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
     var consume = pointers ? "⟨0, 41, .indirectCall .void [] false false 0⟩" : "⟨0, 38, .none⟩";
     var loaded = addressed ? ".reference" : "kind";
     var pushed = pointers ? ".managed (.address ⟨⟨\"Scaling\", 2, []⟩, 0⟩ signature)" : ".ldc_i4 0";
-    var emittedLoad = addressed ? ".localAddr index" : ".local index";
+    var emittedLoad = addressed ? ".ldloca index" : ".ldloc index";
     var consumed = pointers ? ".managed (.call signature [] false)" : ".pop";
     var header = $$"""
         import CIL.Extraction.Scalars
@@ -840,7 +840,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         def states (slots : Nat) : ScalarCertificate :=
           (List.replicate slots [some [], some [kind], some [], some [{{loaded}}]]).flatten ++ [some []]
         def codeSegment (index : Nat) : List Instruction :=
-          [{{pushed}}, .setLocal index, {{emittedLoad}}, {{consumed}}]
+          [{{pushed}}, .stloc index, {{emittedLoad}}, {{consumed}}]
         def code (slots : Nat) : List Instruction := (List.range slots).flatMap codeSegment ++ [.ret]
         """ + "\n";
     var statement = storage ? $"(closedArguments [] (raw {count})).isSome = true"

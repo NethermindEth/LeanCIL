@@ -20,11 +20,11 @@ theorem home_slots : (argumentHomeIndex [2, 0, 2] 5)[2]? = some 5 ∧
 /-- Indexed argument validation rejects missing arguments, incorrect slots and short masks. -/
 theorem argument_bounds :
     argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 1]⟩ [1]
-      [true] [.setLocal 0] = false ∧
+      [true] [.stloc 0] = false ∧
     argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
-      [true] [.setLocal 1] = false ∧
+      [true] [.stloc 1] = false ∧
     argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
-      [] [.setLocal 0] = false := by decide +kernel
+      [] [.stloc 0] = false := by decide +kernel
 #print axioms argument_bounds
 
 /-- Pruned instructions must remain unsupported, even when their indexes are invalid. -/

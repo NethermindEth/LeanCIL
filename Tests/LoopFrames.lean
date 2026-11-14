@@ -190,8 +190,8 @@ namespace Extracted
 /-- `while (remaining != 0) remaining--; return remaining;` with `remaining` in a frame home. -/
 @[cil_code] def method0 : CIL.Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true
-  code := [.arg 0, .setLocal 0, .local 0, .brtrue 6, .local 0, .ret, .local 0, .ldc_i4 1,
-    .sub, .setLocal 0, .br 2] }
+  code := [.arg 0, .stloc 0, .ldloc 0, .brtrue 6, .ldloc 0, .ret, .ldloc 0, .ldc_i4 1,
+    .sub, .stloc 0, .br 2] }
 
 /-- The extracted program. -/
 @[cil_code] def program : CIL.Program := [method0]
@@ -258,7 +258,7 @@ open CIL.Safety
     locals as local 1 without a byte home. -/
 def body : CIL.Method := {
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
-  parameterHomes := [(0, .span 8 false)], code := [.local 0, .ret] }
+  parameterHomes := [(0, .span 8 false)], code := [.ldloc 0, .ret] }
 
 bind_entry entry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
     (valid : view.validate memory = .ok ()) (width : view.width = 8)
@@ -272,10 +272,10 @@ theorem store_then_load (memory : Memory) (view : SpanView) (wellFormed : memory
     (valid : view.validate memory = .ok ()) (width : view.width = 8)
     (readOnly : view.writable = false) {pc : Nat} {args stack : List Value} (word : CIL.W64) :
     ∃ home entered after,
-      step body (.setLocal 0) pc args (entry.frame memory view home)
+      step body (.stloc 0) pc args (entry.frame memory view home)
           (.scalar (.i64 word) :: stack) entered =
         .ok (.next (pc + 1) stack (entry.frame memory view home) after) ∧
-      step body (.local 0) pc args (entry.frame memory view home) stack after =
+      step body (.ldloc 0) pc args (entry.frame memory view home) stack after =
         .ok (.next (pc + 1) (.scalar (.i64 word) :: stack) (entry.frame memory view home)
           after) := by
   obtain ⟨home, entered, enter⟩ :=
@@ -397,10 +397,10 @@ open CIL (W64)
 @[cil_code] def spanSum : CIL.Method := {
   returnsValue := true, locals := [.i64 0], localKinds := [.word64],
   parameterHomes := [(0, .span 8 false)]
-  code := [.ldc_i4 0, .conv_i8, .setLocal 0, .br 15, .local 0, .local 1, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .setLocal 0, .local 1, .ldc_i4 1,
-    .memory (.spanSlice false), .setLocal 1, .local 1, .memory .spanLength, .brtrue 4,
-    .local 0, .ret] }
+  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldloc 1, .ldc_i4 0,
+    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldloc 1, .ldc_i4 1,
+    .memory (.spanSlice false), .stloc 1, .ldloc 1, .memory .spanLength, .brtrue 4,
+    .ldloc 0, .ret] }
 
 /-- The program of `spanSum` alone. -/
 @[cil_code] def spanSumProgram : CIL.Program := [spanSum]

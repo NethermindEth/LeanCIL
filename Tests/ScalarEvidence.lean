@@ -288,7 +288,7 @@ private def localEvidence : MethodEvidence := withBody {
 private def localMethod : Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true,
   declared := { returnType := word },
-  code := [.ldc_i4 1, .neg, .setLocal 0, .local 0, .conv_i8, .ret] }
+  code := [.ldc_i4 1, .neg, .stloc 0, .ldloc 0, .conv_i8, .ret] }
 example : FeatureFlowValid #[] (fun _ => none) localRaw .scalar localFeatures
     (List.replicate 6 true) localMethod.code := by decide
 example : ¬ TranslationValid [] #[] [] [localEvidence] [] [localMethod] := by decide +kernel
@@ -304,7 +304,7 @@ private def argumentEvidence : MethodEvidence := withBody {
 private def argumentMethod : Method := {
   locals := [], parameterHomes := [(0, .word32)], returnsValue := true,
   declared := { parameters := [intType], returnType := word },
-  code := [.ldc_i4 1, .neg, .setLocal 0, .local 0, .conv_i8, .ret] }
+  code := [.ldc_i4 1, .neg, .stloc 0, .ldloc 0, .conv_i8, .ret] }
 example : FeatureFlowValid #[] (fun _ => none) argumentRaw .scalar argumentFeatures
     (List.replicate 6 true) argumentMethod.code := by decide
 example : ¬ TranslationValid [] #[] [] [argumentEvidence] [] [argumentMethod] := by decide +kernel
@@ -416,19 +416,21 @@ private def faultLocalEvidence : MethodEvidence := withBody {
 private def faultLocalMethod : Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true,
   declared := { parameters := [word], returnType := intType },
-  code := [.arg 0, .setLocal 0, .local 0, .ret] }
+  code := [.arg 0, .stloc 0, .ldloc 0, .ret] }
 example : TranslationValid [] #[] [] [faultLocalEvidence] [] [faultLocalMethod] := by
   decide +kernel
 example : scalarTransfer faultLocalRaw (i 10) [.word64] = none := by decide
-example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.setLocal 0) = true := by decide
-example : scalarStoreFault faultLocalRaw (i 10) [.native] (.setLocal 0) = true := by decide
-example : scalarStoreFault faultLocalRaw (i 10) [.other] (.setLocal 0) = false := by decide
-example : scalarStoreFault faultLocalRaw (i 10) [.reference] (.setLocal 0) = false := by decide
-example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.setLocal 1) = false := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.stloc 0) = true := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.native] (.stloc 0) = true := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.other] (.stloc 0) = false := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.reference] (.stloc 0) = false := by decide
+example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.stloc 1) = false := by decide
 example : scalarStoreFault faultLocalRaw (i 10) [.word64] .pop = false := by decide
-example : scalarStoreFault { faultLocalRaw with locals := [] } (i 10) [.word64] (.setLocal 0) = false := by decide
+example :
+    scalarStoreFault { faultLocalRaw with locals := [] } (i 10) [.word64] (.stloc 0) = false := by
+  decide
 example : ¬ ScalarFlowValid #[] faultLocalRaw faultLocalFeatures faultLocalStates
-    (faultLocalMethod.code.set 1 (.setLocal 1)) := by decide
+    (faultLocalMethod.code.set 1 (.stloc 1)) := by decide
 example : ¬ TranslationValid [] #[] [] [faultLocalEvidence] []
     [{ faultLocalMethod with code := faultLocalMethod.code.set 1 .pop }] := by decide
 example (memory : Safety.Memory) (reference : Safety.Reference) (bits : W64) :
@@ -446,7 +448,7 @@ private def nativeHomeEvidence : MethodEvidence := withBody {
 private def nativeHomeMethod : Method := {
   locals := [], parameterHomes := [(0, .word64)], returnsValue := true,
   declared := { parameters := [nativeType, word], returnType := word },
-  code := [.arg 1, .setLocal 0, .local 0, .conv_u8, .ret] }
+  code := [.arg 1, .stloc 0, .ldloc 0, .conv_u8, .ret] }
 example : TranslationValid [] #[] [] [nativeHomeEvidence] [] [nativeHomeMethod] := by
   decide +kernel
 example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.word64] = some [] := by decide
@@ -487,7 +489,7 @@ private def slotFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 
 private def slotStates (pushed : ScalarKind) : ScalarCertificate :=
   [some [], some [pushed], some [], some [.word32]]
 private def slotCode (push : Instruction) (slot : Nat) : List Instruction :=
-  [push, .setLocal slot, .local 0, .ret]
+  [push, .stloc slot, .ldloc 0, .ret]
 
 /-- The indexed local reads accept an int32 store to the declared local and reject a store or
     load past the declared locals and a null store into an int32 local, at the site and in the
@@ -501,7 +503,7 @@ theorem local_slot_sites :
     scalarTransfer constant (i 19 (.local 1)) [.word32] = none ∧
     scalarTransfer constant (i 17 (.local 1)) [] (locals := indexedLocals constant) = none ∧
     scalarTransfer constant (i 17 (.local 1)) [] = none ∧
-    scalarStoreFault constant (i 19 (.local 1)) [.word64] (.setLocal 1)
+    scalarStoreFault constant (i 19 (.local 1)) [.word64] (.stloc 1)
       (indexedLocals constant) = false ∧
     scalarTransfer constant (i 19 (.local 0)) [.nullObject]
       (locals := indexedLocals constant) = none ∧
@@ -531,7 +533,7 @@ private def pointerStates : ScalarCertificate :=
   [some [], some [.methodPointer handlerSignature], some [],
     some [.methodPointer handlerSignature], some []]
 private def pointerCode (slot : Nat) : List Instruction :=
-  [.managed (.address ⟨⟨"Scope::Fixture", 2, []⟩, 0⟩ handlerSignature), .setLocal slot, .local 1,
+  [.managed (.address ⟨⟨"Scope::Fixture", 2, []⟩, 0⟩ handlerSignature), .stloc slot, .ldloc 1,
     .managed (.call handlerSignature [] false), .ret]
 
 /-- The indexed pointer locals give a method pointer home only to the native-int local a `calli`
