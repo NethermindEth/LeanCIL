@@ -475,7 +475,8 @@ var holeProof = Path.Combine(consumerPackage, "Proofs", "Hole.lean");
 File.WriteAllText(holeProof, "import Extracted\ntheorem ExampleProof.correctness : 1 + 1 = 2 := by\n  sorry\n");
 var hole = Execute([.. cli, "verify", consumerOutput, "--proof", holeProof, "--proof-root", consumerPackage,
     "--goals"]);
-var holeText = hole.Stderr.ReplaceLineEndings("\n");
+// A build that runs past the progress interval reports its stage first, as it does under machine load.
+var holeText = WithoutStageProgress(hole.Stderr.ReplaceLineEndings("\n"));
 if (hole.Code != 1 ||
     !holeText.StartsWith("Invalid: 1 goal remains in artifacts/CliConsumer/Package/Proofs/Hole.lean.\n") ||
     !holeText.Contains("  Stage: open goals\n") || !holeText.Contains("  Goals (1):\n" +
@@ -576,7 +577,7 @@ var outlineGoals = Execute([.. cli, "verify", outlined, "--proof", addOutline, "
     environment: new Dictionary<string, string> { ["LEANCIL_TRACE_DIRECTORY"] = goalsTrace });
 var refusalStages = StagesAfterProofCheck(refusalTrace);
 var goalsStages = StagesAfterProofCheck(goalsTrace);
-var outlineGoalsText = outlineGoals.Stderr.ReplaceLineEndings("\n");
+var outlineGoalsText = WithoutStageProgress(outlineGoals.Stderr.ReplaceLineEndings("\n"));
 var reportedHoles = Regex.Matches(outlineGoalsText, @"^    \S*AddProof\.lean:(\d+):(\d+): sorry$",
         RegexOptions.Multiline)
     .Select(goal => (Line: int.Parse(goal.Groups[1].Value), Column: int.Parse(goal.Groups[2].Value))).ToArray();
