@@ -568,6 +568,26 @@ stack -/
 open Lean Meta in
 #eval show MetaM Unit from do logInfo (← loopMissingHint #[mkConst ``True])
 
+/-- `i = (byte) 0x1FF; return i;`: the byte local keeps the low byte of the stored word. -/
+@[cil_code] def narrowed : CIL.Method := {
+  returnsValue := true, locals := [.i32 0], localKinds := [.narrow .unsigned8]
+  code := [.ldc_i4 0x1FF, .setLocal 0, .local 0, .ret] }
+
+/-- The program of `narrowed` alone. -/
+@[cil_code] def narrowedProgram : CIL.Program := [narrowed]
+
+/-- The entered frame of `narrowed`. -/
+bind_entry narrowedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
+  narrowed with [] from memory allocating wellFormed
+
+-- A store to a byte home records the truncated word, which the load and the return read back.
+example (memory current : Memory) (home : Reference)
+    (frame : LoopFrame [] memory current [.narrow .unsigned8] [.bytes (.narrow .unsigned8) home]
+      (knownLocals [some (.i32 0)])) :
+    LoopTerminates narrowedProgram 0 [] (fun _ results => results = [.scalar (.i32 0xFF)])
+      ⟨0, narrowedEntry.frame memory home, [], current⟩ := by
+  cil_loop_finish
+
 -- Without the index bound the callee's slot is not shown inside the frame's footprint, and
 -- the call fails naming that side condition.
 /-- error: cil_loop_call: the frame after the call needs each callee footprint entry inside the
