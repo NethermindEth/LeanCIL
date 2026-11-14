@@ -15,6 +15,7 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 using var verification = new Program();
+Run(["dotnet", "run", "--file", At("Tests/StructuralSignatures.cs")]);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var fsharp = At("Examples/FSharp/bin/Examples.FSharp.dll");
 var root = At("artifacts/GenericMethods");

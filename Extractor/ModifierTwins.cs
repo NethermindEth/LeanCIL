@@ -23,9 +23,6 @@ internal static class ModifierTwins
     static bool Modified(MethodDefinition method) => InitAccessors.Is(method.ReturnType) ||
         method.Parameters.Any(parameter => InReferences.Is(parameter.ParameterType));
 
-    static string Erased(MethodDefinition method) =>
-        $"{method.HasThis}:{method.ExplicitThis}:{(int)method.CallingConvention}:{method.GenericParameters.Count}:" +
-        MethodSpecialization.SignatureType(InitAccessors.Return(method.ReturnType)) + "(" +
-        string.Join(",", method.Parameters.Select(parameter =>
-            MethodSpecialization.SignatureType(InReferences.Parameter(parameter.ParameterType)))) + ")";
+    static StructuralSignatures.Signature Erased(MethodDefinition method) =>
+        StructuralSignatures.Current.ErasedMethod(method);
 }

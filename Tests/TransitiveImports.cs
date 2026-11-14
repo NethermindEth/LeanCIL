@@ -9,6 +9,7 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include ImportReviewRegressions.cs
+#:include PinnedMetadata.cs
 #:include StagedBundleMutation.cs
 
 using System.Numerics;
@@ -16,6 +17,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+
+if (args is ["--imports-only", var sidecar, var implementation])
+{
+    ImportReviewRegressions.ImportResolution_WhenTwoVersionsShareSimpleName_RejectsAmbiguity(
+        ExtractorPath, sidecar, implementation, At("artifacts/ImportAmbiguity-" + Guid.NewGuid().ToString("N")));
+    Console.WriteLine("PASS identical imports deduplicate and different versions reject ambiguous simple names");
+    return;
+}
 
 if (args is ["--staged-bundle-mutation", var fixture])
 {

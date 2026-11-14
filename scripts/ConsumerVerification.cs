@@ -503,6 +503,7 @@ partial class Program
 
     Dictionary<string, string> ReplayConsumerModulesSeparately(string session, string[] targets, string leanPath, bool profile)
     {
+        var expected = SeparateReplayTargets(targets);
         var configuredThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
         var threads = string.IsNullOrWhiteSpace(configuredThreads) ? "2" : configuredThreads;
         if (!uint.TryParse(threads, out var count) || count == 0)
@@ -560,25 +561,88 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 ? "Profiled kernel replay of consumer modules" : "Kernel replay of consumer proof and dependencies",
                 environment: environment);
             if (native) CheckedAuditExecutable();
-            var replayed = new HashSet<string>(StringComparer.Ordinal);
-            var failures = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            try { return ParseExpectedReplayResults(expected, result.Code, result.Stdout); }
+            catch (InvalidDataException)
             {
-                if (!line.StartsWith('{')) continue;
-                JsonElement record;
-                try { record = JsonSerializer.Deserialize<JsonElement>(line); }
-                catch (JsonException) { continue; }
-                if (record.ValueKind != JsonValueKind.Object || !record.TryGetProperty("module", out var module) ||
-                    module.ValueKind != JsonValueKind.String) continue;
-                if (record.TryGetProperty("error", out var error)) failures[module.GetString()!] = error.ToString();
-                else replayed.Add(module.GetString()!);
-            }
-            if ((result.Code == 0) != (failures.Count == 0) || replayed.Overlaps(failures.Keys) ||
-                !targets.All(name => replayed.Contains(name) || failures.ContainsKey(name)))
                 throw new InvalidOperationException($"Command failed ({result.Code}): {string.Join(' ', command)}\n{result.Output}");
-            return failures;
+            }
         }
         finally { File.Delete(runner); File.Delete(targetsPath); }
+    }
+
+    /// <summary>Every replay target is a nonempty unique exact module name.</summary>
+    static HashSet<string> SeparateReplayTargets(string[] targets)
+    {
+        var expected = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var target in targets)
+            if (string.IsNullOrWhiteSpace(target) || !expected.Add(target))
+                throw new InvalidDataException("Replay targets must have unique nonempty names");
+        return expected;
+    }
+
+    /// <summary>Exactly one valid result is required for each requested module.</summary>
+    static Dictionary<string, string> ParseSeparateReplayResults(string[] targets, int exitCode, string stdout)
+        => ParseExpectedReplayResults(SeparateReplayTargets(targets), exitCode, stdout);
+
+    static Dictionary<string, string> ParseExpectedReplayResults(HashSet<string> expected, int exitCode, string stdout)
+    {
+        var reported = new HashSet<string>(StringComparer.Ordinal);
+        var failures = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!line.StartsWith('{')) continue;
+            var (module, error) = SeparateReplayRecord(line);
+            if (!expected.Contains(module) || !reported.Add(module))
+                throw new InvalidDataException("Unexpected or duplicate replay result");
+            if (error is not null) failures.Add(module, error);
+        }
+        if (reported.Count != expected.Count || (exitCode == 0) != (failures.Count == 0))
+            throw new InvalidDataException("Incomplete replay results");
+        return failures;
+    }
+
+    /// <summary>A result has one module and exactly one typed success or failure field.</summary>
+    static (string Module, string? Error) SeparateReplayRecord(string line)
+    {
+        JsonDocument document;
+        try { document = JsonDocument.Parse(line); }
+        catch (JsonException error) { throw new InvalidDataException("Malformed replay result", error); }
+        using (document)
+        {
+            const int moduleField = 1, elapsedField = 2, errorField = 4;
+            int fields = 0;
+            JsonElement module = default, elapsed = default, error = default;
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                int field = property.Name switch
+                {
+                    "module" => moduleField,
+                    "milliseconds" => elapsedField,
+                    "error" => errorField,
+                    _ => throw new InvalidDataException("Unknown replay result field")
+                };
+                if ((fields & field) != 0) throw new InvalidDataException("Duplicate replay result field");
+                fields |= field;
+                switch (field)
+                {
+                    case moduleField: module = property.Value; break;
+                    case elapsedField: elapsed = property.Value; break;
+                    case errorField: error = property.Value; break;
+                }
+            }
+            if (fields != (moduleField | elapsedField) && fields != (moduleField | errorField) ||
+                module.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(module.GetString()))
+                throw new InvalidDataException("Invalid replay result shape");
+            if ((fields & elapsedField) != 0)
+            {
+                if (elapsed.ValueKind != JsonValueKind.Number || !elapsed.TryGetUInt64(out _))
+                    throw new InvalidDataException("Invalid replay elapsed time");
+                return (module.GetString()!, null);
+            }
+            if (error.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(error.GetString()))
+                throw new InvalidDataException("Invalid replay error");
+            return (module.GetString()!, error.GetString());
+        }
     }
 
     /// <summary>A Lake dependency of a consumer package: a git checkout pinned by a full revision.</summary>
