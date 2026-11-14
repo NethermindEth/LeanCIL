@@ -1,5 +1,6 @@
 import CIL.Extraction.Signatures
 import CIL.Extraction.Generics
+import Std.Data.TreeMap.Raw.Basic
 
 /-!
 # Resolving metadata names and types
@@ -77,18 +78,53 @@ def ResolvedList.ofList : List ResolvedType → ResolvedList
   | [] => .nil
   | head :: tail => .cons head (ofList tail)
 
-/-- The pinned assemblies' slices of one method, its own first, and the name stem of every
-    assembly the extraction pins: a reference to an assembly of a pinned name whose slice is not
-    carried is refused, whatever its version, not treated as a platform reference. -/
+/-- A prefix trie with indexed byte children and exact prefix membership at each node. -/
+inductive AssemblyPrefixes where
+  | node (terminal : Bool) (children : Std.TreeMap.Raw Nat AssemblyPrefixes)
+
+/-- An empty trie contains no prefixes. -/
+instance : EmptyCollection AssemblyPrefixes := ⟨.node false {}⟩
+
+/-- Insert one prefix, retaining shared nodes. -/
+def AssemblyPrefixes.insert : AssemblyPrefixes → List Nat → AssemblyPrefixes
+  | .node _ children, [] => .node true children
+  | .node terminal children, byte :: rest =>
+    let child := (children[byte]?).getD {}
+    .node terminal (children.insert byte (child.insert rest))
+
+/-- Whether the supplied identity begins with any stored prefix. -/
+def AssemblyPrefixes.matches : AssemblyPrefixes → List Nat → Bool
+  | .node true _, _ => true
+  | .node false _, [] => false
+  | .node false children, byte :: rest =>
+    match children[byte]? with
+    | some child => child.matches rest
+    | none => false
+
+/-- Indexed metadata and assembly identities derived together from checked metadata. -/
 structure MetadataEnv where
-  slices : List MetadataIndex
-  /-- `assemblyStem` of each pinned identity. -/
-  pinned : List (List Nat) := []
+  slices : SearchTree MetadataIndex
+  identities : Std.TreeMap.Raw (List Nat) Nat
+  pinned : AssemblyPrefixes
+
+/-- Build all assembly lookups once, keeping the first occurrence of each identity. -/
+def MetadataEnv.ofSlices (slices : List MetadataIndex) (pinned : List (List Nat) := []) :
+    MetadataEnv := Id.run do
+  let mut identities : Std.TreeMap.Raw (List Nat) Nat := {}
+  let mut position := 0
+  for index in slices do
+    if !identities.contains index.identity then
+      identities := identities.insert index.identity position
+    position := position + 1
+  return {
+    slices := SearchTree.ofSorted (slices.zipIdx.map fun (index, position) => (position, index))
+    identities := identities
+    pinned := pinned.foldl AssemblyPrefixes.insert {} }
 
 /-- The slice at a position, or `unresolvedType` for a token that points outside the list. -/
 def MetadataEnv.slice (env : MetadataEnv) (position token : Nat) :
     Except MetadataError MetadataIndex :=
-  match env.slices[position]? with
+  match env.slices.find? position with
   | some index => .ok index
   | none => .error (.unresolvedType token)
 
@@ -271,9 +307,9 @@ def typeRefNamed (env : MetadataEnv) (position : Nat) :
   | 0, token, _ => .error (.unresolvedType token)
   | fuel + 1, token, hint => do
     let (scope, name, parts) ← typeRefQualified env position resolveFuel token
-    match env.slices.findIdx? (fun candidate => candidate.identity == scope) with
+    match env.identities[scope]? with
     | none =>
-      if env.pinned.any (·.isPrefixOf scope) then throw (.missingSlice token)
+      if env.pinned.matches scope then throw (.missingSlice token)
       .ok { scope := scope, name := name, parts := parts, kind := .external hint, pinned := false }
     | some target =>
       let index ← env.slice position token

@@ -364,3 +364,6 @@ name = "Tests.PublicProofSurface"
 
 [[lean_lib]]
 name = "Tests.StrictBinding"
+
+[[lean_lib]]
+name = "Tests.MetadataAssemblies"
