@@ -1400,14 +1400,14 @@ internal static partial class ProofOutline
                 stopReason = reason;
                 return Event.Stop;
             }
-            if (op is Local { Index: var loaded } && !NarrowLocal(method, loaded))
+            if (op is Local { Index: var loaded })
             {
                 var slot = slots[loaded];
                 var first = components.IndexOf(slot.Components[0]);
                 stack.Add(slot.Components[0].Part is Part.Word or Part.Object ? (Value)state.State[first]
                     : new LocalValue(slot.Index));
             }
-            else if (op is SetLocal { Index: var assigned } && !NarrowLocal(method, assigned))
+            else if (op is SetLocal { Index: var assigned })
             {
                 var slot = slots[assigned];
                 var first = components.IndexOf(slot.Components[0]);

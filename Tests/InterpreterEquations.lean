@@ -8,8 +8,8 @@ open Lean
 -- A consumer macro naming a reserved equation lemma, which a quotation cannot generate itself.
 macro "unfold_dispatch" : tactic => `(tactic| rw [CIL.step.eq_def])
 
-example (returns : Bool) (pc : Nat) (args stack : List CIL.Value) (frame : Nat) (memory : CIL.Memory) :
-    CIL.step .nop returns pc args frame stack memory = CIL.step .nop returns pc args frame stack memory := by
+example (returns : Bool) (pc : Nat) (args stack : List CIL.Value) (memory : CIL.Memory) :
+    CIL.step .nop returns pc args stack memory = CIL.step .nop returns pc args stack memory := by
   unfold_dispatch
 
 -- Each lemma must come from its shared module; one generated here would mean importers rebuild it.

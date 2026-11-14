@@ -9,9 +9,10 @@ the identity the image is pinned under, and takes the place from the image itsel
 is at the file offset that the section table gives for the relative virtual address in the
 method's own MethodDef row.
 
-`bodiesBound` is the check and `BodiesBound` the proposition an audited theorem states about it.
-Each further kind of claim is another `Except` check over the same prepared images and a
-proposition of the form `ok (check ...) = true`.
+`checkAll` prepares the images once and runs one kind of claim check over every claim in order;
+`ClaimsHold` is the proposition an audited theorem states about it, and `bodyClaimBound` is the
+check for method bodies. A generated module proves the claims a page at a time, each page its own
+kernel evaluation, and `claimsHold_of_pages` composes the pages into the claims.
 -/
 
 namespace StrictBinding
@@ -77,110 +78,112 @@ def bodyBound (image : PreparedImage) (token : Nat) (bytes : List Nat) :
   let offset ← mapRva image.layout.pe.sections rva bytes.length
   unless (← image.view.hasBytesAt offset bytes) do throw (.bodyMismatch token rva offset)
 
-/-- Every claim in order is in the image that it names, at the place that image's own MethodDef
-    row gives. -/
-def claimsBound (prepared : List PreparedImage) : List BodyClaim → Except AuditError Unit
-  | [] => pure ()
-  | claim :: rest => do
-    bodyBound (← located prepared claim.identity) claim.token claim.bytes
-    claimsBound prepared rest
+/-- Every claim holds against the images prepared once, each claim checked once and in order. -/
+def checkAll {Claim : Type} (check : List PreparedImage → Claim → Except AuditError Unit)
+    (images : List PinnedImage) (claims : List Claim) : Except AuditError Unit := do
+  let prepared ← prepare images
+  claims.forM (check prepared)
 
-/-- Every claimed body is in the pinned image that its claim names, at the place that image's
-    own MethodDef row gives. -/
-def bodiesBound (images : List PinnedImage) (claims : List BodyClaim) :
-    Except AuditError Unit := do
-  claimsBound (← prepare images) claims
+/-- The proposition every audited check states: the claims hold against the pinned images. -/
+def ClaimsHold {Claim : Type} (check : List PreparedImage → Claim → Except AuditError Unit)
+    (images : List PinnedImage) (claims : List Claim) : Prop :=
+  ok (checkAll check images claims) = true
 
-/-- Every claimed body is in its image at the place its MethodDef row gives. -/
-def ClaimedBodiesBound (images : List PinnedImage) (claims : List BodyClaim) : Prop :=
-  ok (bodiesBound images claims) = true
-
-instance (images : List PinnedImage) (claims : List BodyClaim) :
-    Decidable (ClaimedBodiesBound images claims) :=
+instance {Claim : Type} (check : List PreparedImage → Claim → Except AuditError Unit)
+    (images : List PinnedImage) (claims : List Claim) :
+    Decidable (ClaimsHold check images claims) :=
   inferInstanceAs (Decidable (_ = _))
 
-/-- Claims that each hold hold together: claims are checked one after another. -/
-theorem claimsBound_append (prepared : List PreparedImage) (first second : List BodyClaim)
-    (holdsFirst : ok (claimsBound prepared first) = true)
-    (holdsSecond : ok (claimsBound prepared second) = true) :
-    ok (claimsBound prepared (first ++ second)) = true := by
+/-- Claims that each hold against one preparation hold together: they are checked in order. -/
+theorem forM_append_ok {Claim : Type} (check : Claim → Except AuditError Unit)
+    (first second : List Claim) (holdsFirst : ok (first.forM check) = true)
+    (holdsSecond : ok (second.forM check) = true) :
+    ok ((first ++ second).forM check) = true := by
   induction first with
-  | nil => simpa [claimsBound] using holdsSecond
+  | nil => simpa using holdsSecond
   | cons claim rest ih =>
-    simp only [List.cons_append, claimsBound] at holdsFirst ⊢
-    cases lookup : located prepared claim.identity with
-    | error _ => simp [lookup, bind, Except.bind, ok] at holdsFirst
-    | ok image =>
-      cases bound : bodyBound image claim.token claim.bytes with
-      | error _ => simp [lookup, bound, bind, Except.bind, ok] at holdsFirst
-      | ok _ =>
-        simp only [lookup, bound, bind, Except.bind] at holdsFirst ⊢
-        exact ih holdsFirst
+    simp only [List.cons_append, List.forM] at holdsFirst ⊢
+    cases checked : check claim with
+    | error _ => simp [checked, bind, Except.bind, ok] at holdsFirst
+    | ok _ =>
+      simp only [checked, bind, Except.bind] at holdsFirst ⊢
+      exact ih holdsFirst
 
-#print axioms claimsBound_append
+#print axioms forM_append_ok
 
 /-- Two lists of claims that each hold in the pinned images hold together. -/
-theorem bodiesBound_append (images : List PinnedImage) (first second : List BodyClaim)
-    (holdsFirst : ok (bodiesBound images first) = true)
-    (holdsSecond : ok (bodiesBound images second) = true) :
-    ok (bodiesBound images (first ++ second)) = true := by
-  unfold bodiesBound at *
+theorem claimsHold_append {Claim : Type}
+    {check : List PreparedImage → Claim → Except AuditError Unit} {images : List PinnedImage}
+    {first second : List Claim}
+    (holdsFirst : ClaimsHold check images first) (holdsSecond : ClaimsHold check images second) :
+    ClaimsHold check images (first ++ second) := by
+  unfold ClaimsHold checkAll at *
   cases decoded : prepare images with
   | error _ => simp [decoded, bind, Except.bind, ok] at holdsFirst
   | ok prepared =>
     simp only [decoded, bind, Except.bind] at holdsFirst holdsSecond ⊢
-    exact claimsBound_append prepared first second holdsFirst holdsSecond
+    exact forM_append_ok (check prepared) first second holdsFirst holdsSecond
 
-#print axioms bodiesBound_append
+#print axioms claimsHold_append
 
-/-- When the images decode and spell their identities, the empty list of claims holds. -/
-theorem bodiesBound_nil {images : List PinnedImage}
-    (prepared : ok (prepare images) = true) : ok (bodiesBound images []) = true := by
-  unfold bodiesBound
+/-- When the images decode and spell distinct identities, the empty list of claims holds. -/
+theorem claimsHold_nil {Claim : Type}
+    {check : List PreparedImage → Claim → Except AuditError Unit} {images : List PinnedImage}
+    (prepared : ok (prepare images) = true) :
+    ClaimsHold check images [] := by
+  unfold ClaimsHold checkAll
   cases decoded : prepare images with
   | error _ => simp [decoded, ok] at prepared
-  | ok _ => simp [bind, Except.bind, claimsBound, ok, pure, Except.pure]
+  | ok _ => simp [bind, Except.bind, ok, List.forM, pure, Except.pure]
 
-#print axioms bodiesBound_nil
+#print axioms claimsHold_nil
 
 /-- The claims of page `index` when pages hold `size` claims each. -/
-def claimPage (claims : List BodyClaim) (size index : Nat) : List BodyClaim :=
+def claimPage {Claim : Type} (claims : List Claim) (size index : Nat) : List Claim :=
   (claims.drop (index * size)).take size
 
-/-- The pages of the claims before an index each hold. A page is one kernel evaluation, so the
+/-- The pages of claims before an index each hold. A page is one kernel evaluation, so the
     memory of a page grows with its `size` claims and not with the number of pages. -/
-inductive ClaimPagesBound (images : List PinnedImage) (claims : List BodyClaim) (size : Nat) :
-    Nat → Prop where
-  | zero : ClaimPagesBound images claims size 0
-  | succ {index : Nat} : ClaimedBodiesBound images (claimPage claims size index) →
-      ClaimPagesBound images claims size index → ClaimPagesBound images claims size (index + 1)
+inductive PagesHold {Claim : Type} (holds : List Claim → Prop) (claims : List Claim)
+    (size : Nat) : Nat → Prop where
+  | zero : PagesHold holds claims size 0
+  | succ {index : Nat} : holds (claimPage claims size index) →
+      PagesHold holds claims size index → PagesHold holds claims size (index + 1)
 
 /-- The first `count` pages of claims hold together as the claims they cover. -/
-theorem claimedBodiesBound_of_first_pages {images : List PinnedImage} {claims : List BodyClaim}
-    {size : Nat} (prepared : ok (prepare images) = true) :
-    ∀ count, ClaimPagesBound images claims size count →
-      ClaimedBodiesBound images (claims.take (count * size)) := by
+theorem claimsHold_of_first_pages {Claim : Type}
+    {check : List PreparedImage → Claim → Except AuditError Unit} {images : List PinnedImage}
+    {claims : List Claim} {size : Nat} (prepared : ok (prepare images) = true) :
+    ∀ count, PagesHold (ClaimsHold check images) claims size count →
+      ClaimsHold check images (claims.take (count * size)) := by
   intro count pages
   induction pages with
-  | zero => simpa [ClaimedBodiesBound] using bodiesBound_nil prepared
+  | zero => simpa using claimsHold_nil prepared
   | @succ index page _ ih =>
     have split : claims.take ((index + 1) * size) =
         claims.take (index * size) ++ claimPage claims size index := by
       rw [Nat.succ_mul, List.take_add]; rfl
     rw [split]
-    exact bodiesBound_append images _ _ ih page
+    exact claimsHold_append ih page
 
-#print axioms claimedBodiesBound_of_first_pages
+#print axioms claimsHold_of_first_pages
 
-/-- Pages that cover every claim, each page holding, give the claims: they are covered once and
-    in order. -/
-theorem claimedBodiesBound_of_pages {images : List PinnedImage} {claims : List BodyClaim}
-    {size count : Nat} (prepared : ok (prepare images) = true)
-    (covers : claims.length ≤ count * size) (pages : ClaimPagesBound images claims size count) :
-    ClaimedBodiesBound images claims := by
-  have whole := claimedBodiesBound_of_first_pages (claims := claims) prepared count pages
+/-- Pages that cover every claim give all claims, each once and in order. -/
+theorem claimsHold_of_pages {Claim : Type}
+    {check : List PreparedImage → Claim → Except AuditError Unit} {images : List PinnedImage}
+    {claims : List Claim} {size count : Nat} (prepared : ok (prepare images) = true)
+    (covers : claims.length ≤ count * size)
+    (pages : PagesHold (ClaimsHold check images) claims size count) :
+    ClaimsHold check images claims := by
+  have whole := claimsHold_of_first_pages (claims := claims) prepared count pages
   rwa [List.take_of_length_le covers] at whole
 
-#print axioms claimedBodiesBound_of_pages
+#print axioms claimsHold_of_pages
+
+/-- The claimed body is in the image pinned under the claim's identity, at the place that
+    image's own MethodDef row gives. -/
+def bodyClaimBound (prepared : List PreparedImage) (claim : BodyClaim) :
+    Except AuditError Unit := do
+  bodyBound (← located prepared claim.identity) claim.token claim.bytes
 
 end StrictBinding
