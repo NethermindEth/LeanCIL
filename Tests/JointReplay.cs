@@ -131,7 +131,8 @@ void CheckSeparateReplayResults()
         }
         if (bytes > (long)maxBytesPerRecord * count)
             throw new InvalidOperationException(
-                $"Separate replay parsing allocated {bytes} bytes for {count} records, over {maxBytesPerRecord} per record");
+                $"Separate replay parsing allocated {bytes} bytes for {count} records, " +
+                $"over {maxBytesPerRecord} per record");
         if (previousBytes != 0 && (bytes > previousBytes * 6 || milliseconds > previousMilliseconds * 6 + 1))
             throw new InvalidOperationException(
                 $"Separate replay parsing exceeded its growth bound at {count}: {bytes} allocated bytes and " +
