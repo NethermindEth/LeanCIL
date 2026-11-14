@@ -310,6 +310,11 @@ partial class Program
     }
 
     string? bindingSession, bindingSourcesKey, bindingLeanVersion;
+    BindingLibraryPreparation? bindingPreparation;
+
+    /// <summary>The exact library and session artifacts certified for the strict binding sources.</summary>
+    sealed record BindingLibraryPreparation(string Library, string LibraryKey, string Toolchain,
+        SortedDictionary<string, string> BaseArtifacts, SortedDictionary<string, string> SessionArtifacts);
 
     /// <summary>
     /// The session package with the strict binding library built on the certified library and kernel-replayed, once
@@ -317,22 +322,66 @@ partial class Program
     /// </summary>
     string BindingSession()
     {
-        if (bindingSession is not null) return bindingSession;
         var session = Library(Inputs(At("CIL.lean")));
+        PrepareBindingLibrary(session);
+        return session;
+    }
+
+    /// <summary>Builds and replays StrictBinding in the caller's selected, certified library session.</summary>
+    void PrepareBindingLibrary(string package)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (session is null || library is null || libraryKey is null || certifiedModules is null ||
+            !string.Equals(Path.GetFullPath(package), Path.GetFullPath(session), comparison))
+            throw new InvalidOperationException("StrictBinding requires the selected certified library session");
+        RequireUnchangedLibrary();
+        var beforeBase = ModuleArtifacts(library);
+        var beforeSession = ModuleArtifacts(session);
+        var current = new SortedDictionary<string, string>(beforeBase, StringComparer.Ordinal);
+        foreach (var (name, hash) in beforeSession) current[name] = hash;
+        if (!Same(current, certifiedModules) ||
+            baseModules!.Any(pair => !beforeBase.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
+            throw new InvalidOperationException("The certified library changed before preparing StrictBinding");
+        var toolchain = BindingToolchainKey(session);
+        if (bindingPreparation is { } prepared)
+        {
+            if (bindingSession != session || prepared.Library != library || prepared.LibraryKey != libraryKey ||
+                prepared.Toolchain != toolchain || bindingSourcesKey != BindingSourcesKey(session) ||
+                !Same(prepared.BaseArtifacts, beforeBase) || !Same(prepared.SessionArtifacts, beforeSession))
+                throw new InvalidOperationException("The prepared StrictBinding library changed");
+            return;
+        }
         CopyBindingSources(session);
-        bindingSourcesKey = BindingSourcesKey(session);
-        bindingLeanVersion = Run([LeanExecutable, "--version"]).Trim();
+        var sourcesKey = BindingSourcesKey(session);
+        var leanVersion = Run([LeanExecutable, "--version"]).Trim();
         Run(["lake", "build", "StrictBinding"], session, progress: "Building the strict binding library");
-        var current = SessionModules(session);
-        var certified = certifiedModules!;
-        if (certified.Any(pair => !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
+        var afterBase = ModuleArtifacts(library);
+        var afterSession = ModuleArtifacts(session);
+        current = new(afterBase, StringComparer.Ordinal);
+        foreach (var (name, hash) in afterSession) current[name] = hash;
+        if (!Same(beforeBase, afterBase) ||
+            beforeSession.Any(pair => !afterSession.TryGetValue(pair.Key, out var hash) || hash != pair.Value) ||
+            certifiedModules.Any(pair => !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
             throw new InvalidOperationException("The certified library changed while building StrictBinding");
         string[] added =
-            [.. current.Keys.Where(name => !certified.ContainsKey(name)).Select(ModuleName).Distinct()];
-        ReplayCheckedModules(added, SessionLeanPath(session), "Kernel replay of the strict binding library");
+            [.. current.Keys.Where(name => !certifiedModules.ContainsKey(name)).Select(ModuleName).Distinct()];
+        if (sourcesKey != BindingSourcesKey(session) || toolchain != BindingToolchainKey(session))
+            throw new InvalidOperationException("The strict binding sources or toolchain changed during preparation");
+        if (added.Length != 0)
+            ReplayCheckedModules(added, SessionLeanPath(session), "Kernel replay of the strict binding library");
+        if (!Same(afterBase, ModuleArtifacts(library)) || !Same(afterSession, ModuleArtifacts(session)) ||
+            sourcesKey != BindingSourcesKey(session) || toolchain != BindingToolchainKey(session))
+            throw new InvalidOperationException("The strict binding library changed during preparation");
         certifiedModules = current;
-        return bindingSession = session;
+        bindingSession = session;
+        bindingSourcesKey = sourcesKey;
+        bindingLeanVersion = leanVersion;
+        bindingPreparation = new(library, libraryKey, toolchain, afterBase, afterSession);
     }
+
+    /// <summary>The toolchain declaration and compiler bytes used to prepare the binding library.</summary>
+    string BindingToolchainKey(string package) => ContentKey(Sha(Path.Combine(package, "lean-toolchain")) +
+        "\n" + Toolchain + "\n" + Sha(LeanExecutable));
 
     /// <summary>Copies the StrictBinding library's sources into a package, below the same relative paths.</summary>
     static void CopyBindingSources(string package)
