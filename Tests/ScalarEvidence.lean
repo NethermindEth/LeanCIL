@@ -420,7 +420,8 @@ example : scalarStoreFault faultLocalRaw (i 10) [.other] (.stloc 0) = false := b
 example : scalarStoreFault faultLocalRaw (i 10) [.reference] (.stloc 0) = false := by decide
 example : scalarStoreFault faultLocalRaw (i 10) [.word64] (.stloc 1) = false := by decide
 example : scalarStoreFault faultLocalRaw (i 10) [.word64] .pop = false := by decide
-example : scalarStoreFault { faultLocalRaw with locals := [] } (i 10) [.word64] (.stloc 0) = false := by
+example :
+    scalarStoreFault { faultLocalRaw with locals := [] } (i 10) [.word64] (.stloc 0) = false := by
   decide
 example : ¬ ScalarFlowValid #[] faultLocalRaw faultLocalFeatures faultLocalStates
     (faultLocalMethod.code.set 1 (.stloc 1)) := by decide
