@@ -10,7 +10,8 @@ var directory = At("artifacts/Blockers");
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Fixture.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<Optimize>true</Optimize></PropertyGroup></Project>
 """);
 var fixture = """
 using System.Runtime.CompilerServices;
@@ -286,6 +287,61 @@ var debug = ExtractAdmitted(BuildAs("Debug"), "Debug");
 Require(debug.Code != 0 && debug.Output.Contains("build configuration"),
     "A Debug build is accepted:\n" + debug.Output);
 
+// A runtime-async body returns the awaited result under a task signature: refused as an entry and as a callee.
+var asyncSource = Path.Combine(directory, "RuntimeAsync");
+Directory.CreateDirectory(asyncSource);
+File.WriteAllText(Path.Combine(asyncSource, "RuntimeAsync.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize>
+<Features>runtime-async=on</Features></PropertyGroup></Project>
+""");
+File.WriteAllText(Path.Combine(asyncSource, "RuntimeAsync.cs"), """
+using System.Threading.Tasks;
+
+public static class Awaiting
+{
+    public static async ValueTask<long> Twice(long x) => x * 2;
+
+    public static long Caller(long x) => Twice(x).Result;
+}
+""");
+Run(["dotnet", "build", Path.Combine(asyncSource, "RuntimeAsync.csproj"), "-c", "Release"]);
+var asyncAssembly = Path.Combine(asyncSource, "bin/RuntimeAsync.dll");
+const int runtimeAsyncFlag = 0x2000;
+using (var image = new System.Reflection.PortableExecutable.PEReader(File.OpenRead(asyncAssembly)))
+{
+    var metadata = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(image);
+    var twice = metadata.MethodDefinitions.Select(metadata.GetMethodDefinition)
+        .Single(method => metadata.GetString(method.Name) == "Twice");
+    Require(((int)twice.ImplAttributes & runtimeAsyncFlag) != 0, "The fixture's Twice is not a runtime-async method");
+}
+var asyncManifest = Path.Combine(directory, "runtime-async-manifest.json");
+File.WriteAllText(asyncManifest, JsonSerializer.Serialize(new
+{
+    entries = new object[]
+    {
+        new { signature = "Awaiting::Twice(long)", profile = "scalar" },
+        new { signature = "Awaiting::Caller(long)", profile = "scalar" }
+    }
+}));
+var asyncReport = Path.Combine(directory, "runtime-async-blockers.json");
+var asyncSummary = Run(["dotnet", ExtractorPath, "blockers", asyncAssembly, "--manifest", asyncManifest,
+    "--output", asyncReport]);
+var asyncJson = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(asyncReport));
+const string twiceMethod = "System.Threading.Tasks.ValueTask`1<System.Int64> Awaiting::Twice(System.Int64)";
+const string callerMethod = "System.Int64 Awaiting::Caller(System.Int64)";
+var refusal = asyncJson.GetProperty("blockers").EnumerateArray()
+    .Single(b => b.GetProperty("construct").GetString() == "Unsupported method metadata: runtime-async method");
+var refusalSite = refusal.GetProperty("sites").EnumerateArray().Single();
+Require(asyncJson.GetProperty("entries").EnumerateArray().All(e => e.GetProperty("status").GetString() == "blocked") &&
+    refusalSite.GetProperty("method").GetString() == twiceMethod &&
+    refusalSite.GetProperty("message").GetString()!.Contains("returns the awaited result, not the declared task") &&
+    Reached(refusal).SequenceEqual([$"scalar {callerMethod} -> {twiceMethod}", $"scalar {twiceMethod}"]),
+    "Runtime-async method not refused as entry and callee:\n" + asyncSummary + "\n" + File.ReadAllText(asyncReport));
+var asyncExtract = Execute(["dotnet", ExtractorPath, "extract", asyncAssembly, "Awaiting::Twice(long)",
+    Path.Combine(directory, "extract", "runtime-async"), "scalar"]);
+Require(asyncExtract.Code != 0 && asyncExtract.Output.Contains("Unsupported method metadata: runtime-async method"),
+    "extract does not name the runtime-async refusal:\n" + asyncExtract.Output);
+
 // Distinct arrays and sites are compared by content, while output keeps first discovery order.
 var blockersType = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.Blockers", true)!;
 var findingType = blockersType.GetNestedType("Finding", BindingFlags.NonPublic)!;
@@ -369,7 +425,7 @@ double VirtualDispatchSeconds(int classes)
     Directory.CreateDirectory(fixtureDirectory);
     File.WriteAllText(Path.Combine(fixtureDirectory, "Dispatch.csproj"), """
     <Project Sdk="Microsoft.NET.Sdk">
-      <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+      <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
     </Project>
     """);
     // Each caller is blocked after its virtual call, so no extraction runs and the dispatch scan is the cost.
@@ -405,7 +461,7 @@ var regexDirectory = Path.Combine(directory, "Regex");
 Directory.CreateDirectory(regexDirectory);
 File.WriteAllText(Path.Combine(regexDirectory, "Regex.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
 </Project>
 """);
 File.WriteAllText(Path.Combine(regexDirectory, "Patterns.cs"), """
@@ -455,7 +511,7 @@ double AdmissionSeconds(int methods)
     Directory.CreateDirectory(fixtureDirectory);
     File.WriteAllText(Path.Combine(fixtureDirectory, "Admission.csproj"), """
     <Project Sdk="Microsoft.NET.Sdk">
-      <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+      <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
       <ItemGroup><EmbeddedResource Include="padding.bin" /></ItemGroup>
     </Project>
     """);
