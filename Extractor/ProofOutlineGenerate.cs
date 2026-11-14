@@ -507,7 +507,7 @@ internal static partial class ProofOutline
     {
         if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean)!;
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
-            ParameterShape.StructValue) && body.Operations.All(op => Body.Pure(op) || Steps(op));
+            ParameterShape.StructValue) && body.Operations.All(op => Body.Pure(op) || Steps(spec.Method, op));
         var split = !steppable && SplitsOnBooleans(body.Operations, spec.Parameters);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Operations);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
@@ -548,12 +548,23 @@ internal static partial class ProofOutline
         return lean.ToString();
     }
 
-    /// <summary>A frame, field or duplicate operation the stepping tactics take without facts: a local access, an
-    /// aggregate initialisation or a field access whose load is not sign-extending.</summary>
-    static bool Steps(Operation op) => op is LocalAddress or Local { Narrow: null } or SetLocal { Narrow: null } or
-        AggregateTransfer { Access: AggregateAccess.Initialize } or StackOperation { Kind: StackOpcode.Dup } or
-        StructField { Access: FieldAccess.Address or FieldAccess.Store or FieldAccess.LoadAggregate or
-            FieldAccess.StoreAggregate } or StructField { Access: FieldAccess.Load, Signed: false };
+    /// <summary>A frame, field or duplicate operation the stepping tactics take without facts: a local access
+    /// other than to a narrow integer local, an aggregate initialisation or a field access whose load is not
+    /// sign-extending.</summary>
+    static bool Steps(MethodDefinition method, Operation op) => op switch
+    {
+        Local load => !NarrowLocal(method, load.Index),
+        SetLocal store => !NarrowLocal(method, store.Index),
+        _ => op is LocalAddress or AggregateTransfer { Access: AggregateAccess.Initialize } or
+            StackOperation { Kind: StackOpcode.Dup } or
+            StructField { Access: FieldAccess.Address or FieldAccess.Store or FieldAccess.LoadAggregate or
+                FieldAccess.StoreAggregate } or StructField { Access: FieldAccess.Load, Signed: false }
+    };
+
+    /// <summary>Whether local `index` is a declared local of a narrow integer type, whose loads and stores the
+    /// outlines leave to the author. Argument homes follow the declared locals and are never narrow.</summary>
+    static bool NarrowLocal(MethodDefinition method, int index) => index < method.Body.Variables.Count &&
+        LeanEmitter.Narrow(method.Body.Variables[index].VariableType) is not null;
 
     /// <summary>The checked run of a body `cil_checked_steps` takes alone, and its postcondition hole; `suffix`
     /// keeps the named holes of each side of a split apart, since a named hole is shared across tactics.</summary>

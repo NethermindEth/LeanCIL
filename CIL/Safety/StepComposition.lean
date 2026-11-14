@@ -193,9 +193,8 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 1 stack <;> rfl
 -- Locals go through the frame's slot for `index`.
-@[cil_step] theorem step_local_eq (index : Nat) (narrow : Option CIL.NarrowKind)
-    (stack : List Value) :
-    step body (.local index narrow) pc args frame stack memory = do
+@[cil_step] theorem step_local_eq (index : Nat) (stack : List Value) :
+    step body (.local index) pc args frame stack memory = do
       let some slot := frame.locals[index]? | .error .invalidState
       return FrameAction.next (pc + 1) ((← loadLocal memory slot) :: stack) frame memory := rfl
 
@@ -204,9 +203,8 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       let some slot := frame.locals[index]? | .error .invalidState
       return FrameAction.next (pc + 1) ((← localAddress memory slot) :: stack) frame memory := rfl
 
-@[cil_step] theorem step_setLocal_eq (index : Nat) (narrow : Option CIL.NarrowKind)
-    (value : Value) (rest : List Value) :
-    step body (.setLocal index narrow) pc args frame (value :: rest) memory = do
+@[cil_step] theorem step_setLocal_eq (index : Nat) (value : Value) (rest : List Value) :
+    step body (.setLocal index) pc args frame (value :: rest) memory = do
       let some slot := frame.locals[index]? | .error .invalidState
       let (slot, memory) ← storeLocal memory slot value
       return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }

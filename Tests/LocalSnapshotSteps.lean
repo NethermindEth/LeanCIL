@@ -85,9 +85,9 @@ theorem mixed_vector_widths {entered memory : Memory} {frame : Frame} {boundary 
 
 #print axioms mixed_vector_widths
 
-/-- A compiled signed-byte local carries its narrow annotation on both instructions. -/
+/-- A compiled signed-byte local, whose slot kind truncates its store and extends its load. -/
 @[cil_code] def narrowLocal : CIL.Method := {
-  code := [.arg 0, .setLocal 0 (some .signed8), .local 0 (some .signed8), .ret]
+  code := [.arg 0, .setLocal 0, .local 0, .ret]
   locals := [.i32 0], localKinds := [.narrow .signed8], returnsValue := true }
 
 /-- The snapshot remembers the truncated and extended value, not the original operand. -/
@@ -165,8 +165,8 @@ theorem unknown_load (memory : Memory) (frame : Frame) (vector : BitVec 128) :
 
 /-- Mixed private homes include a narrowed byte and a vector. -/
 @[cil_code] def mixedHomes : CIL.Method := {
-  code := [.arg 0, .setLocal 0, .ldc_i4 0x1FF, .setLocal 1 (some .unsigned8),
-    .arg 1, .setLocal 2, .local 2, .pop, .local 1 (some .unsigned8), .pop,
+  code := [.arg 0, .setLocal 0, .ldc_i4 0x1FF, .setLocal 1,
+    .arg 1, .setLocal 2, .local 2, .pop, .local 1, .pop,
     .local 0, .ret]
   locals := [.i64 0, .i32 0, .v128 0]
   localKinds := [.word64, .narrow .unsigned8, .vector128], returnsValue := true }
@@ -281,18 +281,6 @@ theorem symbolic_snapshot_index (memory : Memory) (frame : Frame) (base : Nat)
   cil_contract_steps (snapshots := known) [found, instruction, rangedValues] until continuation
 
 #print axioms symbolic_snapshot_index
-
-/-- An annotated supplied fact also applies to the same checked store without an annotation. -/
-theorem annotated_fact_to_plain (before after : Memory) (frame : Frame) (vector : BitVec 128)
-    (stored : step storeOnly (.setLocal 0 (some .unsigned8)) 0 [] frame
-      [.scalar (.v128 vector)] before = .ok (.next 1 [] frame after))
-    (continuation : WP (Execution (fun fuel => run [storeOnly] fuel 0 1 [] frame [] after))
-      (fun result => result.1 = leaveFrame frame after)) :
-    WP (Execution (fun fuel => run [storeOnly] fuel 0 0 [] frame
-      [.scalar (.v128 vector)] before)) (fun result => result.1 = leaveFrame frame after) := by
-  cil_contract_steps [stored] until continuation
-
-#print axioms annotated_fact_to_plain
 
 /-- An empty snapshot collection grants neither a readable value nor permission to write. -/
 theorem wp_unknown_load (memory : Memory) (frame : Frame) (vector : BitVec 128)

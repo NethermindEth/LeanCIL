@@ -243,10 +243,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
       let layoutTerm ← Term.exprToSyntax layout
       `(tactic| obtain ⟨$after, $stepped, $framed, $below⟩ := CIL.Safety.LoopFrame.zero_aggregate
         $frame $(quote index) $layoutTerm [$zeros,*] (valid := $valid))
-    else if op.isAppOfArity ``CIL.Instruction.setLocal 2 then do
-      -- A narrowing store changes the value, which `LoopFrame.store` does not model.
-      let #[slotIndex, narrowing] := op.getAppArgs | return false
-      unless (← whnf narrowing).isAppOf ``Option.none do return false
+    else if op.isAppOfArity ``CIL.Instruction.setLocal 1 then do
+      let #[slotIndex] := op.getAppArgs | return false
       let some index ← literalNat? slotIndex | return false
       let some (_, top) := stack[0]? | return false
       let top ← whnf top

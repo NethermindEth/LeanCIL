@@ -568,28 +568,6 @@ stack -/
 open Lean Meta in
 #eval show MetaM Unit from do logInfo (← loopMissingHint #[mkConst ``True])
 
-/-- `i = (byte) 0x1FF; return i;`, storing the int local through a byte narrowing. -/
-@[cil_code] def narrowed : CIL.Method := {
-  returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.ldc_i4 0x1FF, .setLocal 0 (some .unsigned8), .local 0, .ret] }
-
-/-- The program of `narrowed` alone. -/
-@[cil_code] def narrowedProgram : CIL.Program := [narrowed]
-
-/-- The entered frame of `narrowed`. -/
-bind_entry narrowedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
-  narrowed with [] from memory allocating wellFormed
-
--- A narrowing local store is not one `LoopFrame.store` models, so the walk stops at it.
-/-- error: cil_loop_finish: cannot step pc 1 (CIL.Instruction.setLocal 0 (some CIL.NarrowKind.unsigned8)) -/
-#guard_msgs (whitespace := lax, substring := true) in
-example (memory current : Memory) (home : Reference)
-    (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
-      (knownLocals [some (.i32 0)])) :
-    LoopTerminates narrowedProgram 0 [] (fun _ _ => True)
-      ⟨0, narrowedEntry.frame memory home, [], current⟩ := by
-  cil_loop_finish
-
 -- Without the index bound the callee's slot is not shown inside the frame's footprint, and
 -- the call fails naming that side condition.
 /-- error: cil_loop_call: the frame after the call needs each callee footprint entry inside the
