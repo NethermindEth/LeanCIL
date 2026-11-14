@@ -70,7 +70,8 @@ private def runtimeCost (pinCount methodCount repetitions : Nat) : IO (Nat × Na
     let heartbeats := (allocations.qsort (· < ·))[rounds / 2]!
     IO.println s!"pin runtime: {pinCount} pins, {methodCount} methods, {median} ns"
     -- Runtime heartbeats count allocation work, independently of scheduler delays.
-    IO.println s!"pin allocation work: {pinCount} pins, {methodCount} methods, {heartbeats} heartbeats"
+    IO.println (s!"pin allocation work: {pinCount} pins, {methodCount} methods, " ++
+      s!"{heartbeats} heartbeats")
     if pinCount == methodCount then
       if previous != 0 && median > previous * 6 + 1000000 then
         throw (IO.userError "package pin runtime grew faster than package size")
