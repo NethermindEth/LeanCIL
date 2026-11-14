@@ -41,6 +41,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly Dictionary<ModuleDefinition, byte[]> images = [];
     readonly Dictionary<byte[], PEReader> readers = [];
     readonly Dictionary<PEReader, MetadataImage> metadata = [];
+    readonly Dictionary<ModuleDefinition, (PEReader Reader, MetadataImage Metadata)> identityImages = [];
     readonly List<(Pin Pin, string Path, ModuleDefinition Module)> references = [];
 
     internal ModuleDefinition Selected { get; }
@@ -162,6 +163,18 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         return image;
     }
 
+    /// <summary>Retains verified import metadata without admitting its bodies or resolution scope.</summary>
+    internal void RegisterIdentityImage(ModuleDefinition module, byte[] bytes)
+    {
+        var reader = new PEReader(ImmutableCollectionsMarshal.AsImmutableArray(bytes));
+        try { identityImages.Add(module, (reader, new MetadataImage(reader))); }
+        catch { reader.Dispose(); throw; }
+    }
+
+    /// <summary>The raw identity rows of an executable pin or a verified contract import.</summary>
+    internal MetadataImage IdentityMetadata(ModuleDefinition module) =>
+        identityImages.TryGetValue(module, out var image) ? image.Metadata : Metadata(module);
+
     /// <summary>
     /// The working module that <paramref name="module"/> is the untouched copy of, or the module itself.
     /// </summary>
@@ -221,6 +234,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         platform.Dispose();
         foreach (AssemblyDefinition assembly in platformAssemblies.Values.Distinct()) assembly.Dispose();
         foreach (PEReader reader in readers.Values) reader.Dispose();
+        foreach (var image in identityImages.Values) image.Reader.Dispose();
         foreach (ModuleDefinition module in modules.Values.Concat(originals.Values)) module.Dispose();
     }
 }

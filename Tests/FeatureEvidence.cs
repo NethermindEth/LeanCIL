@@ -7,6 +7,7 @@
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../scripts/RuntimeProfileValidation.cs
+#:include PinnedMetadata.cs
 
 using System.Text.RegularExpressions;
 using System.Reflection;
@@ -327,11 +328,11 @@ foreach (var obligation in new[] { featureObligation, "method0_scalars_validated
 }
 queryControls.Check(replay: false);
 // A cached type validation belongs to its module and architecture within this request.
-using (var module = ModuleDefinition.ReadModule(assembly))
-using (var other = ModuleDefinition.CreateModule("OtherQueryOwner", ModuleKind.Dll))
+using (var pinned = new PinnedMetadata(profileType.Assembly, assembly))
 using (var scope = (IDisposable)profileType.Assembly.GetType("Nethermind.LeanCIL.EnumTypes", true)!
     .GetMethod("BeginScope", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!)
 {
+    var module = pinned.Module;
     var validate = profileType.Assembly.GetType("Nethermind.LeanCIL.ReferenceQueries", true)!
         .GetMethod("Constant", BindingFlags.Static | BindingFlags.NonPublic)!;
     var method = module.Types.Single(type => type.FullName == "Examples.Capabilities")
@@ -341,12 +342,12 @@ using (var scope = (IDisposable)profileType.Assembly.GetType("Nethermind.LeanCIL
     if (!Equals(validate.Invoke(null, [validQuery, "scalar"]), 0) ||
         !Equals(validate.Invoke(null, [validQuery, "scalar"]), 0))
         throw new InvalidOperationException("Reference-content cache control failed");
-    var owner = validQuery.DeclaringType;
-    var definition = new MethodReference(validQuery.Name, validQuery.ReturnType,
-        new TypeReference(owner.Namespace, owner.Name, other, owner.Scope))
-        { CallingConvention = MethodCallingConvention.Generic };
-    definition.GenericParameters.Add(new GenericParameter("T", definition));
-    var foreignQuery = new GenericInstanceMethod(definition);
+    using var foreign = new PinnedMetadata(profileType.Assembly, assembly);
+    var foreignMethod = foreign.Module.GetType("Examples.Capabilities")
+        .Methods.Single(candidate => candidate.Name == "ReferenceFree");
+    var foreignQuery = foreignMethod.Body.Instructions.Select(instruction => instruction.Operand)
+        .OfType<GenericInstanceMethod>().Single(call => call.GenericArguments[0].Name == "EnumRecord");
+    foreignQuery.GenericArguments.Clear();
     foreignQuery.GenericArguments.Add(validQuery.GenericArguments[0]);
     try
     {

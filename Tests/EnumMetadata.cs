@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -15,7 +16,8 @@ var descriptor = arrays.GetMethod("Storage", flags)!;
 var runtime = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!;
 var span = runtime.GetMethod("ElementSpan", flags)!;
 var spanOperations = runtime.GetMethod("BuildSpanOperations", flags)!;
-using var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll"));
+using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
+var module = pinned.Module;
 var owner = module.GetType("Examples.EnumBuffers");
 var element = owner.NestedTypes.Single(type => type.Name == "Small");
 var field = element.Fields.Single(field => !field.IsStatic);
