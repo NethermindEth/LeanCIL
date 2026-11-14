@@ -414,9 +414,10 @@ info: 'CIL.MetadataName.bytes?_ofBytes?' depends on axioms: [propext, Classical.
 #print axioms MetadataName.bytes?_ofBytes?
 
 /--
-info: 'CIL.MetadataName.ofBytes?_bytes?' depends on axioms: [propext, Quot.sound]
+info: 'CIL.MetadataName.ofBytes?_bytes?' depends on axioms:
+  [propext, Classical.choice, Quot.sound]
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 #print axioms MetadataName.ofBytes?_bytes?
 
 /--
@@ -433,9 +434,10 @@ info: 'CIL.UserString.units?_ofUnits?' depends on axioms: [propext, Classical.ch
 #print axioms UserString.units?_ofUnits?
 
 /--
-info: 'CIL.UserString.ofUnits?_units?' depends on axioms: [propext, Quot.sound]
+info: 'CIL.UserString.ofUnits?_units?' depends on axioms:
+  [propext, Classical.choice, Quot.sound]
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 #print axioms UserString.ofUnits?_units?
 
 /-- info: name!"é" : MetadataName -/
@@ -528,5 +530,60 @@ example : innerType ≠ { innerType with typeNamespace := name!"N" } := by decid
 #guard_msgs in
 #check ({ assembly := examples, typeNamespace := name!"N", enclosing := [⟨name!"N", name!"Outer"⟩],
           name := name!"Inner" } : TypeIdentity)
+
+/-- Boundary codes and payload digits agree with the mathematical radix specification. -/
+def checkIdentityCodec : IO Unit := do
+  for bits in [8, 16] do
+    let base := 2^bits
+    for code in List.range 1024 ++
+        [base - 1, base, base + 1, 2 * base - 1, 2 * base, base^2 - 1,
+          base^2, base^2 + 1, 2 * base^2 - 1, 2 * base^2] do
+      unless bitDigits? bits code == radixDigits? base code code [] do
+        throw (IO.userError s!"decoder admission differs: width {bits}, code {code}")
+    for digits in [[], [0], [0, 0], [base - 1], [0, base - 1, 0],
+        [base - 1, 0, base - 1], [base], [0, base], [base + 1, 0]] do
+      unless bitCode? bits digits == radixCode? base digits 1 do
+        throw (IO.userError s!"encoder differs: width {bits}, digits {digits}")
+      if let some code := bitCode? bits digits then
+        unless bitDigits? bits code == some digits do
+          throw (IO.userError s!"payload digits differ: width {bits}, digits {digits}")
+  for seed in [0, 1, 0x0123456789abcdef] do
+    for code in [0, 1, 2^64 - 1, 2^64, 2^64 + 1, 2^128 - 1,
+        2^128, 2^128 + 1, 2^192 + 2^64 + 7] do
+      unless mixCodeLimbs seed code == mixCodeLimbsSpec seed code do
+        throw (IO.userError s!"hash limbs differ: seed {seed}, code {code}")
+
+#eval checkIdentityCodec
+
+/-- Separate runtime measurements cover encoding, decoding and hashing of growing payloads. -/
+def checkIdentityCodecCost : IO Unit := do
+  for bits in [8, 16] do
+    let mut previous : Array Nat := #[0, 0, 0]
+    for size in [8192, 65536, 524288] do
+      let mut best : Array Nat := #[1000000000000, 1000000000000, 1000000000000]
+      let mut checksum : UInt64 := 0
+      for sample in [:3] do
+        let digits := (List.range (size * 8 / bits)).map
+          (fun index => (index + sample) % (2^bits))
+        let started ← IO.monoNanosNow
+        let some code := bitCode? bits digits | throw (IO.userError "bounded encoder rejected")
+        let encoded ← IO.monoNanosNow
+        let decoded := bitDigits? bits code
+        let finished ← IO.monoNanosNow
+        let hashed := mixCodeLimbs (UInt64.ofNat sample) code
+        let ended ← IO.monoNanosNow
+        unless decoded == some digits do
+          throw (IO.userError "growing payload did not round trip")
+        checksum := checksum ^^^ hashed
+        let times := #[encoded - started, finished - encoded, ended - finished]
+        for index in [:3] do best := best.set! index (min best[index]! times[index]!)
+      for index in [:3] do
+        if previous[index]! > 0 && best[index]! > previous[index]! * 16 + 2000000 then
+          throw (IO.userError (s!"codec cost grew too quickly: width {bits}, size {size}, " ++
+            s!"operation {index}, {previous[index]!} -> {best[index]!} ns"))
+      IO.println s!"PASS codec width {bits}, bytes {size}: encode/decode/hash ns {best}, {checksum}"
+      previous := best
+
+#eval checkIdentityCodecCost
 
 end Tests.Identity
