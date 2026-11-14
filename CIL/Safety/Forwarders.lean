@@ -195,7 +195,8 @@ theorem step_return_unchanged {body : CIL.Method} {narrow : Option CIL.NarrowKin
     have hidden : unspecifiedOperands 1 values = false := by
       simp only [unspecifiedOperands, List.any_eq_false] at known ⊢
       exact fun value member => known value (List.mem_of_mem_take member)
-    simp only [step_ret_eq, returnNarrow, returnFrom_none_eq, hidden, Bool.false_eq_true, ↓reduceIte,
+    simp only [step_ret_eq, returnNarrow, returnFrom_none_eq, hidden, Bool.false_eq_true,
+      ↓reduceIte,
       arity, checked,
       Bind.bind, Except.bind, Pure.pure, Except.pure]
   | some kind =>

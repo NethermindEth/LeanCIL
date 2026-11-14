@@ -91,7 +91,8 @@ def callableType : TypeExpr → TypeExpr
   | .byref element => .byref (callableType element)
   | .apply constructor argument => .apply (callableType constructor) (callableType argument)
   | .functionPointer result parameters convention hasThis explicitThis =>
-    .functionPointer (callableType result) (callableType parameters) convention hasThis explicitThis
+    .functionPointer (callableType result) (callableType parameters) convention hasThis
+      explicitThis
   | .signatureParameter head tail => .signatureParameter (callableType head) (callableType tail)
   | type => type
 
@@ -182,4 +183,3 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | _ => none
 
 end CIL.Extraction
-

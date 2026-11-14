@@ -53,7 +53,8 @@ theorem invoke_broadcastBinary {declared : DeclaredSignature} {environment : Lay
     invoke [broadcastBinaryMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 (Vector.lane64 bits lane.toNat))]) := by
-  cil_checked_steps [returnStorage, Method.returnNarrow, available, evaluated, checked_broadcast256,
+  cil_checked_steps [returnStorage, Method.returnNarrow, available, evaluated,
+    checked_broadcast256,
     checked_extract256 bits lane bound]
 
 #print axioms invoke_broadcastBinary
@@ -163,7 +164,8 @@ theorem invoke_broadcastShift {declared : DeclaredSignature} {environment : Layo
     invoke [broadcastShiftMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 value), .scalar (.i64 count)] memory =
       .ok (memory, [.scalar (.i64 word)]) := by
-  cil_checked_steps [returnStorage, Method.returnNarrow, available, evaluated, checked_broadcast256,
+  cil_checked_steps [returnStorage, Method.returnNarrow, available, evaluated,
+    checked_broadcast256,
     checked_scalarUnsafe,
     checked_extract256, lane_broadcast256, bound, Opaque128Value.value]
 

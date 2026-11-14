@@ -101,7 +101,8 @@ theorem enum_underlying_codes :
 /-- External enum claims use exactly the same eight integer runtime atoms. -/
 theorem external_enum_atoms :
     let frame : Frame :=
-      { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes, arity := 0, ownerArity := 0 }
+      { corlib := some runtimeScopeBytes, anchor := runtimeScopeBytes,
+        arity := 0, ownerArity := 0 }
     let named : NamedType :=
       { scope := bytesOf "E", name := bytesOf "Number", parts := [], kind := .external none,
         pinned := false }
