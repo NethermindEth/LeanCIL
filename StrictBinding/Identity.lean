@@ -1,5 +1,5 @@
 import StrictBinding.Tables
-import StrictBinding.Sha1
+import CIL.Crypto.Sha1
 
 /-!
 # Heaps and assembly identity
@@ -7,7 +7,7 @@ import StrictBinding.Sha1
 Reads entries of the `#Strings` and `#Blob` heaps and spells the identity of the assembly an
 image defines from its Assembly row, in the form the extractor records:
 `Name, Version=a.b.c.d, Culture=neutral, PublicKeyToken=0123456789abcdef`. The token is the
-strong-name token of a flagged public key (`StrictBinding.Sha1.keyToken`), the eight-byte token
+strong-name token of a flagged public key (`CIL.Crypto.Sha1.keyToken`), the eight-byte token
 of an unflagged key, or `null` for an unsigned assembly.
 -/
 
@@ -97,10 +97,10 @@ def hexDigits (count value : Nat) : List Nat :=
 /-- The token of key bytes read from an image, respecting the Assembly PublicKey flag. -/
 def assemblyKeyToken (flags : Nat) (key : List Nat) : Except AuditError (Option Nat) := do
   if key.isEmpty then return none
-  if flags % 2 == 1 then return some (Sha1.keyToken key)
+  if flags % 2 == 1 then return some (CIL.Crypto.Sha1.keyToken key)
   let width := key.length
   if width != 8 then throw (.tables (.invalidPublicKeyToken width))
-  pure (some (bytesValue key))
+  pure (some (CIL.Crypto.bytesValue key))
 
 /-- The code points of the identity the Assembly row spells. -/
 def assemblyIdentity (view : ImageView) (layout : MetadataLayout) :
