@@ -54,7 +54,7 @@ internal static class ObjectTypes
                 "\n  A finalizer runs outside the extracted call graph.");
         var parent = definition.BaseType ?? throw new InvalidDataException(Unsupported + type.FullName);
         if (parent.FullName == "System.Object" &&
-            RuntimeModels.ExactScope(parent.Scope, PlatformAssemblies.SystemRuntime))
+            RuntimeModels.ExactScope(parent, PlatformAssemblies.SystemRuntime))
             return definition;
         if (!Candidate(parent))
             throw new InvalidDataException(Unsupported + type.FullName +
@@ -104,7 +104,7 @@ internal static class ObjectTypes
     /// </summary>
     internal static bool IsString(TypeReference type) =>
         type is not TypeSpecification && type.FullName == "System.String" &&
-        RuntimeModels.ExactScope(type.Scope, PlatformAssemblies.SystemRuntime);
+        RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime);
 
     /// <summary>
     /// A type whose values are object references on the stack and in argument and local roots: an admitted class,

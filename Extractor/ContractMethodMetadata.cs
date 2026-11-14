@@ -127,7 +127,7 @@ internal static class ContractMethodMetadata
     }
 
     internal static bool Primitive(TypeReference type) => type is not TypeSpecification &&
-        RuntimeModels.ExactScope(type.Scope, PlatformAssemblies.SystemRuntime) && type.IsValueType &&
+        RuntimeModels.ExactScope(type, PlatformAssemblies.SystemRuntime) && type.IsValueType &&
         PrimitiveName(type.FullName);
 
     static bool PrimitiveName(string name) => name is

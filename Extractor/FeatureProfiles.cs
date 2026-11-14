@@ -133,7 +133,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             reference.DeclaringType.FullName == "System.Environment";
         if (!pointerSize && !processWidth) return null;
         var result = pointerSize ? "System.Int32" : "System.Boolean";
-        if (!RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemRuntime) ||
+        if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference.HasThis || reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default ||
             reference.HasGenericParameters || reference is GenericInstanceMethod || reference.Parameters.Count != 0 ||
             reference.FullName != $"{result} {reference.DeclaringType.FullName}::{reference.Name}()")
@@ -155,8 +155,8 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         if (!PlatformFieldQuery(reference)) return null;
         const string identity = "System.Boolean System.BitConverter::IsLittleEndian";
         var exactReference = reference.DeclaringType is not TypeSpecification &&
-            RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemRuntime) &&
-            RuntimeModels.ExactScope(reference.FieldType.Scope, PlatformAssemblies.SystemRuntime) &&
+            RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) &&
+            RuntimeModels.ExactScope(reference.FieldType, PlatformAssemblies.SystemRuntime) &&
             reference.FullName == identity;
         // Resolve only exact references: a forged assembly scope must not reach the resolver.
         var field = exactReference ? reference.Resolve() : null;
@@ -174,7 +174,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         if (reference.Name is not ("get_IsSupported" or "get_IsHardwareAccelerated") ||
             !reference.DeclaringType.FullName.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal)) return null;
         // Never reinterpret an unrecognised getter as a disabled capability.
-        if (!RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemRuntimeIntrinsics) ||
+        if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntimeIntrinsics) ||
             reference.HasThis || reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default ||
             reference.HasGenericParameters || reference.Parameters.Count != 0 ||
             reference.ReturnType.FullName != "System.Boolean" ||

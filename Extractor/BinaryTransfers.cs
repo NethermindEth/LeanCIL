@@ -10,7 +10,7 @@ internal static class BinaryTransfers
     internal static Operation? Translate(MethodReference reference)
     {
         if (reference.DeclaringType.FullName != "System.Buffers.Binary.BinaryPrimitives" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemMemory) ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemMemory) ||
             reference.HasThis || reference.ExplicitThis || reference.HasGenericParameters ||
             reference is GenericInstanceMethod || reference.CallingConvention != MethodCallingConvention.Default)
             return null;

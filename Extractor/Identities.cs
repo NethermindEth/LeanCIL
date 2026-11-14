@@ -3,10 +3,45 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Reflection.Metadata.Ecma335;
+using System.Security.Cryptography;
 using System.Text;
 using Mono.Cecil;
+using Srm = System.Reflection.Metadata;
 
 namespace Nethermind.LeanCIL;
+
+/// <summary>Identity columns read directly from the module image named by a metadata token.</summary>
+internal static class IdentityRows
+{
+    internal static void RequireModule(MetadataImage image, ModuleDefinition module)
+    {
+        if (image.Reader.GetGuid(image.Reader.GetModuleDefinition().Mvid) != module.Mvid)
+            throw new InvalidDataException("Identity module and image have different MVIDs");
+    }
+
+    internal static MetadataName Name(MetadataImage image, Srm.StringHandle handle)
+    {
+        byte[] entry = image.StringEntry(MetadataTokens.GetHeapOffset(handle));
+        return MetadataName.FromBytes(entry.AsSpan(0, entry.Length - 1));
+    }
+
+    internal static TypeLevel Level(MetadataImage image, MetadataToken token)
+    {
+        if (token.RID == 0) throw new InvalidDataException("Type identity without an image row");
+        if (token.TokenType == TokenType.TypeDef)
+        {
+            var row = image.Reader.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle((int)token.RID));
+            return new(Name(image, row.Namespace), Name(image, row.Name));
+        }
+        if (token.TokenType == TokenType.TypeRef)
+        {
+            var row = image.Reader.GetTypeReference(MetadataTokens.TypeReferenceHandle((int)token.RID));
+            return new(Name(image, row.Namespace), Name(image, row.Name));
+        }
+        throw new InvalidDataException("Type identity token does not name a type definition or reference");
+    }
+}
 
 // The identities of CIL/Identity.lean, built from metadata columns. ToLean() elaborates against the expected Lean
 // type; ToDisplay() is the text CIL/Identity.lean shows for the value, escapes and raw fallbacks included.
@@ -24,9 +59,8 @@ internal sealed record MetadataName
     /// <summary>The name whose UTF-8 bytes are <paramref name="bytes"/>.</summary>
     internal static MetadataName FromBytes(ReadOnlySpan<byte> bytes) => new(bytes.ToArray());
 
-    /// <summary>The name of a <c>#Strings</c> entry as Cecil decodes it. Its bytes are the entry's bytes when the
-    /// entry is UTF-8, as ECMA-335 requires; Cecil replaces the bytes of an entry that is not.</summary>
-    internal static MetadataName OfEntry(string entry) => new(IdentityText.Utf8(entry));
+    /// <summary>A name constant encoded as UTF-8, rejecting text with an unpaired surrogate.</summary>
+    internal static MetadataName OfText(string entry) => new(IdentityText.Utf8(entry));
 
     /// <summary>The UTF-8 bytes of the name.</summary>
     internal ReadOnlySpan<byte> Bytes => bytes;
@@ -133,27 +167,47 @@ internal readonly record struct AssemblyVersion(ushort Major, ushort Minor, usho
 internal sealed record AssemblyName(MetadataName Name, AssemblyVersion Version, MetadataName Culture,
     ulong? PublicKeyToken)
 {
-    /// <summary>The columns of an <c>Assembly</c> or <c>AssemblyRef</c> row, the token computed from the key when
-    /// the row holds one; null for a version Cecil did not read from a row or a token that is not eight bytes.
-    /// </summary>
-    internal static AssemblyName? Of(AssemblyNameReference row)
+    /// <summary>The identity of an assembly row, preserving the exact name and culture heap bytes.</summary>
+    internal static AssemblyName? Of(AssemblyNameReference row, MetadataImage image)
     {
-        byte[] token = row.PublicKeyToken;
-        if (AssemblyVersion.Of(row.Version) is not { } version || token is { Length: not (0 or TokenBytes) })
-            return null;
-        return new(MetadataName.OfEntry(row.Name), version, MetadataName.OfEntry(row.Culture ?? ""),
-            token is { Length: TokenBytes } ? BinaryPrimitives.ReadUInt64BigEndian(token) : null);
+        var reader = image.Reader;
+        if (row is AssemblyNameDefinition)
+        {
+            var definition = reader.GetAssemblyDefinition();
+            return FromRow(definition.Name, definition.Version, definition.Culture, definition.PublicKey,
+                (definition.Flags & System.Reflection.AssemblyFlags.PublicKey) != 0);
+        }
+        if (row.MetadataToken.TokenType != TokenType.AssemblyRef || row.MetadataToken.RID == 0)
+            throw new InvalidDataException("Assembly reference without an image row");
+        var handle = MetadataTokens.AssemblyReferenceHandle((int)row.MetadataToken.RID);
+        var reference = reader.GetAssemblyReference(handle);
+        return FromRow(reference.Name, reference.Version, reference.Culture, reference.PublicKeyOrToken,
+            (reference.Flags & System.Reflection.AssemblyFlags.PublicKey) != 0);
+
+        AssemblyName? FromRow(Srm.StringHandle name, Version version, Srm.StringHandle culture,
+            Srm.BlobHandle key, bool fullKey)
+        {
+            byte[] token = reader.GetBlobBytes(key);
+            if (fullKey && token.Length != 0) token = SHA1.HashData(token)[^TokenBytes..].Reverse().ToArray();
+            if (token.Length is not (0 or TokenBytes) || AssemblyVersion.Of(version) is not { } columns) return null;
+            return new(IdentityRows.Name(image, name), columns, IdentityRows.Name(image, culture),
+                token.Length == TokenBytes ? BinaryPrimitives.ReadUInt64BigEndian(token) : null);
+        }
     }
 
     /// <summary>The assembly a type's scope names: the referenced row, or the assembly of the module that
-    /// defines the type; null for a module reference or a row <see cref="Of(AssemblyNameReference)"/> refuses.
+    /// defines the type; null for a module reference or an invalid assembly row.
     /// </summary>
-    internal static AssemblyName? OfScope(TypeReference type) => type.Scope switch
+    internal static AssemblyName? OfScope(TypeReference type, MetadataImage image)
     {
-        AssemblyNameReference row => Of(row),
-        ModuleDefinition module => Of(module.Assembly.Name),
-        _ => null
-    };
+        IdentityRows.RequireModule(image, type.Module);
+        return type.Scope switch
+        {
+            AssemblyNameReference row => Of(row, image),
+            ModuleDefinition module when module == type.Module => Of(module.Assembly.Name, image),
+            _ => null
+        };
+    }
 
     const int TokenBytes = 8;
 
@@ -192,15 +246,16 @@ internal sealed record AssemblyName(MetadataName Name, AssemblyVersion Version, 
     /// <summary>The derived <c>Repr</c> of the assembly.</summary>
     internal LeanDoc Repr() => LeanDoc.Structure(("name", Name.Repr()), ("version", Version.Repr()),
         ("culture", Culture.Repr()),
-        ("publicKeyToken", PublicKeyToken is { } token ? LeanDoc.Of("some ") + LeanDoc.Of(token) : LeanDoc.Of("none")));
+        ("publicKeyToken", PublicKeyToken is { } token
+            ? LeanDoc.Of("some ") + LeanDoc.Of(token) : LeanDoc.Of("none")));
 }
 
 /// <summary>One row of a type's nesting chain: its namespace and name columns (<c>CIL.TypeLevel</c>).</summary>
 internal sealed record TypeLevel(MetadataName Namespace, MetadataName Name)
 {
     /// <summary>The level of a type definition's own row.</summary>
-    internal static TypeLevel Of(TypeDefinition definition) =>
-        new(MetadataName.OfEntry(definition.Namespace), MetadataName.OfEntry(definition.Name));
+    internal static TypeLevel Of(TypeDefinition definition, MetadataImage image) =>
+        IdentityRows.Level(image, definition.MetadataToken);
 
     /// <summary>The structure literal of the level.</summary>
     internal string ToLean() => $"{{ typeNamespace := {Namespace.ToLean()}, name := {Name.ToLean()} }}";
@@ -227,17 +282,18 @@ internal sealed record TypeIdentity(AssemblyName Assembly, MetadataName Namespac
 {
     /// <summary>The identity of a type definition, read from its row, its enclosing rows and its assembly row.
     /// A reference names the same identity once it is resolved to its definition.</summary>
-    internal static TypeIdentity Of(TypeDefinition definition)
+    internal static TypeIdentity Of(TypeDefinition definition, MetadataImage image)
     {
-        AssemblyName assembly = AssemblyName.Of(definition.Module.Assembly.Name) ??
+        IdentityRows.RequireModule(image, definition.Module);
+        AssemblyName assembly = AssemblyName.Of(definition.Module.Assembly.Name, image) ??
             throw new InvalidDataException("Assembly row without a version or an eight-byte public key token: " +
                 definition.Module.Assembly.Name.FullName);
         var enclosing = ImmutableArray.CreateBuilder<TypeLevel>();
         for (TypeDefinition? outer = definition.DeclaringType; outer is not null; outer = outer.DeclaringType)
-            enclosing.Add(TypeLevel.Of(outer));
+            enclosing.Add(TypeLevel.Of(outer, image));
         enclosing.Reverse();
-        return new(assembly, MetadataName.OfEntry(definition.Namespace), enclosing.ToImmutable(),
-            MetadataName.OfEntry(definition.Name));
+        TypeLevel level = TypeLevel.Of(definition, image);
+        return new(assembly, level.Namespace, enclosing.ToImmutable(), level.Name);
     }
 
     /// <summary>The structure literal of the type, without <c>enclosing</c> when the type is not nested.</summary>
@@ -307,9 +363,9 @@ internal closed record PrimitiveType(MetadataType ElementType, string Constructo
     /// <summary>The primitive a type encodes: an element type code, or a reference into a core library, which
     /// Cecil reads as the same code. Cecil also gives that code to a type of that name in any other assembly,
     /// which is a named type and gives null here.</summary>
-    internal static PrimitiveType? Of(TypeReference type) =>
+    internal static PrimitiveType? Of(TypeReference type, MetadataImage image) =>
         type is not (TypeSpecification or GenericParameter) && OfElementType(type.MetadataType) is { } primitive &&
-        AssemblyName.OfScope(type) is { } scope && PlatformAssemblies.CoreLibraries.Contains(scope)
+        AssemblyName.OfScope(type, image) is { } scope && PlatformAssemblies.CoreLibraries.Contains(scope)
             ? primitive : null;
 
     /// <summary>The constructor term, such as <c>.int32</c>.</summary>
@@ -329,29 +385,30 @@ internal closed record TypeKind
 
     /// <summary>The kind of a definition from its flags and the core-library type it extends: an enumeration
     /// holds its underlying primitive, and <c>System.Enum</c> itself is a class.</summary>
-    internal static TypeKind Of(TypeDefinition definition)
+    internal static TypeKind Of(TypeDefinition definition, MetadataImage image)
     {
         if (definition.IsInterface) return new InterfaceType();
-        if (definition.BaseType is not { } baseType || CoreType(definition, EnumName)) return new ClassType();
-        if (CoreType(baseType, EnumName)) return new EnumType(UnderlyingOf(definition));
-        return CoreType(baseType, ValueTypeName) ? new ValueType() : new ClassType();
+        if (definition.BaseType is not { } baseType || CoreType(definition, EnumName, image)) return new ClassType();
+        if (CoreType(baseType, EnumName, image)) return new EnumType(UnderlyingOf(definition, image));
+        return CoreType(baseType, ValueTypeName, image) ? new ValueType() : new ClassType();
     }
 
-    static readonly MetadataName SystemNamespace = MetadataName.OfEntry("System");
-    static readonly MetadataName EnumName = MetadataName.OfEntry("Enum");
-    static readonly MetadataName ValueTypeName = MetadataName.OfEntry("ValueType");
+    static readonly MetadataName SystemNamespace = MetadataName.OfText("System");
+    static readonly MetadataName EnumName = MetadataName.OfText("Enum");
+    static readonly MetadataName ValueTypeName = MetadataName.OfText("ValueType");
 
     // A top-level type of the System namespace defined or referenced in a core library.
-    static bool CoreType(TypeReference type, MetadataName name) => type is not TypeSpecification &&
-        type.DeclaringType is null && MetadataName.OfEntry(type.Namespace) == SystemNamespace &&
-        MetadataName.OfEntry(type.Name) == name && AssemblyName.OfScope(type) is { } scope &&
+    static bool CoreType(TypeReference type, MetadataName name, MetadataImage image) =>
+        type is not TypeSpecification && type.DeclaringType is null &&
+        IdentityRows.Level(image, type.MetadataToken) is { } level &&
+        level.Namespace == SystemNamespace && level.Name == name && AssemblyName.OfScope(type, image) is { } scope &&
         PlatformAssemblies.CoreLibraries.Contains(scope);
 
     // ECMA-335 II.14.3: an enumeration has exactly one instance field, of its underlying primitive type.
-    static PrimitiveType UnderlyingOf(TypeDefinition definition)
+    static PrimitiveType UnderlyingOf(TypeDefinition definition, MetadataImage image)
     {
         var instance = definition.Fields.Where(field => !field.IsStatic).ToArray();
-        return instance is [var field] && PrimitiveType.Of(field.FieldType) is { } primitive ? primitive :
+        return instance is [var field] && PrimitiveType.Of(field.FieldType, image) is { } primitive ? primitive :
             throw new InvalidDataException("Enumeration without one primitive instance field: " + definition.FullName);
     }
 
@@ -419,25 +476,44 @@ internal static class PlatformAssemblies
         [SystemRuntime, SystemMemory, SystemRuntimeIntrinsics];
 
     /// <summary>The modelled platform assembly whose simple name a scope carries, or null.</summary>
-    internal static AssemblyName? Claimed(IMetadataScope scope)
+    internal static AssemblyName? Claimed(AssemblyName? scope)
     {
-        MetadataName name = MetadataName.OfEntry(scope.Name);
-        return Modelled.FirstOrDefault(platform => platform.Name == name);
+        return scope is null ? null : Modelled.FirstOrDefault(platform => platform.Name == scope.Name);
     }
 
     static AssemblyName Signed(string name, ulong token) =>
-        new(MetadataName.OfEntry(name), Version, MetadataName.Empty, token);
+        new(MetadataName.OfText(name), Version, MetadataName.Empty, token);
 }
 
 /// <summary>A Lean <c>Std.Format</c> document of text, line breaks, nesting and all-or-none groups, laid out by
 /// Lean's algorithm, so a <c>Repr</c> built here prints as <c>reprStr</c> prints it.</summary>
 internal closed record LeanDoc
 {
-    internal sealed record Text(string Value) : LeanDoc;
-    internal sealed record Line : LeanDoc;
-    internal sealed record Nest(int Indent, LeanDoc Body) : LeanDoc;
-    internal sealed record Group(LeanDoc Body) : LeanDoc;
-    internal sealed record Append(LeanDoc Left, LeanDoc Right) : LeanDoc;
+    internal abstract int FlatWidth { get; }
+
+    internal sealed record Text(string Value) : LeanDoc
+    {
+        internal int Width { get; } = IdentityText.Columns(Value);
+        internal override int FlatWidth => Width;
+    }
+    internal sealed record Line : LeanDoc
+    {
+        internal override int FlatWidth => 1;
+    }
+    internal sealed record Nest(int Indent, LeanDoc Body) : LeanDoc
+    {
+        internal override int FlatWidth { get; } = Body.FlatWidth;
+    }
+    internal sealed record Group(LeanDoc Body) : LeanDoc
+    {
+        internal override int FlatWidth { get; } = Body.FlatWidth;
+    }
+    internal sealed record Append(LeanDoc Left, LeanDoc Right) : LeanDoc
+    {
+        internal override int FlatWidth { get; } = AddWidths(Left.FlatWidth, Right.FlatWidth);
+    }
+
+    static int AddWidths(int left, int right) => (int)Math.Min(int.MaxValue, (long)left + right);
 
     /// <summary>Text without a line break.</summary>
     internal static LeanDoc Of(string text) => new Text(text);
@@ -508,7 +584,7 @@ internal closed record LeanDoc
             {
                 case Text text:
                     output.Append(text.Value);
-                    column += IdentityText.Columns(text.Value);
+                    column += text.Width;
                     groups = With(group.Items.Tail);
                     break;
                 case Append append:
@@ -554,26 +630,51 @@ internal closed record LeanDoc
     {
         if (first.Width > width || first.FoundLine) return first;
         Space second = rest(width - first.Width);
-        return second with { Width = first.Width + second.Width };
+        return second with { Width = AddWidths(first.Width, second.Width) };
     }
 
     static Space UpToLine(Cons<WorkGroup>? groups, int width)
     {
-        if (groups is null) return default;
-        if (groups.Head.Items is not { } items) return UpToLine(groups.Tail, width);
-        return Merge(width, UpToLine(items.Head.Document, groups.Head.Flatten == Flatten.Fits, width),
-            remaining => UpToLine(new(groups.Head with { Items = items.Tail }, groups.Tail), remaining));
+        int columns = 0;
+        Stack<(LeanDoc Document, bool Flatten)> pending = new();
+        while (groups is not null)
+        {
+            for (Cons<Item>? items = groups.Head.Items; items is not null; items = items.Tail)
+            {
+                pending.Push((items.Head.Document, groups.Head.Flatten == Flatten.Fits));
+                while (pending.TryPop(out var item))
+                {
+                    if (item.Flatten)
+                    {
+                        columns = AddWidths(columns, item.Document.FlatWidth);
+                        if (columns > width) return new(false, columns);
+                        continue;
+                    }
+                    switch (item.Document)
+                    {
+                        case Text text:
+                            columns = AddWidths(columns, text.Width);
+                            break;
+                        case Line:
+                            return new(true, columns);
+                        case Nest nest:
+                            pending.Push((nest.Body, item.Flatten));
+                            break;
+                        case Group group:
+                            pending.Push((group.Body, true));
+                            break;
+                        case Append append:
+                            pending.Push((append.Right, item.Flatten));
+                            pending.Push((append.Left, item.Flatten));
+                            break;
+                    }
+                    if (columns > width) return new(false, columns);
+                }
+            }
+            groups = groups.Tail;
+        }
+        return new(false, columns);
     }
-
-    static Space UpToLine(LeanDoc document, bool flatten, int width) => document switch
-    {
-        Text text => new(false, IdentityText.Columns(text.Value)),
-        Line => flatten ? new(false, 1) : new(true, 0),
-        Nest nest => UpToLine(nest.Body, flatten, width),
-        Group group => UpToLine(group.Body, true, width),
-        Append append => Merge(width, UpToLine(append.Left, flatten, width),
-            remaining => UpToLine(append.Right, flatten, remaining))
-    };
 }
 
 /// <summary>The codes, escapes and fallbacks CIL/Identity.lean gives names and literals.</summary>
@@ -643,7 +744,10 @@ internal static class IdentityText
 
     /// <summary>The raw structure of a code, <c>rawCodeDisplay</c>.</summary>
     internal static string RawCode(BigInteger code) =>
-        "{ code := " + code.ToString(CultureInfo.InvariantCulture) + " }";
+        "{ code := " + Decimal(code) + " }";
+
+    /// <summary>The exact unsigned decimal digits used by Lean's raw identity display.</summary>
+    internal static string Decimal(BigInteger code) => code.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>The number of characters Lean counts in <paramref name="text"/>: its Unicode scalar values.
     /// </summary>
