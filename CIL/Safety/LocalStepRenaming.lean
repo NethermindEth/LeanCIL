@@ -96,7 +96,7 @@ theorem Frame.Renamed.stepLocal {indices : LocalIndexMap} {mapping : AllocationR
     exact .ok (.next memories frames)
 #print axioms Frame.Renamed.stepLocal
 
-/-- A local address uses its retained byte home at the relocated operand. -/
+/-- A local address uses its retained byte home or span view at the relocated operand. -/
 theorem Frame.Renamed.stepLocalAddress {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (memories : Memory.Renamed mapping scopes source target)

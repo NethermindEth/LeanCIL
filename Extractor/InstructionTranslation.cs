@@ -218,9 +218,7 @@ internal static class InstructionTranslation
                 throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S when ObjectTypes.Rooted(((ParameterDefinition)i.Operand).ParameterType) =>
                 throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
-            Code.Ldarga or Code.Ldarga_S => Parameter(
-                !Spans.Is(((ParameterDefinition)i.Operand).ParameterType)
-                    ? index => new LocalAddress(index) : index => new Local(index)),
+            Code.Ldarga or Code.Ldarga_S => Parameter(index => new LocalAddress(index)),
             Code.Conv_I => new StackOperation(StackOpcode.ConvI),
             Code.Ldind_I => new StackOperation(StackOpcode.Load64),
             Code.Stind_I => new StackOperation(StackOpcode.Store64),
@@ -315,8 +313,7 @@ internal static class InstructionTranslation
             Code.Ldloca or Code.Ldloca_S when ObjectTypes.Rooted(((VariableDefinition)i.Operand).VariableType) ||
                 ReferenceArrays.Is(((VariableDefinition)i.Operand).VariableType) =>
                 throw new InvalidDataException("Unsupported address of a class instance local: " + m.FullName),
-            Code.Ldloca or Code.Ldloca_S => !Spans.Is(((VariableDefinition)i.Operand).VariableType)
-                ? AddressLocal(LocalIndex()) : LoadLocal(LocalIndex()),
+            Code.Ldloca or Code.Ldloca_S => AddressLocal(LocalIndex()),
             Code.Stloc_0 => StoreLocal(0),
             Code.Stloc_1 => StoreLocal(1),
             Code.Stloc_2 => StoreLocal(2),
