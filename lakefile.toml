@@ -25,6 +25,9 @@ name = "StrictBinding"
 name = "Tests.Support"
 
 [[lean_lib]]
+name = "Tests.ReplayDiagnostics"
+
+[[lean_lib]]
 name = "Tests.Semantics"
 
 [[lean_lib]]
