@@ -31,8 +31,8 @@ def byteBase : Nat := 256
 /-- The number of values one UTF-16 code unit can take. -/
 def codeUnitBase : Nat := 65536
 
-/-- The number that `digits` continue in `base`, most significant first, after the digits
-    already read into `code`; `none` when a digit is not below `base`. Each step scales a growing code. -/
+/-- Read `digits` in `base` into `code`, most significant first; reject digits not below `base`.
+    Each step scales a growing code. -/
 def radixCode? (base : Nat) : List Nat → Nat → Option Nat
   | [], code => some code
   | digit :: rest, code =>
