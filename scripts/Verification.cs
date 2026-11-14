@@ -3891,8 +3891,12 @@ partial class Program : IDisposable
             return $"its binding section is from a {binding.mode} run, and this run accepts only {required}";
         if (required == BindingMode.Default
             ? binding.digests is not null || binding.sources is not null || images.Length != 0
-            : binding.digests is null || binding.sources is null || images.Any(image => image is null ||
-                !Settled(image.status, image.theorem, image.reason)))
+            : binding.digests is null || string.IsNullOrWhiteSpace(binding.digests.path) ||
+                !Sha256Text(binding.digests.sha256) || binding.sources is null ||
+                string.IsNullOrWhiteSpace(binding.sources.leanToolchain) ||
+                !Sha256Text(binding.sources.strictBinding) || !Sha256Text(binding.sources.lean) ||
+                images.Any(image => image is null || string.IsNullOrWhiteSpace(image.identity) ||
+                    !Sha256Text(image.sha256) || !Settled(image.status, image.theorem, image.reason)))
             return $"its binding section's digest file, sources or images do not fit a {required} run";
         var declared = Enum.GetValues<BindingFact>().Select(fact => (BindingFact?)fact);
         if (!facts.Select(fact => fact?.id).SequenceEqual(declared))
@@ -3904,6 +3908,9 @@ partial class Program : IDisposable
             : $"its binding fact {wrong.id} is {wrong.status} with theorem {wrong.theorem ?? "none"} and reason " +
                 $"{wrong.reason ?? "none"}, which a {required} run does not issue";
     }
+
+    /// <summary>Whether a digest contains exactly the 64 hexadecimal digits of a SHA-256 value.</summary>
+    static bool Sha256Text(string? digest) => digest is { Length: 64 } && digest.All(char.IsAsciiHexDigit);
 
     /// <summary>
     /// Whether a deep run's verified certificate can report this outcome: reconfirmed by a named theorem, or not
