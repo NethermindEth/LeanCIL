@@ -429,7 +429,7 @@ var tokenSource = Path.Combine(directory, "TokenAssembly");
 Directory.CreateDirectory(tokenSource);
 File.WriteAllText(Path.Combine(tokenSource, "Tokens.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
 </Project>
 """);
 string Join(int count, Func<int, string> piece) => string.Concat(Enumerable.Range(0, count).Select(piece));
@@ -650,7 +650,7 @@ var deepSource = Path.Combine(directory, "DeepAssembly");
 Directory.CreateDirectory(deepSource);
 File.WriteAllText(Path.Combine(deepSource, "Deep.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize>
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize>
     <AssemblyName>Bodies</AssemblyName></PropertyGroup>
 </Project>
 """);

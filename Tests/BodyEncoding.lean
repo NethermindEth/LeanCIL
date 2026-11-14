@@ -144,7 +144,7 @@ def methodMetadata (pin : AssemblyPin) (method : RawMethod) : Option (MetadataSl
   let step : Step Nat := do
     let runtimeName ← string "System.Runtime"
     let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
-    let _ ← row Table.assemblyRef [10, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
+    let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
     modify fun builder => { builder with corlib := 1 }
     let objectName ← string "Object"
     let systemName ← string "System"
