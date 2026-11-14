@@ -145,33 +145,39 @@ owner of an instance method, and enums carry their whole field lists.
 What `MetadataResolution` and `MetadataBinding` check:
 
 - The scope of every type is the assembly identity its `AssemblyRef` row spells (name, version,
-  culture, key token); nested types are named `Outer/Inner`, and a type's namespace and simple names
-  stay apart in the comparison between a reference and its definition, so namespace `A.B` with name
-  `C` is not namespace `A` with name `B.C`. A type defined in a carried slice has the value type,
-  enum (with its integer type), class or interface kind its flags and base give: the base counts
-  as `System.ValueType` or `System.Enum` only when the base's own `TypeRef` names a core-library
-  assembly (`System.Runtime`, `netstandard`, `mscorlib` or `System.Private.CoreLib`), whatever the
-  slice's `corlib` number says.
-- A reference whose scope is a pinned assembly needs that assembly's slice among the method's
-  slices; without it the check fails with `missingSlice`, so a pinned type or call is never read as
-  a platform one.
+  culture, key token); nested types are named `Outer/Inner`, and the namespace and simple names of a
+  type and of each type enclosing it stay apart in the comparison between a reference and its
+  definition, so namespace `A.B` with name `C` is not namespace `A` with name `B.C`. A type defined
+  in a carried slice has the value type, enum (with its integer type), class or interface kind its
+  flags and base give: the base counts as `System.ValueType` or `System.Enum`, and a class's base
+  chain ends at `System.Object`, only when the base's own `TypeRef` names a core-library assembly
+  (`System.Runtime`, `netstandard`, `mscorlib` or `System.Private.CoreLib`), whatever the slice's
+  `corlib` number says.
+- A reference whose scope has the name of a pinned assembly, at any version, culture or key token,
+  needs the pinned assembly's slice among the method's slices; without it the check fails with
+  `missingSlice`, so a pinned type or call, or one of another version of a pinned assembly, is
+  never read as a platform one.
 - Each `.type`, `.field`, `.call`, `.indirectCall` and string operand of the token table is
   checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
   for a type, and Lean accepts the choices that name the same scoped type with a form its kind
-  allows. A field's index and static flag, the generic arguments of a type or method instantiation,
+  allows. A field of a platform ``ValueTuple`2`` reads as the pair's first or second item only when
+  the pair's own `TypeRef` is scoped by a core-library assembly. A field's index and static flag,
+  the generic arguments of a type or method instantiation,
   the parameter and return types after substitution, the definition a member reference resolves to
   in a pinned assembly (its name, its signature and its place in its type's members) and the
   external identity of a call (the scope and Cecil's `result Owner::name(parameters)`) are
   recomputed from the bytes.
 - The local variable types are checked against the standalone signature the body header names.
-- The method's own identity is checked against its `MethodDef` row: owner, flags, calling
-  convention, parameter and return types, generic parameter counts and flags, the class layout
-  facts of a class receiver. The row's name and signature give Cecil's full name of the method,
-  for a generic instance at the type arguments its evidence states, and `BodyDecodes` equates it
-  with the evidence's `signature`, the string `Extracted.signatures` lists and proofs select the
-  method by. A row whose flags give it no IL body (abstract, platform invoke, internal call, or
-  a code type other than IL) is refused. The address of the body and the parameter list are not
-  read.
+- The method's own identity is checked against four columns of its `MethodDef` row. `Flags` and
+  `ImplFlags` must equal the evidence's attributes and implementation flags. The `Signature` blob
+  gives the calling convention, generic arity and parameter and return types. `Name`, with the
+  signature, gives Cecil's full name of the method, for a generic instance at the type arguments
+  its evidence states, and `BodyDecodes` equates it with the evidence's `signature`, the string
+  `Extracted.signatures` lists and proofs select the method by. The owner is the `TypeDef` whose
+  method range holds the row, and its `GenericParam` rows and the method's give the generic
+  parameter counts and flags; a class receiver also checks the class layout facts. A row whose
+  flags give it no IL body (abstract, platform invoke, internal call, or a code type other than
+  IL) is refused. The `RVA` and `ParamList` columns are not read.
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
