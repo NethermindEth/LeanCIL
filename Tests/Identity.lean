@@ -14,9 +14,9 @@ namespace Tests.Identity
 
 open CIL
 
-/-- The core library assembly of .NET 10. -/
+/-- The core library assembly of .NET 11. -/
 def runtime : AssemblyName :=
-  { name := name!"System.Runtime", version := ⟨10, 0, 0, 0⟩, culture := name!"",
+  { name := name!"System.Runtime", version := ⟨11, 0, 0, 0⟩, culture := name!"",
     publicKeyToken := some 0xb03f5f7f11d50a3a }
 
 /-- An application assembly with a neutral culture and a null public key token. -/
@@ -42,11 +42,11 @@ def enumeratorType : TypeIdentity :=
 #guard_msgs in
 #eval (str!"a \"quoted\" line").display
 
-/-- info: "10.0.0.0" -/
+/-- info: "11.0.0.0" -/
 #guard_msgs in
 #eval runtime.version.display
 
-/-- info: "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" -/
+/-- info: "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" -/
 #guard_msgs in
 #eval runtime.display
 
@@ -64,7 +64,7 @@ def enumeratorType : TypeIdentity :=
 #guard_msgs in
 #eval pointType.display
 
-#guard enumeratorType.display == "[System.Runtime,10.0.0.0,neutral,b03f5f7f11d50a3a]" ++
+#guard enumeratorType.display == "[System.Runtime,11.0.0.0,neutral,b03f5f7f11d50a3a]" ++
   "System.Collections.Generic.List`1/Enumerator"
 
 /-- info: "[Examples,1.0.0.0,en-US,null]Global" -/

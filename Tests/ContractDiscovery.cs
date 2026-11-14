@@ -37,7 +37,7 @@ bool Same(string? left, string right) => left is not null && string.Equals(Path.
     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
 File.WriteAllText(Path.Combine(producer, "Producer.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
 <AssemblyName>ImportFixture.Lib</AssemblyName><Optimize>true</Optimize><ProduceReferenceAssembly>true</ProduceReferenceAssembly>
 </PropertyGroup></Project>
 """);
@@ -85,17 +85,17 @@ using (ZipArchive archive = ZipFile.Open(Path.Combine(feed, Package + ".1.0.0.nu
     Entry(Package + ".nuspec", Encoding.UTF8.GetBytes("""
 <?xml version="1.0"?><package><metadata><id>LeanCil.Discovery.Fixture</id><version>1.0.0</version>
 <authors>LeanCIL</authors><description>Discovery fixture</description>
-<dependencies><group targetFramework="net10.0" /></dependencies></metadata></package>
+<dependencies><group targetFramework="net11.0" /></dependencies></metadata></package>
 """));
-    Entry("ref/net10.0/" + Library + ".dll", File.ReadAllBytes(reference));
+    Entry("ref/net11.0/" + Library + ".dll", File.ReadAllBytes(reference));
     Entry("lib/net9.0/" + Library + ".dll", variants["net9"]);
-    Entry("lib/net10.0/" + Library + ".dll", variants["portable"]);
+    Entry("lib/net11.0/" + Library + ".dll", variants["portable"]);
     foreach (string rid in new[] { "linux-x64", "linux-arm64", "unix-x64", "unix" })
-        Entry("runtimes/" + rid + "/lib/net10.0/" + Library + ".dll", variants[rid]);
+        Entry("runtimes/" + rid + "/lib/net11.0/" + Library + ".dll", variants[rid]);
     Entry("contracts/" + digest + ".leancil.contracts", Encoding.UTF8.GetBytes(contract.ToJsonString()));
 }
 File.WriteAllText(Path.Combine(consumer, "Consumer.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
 <AssemblyName>ImportFixture.App</AssemblyName><Optimize>true</Optimize>
 <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally><CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies></PropertyGroup>
 <ItemGroup><PackageReference Include="LeanCil.Discovery.Fixture" Version="1.0.0" /></ItemGroup></Project>
@@ -146,7 +146,7 @@ void Rejected(string name, string marker, (int Code, string Output, JsonElement?
     if (outcome.Code != 1 || !outcome.Output.Contains(marker, StringComparison.Ordinal))
         throw new InvalidOperationException(name + " did not fail at the intended resolver guard: " + outcome.Output);
 }
-string RidAsset(string rid) => Path.Combine(bin, "runtimes", rid, "lib", "net10.0", Library + ".dll");
+string RidAsset(string rid) => Path.Combine(bin, "runtimes", rid, "lib", "net11.0", Library + ".dll");
 
 // NuGet's RuntimeGraph.ExpandRuntime and the .NET 8+ host list are breadth-first:
 // osx-x64 -> osx, unix-x64, unix and linux-musl-x64 -> linux-musl, linux-x64. A depth-first
@@ -176,11 +176,15 @@ string relocated = Path.Combine(bin, "alt", Library + ".dll");
 Directory.CreateDirectory(Path.GetDirectoryName(relocated)!);
 File.WriteAllBytes(relocated, variants["linux-x64"]);
 JsonObject localDeps = Copy(deps);
-EachLibrary(localDeps, library => library["runtimeTargets"]!["runtimes/linux-x64/lib/net10.0/" + Library + ".dll"]!["localPath"] = "alt/" + Library + ".dll");
+EachLibrary(localDeps, library =>
+    library["runtimeTargets"]!["runtimes/linux-x64/lib/net11.0/" + Library + ".dll"]!["localPath"] =
+        "alt/" + Library + ".dll");
 Selected("linux-x64", "linux-x64", relocated, Write("local.deps.json", localDeps));
-EachLibrary(localDeps, library => library["runtimeTargets"]!["runtimes/linux-x64/lib/net10.0/" + Library + ".dll"]!["localPath"] = "../" + Library + ".dll");
+EachLibrary(localDeps, library =>
+    library["runtimeTargets"]!["runtimes/linux-x64/lib/net11.0/" + Library + ".dll"]!["localPath"] =
+        "../" + Library + ".dll");
 Rejected("unsafe localPath", "Unsafe discovery asset path", Resolve("linux-x64", Write("unsafe-local.deps.json", localDeps)));
-Console.WriteLine("PASS actual SDK deps/assets and portable RID graph select the host's net10.0 runtime asset");
+Console.WriteLine("PASS actual SDK deps/assets and portable RID graph select the host's net11.0 runtime asset");
 
 Rejected("portable without RID", "Runtime identifier is required", Resolve(null));
 Rejected("RID without graph", "requires --rid-graph", Resolve("linux-x64", ridGraph: null));
@@ -212,23 +216,23 @@ foreach (JsonObject document in new[] { perLibraryDeps, perLibraryAssets })
     EachLibrary(document, library =>
     {
         JsonObject targets = library["runtimeTargets"]!.AsObject();
-        JsonNode linux = targets["runtimes/linux-x64/lib/net10.0/" + Library + ".dll"]!.DeepClone();
-        targets.Remove("runtimes/linux-x64/lib/net10.0/" + Library + ".dll");
-        targets["runtimes/linux-x64/lib/net10.0/Companion.dll"] = linux;
+        JsonNode linux = targets["runtimes/linux-x64/lib/net11.0/" + Library + ".dll"]!.DeepClone();
+        targets.Remove("runtimes/linux-x64/lib/net11.0/" + Library + ".dll");
+        targets["runtimes/linux-x64/lib/net11.0/Companion.dll"] = linux;
     });
 Rejected("per-library RID group", "no runtime implementation",
     Resolve("linux-x64", Write("group.deps.json", perLibraryDeps), Write("group.assets.json", perLibraryAssets)));
 
 JsonObject wrongFramework = Copy(deps);
 wrongFramework["runtimeTarget"]!["name"] = ".NETCoreApp,Version=v9.0";
-Rejected("wrong TFM", "requires net10.0", Resolve("linux-x64", Write("wrong-framework.deps.json", wrongFramework)));
+Rejected("wrong TFM", "requires net11.0", Resolve("linux-x64", Write("wrong-framework.deps.json", wrongFramework)));
 
 JsonObject traversalDeps = Copy(deps), traversalAssets = Copy(assets);
 foreach (JsonObject document in new[] { traversalDeps, traversalAssets })
     EachLibrary(document, library =>
     {
         JsonObject targets = library["runtimeTargets"]!.AsObject();
-        string path = "runtimes/linux-x64/lib/net10.0/" + Library + ".dll";
+        string path = "runtimes/linux-x64/lib/net11.0/" + Library + ".dll";
         JsonNode entry = targets[path]!.DeepClone();
         targets.Remove(path);
         targets["../../" + Library + ".dll"] = entry;
@@ -237,7 +241,8 @@ Rejected("asset traversal", "Unsafe discovery asset path",
     Resolve("linux-x64", Write("traversal.deps.json", traversalDeps), Write("traversal.assets.json", traversalAssets)));
 
 JsonObject conflictingAssets = Copy(assets);
-EachLibrary(conflictingAssets, library => library["runtimeTargets"]!.AsObject().Remove("runtimes/linux-x64/lib/net10.0/" + Library + ".dll"));
+EachLibrary(conflictingAssets, library =>
+    library["runtimeTargets"]!.AsObject().Remove("runtimes/linux-x64/lib/net11.0/" + Library + ".dll"));
 Rejected("deps/assets disagreement", "Conflicting deps/NuGet runtime asset", Resolve("linux-x64", "", Write("conflict.assets.json", conflictingAssets)));
 
 JsonObject referenceDeps = Copy(deps), referenceAssets = Copy(assets);
@@ -262,12 +267,12 @@ byte[] Attributed(byte[] assembly, string? advertised)
     metadata.Write(bytes);
     return bytes.ToArray();
 }
-string packagedReference = Path.Combine(packageRoot, "ref", "net10.0", Library + ".dll");
+string packagedReference = Path.Combine(packageRoot, "ref", "net11.0", Library + ".dll");
 byte[] originalReference = File.ReadAllBytes(packagedReference);
 File.WriteAllBytes(packagedReference, Attributed(originalReference, new string('0', 64)));
 Rejected("reference/runtime digest disagreement", "Reference/runtime contract attribute mismatch", Resolve("linux-x64"));
 File.WriteAllBytes(packagedReference, originalReference);
-string packagedRuntime = Path.Combine(packageRoot, "runtimes", "linux-x64", "lib", "net10.0", Library + ".dll");
+string packagedRuntime = Path.Combine(packageRoot, "runtimes", "linux-x64", "lib", "net11.0", Library + ".dll");
 byte[] unadvertised = Attributed(variants["linux-x64"], null);
 foreach (string path in new[] { RidAsset("linux-x64"), packagedRuntime }) File.WriteAllBytes(path, unadvertised);
 (int Code, string Output, JsonElement? Result) referenceAdvertised = Resolve("linux-x64");
@@ -277,7 +282,7 @@ if (referenceAdvertised.Code != 0 || !Same(referenceAdvertised.Result!.Value.Get
 Console.WriteLine("PASS resolver rejects missing RID or graph, cross-architecture and malformed graphs, and unsafe or ambiguous manifests");
 
 // Certify the resolved linux-x64 import; the resolver output is locations, the pins come separately.
-string selectedImplementation = Path.Combine(packageRoot, "runtimes", "linux-x64", "lib", "net10.0", Library + ".dll");
+string selectedImplementation = Path.Combine(packageRoot, "runtimes", "linux-x64", "lib", "net11.0", Library + ".dll");
 string artifact = Path.Combine(root, "ProducerArtifact");
 Run([.. cli, "extract", selectedImplementation, "ImportFixture.Library::AddOne(ulong)", artifact]);
 File.WriteAllText(Path.Combine(artifact, "verification.json"), JsonSerializer.Serialize(new
@@ -306,7 +311,8 @@ JsonElement import = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Pa
 JsonElement binding = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(selectedOutput, "identity.json"))).GetProperty("imports")[0];
 if (import.GetProperty("implementationSha256").GetString() != Hash(variants["linux-x64"]) ||
     !Same(ExtractionIdentity.Resolve(selectedOutput, binding.GetProperty("implementationPath").GetString()!), RidAsset("linux-x64")) || import.GetProperty("interfaceDigest").GetString() != digest)
-    throw new InvalidOperationException("Report did not name the resolved net10.0 linux-x64 implementation: " + import);
+    throw new InvalidOperationException(
+        "Report did not name the resolved net11.0 linux-x64 implementation: " + import);
 (int Code, string Output, string Stdout, string Stderr) wrongPin = Execute(Extract(Path.Combine(root, "WrongPin"), Hash(variants["linux-arm64"])));
 if (wrongPin.Code != 1 || !wrongPin.Output.Contains("implementation SHA-256 mismatch", StringComparison.Ordinal) ||
     File.Exists(Path.Combine(root, "WrongPin", "Extracted.lean")))

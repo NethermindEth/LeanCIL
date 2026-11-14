@@ -139,7 +139,7 @@ void Reject(int sample, string name, Func<string, string> mutate,
 foreach (var (name, scope) in new[]
 {
     ("wrong-runtime-version", "System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"),
-    ("wrong-runtime-token", "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=0000000000000000")
+    ("wrong-runtime-token", "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=0000000000000000")
 })
     Reject(0, name, source => ChangeDefinition(source, "method1Closed", line =>
         line.Replace("Extraction.runtimeScope", System.Text.Json.JsonSerializer.Serialize(scope))));
@@ -296,7 +296,7 @@ void CheckExternalIdentities()
     var identityEvidence = new ExternalIdentityEvidence();
     var identities = new[]
     {
-        "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::" +
+        "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::" +
             "System.UInt64 Namespace.Type::Method(System.UInt64)",
         "Unicode::Namespace.λ漢字::Method(\"quoted\",\\path)",
         "System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=0000000000000000::" +
@@ -335,7 +335,7 @@ void CheckExternalIdentities()
     foreach (var (name, source) in new[]
     {
         ("changed-byte", baseline.Replace("#[83,", "#[84,", StringComparison.Ordinal)),
-        ("changed-version", baseline.Replace("Version=10.0.0.0", "Version=11.0.0.0", StringComparison.Ordinal)),
+        ("changed-version", baseline.Replace("Version=11.0.0.0", "Version=10.0.0.0", StringComparison.Ordinal)),
         ("changed-token", baseline.Replace("b03f5f7f11d50a3a", "b03f5f7f11d50a3b", StringComparison.Ordinal))
     })
     {

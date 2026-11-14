@@ -18,7 +18,7 @@ partial class Program
         Directory.CreateDirectory(package);
         File.WriteAllText(Path.Combine(assemblyRoot, "Components.csproj"), """
         <Project Sdk="Microsoft.NET.Sdk">
-          <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+          <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
         </Project>
         """);
         File.WriteAllText(Path.Combine(assemblyRoot, "Methods.cs"), """

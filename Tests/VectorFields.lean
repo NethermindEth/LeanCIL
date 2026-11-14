@@ -82,17 +82,21 @@ def raw : List RawLayout := [{ identity := "VectorHolder", explicit := true, pac
 
 def vector (scope : String) : TypeExpr := .apply
   (.constructor scope "System.Runtime.Intrinsics.Vector256`1")
-  (.atom "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" "System.UInt64")
+  (.atom "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+    "System.UInt64")
 
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
-    (vector "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51") false⟩ =
+    (vector "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
+      PublicKeyToken=cc7b13ffcd2ddd51")
+    false⟩ =
     some [.field 0 0 0 .load] := by decide
 
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
     (vector "Spoofed.Intrinsics") false⟩ = none := by decide
 
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
-    (.atom "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" "System.UInt64")
+    (.atom "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+      "System.UInt64")
     false⟩ = none := by decide
 
 end Tests.VectorFields

@@ -25,7 +25,7 @@ Directory.CreateDirectory(consumer);
 var project = Path.Combine(consumer, "Workspace.csproj");
 File.WriteAllText(project, """
     <Project Sdk="Microsoft.NET.Sdk">
-      <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+      <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
     </Project>
     """);
 var wide = Path.Combine(consumer, "Wide.cs");

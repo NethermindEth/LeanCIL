@@ -93,7 +93,7 @@ internal sealed class ImportResolution : IDisposable
                         throw new InvalidDataException("Import implementation MVID mismatch.");
                     string? framework = module.Assembly.CustomAttributes.SingleOrDefault(attribute =>
                         attribute.AttributeType.FullName == "System.Runtime.Versioning.TargetFrameworkAttribute")?.ConstructorArguments.Single().Value as string;
-                    if (framework != contract.TargetFramework || framework != ".NETCoreApp,Version=v10.0")
+                    if (framework != contract.TargetFramework || framework != ".NETCoreApp,Version=v11.0")
                         throw new InvalidDataException("Import target framework mismatch.");
                     Library? existing = librariesByIdentity.GetValueOrDefault(contract.AssemblyIdentity);
                     if (existing is not null)
