@@ -97,7 +97,7 @@ elab_rules : command
               (memory : Memory) ($rest : List Value) $params* $operands*,
               step body $opTerm pc args frame $stack memory =
                 step body $opTerm pc args frame $stack memory)
-        -- Proves `∀ xs, lhs = rhs` with `rhs` the arm the dispatcher selects, cleaned up.
+        -- Proves `lhs = rhs` for all `xs`, with `rhs` the arm the dispatcher selects, cleaned up.
         let reduceEquation (statement : Expr) : TermElabM (Expr × Expr) :=
           forallTelescope statement fun xs equation => do
             let some (_, lhs, _) := equation.eq? | throwError "cil_value_steps: not an equation"
@@ -169,16 +169,6 @@ cil_value_steps [div, div_un, rem, rem_un, add_ovf, add_ovf_un, sub_ovf, sub_ovf
 -- reduces them to the literals a caller's `calculated` fact states.
 attribute [cil_step] CIL.ConvTarget.width CIL.ConvTarget.signed
 
-#print axioms step_add_ovf_i64_i64_eq
-#print axioms step_add_ovf_un_i64_i64_eq
-#print axioms step_sub_ovf_un_i32_i32_eq
-#print axioms step_mul_ovf_un_i32_i64_eq
-#print axioms step_conv_ovf_i64_eq
-#print axioms step_conv_ovf_un_i32_eq
-#print axioms step_conv_i_i32_eq
-#print axioms step_div_i64_i64_eq
-#print axioms step_rem_un_i32_i32_eq
-#print axioms step_div_un_i32_i64_eq
 
 /-- A proved overflow-checked arithmetic result advances the instruction without unfolding its
     check; `selected` names the constructor's flags. -/
