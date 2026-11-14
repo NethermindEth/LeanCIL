@@ -212,7 +212,7 @@ proof compilations and a header-only baseline per scalar, memory, accumulate and
   at most 100 heartbeats to an instruction, which costs about 120,000, or to a direct lookup,
   between the smallest and the largest size. A lookup that tries to unify with every equation
   hypothesis adds 600 to 1,950 and fails that limit, as does a direct lookup that builds an index
-  of the hypotheses, which adds about 410; reading each hypothesis once adds about 23.
+  of the hypotheses, which adds about 410; reading each hypothesis once adds about 25.
 - Heartbeats and bytes must repeat exactly across the three runs.
 - Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
   recheck. Compiled proof bytes subtract the same module containing only the body and its lookup

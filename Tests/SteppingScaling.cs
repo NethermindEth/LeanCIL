@@ -10,7 +10,7 @@ const double WorkGrowthLimit = 1.35;
 const double TimeGrowthLimit = 2.0;
 // Most heartbeats one more hypothesis in scope may add to one instruction, which costs about 120,000.
 // Unifying each lookup with every equation hypothesis added 600 to 1,950. A lookup outside a stepping
-// driver reads each hypothesis once, about 23 heartbeats; building an index for it took about 410.
+// driver reads each hypothesis once, about 25 heartbeats; building an index for it took about 410.
 const double HypothesisCostLimit = 100.0;
 const int Repetitions = 3;
 const int LocalCount = 8;
