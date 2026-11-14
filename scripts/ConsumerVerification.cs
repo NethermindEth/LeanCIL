@@ -763,43 +763,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static string CertifiedModuleDirectory(string certified) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(certified, ".lake/build/lib/lean")));
 
-    /// <summary>Resolves directory aliases, including ancestors of build directories not yet created.</summary>
-    static string PhysicalImportDirectory(string path)
-    {
-        const int maximumLinks = 64;
-        var remainingLinks = maximumLinks;
-        string Resolve(string absolute)
-        {
-            var root = Path.GetPathRoot(absolute)
-                ?? throw new InvalidDataException("Import directory must be absolute: " + absolute);
-            var current = root;
-            foreach (var component in absolute[root.Length..].Split(
-                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (component == ".") continue;
-                if (component == "..")
-                {
-                    current = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(current)) ?? root;
-                    continue;
-                }
-                var candidate = Path.Combine(current, component);
-                var directory = new DirectoryInfo(candidate);
-                if (directory.LinkTarget is { } target)
-                {
-                    if (--remainingLinks < 0)
-                        throw new InvalidDataException("Import directory has too many symbolic links: " + path);
-                    current = Resolve(Path.IsPathFullyQualified(target) ? target : Path.Combine(current, target));
-                    if (!Directory.Exists(current))
-                        throw new InvalidDataException(
-                            "Import directory has an unresolved symbolic link: " + candidate);
-                }
-                else current = candidate;
-            }
-            return Path.TrimEndingDirectorySeparator(current);
-        }
-        return Resolve(path);
-    }
-
     /// <summary>Accepts only the toolchain, certified base and physical descendants of the session.</summary>
     static string[] ValidatedConsumerImportDirectories(
         string session, string trusted, string? certified, string leanPath)
