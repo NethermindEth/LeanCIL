@@ -109,7 +109,8 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
             try
             {
                 TranslatePinned(contextProbe, profiles[0]);
-                throw new InvalidOperationException("A missing metadata context was recorded as an unsupported method.");
+                throw new InvalidOperationException(
+                    "A missing metadata context was recorded as an unsupported method.");
             }
             catch (TargetInvocationException exception) when (exception.InnerException is InvalidDataException
                 { Message: "Type identity without a pinned module image" }) { checkedMissingContext = true; }
