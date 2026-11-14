@@ -363,7 +363,7 @@ The report has one line per image and one per item:
 Valid: strict binding audit of /work/artifacts/Add
   Certificate: Extracted.translation_valid audited with the binding theorems; generatedSha256 ceba1286...4924
   Image Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: SHA-256 a9351b77...abe4 stated
-  SHA-256 digest of Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: reconfirmed (BindingAudit.Ia9351b776ddd5e75.digest)
+  SHA-256 digest of Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: reconfirmed (BindingAudit.Ia9351b77...abe4.digest)
   PE container and method body locations: reconfirmed (BindingAudit.bodies)
   Copied metadata rows and heap entries: not covered (the extraction's evidence carries no copied metadata rows or heap entries to check)
   Initial values of static data: not covered (no check reads static data from the image)
