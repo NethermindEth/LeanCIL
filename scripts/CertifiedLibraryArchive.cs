@@ -136,8 +136,8 @@ static class CertifiedLibraryArchive
                 try
                 {
                     using var reader = new TarReader(process.StandardOutput.BaseStream, leaveOpen: true);
-                    // Entry names differing only in case are one file where the staging volume ignores case.
-                    var seen = new HashSet<string>(Program.LocationComparer);
+                    // Entry names differing only in case are one file unless the staging volume tells case apart.
+                    var seen = new HashSet<string>(Program.CollidingLocationComparer);
                     while (reader.GetNextEntry() is { } entry)
                     {
                         var path = EntryPath(staging, entry.Name);

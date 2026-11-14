@@ -502,15 +502,24 @@ partial class Program : IDisposable
 
     /// <summary>
     /// `path` relative to `root`, or null when it lies outside; both are taken as already resolved. Two names
-    /// differing only in case are one entry exactly where the volume holding their directory says so.
+    /// differing only in case are one entry exactly where the directory holding them is known to ignore case.
     /// </summary>
     internal static string? RelativeBelow(string root, string path) => RelativeBelow(root, path, NameCaseIn);
 
     /// <summary>
-    /// `path` relative to `root` (`.` when they are equal), or null when it lies outside; both are full paths
-    /// without `.` or `..` components. `nameCaseIn` gives the rule by which a directory matches entry names.
+    /// Whether `path` may lie below `root` (both resolved): as <see cref="RelativeBelow(string, string)"/>, but a
+    /// name differing only in case matches where the case rule is unknown, for checks that must keep outputs apart.
     /// </summary>
-    internal static string? RelativeBelow(string root, string path, Func<string, NameCase> nameCaseIn)
+    internal static bool MayLieBelow(string root, string path) =>
+        RelativeBelow(root, path, NameCaseIn, unknownMatches: true) is not null;
+
+    /// <summary>
+    /// `path` relative to `root` (`.` when they are equal), or null when it lies outside; both are full paths
+    /// without `.` or `..` components. `nameCaseIn` gives the rule by which a directory matches entry names, and a
+    /// name differing only in case where that rule is unknown matches only when `unknownMatches` is set.
+    /// </summary>
+    internal static string? RelativeBelow(string root, string path, Func<string, NameCase> nameCaseIn,
+        bool unknownMatches = false)
     {
         var rootPrefix = Path.GetPathRoot(root) ?? "";
         // Drive letters and server names match ignoring case on every volume.
@@ -522,9 +531,12 @@ partial class Program : IDisposable
         for (var index = 0; index < rootNames.Length; index++)
         {
             var (expected, actual) = (rootNames[index], pathNames[index]);
-            if (expected != actual && !(string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase) &&
-                    nameCaseIn(directory) == NameCase.Insensitive))
-                return null;
+            if (expected != actual)
+            {
+                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase)) return null;
+                var rule = nameCaseIn(directory);
+                if (rule is NameCase.Sensitive || rule is NameCase.Unknown && !unknownMatches) return null;
+            }
             directory = Path.Join(directory, expected);
         }
         return pathNames.Length == rootNames.Length ? "."
@@ -536,59 +548,138 @@ partial class Program : IDisposable
         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 
     /// <summary>
-    /// Whether `path` is `root` or lies below it once links in both are followed, under the case rule of the
-    /// volumes that hold them.
+    /// Whether `path` is `root` or lies below it once links in both are followed, matching a name in another case
+    /// only where the directory holding it is known to ignore case.
     /// </summary>
     internal static bool Inside(string root, string path) => ResolvedRelativePath(root, path) is not null;
 
     /// <summary>
-    /// Whether two paths name one location once links are followed, under the case rule of the volumes that hold
-    /// them.
+    /// Whether two paths name one location once links are followed, matching a name in another case only where the
+    /// directory holding it is known to ignore case.
     /// </summary>
     internal static bool SameLocation(string first, string second) => ResolvedRelativePath(first, second) == ".";
 
-    /// <summary>How a directory matches the names of its entries: telling case apart or ignoring it.</summary>
-    internal enum NameCase { Sensitive, Insensitive }
+    /// <summary>
+    /// How a directory matches the names of its entries: telling case apart, ignoring it, or unknown where neither
+    /// the operating system nor the directory's entries tell.
+    /// </summary>
+    internal enum NameCase { Sensitive, Insensitive, Unknown }
 
+    // Answers for directories that existed when asked; an unknown rule is asked again.
     static readonly ConcurrentDictionary<string, NameCase> nameCases = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The rule by which the volume holding `directory` matches entry names, probed once per directory. A directory
-    /// that does not exist yet takes the rule of its nearest existing ancestor, where it would be created.
+    /// The rule by which `directory` matches entry names. A directory that does not exist yet takes the rule of its
+    /// nearest existing ancestor, where it would be created; the operating system is asked first, and the
+    /// directory's entries are read where it gives no answer.
     /// </summary>
-    internal static NameCase NameCaseIn(string directory) =>
-        nameCases.GetOrAdd(Path.GetFullPath(directory), ProbeNameCase);
+    internal static NameCase NameCaseIn(string directory)
+    {
+        string? existing = Path.GetFullPath(directory);
+        while (existing is not null && !Directory.Exists(existing)) existing = Path.GetDirectoryName(existing);
+        if (existing is null) return NameCase.Unknown;
+        if (nameCases.TryGetValue(existing, out var known)) return known;
+        var rule = QueriedNameCase(existing) ?? EntryNameCase(existing);
+        if (rule is not NameCase.Unknown) nameCases.TryAdd(existing, rule);
+        return rule;
+    }
 
     /// <summary>
-    /// Reads the rule from the first entry of the nearest existing directory whose name has an ASCII letter: its
-    /// case-flipped name finds it only on a volume that ignores case, unless another entry has that exact name.
-    /// Throws when no ancestor has such an entry, so no caller decides on a guess.
+    /// The rule the operating system reports for an existing directory, or null where it reports none that decides
+    /// it: the volume's case sensitivity on macOS, the case-sensitive flag of a Windows directory, and the
+    /// case-folding flag of a Linux directory.
     /// </summary>
-    static NameCase ProbeNameCase(string directory)
+    internal static NameCase? QueriedNameCase(string directory)
     {
-        for (var current = directory; current is not null; current = Path.GetDirectoryName(current))
+        if (OperatingSystem.IsMacOS())
+            return pathconf(directory, CaseSensitivePathSetting) switch
+            {
+                1 => NameCase.Sensitive, 0 => NameCase.Insensitive, _ => null
+            };
+        if (OperatingSystem.IsWindows())
         {
-            if (!Directory.Exists(current)) continue;
-            // Links are skipped: whether a flipped name exists must not depend on where a link points.
-            string[] names;
+            using var handle = CreateFileW(Win32Path(directory), ReadAttributesAccess, ShareAll, 0, OpenExisting,
+                BackupSemantics, 0);
+            // A directory without the flag can still sit on a volume that tells case apart, such as a share.
+            return !handle.IsInvalid && GetFileInformationByHandleEx(handle, FileCaseSensitiveInfo, out var flags,
+                sizeof(uint)) && (flags & CaseSensitiveDirectoryFlag) != 0 ? NameCase.Sensitive : null;
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            var descriptor = open(directory, ReadOnlyCloseOnExec);
+            if (descriptor < 0) return null;
             try
             {
-                names = new DirectoryInfo(current).EnumerateFileSystemInfos()
-                    .Where(entry => (entry.Attributes & FileAttributes.ReparsePoint) == 0)
-                    .Select(entry => entry.Name).ToArray();
+                // Without the flag the volume may still ignore case, as a FAT or SMB mount does.
+                return ioctl(descriptor, GetFlagsRequest, out var flags) == 0 && (flags & CaseFoldFlag) != 0
+                    ? NameCase.Insensitive : null;
             }
-            catch (UnauthorizedAccessException) { continue; }
-            var spelled = new HashSet<string>(names, StringComparer.Ordinal);
-            foreach (var name in names)
-            {
-                var flipped = FlippedAsciiCase(name);
-                if (flipped == name || spelled.Contains(flipped)) continue;
-                var probe = Path.Join(current, flipped);
-                return File.Exists(probe) || Directory.Exists(probe) ? NameCase.Insensitive : NameCase.Sensitive;
-            }
+            finally { close(descriptor); }
         }
-        throw new IOException(
-            "No directory holding " + directory + " has an entry that shows the case rule of its volume.");
+        return null;
+    }
+
+    /// <summary>`_PC_CASE_SENSITIVE`: 1 where the volume holding a path tells case apart, 0 where not.</summary>
+    const int CaseSensitivePathSetting = 11;
+    const uint ReadAttributesAccess = 0x80, ShareAll = 7, OpenExisting = 3, BackupSemantics = 0x02000000;
+    /// <summary>`FileCaseSensitiveInfo` and its `FILE_CS_FLAG_CASE_SENSITIVE_DIR` bit.</summary>
+    const int FileCaseSensitiveInfo = 23;
+    const uint CaseSensitiveDirectoryFlag = 1;
+    /// <summary>`O_RDONLY | O_CLOEXEC`, `FS_IOC_GETFLAGS` and its `FS_CASEFOLD_FL` bit on Linux.</summary>
+    const int ReadOnlyCloseOnExec = 0x80000, CaseFoldFlag = 0x40000000;
+    const nuint GetFlagsRequest = 0x80086601;
+
+    [DllImport("libc", CharSet = CharSet.Ansi, SetLastError = true)]
+    static extern nint pathconf(string path, int name);
+
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string fileName, uint access, uint share,
+        nint securityAttributes, uint disposition, uint flags, nint template);
+
+    [DllImport("kernel32", SetLastError = true)]
+    static extern bool GetFileInformationByHandleEx(Microsoft.Win32.SafeHandles.SafeFileHandle file,
+        int informationClass, out uint information, uint size);
+
+    [DllImport("libc", CharSet = CharSet.Ansi, SetLastError = true)]
+    static extern int open(string path, int flags);
+
+    [DllImport("libc", SetLastError = true)]
+    static extern int ioctl(int descriptor, nuint request, out int flags);
+
+    [DllImport("libc")]
+    static extern int close(int descriptor);
+
+    /// <summary>
+    /// The rule shown by the entries of an existing directory: the case-flipped name of an entry finds it only
+    /// where case is ignored. Entries whose flipped name is itself listed are passed over, a finding is confirmed
+    /// by listing the directory again, and Unknown is returned when no entry decides it.
+    /// </summary>
+    internal static NameCase EntryNameCase(string directory)
+    {
+        if (EntryNames(directory) is not { } names) return NameCase.Unknown;
+        foreach (var name in names)
+        {
+            var flipped = FlippedAsciiCase(name);
+            if (flipped == name || names.Contains(flipped)) continue;
+            var found = File.Exists(Path.Join(directory, flipped)) || Directory.Exists(Path.Join(directory, flipped));
+            // The listing must still hold the entry and not its flipped name, or it changed while being read.
+            if (EntryNames(directory) is not { } again || !again.Contains(name) || again.Contains(flipped)) continue;
+            return found ? NameCase.Insensitive : NameCase.Sensitive;
+        }
+        return NameCase.Unknown;
+    }
+
+    /// <summary>The names of a directory's entries other than links as listed, or null when unreadable.</summary>
+    static HashSet<string>? EntryNames(string directory)
+    {
+        // Links are skipped: whether a flipped name exists must not depend on where a link points.
+        try
+        {
+            return new DirectoryInfo(directory).EnumerateFileSystemInfos()
+                .Where(entry => (entry.Attributes & FileAttributes.ReparsePoint) == 0)
+                .Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>`name` with each ASCII letter in the other case.</summary>
@@ -600,13 +691,15 @@ partial class Program : IDisposable
     });
 
     /// <summary>
-    /// Equality of full paths without `.` or `..` components under the case rule of the volumes that hold them:
-    /// equal hash codes for every spelling that differs only in case, so hashed sets and groupings stay exact.
+    /// Equality of full paths without `.` or `..` components, matching a name in another case where the directory
+    /// holding it ignores case and, when `unknownMatches` is set, where its rule is unknown. Every spelling that
+    /// differs only in case has one hash code, so hashed sets and groupings stay exact.
     /// </summary>
-    internal sealed class LocationEquality(Func<string, NameCase> nameCaseIn) : IEqualityComparer<string>
+    internal sealed class LocationEquality(Func<string, NameCase> nameCaseIn, bool unknownMatches)
+        : IEqualityComparer<string>
     {
         public bool Equals(string? first, string? second) => first is null || second is null ? first == second
-            : RelativeBelow(first, second, nameCaseIn) == ".";
+            : RelativeBelow(first, second, nameCaseIn, unknownMatches) == ".";
 
         public int GetHashCode(string path)
         {
@@ -618,8 +711,14 @@ partial class Program : IDisposable
         }
     }
 
-    /// <summary>Equality of resolved paths under the case rule of the volumes that hold them.</summary>
-    internal static readonly LocationEquality LocationComparer = new(NameCaseIn);
+    /// <summary>Equality of resolved paths known to name one location, for checks that require it.</summary>
+    internal static readonly LocationEquality LocationComparer = new(NameCaseIn, unknownMatches: false);
+
+    /// <summary>
+    /// Equality of resolved paths that may name one location, for checks that keep outputs apart: two spellings
+    /// differing only in case collide unless the directory holding them is known to tell case apart.
+    /// </summary>
+    internal static readonly LocationEquality CollidingLocationComparer = new(NameCaseIn, unknownMatches: true);
 
     /// <summary>Deletes a tree that may hold git objects, which git marks read-only and Windows refuses to delete.</summary>
     static void DeleteTree(string directory)

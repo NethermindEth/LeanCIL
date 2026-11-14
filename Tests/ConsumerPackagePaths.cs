@@ -44,6 +44,10 @@ partial class Program
             Require(NameCaseIn(real) == (sameUnderCase ? NameCase.Insensitive : NameCase.Sensitive) &&
                 NameCaseIn(Path.Combine(real, "missing", "deeper")) == NameCaseIn(real),
                 "The probe read another case rule than the temporary volume follows.");
+            // macOS reports the case rule of every volume; Windows and Linux report only a flag that decides it.
+            var queried = QueriedNameCase(real);
+            Require(queried == NameCaseIn(real) || queried is null && !OperatingSystem.IsMacOS(),
+                $"The operating system reported {queried} for the temporary volume.");
             Console.WriteLine("PASS the probe reads the case rule of the temporary volume");
 
             CheckNameCaseRule(work, Require);
@@ -150,13 +154,22 @@ partial class Program
         require(RelativeBelow(package, respelled, mounted) == "Module.lean" &&
             RelativeBelow(package, sibling, mounted) is null,
             "A path crossing volumes with different case rules was judged by one rule.");
-        LocationEquality sensitive = new(Every(NameCase.Sensitive)), insensitive = new(Every(NameCase.Insensitive));
+        LocationEquality sensitive = new(Every(NameCase.Sensitive), unknownMatches: true);
+        LocationEquality insensitive = new(Every(NameCase.Insensitive), unknownMatches: false);
         var upper = Path.Combine(volume, "PACKAGE");
         require(!sensitive.Equals(package, upper) && insensitive.Equals(package, upper) &&
             insensitive.GetHashCode(package) == insensitive.GetHashCode(upper) &&
             new HashSet<string>([package, upper], insensitive).Count == 1 &&
             new HashSet<string>([package, upper], sensitive).Count == 2,
             "Locations differing only in case were compared against the given rule.");
+        // An unknown rule never admits a path into a package, and keeps two outputs apart as if they collided.
+        LocationEquality known = new(Every(NameCase.Unknown), unknownMatches: false);
+        LocationEquality colliding = new(Every(NameCase.Unknown), unknownMatches: true);
+        require(RelativeBelow(package, sibling, Every(NameCase.Unknown)) is null &&
+            RelativeBelow(package, sibling, Every(NameCase.Unknown), unknownMatches: true) == "Module.lean" &&
+            !known.Equals(package, upper) && colliding.Equals(package, upper) &&
+            new HashSet<string>([package, upper], colliding).Count == 1,
+            "A name in another case under an unknown rule was admitted, or two outputs were not kept apart.");
         Console.WriteLine("PASS paths are compared under the case rule of each directory that holds a name");
     }
 
@@ -168,6 +181,10 @@ partial class Program
     static void CheckCaseSensitiveVolume(string directory, Action<bool, string> require,
         Action<string, string, string> reject)
     {
+        // Asked before it exists, the directory takes the rule of the volume it would be made on.
+        var before = NameCaseIn(directory);
+        require(before == NameCaseIn(Path.GetDirectoryName(directory)!),
+            "A missing directory did not take the rule of its nearest existing ancestor.");
         if (CaseSensitiveDirectory(directory) is not { } removeVolume) return;
         try
         {
@@ -186,9 +203,32 @@ partial class Program
                 Inside(package, Path.Combine(package, ".lake")) &&
                 new[] { package, sibling }.Select(ResolvedPath).Distinct(LocationComparer).Count() == 2,
                 "A sibling whose name differs only in case was judged the package's location.");
+            // The answer given before the volume existed is not reused for it.
             require(NameCaseIn(directory) == NameCase.Sensitive &&
                 NameCaseIn(Path.Combine(directory, "missing", "deeper")) == NameCase.Sensitive,
-                "The probe read a case-sensitive volume as ignoring case.");
+                "A case-sensitive volume was read as ignoring case, or given an answer from before it existed.");
+            require(OperatingSystem.IsLinux() ? QueriedNameCase(directory) is null
+                    : QueriedNameCase(directory) == NameCase.Sensitive,
+                $"The operating system reported {QueriedNameCase(directory)} for a case-sensitive volume.");
+            // Both spellings of one name are listed, so neither shows the rule; the other entry does.
+            require(EntryNameCase(directory) == NameCase.Sensitive,
+                "The entries of a directory holding both spellings of a name were read as ignoring case.");
+            var pair = Path.Combine(directory, "pair");
+            Directory.CreateDirectory(Path.Combine(pair, "name"));
+            Directory.CreateDirectory(Path.Combine(pair, "NAME"));
+            var empty = Path.Combine(directory, "empty");
+            Directory.CreateDirectory(empty);
+            require(EntryNameCase(pair) == NameCase.Unknown && EntryNameCase(empty) == NameCase.Unknown,
+                "Entries that cannot show the case rule were read as showing one.");
+            // An unknown rule is never kept: the directory is asked again once an entry can show it.
+            var firstAnswer = NameCaseIn(empty);
+            require(firstAnswer == (QueriedNameCase(empty) ?? NameCase.Unknown),
+                $"A directory whose entries show no rule was given {firstAnswer}.");
+            Directory.CreateDirectory(Path.Combine(empty, "probe"));
+            require(NameCaseIn(empty) == NameCase.Sensitive,
+                "An unknown case rule was kept after the directory gained an entry that shows it.");
+            reject(Path.Combine(pair, "name"), Path.Combine(pair, "NAME", "Module.lean"),
+                "a sibling named in another case where the entries show no rule");
             Console.WriteLine(
                 "PASS on a case-sensitive volume a sibling named in another case lies outside the package");
         }

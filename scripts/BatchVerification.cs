@@ -43,8 +43,8 @@ partial class Program
         requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof),
             Output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(r.Output)),
             Assembly = Path.GetFullPath(r.Assembly ?? assembly) }).ToArray();
-        // Outputs named in another case are distinct where the volume tells case apart; one reached by a link is not.
-        if (requests.Select(r => ResolvedPath(r.Output)).Distinct(LocationComparer).Count() != requests.Count)
+        // Outputs in another case are distinct only where the volume is known to tell case apart; a link never is.
+        if (requests.Select(r => ResolvedPath(r.Output)).Distinct(CollidingLocationComparer).Count() != requests.Count)
             throw new ArgumentException("Batch outputs must be distinct");
         foreach (var request in requests)
         {

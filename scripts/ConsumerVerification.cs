@@ -1469,7 +1469,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 Fail([members[k]], failure);
             }
         }
-        var comparer = LocationComparer;
+        var comparer = CollidingLocationComparer;
         var all = Enumerable.Range(0, requests.Count).ToArray();
         var identities = new string[requests.Count];
         var extractions = new ExtractionIdentity[requests.Count];
@@ -1494,8 +1494,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         foreach (var i in all)
             try { proofs[i] = Within(root, Path.GetRelativePath(root, Path.GetFullPath(requests[i].Proof))); }
             catch (Exception error) { Fail([i], error); }
-        // Only the last request for an output may leave a certificate, as in sequential runs. Two spellings of one
-        // output, such as one through a link or one named in another case where the volume ignores case, are one.
+        // Only the last request for an output may leave a certificate, as in sequential runs. Spellings that may name
+        // one output, through a link or in another case where case is ignored or unknown, can only lose one.
         var locations = outputs.Select(ResolvedPath).ToArray();
         var last = all.GroupBy(i => locations[i], comparer)
             .ToDictionary(group => group.Key, group => group.Max(), comparer);
@@ -1505,8 +1505,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         void CheckExtractions(int[] members)
         {
             Stage(members, "extraction integrity");
-            // Grouped by location, so each output directory is checked once whatever its spelling.
-            Parallel.ForEach(Pending(members).GroupBy(i => locations[i], comparer), parallel, group =>
+            // Grouped by exact resolved spelling, so every directory is checked whatever its volume's case rule.
+            Parallel.ForEach(Pending(members).GroupBy(i => locations[i], StringComparer.Ordinal), parallel, group =>
             {
                 try { RunExtractor(["dotnet", ExtractorPath, "check", outputs[group.First()]]); }
                 catch (Exception error) { Fail(group, error); }
@@ -1543,7 +1543,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             foreach (var i in live)
                 try
                 {
-                    if (consumerSources.Any(source => RelativeBelow(locations[i], source) is not null))
+                    if (consumerSources.Any(source => MayLieBelow(locations[i], source)))
                         throw new InvalidDataException(
                             "Batch outputs must lie outside the consumer sources, for example under artifacts/: " +
                             outputs[i]);
