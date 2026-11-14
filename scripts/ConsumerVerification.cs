@@ -763,6 +763,57 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static string CertifiedModuleDirectory(string certified) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(certified, ".lake/build/lib/lean")));
 
+    /// <summary>Resolves directory aliases, including ancestors of build directories not yet created.</summary>
+    static string PhysicalImportDirectory(string path)
+    {
+        const int maximumLinks = 64;
+        var remainingLinks = maximumLinks;
+        string Resolve(string absolute)
+        {
+            var root = Path.GetPathRoot(absolute)
+                ?? throw new InvalidDataException("Import directory must be absolute: " + absolute);
+            var current = root;
+            foreach (var component in absolute[root.Length..].Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (component == ".") continue;
+                if (component == "..")
+                {
+                    current = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(current)) ?? root;
+                    continue;
+                }
+                var candidate = Path.Combine(current, component);
+                var directory = new DirectoryInfo(candidate);
+                if (directory.LinkTarget is { } target)
+                {
+                    if (--remainingLinks < 0)
+                        throw new InvalidDataException("Import directory has too many symbolic links: " + path);
+                    current = Resolve(Path.IsPathFullyQualified(target) ? target : Path.Combine(current, target));
+                    if (!Directory.Exists(current))
+                        throw new InvalidDataException("Import directory has an unresolved symbolic link: " + candidate);
+                }
+                else current = candidate;
+            }
+            return Path.TrimEndingDirectorySeparator(current);
+        }
+        return Resolve(path);
+    }
+
+    /// <summary>Accepts only the toolchain, certified base and physical descendants of the session.</summary>
+    static string[] ValidatedConsumerImportDirectories(string session, string trusted, string? certified, string leanPath)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var physicalSession = PhysicalImportDirectory(session);
+        var physicalTrusted = PhysicalImportDirectory(trusted);
+        var physicalCertified = certified is null ? null : PhysicalImportDirectory(certified);
+        return leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => PhysicalImportDirectory(Path.IsPathFullyQualified(path) ? path : Path.Combine(session, path)))
+            .Where(path => !path.Equals(physicalTrusted, comparison))
+            .Select(path => path.Equals(physicalCertified, comparison) ? certified! :
+                Within(session, Path.GetRelativePath(physicalSession, Within(physicalSession, path))))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
+    }
+
     (string[] Directories, string LeanPath) ConsumerImportDirectories(string session)
     {
         // Ask the same Lake environment used by the checker. Package buildDir and
@@ -771,15 +822,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .Where(line => line.StartsWith("LEAN_PATH=", StringComparison.Ordinal)).ToArray();
         if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean import paths.");
         var leanPath = lines[0]["LEAN_PATH=".Length..];
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var trusted = Path.GetFullPath(Path.Combine(Toolchain, "lib/lean"));
         var certified = library is null ? null : CertifiedModuleDirectory(library);
-        return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, session)))
-            .Where(path => !path.Equals(trusted, comparison))
-            // Keep the certified base in place; map other imports into the session.
-            .Select(path => path.Equals(certified, comparison) ? path : Within(session, Path.GetRelativePath(session, path)))
-            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray(), leanPath);
+        return (ValidatedConsumerImportDirectories(session, trusted, certified, leanPath), leanPath);
     }
 
     // Variables read by Lean, Lake and elan, plus any a consumer's elaborators read

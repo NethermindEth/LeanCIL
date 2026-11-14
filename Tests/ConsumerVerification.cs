@@ -7,6 +7,7 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/LibraryAudit.cs
 #:include ConsumerSourceResolution.cs
+#:include ConsumerImportDirectories.cs
 #:include ConsumerSupportUnion.cs
 #:include ConsumerCertificateReuse.cs
 #:include ConsumerComponents.cs
@@ -18,6 +19,7 @@ using System.Text.Json;
 var checks = new Dictionary<string, Action<string[]>>(StringComparer.Ordinal)
 {
     ["source-resolution"] = CheckConsumerSourceResolution,
+    ["import-directories"] = CheckConsumerImportDirectories,
     ["support-union"] = CheckConsumerSupportUnion,
     ["certificate-reuse"] = CheckConsumerCertificateReuse,
     ["components"] = CheckConsumerComponents,
