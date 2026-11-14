@@ -57,7 +57,8 @@ File.WriteAllText(proofSource, """
     import Extracted
     /-- The extracted program has the certificate checked in this same environment. -/
     theorem certificate : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-        Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
+        Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+      Extracted.translation_valid
     #print axioms certificate
     """);
 Compile(proofSource);
