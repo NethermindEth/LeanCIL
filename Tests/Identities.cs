@@ -30,6 +30,7 @@ if (args.Contains("--code-cost", StringComparer.Ordinal))
     return;
 }
 CheckScaling();
+CheckCodeCost();
 if (args.Contains("--scaling-only", StringComparer.Ordinal)) return;
 var directory = At("artifacts/Identities");
 Directory.CreateDirectory(directory);
@@ -68,6 +69,30 @@ var source = new StringBuilder("""
 
     #eval IO.println s!"@ranges:{invisibleRanges}"
 
+    /-- Raw code formatting retains every digit with bounded growth in payload length. -/
+    def checkRawCodeCost : IO Unit := do
+      let mut previous := 0
+      for size in [4096, 32768, 262144] do
+        let baseCode := (1 <<< (8 * size + 1)) - 1
+        let mut best := 1000000000
+        for sample in [:3] do
+          let code := baseCode - sample
+          let started ← IO.monoMsNow
+          let shown := rawCodeDisplay code
+          let elapsed := (← IO.monoMsNow) - started
+          let ending := [Nat.digitChar (15 - sample)]
+          let expected := "{ code := 0x1" ++
+            String.ofList (List.replicate (2 * size - 1) 'f' ++ ending) ++ " }"
+          unless shown == expected do
+            throw (IO.userError "Raw code formatting changed its numeric value")
+          best := min best elapsed
+        if previous > 0 && best > previous * 16 + 10 then
+          throw (IO.userError s!"Raw formatting cost {best}ms after {previous}ms for 8x fewer bytes")
+        IO.println s!"PASS Lean raw display {size}: {best} ms"
+        previous := best
+
+    #eval checkRawCodeCost
+
     """);
 var expected = new List<(string Kind, string Term, string Text)>();
 const int ChunkSize = 64;
@@ -85,6 +110,8 @@ void Emit(string kind, IEnumerable<(string Term, string LeanText, string Text)> 
     }
 }
 static string Show(string term, string type, string function) => $"(({term} : {type}).{function})";
+Emit("raw-code", new[] { 0, 1, 15, 16, 255, 256, 511, 767, 120832, 121856 }.Select(code =>
+    (code.ToString(CultureInfo.InvariantCulture), $"rawCodeDisplay {code}", IdentityText.RawCode(code))));
 Emit("name", corpus.Names.SelectMany(name => new[]
 {
     (name.ToLean(), Show(name.ToLean(), "MetadataName", "display"), name.ToDisplay()),
@@ -118,6 +145,9 @@ File.WriteAllText(leanPath, source.ToString());
 var leanClock = Stopwatch.StartNew();
 var output = Run(["lake", "env", "lean", leanPath], cwd: FixturePackage());
 leanClock.Stop();
+foreach (string line in output.Split('\n').Where(line =>
+    line.StartsWith("PASS Lean raw display", StringComparison.Ordinal)))
+    Console.WriteLine(line.TrimEnd('\r'));
 
 var shown = new Dictionary<int, string>();
 string? ranges = null;
@@ -145,7 +175,6 @@ Console.WriteLine($"PASS {expected.Count} Lean displays of {corpus.Summary()} eq
 Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
     $"PASS identity records cost {clock.Elapsed.TotalSeconds:F1} s, " +
     $"of which Lean took {leanClock.Elapsed.TotalSeconds:F1} s"));
-CheckCodeCost();
 
 // The rows of an image read with System.Reflection.Metadata, which shares no decoding with Cecil.
 static void CheckRows(string path, ModuleDefinition module)
@@ -271,7 +300,7 @@ static void CheckScaling()
 
 static void CheckCodeCost()
 {
-    double previousDecimalMs = 0;
+    double previousDisplayMs = 0;
     foreach (int size in new[] { 4096, 32768, 262144, 2097152 })
     {
         var bytes = new byte[size];
@@ -279,12 +308,12 @@ static void CheckCodeCost()
         var code = IdentityText.Code(bytes);
         Measure("construct", () => GC.KeepAlive(IdentityText.Code(bytes)));
         Measure("hex", () => GC.KeepAlive(code.ToString("x", CultureInfo.InvariantCulture)));
-        double decimalMs = Measure("decimal", () => GC.KeepAlive(IdentityText.Decimal(code)));
-        if (size == 2097152 && decimalMs > previousDecimalMs * 16 + 10)
-            throw new InvalidOperationException($"Raw identity decimal display exceeds its payload scaling bound: " +
-                $"{size} bytes took {decimalMs:F3} CPU ms after {previousDecimalMs:F3} CPU ms " +
+        double displayMs = Measure("raw-display", () => GC.KeepAlive(IdentityText.RawCode(code)));
+        if (size == 2097152 && displayMs > previousDisplayMs * 16 + 10)
+            throw new InvalidOperationException($"Raw identity display exceeds its payload scaling bound: " +
+                $"{size} bytes took {displayMs:F3} CPU ms after {previousDisplayMs:F3} CPU ms " +
                 "for one eighth the payload");
-        previousDecimalMs = decimalMs;
+        previousDisplayMs = displayMs;
 
         double Measure(string label, Action action)
         {

@@ -11,7 +11,8 @@ function of the entity it names and holds no row number, heap offset or per-extr
 A name or literal is one natural number: its UTF-8 bytes or UTF-16 code units read as a
 big-endian number after a leading 1, so the number fixes the length and every digit. Equality
 of every identity is the derived `DecidableEq`, which the kernel decides with `Nat.beq` on codes
-and constructor matches; its cost does not grow with the length of a name.
+and constructor matches. Code comparison reads numeric limbs rather than reducing a digit list;
+runtime comparison still depends on the number of limbs.
 
 Text appears only in the `name!` and `str!` elaborators, which turn a literal into a code when
 the term is elaborated, and in the display functions and delaborators, which turn a value back
@@ -31,7 +32,7 @@ def byteBase : Nat := 256
 def codeUnitBase : Nat := 65536
 
 /-- The number that `digits` continue in `base`, most significant first, after the digits
-    already read into `code`; `none` when a digit is not below `base`. Linear in the digits. -/
+    already read into `code`; `none` when a digit is not below `base`. Each step scales a growing code. -/
 def radixCode? (base : Nat) : List Nat → Nat → Option Nat
   | [], code => some code
   | digit :: rest, code =>
@@ -182,6 +183,100 @@ theorem radixCode?_of_radixDigits?_self {base : Nat} (wide : 2 ≤ base) {code :
 
 #print axioms radixCode?_of_radixDigits?_self
 
+/-- Exactly `count` base-2^bits digits when the code fits, most significant first, then `tail`.
+    Balanced splits keep bit operations within O(payload bits * log count). -/
+def fixedDigits (bits count code : Nat) (tail : List Nat) : List Nat :=
+  match count with
+  | 0 => tail
+  | 1 => code :: tail
+  | count + 2 =>
+    let lowCount := (count + 2) / 2
+    let highCount := count + 2 - lowCount
+    let lowBits := bits * lowCount
+    fixedDigits bits highCount (code >>> lowBits)
+      (fixedDigits bits lowCount (code &&& ((1 <<< lowBits) - 1)) tail)
+termination_by count
+decreasing_by all_goals omega
+
+/-- The digit count is independent of the code and includes every leading zero. -/
+theorem fixedDigits_length (bits count code : Nat) (tail : List Nat) :
+    (fixedDigits bits count code tail).length = count + tail.length := by
+  induction count using Nat.strongRecOn generalizing code tail with
+  | ind count ih =>
+    match count with
+    | 0 => simp [fixedDigits]
+    | 1 => simp [fixedDigits, Nat.add_comm]
+    | count + 2 =>
+      rw [fixedDigits, ih _ (by omega), ih _ (by omega)]
+      omega
+
+#print axioms fixedDigits_length
+
+/-- Reading bounded fixed-width digits continues any initial code with their exact value. -/
+theorem fixedDigits_spec (bits count code : Nat) (bounded : code < (2^bits)^count)
+    (tail : List Nat) (start : Nat) :
+    radixCode? (2^bits) (fixedDigits bits count code tail) start =
+      radixCode? (2^bits) tail (start * (2^bits)^count + code) := by
+  induction count using Nat.strongRecOn generalizing code tail start with
+  | ind count ih =>
+    match count with
+    | 0 => simp_all [fixedDigits]
+    | 1 => simp_all [fixedDigits, radixCode?]
+    | count + 2 =>
+      let low := (count + 2) / 2
+      let high := count + 2 - low
+      have splitCount : high + low = count + 2 := by dsimp [high, low]; omega
+      have lowSmall : low < count + 2 := by dsimp [low]; omega
+      have highSmall : high < count + 2 := by dsimp [high, low]; omega
+      have power : 2^(bits*low) = (2^bits)^low := by rw [Nat.pow_mul]
+      have positive : 0 < (2^bits)^low := Nat.pow_pos (Nat.pow_pos (by decide))
+      have upper : code / (2^bits)^low < (2^bits)^high := by
+        apply (Nat.div_lt_iff_lt_mul positive).mpr
+        rw [← Nat.pow_add, splitCount]
+        exact bounded
+      have lower : code % (2^bits)^low < (2^bits)^low := Nat.mod_lt _ positive
+      rw [fixedDigits]
+      change radixCode? (2^bits)
+        (fixedDigits bits high (code >>> (bits*low))
+          (fixedDigits bits low (code &&& ((1 <<< (bits*low)) - 1)) tail)) start = _
+      simp only [Nat.shiftRight_eq_div_pow, Nat.shiftLeft_eq, Nat.one_mul]
+      rw [Nat.and_two_pow_sub_one_eq_mod, power]
+      rw [ih high highSmall _ upper, ih low lowSmall _ lower]
+      congr 1
+      rw [Nat.add_mul, Nat.mul_assoc, ← Nat.pow_add, splitCount]
+      have joined := Nat.div_add_mod code ((2^bits)^low)
+      rw [Nat.mul_comm] at joined
+      omega
+
+
+#print axioms fixedDigits_spec
+
+/-- Every digit accepted by the radix reader is below its base. -/
+theorem radixCode?_digits {base : Nat} {digits : List Nat} {start code : Nat}
+    (read : radixCode? base digits start = some code) :
+    ∀ digit ∈ digits, digit < base := by
+  induction digits generalizing start with
+  | nil => simp
+  | cons head rest ih =>
+    simp only [radixCode?] at read
+    split at read
+    next small =>
+      intro digit member
+      rcases List.mem_cons.mp member with same | member
+      · simpa [same] using small
+      · exact ih read digit member
+    next => simp at read
+
+#print axioms radixCode?_digits
+
+/-- Every digit of a bounded code fits the requested digit width, including zero-width digits. -/
+theorem fixedDigits_bound (bits count code : Nat) (bounded : code < (2^bits)^count) :
+    ∀ digit ∈ fixedDigits bits count code [], digit < 2^bits := by
+  apply radixCode?_digits (start := 0) (code := code)
+  simpa [radixCode?] using fixedDigits_spec bits count code bounded [] 0
+
+#print axioms fixedDigits_bound
+
 /-! ## Names and literals -/
 
 /-- One metadata name, such as `Int32` or `System.Collections`: its UTF-8 bytes read as a
@@ -205,13 +300,12 @@ decreasing_by exact Nat.div_lt_self (by omega) (by unfold hashLimbBase; decide)
 
 instance : Hashable MetadataName := ⟨fun name => mixCodeLimbs 0 name.code⟩
 
-/-- The name whose UTF-8 bytes are `bytes`, or `none` when an entry is not a byte. Linear in
-    the number of bytes. -/
+/-- The name whose UTF-8 bytes are `bytes`, or `none` when an entry is not a byte. -/
 def MetadataName.ofBytes? (bytes : List Nat) : Option MetadataName :=
   (radixCode? byteBase bytes 1).map MetadataName.mk
 
 /-- The UTF-8 bytes a name holds, or `none` when its code is zero or its leading base-256 digit
-    is not 1. Linear in the number of bytes. -/
+    is not 1. -/
 def MetadataName.bytes? (name : MetadataName) : Option (List Nat) :=
   radixDigits? byteBase name.code name.code []
 
@@ -252,12 +346,12 @@ structure UserString where
 instance : Hashable UserString := ⟨fun literal => mixCodeLimbs 0 literal.code⟩
 
 /-- The literal whose UTF-16 code units are `units`, or `none` when an entry is not a code
-    unit. Linear in the number of units. -/
+    unit. -/
 def UserString.ofUnits? (units : List Nat) : Option UserString :=
   (radixCode? codeUnitBase units 1).map UserString.mk
 
 /-- The UTF-16 code units a literal holds, or `none` when its code is zero or its leading
-    base-65536 digit is not 1. Linear in the number of units. -/
+    base-65536 digit is not 1. -/
 def UserString.units? (literal : UserString) : Option (List Nat) :=
   radixDigits? codeUnitBase literal.code literal.code []
 
@@ -434,10 +528,33 @@ def readableText? (text : String) : Option String := do
 def quotedText? (text : String) : Option String :=
   (fun escaped => "\"" ++ escaped ++ "\"") <$> escapedText? true text
 
+/-- The hexadecimal digit count obtained from the highest set bit contains the complete code. -/
+theorem hexCode_bound (code : Nat) : code < (2 ^ 4) ^ (code.log2 / 4 + 1) := by
+  rw [← Nat.pow_mul]
+  apply Nat.lt_of_lt_of_le Nat.lt_log2_self
+  apply Nat.pow_le_pow_right (by decide)
+  omega
+
+#print axioms hexCode_bound
+
+/-- The digits used by raw hexadecimal display retain the exact natural code. -/
+theorem fixedDigits_hex_exact (code : Nat) :
+    radixCode? 16 (fixedDigits 4 (code.log2 / 4 + 1) code []) 0 = some code := by
+  simpa [radixCode?] using
+    fixedDigits_spec 4 (code.log2 / 4 + 1) code (hexCode_bound code) [] 0
+
+#print axioms fixedDigits_hex_exact
+
+/-- Minimal lowercase hexadecimal digits of a natural code, including one digit for zero. -/
+def rawCodeHex (code : Nat) : String :=
+  let count := code.log2 / 4 + 1
+  let digits := fixedDigits 4 count code []
+  String.ofList (digits.map Nat.digitChar)
+
 /-- The raw structure of a code, for a value that no text shows faithfully. Its leading `{`
     sets it apart from every `readableText?`. -/
 def rawCodeDisplay (code : Nat) : String :=
-  "{ code := " ++ toString code ++ " }"
+  "{ code := 0x" ++ rawCodeHex code ++ " }"
 
 /-- The text of a name, or `none` when its code is malformed or its bytes are not UTF-8. -/
 def MetadataName.text? (name : MetadataName) : Option String := do
@@ -685,8 +802,11 @@ def typeIdentityLiteral? (term : Expr) : MetaM (Option TypeIdentity) := do
   if ← getPPOption getPPAll then failure
   let #[codeTerm] := (← getExpr).getAppArgs | failure
   let some code := natLiteral? codeTerm | failure
-  let some quoted := (MetadataName.mk code).literal? | failure
-  `(name! $(⟨Syntax.mkLit strLitKind quoted⟩))
+  if let some quoted := (MetadataName.mk code).literal? then
+    `(name! $(⟨Syntax.mkLit strLitKind quoted⟩))
+  else
+    let field ← `(Parser.Term.structInstLVal| $(mkIdent `code):ident)
+    `({ $field := $(Syntax.mkNumLit ("0x" ++ rawCodeHex code)) })
 
 /-- Prints a literal as its `UserString.literal?`, which elaborates back to it; any other
     literal keeps its raw structure. -/
@@ -694,8 +814,11 @@ def typeIdentityLiteral? (term : Expr) : MetaM (Option TypeIdentity) := do
   if ← getPPOption getPPAll then failure
   let #[codeTerm] := (← getExpr).getAppArgs | failure
   let some code := natLiteral? codeTerm | failure
-  let some quoted := (UserString.mk code).literal? | failure
-  `(str! $(⟨Syntax.mkLit strLitKind quoted⟩))
+  if let some quoted := (UserString.mk code).literal? then
+    `(str! $(⟨Syntax.mkLit strLitKind quoted⟩))
+  else
+    let field ← `(Parser.Term.structInstLVal| $(mkIdent `code):ident)
+    `({ $field := $(Syntax.mkNumLit ("0x" ++ rawCodeHex code)) })
 
 /-- Prints a type whose components are all literals as `type!"..."` when `TypeIdentity.text?`
     reads it, so the printed text determines the type; any other type keeps its structure. -/
