@@ -39,6 +39,10 @@ const long KernelDecisionFloor = 2_000;
 const int FewAddresses = 128;
 const int MoreAddresses = 256;
 const int ManyAddresses = 512;
+// Bodies of these many local loads and stores, which cycle over four int32 locals.
+const int FewLocalAccesses = 256;
+const int MoreLocalAccesses = 1024;
+const int ManyLocalAccesses = 4096;
 // Bodies of these many locals, each stored once and then loaded or addressed. A check that walks the locals list,
 // or the list of locals a `calli` consumes, at each such site costs between 1.3 and 2.3 times as much per
 // instruction at 512 as at 128; reading indexes built once per body costs at most about 1.1 times as much.
@@ -480,6 +484,55 @@ foreach (var prefixed in new[] { false, true })
     Console.WriteLine($"PASS checking the scalar certificate of {label} costs {addressesMeasured}");
 }
 
+// The kernel heartbeats of the feature certificate of a body that loads and stores four int32 locals in turn,
+// less those of stating the same certificate. A local load or store checks its opcode and index alone.
+long LocalAccessCost(int accesses)
+{
+    var pairs = accesses / 2;
+    var header = $$"""
+        import CIL.Extraction.Features
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        namespace LocalAccesses
+        open CIL CIL.Extraction
+        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def localCount : Nat := 4
+        def segment (index : Nat) : List RawInstruction :=
+          [⟨0, 17, .local (index % localCount)⟩, ⟨0, 19, .local ((index + 1) % localCount)⟩]
+        def raw (pairs : Nat) : RawMethod := {
+          token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+          callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+          parameters := [], locals := List.replicate localCount intType, initLocals := true,
+          maxStack := 1, genericParameters := [],
+          code := (List.range pairs).flatMap segment ++ [⟨0, 42, .none⟩] }
+        def unknown : List (Option W32) := List.replicate localCount none
+        def features (pairs : Nat) : FeatureCertificate :=
+          (List.replicate pairs [some ⟨[], unknown⟩, some ⟨[none], unknown⟩]).flatten ++
+            [some ⟨[], unknown⟩]
+        def codeSegment (index : Nat) : List Instruction :=
+          [.local (index % localCount), .setLocal ((index + 1) % localCount)]
+        def code (pairs : Nat) : List Instruction := (List.range pairs).flatMap codeSegment ++ [.ret]
+        """ + "\n";
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {pairs}) .scalar (features {pairs}) " +
+        $"(List.replicate {accesses + 1} true) (code {pairs})";
+    var path = Path.Combine(directory, $"LocalAccesses{accesses}.lean");
+    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend LocalAccesses\n", equations: false);
+    var decided = Heartbeats(path, header + $"""
+        theorem valid : {statement} := by decide +kernel
+        #print axioms valid
+        end LocalAccesses
+        """ + "\n", equations: false);
+    return decided - stated;
+}
+var perAccess = new[] { FewLocalAccesses, MoreLocalAccesses, ManyLocalAccesses }
+    .Select(accesses => (Accesses: accesses, Cost: (double)LocalAccessCost(accesses) / accesses)).ToArray();
+var accessesMeasured = string.Join("; ", perAccess.Select(run =>
+    string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per access at {run.Accesses}")));
+if (perAccess.Skip(1).Any(run => run.Cost > perAccess[0].Cost * AllowedGrowth))
+    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+        $"Checking the feature certificate of local loads and stores costs {accessesMeasured}; the limit is " +
+        $"{AllowedGrowth} times the cost per access at {FewLocalAccesses}."));
+Console.WriteLine($"PASS checking the feature certificate of local loads and stores costs {accessesMeasured}");
 // The kernel heartbeats of a check over a body that stores each of its locals once and then loads or addresses
 // it, less those of stating the same check. Integer locals take a constant and are popped after a load or after
 // `ldloca`, which also names each as a receiver fold candidate; native-int locals take a method address and are

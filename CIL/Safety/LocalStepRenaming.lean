@@ -76,11 +76,10 @@ theorem Frame.Renamed.stepLocal {indices : LocalIndexMap} {mapping : AllocationR
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (memories : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceBody targetBody : CIL.Method) (position pc : Nat) (narrow : Option CIL.NarrowKind)
-    (arguments stack : List Value) :
+    (sourceBody targetBody : CIL.Method) (position pc : Nat) (arguments stack : List Value) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.local position narrow) pc arguments sourceFrame stack source)
-      (step targetBody (.local (indices.index position) narrow) pc (arguments.map mapping.value)
+      (step sourceBody (.local position) pc arguments sourceFrame stack source)
+      (step targetBody (.local (indices.index position)) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
     Bool.false_or, Bool.false_eq_true, ite_false]
@@ -128,11 +127,11 @@ theorem Frame.Renamed.stepSetLocal {indices : LocalIndexMap} {mapping : Allocati
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (memories : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceBody targetBody : CIL.Method) (position pc : Nat) (narrow : Option CIL.NarrowKind)
+    (sourceBody targetBody : CIL.Method) (position pc : Nat)
     (arguments rest : List Value) (value : Value) (valueBound : value.Below mapping.sourceLimit) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.setLocal position narrow) pc arguments sourceFrame (value :: rest) source)
-      (step targetBody (.setLocal (indices.index position) narrow) pc
+      (step sourceBody (.setLocal position) pc arguments sourceFrame (value :: rest) source)
+      (step targetBody (.setLocal (indices.index position)) pc
         (arguments.map mapping.value) targetFrame ((value :: rest).map mapping.value) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
     Bool.false_or, Bool.false_eq_true, ite_false, List.map_cons]

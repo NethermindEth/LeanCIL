@@ -67,7 +67,7 @@ theorem stepTransport : StepTransport := by
     | exact memories.stepNewAggregate frames sourceFormed targetFormed staticBounds
         sourceBody targetBody _ _ pc _ arguments stack bounds
     | exact ⟨mapping, .refl mapping,
-        frames.stepLocal memories sourceBody targetBody _ pc _ arguments stack⟩
+        frames.stepLocal memories sourceBody targetBody _ pc arguments stack⟩
     | exact ⟨mapping, .refl mapping,
         frames.stepLocalAddress memories sourceBody targetBody _ pc arguments stack⟩
     | (cases stack with
@@ -77,7 +77,7 @@ theorem stepTransport : StepTransport := by
          cases observable
        | cons value rest =>
          exact ⟨mapping, .refl mapping,
-           frames.stepSetLocal memories sourceBody targetBody _ pc _ arguments rest value
+           frames.stepSetLocal memories sourceBody targetBody _ pc arguments rest value
              (bounds value (List.mem_cons_self ..))⟩)
 #print axioms stepTransport
 
