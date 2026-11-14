@@ -70,6 +70,19 @@ instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, bo
 per body, and measures 1.02 for plain and 1.09 for prefixed addresses. A rule that scans the body
 at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
 
+It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
+128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
+of stating the same certificate. Integer locals take a constant and are popped after a load or
+after `ldloca`, which also makes each a receiver fold candidate; native-int locals take a method
+address and are consumed by `calli`, which makes each a pointer local. For the pointer locals it
+also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
+exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a
+`FlowIndex` and pointer locals from a `Std.TreeSet`, built once per body, as does the closed
+argument storage. They measure 1.01 for loaded, 1.12 for addressed and 1.08 for pointer locals,
+and 1.20 for the closed argument storage, whose set lookups cost the logarithm of the locals.
+Checks that walk the locals list or the pointer local list at each site measure 1.33, 1.54, 1.62
+and 2.33.
+
 The suite also checks the kernel heartbeats of `FeatureFlowValid` on generated bodies of 256, 1,024
 and 4,096 `ldloc.s` and `stloc.s` instructions that cycle over four `int32` locals, less the
 heartbeats of stating the same certificate. It fails when the cost per access at 1,024 or 4,096
