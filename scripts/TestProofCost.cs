@@ -325,6 +325,13 @@ var validCertificate = JsonSerializer.Serialize(new Report(CertificateSchema, "a
     "ExampleProof.correctness", [], "audit", new(StringComparer.Ordinal), BindingSection.Default));
 Require(CertificateProblem(validCertificate, BindingMode.Default) is null,
     "the measurement's sample certificate is one a default run accepts");
+foreach (var certificate in CertificateCases.AcceptedDeep(validCertificate))
+    Require(CertificateProblem(certificate, BindingMode.Deep) is null,
+        "a deep certificate accepts valid digests and settled outcomes");
+var acceptedMalformed = CertificateCases.RefusedDeep(validCertificate)
+    .Where(test => CertificateProblem(test.Text, BindingMode.Deep) is null).Select(test => test.Case).ToArray();
+Require(acceptedMalformed.Length == 0,
+    "deep metadata refuses malformed values: " + string.Join(", ", acceptedMalformed));
 var refusedCertificates = CertificateCases.Refused(validCertificate).ToArray();
 foreach (var (index, (_, text)) in refusedCertificates.Index())
 {

@@ -20,7 +20,8 @@ static class CertificateCases
         binding["digests"] = new JsonObject { ["path"] = "pins.sha256", ["sha256"] = new string('0', 64) };
         binding["sources"] = new JsonObject
         {
-            ["strictBinding"] = "key", ["leanToolchain"] = "leanprover/lean4:v4", ["lean"] = new string('1', 64)
+            ["strictBinding"] = new string('a', 64), ["leanToolchain"] = "leanprover/lean4:v4",
+            ["lean"] = new string('1', 64)
         };
         binding["images"] = new JsonArray(new JsonObject
         {
@@ -33,6 +34,54 @@ static class CertificateCases
             fact["theorem"] = "BindingAudit.bodies";
         }
         return report.ToJsonString();
+    }
+
+    /// <summary>Independent malformed deep metadata values, each applied to a valid certificate.</summary>
+    internal static IEnumerable<(string Case, string Text)> RefusedDeep(string valid)
+    {
+        (string Section, string Field, bool Hash)[] fields =
+        [
+            ("digests", "path", false), ("digests", "sha256", true),
+            ("sources", "strictBinding", true), ("sources", "leanToolchain", false),
+            ("sources", "lean", true), ("images", "identity", false), ("images", "sha256", true)
+        ];
+        foreach (var (section, field, hash) in fields)
+        {
+            string?[] values = hash
+                ? [null, "", " \t\r\n", new string('a', 63), new string('a', 65), new string('g', 64),
+                    new string('a', 63) + "\n", " " + new string('a', 64)]
+                : [null, "", " \t\r\n"];
+            foreach (var (index, value) in values.Index())
+            {
+                var report = JsonNode.Parse(Deep(valid))!;
+                var target = report["binding"]![section]!;
+                if (section == "images") target = target[0]!;
+                target[field] = value;
+                yield return ($"{section}.{field} malformed value {index}", report.ToJsonString());
+            }
+        }
+    }
+
+    /// <summary>Deep certificates with valid mixed-case digests and each settled image and fact status.</summary>
+    internal static IEnumerable<string> AcceptedDeep(string valid)
+    {
+        var report = JsonNode.Parse(Deep(valid))!;
+        var binding = report["binding"]!;
+        const string digest = "0123456789abcdef" + "0123456789ABCDEF" + "0123456789abcdef" + "0123456789ABCDEF";
+        binding["digests"]!["sha256"] = digest;
+        binding["sources"]!["strictBinding"] = digest;
+        binding["sources"]!["lean"] = digest;
+        binding["images"]![0]!["sha256"] = digest;
+        yield return report.ToJsonString();
+        foreach (var fact in Facts(report).Append(binding["images"]![0]))
+        {
+            fact!["status"] = "not covered";
+            fact["theorem"] = null;
+            fact["reason"] = "An image was not supplied.";
+        }
+        yield return report.ToJsonString();
+        binding["images"] = new JsonArray();
+        yield return report.ToJsonString();
     }
 
     /// <summary>Each variant of the valid default certificate `valid` that a default reader refuses, by name.
