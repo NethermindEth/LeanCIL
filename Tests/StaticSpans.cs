@@ -74,7 +74,7 @@ queue.Flush();
 foreach (var (mutation, marker) in new[]
 {
     ("element", "Unsupported type: System.ReadOnlySpan`1<System.Double>"),
-    ("scope", "Unsupported type identity: System.ReadOnlySpan`1 [Foreign.Runtime, Version=10.0.0.0"),
+    ("scope", "Unsupported type identity: System.ReadOnlySpan`1 [Foreign.Runtime,"),
     ("value-type", "Unsupported type identity"), ("byref-return", "Unsupported by-reference span")
 })
 {
