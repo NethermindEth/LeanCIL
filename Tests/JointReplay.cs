@@ -16,12 +16,36 @@ if (args is not ([] or ["--audit-only"] or ["--results-only"] or ["--diagnostics
     throw new ArgumentException("Usage: JointReplay.cs [--audit-only|--results-only|--diagnostics-only]");
 CheckSeparateReplayResults();
 CheckReplayDiagnostics();
+CheckReplayWorkers();
 if (args is ["--results-only"]) return;
 using var verification = new Program();
 var root = At("artifacts/JointReplay");
 if (Directory.Exists(root)) Directory.Delete(root, true);
 Directory.CreateDirectory(root);
 var environment = new Dictionary<string, string> { ["LEAN_SYSROOT"] = verification.Toolchain };
+
+void CheckReplayWorkers()
+{
+    var original = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
+    try
+    {
+        foreach (var configured in new string?[] { null, "", " ", "8" })
+        {
+            Environment.SetEnvironmentVariable("LEAN_NUM_THREADS", configured);
+            if (ReplayWorkerCount() != (configured == "8" ? "8" : "2"))
+                throw new InvalidOperationException("Isolated replay worker count changed.");
+        }
+        foreach (var configured in new[] { "0", "-1", "invalid" })
+        {
+            Environment.SetEnvironmentVariable("LEAN_NUM_THREADS", configured);
+            try { ReplayWorkerCount(); }
+            catch (InvalidDataException) { continue; }
+            throw new InvalidOperationException("Invalid isolated replay worker count was accepted.");
+        }
+    }
+    finally { Environment.SetEnvironmentVariable("LEAN_NUM_THREADS", original); }
+    Console.WriteLine("PASS isolated replay worker configuration");
+}
 
 void CheckSeparateReplayResults()
 {
@@ -246,8 +270,11 @@ void CheckIsolatedDiagnostics()
     Console.WriteLine("PASS isolated typed rejection, imported dependency exclusion and unavailable olean");
 }
 
-CheckIsolatedDiagnostics();
-if (args is ["--diagnostics-only"]) return;
+if (args is ["--diagnostics-only"])
+{
+    CheckIsolatedDiagnostics();
+    return;
+}
 
 void CheckFusedReplay()
 {
@@ -567,6 +594,7 @@ else
     CheckReplays(native: false);
     CheckReplays(native: true);
 }
+CheckIsolatedDiagnostics();
 CheckFusedReplay();
 CheckReplayedClosures();
 CheckReplayedInterfaces();

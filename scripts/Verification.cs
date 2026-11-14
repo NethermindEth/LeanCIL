@@ -406,10 +406,7 @@ partial class Program : IDisposable
         string leanPath, bool profile)
     {
         var expected = SeparateReplayTargets(targets);
-        var configuredThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
-        var threads = string.IsNullOrWhiteSpace(configuredThreads) ? "2" : configuredThreads;
-        if (!uint.TryParse(threads, out var count) || count == 0)
-            throw new InvalidDataException("LEAN_NUM_THREADS must be a positive integer.");
+        var threads = ReplayWorkerCount();
         var runner = Path.Combine(Path.GetTempPath(), "leancil-replay-" + Guid.NewGuid().ToString("N") + ".lean");
         var targetsPath = Path.ChangeExtension(runner, ".json");
         var native = !profile && auditExecutable is not null;
@@ -547,16 +544,30 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         _ = SeparateReplayTargets(targets);
         if (targets.Length == 0 || auditExecutable is null) return new(StringComparer.Ordinal);
+        var environment = new Dictionary<string, string>(LeanEnvironment)
+        {
+            ["LEAN_NUM_THREADS"] = ReplayWorkerCount()
+        };
         var input = Path.Combine(Path.GetTempPath(), "leancil-diagnose-" + Guid.NewGuid().ToString("N") + ".json");
         try
         {
             File.WriteAllText(input, JsonSerializer.Serialize(targets));
             var result = Execute([CheckedAuditExecutable(), "--diagnose-replay", input], session, leanPath,
-                progress: "Diagnosing rejected kernel replay", environment: LeanEnvironment);
+                progress: "Diagnosing rejected kernel replay", environment: environment);
             CheckedAuditExecutable();
             return ParseReplayDiagnostics(targets, result.Code, result.Stdout);
         }
         finally { File.Delete(input); }
+    }
+
+    /// <summary>Isolated replay uses a positive configured worker count or two workers.</summary>
+    static string ReplayWorkerCount()
+    {
+        var configuredThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
+        var threads = string.IsNullOrWhiteSpace(configuredThreads) ? "2" : configuredThreads;
+        if (!uint.TryParse(threads, out var count) || count == 0)
+            throw new InvalidDataException("LEAN_NUM_THREADS must be a positive integer.");
+        return threads;
     }
 
     /// <summary>Every replay target is a nonempty unique exact module name.</summary>
