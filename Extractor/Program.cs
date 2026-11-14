@@ -50,11 +50,11 @@ internal static partial class Program
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
     /// <summary>Runs <c>extract</c> or <c>check</c> in this process without printing its report;
-    /// a rejection throws instead of returning an exit code.</summary>
-    internal static void RunQuietly(string[] args)
+    /// a rejection throws instead of returning an exit code. A batch shares the files read by earlier runs.</summary>
+    internal static void RunQuietly(string[] args, ExtractionBatch? batch = null)
     {
         if (args is not ["extract" or "check", ..]) throw new ArgumentException(Usage);
-        Run(args, report: TextWriter.Null, rethrow: true);
+        Run(args, batch, report: TextWriter.Null, rethrow: true);
     }
 
     /// <summary>
@@ -294,7 +294,8 @@ internal static partial class Program
                     global::Program.ExtractionIdentity.Resolve(output, pin.GetProperty("path").GetString()!),
                     pin.GetProperty("sha256").GetString()!));
             referenceSources.AddRange(referencePaths.Select(path => new PinnedAssemblies.Source(path)));
-            using PinnedAssemblies pinned = new(assembly, assemblyHash, referenceSources);
+            using PinnedAssemblies pinned = new(assembly, assemblyHash, referenceSources,
+                batch is null ? null : batch.ReadAssembly);
             ModuleDefinition module = pinned.Selected;
             foreach ((JsonElement record, var reference) in recordedReferences.Zip(pinned.References))
                 if (record.GetProperty("assemblyIdentity").GetString() != reference.Pin.Identity ||
@@ -302,7 +303,8 @@ internal static partial class Program
                     throw new InvalidDataException("Stale or mismatched verification artifact: referenced assembly " +
                         $"{CliPaths.Display(reference.Path)} is not the recorded " +
                         $"{record.GetProperty("assemblyIdentity").GetString()}.");
-            var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
+            var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice,
+                batch is null ? null : batch.ReadPdb);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
             List<ImportResolution.Source> importSources = [];
