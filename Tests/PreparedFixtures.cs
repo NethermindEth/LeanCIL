@@ -51,10 +51,15 @@ try
         throw new Exception("Prepared fixture arguments changed");
     var corpus = Path.Combine(directory, "isolated");
     Directory.CreateDirectory(Path.Combine(corpus, "scripts"));
-    File.Copy(At("scripts/Verification.cs"), Path.Combine(corpus, "scripts", "Verification.cs"));
+    var probeScripts = File.ReadLines(At("Tests/PreparedFixtures.cs"))
+        .Where(line => line.StartsWith("#:include ../scripts/", StringComparison.Ordinal))
+        .Select(line => line["#:include ../".Length..]).ToArray();
+    foreach (var script in probeScripts)
+        File.Copy(At(script), Path.Combine(corpus, script));
     var probe = Path.Combine(corpus, "Probe.cs");
     File.WriteAllText(probe, "#!/usr/bin/env dotnet\n#:property PublishAot=false\n" +
-        "#:include scripts/Verification.cs\nConsole.WriteLine(Root);\n");
+        string.Join("\n", probeScripts.Select(script => "#:include " + script)) +
+        "\nConsole.WriteLine(Root);\n");
     Environment.SetEnvironmentVariable("LEANCIL_FIXTURE_ROOT", Root);
     var probeOutput = Path.Combine(directory, "probe-bin");
     Run(["dotnet", "build", probe, "-c", "Release", "--output", probeOutput,
