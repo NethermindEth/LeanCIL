@@ -34,8 +34,12 @@ internal static class RuntimeModels
     private const string Unsafe = "System.Runtime.CompilerServices.Unsafe";
 
     /// <summary>Whether a scope is the row that names <paramref name="platform"/>, column for column.</summary>
-    internal static bool ExactScope(IMetadataScope scope, AssemblyName platform) =>
-        scope is AssemblyNameReference row && AssemblyName.Of(row) == platform;
+    internal static bool ExactScope(TypeReference type, AssemblyName platform) =>
+        type.Scope is AssemblyNameReference && AssemblyName.OfScope(type, IdentityImage(type)) == platform;
+
+    static MetadataImage IdentityImage(TypeReference type) =>
+        (PinnedAssemblies.Active ?? throw new InvalidDataException("Type identity without a pinned module image"))
+        .Metadata(type.Module);
 
     internal static bool SupportedType(TypeReference type)
     {
@@ -51,7 +55,7 @@ internal static class RuntimeModels
 
     internal static bool HasRuntimeValueTypeBase(TypeDefinition type) =>
         type.BaseType is { FullName: "System.ValueType" } parent &&
-        ExactScope(parent.Scope, PlatformAssemblies.SystemRuntime);
+        ExactScope(parent, PlatformAssemblies.SystemRuntime);
 
     internal static void ValidateTypeIdentity(TypeReference type, ModuleDefinition module,
         string architecture = "scalar")
@@ -91,7 +95,7 @@ internal static class RuntimeModels
         }
         bool expectedValueType = IsModeledValueType(type.FullName);
         var expectedScope = DefiningAssembly(type.FullName);
-        bool valid = type.IsValueType == expectedValueType && ExactScope(type.Scope, expectedScope) &&
+        bool valid = type.IsValueType == expectedValueType && ExactScope(type, expectedScope) &&
             (type.FullName != "System.Void" || type.MetadataType == MetadataType.Void);
         if (!valid) throw new InvalidDataException($"Unsupported type identity: {type.FullName} [{type.Scope}]");
     }
@@ -129,7 +133,7 @@ internal static class RuntimeModels
         reference is not GenericInstanceMethod && reference.CallingConvention == MethodCallingConvention.Default &&
         reference.ReturnType.MetadataType == MetadataType.Void &&
         reference.DeclaringType is { FullName: "System.Object" } owner &&
-        ExactScope(owner.Scope, PlatformAssemblies.SystemRuntime);
+        ExactScope(owner, PlatformAssemblies.SystemRuntime);
 
     internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
     {
@@ -141,8 +145,9 @@ internal static class RuntimeModels
                  "CopyTo" or "TryCopyTo" or "get_IsEmpty" or "GetPinnableReference")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
-        if (PlatformAssemblies.Claimed(reference.DeclaringType.Scope) is { } platform &&
-            !ExactScope(reference.DeclaringType.Scope, platform))
+        if (PlatformAssemblies.Claimed(
+                AssemblyName.OfScope(reference.DeclaringType, IdentityImage(reference.DeclaringType))) is { } platform &&
+            !ExactScope(reference.DeclaringType, platform))
             throw new InvalidDataException(
                 $"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
         Operation? op = scope switch

@@ -3,6 +3,7 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../Extractor/Identities.cs
+#:include ../Extractor/MetadataImage.cs
 
 using System.Diagnostics;
 using System.Globalization;
@@ -18,6 +19,18 @@ using Srm = System.Reflection.Metadata;
 // Every identity of the corpus is rendered with ToLean(), elaborated by Lean, and shown by CIL/Identity.lean's
 // display; that text must equal ToDisplay(). Each record is first checked against the raw metadata rows it reads.
 var clock = Stopwatch.StartNew();
+if (args.Contains("--raw-names-only", StringComparer.Ordinal))
+{
+    CheckRawNames(At("artifacts/Identities/Unusual.dll"));
+    return;
+}
+if (args.Contains("--code-cost", StringComparer.Ordinal))
+{
+    CheckCodeCost();
+    return;
+}
+CheckScaling();
+if (args.Contains("--scaling-only", StringComparer.Ordinal)) return;
 var directory = At("artifacts/Identities");
 Directory.CreateDirectory(directory);
 var examplesPath = At("Examples/Assembly/bin/Examples.dll");
@@ -35,6 +48,7 @@ var corpus = new IdentityCorpus();
 corpus.Add(examples, resolve: true);
 corpus.Add(unusual, resolve: false);
 CheckTypedPredicates(examples, unusual);
+CheckRawNames(unusualPath);
 CheckEquality(examplesPath, parameters, corpus);
 corpus.RequireCoverage();
 
@@ -50,7 +64,7 @@ var source = new StringBuilder("""
 
     /-- Prints each numbered text on its own line. -/
     def emit (texts : List (Nat × String)) : IO Unit :=
-      texts.forM' fun (index, text) => IO.println s!"@{index}:{hexOf text}"
+      texts.forM fun (index, text) => IO.println s!"@{index}:{hexOf text}"
 
     #eval IO.println s!"@ranges:{invisibleRanges}"
 
@@ -131,6 +145,7 @@ Console.WriteLine($"PASS {expected.Count} Lean displays of {corpus.Summary()} eq
 Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
     $"PASS identity records cost {clock.Elapsed.TotalSeconds:F1} s, " +
     $"of which Lean took {leanClock.Elapsed.TotalSeconds:F1} s"));
+CheckCodeCost();
 
 // The rows of an image read with System.Reflection.Metadata, which shares no decoding with Cecil.
 static void CheckRows(string path, ModuleDefinition module)
@@ -152,14 +167,15 @@ static void CheckRows(string path, ModuleDefinition module)
     {
         var row = reader.GetTypeDefinition(handle);
         var definition = (TypeDefinition)module.LookupToken(MetadataTokens.GetToken(handle));
-        Require(TypeLevel.Of(definition) == new TypeLevel(Name(row.Namespace), Name(row.Name)), definition.FullName);
+        Require(TypeLevel.Of(definition, FixtureImages.For(module)) ==
+            new TypeLevel(Name(row.Namespace), Name(row.Name)), definition.FullName);
     }
     foreach (var handle in reader.TypeReferences)
     {
         var row = reader.GetTypeReference(handle);
         var reference = (TypeReference)module.LookupToken(MetadataTokens.GetToken(handle));
-        Require(MetadataName.OfEntry(reference.Namespace) == Name(row.Namespace) &&
-            MetadataName.OfEntry(reference.Name) == Name(row.Name), reference.FullName);
+        Require(IdentityRows.Level(FixtureImages.For(module), reference.MetadataToken) ==
+            new TypeLevel(Name(row.Namespace), Name(row.Name)), reference.FullName);
     }
     AssemblyName Row(Srm.StringHandle name, Version version, Srm.StringHandle culture, bool hasKey,
         Srm.BlobHandle key)
@@ -171,14 +187,16 @@ static void CheckRows(string path, ModuleDefinition module)
             token.Length == 0 ? null : System.Buffers.Binary.BinaryPrimitives.ReadUInt64BigEndian(token));
     }
     var assembly = reader.GetAssemblyDefinition();
-    Require(AssemblyName.Of(module.Assembly.Name) == Row(assembly.Name, assembly.Version, assembly.Culture,
+    Require(AssemblyName.Of(module.Assembly.Name, FixtureImages.For(module)) ==
+        Row(assembly.Name, assembly.Version, assembly.Culture,
         !assembly.PublicKey.IsNil, assembly.PublicKey), "Assembly");
     var references = reader.AssemblyReferences.Select(reader.GetAssemblyReference).ToArray();
     Require(references.Length == module.AssemblyReferences.Count, "AssemblyRef count");
     for (int index = 0; index < references.Length; index++)
     {
         var row = references[index];
-        Require(AssemblyName.Of(module.AssemblyReferences[index]) == Row(row.Name, row.Version, row.Culture,
+        Require(AssemblyName.Of(module.AssemblyReferences[index], FixtureImages.For(module)) ==
+            Row(row.Name, row.Version, row.Culture,
             (row.Flags & System.Reflection.AssemblyFlags.PublicKey) != 0, row.PublicKeyOrToken),
             "AssemblyRef " + module.AssemblyReferences[index].FullName);
     }
@@ -205,12 +223,101 @@ static IEnumerable<string> Literals(ModuleDefinition module) => module.GetTypes(
     .Where(method => method.HasBody).SelectMany(method => method.Body.Instructions)
     .Where(instruction => instruction.OpCode.Code == Code.Ldstr).Select(instruction => (string)instruction.Operand);
 
+static void CheckScaling()
+{
+    Measure("raw name payload", [512, 4096, 32768], size =>
+    {
+        var bytes = new byte[size];
+        Array.Fill(bytes, (byte)0xFF);
+        var name = MetadataName.FromBytes(bytes);
+        return name.ToLean().Length + name.ToDisplay().Length + name.GetHashCode();
+    });
+    Measure("type nesting", [64, 512, 4096], size =>
+    {
+        var level = new TypeLevel(MetadataName.Empty, MetadataName.OfText("Nested.Name"));
+        var type = new TypeIdentity(PlatformAssemblies.SystemRuntime, MetadataName.Empty,
+            [.. Enumerable.Repeat(level, size)], MetadataName.OfText("Type"));
+        return type.ToLean().Length + type.ToDisplay().Length + type.GetHashCode();
+    });
+
+    static void Measure(string label, int[] sizes, Func<int, int> operation)
+    {
+        const int Repetitions = 4;
+        double previousMs = 0;
+        long previousBytes = 0;
+        foreach (int size in sizes)
+        {
+            _ = operation(size);
+            double bestMs = double.MaxValue;
+            long allocated = 0;
+            for (int sample = 0; sample < 3; sample++)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                var timer = Stopwatch.StartNew();
+                for (int iteration = 0; iteration < Repetitions; iteration++) GC.KeepAlive(operation(size));
+                timer.Stop();
+                bestMs = Math.Min(bestMs, timer.Elapsed.TotalMilliseconds / Repetitions);
+                allocated = (GC.GetAllocatedBytesForCurrentThread() - before) / Repetitions;
+            }
+            if (previousBytes != 0 && (allocated > previousBytes * 12 + 4096 || bestMs > previousMs * 16 + 10))
+                throw new InvalidOperationException($"Identity {label} grows superlinearly at {size}: " +
+                    $"{bestMs:F2} ms/{allocated} bytes after {previousMs:F2} ms/{previousBytes} bytes");
+            Console.WriteLine($"PASS {label} {size}: {bestMs:F2} ms, {allocated} allocated bytes");
+            previousMs = bestMs;
+            previousBytes = allocated;
+        }
+    }
+}
+
+static void CheckCodeCost()
+{
+    double previousDecimalMs = 0;
+    foreach (int size in new[] { 4096, 32768, 262144, 2097152 })
+    {
+        var bytes = new byte[size];
+        Array.Fill(bytes, (byte)0xFF);
+        var code = IdentityText.Code(bytes);
+        Measure("construct", () => GC.KeepAlive(IdentityText.Code(bytes)));
+        Measure("hex", () => GC.KeepAlive(code.ToString("x", CultureInfo.InvariantCulture)));
+        double decimalMs = Measure("decimal", () => GC.KeepAlive(IdentityText.Decimal(code)));
+        if (size == 2097152 && decimalMs > previousDecimalMs * 16 + 10)
+            throw new InvalidOperationException($"Raw identity decimal display exceeds its payload scaling bound: " +
+                $"{size} bytes took {decimalMs:F3} CPU ms after {previousDecimalMs:F3} CPU ms " +
+                "for one eighth the payload");
+        previousDecimalMs = decimalMs;
+
+        double Measure(string label, Action action)
+        {
+            action();
+            double best = double.MaxValue;
+            double bestCpu = double.MaxValue;
+            long allocated = 0;
+            using var process = Process.GetCurrentProcess();
+            for (int repeat = 0; repeat < 3; repeat++)
+            {
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                process.Refresh();
+                TimeSpan cpuBefore = process.TotalProcessorTime;
+                var timer = Stopwatch.StartNew();
+                action();
+                timer.Stop();
+                process.Refresh();
+                bestCpu = Math.Min(bestCpu, (process.TotalProcessorTime - cpuBefore).TotalMilliseconds);
+                best = Math.Min(best, timer.Elapsed.TotalMilliseconds);
+                allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            }
+            Console.WriteLine($"{label} {size}: {best:F3} ms, {bestCpu:F3} CPU ms, {allocated} allocated bytes");
+            return bestCpu;
+        }
+    }
+}
+
 // The typed platform identity accepts only the exact System.Runtime row, and refuses without throwing a token
 // that is not eight bytes; Cecil reads a type named System.Int32 in another assembly with Int32's element type.
 static void CheckTypedPredicates(ModuleDefinition examples, ModuleDefinition unusual)
 {
     var runtime = examples.AssemblyReferences.Single(reference =>
-        AssemblyName.Of(reference) == PlatformAssemblies.SystemRuntime);
+        AssemblyName.Of(reference, FixtureImages.For(examples)) == PlatformAssemblies.SystemRuntime);
     AssemblyNameReference Variant(Action<AssemblyNameReference> change)
     {
         var copy = new AssemblyNameReference(runtime.Name, runtime.Version)
@@ -229,25 +336,67 @@ static void CheckTypedPredicates(ModuleDefinition examples, ModuleDefinition unu
         ("name", Variant(reference => reference.Name = "System.Runtime.Extra"))
     };
     foreach (var (name, reference) in variants)
-        if (AssemblyName.Of(reference) is not { } variant || variant == PlatformAssemblies.SystemRuntime)
+        if (ReadVariant(reference) is not { } variant || variant == PlatformAssemblies.SystemRuntime)
             throw new InvalidOperationException("The platform identity accepts a changed " + name);
-    if (AssemblyName.Of(Variant(reference => reference.PublicKeyToken = [1, 2, 3, 4])) is not null)
+    if (ReadVariant(Variant(reference => reference.PublicKeyToken = [1, 2, 3, 4])) is not null)
         throw new InvalidOperationException("A four-byte public key token has an assembly name");
-    if (AssemblyName.Of(Variant(reference => reference.PublicKeyToken = new byte[8]))!.PublicKeyToken != 0 ||
-        AssemblyName.Of(Variant(reference => reference.PublicKeyToken = []))!.PublicKeyToken is not null)
+    if (ReadVariant(Variant(reference => reference.PublicKeyToken = new byte[8]))!.PublicKeyToken != 0 ||
+        ReadVariant(Variant(reference => reference.PublicKeyToken = []))!.PublicKeyToken is not null)
         throw new InvalidOperationException("Eight zero token bytes and no token are not told apart");
     var forged = unusual.GetType("Odd.Holder").Fields.Single(field => field.Name == "Forged").FieldType;
-    if (PrimitiveType.Of(forged) is not null)
+    if (PrimitiveType.Of(forged, FixtureImages.For(unusual)) is not null)
         throw new InvalidOperationException($"{forged.FullName} [{forged.Scope}] reads as a primitive");
     Console.WriteLine($"PASS the typed platform identity refuses {variants.Length} changed rows, and " +
         $"[{forged.Scope.Name}]{forged.FullName}, which Cecil reads as {forged.MetadataType}, is no primitive");
+}
+
+static AssemblyName? ReadVariant(AssemblyNameReference reference)
+{
+    using var definition = ModuleDefinition.CreateModule("IdentityVariant", ModuleKind.Dll);
+    definition.AssemblyReferences.Add(reference);
+    using var stream = new MemoryStream();
+    definition.Write(stream);
+    byte[] bytes = stream.ToArray();
+    using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes));
+    using var pe = new PEReader(new MemoryStream(bytes));
+    return AssemblyName.Of(module.AssemblyReferences[0], new MetadataImage(pe));
+}
+
+// Distinct invalid UTF-8 bytes may decode to the same Cecil name; typed identities retain each byte.
+static void CheckRawNames(string path)
+{
+    byte[] original = File.ReadAllBytes(path);
+    using var pe = new PEReader(new MemoryStream(original));
+    var reader = Srm.PEReaderExtensions.GetMetadataReader(pe);
+    var typeHandle = reader.TypeDefinitions.Single(handle =>
+        reader.GetString(reader.GetTypeDefinition(handle).Name) == "Dotted.Name");
+    foreach (var handle in new[] { reader.GetTypeDefinition(typeHandle).Name, reader.GetAssemblyDefinition().Name })
+    {
+        int offset = pe.PEHeaders.MetadataStartOffset + reader.GetHeapMetadataOffset(Srm.Ecma335.HeapIndex.String) +
+            MetadataTokens.GetHeapOffset(handle);
+        (TypeIdentity Identity, string CecilName) Read(byte first)
+        {
+            byte[] changed = (byte[])original.Clone();
+            changed[offset] = first;
+            using var module = ModuleDefinition.ReadModule(new MemoryStream(changed));
+            using var image = new PEReader(new MemoryStream(changed));
+            var definition = (TypeDefinition)module.LookupToken(MetadataTokens.GetToken(typeHandle));
+            return (TypeIdentity.Of(definition, new MetadataImage(image)),
+                handle == reader.GetAssemblyDefinition().Name ? module.Assembly.Name.Name : definition.Name);
+        }
+        var first = Read(0xFE);
+        var second = Read(0xFF);
+        if (first.CecilName != second.CecilName || first.Identity == second.Identity)
+            throw new InvalidOperationException("Raw metadata names were aliased by decoded text");
+    }
+    Console.WriteLine("PASS distinct malformed assembly and type names retain their raw identities");
 }
 
 // A second reading of an image gives equal records with equal hashes.
 static void CheckEquality(string path, ReaderParameters parameters, IdentityCorpus corpus)
 {
     using var again = ModuleDefinition.ReadModule(path, parameters);
-    var types = again.GetTypes().Select(TypeIdentity.Of).ToHashSet();
+    var types = again.GetTypes().Select(type => TypeIdentity.Of(type, FixtureImages.For(again))).ToHashSet();
     var first = corpus.Types.ToHashSet();
     if (!types.All(first.Contains) || again.GetTypes().Count() != types.Count)
         throw new InvalidOperationException("A second reading of Examples.dll gives other type identities");
@@ -290,7 +439,7 @@ static void WriteUnusual(string path)
     Type("Odd/Slashed", "Name");
     Type("Odd", "{Braced");
     Type("Odd", "Back\\slash\"quote");
-    Type("Odd", "Zero​width");
+    Type("Odd", "Zero\u200Bwidth");
     Type("Odd", "Tag\U000E0001");
     Type("Odd", "Größe\U0001D538");
     Type("", longName + "/" + longName, Type("", "Outer", Type("Odd", "Outermost")));
@@ -306,6 +455,41 @@ static void WriteUnusual(string path)
     }
     il.Emit(OpCodes.Ret);
     assembly.Write(path);
+    byte[] bytes = File.ReadAllBytes(path);
+    using (var image = new PEReader(new MemoryStream(bytes)))
+    {
+        var reader = Srm.PEReaderExtensions.GetMetadataReader(image);
+        for (var handle = MetadataTokens.UserStringHandle(1); !handle.IsNil; handle = reader.GetNextHandle(handle))
+        {
+            if (reader.GetUserString(handle) != "{brace") continue;
+            int start = image.PEHeaders.MetadataStartOffset +
+                reader.GetHeapMetadataOffset(Srm.Ecma335.HeapIndex.UserString) + MetadataTokens.GetHeapOffset(handle);
+            if (bytes[start] >= 0x80) throw new InvalidDataException("Unexpected fixture literal size");
+            bytes[start + 1] = 0;
+            bytes[start + 2] = 0xD8;
+        }
+    }
+    File.WriteAllBytes(path, bytes);
+}
+
+/// <summary>Fixture image readers retained for the lifetime of this test process.</summary>
+static class FixtureImages
+{
+    static readonly Dictionary<ModuleDefinition, (PEReader Reader, MetadataImage Image)> images = [];
+
+    internal static MetadataImage For(ModuleDefinition module)
+    {
+        if (images.TryGetValue(module, out var entry)) return entry.Image;
+        var reader = new PEReader(File.OpenRead(module.FileName));
+        var image = new MetadataImage(reader);
+        if (image.Reader.GetGuid(image.Reader.GetModuleDefinition().Mvid) != module.Mvid)
+        {
+            reader.Dispose();
+            throw new InvalidDataException("Fixture module and image have different MVIDs");
+        }
+        images.Add(module, (reader, image));
+        return image;
+    }
 }
 
 /// <summary>The distinct identities of a corpus in the order they were found, and the cases they cover.</summary>
@@ -320,6 +504,14 @@ sealed class IdentityCorpus
     readonly List<TypeKind> kinds = [];
     readonly HashSet<object> seen = [];
     readonly HashSet<PrimitiveType> primitives = [];
+
+    internal IdentityCorpus()
+    {
+        Add(names, MetadataName.FromBytes([0xFE]));
+        Add(names, MetadataName.FromBytes([0xC0, 0x80]));
+        Add(literals, UserString.OfLiteral("\uD800"));
+        Add(literals, UserString.OfLiteral("\uDC00"));
+    }
 
     internal IReadOnlyList<MetadataName> Names => names;
     internal IReadOnlyList<UserString> Literals => literals;
@@ -338,8 +530,9 @@ sealed class IdentityCorpus
     /// type references resolve to.</summary>
     internal void Add(ModuleDefinition module, bool resolve)
     {
-        Add(AssemblyName.Of(module.Assembly.Name)!);
-        foreach (var reference in module.AssemblyReferences) Add(AssemblyName.Of(reference)!);
+        Add(AssemblyName.Of(module.Assembly.Name, FixtureImages.For(module))!);
+        foreach (var reference in module.AssemblyReferences)
+            Add(AssemblyName.Of(reference, FixtureImages.For(module))!);
         foreach (var definition in module.GetTypes()) Add(definition);
         if (resolve)
             foreach (var reference in module.GetTypeReferences())
@@ -367,7 +560,7 @@ sealed class IdentityCorpus
             foreach (var part in pointer.Parameters.Select(parameter => parameter.ParameterType)
                 .Append(pointer.ReturnType)) AddPrimitives(part);
         else if (type is TypeSpecification specification) AddPrimitives(specification.ElementType);
-        else if (PrimitiveType.Of(type) is { } primitive) primitives.Add(primitive);
+        else if (PrimitiveType.Of(type, FixtureImages.For(type.Module)) is { } primitive) primitives.Add(primitive);
     }
 
     void Add(AssemblyName assembly)
@@ -380,7 +573,7 @@ sealed class IdentityCorpus
 
     void Add(TypeDefinition definition)
     {
-        var type = TypeIdentity.Of(definition);
+        var type = TypeIdentity.Of(definition, FixtureImages.For(definition.Module));
         Add(types, type);
         Add(type.Assembly);
         foreach (var level in (TypeLevel[])[.. type.Enclosing, new TypeLevel(type.Namespace, type.Name)])
@@ -389,7 +582,7 @@ sealed class IdentityCorpus
             Add(names, level.Namespace);
             Add(names, level.Name);
         }
-        Add(kinds, TypeKind.Of(definition));
+        Add(kinds, TypeKind.Of(definition, FixtureImages.For(definition.Module)));
     }
 
     /// <summary>Fails naming each case no identity of the corpus covers.</summary>

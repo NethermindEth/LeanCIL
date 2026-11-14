@@ -10,7 +10,7 @@ internal static class UnsafeModels
         if (MemoryTransfers.Unsafe(reference, architecture) is { } transfer) return transfer;
         if (ReinterpretReference(reference, architecture) is { } cast) return cast;
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemRuntime) ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
             generic.ElementMethod.GenericParameters.Count != 1 || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
@@ -89,7 +89,7 @@ internal static class UnsafeModels
     private static Operation? ReinterpretReference(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemRuntime) ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
             return null;
