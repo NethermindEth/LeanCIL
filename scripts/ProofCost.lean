@@ -117,10 +117,34 @@ def describe (currentNamespace : Name) (command : Syntax) (source : String) (add
         | none => unnamedLabel keyword source
       (label, "command")
 
-/-- The constants of the module being elaborated that `known` does not hold yet. -/
-def addedConstants (env : Environment) (known : NameSet) : Array (Name × ConstantInfo) :=
-  env.constants.map₂.foldl (init := #[]) fun added name info =>
+/-- Constants absent from `known`, which must contain every name in `previous`. -/
+unsafe def addedConstants (previous current : PHashMap Name ConstantInfo)
+    (known : NameSet) : Array (Name × ConstantInfo) :=
+  visit previous.root current.root #[]
+where
+  /-- An entry is emitted only on its first appearance across measured commands. -/
+  add (added : Array (Name × ConstantInfo)) (name : Name) (info : ConstantInfo) :=
     if known.contains name then added else added.push (name, info)
+  /-- Shared trie nodes contain only known names; changed nodes retain the map's fold order. -/
+  visit (previous current : PersistentHashMap.Node Name ConstantInfo)
+      (added : Array (Name × ConstantInfo)) : Array (Name × ConstantInfo) := Id.run do
+    if ptrEq previous current then return added
+    match previous, current with
+    | .entries before, .entries after =>
+      let mut added := added
+      for index in [:after.size] do
+        match after[index]! with
+        | .null => pure ()
+        | .entry name info => added := add added name info
+        | .ref child =>
+          let earlier := match before[index]? with
+            | some (.ref child) => child
+            | _ => default
+          added := visit earlier child added
+      return added
+    | _, _ =>
+      return PersistentHashMap.foldlMAux (m := Id) (fun added name info =>
+        add added name info) current added
 
 /-- The kernel's heartbeat limit value that disables the limit. -/
 def noHeartbeatLimit : USize := 0
@@ -169,7 +193,7 @@ def processMeasuredCommand : Frontend.FrontendM (Bool × MessageLog) := do
   return (Parser.isTerminalCommand command, messages)
 
 /-- Elaborates `sourcePath` as `moduleName`; returns each command's cost and the result. -/
-def measure (moduleName : Name) (sourcePath : String) :
+unsafe def measure (moduleName : Name) (sourcePath : String) :
     IO (Array CommandCost × Environment × Bool) := do
   let text ← IO.FS.readFile sourcePath
   let inputContext := Parser.mkInputContext text sourcePath
@@ -184,6 +208,7 @@ def measure (moduleName : Name) (sourcePath : String) :
   let commandState := Command.mkState env messages singleThreaded
   let mut state : Frontend.State := { commandState, parserState, cmdPos := parserState.pos }
   let mut known : NameSet := {}
+  let mut previous : PHashMap Name ConstantInfo := {}
   let mut costs : Array CommandCost := #[]
   let mut diagnostics : MessageLog := {}
   let mut finished := false
@@ -201,7 +226,9 @@ def measure (moduleName : Name) (sourcePath : String) :
     finished := isLast
     let some command := state.commands.back? | continue
     if command.isOfKind ``Parser.Command.eoi then continue
-    let added := addedConstants state.commandState.env known
+    let current := state.commandState.env.constants.map₂
+    let added := addedConstants previous current known
+    previous := current
     known := added.foldl (fun names (name, _) => names.insert name) known
     let theorems := added.filterMap fun
       | (_, .thmInfo declaration) => some declaration

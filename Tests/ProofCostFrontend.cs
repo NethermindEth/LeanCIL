@@ -12,6 +12,14 @@ using System.Text.Json;
 // Failed imports and earlier commands must not publish a successful measurement.
 var directory = At("artifacts/ProofCostFrontend");
 Directory.CreateDirectory(directory);
+var tooling = Path.Combine(directory, "scripts");
+Directory.CreateDirectory(tooling);
+var compile = Execute(["lake", "env", "lean", "-o", Path.Combine(tooling, "ProofCost.olean"),
+    At("scripts/ProofCost.lean")]);
+if (compile.Code != 0) throw new InvalidOperationException(compile.Output);
+var discovery = Execute(["lake", "env", "lean", At("Tests/ProofCostDiscovery.lean")], leanPath: directory);
+if (discovery.Code != 0) throw new InvalidOperationException(discovery.Output);
+Console.WriteLine(discovery.Output);
 var fixtures = new (string Name, string? Error, string Source)[]
 {
     ("ValidCostImport", null, """
@@ -26,6 +34,15 @@ var fixtures = new (string Name, string? Error, string Source)[]
 
         theorem subsequent : True := True.intro
         #print axioms subsequent
+
+        private theorem hidden : True := True.intro
+        #print axioms hidden
+
+        example : True := True.intro
+
+        structure MeasuredPair where
+          left : Nat
+          right : Nat
 
         /-- error: expected cost diagnostic -/
         #guard_msgs in
@@ -89,7 +106,8 @@ foreach (var (name, error, contents) in fixtures)
             throw new InvalidOperationException("A valid proof was not measured:\n" + result.Output);
         using var measured = JsonDocument.Parse(File.ReadAllText(report));
         var commands = measured.RootElement.GetProperty("commands").EnumerateArray().ToArray();
-        foreach (var (label, constants) in new[] { ("measured", 1), ("auxiliary", 2), ("subsequent", 1) })
+        foreach (var (label, constants) in new[]
+                 { ("measured", 1), ("auxiliary", 2), ("subsequent", 1), ("hidden", 1) })
         {
             var command = commands.Single(command => command.GetProperty("label").GetString() == label);
             if (command.GetProperty("constants").GetInt32() != constants ||
@@ -97,6 +115,10 @@ foreach (var (name, error, contents) in fixtures)
                 command.GetProperty("kernelHeartbeats").GetInt64() <= 0)
                 throw new InvalidOperationException("Missing theorem measurement: " + label);
         }
+        if (commands.Count(command => command.GetProperty("kind").GetString() == "example") != 1 ||
+            commands.Single(command => command.GetProperty("label").GetString() == "MeasuredPair")
+                .GetProperty("constants").GetInt32() < 3)
+            throw new InvalidOperationException("Examples or generated structure declarations were lost.");
         if (commands.Where(command => command.GetProperty("kind").GetString() == "command")
             .Any(command => command.GetProperty("constants").GetInt32() != 0))
             throw new InvalidOperationException("A diagnostic command counted declarations again.");
