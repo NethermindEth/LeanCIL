@@ -97,7 +97,7 @@ inductive FixedStepFamily where
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
-  | .sub => .reference
+  | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
@@ -127,6 +127,7 @@ theorem argumentUnspecified_map (mapping : AllocationRenaming)
 
 /-- The finite reference-operation family exposes only the cases that can observe references. -/
 inductive ReferenceStepOperation : CIL.Instruction → Prop where
+  | add : ReferenceStepOperation .add
   | sub : ReferenceStepOperation .sub
   | clt_un : ReferenceStepOperation .clt_un
   | cgt_un : ReferenceStepOperation .cgt_un
@@ -179,6 +180,32 @@ macro "fixed_fallback" : tactic => `(tactic| (
       all_goals first
       | contradiction
       | exact fallback
+      | (exfalso
+         have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
+             CIL.Instruction.add = CIL.Instruction.add →
+             originalStack = Value.scalar offset :: Value.reference reference :: tail → False :=
+           by assumption
+         exact excluded _ _ _ rfl rfl)
+      | (exfalso
+         have excluded : ∀ (reference : ManagedReference) (offset : CIL.Value) (tail : List Value),
+             CIL.Instruction.add = CIL.Instruction.add →
+             originalStack = Value.reference reference :: Value.scalar offset :: tail → False :=
+           by assumption
+         exact excluded _ _ _ rfl rfl)
+      | (exfalso
+         have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
+             CIL.Instruction.add = CIL.Instruction.add →
+             originalStack =
+               Value.scalar offset :: Value.readOnlyReference reference :: tail → False :=
+           by assumption
+         exact excluded _ _ _ rfl rfl)
+      | (exfalso
+         have excluded : ∀ (reference : ManagedReference) (offset : CIL.Value) (tail : List Value),
+             CIL.Instruction.add = CIL.Instruction.add →
+             originalStack =
+               Value.readOnlyReference reference :: Value.scalar offset :: tail → False :=
+           by assumption
+         exact excluded _ _ _ rfl rfl)
       | (exfalso
          have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
              CIL.Instruction.sub = CIL.Instruction.sub →
@@ -266,6 +293,14 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          all_goals repeat first | cases observable | split at observable)
       | fixed_fallback
     all_goals try solve | repeat first | contradiction | cases observable | split at observable
+    all_goals try solve |
+      apply (related.referenceAddInstructionResult 1 true _ bounds
+        (SuccessOrThrow.bind_left observable)).bind
+      intro first second same
+      obtain ⟨memory, values⟩ := first
+      obtain ⟨otherMemory, otherValues⟩ := second
+      obtain ⟨memories, rfl⟩ := same
+      exact .ok (.next memories frames)
     all_goals clear observable
     all_goals try simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
     all_goals repeat' rcases bounds with ⟨_, bounds⟩

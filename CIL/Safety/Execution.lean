@@ -257,6 +257,12 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m
+  | .add, .scalar _ :: .reference _ :: _
+  | .add, .reference _ :: .scalar _ :: _
+  | .add, .scalar _ :: .readOnlyReference _ :: _
+  | .add, .readOnlyReference _ :: .scalar _ :: _ =>
+    let (memory, values) ← referenceAddInstruction 1 true stack m
+    return .next (pc + 1) values frame memory
   | .sub, .scalar offset :: .reference value :: rest =>
     let result ← referenceSubtract m value offset
     return .next (pc + 1) (.reference result :: rest) frame m
