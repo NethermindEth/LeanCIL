@@ -34,6 +34,34 @@ internal sealed class MetadataImage
         return identity;
     }
 
+    /// <summary>A top-level type's raw name columns and resolution scope; definitions have no reference scope.</summary>
+    internal sealed record TypeNameRow(TypeLevel Level, uint ResolutionScope);
+
+    readonly Dictionary<uint, TypeNameRow?> typeNames = [];
+
+    /// <summary>The cached raw name of a top-level TypeDef or TypeRef; nested types have no top-level name.</summary>
+    internal TypeNameRow? TopLevelTypeName(uint token)
+    {
+        if (typeNames.TryGetValue(token, out var cached)) return cached;
+        uint table = token >> 24;
+        int rowNumber = (int)(token & 0xffffff);
+        if (table is not (1 or 2) || rowNumber == 0 || rowNumber > Count((int)table))
+            throw new InvalidDataException("Modifier identity requires a valid TypeDef or TypeRef row");
+        uint scope = 0;
+        bool nested;
+        if (table == 1)
+        {
+            var row = Reader.GetTypeReference(MetadataTokens.TypeReferenceHandle(rowNumber));
+            scope = (uint)MetadataTokens.GetToken(row.ResolutionScope);
+            nested = row.ResolutionScope.Kind == HandleKind.TypeReference;
+        }
+        else nested = NestedClassRow(rowNumber) is not null;
+        var name = nested ? null : new TypeNameRow(
+            IdentityRows.Level(this, new Mono.Cecil.MetadataToken(token)), scope);
+        typeNames.Add(token, name);
+        return name;
+    }
+
     internal int Count(int table) => Reader.GetTableRowCount((TableIndex)table);
 
     Dictionary<int, uint>? nesting;

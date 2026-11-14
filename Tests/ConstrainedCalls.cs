@@ -666,7 +666,8 @@ Console.WriteLine("PASS constrained extraction rejection: open-generic-receiver"
 const string modifierRejection = "except System.Runtime's modreq(InAttribute) directly on a by-reference parameter";
 MethodDefinition InAdd(ModuleDefinition module) => module.GetType("Examples.InWord").Methods
     .Single(method => method.Name.EndsWith(".Add", StringComparison.Ordinal));
-foreach (var mutation in new[] { "modopt", "other-modreq", "by-value", "nested", "versioned-scope", "foreign-scope" })
+foreach (var mutation in new[]
+    { "modopt", "other-modreq", "by-value", "nested", "versioned-scope", "foreign-scope", "flattened-name" })
 {
     var dll = Path.Combine(root, "in-" + mutation + ".dll");
     string selector;
@@ -680,6 +681,8 @@ foreach (var mutation in new[] { "modopt", "other-modreq", "by-value", "nested",
             new(modified.ModifierType.Namespace, modified.ModifierType.Name, module, scope);
         method.Parameters[0].ParameterType = mutation switch
         {
+            "flattened-name" => new RequiredModifierType(new TypeReference("",
+                "System.Runtime.InteropServices.InAttribute", module, runtime), reference),
             "modopt" => new OptionalModifierType(modified.ModifierType, reference),
             "other-modreq" => new RequiredModifierType(
                 new TypeReference("System.Runtime.CompilerServices", "IsVolatile", module, runtime), reference),

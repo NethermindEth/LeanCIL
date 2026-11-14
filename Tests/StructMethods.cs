@@ -8,6 +8,8 @@ using System.Reflection;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
+Run(["dotnet", "run", "--file", At("Tests/ModifierIdentities.cs")]);
+
 using var verification = new Program();
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/StructMethods");
@@ -96,8 +98,8 @@ foreach (var shortForm in new[] { false, true })
     Compare(dll, "Arguments", "-" + shortForm);
 }
 
-// Libraries for older frameworks declare their own IsExternalInit; C# binds the marker by full name
-// from any assembly, so an accessor marked by one runs exactly as with System.Runtime's.
+// The top-level IsExternalInit marker keeps its namespace and simple name across assemblies.
+// An accessor marked by a library's own definition runs exactly as with System.Runtime's.
 foreach (var scope in new[] { "local-marker", "versioned-marker" })
 {
     var output = Path.Combine(root, "Init-" + scope);
@@ -178,7 +180,8 @@ const string returnRejection = "except modreq(System.Runtime.CompilerServices.Is
 const string parameterRejection = "except System.Runtime's modreq(InAttribute) directly on a by-reference parameter";
 static MethodDefinition Accessor(ModuleDefinition module, string name) =>
     module.GetType("Examples.InitCounter").Methods.Single(method => method.Name == name);
-foreach (var mutation in new[] { "other-modreq", "modopt", "non-void", "parameter", "other-namespace" })
+foreach (var mutation in new[]
+    { "other-modreq", "modopt", "non-void", "parameter", "other-namespace", "flattened-name" })
 {
     var output = Path.Combine(root, "Reject-init-" + mutation);
     Directory.CreateDirectory(output);
@@ -201,6 +204,10 @@ foreach (var mutation in new[] { "other-modreq", "modopt", "non-void", "paramete
         var target = mutation == "non-void" ? Accessor(module, "get_Value") : setter;
         switch (mutation)
         {
+            case "flattened-name":
+                setter.ReturnType = new RequiredModifierType(new TypeReference("",
+                    "System.Runtime.CompilerServices.IsExternalInit", module, runtime), marker.ElementType);
+                break;
             case "other-modreq":
                 setter.ReturnType = new RequiredModifierType(Modifier("IsVolatile", runtime), marker.ElementType);
                 break;
