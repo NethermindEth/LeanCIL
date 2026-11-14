@@ -600,4 +600,157 @@ Test("certified library binding, main republication and observability", () =>
     Require(workflow.ReplaceLineEndings("\n").Split("timeout-minutes: 3\n", StringSplitOptions.None).Length == 3,
         "Both toolchain installation attempts must have bounded timeouts");
 });
+Test("CI and suite scripts reach no repository, package source or path outside this one", () =>
+{
+    var found = ExternalSources.Scan(root, ExternalSources.CiFiles(root));
+    Require(found.Count == 0, "Reaches outside this repository:\n" + string.Join("\n", found));
+    Require(!File.Exists(Path.Combine(root, ".gitmodules")), "A submodule pulls in another repository");
+    Require(!Directory.GetFiles(root).Any(path =>
+            Path.GetFileName(path).Equals("nuget.config", StringComparison.OrdinalIgnoreCase)),
+        "A NuGet configuration can name a package source outside this repository");
+});
+Test("each way to reach another repository is found in a scratch copy of a workflow or script", () =>
+{
+    string scratch = Path.Combine(Path.GetTempPath(), "leancil-external-" + Guid.NewGuid().ToString("N"));
+    string workflowDirectory = Path.Combine(scratch, ".github", "workflows");
+    Directory.CreateDirectory(workflowDirectory);
+    Directory.CreateDirectory(Path.Combine(scratch, "scripts"));
+    try
+    {
+        string original = File.ReadAllText(Path.Combine(root, ".github/workflows/verification.yml"));
+        string copy = Path.Combine(workflowDirectory, "verification.yml");
+        File.WriteAllText(copy, original);
+        Require(ExternalSources.Scan(scratch, [copy]).Count == 0, "An unchanged copy must pass");
+        // Strings are split so that this file does not match its own rules.
+        string checkoutStep = Regex.Match(original, @"(?m)^( *)- uses: actions/checkout@.*$").Value;
+        Require(checkoutStep.Length > 0, "The workflow has no checkout step to mutate");
+        string indent = checkoutStep[..checkoutStep.IndexOf('-')];
+        int stepStart = original.IndexOf(checkoutStep, StringComparison.Ordinal);
+        File.WriteAllText(copy, original[..stepStart] + checkoutStep + "\n" + indent + "  with:\n" +
+            indent + "    repo" + "sitory: other/owner" + original[(stepStart + checkoutStep.Length)..]);
+        int stepLine = original[..stepStart].Count(character => character == '\n') + 3;
+        Equal(ExternalSources.Scan(scratch, [copy]),
+            [$".github/workflows/verification.yml:{stepLine}: checkout-repository"]);
+        var cases = new (string Rule, string File, string Text)[]
+        {
+            ("fetch-repository", ".github/workflows/mutant.yml",
+                "      - run: git cl" + "one https://example.test/a/b.git"),
+            ("fetch-repository", ".github/workflows/mutant.yml",
+                "      - run: git sub" + "module add https://example.test/a/b"),
+            ("fetch-repository", ".github/workflows/mutant.yml", "      - run: gh repo cl" + "one other/owner"),
+            ("fetch-repository", "scripts/Mutant.cs", "Run([\"git\", \"cl" + "one\", \"other\"]);"),
+            ("package-source", ".github/workflows/mutant.yml",
+                "      - run: dotnet restore --sou" + "rce https://feed.test"),
+            ("package-source", ".github/workflows/mutant.yml",
+                "      - run: dotnet nuget add sou" + "rce https://feed.test"),
+            ("nuget-host", "scripts/Mutant.cs", "var feed = \"https://api.nu" + "get.org/v3/index.json\";"),
+            ("other-url", ".github/workflows/mutant.yml",
+                "      - run: curl https://git" + "hub.com/other/owner/archive/main.tar.gz"),
+            ("other-url", "scripts/Mutant.cs", "var api = \"https://api.git" + "hub.com/repos/other/owner\";"),
+            ("escape", ".github/workflows/mutant.yml", "          working-directory: ../other"),
+            ("escape", ".github/workflows/mutant.yml", "          path: /tmp/other"),
+            ("escape", ".github/workflows/mutant.yml", "      - run: cd .. && ls"),
+            ("directive", "scripts/Mutant.cs", "#:include ../../other/Shared.cs"),
+            ("directive", "scripts/Mutant.cs", "#:project ../../other/Other.csproj"),
+            ("directive", "scripts/Mutant.cs", "#:package Other.Package@1.0.0"),
+        };
+        foreach (var (rule, relative, text) in cases)
+        {
+            string path = Path.Combine(scratch, relative);
+            File.WriteAllText(path, text + "\n");
+            Require(ExternalSources.Scan(scratch, [path])
+                    .Any(finding => finding.EndsWith(": " + rule, StringComparison.Ordinal)),
+                "Not found as " + rule + ": " + text);
+        }
+    }
+    finally { Directory.Delete(scratch, recursive: true); }
+});
 Console.WriteLine($"All {checks} selection checks passed.");
+
+/// <summary>Finds where workflows and suite scripts reach code or packages outside this repository.</summary>
+static partial class ExternalSources
+{
+    /// <summary>Packages a script may reference; every other package is a source outside this repository.</summary>
+    static readonly string[] AllowedPackages = ["Mono.Cecil"];
+
+    /// <summary>Accepted findings by file and rule, with why each cannot reach another repository.</summary>
+    static readonly Dictionary<(string File, string Rule), string> Exempt = new()
+    {
+        [("scripts/ConsumerVerification.cs", "fetch-repository")] =
+            "clones the dependency directories of the repository under verification into a scratch workspace",
+        [("scripts/CertifiedLibraryDonor.cs", "other-url")] =
+            "compares a pull request side with this repository by the API URL that run metadata gives",
+        [("scripts/TestFindCertifiedLibrary.cs", "other-url")] =
+            "uses other and forked repositories as fixtures that donor selection must reject",
+        [("Tests/CompilerCoverage.cs", "nuget-host")] =
+            "the advisory latest run reads the compiler package index and builds no repository",
+        [("Tests/ContractDiscovery.cs", "package-source")] =
+            "restores from a feed directory the test creates in its own scratch folder",
+    };
+
+    [GeneratedRegex(@"^\s*(-\s+)?repository\s*:")]
+    private static partial Regex CheckoutRepository();
+
+    [GeneratedRegex(@"\bgit\s+(clone|submodule|remote\s+add)\b|\bgh\s+repo\s+clone\b|""(clone|submodule)""")]
+    private static partial Regex FetchRepository();
+
+    [GeneratedRegex(@"--sourc[e]\b|\bnuget\s+add\s+sourc[e]\b|<add\s+key=", RegexOptions.IgnoreCase)]
+    private static partial Regex PackageSource();
+
+    [GeneratedRegex(@"nuget\.org", RegexOptions.IgnoreCase)]
+    private static partial Regex NugetHost();
+
+    [GeneratedRegex(@"github\.com/(?!NethermindEth/LeanCIL[/""]|leanprover/elan/releases/download/v4\.2\.4/)")]
+    private static partial Regex OtherRepositoryUrl();
+
+    [GeneratedRegex(@"(path|working-directory)\s*:\s*['""]?(\.\.|/|~|[A-Za-z]:)|\bcd\s+\.\.")]
+    private static partial Regex WorkflowEscape();
+
+    [GeneratedRegex(@"^#:(include|project)\s+(\S+)")]
+    private static partial Regex PathDirective();
+
+    [GeneratedRegex(@"^#:package\s+([^@\s]+)")]
+    private static partial Regex PackageDirective();
+
+    /// <summary>Every workflow and every script or test source that a suite runs.</summary>
+    internal static IEnumerable<string> CiFiles(string root) =>
+        new[] { ".github/workflows/*.yml", ".github/workflows/*.yaml", "scripts/*.cs", "Tests/*.cs" }
+            .SelectMany(pattern => Directory.GetFiles(Path.Combine(root, Path.GetDirectoryName(pattern)!),
+                Path.GetFileName(pattern)));
+
+    /// <summary>One finding per rule broken on a line, as file:line: rule. Cost is linear in total lines.</summary>
+    internal static List<string> Scan(string root, IEnumerable<string> files)
+    {
+        var found = new List<string>();
+        foreach (string file in files)
+        {
+            string relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+            bool workflow = relative.StartsWith(".github/workflows/", StringComparison.Ordinal);
+            string[] lines = File.ReadAllLines(file);
+            for (int index = 0; index < lines.Length; index++)
+                foreach (string rule in Broken(root, file, workflow, lines[index]))
+                    if (!Exempt.ContainsKey((relative, rule))) found.Add($"{relative}:{index + 1}: {rule}");
+        }
+        return found;
+    }
+
+    private static IEnumerable<string> Broken(string root, string file, bool workflow, string line)
+    {
+        if (workflow && CheckoutRepository().IsMatch(line)) yield return "checkout-repository";
+        if (workflow && WorkflowEscape().IsMatch(line)) yield return "escape";
+        if (FetchRepository().IsMatch(line)) yield return "fetch-repository";
+        if (PackageSource().IsMatch(line)) yield return "package-source";
+        if (NugetHost().IsMatch(line)) yield return "nuget-host";
+        if (OtherRepositoryUrl().IsMatch(line)) yield return "other-url";
+        var path = PathDirective().Match(line);
+        string? target = path.Success
+            ? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(file)!, path.Groups[2].Value)) : null;
+        if (target is not null && !Within(root, target)) yield return "directive";
+        var package = PackageDirective().Match(line);
+        if (package.Success && !AllowedPackages.Contains(package.Groups[1].Value)) yield return "directive";
+    }
+
+    private static bool Within(string root, string path) =>
+        path.StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+            StringComparison.Ordinal);
+}
