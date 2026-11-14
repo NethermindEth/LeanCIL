@@ -18,7 +18,7 @@ internal static class MetadataValidation
         var marker = markers[0];
         var constructor = marker.Constructor;
         if (markers.Length != 1 || marker.AttributeType is TypeSpecification ||
-            !RuntimeModels.ExactScope(marker.AttributeType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(marker.AttributeType.Scope, PlatformAssemblies.SystemRuntime) ||
             constructor.Name != ".ctor" || !constructor.HasThis || constructor.ExplicitThis ||
             constructor.CallingConvention != MethodCallingConvention.Default ||
             constructor.HasGenericParameters || constructor.Parameters.Count != 0 ||
@@ -69,8 +69,8 @@ internal static class MetadataValidation
     internal static int? IntegerVectorWidth(TypeReference type)
     {
         if (type is not GenericInstanceType { GenericArguments.Count: 1 } vector ||
-            !RuntimeModels.ExactScope(vector.ElementType.Scope, "System.Runtime.Intrinsics") ||
-            !RuntimeModels.ExactScope(vector.GenericArguments[0].Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(vector.ElementType.Scope, PlatformAssemblies.SystemRuntimeIntrinsics) ||
+            !RuntimeModels.ExactScope(vector.GenericArguments[0].Scope, PlatformAssemblies.SystemRuntime) ||
             vector.GenericArguments[0].FullName is not ("System.Byte" or "System.Int32" or "System.UInt32" or
                 "System.Int64" or "System.UInt64")) return null;
         return vector.ElementType.FullName switch

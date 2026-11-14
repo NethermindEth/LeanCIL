@@ -8,7 +8,7 @@ internal static class SpanReinterpretation
     internal static Operation? Translate(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.InteropServices.MemoryMarshal" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
             reference.Parameters.Count != 1 ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) !=

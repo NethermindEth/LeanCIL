@@ -8,7 +8,7 @@ internal static class MemoryTransfers
     internal static Operation? Marshal(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.InteropServices.MemoryMarshal" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
             generic.ElementMethod.GenericParameters.Count != 1 || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) !=
@@ -55,7 +55,7 @@ internal static class MemoryTransfers
     internal static Operation? Unsafe(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
             generic.ElementMethod.GenericParameters.Count != 1 || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) !=

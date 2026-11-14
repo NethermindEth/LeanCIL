@@ -12,7 +12,7 @@ internal static class InReferences
     internal static ByReferenceType? Unwrap(TypeReference type) =>
         type is RequiredModifierType { ModifierType: var modifier, ElementType: ByReferenceType reference } &&
         modifier is not TypeSpecification && modifier.FullName == Modifier &&
-        RuntimeModels.ExactScope(modifier.Scope, "System.Runtime") && !Modified(reference.ElementType)
+        RuntimeModels.ExactScope(modifier.Scope, PlatformAssemblies.SystemRuntime) && !Modified(reference.ElementType)
             ? reference : null;
 
     internal static bool Is(TypeReference type) => Unwrap(type) is not null;

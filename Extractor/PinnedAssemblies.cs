@@ -26,10 +26,6 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
             name.PublicKeyToken is { Length: 8 } token ? BinaryPrimitives.ReadUInt64BigEndian(token) : 0);
     }
 
-    // Platform keys: only the extractor's trusted platform assemblies can answer these names.
-    static readonly string[] PlatformKeyTokens =
-        ["b03f5f7f11d50a3a", "cc7b13ffcd2ddd51", "7cec85d7bea7798e", "b77a5c561934e089"];
-
     [ThreadStatic]
     static PinnedAssemblies? active;
 
@@ -102,8 +98,9 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>The pinned set of the current extraction, or none outside one.</summary>
     internal static PinnedAssemblies? Active => active;
 
+    // Platform keys: only the extractor's trusted platform assemblies can answer these names.
     static bool Platform(AssemblyNameReference name) => name.PublicKeyToken is { Length: 8 } token &&
-        PlatformKeyTokens.Contains(Convert.ToHexStringLower(token));
+        PlatformAssemblies.KeyTokens.Contains(BinaryPrimitives.ReadUInt64BigEndian(token));
 
     /// <summary>Whether <paramref name="module"/> is one of the pinned modules.</summary>
     internal bool Contains(ModuleDefinition module) =>
