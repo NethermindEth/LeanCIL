@@ -15,7 +15,7 @@ foreach (var path in new[] { package, fixture, second }) Directory.CreateDirecto
 File.WriteAllText(Path.Combine(fixture, "Gates.csproj"), """
     <Project Sdk="Microsoft.NET.Sdk">
       <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
+        <TargetFramework>net11.0</TargetFramework>
         <Optimize>true</Optimize>
         <DefineConstants>$(DefineConstants);$(FixtureCase)</DefineConstants>
       </PropertyGroup>
@@ -41,7 +41,7 @@ File.WriteAllText(Path.Combine(fixture, "First.cs"), """
     """);
 File.WriteAllText(Path.Combine(second, "Second.csproj"), """
     <Project Sdk="Microsoft.NET.Sdk">
-      <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+      <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
     </Project>
     """);
 File.WriteAllText(Path.Combine(second, "Second.cs"),

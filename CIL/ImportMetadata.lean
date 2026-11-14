@@ -29,7 +29,7 @@ structure ImportLayoutCatalog where
   computed : Array ComputedLayout := #[]
   deriving DecidableEq, Repr
 
-/-- Whether a type is one of the .NET 10 `System.Runtime` integer primitives (including
+/-- Whether a type is one of the .NET 11 `System.Runtime` integer primitives (including
     `bool`, `char` and the native integers). -/
 def importPrimitive : TypeExpr → Bool
   | .atom scope name =>

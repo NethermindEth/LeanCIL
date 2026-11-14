@@ -11,7 +11,8 @@ private def layouts : List RawLayout :=
      fields := [⟨.unsigned64, none⟩] }]
 private def packet : TypeExpr := .aggregate "Packet" 0
 private def word : TypeExpr := .atom
-  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" "System.UInt64"
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+  "System.UInt64"
 private def body : RawMethod := {
   token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,

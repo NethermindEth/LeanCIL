@@ -34,7 +34,7 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
 {
     using var reference = ModuleDefinition.ReadModule(Path.Combine(toolchain.References, assembly + ".dll"));
     var runtime = AssemblyNameReference.Parse(
-        "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
+        "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
     var elements = new[] { "Byte", "SByte", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
         "IntPtr", "UIntPtr", "Boolean", "Char", "Single", "Double" }
         .Select(name => new TypeReference("System", name, probe, runtime, true)).ToArray();

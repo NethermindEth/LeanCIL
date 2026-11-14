@@ -27,10 +27,14 @@ string package = Path.Combine(root, "Package");
 string caller = Path.Combine(root, "Caller");
 foreach (string path in new[] { libRoot, appRoot, package, caller }) Directory.CreateDirectory(path);
 File.WriteAllText(Path.Combine(libRoot, "Lib.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.Lib</AssemblyName><AssemblyVersion>1.0.0.0</AssemblyVersion><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>StaticFixture.Lib</AssemblyName><AssemblyVersion>1.0.0.0</AssemblyVersion><Optimize>true</Optimize>
+</PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>StaticFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+<ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
 """);
 File.WriteAllText(Path.Combine(libRoot, "Library.cs"), """
 namespace StaticFixture;
@@ -445,7 +449,9 @@ void FullTransitiveStatic()
     var topRoot = Path.Combine(root, "Top");
     Directory.CreateDirectory(topRoot);
     File.WriteAllText(Path.Combine(topRoot, "Top.csproj"), """
-        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>StaticFixture.Top</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../App/App.csproj" /></ItemGroup></Project>
+        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+        <AssemblyName>StaticFixture.Top</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+        <ItemGroup><ProjectReference Include="../App/App.csproj" /></ItemGroup></Project>
         """);
     File.WriteAllText(Path.Combine(topRoot, "Top.cs"),
         "namespace StaticFixture; public static class Top { public static ulong Entry() => Application.Entry(); }");

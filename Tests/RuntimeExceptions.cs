@@ -9,7 +9,8 @@ using Program verification = new();
 string root = At("artifacts/RuntimeExceptions");
 Directory.CreateDirectory(root);
 File.WriteAllText(Path.Combine(root, "RuntimeFaults.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<Optimize>true</Optimize></PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(root, "RuntimeFaults.cs"), """
 namespace RuntimeFaults;

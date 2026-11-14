@@ -40,7 +40,7 @@ partial class Program
         File.WriteAllText(attributes, """
             [assembly: System.Reflection.AssemblyVersion("1.0.0.0")]
             [assembly: System.Reflection.AssemblyConfiguration("Release")]
-            [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0")]
+            [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v11.0")]
             """);
         var implicitUsings = Path.Combine(directory, "GlobalUsings.cs");
         File.WriteAllText(implicitUsings, """

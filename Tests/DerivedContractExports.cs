@@ -16,7 +16,7 @@ string callerPackage = Path.Combine(root, "CallerProofs");
 foreach (string directory in new[] { libRoot, appRoot, package, callerPackage }) Directory.CreateDirectory(directory);
 string[] cli = ["dotnet", ExtractorPath];
 string Project(string assembly, string references) =>
-    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>" +
+    "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net11.0</TargetFramework><AssemblyName>" +
     assembly + "</AssemblyName><Optimize>true</Optimize></PropertyGroup>" + references + "</Project>";
 File.WriteAllText(Path.Combine(libRoot, "Lib.csproj"), Project("DerivedFixture.Lib", ""));
 File.WriteAllText(Path.Combine(appRoot, "App.csproj"), Project("DerivedFixture.App",

@@ -20,7 +20,7 @@ namespace CIL.Extraction
 
 /-- The exact `System.Runtime.Intrinsics` assembly identity; `runtimeScope` is in `TypeExpr`. -/
 def intrinsicsScope : String :=
-  "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+  "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
 /-- Byte width of an admitted integer vector, bound to both exact runtime type identities. -/
 def integerVectorWidth : TypeExpr → Option Nat
