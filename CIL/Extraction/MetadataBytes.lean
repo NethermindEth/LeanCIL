@@ -50,6 +50,8 @@ inductive MetadataError where
   /-- A reference into a pinned assembly whose slice the evidence does not carry. -/
   | missingSlice (token : Nat)
   | bodyLocation (token : Nat)
+  /-- A runtime-async method, whose body the model does not read. -/
+  | runtimeAsync (token : Nat)
   | tablesMismatch
   deriving DecidableEq, Repr
 

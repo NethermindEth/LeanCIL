@@ -423,6 +423,12 @@ theorem rejects_body_bytes_for_a_row_without_a_body :
       (.bodyLocation tokens.main) = true := by decide +kernel
 #print axioms rejects_body_bytes_for_a_row_without_a_body
 
+/-- A runtime-async row is refused: its body returns the result its signature states as a task. -/
+theorem rejects_a_runtime_async_row :
+    identityFails (withFlags 0x0096 0x2000).1 (withFlags 0x0096 0x2000).2
+      (.runtimeAsync tokens.main) = true := by decide +kernel
+#print axioms rejects_a_runtime_async_row
+
 /-- The same rewrite of the row with `Main`'s own flags is accepted, so the refusals above come
     from the flags and not from the rewrite. -/
 theorem accepts_the_row_rewritten_with_its_own_flags :
