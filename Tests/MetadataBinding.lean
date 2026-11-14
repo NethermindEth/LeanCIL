@@ -18,7 +18,7 @@ open CIL CIL.Extraction Tests.MetadataBuilder Tests.MetadataWorld
 private def passes (ownSlice libSlice : MetadataSlice) (token : Nat) (operand : RawOperand)
     (arity : Nat := 0) : Bool :=
   match (do
-    let env : MetadataEnv := { slices := [← ownSlice.index, ← libSlice.index] }
+    let env := MetadataEnv.ofSlices [← ownSlice.index, ← libSlice.index]
     checkEntry env arity token operand) with
   | .ok _ => true
   | .error _ => false
@@ -27,7 +27,7 @@ private def passes (ownSlice libSlice : MetadataSlice) (token : Nat) (operand : 
 private def rejects (ownSlice libSlice : MetadataSlice) (token : Nat) (operand : RawOperand)
     (error : MetadataError) (arity : Nat := 0) : Bool :=
   match (do
-    let env : MetadataEnv := { slices := [← ownSlice.index, ← libSlice.index] }
+    let env := MetadataEnv.ofSlices [← ownSlice.index, ← libSlice.index]
     checkEntry env arity token operand) with
   | .error found => found == error
   | .ok _ => false
@@ -137,14 +137,14 @@ theorem rejects_a_static_field_claimed_as_an_instance_field :
 private def localsFail (slice : MetadataSlice) (locals : List TypeExpr) (error : MetadataError) :
     Bool :=
   match (do
-    let env : MetadataEnv := { slices := [← slice.index, ← lib.index] }
+    let env := MetadataEnv.ofSlices [← slice.index, ← lib.index]
     checkLocals env 0 tokens.localsSignature locals) with
   | .error found => found == error
   | .ok _ => false
 
 theorem accepts_the_locals_the_signature_names :
     (match (do
-      let env : MetadataEnv := { slices := [← own.1.index, ← lib.index] }
+      let env := MetadataEnv.ofSlices [← own.1.index, ← lib.index]
       checkLocals env 0 tokens.localsSignature [uint64]) with
     | .ok _ => true
     | .error _ => false) = true := by decide +kernel
@@ -237,7 +237,7 @@ theorem rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
 private def rejectsWithoutLibSlice (token : Nat) (operand : RawOperand) (error : MetadataError) :
     Bool :=
   match (do
-    let env : MetadataEnv := { slices := [← own.1.index], pinned := [bytesOf libScope] }
+    let env := MetadataEnv.ofSlices [← own.1.index] [bytesOf libScope]
     checkEntry env 0 token operand) with
   | .error found => found == error
   | .ok _ => false
@@ -380,7 +380,7 @@ private def receiverIdentity (baseName : String) (interfaceType hasThis objectRe
   let metadata := if omitLink then
       { fixture.1 with links := fixture.1.links.filter (·.kind != linkGenericParams) }
     else fixture.1
-  let env : MetadataEnv := { slices := [← metadata.index] }
+  let env := MetadataEnv.ofSlices [← metadata.index]
   methodIdentityValid env method (if generic && !omitParameters then [.primitive 8] else [])
     (if generic && !omitParameters then [int32] else [])
 
@@ -469,7 +469,7 @@ private def mainMethod : RawMethod :=
 /-- Whether the method definition is accepted, or refused with this error. -/
 private def identity (slice : MetadataSlice) (method : RawMethod) :
     Except MetadataError MethodNames := do
-  let env : MetadataEnv := { slices := [← slice.index, ← lib.index] }
+  let env := MetadataEnv.ofSlices [← slice.index, ← lib.index]
   methodIdentityValid env method [] []
 
 private def identityFails (slice : MetadataSlice) (method : RawMethod) (error : MetadataError) :

@@ -426,12 +426,13 @@ def MethodMetadata.environmentWith (metadata : MethodMetadata) (identities : Lis
   else do
     let indexed ← (metadata.slices.zip (identities.zip tables)).mapM
       fun (slice, identity, sliceTables) => slice.indexWith sliceTables identity
-    .ok { slices := indexed, pinned := pinned.map assemblyStem }
+    .ok (MetadataEnv.ofSlices indexed (pinned.map assemblyStem))
 
 /-- The metadata of a body as an environment of indexed slices, built from its bytes alone. -/
 def MethodMetadata.environment (metadata : MethodMetadata) (pinned : List (List Nat) := []) :
     Except MetadataError MetadataEnv := do
-  .ok { slices := ← metadata.slices.mapM MetadataSlice.index, pinned := pinned.map assemblyStem }
+  .ok (MetadataEnv.ofSlices (← metadata.slices.mapM MetadataSlice.index)
+    (pinned.map assemblyStem))
 
 /-- Decode a method body: its header and its instructions, with branch operands as instruction
     indices and every token operand checked against the metadata. `arity` is the number of
