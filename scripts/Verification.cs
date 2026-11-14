@@ -4124,6 +4124,10 @@ partial class Program : IDisposable
         var closureRoots = ClosureRoots(proofSource, output, symbolsSource, extraction);
         var session = Library(before, closureRoots: closureRoots);
         if (deepChecks is not null) PrepareBindingLibrary(session);
+        void RequireDeepBindingStable()
+        {
+            if (deepChecks is not null) RequirePreparedBindingLibrary();
+        }
         RequireReplayedImports(closureRoots ?? []);
         HashSet<string> importSourceNames = extraction.Sources.Keys.ToHashSet(StringComparer.Ordinal);
         var support = Regex.Matches(proofSource, @"^import\s+([A-Za-z_][A-Za-z0-9_.]*)", RegexOptions.Multiline)
@@ -4148,6 +4152,7 @@ partial class Program : IDisposable
                     {
                         var restored = ModuleArtifacts(staging);
                         CopyTree(staging, session);
+                        RequireDeepBindingStable();
                         foreach (var (name, hash) in restored) certifiedModules![name] = hash;
                         supportCacheHits++;
                         CacheProgress("certified dependencies: " + entry);
@@ -4155,6 +4160,7 @@ partial class Program : IDisposable
                     else
                     {
                         Run(["lake", "build", .. support], session, progress: "Building proof dependencies: " + entry);
+                        RequireDeepBindingStable();
                         var current = SessionModules(session);
                         var altered = certifiedModules!.Any(pair => !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value);
                         var changed = (altered ? current : current.Where(pair => !certifiedModules!.ContainsKey(pair.Key)))
@@ -4165,6 +4171,7 @@ partial class Program : IDisposable
                             Run([Path.Combine(Toolchain, "bin", OperatingSystem.IsWindows() ? "leanchecker.exe" : "leanchecker"), .. changed],
                                 leanPath: SessionLeanPath(session), progress: "Kernel replay of proof dependencies: " + entry);
                         }
+                        RequireDeepBindingStable();
                         certifiedModules = current;
                         CopySupportArtifacts(session, staging, supportSources);
                         PublishSuccess(supportKey, staging);
@@ -4174,6 +4181,7 @@ partial class Program : IDisposable
                 preparedSupport.Add(supportKey);
             }
         }
+        RequireDeepBindingStable();
 
         RequireOriginalProofSources();
         var identityHash = extraction.Sha256;
@@ -4216,8 +4224,10 @@ partial class Program : IDisposable
             {
                 stage?.Invoke("kernel replay");
                 ReplayCheckedModules(changedModules, leanPath, "Kernel replay of proof dependencies: " + entry);
+                RequireDeepBindingStable();
                 certifiedModules = currentModules;
             }
+            RequireDeepBindingStable();
             // Full artifact identities include transitive support dependencies and every
             // olean part. Cached success is never inferred from an unsigned manifest.
             var environmentKey = ContentKey("certified-modules-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" + JsonSerializer.Serialize(currentModules));
@@ -4366,6 +4376,7 @@ partial class Program : IDisposable
                     bindingSourcesKey != BindingSourcesKey(session) ||
                     bindingPreparation!.Toolchain != BindingToolchainKey(session))
                     throw new InvalidOperationException("Deep-check sources, toolchain or compiled artifacts changed");
+                RequireDeepBindingStable();
                 RequireStagedProofSources();
             }
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
@@ -4399,6 +4410,7 @@ partial class Program : IDisposable
             // A caller that ends the run at the stage after the proof check must do so before the display starts.
             var replays = replay.Length > 0;
             stage?.Invoke(replays ? "kernel replay" : "theorem audit");
+            RequireDeepBindingStable();
             // The display runs beside replay and audit; it feeds no check and is read only after all of them.
             var statementView = Path.Combine(fresh, StatementViewFile);
             var statementCached = proofRestored && File.Exists(statementView);

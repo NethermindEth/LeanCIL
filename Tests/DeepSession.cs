@@ -139,14 +139,14 @@ ExpectFailure(() => verification.PrepareBindingLibrary(session), "selected certi
 var bindingArtifact = Path.Combine(package, ".lake/build/lib/lean/StrictBinding.olean");
 var bindingBytes = File.ReadAllBytes(bindingArtifact);
 File.WriteAllBytes(bindingArtifact, [0]);
-ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
 File.WriteAllBytes(bindingArtifact, bindingBytes);
 var addedCompanion = bindingArtifact + ".unexpected";
 File.WriteAllBytes(addedCompanion, [0]);
-ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
 File.Delete(addedCompanion);
 File.Delete(bindingArtifact);
-ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
 File.WriteAllBytes(bindingArtifact, bindingBytes);
 var bindingSource = Path.Combine(package, "StrictBinding.lean");
 var bindingSourceText = File.ReadAllText(bindingSource);
