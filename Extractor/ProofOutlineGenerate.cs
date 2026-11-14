@@ -563,7 +563,7 @@ internal static partial class ProofOutline
 
     /// <summary>Whether local `index` is a declared local of a narrow integer type, whose loads and stores the
     /// outlines leave to the author. A `byte` or `bool` argument's home has a narrow slot too, but its index follows
-    /// the declared locals and its emitted access carries no narrowing, so this is false for it.</summary>
+    /// the declared locals, so this is false for it.</summary>
     static bool NarrowLocal(MethodDefinition method, int index) => index < method.Body.Variables.Count &&
         LeanEmitter.Narrow(method.Body.Variables[index].VariableType) is not null;
 
