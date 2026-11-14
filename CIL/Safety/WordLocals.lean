@@ -37,7 +37,7 @@ theorem step_load_word64 {body : CIL.Method} {pc index : Nat} {args stack : List
     {frame : Frame} {memory : Memory} {reference : Reference} {word : BitVec 64}
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (loaded : read memory reference 8 1 = .ok (numberBytes word.toNat 8)) :
-    step body (.local index) pc args frame stack memory =
+    step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.i64 word) :: stack) frame memory) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or,
     Bool.false_eq_true, ite_false, slot, load_local_word64_of_read loaded, Bind.bind, Except.bind,
@@ -49,7 +49,7 @@ theorem step_store_word64 {body : CIL.Method} {pc index : Nat} {args rest : List
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (ready : access memory reference 8 1 true = .ok ()) :
     ∃ result,
-      step body (.setLocal index) pc args frame (.scalar (.i64 word) :: rest) memory =
+      step body (.stloc index) pc args frame (.scalar (.i64 word) :: rest) memory =
         .ok (.next (pc + 1) rest
           { frame with locals := frame.locals.set index (.bytes .word64 reference) } result) ∧
       write memory reference (numberBytes word.toNat 8) 1 = .ok result ∧
@@ -67,7 +67,7 @@ theorem step_store_word64_same_frame {body : CIL.Method} {pc index : Nat}
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (ready : access memory reference 8 1 true = .ok ()) :
     ∃ result,
-      step body (.setLocal index) pc args frame (.scalar (.i64 word) :: rest) memory =
+      step body (.stloc index) pc args frame (.scalar (.i64 word) :: rest) memory =
         .ok (.next (pc + 1) rest frame result) ∧
       write memory reference (numberBytes word.toNat 8) 1 = .ok result ∧
       read result reference 8 1 = .ok (numberBytes word.toNat 8) := by

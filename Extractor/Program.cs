@@ -42,16 +42,19 @@ internal static partial class Program
         "       leancil bindings catalog.json [--check]\n" +
         "       leancil audit-library --project package-directory --module M... --prefix P... [--axioms a,b,c] " +
         "[--results results.json]\n" +
+        "       leancil audit-binding extraction-directory --sha256 hex [--assembly-path assembly.dll] " +
+        "[--reference-sha256 Lib=hex]... [--require item,...] [--output directory] " +
+        "[--format text|json] [--results results.json]\n" +
         "       leancil --version";
 
     internal static int CheckExtraction(string output) => Main(["check", output]);
 
     /// <summary>Runs <c>extract</c> or <c>check</c> in this process without printing its report;
-    /// a rejection throws instead of returning an exit code.</summary>
-    internal static void RunQuietly(string[] args)
+    /// a rejection throws instead of returning an exit code. A batch shares the files read by earlier runs.</summary>
+    internal static void RunQuietly(string[] args, ExtractionBatch? batch = null)
     {
         if (args is not ["extract" or "check", ..]) throw new ArgumentException(Usage);
-        Run(args, report: TextWriter.Null, rethrow: true);
+        Run(args, batch, report: TextWriter.Null, rethrow: true);
     }
 
     /// <summary>
@@ -171,6 +174,11 @@ internal static partial class Program
                 stage = "library audit";
                 return global::Program.AuditLibrary(args[1..]);
             }
+            if (args[0] == "audit-binding")
+            {
+                stage = "binding audit";
+                return global::Program.AuditBinding(args[1..]);
+            }
             if (args[0] == "verify")
             {
                 global::Program.VerifyArtifacts(args[1..]);
@@ -286,7 +294,8 @@ internal static partial class Program
                     global::Program.ExtractionIdentity.Resolve(output, pin.GetProperty("path").GetString()!),
                     pin.GetProperty("sha256").GetString()!));
             referenceSources.AddRange(referencePaths.Select(path => new PinnedAssemblies.Source(path)));
-            using PinnedAssemblies pinned = new(assembly, assemblyHash, referenceSources);
+            using PinnedAssemblies pinned = new(assembly, assemblyHash, referenceSources,
+                batch is null ? null : batch.ReadAssembly);
             ModuleDefinition module = pinned.Selected;
             foreach ((JsonElement record, var reference) in recordedReferences.Zip(pinned.References))
                 if (record.GetProperty("assemblyIdentity").GetString() != reference.Pin.Identity ||
@@ -294,7 +303,8 @@ internal static partial class Program
                     throw new InvalidDataException("Stale or mismatched verification artifact: referenced assembly " +
                         $"{CliPaths.Display(reference.Path)} is not the recorded " +
                         $"{record.GetProperty("assemblyIdentity").GetString()}.");
-            var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice);
+            var symbols = Symbols.Read(module, assemblyPath, out var symbolNotice,
+                batch is null ? null : batch.ReadPdb);
             var assemblyIdentity = module.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             stage = "contract import validation";
             List<ImportResolution.Source> importSources = [];
@@ -412,7 +422,9 @@ internal static partial class Program
                 staticIdentities = staticIdentities.Select(identity => JsonSerializer.SerializeToElement(identity, ContractInterface.Json)),
                 generatedSha256 = Hash(Encoding.UTF8.GetBytes(source)),
                 extractorSha256 = extractorHash,
+                // Where each body sits in the image is recorded here, outside the Lean evidence, for the strict audit.
                 methods = methods.Select(m => new { signature = m.FullName, token = m.MetadataToken.ToInt32(),
+                    bodyAddress = ((MethodDefinition)pinned.Original(m.Module).LookupToken(m.MetadataToken)).RVA,
                     specialization = MethodSpecialization.Source(m),
                     locals = m.Body.Variables.Select(v => v.VariableType.FullName),
                     instructions = m.Body.Instructions.Select(i => i.ToString()) }),
@@ -476,14 +488,15 @@ internal static partial class Program
                     "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
             if (args[0] == "check" && !refresh)
-                inspect?.Invoke(new(methods, emitted.Templates, emitted.LayoutIdentities, source, emitted.Views,
-                    profile.Architecture));
+                inspect?.Invoke(new(methods, emitted.Templates, emitted.Views,
+                    profile.Architecture, emitted.Layouts));
         }
         catch (Exception exception)
         {
             if (rethrow) throw;
             if (exception is CliFailure { Reported: true }) return 1;
-            CliDiagnostics.Write(exception, stage, args[0] is "check" or "verify" or "audit-library");
+            CliDiagnostics.Write(exception, stage,
+                args[0] is "check" or "verify" or "audit-library" or "audit-binding");
             return 1;
         }
         return 0;

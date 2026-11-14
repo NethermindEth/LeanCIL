@@ -315,7 +315,7 @@ partial class Program
             var report = VerifyReports.Result(verified ? "verified" : "failed", failure, theorem, proof, output,
                 proofRoot, verified ? null : outcome.Stage, outcome.Report?.axioms,
                 outcome.Report is { } checkedReport ? StatementOf(checkedReport) : null, JsonMessages(messages), trace,
-                messages is not null);
+                messages is not null, binding: verified ? outcome.Report!.binding : null);
             return new JsonObject { ["expect"] = expect, ["status"] = status, ["report"] = report };
         }
     }
@@ -438,14 +438,6 @@ partial class Program
                 theorem ??= saved.theorem;
                 if (saved.proofRoot is not null) proofRoot ??= Path.GetFullPath(saved.proofRoot, output);
             }
-            else if (proof is null && File.Exists(reportPath))
-            {
-                // Migrate proof selection from reports created before settings were separate.
-                var previous = JsonSerializer.Deserialize<Report>(File.ReadAllText(reportPath))
-                    ?? throw new InvalidDataException("Missing verification report.");
-                proof = previous.inputs.Keys.Single(key => key.StartsWith("proof:", StringComparison.Ordinal))[6..];
-                theorem ??= previous.theorem;
-            }
 
             File.Delete(reportPath);
             File.Delete(Path.Combine(output, ProofMessagesText));
@@ -513,7 +505,7 @@ partial class Program
                 Console.Write(VerifyReports.Serialize(VerifyReports.Result("verified", refutation, report.theorem,
                     proof, output, proofRoot, null, report.axioms, view?.statement ?? StatementOf(report),
                     JsonMessages(verification.ProofMessages), trace, verification.ProofMessages is not null,
-                    goals, Specification(view))));
+                    goals, Specification(view), report.binding)));
                 reported = true;
                 return;
             }

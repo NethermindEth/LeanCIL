@@ -67,7 +67,7 @@ leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.cor
 
 State these limits to the user before promising a result.
 
-- `extract` accepts Release, IL-only .NET 10 assemblies, and every profile is 64-bit
+- `extract` accepts Release, IL-only .NET 11 assemblies, and every profile is 64-bit
   little-endian. It validates the selected method and every method reachable from it, and rejects
   an unsupported instruction, call, type or signature by name at the stage
   `metadata and CIL validation`. `leancil list` validates nothing.
@@ -108,7 +108,7 @@ each point.
 
 Then quote the theorem name, the `Subject:` line and the profile, and say in plain words what the
 theorem guarantees and what remains trusted: the CIL and memory model's correspondence to the
-CLR, the extractor's decoding, the modeled runtime helpers, the JIT, the runtime and the hardware
+CLR, the extractor's metadata and token resolution and its translation of instructions outside the checked families, the modeled runtime helpers, the JIT, the runtime and the hardware
 ([soundness boundary](https://github.com/NethermindEth/LeanCIL/blob/main/docs/SOUNDNESS.md#trusted-components-and-deployment-assumptions)).
 The theorem covers the compiled CIL; it says nothing about whether the specification is the one
 the user needs.

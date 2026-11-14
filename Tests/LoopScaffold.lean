@@ -11,11 +11,11 @@ open CIL.Safety
 /-- A numeric local with a single conditional loop edge. -/
 def body : CIL.Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true
-  code := [.local 0, .brnonzero 0, .ret] }
+  code := [.ldloc 0, .brtrue 0, .ret] }
 
 bind_entry entry := body with [] from Memory.empty
 bind_cutpoint header := body matching
-  (fun op => match op with | .brnonzero _ => true | _ => false) with entry.frame
+  (fun op => match op with | .brtrue _ => true | _ => false) with entry.frame
 
 /-- Generated homes come from checked allocation and the cutpoint follows compiled instructions. -/
 theorem generated_state :
@@ -31,9 +31,9 @@ bind_cutpoint absent := body matching (fun _ => false) with entry.frame
 #guard_msgs in
 bind_cutpoint ambiguous := body matching (fun _ => true) with entry.frame
 
-/-- Missing vector arguments cannot supply a frame witness. -/
+/-- A parameter home with no matching argument cannot supply a frame witness. -/
 def missingArgument : CIL.Method := {
-  code := [.ret], locals := [], returnsValue := false, vectorArgs := [0] }
+  code := [.ret], locals := [], returnsValue := false, parameterHomes := [(0, .word32)] }
 
 /-- error: Frame entry must reduce to a successful checked allocation -/
 #guard_msgs in
@@ -46,15 +46,15 @@ open CIL.Safety
 
 /-- Both nested loop latches have the same opcode, so instruction shape is ambiguous. -/
 def body : CIL.Method := {
-  code := [.nop, .const32 0, .brnonzero 1, .const32 0, .brnonzero 0, .ret]
+  code := [.nop, .ldc_i4 0, .brtrue 1, .ldc_i4 0, .brtrue 0, .ret]
   locals := [], returnsValue := false }
 
 bind_loop outer := body [0]
 bind_loop inner := body [1]
 bind_cutpoint outerExit (frame : Frame) := body at outer.latch matching
-  (fun op => match op with | .brnonzero _ => true | _ => false) with frame
+  (fun op => match op with | .brtrue _ => true | _ => false) with frame
 bind_cutpoint innerExit (frame : Frame) := body at inner.latch matching
-  (fun op => match op with | .brnonzero _ => true | _ => false) with frame
+  (fun op => match op with | .brtrue _ => true | _ => false) with frame
 
 /-- Structural labels select distinct checked latches despite identical instruction shapes. -/
 theorem distinct_latches : outerExit.pc = 4 ∧ innerExit.pc = 2 := by exact ⟨rfl, rfl⟩
@@ -86,19 +86,6 @@ theorem parameter_entry (value : CIL.W32) :
     enterFrame addressed [.scalar (.i32 value)] Memory.empty =
       .ok (parameter.frame value, parameter.memory value) := parameter.checked value
 #print axioms parameter_entry
-
-/-- Vector argument homes preserve a symbolic vector's bytes. -/
-def vectorBody : CIL.Method := {
-  code := [.ret], locals := [], returnsValue := false, vectorArgs := [0] }
-
-bind_entry vector (bits : BitVec 256) := vectorBody
-  with [.scalar (.v256 bits)] from Memory.empty
-
-/-- Vector entry uses the supplied bits and is checked for every vector. -/
-theorem vector_entry (bits : BitVec 256) :
-    enterFrame vectorBody [.scalar (.v256 bits)] Memory.empty =
-      .ok (vector.frame bits, vector.memory bits) := vector.checked bits
-#print axioms vector_entry
 
 end Tests.SymbolicLoopScaffold
 
@@ -290,8 +277,8 @@ open CIL.Safety
 /-- `while (remaining != 0) remaining--; return remaining;` with `remaining` in a frame home. -/
 @[cil_code] def countdown : CIL.Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true
-  code := [.arg 0, .setLocal 0, .local 0, .brnonzero 6, .local 0, .ret, .local 0, .const32 1,
-    .sub, .setLocal 0, .branch 2] }
+  code := [.arg 0, .stloc 0, .ldloc 0, .brtrue 6, .ldloc 0, .ret, .ldloc 0, .ldc_i4 1,
+    .sub, .stloc 0, .br 2] }
 
 /-- The program holding only `countdown`. -/
 @[cil_code] def program : CIL.Program := [countdown]
@@ -306,7 +293,7 @@ abbrev State (memory : Memory) (home : Reference) :=
 
 -- The guard sees the remaining count.
 bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
-  countdown at 3 matching (fun op => match op with | .brnonzero _ => true | _ => false)
+  countdown at 3 matching (fun op => match op with | .brtrue _ => true | _ => false)
   with (entry.frame memory home), [.scalar (.i32 state.values)], state.memory
 
 /-- The store and exit rules carry the frame part of the state, and the loop tactics read the
@@ -393,10 +380,10 @@ open CIL.Safety
 @[cil_code] def sum : CIL.Method := {
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
-  code := [.const32 0, .convI8, .setLocal 0, .branch 15, .local 0, .local 1, .const32 0,
-    .memory (.spanItem 8), .load64, .add, .setLocal 0, .local 1, .const32 1,
-    .memory (.spanSlice false), .setLocal 1, .local 1, .memory .spanLength, .brnonzero 4,
-    .local 0, .ret] }
+  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldloc 1, .ldc_i4 0,
+    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldloc 1, .ldc_i4 1,
+    .memory (.spanSlice false), .stloc 1, .ldloc 1, .memory .spanLength, .brtrue 4,
+    .ldloc 0, .ret] }
 
 /-- The program holding only `sum`. -/
 @[cil_code] def program : CIL.Program := [sum]
@@ -416,7 +403,7 @@ abbrev State (memory : Memory) (home : Reference) :=
 
 -- The guard sees the remaining length.
 bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
-  sum at 17 matching (· matches .brnonzero _)
+  sum at 17 matching (· matches .brtrue _)
   with entry.frame memory state.values.1.view home,
     [.scalar (.i32 (BitVec.ofNat 32 state.values.1.view.length))], state.memory
 
@@ -511,6 +498,58 @@ theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.
       nextFrame.set_local 1 (.span 8 false (some sliced))⟩
     · simpa [BitVec.add_assoc] using invariant
     · decide
+
+/-- `sum` as the extractor emits it: `span[0]`, `span.Slice(1)` and `span.Length` take the span
+    parameter's address with `ldarga`, which pushes the view its home holds. -/
+@[cil_code] def sumByAddress : CIL.Method := {
+  locals := [.i64 0], localKinds := [.word64], returnsValue := true
+  parameterHomes := [(0, .span 8 false)]
+  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldloca 1, .ldc_i4 0,
+    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldloca 1, .ldc_i4 1,
+    .memory (.spanSlice false), .stloc 1, .ldloca 1, .memory .spanLength, .brtrue 4,
+    .ldloc 0, .ret] }
+
+/-- The program holding only `sumByAddress`. -/
+@[cil_code] def addressProgram : CIL.Program := [sumByAddress]
+
+bind_entry addressEntry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (width : view.width = 8)
+    (readOnly : view.writable = false) := sumByAddress
+  with [.bufferSpan view] from memory allocating wellFormed
+  simplifying [valid, width, readOnly]
+
+-- The guard sees the remaining length.
+bind_cutpoint addressHeader (memory : Memory) (home : Reference) (state : State memory home) :=
+  sumByAddress at 17 matching (· matches .brtrue _)
+  with addressEntry.frame memory state.values.1.view home,
+    [.scalar (.i32 (BitVec.ofNat 32 state.values.1.view.length))], state.memory
+
+/-- Taking the span home's address checks the view it holds, so the loop tactics give that step
+    the span's facts, including those of a slice an earlier iteration stored. -/
+theorem sum_by_address_returns (memory : Memory) (view : SpanView) (values : List CIL.W64)
+    (wellFormed : memory.WellFormed) (span : CheckedSpan memory view 8 false values) :
+    ∃ fuel final, invoke addressProgram fuel 0 [.bufferSpan view] memory =
+      .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, enter⟩ :=
+    addressEntry.checked memory view wellFormed span.valid span.elementWidth span.mode
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i64 0) rfl
+  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) enter.setup
+    (addressHeader memory home)
+    (fun state => state.values.2 + state.values.1.values.sum = values.sum)
+    (·.values.1.values.length) ⟨(⟨view, values, span⟩, 0), started, frame⟩
+    (by cil_loop_steps) (by simp) ?_
+  rintro ⟨⟨⟨view, remaining, span⟩, total⟩, current, frame⟩ invariant
+  cases remaining with
+  | nil => exact .inl (by cil_loop_finish [invariant.symm])
+  | cons value remaining =>
+    obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
+    obtain ⟨updated, stored, nextFrame, -⟩ := frame.store 0 (.i64 (total + value)) rfl
+    obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
+    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated,
+      nextFrame.set_local 1 (.span 8 false (some sliced))⟩
+    · simpa [BitVec.add_assoc] using invariant
+    · simp
+#print axioms sum_by_address_returns
 
 /-- `return span.Length;` read straight from the argument, with no parameter home. -/
 @[cil_code] def length : CIL.Method :=

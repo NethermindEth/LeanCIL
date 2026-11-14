@@ -14,7 +14,7 @@ future allocations is proved here.
 -/
 
 theorem relocation_preserves_step (m : PlacedMemory) (after : Placement)
-    (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
+    (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
     step body op pc args frame stack (relocate m after).memory =
       step body op pc args frame stack m.memory := rfl

@@ -80,9 +80,9 @@ theorem private_store_load {body : CIL.Method} {frame : Frame}
     (ready : access memory reference size 1 true = .ok ())
     (fresh : watermark ≤ reference.allocation) :
     ∃ result,
-      step body (.setLocal index) 0 [] frame [.scalar (.aggregate bytes)] memory =
+      step body (.stloc index) 0 [] frame [.scalar (.aggregate bytes)] memory =
         .ok (.next 1 [] frame result) ∧
-      step body (.local index) 1 [] frame [] result =
+      step body (.ldloc index) 1 [] frame [] result =
         .ok (.next 2 [.scalar (.aggregate bytes)] frame result) ∧
       MemoryBelow watermark memory result := by
   obtain ⟨result, stored, _, loaded, _, _, preserved⟩ :=

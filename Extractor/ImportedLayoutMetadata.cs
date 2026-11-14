@@ -112,7 +112,8 @@ internal static class ImportedLayoutMetadata
         Dictionary<string, int> indices = layouts.Select((layout, index) => (layout.Identity, Index: index))
             .ToDictionary(item => item.Identity, item => item.Index, StringComparer.Ordinal);
         return "[" + string.Join(", ", layouts.Select(layout => "{ identity := " + JsonSerializer.Serialize(layout.Identity) +
-            ", explicit := " + Bool(layout.Explicit) + ", auto := " + Bool(layout.Auto) + ", packing := " +
+            ", explicit := " + LeanText.Bool(layout.Explicit) + ", auto := " + LeanText.Bool(layout.Auto) +
+            ", packing := " +
             layout.Packing + ", declaredSize := " + layout.DeclaredSize + ", fields := [" +
             string.Join(", ", layout.Fields.Select(field => "{ type := " + (field.Storage == "aggregate" ?
                 ".aggregate " + indices[field.Type.Scope + "::" + field.Type.Name] : "." + field.Storage) +
@@ -127,7 +128,8 @@ internal static class ImportedLayoutMetadata
             return "⟨⟨" + computed.Size + ", [" + string.Join(", ", MetadataValidation.Fields(type).Select(field =>
                 "⟨" + computed.Offsets[field.Definition.FullName] + ", " +
                 MetadataValidation.FieldSize(field.Type, selected, architecture) + ", " +
-                Bool(MetadataValidation.IsAggregate(field.Type, selected)) + "⟩")) + "]⟩, " + computed.Alignment + "⟩";
+                LeanText.Bool(MetadataValidation.IsAggregate(field.Type, selected)) + "⟩")) + "]⟩, " +
+                computed.Alignment + "⟩";
         })) + "]";
 
     internal static int[] Projection(ContractLayout[] layouts, IEnumerable<string> artifactIdentities)
@@ -141,6 +143,4 @@ internal static class ImportedLayoutMetadata
                 throw new InvalidDataException("Missing or duplicate artifact layout: " + layout.Identity);
         }).ToArray();
     }
-
-    static string Bool(bool value) => value ? "true" : "false";
 }

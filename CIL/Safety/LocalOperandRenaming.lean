@@ -12,25 +12,22 @@ indices, arithmetic operations and static sites retain their original meaning.
 namespace CIL.Safety
 
 /-- Relocate each local load, address or store through the retained declaration map. -/
-def LocalIndexMap.operation (indices : LocalIndexMap) : CIL.Op → CIL.Op
-  | .local position narrow => .local (indices.index position) narrow
-  | .localAddr position => .localAddr (indices.index position)
-  | .setLocal position narrow => .setLocal (indices.index position) narrow
+def LocalIndexMap.operation (indices : LocalIndexMap) : CIL.Instruction → CIL.Instruction
+  | .ldloc position => .ldloc (indices.index position)
+  | .ldloca position => .ldloca (indices.index position)
+  | .stloc position => .stloc (indices.index position)
   | .initializeSpanLocal position constructor =>
     .initializeSpanLocal (indices.index position) constructor
-  | .vectorLocal position => .vectorLocal (indices.index position)
-  | .vectorLocalAddr position => .vectorLocalAddr (indices.index position)
-  | .setVectorLocal position => .setVectorLocal (indices.index position)
   | operation => operation
 
 /-- Relocation leaves every instruction's unspecified-operand guard unchanged. -/
-theorem LocalIndexMap.operation_observers (indices : LocalIndexMap) (operation : CIL.Op) :
+theorem LocalIndexMap.operation_observers (indices : LocalIndexMap) (operation : CIL.Instruction) :
     observerCount (indices.operation operation) = observerCount operation := by
   cases operation <;> rfl
 #print axioms LocalIndexMap.operation_observers
 
 /-- Local operands never enter the pure arithmetic fallback, whose arity remains exact. -/
-theorem LocalIndexMap.operation_pureArity (indices : LocalIndexMap) (operation : CIL.Op) :
+theorem LocalIndexMap.operation_pureArity (indices : LocalIndexMap) (operation : CIL.Instruction) :
     pureArity (indices.operation operation) = pureArity operation := by
   cases operation <;> rfl
 #print axioms LocalIndexMap.operation_pureArity
@@ -52,21 +49,6 @@ theorem Frame.Renamed.localFound {indices : LocalIndexMap} {mapping : Allocation
   | some slots =>
     exact ⟨bound, slots.1, congrArg some slots.2⟩
 #print axioms Frame.Renamed.localFound
-
-/-- Argument-home lookup retains its argument key and maps the selected bounded slot. -/
-theorem Frame.Renamed.argumentHome {indices : LocalIndexMap} {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Frame}
-    (related : Frame.Renamed indices mapping scopes source target) (position : Nat) :
-    ResultRenamed mapping (LocalSlot.Renamed mapping)
-      (argumentHome source position) (argumentHome target position) := by
-  unfold CIL.Safety.argumentHome
-  rw [related.arguments]
-  simp only [List.find?_map, Function.comp_def]
-  cases found : source.arguments.find? (fun home => home.1 == position) with
-  | none => exact .error .invalidState
-  | some binding =>
-    exact .ok ⟨related.argumentBounds binding (List.mem_of_find?_eq_some found), rfl⟩
-#print axioms Frame.Renamed.argumentHome
 
 /-- Local lookup preserves missing-slot rejection as well as corresponding retained slots. -/
 theorem Frame.Renamed.localLookup {indices : LocalIndexMap} {mapping : AllocationRenaming}

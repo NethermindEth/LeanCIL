@@ -218,12 +218,6 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) rest frame stored := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_init256_eq (r : ManagedReference) (rest : List Value) :
-    step body (.memory .init256) pc args frame (.reference r :: rest) memory = do
-      let stored ← storeValue memory r (.v256 0)
-      return .next (pc + 1) rest frame stored := by
-  memory_step_proof
-
 -- `Vector128.LoadUnsafe` and `StoreUnsafe` on bytes, without and with a `nuint` byte offset.
 @[cil_step high] theorem step_memory_vector128Load_eq (r : ManagedReference) (rest : List Value) :
     step body (.memory (.vector128Unsafe false false)) pc args frame (.reference r :: rest)
@@ -379,11 +373,6 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       return .next (pc + 1) (.readOnlyReference (.address result) :: rest) frame memory := by
   memory_step_proof
 
-@[cil_step high] theorem step_memory_bitcast256_eq (bits : BitVec 256) (rest : List Value) :
-    step body (.memory .bitcast256) pc args frame (.scalar (.v256 bits) :: rest) memory =
-      .ok (.next (pc + 1) (.scalar (.v256 bits) :: rest) frame memory) := by
-  memory_step_proof
-
 -- The operand is any scalar, so the guard stays until the caller's value decides it.
 @[cil_step high] theorem step_memory_bitcastValue_eq (source target : CIL.SnapshotShape)
     (value : CIL.Value) (rest : List Value) :
@@ -407,12 +396,6 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       if bits.toNat ≤ 1 then
         .ok (.next (pc + 1) (.scalar (.i32 (bits.zeroExtend 32)) :: rest) frame memory)
       else .error (.unsupported "Noncanonical Boolean representation") := by
-  memory_step_proof
-
-@[cil_step high] theorem step_memory_skipInit_eq (r : ManagedReference) (rest : List Value) :
-    step body (.memory .skipInit) pc args frame (.reference r :: rest) memory = do
-      let _ ← formValue memory r
-      return .next (pc + 1) rest frame memory := by
   memory_step_proof
 
 -- Spans.
@@ -598,7 +581,6 @@ end MemoryEquations
 #print axioms step_memory_store256_snapshot_eq
 #print axioms step_memory_store512_eq
 #print axioms step_memory_store512_snapshot_eq
-#print axioms step_memory_init256_eq
 #print axioms step_memory_vector128Load_eq
 #print axioms step_memory_vector128Load_readOnly_eq
 #print axioms step_memory_vector128LoadAt_eq
@@ -614,11 +596,9 @@ end MemoryEquations
 #print axioms step_memory_add_readOnly_signed_i32_eq
 #print axioms step_memory_add_readOnly_signed_i64_eq
 #print axioms step_memory_add_readOnly_unsigned_i64_eq
-#print axioms step_memory_bitcast256_eq
 #print axioms step_memory_bitcastValue_eq
 #print axioms step_memory_bitcastByteBool_i32_eq
 #print axioms step_memory_bitcastByteBool_i8_eq
-#print axioms step_memory_skipInit_eq
 #print axioms step_memory_spanReference_eq
 #print axioms step_memory_spanReference_view_eq
 #print axioms step_memory_spanReference_readOnlyView_eq

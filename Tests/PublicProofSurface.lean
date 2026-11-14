@@ -45,7 +45,7 @@ theorem named_call_continuation (program : CIL.Program) (memory : Memory) (value
 /-- The vector control is an ordinary literal in the emitted instructions. -/
 @[cil_code] def reverseVector : CIL.Method :=
   { profile := { architecture := .x64, avx2 := true }, locals := [], returnsValue := true,
-    code := [.const32 27, .intrinsic (.avx2 .permute4x64) 2, .ret] }
+    code := [.ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2, .ret] }
 
 /-- A rewrite stated with a literal still matches the vector value left by stepping. -/
 theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reversed : BitVec 256)
@@ -96,10 +96,19 @@ theorem checked_conversion_result (body : CIL.Method) (frame : Frame) (memory : 
     (input : CIL.W64)
     (calculated : CIL.convertInteger 32 false true (.i64 input) =
       .ok (.i32 (BitVec.ofNat 32 input.toNat))) :
-    step body (.checkedConvert 32 false true) 0 [] frame [.scalar (.i64 input)] memory =
+    step body (.conv_ovf_un .u4) 0 [] frame [.scalar (.i64 input)] memory =
       .ok (.next 1 [.scalar (.i32 (BitVec.ofNat 32 input.toNat))] frame memory) := by
   cil_checked_step [calculated]
 #print axioms checked_conversion_result
+
+/-- A fact about a 64-bit signed range drives the conversion to the native `int` target. -/
+theorem native_conversion_result (body : CIL.Method) (frame : Frame) (memory : Memory)
+    (input : CIL.W64)
+    (calculated : CIL.convertInteger 64 true true (.i64 input) = .ok (.i64 input)) :
+    step body (.conv_ovf_un .i) 0 [] frame [.scalar (.i64 input)] memory =
+      .ok (.next 1 [.scalar (.i64 input)] frame memory) := by
+  cil_checked_step [calculated]
+#print axioms native_conversion_result
 
 /-- A two-word aggregate argument is described independently of any callee body. -/
 def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
@@ -130,7 +139,7 @@ theorem mixed_local_snapshot {caller current final : Memory} {word vector : Refe
     (confined : Confined [(word, 8)] current final) (formed : final.WellFormed)
     (loaded : read final word 8 1 = .ok (numberBytes value.toNat 8))
     (body : CIL.Method) (pc : Nat) (arguments stack : List Value) :
-    step body (.local 1) pc arguments
+    step body (.ldloc 1) pc arguments
       { activation := 0, locals := [.bytes .word64 word, .bytes .vector256 vector], owned := [] }
       stack final = .ok (.next (pc + 1) (.scalar (.v256 saved) :: stack)
         { activation := 0, locals := [.bytes .word64 word, .bytes .vector256 vector], owned := [] }
@@ -143,7 +152,7 @@ theorem mixed_local_snapshot {caller current final : Memory} {word vector : Refe
 #print axioms mixed_local_snapshot
 
 /-- One reusable arithmetic prefix adds one to the top word. -/
-def incrementCode : List CIL.Op := [.const32 1, .add]
+def incrementCode : List CIL.Instruction := [.ldc_i4 1, .add]
 
 /-- A placed segment computes its stack value through the shared checked stepper. -/
 theorem increment_segment {program : CIL.Program} {method start : Nat} {body : CIL.Method}
@@ -169,7 +178,7 @@ theorem repeated_segment {program : CIL.Program} {method : Nat} {body : CIL.Meth
 /-- A countdown body has one return and one continuing edge. -/
 @[cil_code] def countdown : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.dup, .brzero 5, .const32 1, .sub, .branch 0, .ret] }
+    code := [.dup, .brfalse 5, .ldc_i4 1, .sub, .br 0, .ret] }
 
 /-- The checked continuing path retains the exact stack expression at the loop head. -/
 theorem loop_cutpoint (memory : Memory) (frame : Frame) (value : CIL.W32)

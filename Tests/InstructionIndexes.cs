@@ -62,9 +62,21 @@ caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
 var translate = extractor.GetType("Nethermind.LeanCIL.InstructionTranslation", true)!
     .GetMethod("Translate", BindingFlags.Static | BindingFlags.NonPublic)!;
 var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1 };
-string Translate(Instruction instruction) => (string)translate.Invoke(null,
+string Lean(object operation) => (string)operation.GetType()
+    .GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, Type.EmptyTypes)!
+    .Invoke(operation, null)!;
+object Operation(Instruction instruction) => translate.Invoke(null,
     [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!;
+string Translate(Instruction instruction) => Lean(Operation(instruction));
+string? Link(Instruction instruction)
+{
+    var operation = Operation(instruction);
+    return (string?)operation.GetType().GetMethod("Link", BindingFlags.Instance | BindingFlags.NonPublic |
+        BindingFlags.Public)!.Invoke(operation, [(Func<int, string>)(index => $"{index}")]);
+}
 if (Translate(call) != ".call 1 0") throw new Exception("Incorrect call index");
+// The link is read from the same operation as the instruction, so the two cannot name different callees.
+if (Link(call) != ".direct 1") throw new Exception("Incorrect call link");
 methods.Remove(callee);
 try
 {
@@ -81,9 +93,10 @@ caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ldc_I4_0));
 caller.Body.Instructions.Add(choose);
 caller.Body.Instructions.Add(destination);
 if (Translate(choose) != ".switch [2, 2]") throw new Exception("Switch target order or duplicates changed");
+if (Link(choose) is not null) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
 var runtimeScope = AssemblyNameReference.Parse(
-    "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
+    "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
 module.TypeSystem.UInt64.Scope = runtimeScope;
 var valueType = new TypeReference("System", "ValueType", module, runtimeScope);
 var inner = new TypeDefinition("Fixture", "ZInner", Mono.Cecil.TypeAttributes.Public |
@@ -154,7 +167,7 @@ if (!ReferenceEquals(contextFields.Invoke(freshContext, [inner]), contextFields.
     (int)contextFieldIndex.Invoke(freshContext, [inner, duplicateField, false])! != -1)
     throw new Exception("Field snapshots lost field identity or instance order");
 var intrinsicsScope = AssemblyNameReference.Parse(
-    "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
+    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
 var vector = new GenericInstanceType(new TypeReference("System.Runtime.Intrinsics", "Vector256`1",
     module, intrinsicsScope, true));
 vector.GenericArguments.Add(module.TypeSystem.UInt64);
@@ -221,12 +234,12 @@ var addressArgument = Instruction.Create(OpCodes.Ldarga, argumentMethod.Paramete
 foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeArgument, loadArgument,
     Instruction.Create(OpCodes.Pop), addressArgument, Instruction.Create(OpCodes.Pop), Instruction.Create(OpCodes.Ret) })
     argumentMethod.Body.Instructions.Add(instruction);
-string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => (string)translate.Invoke(null,
+string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => Lean(translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
-        0, Index(argumentMethod), null, null, positions, null, null, null])!;
-if (TranslateArgument(storeArgument, homePositions) != ".setLocal 3" ||
-    TranslateArgument(loadArgument, homePositions) != ".local 3" ||
-    TranslateArgument(addressArgument, homePositions) != ".localAddr 3")
+        0, Index(argumentMethod), null, null, positions, null, null, null])!);
+if (TranslateArgument(storeArgument, homePositions) != ".stloc 3" ||
+    TranslateArgument(loadArgument, homePositions) != ".ldloc 3" ||
+    TranslateArgument(addressArgument, homePositions) != ".ldloca 3")
     throw new Exception("Home translation lost the raw-local offset or slot index");
 if (TranslateArgument(loadArgument, []) != ".arg 1")
     throw new Exception("Unhomed loads no longer use the original argument");
@@ -238,3 +251,63 @@ try
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
     rejected.Message == "Missing parameter storage") { }
 Console.WriteLine("PASS home lookup preserves first positions, local offsets and missing-store rejection");
+
+// The typed operation model: the cases the outline generators branch on keep the spellings they are told apart by.
+const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |
+    BindingFlags.NonPublic;
+Type Model(string name) => extractor.GetType("Nethermind.LeanCIL." + name, true)!;
+object Make(string name, params object?[] arguments) => Activator.CreateInstance(Model(name), arguments)!;
+object Named(string type, string value) => Enum.Parse(Model(type), value);
+object Property(object value, string name) => value.GetType().GetProperty(name, Declared)!.GetValue(value)!;
+var bodyType = extractor.GetType("Nethermind.LeanCIL.ProofOutline", true)!.GetNestedType("Body",
+    BindingFlags.NonPublic)!;
+Array Operations(params object[] operations)
+{
+    var array = Array.CreateInstance(Model("Operation"), operations.Length);
+    for (var at = 0; at < operations.Length; at++) array.SetValue(operations[at], at);
+    return array;
+}
+object Body(params object[] operations) => Activator.CreateInstance(bodyType, Declared, null,
+    [Operations(operations)], null)!;
+int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
+bool Pure(object operation) => (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation")])!.Invoke(null,
+    [operation])!;
+var nop = Make("StackOperation", Named("StackOpcode", "Nop"));
+var backEdge = Make("Jump", Named("JumpKind", "Less"), 0);
+if (Loops(Body(nop, nop, backEdge)) != 1 || Loops(Body(nop, nop, Make("NativeBinary", backEdge))) != 1)
+    throw new Exception("A back edge the native-width analysis wrapped is not found as a loop");
+if (!Pure(Make("Arg", 0, null)) || Pure(Make("Arg", 0, Named("Narrowing", "Unsigned8"))) ||
+    !Pure(Make("Return", [null])) || Pure(Make("Return", Named("Narrowing", "Signed16"))) ||
+    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)) || Pure(Make("NativeBinary", nop)))
+    throw new Exception("The pure operations are no longer exactly the unnarrowed, unwrapped ones");
+if (Lean(Make("LoadScalar", 4, false)) != ".loadScalar 4" ||
+    Lean(Make("LoadScalar", 4, Named("LoadSign", "UnsignedSpelled"))) != ".loadScalar 4 false" ||
+    Lean(Make("LoadScalar", 1, true)) != ".loadScalar 1 true" ||
+    !Make("LoadScalar", 1, true).Equals(Make("LoadScalar", 1, Named("LoadSign", "Signed"))))
+    throw new Exception("Scalar loads lost the spelling that tells the unaligned load from the aligned one");
+if (Lean(Make("AddOffset", ulong.MaxValue - 7, true)) != "(.add 18446744073709551608 true)")
+    throw new Exception("A negative stride lost its two's complement spelling");
+var tail = Make("Call", Named("CallKind", "Tail"), 3, 0);
+var renumbered = tail.GetType().GetMethod("Renumber", Declared)!.Invoke(tail, [(Func<int, int>)(_ => 1)])!;
+if (!((IEnumerable<int>)Property(tail, "Methods")).SequenceEqual([3]) || Lean(renumbered) != ".tailCall 1 0")
+    throw new Exception("A tail call does not expose and renumber its callee");
+try
+{
+    Make("Constant", 32, -1L, true);
+    throw new Exception("A negative numeral constant was admitted");
+}
+catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
+// A `with` copy sets one member of an existing constant, so each member checks the other as well.
+void Assign(object value, string property, object newValue) =>
+    value.GetType().GetProperty(property, Declared)!.SetValue(value, newValue);
+foreach (var (constant, property, newValue) in new (object, string, object)[]
+{
+    (Make("Constant", 32, 5L, true), "Value", -1L), (Make("Constant", 32, -1L, false), "Numeral", true)
+})
+    try
+    {
+        Assign(constant, property, newValue);
+        throw new Exception("Changing " + property + " made a negative numeral constant");
+    }
+    catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
+Console.WriteLine("PASS typed operations keep the spellings and shapes the outline generators branch on");

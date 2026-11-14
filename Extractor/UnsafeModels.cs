@@ -5,12 +5,12 @@ namespace Nethermind.LeanCIL;
 // Generic runtime helpers share the same validated managed layout as CIL storage.
 internal static class UnsafeModels
 {
-    internal static string? Translate(MethodReference reference, string architecture = "scalar")
+    internal static Operation? Translate(MethodReference reference, string architecture = "scalar")
     {
         if (MemoryTransfers.Unsafe(reference, architecture) is { } transfer) return transfer;
         if (ReinterpretReference(reference, architecture) is { } cast) return cast;
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || generic.GenericArguments.Count != 1 ||
             generic.ElementMethod.GenericParameters.Count != 1 || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
@@ -56,9 +56,9 @@ internal static class UnsafeModels
             throw new InvalidDataException($"Unsupported Unsafe element type: {element.FullName}");
         MetadataValidation.Type(element, reference.Module, architecture: architecture);
         RuntimeModels.ValidateSignature(reference, architecture);
-        if (skipInit) return ".skipInit";
-        if (nullRef) return ".memory .nullRef";
-        if (isNullRef) return ".memory .isNullRef";
+        if (skipInit) return new StackOperation(StackOpcode.SkipInit);
+        if (nullRef) return MemoryOperation.Other(".nullRef");
+        if (isNullRef) return MemoryOperation.Other(".isNullRef");
         var width = element is GenericInstanceType vector && RuntimeModels.SupportedType(vector)
             ? vector.ElementType.FullName switch
             {
@@ -71,25 +71,25 @@ internal static class UnsafeModels
 
         if (comparison) return reference.Name switch
         {
-            "AreSame" => ".eq",
-            "IsAddressLessThan" => ".ltu",
-            _ => ".gtu"
+            "AreSame" => new StackOperation(StackOpcode.Ceq),
+            "IsAddressLessThan" => new StackOperation(StackOpcode.CltUn),
+            _ => new StackOperation(StackOpcode.CgtUn)
         };
-        if (byteOffset) return ".memory .byteOffset";
-        if (subtractBytes) return ".sub";
-        if (sizeOf) return $".const32 {width}";
+        if (byteOffset) return MemoryOperation.Other(".byteOffset");
+        if (subtractBytes) return new StackOperation(StackOpcode.Sub);
+        if (sizeOf) return new Constant(32, width, true);
         var signed = reference.Parameters[1].ParameterType.FullName != "System.UIntPtr";
         // Native-width negative strides reuse the checked wrapping offset operation.
         var stride = reference.Name == "Subtract" ? unchecked(0UL - (ulong)width) : (ulong)(addBytes ? 1 : width);
-        return $".memory (.add {stride} {signed.ToString().ToLowerInvariant()})";
+        return MemoryOperation.Of(new AddOffset(stride, signed));
     }
 
     // A byref reinterpretation changes only its static type, never the allocation,
     // offset, initialized bytes or access bounds used by checked memory operations.
-    private static string? ReinterpretReference(MethodReference reference, string architecture)
+    private static Operation? ReinterpretReference(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.CompilerServices.Unsafe" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) != MethodCallingConvention.Default)
             return null;
@@ -112,6 +112,6 @@ internal static class UnsafeModels
             MetadataValidation.Type(type, reference.Module, architecture: architecture);
         }
         RuntimeModels.ValidateSignature(reference, architecture);
-        return ".memory .asRef";
+        return MemoryOperation.Other(".asRef");
     }
 }

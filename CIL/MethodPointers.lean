@@ -58,7 +58,6 @@ inductive ManagedOp where
   | address (target : ManagedTarget) (signature : ManagedSignature)
   | tableLength
   | tableElement (signature : ManagedSignature)
-  | tableAddress (signature : ManagedSignature)
   | tableOffset
   | tableLoad (signature : ManagedSignature)
   | call (signature : ManagedSignature) (catalog : List ManagedTarget) (tail : Bool)

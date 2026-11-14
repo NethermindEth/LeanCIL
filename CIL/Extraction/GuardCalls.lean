@@ -81,14 +81,14 @@ def nullGuardCall (raw : RawInstruction) : Bool :=
   guardCall raw == some .null
 
 /-- The guard an emitted operation performs, if any. -/
-private def emittedGuard : Op → Option Guard
+private def emittedGuard : Instruction → Option Guard
   | .memory .throwIfNull => some .null
   | .memory (.zeroGuard guard width signed) => some (.zero guard width signed)
   | .memory (.comparisonGuard guard width signed) => some (.comparison guard width signed)
   | _ => none
 
 /-- A guard operation comes only from its exact call, and a guard call emits only its guard. -/
-def guardCallMatches (raw : RawInstruction) (emitted : Op) : Bool :=
+def guardCallMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
   guardCall raw == emittedGuard emitted
 
 end CIL.Extraction

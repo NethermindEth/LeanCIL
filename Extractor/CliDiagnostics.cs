@@ -50,7 +50,7 @@ internal static class CliDiagnostics
             ? $"\\u{(int)character:X4}" : character.ToString()));
 
     static bool IsBidiControl(char character) =>
-        character is >= '‪' and <= '‮' or >= '⁦' and <= '⁩' or '‎' or '‏' or '؜';
+        character is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069' or '\u200E' or '\u200F' or '\u061C';
 
     internal static void Write(Exception error, string stage, bool invalid)
     {
@@ -77,6 +77,8 @@ internal static class CliDiagnostics
             "open goals" => "Prove each goal listed below in place of its `sorry` or failing tactic, then rerun.",
             "proof outline" => "Write this proof by hand from a similar example, or report the shape as an issue.",
             "library audit" => "Address the kernel replay or axiom diagnostic for the listed theorems, or correct the namespace prefixes.",
+            "binding audit" =>
+                "Correct the option, digest or failed item named above, then rerun leancil audit-binding.",
             "build" => "Read the build output, then fix the project or its build properties in the manifest.",
             "extraction" => "Run leancil extract on the built assembly, method and profile to see why.",
             "program comparison" => "Fix the fixture case, or the variant's program if the change is intended.",

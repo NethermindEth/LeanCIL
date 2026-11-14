@@ -8,58 +8,77 @@ namespace Nethermind.LeanCIL;
 internal static partial class ProofOutline
 {
     /// <summary>The emitted operations of one method and its control flow.</summary>
-    sealed class Body(string[] ops)
+    sealed class Body(Operation[] operations)
     {
-        internal string[] Ops { get; } = ops;
+        internal Operation[] Operations { get; } = operations;
 
-        internal static int? Target(string op) =>
-            Regex.Match(op, @"\A\.(branch|brzero|brnonzero|beq|bne|blt|ble|bgt|bge|bltu|bleu|bgtu|bgeu) (\d+)\z")
-                is { Success: true } match ? int.Parse(match.Groups[2].Value) : null;
+        /// <summary>The jump an operation is, also when the native-width analysis wrapped it.</summary>
+        internal static Jump? JumpOf(Operation operation) => operation switch
+        {
+            Jump jump => jump,
+            NativeBinary { Inner: Jump jump } => jump,
+            _ => null
+        };
 
-        internal static bool Conditional(string op) => Target(op) is not null && !op.StartsWith(".branch ");
+        internal static int? Target(Operation operation) => JumpOf(operation)?.Target;
+
+        internal static bool Conditional(Operation operation) => JumpOf(operation) is { Conditional: true };
+
+        /// <summary>An operation that steps without a branch, a call, a fault or memory: arithmetic, conversions
+        /// and the bit counts, which are total.</summary>
+        internal static bool Pure(Operation operation) => operation is
+            Arg { Narrow: null } or Constant { Width: 32 or 64 } or Return { Narrow: null } or
+            ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
+            StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.And
+                or StackOpcode.Or or StackOpcode.Xor or StackOpcode.Nop or
+                StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.ConvU8 or StackOpcode.ConvU4 or
+                StackOpcode.ConvI4 };
 
         /// <summary>The proposition a conditional branch tests of its `bits`-bit operands' terms, and whether it
         /// is taken when the proposition holds; signed comparisons read the words through `toInt`. A literal
         /// operand is written as default `simp` writes it, so the split's fact rewrites a simplified goal.</summary>
-        internal static (string Condition, bool TakenWhenTrue) Test(string name, string[] terms, int bits)
+        internal static (string Condition, bool TakenWhenTrue) Test(Jump jump, Operand[] terms, int bits)
         {
             string Word(int index) => Literal(terms[index], bits);
-            string Signed(int index) => Regex.IsMatch(terms[index], @"\A\d+\z")
-                ? SignedValue(terms[index], bits) : $"{terms[index]}.toInt";
-            return name switch
+            string Signed(int index) => terms[index].Numeral is { } numeral
+                ? SignedValue(numeral, bits) : $"{terms[index].Term}.toInt";
+            return jump.Kind switch
             {
-                "brzero" => ($"{terms[0]} = {Literal("0", bits)}", true),
-                "brnonzero" => ($"{terms[0]} = {Literal("0", bits)}", false),
-                "beq" => ($"{Word(0)} = {Word(1)}", true),
-                "bne" => ($"{Word(0)} = {Word(1)}", false),
-                "blt" => ($"{Signed(0)} < {Signed(1)}", true),
-                "ble" => ($"{Signed(0)} ≤ {Signed(1)}", true),
-                "bgt" => ($"{Signed(1)} < {Signed(0)}", true),
-                "bge" => ($"{Signed(1)} ≤ {Signed(0)}", true),
-                "bltu" => ($"{Word(0)} < {Word(1)}", true),
-                "bleu" => ($"{Word(0)} ≤ {Word(1)}", true),
-                "bgtu" => ($"{Word(1)} < {Word(0)}", true),
-                "bgeu" => ($"{Word(1)} ≤ {Word(0)}", true),
-                _ => throw new ArgumentException($"`{name}` is not a conditional branch", nameof(name))
+                JumpKind.IfZero => ($"{terms[0].Term} = {Literal(new Operand("0", 0), bits)}", true),
+                JumpKind.IfNonzero => ($"{terms[0].Term} = {Literal(new Operand("0", 0), bits)}", false),
+                JumpKind.Equal => ($"{Word(0)} = {Word(1)}", true),
+                JumpKind.NotEqual => ($"{Word(0)} = {Word(1)}", false),
+                JumpKind.Less => ($"{Signed(0)} < {Signed(1)}", true),
+                JumpKind.LessOrEqual => ($"{Signed(0)} ≤ {Signed(1)}", true),
+                JumpKind.Greater => ($"{Signed(1)} < {Signed(0)}", true),
+                JumpKind.GreaterOrEqual => ($"{Signed(1)} ≤ {Signed(0)}", true),
+                JumpKind.LessUnsigned => ($"{Word(0)} < {Word(1)}", true),
+                JumpKind.LessOrEqualUnsigned => ($"{Word(0)} ≤ {Word(1)}", true),
+                JumpKind.GreaterUnsigned => ($"{Word(1)} < {Word(0)}", true),
+                JumpKind.GreaterOrEqualUnsigned => ($"{Word(1)} ≤ {Word(0)}", true),
+                _ => throw new ArgumentException($"`{jump.Mnemonic}` is not a conditional branch", nameof(jump))
             };
         }
 
         /// <summary>A decimal literal as the `bits`-bit word `simp` normalizes it to, such as `0#32`; any
         /// other term is returned as it is.</summary>
-        internal static string Literal(string term, int bits) =>
-            Regex.IsMatch(term, @"\A\d+\z") ? $"{term}#{bits}" : term;
+        internal static string Literal(Operand operand, int bits) =>
+            operand.Numeral is null ? operand.Term : $"{operand.Term}#{bits}";
+
+        /// <summary>A term of a branch test, with its value when the term is a bare numeral.</summary>
+        internal readonly record struct Operand(string Term, long? Numeral = null);
 
         /// <summary>The integer a `bits`-bit decimal literal reads as through `toInt`, as `simp` writes it.</summary>
-        static string SignedValue(string term, int bits)
+        static string SignedValue(long numeral, int bits)
         {
-            var value = System.Numerics.BigInteger.Parse(term, System.Globalization.CultureInfo.InvariantCulture) %
+            var value = new System.Numerics.BigInteger(numeral) %
                 (System.Numerics.BigInteger.One << bits);
             if (value >= System.Numerics.BigInteger.One << (bits - 1)) value -= System.Numerics.BigInteger.One << bits;
             return value.Sign < 0 ? $"({value})" : value.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
         /// <summary>Each loop as its head and latch, the last pc branching back to it, in head order.</summary>
-        internal List<(int Head, int Latch)> Loops() => Ops.Select((op, pc) => (Target: Target(op), Pc: pc))
+        internal List<(int Head, int Latch)> Loops() => Operations.Select((op, pc) => (Target: Target(op), Pc: pc))
             .Where(edge => edge.Target is { } target && target <= edge.Pc)
             .GroupBy(edge => edge.Target!.Value).OrderBy(group => group.Key)
             .Select(group => (group.Key, group.Max(edge => edge.Pc))).ToList();
@@ -68,21 +87,14 @@ internal static partial class ProofOutline
         internal int BlockStart(int pc)
         {
             var leaders = new SortedSet<int> { 0 };
-            for (var index = 0; index < Ops.Length; index++)
+            for (var index = 0; index < Operations.Length; index++)
             {
-                if (Target(Ops[index]) is { } target) leaders.Add(target);
-                if (Target(Ops[index]) is not null || Ops[index].StartsWith(".ret")) leaders.Add(index + 1);
+                if (Target(Operations[index]) is { } target) leaders.Add(target);
+                if (Target(Operations[index]) is not null || Operations[index] is Return) leaders.Add(index + 1);
             }
             return leaders.Where(leader => leader <= pc).Max();
         }
 
-        /// <summary>An operation that steps without a branch, a call, a fault or memory: arithmetic, conversions
-        /// and the bit counts, which are total.</summary>
-        internal static bool Pure(string op) => Regex.IsMatch(op,
-            @"\A\.(arg \d+|const32 \S.*|const64 \S.*|add|sub|mul|band|bor|bxor|nop|ret|convI8|convU8|convU4|" +
-            @"convI4)\z") ||
-            Regex.IsMatch(op, @"\A\.intrinsic \(\.scalar \(\.(log2|popCount|leadingZeroCount|trailingZeroCount) " +
-                @"\d+ \.word(32|64)\)\) 1\z");
     }
 
     enum Part { Word, Field, Span, Object }
@@ -94,26 +106,30 @@ internal static partial class ProofOutline
     /// <summary>A frame slot: a local's home, or a span parameter's home. A parameter's span slot holds the
     /// argument on entry, so the entry frame names it; a span local's holds nothing until it is assigned.
     /// </summary>
-    sealed record Slot(int Index, string Kind, string? Home, int Layout, Component[] Components,
+    sealed record Slot(int Index, LocalKind Kind, string? Home, int Layout, Component[] Components,
         bool Argument = false);
 
     abstract record Value;
     /// <summary>A word the outline names by `Term`; `Stacked` is its stack entry when the step leaves it in a
     /// form other than `Term`, which a test reads simplified.</summary>
-    sealed record Number(string Term, int Width, bool Literal = false, bool Narrow = false, string? Stacked = null)
-        : Value;
+    sealed record Number(string Term, int Width, long? Value = null, bool Narrow = false, string? Stacked = null)
+        : Value
+    {
+        /// <summary>The word is a bare numeral, whose value is `Value`.</summary>
+        internal bool Literal => Value is not null;
+    }
     sealed record Unknown(string What) : Value;
     sealed record LocalValue(int Slot) : Value;
-    sealed record LocalAddress(int Slot) : Value;
+    sealed record LocalAddressValue(int Slot) : Value;
     sealed record Element(int Component) : Value;
-    sealed record SpanLength(int Component) : Value;
+    sealed record SpanLengthValue(int Component) : Value;
     sealed record Sliced(int Component) : Value;
     sealed record ReferenceArgument(string Name) : Value;
     sealed record ObjectTerm(string Term) : Value;
     /// <summary>An array argument, destructured into its base and length before the loop.</summary>
     sealed record WordArrayArgument(Parameter Array) : Value;
     /// <summary>The 64-bit length `ldlen` pushes for an array argument.</summary>
-    sealed record ArrayLength(Parameter Array) : Value;
+    sealed record ArrayLengthValue(Parameter Array) : Value;
     /// <summary>A span argument, which a span local copies before the loop.</summary>
     sealed record SpanArgument(Parameter Span) : Value;
     /// <summary>The span over a whole array argument that a span local holds before the loop.</summary>
@@ -176,7 +192,7 @@ internal static partial class ProofOutline
             var imports = new List<string> { "CIL.Verification", "CIL.StructuralLabels" };
             if (callees.Count > 0) imports.Add("CIL.MethodIdentity");
             imports.Add("CIL.Safety.LoopScaffold");
-            if (body.Ops.Any(op => op.StartsWith(".memory (.add ", StringComparison.Ordinal)) &&
+            if (body.Operations.Any(op => op is Memory { Operation: AddOffset }) &&
                 spec.Parameters.Any(parameter => parameter.Shape == ParameterShape.Reference) ||
                 callees.Keys.Any(index => Branches(extraction, index)) || Indexed.Any())
                 imports.Add("CIL.Safety.LoopObligations");
@@ -230,35 +246,32 @@ internal static partial class ProofOutline
 
         void Frame()
         {
-            var metadata = extraction.Emitted[0].Metadata;
-            var kinds = Items(Regex.Match(metadata, @"localKinds := \[(.*?)\], opaqueVectorLocals").Groups[1].Value);
-            var homeList = Regex.Match(metadata, @"parameterHomes := \[(.*?)\], staticSites").Groups[1].Value;
-            var homes = Regex.Matches(homeList, @"\((\d+), ([^)]*)\)")
-                .Select(match => (Index: int.Parse(match.Groups[1].Value), Kind: match.Groups[2].Value));
+            var frame = extraction.Emitted[0].Frame;
+            var kinds = frame.LocalKinds;
             var localNames = method.Body.Variables.Select(variable =>
                 method.DebugInformation.TryGetName(variable, out var name) ? name : null).ToArray();
-            for (var index = 0; index < kinds.Length; index++)
+            for (var index = 0; index < kinds.Count; index++)
             {
                 var kind = kinds[index];
                 var name = names.Claim(localNames[index], "local" + index);
                 var home = $"home{index}";
-                if (Regex.Match(kind, @"\A\.word(32|64)\z") is { Success: true } word)
+                if (kind is LocalKind.Word32 or LocalKind.Word64)
                 {
-                    var width = word.Groups[1].Value == "64" ? 8 : 4;
+                    var width = kind is LocalKind.Word64 ? 8 : 4;
                     Add(new(index, kind, home, -1, [new(name, Part.Word, width, index, 0, null)]));
                 }
-                else if (Regex.Match(kind, @"\A\.aggregate (\d+)\z").Success)
+                else if (kind is LocalKind.Aggregate)
                     Add(Aggregate(index, kind, home, name));
-                else if (kind == ".object")
+                else if (kind is LocalKind.Object)
                     Add(new(index, kind, null, -1, [new(name, Part.Object, 8, index, 0, null)]));
-                else if (kind.StartsWith(".span ", StringComparison.Ordinal))
+                else if (kind is LocalKind.Span)
                 {
                     var source = SpanSource(index, kind, name);
                     Add(new(index, kind, null, -1, [new(name, Part.Span, source.Width, index, 0, source)]));
                 }
-                else throw Unsupported($"local `{name}` has kind {kind}");
+                else throw Unsupported($"local `{name}` has kind {kind.ToLean()}");
             }
-            foreach (var (argument, kind) in homes)
+            foreach (var (argument, kind) in frame.ParameterHomes)
             {
                 var parameter = spec.Parameters[argument];
                 if (parameter.Shape != ParameterShape.Span || kind != SpanKind(parameter))
@@ -272,27 +285,28 @@ internal static partial class ProofOutline
             if (components.Count == 0) throw Unsupported("its loop keeps no state in locals");
         }
 
-        static string SpanKind(Parameter span) => $".span {span.Width} {(span.Writable ? "true" : "false")}";
+        static LocalKind SpanKind(Parameter span) => new LocalKind.Span(span.Width, span.Writable);
 
         /// <summary>The argument a span local is assigned once, before its loop, from: a span argument it copies or
         /// an array argument it spans whole. Its other stores are the loop's `Slice(1)` of itself.</summary>
-        Parameter SpanSource(int local, string kind, string name)
+        Parameter SpanSource(int local, LocalKind kind, string name)
         {
-            var ops = body.Ops;
-            var stores = Enumerable.Range(1, ops.Length - 1).Where(pc => ops[pc] == $".setLocal {local}" &&
-                ops[pc - 1] != ".memory (.spanSlice false)").ToArray();
+            var ops = body.Operations;
+            var stores = Enumerable.Range(1, ops.Length - 1).Where(pc =>
+                ops[pc] is SetLocal store && store.Index == local &&
+                ops[pc - 1] is not Memory { Operation: SpanSlice { Counted: false } }).ToArray();
             var refused = Unsupported($"span local `{name}` is not assigned once from a span argument or from the " +
                 "whole of an array argument");
             if (stores.Length != 1 || stores[0] >= loops[0].Head) throw refused;
             var store = stores[0];
-            Parameter Argument(int pc) => Regex.Match(ops[pc], @"\A\.arg (\d+)\z") is { Success: true } match
-                ? spec.Parameters[int.Parse(match.Groups[1].Value)] : throw refused;
+            Parameter Argument(int pc) => ops[pc] is Arg { Narrow: null } argument
+                ? spec.Parameters[argument.Index] : throw refused;
             Parameter source;
-            if (Regex.IsMatch(ops[store - 1], @"\A\.arg \d+\z"))
+            if (ops[store - 1] is Arg { Narrow: null })
                 source = Argument(store - 1);
             else if (store >= 2 && Argument(store - 2) is { Shape: ParameterShape.WordArray } array &&
-                ops[store - 1] ==
-                    $".memory (.arraySpan {array.ArrayElement} {(array.Writable ? "true" : "false")} .whole)")
+                ops[store - 1] is Memory { Operation: ArraySpan { Range: ArrayRange.Whole } whole } &&
+                whole.Writable == array.Writable && whole.Element == array.Element)
                 source = array;
             else throw refused;
             if (source.Shape is not (ParameterShape.Span or ParameterShape.WordArray) || kind != SpanKind(source))
@@ -302,8 +316,9 @@ internal static partial class ProofOutline
             if (source.Shape == ParameterShape.WordArray)
             {
                 // An array read other than through the span is indexed, which a spanned array is not destructured for.
-                var argument = $".arg {Array.IndexOf(spec.Parameters, source)}";
-                if (Enumerable.Range(0, ops.Length).Any(pc => ops[pc] == argument && pc != store - 2))
+                var argument = Array.IndexOf(spec.Parameters, source);
+                if (Enumerable.Range(0, ops.Length).Any(pc =>
+                    ops[pc] is Arg { Narrow: null } read && read.Index == argument && pc != store - 2))
                     throw Unsupported($"array `{source.Name}` is both spanned by `{name}` and read directly");
                 spanned.Add(source);
             }
@@ -316,55 +331,32 @@ internal static partial class ProofOutline
             components.AddRange(slot.Components);
         }
 
-        Slot Aggregate(int index, string kind, string home, string name)
+        Slot Aggregate(int index, LocalKind kind, string home, string name)
         {
             var type = method.Body.Variables[index].VariableType;
-            var layout = Array.IndexOf(extraction.LayoutIdentities, LayoutEvidence.Identity(type));
-            var definition = Regex.Match(Source, $@"^def layout{layout} : AggregateLayout := ⟨\d+, \[(.*)\]⟩\r?$",
-                RegexOptions.Multiline);
-            if (layout < 0 || !definition.Success) throw Unsupported($"no layout for local `{name}`");
-            var fields = Regex.Matches(definition.Groups[1].Value, @"⟨(\d+), (\d+), (true|false)⟩").ToArray();
+            var identity = LayoutEvidence.Identity(type);
+            var layout = LayoutIndex(extraction, identity);
+            if (layout < 0) throw Unsupported($"no layout for local `{name}`");
+            var fields = extraction.Layouts[layout].Fields;
             var named = type.Resolve()?.Fields.Where(field => !field.IsStatic).ToArray() ?? [];
-            if (fields.Any(field => field.Groups[3].Value == "true") || named.Length != fields.Length)
+            if (fields.Any(field => field.IsAggregate) || named.Length != fields.Count)
                 throw Unsupported($"struct local `{name}` nests a struct");
             return new(index, kind, home, layout, fields.Select((field, position) =>
             {
                 var fieldName = named[position].Name;
                 var component = names.Claim(name + char.ToUpperInvariant(fieldName[0]) + fieldName[1..],
                     $"{name}Field{position}");
-                return new Component(component, Part.Field, int.Parse(field.Groups[2].Value), index,
-                    int.Parse(field.Groups[1].Value), null);
+                return new Component(component, Part.Field, field.Width, index, field.Offset, null);
             }).ToArray());
-        }
-
-        string Source => extraction.Source;
-
-        static string[] Items(string list)
-        {
-            var items = new List<string>();
-            var depth = 0;
-            var start = 0;
-            for (var index = 0; index < list.Length; index++)
-            {
-                if (list[index] is '(' or '[' or '⟨') depth++;
-                else if (list[index] is ')' or ']' or '⟩') depth--;
-                else if (list[index] == ',' && depth == 0)
-                {
-                    items.Add(list[start..index].Trim());
-                    start = index + 1;
-                }
-            }
-            if (list.Trim().Length > 0) items.Add(list[start..].Trim());
-            return [.. items];
         }
 
         // Callees are named for their methods so a reader can match each contract to its call.
         void Callees()
         {
-            foreach (var op in body.Ops)
-                if (Regex.Match(op, @"\A\.call(?:Instance)? (\d+) \d+\z") is { Success: true } call)
+            foreach (var op in body.Operations)
+                if (op is Call { Kind: CallKind.Static or CallKind.Instance } call)
                 {
-                    var index = int.Parse(call.Groups[1].Value);
+                    var index = call.Method;
                     if (callees.ContainsKey(index)) continue;
                     var callee = extraction.Methods[index];
                     callees[index] = names.Claim(char.ToLowerInvariant(callee.Name[0]) + callee.Name[1..],
@@ -516,8 +508,8 @@ internal static partial class ProofOutline
                     : inputs.Any(input => input.Span) ? "it writes through a span"
                     : inputs.Any(input => input.Object is not null) ? "it takes an object, whose fields need facts"
                     : output is null ? "it returns nothing to state"
-                    : !extraction.Emitted[index].Metadata.Contains("locals := [],") ? "it has locals"
-                    : Unstepped(callee, extraction.Emitted[index].Ops, []);
+                    : !extraction.Emitted[index].Frame.HasNoLocals ? "it has locals"
+                    : Unstepped(callee, extraction.Emitted[index].Operations, []);
                 lean.Noted("  ", "sorry", $"{NotOutlined}{callee.Name}'s body against the contract, since " +
                     reason);
             }
@@ -526,27 +518,26 @@ internal static partial class ProofOutline
 
         /// <summary>The reference and value parameters, width and store of a static callee whose body only
         /// stores one word argument through one reference argument of that word's width.</summary>
-        (int Slot, int Value, int Width, string Op)? Stores(int index)
+        (int Slot, int Value, int Width, Operation Op)? Stores(int index)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Ops.Where(op => op != ".nop").ToArray();
+            var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
             if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
-                !extraction.Emitted[index].Metadata.Contains("locals := [],") || ops[3] != ".ret") return null;
-            var slot = Regex.Match(ops[0], @"\A\.arg (\d+)\z");
-            var value = Regex.Match(ops[1], @"\A\.arg (\d+)\z");
-            if (!slot.Success || !value.Success) return null;
-            var (reference, word) = (int.Parse(slot.Groups[1].Value), int.Parse(value.Groups[1].Value));
+                !extraction.Emitted[index].Frame.HasNoLocals || ops[3] is not Return { Narrow: null }) return null;
+            if (ops[0] is not Arg { Narrow: null, Index: var reference } ||
+                ops[1] is not Arg { Narrow: null, Index: var word }) return null;
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
                 ElementWidth(target.ElementType) is not { } width ||
                 ElementWidth(callee.Parameters[word].ParameterType) != width) return null;
-            var stores = width == 4 ? ops[2] == ".storeScalar 4" : ops[2] is ".store64" or ".storeScalar 8";
+            var stores = width == 4 ? ops[2] is StoreScalar { Width: 4 }
+                : ops[2] is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 8 };
             return stores ? (reference, word, width, ops[2]) : null;
         }
 
         /// <summary>Whether a callee without locals only computes, so one checked run steps its body.</summary>
         internal static bool Computes(Extraction extraction, int index) =>
-            extraction.Emitted[index].Metadata.Contains("locals := [],") &&
-            extraction.Emitted[index].Ops.All(Body.Pure);
+            extraction.Emitted[index].Frame.HasNoLocals &&
+            extraction.Emitted[index].Operations.All(Body.Pure);
 
         /// <summary>The `Holds` proof of a callee of words that `Computes` or `Branches`, its inputs bound by
         /// `pattern` and named `arguments`: one stepped run, or a split on each test. A `kept` contract's
@@ -572,52 +563,67 @@ internal static partial class ProofOutline
         internal static bool Branches(Extraction extraction, int index)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Ops;
+            var ops = extraction.Emitted[index].Operations;
             return !callee.HasThis &&
                 callee.Parameters.All(parameter => ElementWidth(parameter.ParameterType) is not null) &&
                 callee.ReturnType.FullName != "System.Void" && ElementWidth(callee.ReturnType) is not null &&
-                extraction.Emitted[index].Metadata.Contains("locals := [],") &&
-                ops.Any(op => Body.Conditional(op) || op.StartsWith(".throw ", StringComparison.Ordinal)) &&
-                ops.All(op =>
-                    Regex.IsMatch(op, @"\A\.(arg \d+|const(32|64) \S.*|add|sub|mul|band|bor|bxor|nop|ret)\z") ||
-                    Body.Target(op) is not null || op.StartsWith(".throw ", StringComparison.Ordinal));
+                extraction.Emitted[index].Frame.HasNoLocals &&
+                ops.Any(op => Body.Conditional(op) || op is Throw) &&
+                ops.All(op => op is Arg { Narrow: null } or Constant { Width: 32 or 64 } or Return { Narrow: null } or
+                    Jump or Throw or StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul
+                        or StackOpcode.And or StackOpcode.Or or
+                        StackOpcode.Xor or StackOpcode.Nop });
         }
+
+        /// <summary>The term a constant's operand is written as: its digits, or its bit-vector conversion.</summary>
+        static string ConstantTerm(Constant constant) => constant.Numeral
+            ? $"{constant.Value}" : $"(BitVec.ofInt {constant.Width} ({constant.Value}))";
+
+        /// <summary>The infix operator of a word operation the walks name, or null for any other operation.</summary>
+        static string? Arithmetic(Operation operation) =>
+            operation is StackOperation { IsArithmetic: true } arithmetic ? arithmetic.Symbol : null;
+
+        /// <summary>The operation reads an unsigned element of <paramref name="width"/> bytes.</summary>
+        static bool ReadsWidth(Operation operation, int width) => operation switch
+        {
+            LoadScalar { Signed: false } load => load.Width == width,
+            StackOperation { Kind: StackOpcode.Load64 } => width == 8,
+            _ => false
+        };
+
+        /// <summary>A word a branching callee's walk holds: its term, its width in bits, and its value when it is
+        /// a bare numeral.</summary>
+        internal readonly record struct BranchWord(string Term, int Bits, long? Numeral = null);
 
         /// <summary>The contract proof of a branching callee from `pc`: a `by_cases` on each test, each returning
         /// side stepped with the tests' facts, and each throwing side closed from the precondition. A `kept`
         /// contract's `post` first states that the memory is as it was, which each returning side proves.
         /// </summary>
         internal static void BranchedCallee(Writer lean, Extraction extraction, int index, string name,
-            string[] arguments, int pc, List<(string Term, int Bits)> stack, List<(string Fact, string Text)> facts,
+            string[] arguments, int pc, List<BranchWord> stack, List<(string Fact, string Text)> facts,
             string indent, ref int sides, bool kept)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Ops;
+            var ops = extraction.Emitted[index].Operations;
             string Where() => facts.Count == 0 ? "" : " where " + string.Join(" and ", facts.Select(fact => fact.Text));
             while (true)
             {
                 var op = ops[pc];
-                Match match;
-                if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
+                if (op is Arg { Narrow: null, Index: var argument })
                 {
-                    var argument = int.Parse(match.Groups[1].Value);
                     var bits = 8 * ElementWidth(callee.Parameters[argument].ParameterType)!.Value;
-                    stack.Add((arguments[argument], bits));
+                    stack.Add(new(arguments[argument], bits));
                 }
-                else if ((match = Regex.Match(op, @"\A\.const(32|64) (.+)\z")).Success)
-                    stack.Add((match.Groups[2].Value, int.Parse(match.Groups[1].Value)));
-                else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
+                else if (op is Constant { Width: 32 or 64 } constant)
+                    stack.Add(new(ConstantTerm(constant), constant.Width, constant.Numeral ? constant.Value : null));
+                else if (Arithmetic(op) is { } symbol)
                 {
                     var right = stack[^1];
                     var left = stack[^2];
                     stack.RemoveRange(stack.Count - 2, 2);
-                    var symbol = match.Groups[1].Value switch
-                    {
-                        "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
-                    };
-                    stack.Add(($"({left.Term} {symbol} {right.Term})", left.Bits));
+                    stack.Add(new($"({left.Term} {symbol} {right.Term})", left.Bits));
                 }
-                else if (op == ".ret")
+                else if (op is Return { Narrow: null })
                 {
                     var suffix = (++sides).ToString(System.Globalization.CultureInfo.InvariantCulture);
                     var steps = facts.Count == 0 ? "" : $" [{string.Join(", ", facts.Select(fact => fact.Fact))}]";
@@ -628,7 +634,7 @@ internal static partial class ProofOutline
                         $"{name}Contract.post of the returned value{Where()}");
                     return;
                 }
-                else if (op.StartsWith(".throw ", StringComparison.Ordinal))
+                else if (op is Throw)
                 {
                     lean.Comment($"{indent}-- ", $"{indent}-- ", $"`{callee.Name}` throws at " +
                         $"{ProofOutline.Location(callee, pc)}{Where()}, which its precondition must rule out");
@@ -636,20 +642,19 @@ internal static partial class ProofOutline
                     lean.Line($"{indent}cil_loop_obligation [{name}Contract]");
                     return;
                 }
-                else if (Body.Target(op) is { } target && !Body.Conditional(op))
+                else if (op is Jump { Conditional: false } branch)
                 {
-                    pc = target;
+                    pc = branch.Target;
                     continue;
                 }
-                else if (Body.Conditional(op))
+                else if (op is Jump test)
                 {
-                    var taken = Body.Target(op)!.Value;
-                    var opName = Regex.Match(op, @"\A\.(\w+)").Groups[1].Value;
-                    var arity = opName is "brzero" or "brnonzero" ? 1 : 2;
+                    var taken = test.Target;
+                    var arity = test.Kind is JumpKind.IfZero or JumpKind.IfNonzero ? 1 : 2;
                     var operands = stack.TakeLast(arity).ToArray();
                     var rest = stack.Take(stack.Count - arity).ToList();
-                    var (condition, takenWhenTrue) = Body.Test(opName, [.. operands.Select(operand => operand.Term)],
-                        operands[0].Bits);
+                    var terms = operands.Select(operand => new Body.Operand(operand.Term, operand.Numeral)).ToArray();
+                    var (condition, takenWhenTrue) = Body.Test(test, terms, operands[0].Bits);
                     var fact = $"branch{facts.Count + 1}";
                     lean.Line($"{indent}by_cases {fact} : {condition}");
                     foreach (var holds in new[] { true, false })
@@ -732,10 +737,10 @@ internal static partial class ProofOutline
 
         /// <summary>Each slot's frame entry at the loop head, from the state values at `root`.</summary>
         string[] SlotTerms(string root) => slots.Select(slot => slot.Home is { } home
-            ? $".bytes {(slot.Kind.Contains(' ') ? $"({slot.Kind})" : slot.Kind)} {home}"
+            ? $".bytes {(slot.Kind is LocalKind.Aggregate ? $"({slot.Kind.ToLean()})" : slot.Kind.ToLean())} {home}"
             : slot.Components[0].Part == Part.Object
             ? $".object (some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)})"
-            : $"{slot.Kind} " +
+            : $"{slot.Kind.ToLean()} " +
                 $"(some {Projection(root, components.IndexOf(slot.Components[0]), components.Count)}.view)")
             .ToArray();
 
@@ -757,7 +762,7 @@ internal static partial class ProofOutline
                     slot.Components.Select(field => $"{ScalarConstructor(field.Width)} {project(field)}")) + "]))",
                 _ => "none"
             }).ToArray();
-            var kinds = string.Join(", ", slots.Select(slot => slot.Kind));
+            var kinds = string.Join(", ", slots.Select(slot => slot.Kind.ToLean()));
             lean.Wrapped($"  FrameState {(Writes ? "written" : "[]")} {Memory}", [$"[{kinds}]", ValuesType], "");
             var slotsUse = slotTerms.Any(term => term.Contains("values")) ? "values" : "_";
             var knownUse = remembered.Any(term => term.Contains("values")) ? "values" : "_";
@@ -779,9 +784,10 @@ internal static partial class ProofOutline
         void LoopHeader(Writer lean)
         {
             var suffix = Suffix(active);
-            var latchOp = body.Ops[loop.Latch];
-            var opName = Regex.Match(latchOp, @"\A\.(\w+)").Groups[1].Value;
-            if (!Body.Conditional(latchOp))
+            if (body.Operations[loop.Latch] is NativeBinary)
+                throw Unsupported($"its loop at {Location(loop.Latch)} tests a native and an int32 value at " +
+                    "its back edge, which the outline does not step");
+            if (body.Operations[loop.Latch] is not Jump { Conditional: true } latch)
                 throw Unsupported($"its loop at {Location(loop.Latch)} does not test a condition at its back edge");
             string Projected(Component component) =>
                 Projection("state.values", components.IndexOf(component), components.Count);
@@ -805,7 +811,7 @@ internal static partial class ProofOutline
                 .Append($"(state : {StateType("memory")})");
             lean.Line($"-- The cutpoint is the loop's back-edge test at {Location(loop.Latch)}.");
             lean.Wrapped($"bind_cutpoint header{suffix}", binders, ":=");
-            lean.Line($"  Extracted.method0 at loop{suffix}.latch matching (· matches .{opName} _)");
+            lean.Line($"  Extracted.method0 at loop{suffix}.latch matching (· matches .{latch.Mnemonic} _)");
             var frame = FrameArguments(component =>
                 Projection("state.values", components.IndexOf(component), components.Count) + ".view", "memory");
             var entryFrame = $"entry.frame{(frame.Length > 0 ? " " + frame : "")}";
@@ -850,8 +856,8 @@ internal static partial class ProofOutline
         {
             Unknown unknown => unknown.What,
             Element => "a span element before it is loaded",
-            SpanLength => "a span length outside the loop test",
-            LocalAddress or LocalValue => "a struct local as a whole",
+            SpanLengthValue => "a span length outside the loop test",
+            LocalAddressValue or LocalValue => "a struct local as a whole",
             ReferenceArgument reference => $"the reference `{reference.Name}`",
             SpanArgument span => $"the span `{span.Span.Name}`",
             SpannedArray over => $"a span over the array `{over.Array.Name}`",
@@ -862,7 +868,7 @@ internal static partial class ProofOutline
         {
             Number number => number.Stacked ?? $".scalar ({ScalarConstructor(number.Width)} {number.Term})",
             ObjectTerm reference => $".object {reference.Term}",
-            SpanLength length =>
+            SpanLengthValue length =>
                 $".scalar (.i32 (BitVec.ofNat 32 {((SpanTerm)state.State[length.Component]).View}.length))",
             _ => throw Unsupported($"the loop test at {Location(loop.Latch)} reads a value the outline cannot name")
         };
@@ -879,7 +885,7 @@ internal static partial class ProofOutline
                 if (Step(state) != Event.Continue)
                     throw Unsupported(
                         $"the loop test at {Location(loop.Latch)} is not a straight block ({stopReason})");
-            var arity = Regex.IsMatch(body.Ops[loop.Latch], @"\A\.br(non)?zero ") ? 1 : 2;
+            var arity = body.Operations[loop.Latch] is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } ? 1 : 2;
             if (state.Stack.Count != arity)
                 throw Unsupported($"the loop test at {Location(loop.Latch)} uses values from before its block");
             return state.Stack;
@@ -951,7 +957,7 @@ internal static partial class ProofOutline
                     Part.Span when slots[component.Slot].Argument => EntrySpan(component.Span!),
                     Part.Span => new Unknown($"the span local `{component.Name}` before it is assigned"),
                     Part.Object => new ObjectTerm(".null"),
-                    _ => (object)new Number("0", component.Width, Literal: true)
+                    _ => (object)new Number("0", component.Width, Value: 0)
                 }).ToArray(),
                 // Each step reading an array's length checks the array, valid in the entry's memory.
                 Facts = [.. Indexed.Select(array => array.Name + "Valid")]
@@ -1156,7 +1162,7 @@ internal static partial class ProofOutline
                         spec.Postcondition(lean, indent, $"Postcondition at the return at {Location(pc)}");
                         return;
                     case Event.Call:
-                        if (!Call(lean, state, indent, pc)) return;
+                        if (!EnterCall(lean, state, indent, pc)) return;
                         continue;
                     case Event.Branch:
                         Branch(lean, state, indent, $"branch{++branches}");
@@ -1165,11 +1171,11 @@ internal static partial class ProofOutline
             }
         }
 
-        bool Call(Writer lean, PathState state, string indent, int pc)
+        bool EnterCall(Writer lean, PathState state, string indent, int pc)
         {
-            var call = Regex.Match(body.Ops[pc], @"\A\.call(?:Instance)? (\d+) (\d+)\z");
-            var callee = int.Parse(call.Groups[1].Value);
-            var count = int.Parse(call.Groups[2].Value);
+            var call = (Call)body.Operations[pc];
+            var callee = call.Method;
+            var count = call.Arguments;
             var arguments = state.Stack.TakeLast(count).ToArray();
             state.Stack.RemoveRange(state.Stack.Count - count, count);
             var stores = Stores(callee) is not null;
@@ -1240,10 +1246,11 @@ internal static partial class ProofOutline
         void Branch(Writer lean, PathState state, string indent, string fact)
         {
             var pc = state.Pc;
-            var op = body.Ops[pc];
-            var opName = Regex.Match(op, @"\A\.(\w+)").Groups[1].Value;
-            var target = Body.Target(op)!.Value;
-            var unary = opName is "brzero" or "brnonzero";
+            var jump = (Jump)body.Operations[pc];
+            var target = jump.Target;
+            var zero = jump.Kind == JumpKind.IfZero;
+            var nonzero = jump.Kind == JumpKind.IfNonzero;
+            var unary = zero || nonzero;
             var operands = state.Stack.TakeLast(unary ? 1 : 2).ToArray();
             state.Stack.RemoveRange(state.Stack.Count - operands.Length, operands.Length);
             state.GoalPc = pc;
@@ -1254,12 +1261,12 @@ internal static partial class ProofOutline
                 if (known is not null) side.Facts.Add(known);
                 return side;
             }
-            if (unary && operands[0] is SpanLength length && state.State[length.Component] is SpanTerm
+            if (unary && operands[0] is SpanLengthValue length && state.State[length.Component] is SpanTerm
                 { Caseable: true } span)
             {
                 var name = components[length.Component].Name;
-                var empty = Side(opName == "brzero" ? target : pc + 1, null);
-                var cons = Side(opName == "brzero" ? pc + 1 : target, null);
+                var empty = Side(zero ? target : pc + 1, null);
+                var cons = Side(zero ? pc + 1 : target, null);
                 cons.Obtained.Clear();
                 lean.Line($"{indent}cases {span.Remaining} with");
                 // A written span splits on its length; its elements are never read.
@@ -1288,15 +1295,15 @@ internal static partial class ProofOutline
             }
             if (unary && operands[0] is Number { Literal: true } literal)
             {
-                var truth = literal.Term != "0";
-                state.Pc = (opName == "brnonzero") == truth ? target : pc + 1;
+                var truth = literal.Value != 0;
+                state.Pc = nonzero == truth ? target : pc + 1;
                 Walk(lean, state, indent);
                 return;
             }
             if (unary && operands[0] is ObjectTerm reference)
             {
-                NullTest(lean, state, indent, reference.Term, opName == "brnonzero" ? target : pc + 1,
-                    opName == "brnonzero" ? pc + 1 : target);
+                NullTest(lean, state, indent, reference.Term, nonzero ? target : pc + 1,
+                    nonzero ? pc + 1 : target);
                 return;
             }
             // Identity of two object references: the object locals and caller instances the walk names.
@@ -1307,10 +1314,10 @@ internal static partial class ProofOutline
                     parameter.Shape == ParameterShape.Object) => $"(.address {argument.Name})",
                 _ => null
             }).ToArray();
-            if (opName is "beq" or "bne" && identities.All(term => term is not null))
+            if (jump.Kind is JumpKind.Equal or JumpKind.NotEqual && identities.All(term => term is not null))
             {
                 var (identity, equalTaken) =
-                    Body.Test(opName, [$"({identities[0]} : ManagedReference)", identities[1]!], 64);
+                    Body.Test(jump, [new($"({identities[0]} : ManagedReference)"), new(identities[1]!)], 64);
                 var same = Side(equalTaken ? target : pc + 1, fact);
                 var different = Side(equalTaken ? pc + 1 : target, fact);
                 lean.Line($"{indent}by_cases {fact} : {identity}");
@@ -1325,8 +1332,9 @@ internal static partial class ProofOutline
                 Hole(lean, indent, state, $"the test at {Location(pc)} reads {Unnamed(unnamed)}");
                 return;
             }
-            var terms = operands.Select(operand => ((Number)operand).Term).ToArray();
-            var (condition, takenWhenTrue) = Body.Test(opName, terms, 8 * ((Number)operands[0]).Width);
+            var terms = operands.Select(operand => (Number)operand)
+                .Select(number => new Body.Operand(number.Term, number.Value)).ToArray();
+            var (condition, takenWhenTrue) = Body.Test(jump, terms, 8 * ((Number)operands[0]).Width);
             var holds = Side(takenWhenTrue ? target : pc + 1, fact);
             var fails = Side(takenWhenTrue ? pc + 1 : target, fact);
             lean.Line($"{indent}by_cases {fact} : {condition}");
@@ -1378,7 +1386,7 @@ internal static partial class ProofOutline
         /// <summary>Evaluate the operation at `state.Pc`, advancing it unless the walk must act.</summary>
         Event Step(PathState state)
         {
-            var op = body.Ops[state.Pc];
+            var op = body.Operations[state.Pc];
             var stack = state.Stack;
             Value Pop()
             {
@@ -1392,17 +1400,16 @@ internal static partial class ProofOutline
                 stopReason = reason;
                 return Event.Stop;
             }
-            Match match;
-            if ((match = Regex.Match(op, @"\A\.local (\d+)\z")).Success)
+            if (op is Local { Index: var loaded })
             {
-                var slot = slots[int.Parse(match.Groups[1].Value)];
+                var slot = slots[loaded];
                 var first = components.IndexOf(slot.Components[0]);
                 stack.Add(slot.Components[0].Part is Part.Word or Part.Object ? (Value)state.State[first]
                     : new LocalValue(slot.Index));
             }
-            else if ((match = Regex.Match(op, @"\A\.setLocal (\d+)\z")).Success)
+            else if (op is SetLocal { Index: var assigned })
             {
-                var slot = slots[int.Parse(match.Groups[1].Value)];
+                var slot = slots[assigned];
                 var first = components.IndexOf(slot.Components[0]);
                 var value = Pop();
                 state.Moved = true;
@@ -1423,9 +1430,9 @@ internal static partial class ProofOutline
                     state.State[first] = EntrySpan(source);
                 else return Stop("a store of a value the outline cannot name");
             }
-            else if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
+            else if (op is Arg { Narrow: null, Index: var argument })
             {
-                var parameter = spec.Parameters[int.Parse(match.Groups[1].Value)];
+                var parameter = spec.Parameters[argument];
                 stack.Add(parameter.Shape switch
                 {
                     ParameterShape.Scalar => new Number(parameter.Name, parameter.Width),
@@ -1438,79 +1445,77 @@ internal static partial class ProofOutline
             }
             // The span a local takes over a whole array argument before the loop, on the entry path, where the
             // entry frame carries the array's validity past the frame's allocations.
-            else if (op.StartsWith(".memory (.arraySpan ", StringComparison.Ordinal) && stack.Count > 0 &&
+            else if (op is Memory { Operation: ArraySpan } && stack.Count > 0 &&
                 stack[^1] is WordArrayArgument { Array: var whole } && spanned.Contains(whole))
             {
                 stack.RemoveAt(stack.Count - 1);
                 stack.Add(new SpannedArray(whole));
                 state.Facts.Add(whole.Name + "Spanned");
             }
-            else if ((match = Regex.Match(op, @"\A\.const(32|64) (.+)\z")).Success)
+            else if (op is Constant { Width: 32 or 64 } constant)
             {
-                var literal = match.Groups[2].Value;
-                var width = match.Groups[1].Value == "64" ? 8 : 4;
-                stack.Add(new Number(literal, width, Literal: Regex.IsMatch(literal, @"\A\d+\z")));
+                var width = constant.Width == 64 ? 8 : 4;
+                stack.Add(new Number(ConstantTerm(constant), width, Value: constant.Numeral ? constant.Value : null));
             }
-            else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
+            else if (Arithmetic(op) is { } symbol)
             {
                 var right = Pop();
                 var left = Pop();
-                var symbol = match.Groups[1].Value switch
-                {
-                    "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
-                };
                 if (left is Number { Narrow: false } a && right is Number { Narrow: false } b && a.Width == b.Width)
                     stack.Add(new Number($"({a.Term} {symbol} {b.Term})", a.Width));
                 else stack.Add(new Unknown("arithmetic on a value the outline cannot name"));
             }
-            else if (op == ".convI8" || op == ".convU8")
+            else if (op is StackOperation { Kind: StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.ConvU8 })
             {
                 var value = Pop();
                 stack.Add(value is Number { Literal: true, Width: 4 } literal ? literal with { Width = 8 }
                     : new Unknown("a widened value"));
             }
-            else if ((match = Regex.Match(op, @"\A\.localAddr (\d+)\z")).Success)
-                stack.Add(new LocalAddress(int.Parse(match.Groups[1].Value)));
-            else if ((match = Regex.Match(op, @"\A\.initAggregate \d+\z")).Success)
+            // A span local's address pushes the view it holds, as loading the local does.
+            else if (op is LocalAddress addressed)
+                stack.Add(slots[addressed.Index].Components[0].Part == Part.Span
+                    ? new LocalValue(addressed.Index) : new LocalAddressValue(addressed.Index));
+            else if (op is AggregateTransfer { Access: AggregateAccess.Initialize })
             {
-                if (Pop() is not LocalAddress address) return Stop("zeroing storage other than a struct local");
+                if (Pop() is not LocalAddressValue address) return Stop("zeroing storage other than a struct local");
                 state.Moved = true;
                 foreach (var field in slots[address.Slot].Components)
-                    state.State[components.IndexOf(field)] = new Number("0", field.Width, Literal: true);
+                    state.State[components.IndexOf(field)] = new Number("0", field.Width, Value: 0);
             }
-            else if ((match = Regex.Match(op, @"\A\.fieldAt (\d+) (\d+)\z")).Success)
+            else if (op is StructField { Access: FieldAccess.Load, Signed: false } load)
             {
                 var source = Pop();
                 var slot = source switch
                 {
-                    LocalValue value => value.Slot, LocalAddress address => address.Slot, _ => -1
+                    LocalValue value => value.Slot, LocalAddressValue address => address.Slot, _ => -1
                 };
                 var field = slot < 0 ? null : slots[slot].Components.FirstOrDefault(component =>
-                    component.Offset == int.Parse(match.Groups[1].Value));
+                    component.Offset == load.Offset);
                 if (field is null) return Stop("a field read outside a struct local");
                 var held = (Value)state.State[components.IndexOf(field)];
                 // A narrow field loads its low bytes zero-extended, as `narrowLoad` reads the word it holds.
                 stack.Add(field.Width < 4 && held is Number { Literal: false } word
                     ? new Number(NarrowRead(word.Term, field.Width), 4) : held);
             }
-            else if ((match = Regex.Match(op, @"\A\.setFieldAt (\d+) (\d+)\z")).Success)
+            else if (op is StructField { Access: FieldAccess.Store } store)
             {
                 var value = Pop();
-                var field = Pop() is LocalAddress address ? slots[address.Slot].Components.FirstOrDefault(component =>
-                    component.Offset == int.Parse(match.Groups[1].Value)) : null;
+                var field = Pop() is LocalAddressValue address
+                    ? slots[address.Slot].Components.FirstOrDefault(component =>
+                    component.Offset == store.Offset) : null;
                 if (field is null || value is not (Number or Unknown))
                     return Stop("a field store outside a struct local");
                 state.Moved = true;
                 state.State[components.IndexOf(field)] = value is Number { Literal: false } number && field.Width < 4
                     ? number with { Narrow = true } : value;
             }
-            else if (op == ".memory .spanLength")
+            else if (op is Memory { Operation: SpanLength })
             {
                 if (Pop() is not LocalValue value || slots[value.Slot].Components[0].Part != Part.Span)
                     return Stop("the length of a span the outline does not follow");
-                stack.Add(new SpanLength(components.IndexOf(slots[value.Slot].Components[0])));
+                stack.Add(new SpanLengthValue(components.IndexOf(slots[value.Slot].Components[0])));
             }
-            else if (op == ".memory (.spanSlice false)")
+            else if (op is Memory { Operation: SpanSlice { Counted: false } })
             {
                 var count = Pop();
                 var source = Pop();
@@ -1521,7 +1526,7 @@ internal static partial class ProofOutline
                 PendingTail(state, component, span);
                 stack.Add(new Sliced(component));
             }
-            else if ((match = Regex.Match(op, @"\A\.memory \(\.spanItem (\d+)\)\z")).Success)
+            else if (op is Memory { Operation: SpanItem })
             {
                 var index = Pop();
                 var source = Pop();
@@ -1530,7 +1535,8 @@ internal static partial class ProofOutline
                     return Stop("an element other than the first of a span known to be nonempty");
                 stack.Add(new Element(components.IndexOf(slots[value.Slot].Components[0])));
             }
-            else if (op is ".loadScalar 4" or ".load64" or ".loadScalar 8" && stack.Count > 0 && stack[^1] is Element)
+            else if (stack.Count > 0 && stack[^1] is Element reading &&
+                ReadsWidth(op, components[reading.Component].Width))
             {
                 var element = (Element)Pop();
                 var span = (SpanTerm)state.State[element.Component];
@@ -1540,26 +1546,27 @@ internal static partial class ProofOutline
                 PendingHead(state, element.Component, span);
                 stack.Add(new Number(span.Head!, components[element.Component].Width));
             }
-            else if (op == ".memory .arrayLength")
+            else if (op is Memory { Operation: ArrayLength })
             {
                 if (Pop() is not WordArrayArgument array)
                     return Stop("the length of an array the outline does not follow");
-                stack.Add(new ArrayLength(array.Array));
+                stack.Add(new ArrayLengthValue(array.Array));
             }
             // `ldlen` pushes the length as a 64-bit word, which a test of an `int` index narrows; a test reads
             // the narrowed word simplified.
-            else if (op == ".convI4" && stack.Count > 0 && stack[^1] is ArrayLength length)
+            else if (op is StackOperation { Kind: StackOpcode.ConvI4 } && stack.Count > 0
+                && stack[^1] is ArrayLengthValue length)
             {
                 stack.RemoveAt(stack.Count - 1);
                 var count = length.Array.Name + "Length";
                 stack.Add(new Number($"(BitVec.ofNat 32 {count})", 4,
                     Stacked: $".scalar (.i32 ((BitVec.ofNat 64 {count}).setWidth 32))"));
             }
-            else if ((match = Regex.Match(op, @"\A\.memory \(\.arrayLoad (\d+) false\)\z")).Success &&
+            else if (op is Memory { Operation: ArrayLoad { Signed: false } arrayLoad } &&
                 stack.Count >= 2 && stack[^2] is WordArrayArgument read)
             {
                 if (stack[^1] is not Number { Width: 4, Narrow: false } index || current is null ||
-                    int.Parse(match.Groups[1].Value) != read.Array.Width)
+                    arrayLoad.Width != read.Array.Width)
                     return Stop("an array read the outline cannot name at an index and the element's width");
                 if (read.Array.Writable)
                     return Stop("a read of the array the loop stores into, whose contents the frame does not carry");
@@ -1568,10 +1575,10 @@ internal static partial class ProofOutline
                 stack.RemoveRange(stack.Count - 2, 2);
                 stack.Add(new Number(ElementRead(read.Array, index.Term, state.Facts), read.Array.Width));
             }
-            else if ((match = Regex.Match(op, @"\A\.memory \(\.arrayStore (\d+)\)\z")).Success &&
+            else if (op is Memory { Operation: ArrayStore arrayStore } &&
                 stack.Count >= 3 && stack[^3] is WordArrayArgument stores)
             {
-                var width = int.Parse(match.Groups[1].Value);
+                var width = arrayStore.Width;
                 if (stack[^2] is not Number { Width: 4, Narrow: false } index ||
                     stack[^1] is not Number { Narrow: false } stored || stored.Width != width || current is null)
                     return Stop("an array store the outline cannot name at an index and the element's width");
@@ -1582,29 +1589,30 @@ internal static partial class ProofOutline
                 state.Facts.Add(ElementStore(stores.Array, index.Term, stored.Term));
                 state.Moved = true;
             }
-            else if (op == ".nop") { }
-            else if (Body.Target(op) is { } target && !Body.Conditional(op))
+            else if (op.IsNop) { }
+            else if (op is Jump { Conditional: false } branch)
             {
-                state.Pc = target;
+                state.Pc = branch.Target;
                 return Event.Continue;
             }
-            else if (Body.Conditional(op)) return Event.Branch;
-            else if (op.StartsWith(".call ", StringComparison.Ordinal) ||
-                op.StartsWith(".callInstance ", StringComparison.Ordinal)) return Event.Call;
-            else if (op == ".ret" || op.StartsWith(".ret (some ", StringComparison.Ordinal)) return Event.Return;
-            else if ((match = Regex.Match(op, @"\A\.memory \(\.add (\d+) true\)\z")).Success && current is not null &&
+            else if (op is Jump) return Event.Branch;
+            else if (op is Call { Kind: CallKind.Static or CallKind.Instance }) return Event.Call;
+            else if (op is Return) return Event.Return;
+            else if (op is Memory { Operation: AddOffset { Signed: true, Stride: <= int.MaxValue } offset }
+                && current is not null &&
                 !state.Called && stack.Count >= 2 &&
                 stack[^1] is Number { Width: 4, Narrow: false } index && stack[^2] is ReferenceArgument reference &&
                 spec.Parameters.Any(parameter => parameter.Name == reference.Name &&
                     parameter.Shape == ParameterShape.Reference))
             {
                 stack.RemoveRange(stack.Count - 2, 2);
-                stack.Add(new AddedReference(reference.Name, index.Term, int.Parse(match.Groups[1].Value)));
+                stack.Add(new AddedReference(reference.Name, index.Term, Convert.ToInt32(offset.Stride)));
             }
-            else if (op is ".store64" or ".storeScalar 4" or ".storeScalar 8" && stack.Count >= 2 &&
+            else if (op is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 4 or 8 }
+                && stack.Count >= 2 &&
                 stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })
             {
-                var width = op == ".storeScalar 4" ? 4 : 8;
+                var width = op is StoreScalar { Width: 4 } ? 4 : 8;
                 if (state.Moved || state.Called)
                     return Stop("a span store after another store or a call of the iteration, whose memory the " +
                         "span's checks are not carried to");
@@ -1615,10 +1623,11 @@ internal static partial class ProofOutline
                 state.Facts.AddRange(SpanWrite(state, written.Component, stored.Term, StoreLemma(op)));
                 state.Moved = true;
             }
-            else if (op is ".store64" or ".storeScalar 4" or ".storeScalar 8" && stack.Count >= 2 &&
+            else if (op is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 4 or 8 }
+                && stack.Count >= 2 &&
                 stack[^2] is AddedReference added && !state.Moved)
             {
-                var width = op == ".storeScalar 4" ? 4 : 8;
+                var width = op is StoreScalar { Width: 4 } ? 4 : 8;
                 if (stack[^1] is not Number { Narrow: false } stored || stored.Width != width || added.Width != width)
                     return Stop("a store through `Unsafe.Add` of a value the outline cannot name at the " +
                         "element's width");
@@ -1626,11 +1635,11 @@ internal static partial class ProofOutline
                 state.Facts.AddRange(ElementWrite(added, stored.Term, StoreLemma(op)));
                 state.Moved = true;
             }
-            else if (Regex.IsMatch(op, @"\A\.memory \(\.add \d+ (true|false)\)\z"))
+            else if (op is Memory { Operation: AddOffset })
                 return Stop("an `Unsafe.Add` other than one of a reference argument by a 32-bit index, written " +
                     "through before any other store of an iteration, which needs `add memory base width offset = " +
                     ".ok reference` (such as from `Writable.add_int`) and write authority in `footprint`");
-            else return Stop($"`{op}`, which the outline does not step");
+            else return Stop($"`{op.ToLean()}`, which the outline does not step");
             state.Pc++;
             return Event.Continue;
         }

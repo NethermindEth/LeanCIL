@@ -18,7 +18,7 @@ theorem local_address {memory other : Memory} {reference : Reference} {kind : CI
     (slot : frame.locals[index]? = some (.bytes kind reference))
     (wrongMemory : form other reference = .ok reference)
     (formed : form memory reference = .ok reference) :
-    step body (.localAddr index) pc args frame rest memory =
+    step body (.ldloca index) pc args frame rest memory =
       .ok (.next (pc + 1) (.reference (.address reference) :: rest) frame memory) := by
   fail_if_success solve | cil_checked_step [slot, wrongMemory]
   cil_checked_step [slot, formed]
@@ -151,14 +151,14 @@ theorem field_store_literal_conversion (left right : CIL.W64)
 #print axioms field_store_literal_conversion
 
 /-- A truth-tested branch selects one of two distinct scalar results. -/
-@[cil_code] def truthBranchBody (branch : CIL.Op) : CIL.Method := {
+@[cil_code] def truthBranchBody (branch : CIL.Instruction) : CIL.Method := {
   locals := [], returnsValue := true,
-  code := [.arg 0, branch, .const64 1, .ret, .const64 2, .ret] }
+  code := [.arg 0, branch, .ldc_i8 1, .ret, .ldc_i8 2, .ret] }
 
 /-- A negative 64-bit case fact decides the next pc before it becomes a conditional term. -/
 theorem branch_nonzero_literal (word unrelated : CIL.W64) (memory : Memory)
     (_unrelated : unrelated ≠ 0#64) (nonzero : word ≠ 0#64) :
-    invoke [truthBranchBody (.brnonzero 4)] 5 0 [.scalar (.i64 word)] memory =
+    invoke [truthBranchBody (.brtrue 4)] 5 0 [.scalar (.i64 word)] memory =
       .ok (memory, [.scalar (.i64 2)]) := by
   fail_if_success (cil_checked_steps [_unrelated]; done)
   cil_checked_steps [nonzero]
@@ -166,7 +166,7 @@ theorem branch_nonzero_literal (word unrelated : CIL.W64) (memory : Memory)
 
 /-- A positive 32-bit case fact uses the same literal spelling for a zero branch. -/
 theorem branch_zero_literal (word : CIL.W32) (memory : Memory) (zero : word = 0#32) :
-    invoke [truthBranchBody (.brzero 4)] 5 0 [.scalar (.i32 word)] memory =
+    invoke [truthBranchBody (.brfalse 4)] 5 0 [.scalar (.i32 word)] memory =
       .ok (memory, [.scalar (.i64 2)]) := by
   cil_checked_steps [zero]
 #print axioms branch_zero_literal
@@ -175,7 +175,7 @@ theorem branch_zero_literal (word : CIL.W32) (memory : Memory) (zero : word = 0#
 theorem branch_truth_fact (word unrelated : CIL.W32) (memory : Memory)
     (_unrelated : CIL.truth (.i32 unrelated) = some false)
     (truth : CIL.truth (.i32 word) = some false) :
-    invoke [truthBranchBody (.brzero 4)] 5 0 [.scalar (.i32 word)] memory =
+    invoke [truthBranchBody (.brfalse 4)] 5 0 [.scalar (.i32 word)] memory =
       .ok (memory, [.scalar (.i64 2)]) := by
   fail_if_success (cil_checked_steps [_unrelated]; done)
   cil_checked_steps [truth]
@@ -184,14 +184,14 @@ theorem branch_truth_fact (word unrelated : CIL.W32) (memory : Memory)
 /-- An unrelated truth equation does not prevent a matching zero comparison from deciding. -/
 theorem branch_truth_fact_fallback (word unrelated : CIL.W64) (memory : Memory)
     (_unrelated : CIL.truth (.i64 unrelated) = some false) (nonzero : word ≠ 0#64) :
-    invoke [truthBranchBody (.brnonzero 4)] 5 0 [.scalar (.i64 word)] memory =
+    invoke [truthBranchBody (.brtrue 4)] 5 0 [.scalar (.i64 word)] memory =
       .ok (memory, [.scalar (.i64 2)]) := by
   cil_checked_steps [_unrelated, nonzero]
 #print axioms branch_truth_fact_fallback
 
 /-- A closed zero operand decides the negative branch condition without a supplied guard. -/
 theorem branch_closed_zero (memory : Memory) :
-    invoke [truthBranchBody (.brnonzero 4)] 5 0 [.scalar (.i32 0)] memory =
+    invoke [truthBranchBody (.brtrue 4)] 5 0 [.scalar (.i32 0)] memory =
       .ok (memory, [.scalar (.i64 1)]) := by
   cil_checked_steps []
 #print axioms branch_closed_zero
@@ -199,7 +199,7 @@ theorem branch_closed_zero (memory : Memory) :
 /-- A signed comparison follows a narrowing conversion of a symbolic natural literal. -/
 @[cil_code] def narrowedBranchBody : CIL.Method := {
   locals := [], returnsValue := true,
-  code := [.arg 0, .arg 1, .convI4, .blt 6, .const64 1, .ret, .const64 2, .ret] }
+  code := [.arg 0, .arg 1, .conv_i4, .blt 6, .ldc_i8 1, .ret, .ldc_i8 2, .ret] }
 
 /-- Narrowed branch operands match the supplied comparison without expanding symbolic arithmetic. -/
 theorem branch_narrowed_literal (index : CIL.W32) (length : Nat) (memory : Memory)

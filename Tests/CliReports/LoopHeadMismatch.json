@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "result": "failed",
   "stage": "proof checking",
   "theorem": "ExampleProof.correctness",
@@ -13,6 +13,7 @@
   "axioms": null,
   "statement": null,
   "specification": null,
+  "binding": null,
   "failures": [
     {
       "kind": "elaboration-error",
@@ -71,7 +72,7 @@
         "line": 40,
         "column": 19
       },
-      "message": "cil_loop_finish: cannot step pc 3 (CIL.Op.memory (CIL.MemoryOp.spanSlice false)) at memory\n  memory\nThe step is\n  step Extracted.method0 (CIL.Op.memory (CIL.MemoryOp.spanSlice false)) 3 [Value.bufferSpan view✝]\n      { activation := memory.nextIdentity, locals := [LocalSlot.span 4 false (some view)], owned := [] }\n      [Value.scalar (CIL.Value.i32 1), Value.bufferSpan view] memory =\n    Except.ok (FrameAction.next ?_mvar.4169.6404 ?_mvar.4169.6409 ?_mvar.4169.6411 ?_mvar.4169.6413)\nWith the step equations and facts it reduces to\n  (if 1 ≤ 0 then\n      match\n        match view.slice memory 1 (0 - 1) with\n        | Except.error err => Except.error (ExecutionFault.memory err view.reference 0)\n        | Except.ok v => Except.ok v with\n      | Except.error err => Except.error err\n      | Except.ok v =>\n        Except.ok\n          (FrameAction.next 4 [Value.bufferSpan v]\n            { activation := memory.nextIdentity, locals := [LocalSlot.span 4 false (some view)], owned := [] } memory)\n    else Except.error (ExecutionFault.thrown \"System.ArgumentOutOfRangeException\")) =\n    Except.ok (FrameAction.next ?_mvar.4169.6404 ?_mvar.4169.6409 ?_mvar.4169.6411 ?_mvar.4169.6413)\nSupply the slice: `view.slice memory start length = .ok sliced`, such as from `CheckedSpan.tail` at the caller's memory.",
+      "message": "cil_loop_finish: cannot step pc 3 (CIL.Instruction.memory (CIL.MemoryOp.spanSlice false)) at memory\n  memory\nThe step is\n  step Extracted.method0 (CIL.Instruction.memory (CIL.MemoryOp.spanSlice false)) 3 [Value.bufferSpan view✝]\n      { activation := memory.nextIdentity, locals := [LocalSlot.span 4 false (some view)], owned := [] }\n      [Value.scalar (CIL.Value.i32 1), Value.bufferSpan view] memory =\n    Except.ok (FrameAction.next ?_ ?_ ?_ ?_)\nWith the step equations and facts it reduces to\n  (if 1 ≤ 0 then\n      match\n        match view.slice memory 1 (0 - 1) with\n        | Except.error err => Except.error (ExecutionFault.memory err view.reference 0)\n        | Except.ok v => Except.ok v with\n      | Except.error err => Except.error err\n      | Except.ok v =>\n        Except.ok\n          (FrameAction.next 4 [Value.bufferSpan v]\n            { activation := memory.nextIdentity, locals := [LocalSlot.span 4 false (some view)], owned := [] } memory)\n    else Except.error (ExecutionFault.thrown \"System.ArgumentOutOfRangeException\")) =\n    Except.ok (FrameAction.next ?_ ?_ ?_ ?_)\nSupply the slice: `view.slice memory start length = .ok sliced`, such as from `CheckedSpan.tail` at the caller's memory.",
       "tactic": "cil_loop_finish",
       "stopped": false,
       "method": {
@@ -82,7 +83,7 @@
         "pc": 3,
         "ilOffset": 5,
         "instruction": "call System.ReadOnlySpan`1<!0> System.ReadOnlySpan`1<System.Int32>::Slice(System.Int32)",
-        "leanInstruction": "CIL.Op.memory (CIL.MemoryOp.spanSlice false)",
+        "leanInstruction": "CIL.Instruction.memory (CIL.MemoryOp.spanSlice false)",
         "source": {
           "file": "Loops.cs",
           "line": 31,
@@ -186,7 +187,8 @@
   "trace": null,
   "unknown": {
     "trace": "not requested; --trace traces each step the proof takes",
-    "goals": "not requested; --goals reports the goal at each sorry and failing tactic"
+    "goals": "not requested; --goals reports the goal at each sorry and failing tactic",
+    "binding": "the run issued no certificate"
   },
   "rerun": [
     "leancil",

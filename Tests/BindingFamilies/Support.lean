@@ -11,18 +11,23 @@ namespace BindingSupport
 open CIL CIL.Safety
 
 /-- The fixed body of an equality or inequality method, including boolean return narrowing. -/
-@[cil_code] def equalityBody (profile : FeatureProfile) (positive : Bool) : Method := {
-  profile, locals := [], returnsValue := true,
-  code := [.arg 0, .arg 1, .eq] ++
-    (if positive then [] else [.const32 0, .eq]) ++ [.ret (some .unsigned8)] }
+@[cil_code] def equalityBody (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (declared : DeclaredSignature) (positive : Bool) : Method := {
+  profile, environment, declared, locals := [], returnsValue := true,
+  code := [.arg 0, .arg 1, .ceq] ++
+    (if positive then [] else [.ldc_i4 0, .ceq]) ++ [.ret (some .unsigned8)] }
 
 /-- The fixed body of one binary bitwise method. -/
-@[cil_code] def bitwiseBody (profile : FeatureProfile) (operation : Op) : Method := {
-  profile, locals := [], returnsValue := true, code := [.arg 0, .arg 1, operation, .ret] }
+@[cil_code] def bitwiseBody (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (declared : DeclaredSignature) (operation : Instruction) : Method := {
+  profile, environment, declared, locals := [], returnsValue := true,
+  code := [.arg 0, .arg 1, operation, .ret] }
 
 /-- The equality family computes its boolean in arbitrary caller memory. -/
 theorem equal32 (program : Program) (profile : FeatureProfile)
-    (found : program[0]? = some (equalityBody profile true))
+    (environment : LayoutEnvironment)
+    (declared : DeclaredSignature)
+    (found : program[0]? = some (equalityBody profile environment declared true))
     (left right : W32) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (if left = right then 1 else 0))]) := by
@@ -31,7 +36,9 @@ theorem equal32 (program : Program) (profile : FeatureProfile)
 
 /-- The opposite polarity computes inequality rather than weakening the equality contract. -/
 theorem different64 (program : Program) (profile : FeatureProfile)
-    (found : program[0]? = some (equalityBody profile false))
+    (environment : LayoutEnvironment)
+    (declared : DeclaredSignature)
+    (found : program[0]? = some (equalityBody profile environment declared false))
     (left right : W64) (memory : Safety.Memory) :
     invoke program 7 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i32 (if left ≠ right then 1 else 0))]) := by
@@ -41,7 +48,9 @@ theorem different64 (program : Program) (profile : FeatureProfile)
 
 /-- The conjunction family computes the complete 32-bit result. -/
 theorem and32 (program : Program) (profile : FeatureProfile)
-    (found : program[0]? = some (bitwiseBody profile .band))
+    (environment : LayoutEnvironment)
+    (declared : DeclaredSignature)
+    (found : program[0]? = some (bitwiseBody profile environment declared .and))
     (left right : W32) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (left &&& right))]) := by
@@ -50,7 +59,9 @@ theorem and32 (program : Program) (profile : FeatureProfile)
 
 /-- The exclusive-or family computes the complete 64-bit result. -/
 theorem xor64 (program : Program) (profile : FeatureProfile)
-    (found : program[0]? = some (bitwiseBody profile .bxor))
+    (environment : LayoutEnvironment)
+    (declared : DeclaredSignature)
+    (found : program[0]? = some (bitwiseBody profile environment declared .xor))
     (left right : W64) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 (left ^^^ right))]) := by

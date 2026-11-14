@@ -132,4 +132,39 @@ if (freshProof.extractionCacheHits != 0 || freshProof.proofCacheHits != 0 || fre
     freshProof.libraryKey != second.libraryKey || freshProof.libraryBuild != second.libraryBuild)
     throw new Exception("Fresh proof reused proof/support artifacts or bypassed the existing certified library");
 Console.WriteLine("PASS fresh proof bypasses proof/support reuse while retaining the certified library");
+
+// The session holds no compiled Extracted, so a support module importing it cannot be built, certified or
+// cached; a support entry therefore never holds a module bound to one extraction.
+{
+    var supportOutput = At("artifacts/ExtractedSupport");
+    Directory.CreateDirectory(supportOutput);
+    var supportProof = Path.Combine(supportOutput, "Proof.lean");
+    var addProof = File.ReadAllText(At("Examples/Proofs/Add.lean"));
+    File.WriteAllText(supportProof, "import Tests.ExtractedSupport\n" + addProof);
+    var lakefilePath = At("lakefile.toml");
+    var lakefileBytes = File.ReadAllBytes(lakefilePath);
+    var supportModule = At("Tests/ExtractedSupport.lean");
+    try
+    {
+        // Registered only while this check runs: a library that imports Extracted fails every full library build.
+        File.AppendAllText(lakefilePath, "\n[[lean_lib]]\nname = \"Tests.ExtractedSupport\"\n");
+        File.WriteAllText(supportModule,
+            "import Extracted\n\ntheorem ExtractedSupport.program : True := True.intro\n");
+        using var importing = new Program();
+        try
+        {
+            importing.Verify(assembly, "Examples", entry, supportProof, supportOutput);
+            throw new Exception("A support module importing Extracted was built and its proof reported verified");
+        }
+        catch (InvalidOperationException error) when (error.Message.Contains("unknown module prefix 'Extracted'")) { }
+        if (importing.supportCacheHits != 0 || File.Exists(Path.Combine(supportOutput, "verified.json")))
+            throw new Exception("A support module importing Extracted was restored or left a successful report");
+    }
+    finally
+    {
+        File.WriteAllBytes(lakefilePath, lakefileBytes);
+        if (File.Exists(supportModule)) File.Delete(supportModule);
+    }
+    Console.WriteLine("PASS a support module importing Extracted cannot be built or cached");
+}
 Console.WriteLine($"PASS certified reuse, proof-edit invalidation, repeated unchecked-theorem rejection and new-session reuse; first={first}ms repeat={repeated}ms new-session={newSession}ms");

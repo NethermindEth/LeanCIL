@@ -5,10 +5,10 @@ namespace Nethermind.LeanCIL;
 // Reinterpretation retains the supplied storage; exact generic signatures determine both widths.
 internal static class SpanReinterpretation
 {
-    internal static string? Translate(MethodReference reference, string architecture)
+    internal static Operation? Translate(MethodReference reference, string architecture)
     {
         if (reference.DeclaringType.FullName != "System.Runtime.InteropServices.MemoryMarshal" ||
-            !RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod generic || reference.HasThis || reference.ExplicitThis ||
             reference.Parameters.Count != 1 ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) !=
@@ -32,7 +32,6 @@ internal static class SpanReinterpretation
         var target = asBytes ? 1 : Spans.ElementWidth(generic.GenericArguments[1], architecture);
         if (source is null || target is null) return null;
         var writable = input.ElementType.FullName == "System.Span`1";
-        return $".memory (.spanReinterpret {source} {target} {writable.ToString().ToLowerInvariant()})";
+        return MemoryOperation.Other($"(.spanReinterpret {source} {target} {writable.ToString().ToLowerInvariant()})");
     }
 }
-

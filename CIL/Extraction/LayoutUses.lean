@@ -43,7 +43,7 @@ inductive LayoutUse where
 
 /-- The emitted field operation uses exactly the computed offset and width, and the
     aggregate form exactly when the field is a nested struct. -/
-private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → Op → Bool
+private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → Instruction → Bool
   | .address, .fieldAddress offset => offset == layout.offset
   | .load, .fieldAt offset width actualSigned =>
     !layout.aggregate && offset == layout.offset && width == layout.width &&
@@ -57,7 +57,7 @@ private def checkField (layout : FieldLayout) (signed : Bool) : FieldAccess → 
   | _, _ => false
 
 /-- The emitted size-dependent operation uses exactly the computed struct size. -/
-private def checkSize (size alignment : Nat) : SizeAccess → Op → Bool
+private def checkSize (size alignment : Nat) : SizeAccess → Instruction → Bool
   | .load, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual false)
   | .store, .memory (.pointerTransfer (.snapshot (.aggregate width)) actual true) =>
     width == size && actual == alignment
@@ -72,7 +72,7 @@ private def checkSize (size alignment : Nat) : SizeAccess → Op → Bool
   | .store, .memory (.marshalWrite (.snapshot (.aggregate width)) _) => width == size
   | .load, .loadAggregate width | .store, .storeAggregate width
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
-  | .sizeOf, .const32 bits => bits.toNat == size
+  | .sizeOf, .ldc_i4 bits => bits.toNat == size
   | .construct, .newAggregate _ _ width => width.val == size
   | .spanElement, .memory (.spanEmpty width _)
   | .spanElement, .initializeSpanLocal _ (.empty width _)

@@ -24,22 +24,22 @@ def expected : Method := {
   locals := [.unmodeled, .nullRef, .unmodeled]
   localKinds := [.word32, .reference, .word64]
   returnsValue := true
-  code := [.branch 3, .unsupported "dead", .unsupported "dead",
-    .local 1, .pop, .call 1 0, .ret] }
+  code := [.br 3, .unsupported "dead", .unsupported "dead",
+    .ldloc 1, .pop, .call 1 0, .ret] }
 
 /-- A separately specified body moves the live block past extra unreachable instructions. -/
 def actual : Method := {
   locals := [.unmodeled, .nullRef, .unmodeled]
   localKinds := [.word32, .reference, .word64]
   returnsValue := true
-  code := [.branch 4, .const32 9, .pop, .nop, .local 1, .pop, .call 1 0, .ret] }
+  code := [.br 4, .ldc_i4 9, .pop, .nop, .ldloc 1, .pop, .call 1 0, .ret] }
 
 /-- The child allocates its own numeric home after the parent's retained dead homes. -/
 def child : Method := {
   locals := [.i64 7]
   localKinds := [.word64]
   returnsValue := true
-  code := [.local 0, .ret] }
+  code := [.ldloc 0, .ret] }
 
 /-- Retained numeric declarations need ordinary method embedding, even when interspersed. -/
 theorem embeds : MethodEmbeds [actual, child] 0 expected := by cil_embed
@@ -71,8 +71,8 @@ def removed : Method := {
   locals := [.nullRef, .unmodeled]
   localKinds := [.reference, .word64]
   returnsValue := true
-  code := [.branch 3, .unsupported "dead", .unsupported "dead",
-    .local 0, .pop, .call 1 0, .ret] }
+  code := [.br 3, .unsupported "dead", .unsupported "dead",
+    .ldloc 0, .pop, .call 1 0, .ret] }
 
 /-- Deleting a dead numeric local changes later allocation identities despite equal scalars. -/
 theorem removed_allocations :

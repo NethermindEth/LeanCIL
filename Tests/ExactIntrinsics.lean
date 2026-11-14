@@ -1,18 +1,22 @@
 import Lean
 import CIL.Extraction.Translation
 import CIL.SIMD.UnspecifiedLanes
+import CIL.Safety.IntrinsicExecution
 
 open CIL CIL.Extraction
 
 namespace Tests.ExactIntrinsics
 
-private def scope := "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-private def runtimeScope := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+private def scope :=
+  "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+private def runtimeScope :=
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 private def vectorType (width : String) : TypeExpr :=
   .apply (.constructor scope ("System.Runtime.Intrinsics.Vector" ++ width ++ "`1"))
     (.atom runtimeScope "System.UInt64")
 private def profile : FeatureProfile := { architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true, sse42 := true, avx := true, avx2 := true, bmi1 := true, bmi2 := true, avx512F := true, avx512FVL := true, avx512DQ := true, avx512DQVL := true, vector128Accelerated := true, vector256Accelerated := true }
-private def body (operations : List Op) : Method := { code := operations, locals := [], returnsValue := true, profile }
+private def body (operations : List Instruction) : Method :=
+  { code := operations, locals := [], returnsValue := true, profile }
 private def raw (site : CallSite) : RawMethod := {
   token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
@@ -183,7 +187,8 @@ example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 18, .local 0⟩] 
 example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 65037, .local 0⟩] } localBody
     := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal
-    { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1, .localAddr 0] } := by decide +kernel
+    { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1, .ldloca 0] } := by
+  decide +kernel
 example : ¬ OpaqueLocalsValid withLocal { localBody with localKinds := [.word64] }
     := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with locals := [.atom runtimeScope "System.UInt64"] } localBody := by decide +kernel
@@ -211,9 +216,8 @@ example : Safety.bitcastValue .vector128 .vector128 (.v128Low64 7) =
     .error (.unsupported "Bitcast observes unspecified vector bits") := rfl
 example (memory : Safety.Memory) : Safety.storeLocal memory (.opaque128 none) (.scalar (.v128Low64 7)) =
     .ok (.opaque128 (some (.low64 7)), memory) := rfl
-example (memory : Safety.Memory) : Safety.makeArgumentHomes 0 [0] [.scalar (.v128Low64 7)] memory =
-    .error (.unsupported "Argument home observes unspecified vector bits") := rfl
-example (memory : Safety.Memory) : Safety.instruction .eq [.scalar (.v128Low64 7), .scalar (.v128Low64 7)] memory =
+example (memory : Safety.Memory) :
+    Safety.instruction .ceq [.scalar (.v128Low64 7), .scalar (.v128Low64 7)] memory =
     .error (.unsupported "Instruction observes unspecified vector bits") := rfl
 
 theorem unspecified_return (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
@@ -472,5 +476,47 @@ theorem exact_call_lengths :
     (¬ ExactIntrinsicsValid (raw call0) [false] (body [])) := by
   decide +kernel
 #print axioms exact_call_lengths
+
+/-! Generated runtime comparisons apply the broadcast execution facts to extracted bodies, which
+    carry their declared signature and the extraction's layouts. Each example states a body in
+    the emitted form and proves its claim with the term the fixture generator writes. -/
+
+/-- The declared signature of a `(ulong, ulong) -> ulong` method. -/
+private def wordSignature : DeclaredSignature :=
+  { parameters := [.atom Extraction.runtimeScope "System.UInt64",
+      .atom Extraction.runtimeScope "System.UInt64"],
+    returnType := .atom Extraction.runtimeScope "System.UInt64" }
+
+/-- A layout environment with one entry, as an extraction that reads a struct records. -/
+private def emittedEnvironment : LayoutEnvironment := { layouts := #[⟨⟨4, []⟩, 4⟩] }
+
+/-- `Avx2.And` of two broadcasts, then lane 0, in the form an extraction emits. -/
+private def emittedAnd : Method :=
+  { profile := profile, returnsValue := true, locals := [], localKinds := [],
+    opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
+    declared := wordSignature, environment := emittedEnvironment, links := [],
+    code := [.arg 0, .intrinsic (.vector (.create64 256)) 1, .arg 1,
+      .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 .band) 2, .ldc_i4 0,
+      .intrinsic (.vector (.extract64 256)) 2, .ret] }
+
+example : (Safety.invoke [emittedAnd] 256 0 [.scalar (.i64 13), .scalar (.i64 6)]
+    Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 4)] := by
+  exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastBinary_word profile .band 0 13 6 4
+    Safety.Memory.empty rfl (by decide) (Safety.checked_broadcast_and 13 6))
+
+/-- `Avx2.ShiftLeftLogical` of a broadcast by a full-width count, in the emitted form. -/
+private def emittedShift : Method :=
+  { profile := profile, returnsValue := true, locals := [.v128 0], localKinds := [.vector128],
+    opaqueVectorLocals := [0], parameterHomes := [], staticSites := [],
+    declared := wordSignature, environment := emittedEnvironment, links := [],
+    code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0, .arg 0,
+      .intrinsic (.vector (.create64 256)) 1, .ldloc 0, .intrinsic (.avx2 .shl64Count) 2,
+      .ldc_i4 0, .intrinsic (.vector (.extract64 256)) 2, .ret] }
+
+example : (Safety.invoke [emittedShift] 256 0 [.scalar (.i64 1), .scalar (.i64 63)]
+    Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 9223372036854775808)] := by
+  exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastShift profile .shl64Count 0 1 63
+    9223372036854775808 Safety.Memory.empty rfl (by decide)
+    (Safety.checked_broadcast_shiftLeft 1 63))
 
 end Tests.ExactIntrinsics

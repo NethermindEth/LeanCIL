@@ -33,10 +33,9 @@ inductive VectorIntrinsic where
   | reinterpret (width : Nat) | zero (width : Nat) | ones (width : Nat)
   | create64 (width : Nat) | extract64 (width : Nat) | ashr64 (width : Nat)
   | create32 (width : Nat) | createScalar32 (width : Nat) | createScalar64 (width : Nat)
-  | extractMSB64 (width : Nat) | sum64 (width : Nat) | mul64 (width : Nat)
+  | extractMSB64 (width : Nat) | sum64 (width : Nat)
   | createScalarUnsafe64
   | combine256
-  | byteToBool
   deriving DecidableEq, Repr
 
 /-- ARM AdvSimd intrinsics. -/
@@ -151,7 +150,6 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   -- Portable vectors at any width: lanewise arithmetic and comparisons, bitwise operations.
   | .vector (.add64 w), xs => binaryLanes w (· + ·) xs
   | .vector (.sub64 w), xs => binaryLanes w (· - ·) xs
-  | .vector (.mul64 w), xs => binaryLanes w (· * ·) xs
   | .vector (.ltu64 w), xs => binaryLanes w (fun a b => Vector.mask64 (a.ult b)) xs
   | .vector (.lt64 w), xs => binaryLanes w (fun a b => Vector.mask64 (a.slt b)) xs
   | .vector (.eq64 w), xs => binaryLanes w (fun a b => Vector.mask64 (a == b)) xs
@@ -209,11 +207,8 @@ def evalIntrinsic (op : Intrinsic) (args : List Value) : Option Value := do
   | .vector (.reinterpret 128), [.v128Low64 low] => some (.v128Low64 low)
   | .vector (.extract64 128), [.v128Low64 low, .i32 index] =>
     if index.toNat == 0 then some (.i64 low) else none
-  -- Joining two 256-bit vectors, and reading a byte as a `bool`.
+  -- Joining two 256-bit vectors.
   | .vector .combine256, [.v256 lower, .v256 upper] => some (.v512 (upper ++ lower))
-  | .vector .byteToBool, [.i32 a] =>
-    if a.toNat < 256 then some (.i32 a) else none
-  | .vector .byteToBool, [.i8 a] => some (.i32 (a.setWidth 32))
   -- 128-bit byte alignment and shuffles: ARM AdvSimd and SSE/SSSE3.
   | .advSimd .extract64, [.v128 a, .v128 b, i] =>
     let c ← immediate i

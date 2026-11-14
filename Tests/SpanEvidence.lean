@@ -77,7 +77,7 @@ theorem exact_array_span_call :
 private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 getItem, i 74, i 42]
 private def itemStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none, none], state [none], state [none]]
-private def itemOps : List Op :=
+private def itemOps : List Instruction :=
   [.arg 0, .nop, .nop, .arg 1, .memory (.spanItem 4), .loadScalar 4, .ret none]
 
 example : foldRoles [words] itemCode = [none, some .head, some .interior, none, none, none, none] := by decide
@@ -103,14 +103,14 @@ example : FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar it
 -- The receiver must stay on the stack: a real store or address is not the fold.
 example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true)
-    (itemOps.set 1 (.setLocal 0 none)) := by decide
+    (itemOps.set 1 (.stloc 0)) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true)
-    (itemOps.set 2 (.localAddr 0)) := by decide
+    (itemOps.set 2 (.ldloca 0)) := by decide
 
 -- Span locals outside a receiver fold retain ordinary load/store flow.
 private def loadCode := [i 2, i 10, i 6, i 42]
-private def loadOps : List Op := [.arg 0, .setLocal 0 none, .local 0 none, .ret none]
+private def loadOps : List Instruction := [.arg 0, .stloc 0, .ldloc 0, .ret none]
 private def loadStates : FeatureCertificate := [state [], state [none], state [], state [none]]
 example : FeatureFlowValid #[] (fun _ => none) (raw [intType] loadCode) .scalar loadStates
     (List.replicate 4 true) loadOps := by decide

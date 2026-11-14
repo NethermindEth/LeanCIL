@@ -7,6 +7,7 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/LibraryAudit.cs
 #:include ConsumerSourceResolution.cs
+#:include ConsumerImportDirectories.cs
 #:include ConsumerSupportUnion.cs
 #:include ConsumerCertificateReuse.cs
 #:include ConsumerComponents.cs
@@ -14,10 +15,12 @@
 #:include CertifiedFingerprints.cs
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 var checks = new Dictionary<string, Action<string[]>>(StringComparer.Ordinal)
 {
     ["source-resolution"] = CheckConsumerSourceResolution,
+    ["import-directories"] = CheckConsumerImportDirectories,
     ["support-union"] = CheckConsumerSupportUnion,
     ["certificate-reuse"] = CheckConsumerCertificateReuse,
     ["components"] = CheckConsumerComponents,
@@ -106,7 +109,7 @@ string Reject(string marker, params string[] options)
 Verify("--proof", proof, "--proof-root", root, "--theorem", bindingGate.Theorem);
 var first = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
 var inputs = first.GetProperty("inputs");
-if (first.GetProperty("schema").GetInt32() != 4 ||
+if (first.GetProperty("schema").GetInt32() != 5 ||
     !first.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid", StringComparison.Ordinal) ||
     !first.GetProperty("libraryBuild").GetString()!.StartsWith("consumer-", StringComparison.Ordinal))
     throw new InvalidOperationException("Consumer verification omitted certified base or exact extraction certificate audit.");
@@ -123,6 +126,59 @@ var cached = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combi
 if (cached.GetProperty("libraryBuild").GetString() != "consumer-proof-cache")
     throw new InvalidOperationException("Unchanged consumer proof was not reused.");
 Console.WriteLine("PASS unchanged consumer proof reuses an authenticated successful result");
+
+// An authenticated receipt whose certificate this tool does not accept is a miss: the run verifies afresh
+// instead of failing or reusing it. Republishing under the same key keeps the receipt authenticated.
+var receiptEntries = Directory.EnumerateFiles(SuccessCacheRoot, "report.json", SearchOption.AllDirectories)
+    .Where(receipt => JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(receipt)).GetProperty("inputs")
+        .TryGetProperty("consumer:" + proof, out _))
+    .Select(receipt => Path.GetDirectoryName(Path.GetDirectoryName(receipt)!)!).ToArray();
+if (receiptEntries.Length == 0) throw new InvalidOperationException("No consumer proof receipt was published.");
+var originalReceipts = At("artifacts/ConsumerReceipts-" + Guid.NewGuid().ToString("N"));
+using (var publisher = new Program())
+{
+    try
+    {
+        foreach (var entry in receiptEntries)
+        {
+            var original = Path.Combine(originalReceipts, Path.GetFileName(entry));
+            CopyTree(Path.Combine(entry, "files"), original);
+            var unknownStatus = original + "-unknown-status";
+            CopyTree(original, unknownStatus);
+            var certificate = JsonNode.Parse(File.ReadAllText(Path.Combine(unknownStatus, "report.json")))!;
+            certificate["binding"]!["facts"]![0]!["status"] = "assumed";
+            File.WriteAllText(Path.Combine(unknownStatus, "report.json"), certificate.ToJsonString());
+            DeleteTree(entry);
+            publisher.PublishSuccess(Path.GetFileName(entry), unknownStatus);
+            // The edited receipt must be the authenticated entry the run restores, or the miss proves nothing.
+            var published = unknownStatus + "-published";
+            if (!publisher.RestoreSuccess(Path.GetFileName(entry), published) ||
+                !File.ReadAllText(Path.Combine(published, "report.json")).Contains("\"assumed\"",
+                    StringComparison.Ordinal))
+                throw new InvalidOperationException("The edited consumer receipt was not published authenticated.");
+        }
+        Verify();
+        var refreshed = JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Path.Combine(output, "verified.json")));
+        if (refreshed.GetProperty("libraryBuild").GetString() == "consumer-proof-cache")
+            throw new InvalidOperationException("A receipt with an unknown binding status was reused.");
+    }
+    finally
+    {
+        foreach (var entry in receiptEntries.Where(entry => Directory.Exists(Path.Combine(originalReceipts,
+            Path.GetFileName(entry)))))
+        {
+            if (Directory.Exists(entry)) DeleteTree(entry);
+            publisher.PublishSuccess(Path.GetFileName(entry), Path.Combine(originalReceipts, Path.GetFileName(entry)));
+        }
+        DeleteTree(originalReceipts);
+    }
+}
+Verify();
+var reused = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
+if (reused.GetProperty("libraryBuild").GetString() != "consumer-proof-cache")
+    throw new InvalidOperationException("The restored consumer receipt was not reused.");
+Console.WriteLine("PASS a consumer receipt with a certificate this tool refuses is verified afresh");
 
 // A distinct extraction identity must recheck the extraction-dependent proof,
 // while the independently certified consumer helper can retain its artifact.

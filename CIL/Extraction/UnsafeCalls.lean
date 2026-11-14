@@ -42,7 +42,7 @@ private def admittedReferenceArgument (layouts : List RawLayout) : List TypeExpr
 
 /-- Element offsets bind signedness and native stride; aggregate sizes use layout evidence. -/
 def unsafeElementOffsetMatches (layouts : List RawLayout) (raw : RawInstruction)
-    (emitted : Op) : Bool :=
+    (emitted : Instruction) : Bool :=
   match raw.opcode, raw.operand with
   | 40, .call site =>
     if site.name ∉ ["Add", "Subtract"] ||
@@ -90,7 +90,7 @@ def unsafeHelper (layouts : List RawLayout) (instruction : RawInstruction) : Opt
   | _, _ => none
 
 /-- The helper an emitted operation implements, if any. -/
-def emittedUnsafeHelper : Op → Option UnsafeHelper
+def emittedUnsafeHelper : Instruction → Option UnsafeHelper
   | .skipInit => some .skipInit
   | .memory .nullRef => some .nullRef
   | .memory .isNullRef => some .isNullRef
@@ -98,7 +98,7 @@ def emittedUnsafeHelper : Op → Option UnsafeHelper
 
 /-- A recognized call emits exactly its helper operation, which no other instruction may emit. -/
 def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
-    (reachable : List Bool) (code : List Op) : Prop :=
+    (reachable : List Bool) (code : List Instruction) : Prop :=
   closed.code.length = reachable.length ∧ closed.code.length = code.length ∧
   all3 (fun instruction live emitted => !live ||
       unsafeTransferMatches layouts instruction emitted &&
@@ -121,7 +121,7 @@ def UnsafeCallsValid (layouts : List RawLayout) (closed : RawMethod)
     closed.code reachable code = true
 
 instance (layouts : List RawLayout) (closed : RawMethod)
-    (reachable : List Bool) (code : List Op) :
+    (reachable : List Bool) (code : List Instruction) :
     Decidable (UnsafeCallsValid layouts closed reachable code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _))
 

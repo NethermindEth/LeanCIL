@@ -138,9 +138,13 @@ These regressions cover the extractor's own C# indexes:
   mutations are visible. `Tests/InstructionIndexes.cs` includes those rejection and mutation
   cases.
 - Template emission writes templates and callees in sorted order and profiles in input order,
-  and rejects duplicate method identities before emission. An absent callee in an excluded
-  profile gets a zero placeholder. `Tests/TemplateIndexes.cs` checks reordered methods,
-  conditional absent callees, deterministic output and duplicate rejection without compiling Lean.
+  and rejects duplicate method identities before emission. Every method a body or frame names (calls,
+  tail calls, virtual dispatch targets, callable pointer targets and static initializers) becomes a callee
+  parameter, and an absent callee in an excluded profile gets a zero placeholder. Profiles merge when
+  every instruction renders the same Lean; differing frames, lengths or unflagged instructions are
+  rejected. `Tests/TemplateIndexes.cs` checks reordered methods, each kind of callee, conditional absent
+  callees, those merge rules, deterministic output, duplicate rejection and linear growth in the
+  instructions without compiling Lean.
 - Loaded contract libraries index exports by exact identity and certifications by exact
   (identity, profile). The production reader rejects duplicates before constructing either index.
   `Tests/ImportIndexes.cs` checks case-sensitive lookup, multiple profiles and the reader's exact
@@ -184,9 +188,25 @@ These regressions cover the extractor's own C# indexes:
   resolve as unknown while random seeds do.
 - Layout computation accumulates field placements in reverse and restores declaration order
   once. `computeLayout_eq_append` proves equality to the complete list-based computation for
-  arbitrary layouts, architectures and nested-layout tables. `Tests.LayoutAccumulation` covers
+  arbitrary layouts, architectures and nested-layout lookups. `Tests.LayoutAccumulation` covers
   order, explicit overlaps, empty layouts, missing children, packing/offset failures and vector
   architecture restrictions.
+- The `Decidable` instance of `LayoutsValid` runs `layoutsValidIndexed`, one pass over the raw
+  and claimed tables, so the emitted `Extracted.layouts_validated` theorem, the layout theorem
+  emitted for each method, import catalog checks and layout projection checks all decide it that
+  way. The pass
+  reads raw entries and claimed layouts through balanced indexes built once, lets each entry read
+  only claimed layouts at earlier positions, and finds closed generic owners through an ordered
+  map keyed by closed type that returns the first match. For `L` layouts with `A` fields in total
+  it costs `O((L + A) log L)` lookups, plus, for each `.apply` node of a generic layout's argument
+  and original field types, one owner lookup keyed by that node's closed subtree.
+  `layoutsValidIndexed_iff` proves the pass equivalent to `LayoutsValid` for arbitrary inputs,
+  and `LayoutTable.indexed_eq` proves the indexed reads equal to the list scans that
+  `computeLayouts` uses. `Tests.LayoutAccumulation` checks that a wrong offset, a wrong size, a
+  child at, after or past its parent, and a wrong length are rejected by both checks. Of the
+  generic cases, a mismatched owner identity is rejected before any owner lookup, while a missing
+  owner, an owner at another position and the wrong one of two same-shaped owners are rejected
+  through the owner index, which also finds the first of two equal closed types.
 - Constrained dispatch validation and lowering each build ordered dispatch candidate indexes
   once per invocation and reuse them across call sites, never across invocations. The indexes
   support type identity, method token/name and explicit interface override lookup. Candidate
@@ -407,10 +427,11 @@ These regressions cover joint replay:
 
 ### Fold discovery
 
-Fold discovery counts decoded local references once. `foldRoles_eq_filter` proves exact equality
-to the filter-based specification, including malformed operands and out-of-range local indexes.
-Methods without locals skip count construction. The positional lookup of local types is linear,
-so fold discovery as a whole is not linear.
+Fold discovery counts decoded local references once and reads local types and receiver fold
+candidates from `FlowIndex`es built once per body. `foldRoles_eq_filter` proves exact equality to
+the specification that reads the locals list and filters the whole body at every site, including
+malformed operands and out-of-range local indexes. Methods without locals skip count
+construction.
 
 Exception folds inspect at most three message loads, since admitted constructors accept at most
 two. `throwFold_eq_takeWhile` proves equality to the unrestricted prefix scan. A long rejected

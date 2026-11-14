@@ -14,14 +14,14 @@ proved once over the flags is then bound to concrete profiles without restating 
 namespace Tests.InstructionEquations
 
 /-- The instruction a profile extraction emits for code its feature tests exclude. -/
-abbrev unreachable : CIL.Op := .unsupported "Unreachable under selected profile"
+abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected profile"
 
 /-- `if (Avx2.IsSupported) return Callee(a, b); return Sse42.IsSupported ? b : a;` with the
     paths of the other profile padded as `unreachable`, so every profile has the same pcs. -/
 def dispatchBody (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
     .feature .avx2,
-    .brzero 6,
+    .brfalse 6,
     if avx2 then .arg 0 else unreachable,
     if avx2 then .arg 1 else unreachable,
     if avx2 then .call callee 2 else unreachable,
@@ -35,7 +35,7 @@ cil_instruction_equations dispatchBody
 /--
 info: Tests.InstructionEquations.dispatchBody_instruction4 (sse42 avx2 : Bool) (callee : Nat) :
   (dispatchBody sse42 avx2 callee).code[4]? =
-    some (if avx2 = true then CIL.Op.call callee 2 else unreachable)
+    some (if avx2 = true then CIL.Instruction.call callee 2 else unreachable)
 -/
 #guard_msgs (whitespace := lax) in #check dispatchBody_instruction4
 
@@ -68,7 +68,7 @@ attribute [local irreducible] dispatchBody
 
 -- `cil_lookup` closes a lookup through the `@[cil_code]` equations where `rfl` cannot.
 example (sse42 avx2 : Bool) (callee : Nat) :
-    ∃ op, (dispatchBody sse42 avx2 callee).code[1]? = some op ∧ op = .brzero 6 :=
+    ∃ op, (dispatchBody sse42 avx2 callee).code[1]? = some op ∧ op = .brfalse 6 :=
   ⟨_, by (fail_if_success rfl); cil_lookup [], by with_reducible rfl⟩
 
 -- Symbolic flags: a fact about each flag decides the fetched instruction's feature test.
@@ -135,7 +135,7 @@ def composedBody (avx2 : Bool) : CIL.Method :=
     code := List.replicate 2 unreachable ++ tailCode avx2 }
 where
   /-- The instructions after the padding. -/
-  tailCode (avx2 : Bool) : List CIL.Op := [if avx2 then .nop else unreachable, .ret]
+  tailCode (avx2 : Bool) : List CIL.Instruction := [if avx2 then .nop else unreachable, .ret]
 
 cil_instruction_equations composedBody
 
@@ -193,18 +193,18 @@ example : ∃ op, fixedBody.code[0]? = some op ∧ op = .nop :=
 
 /-- A body with an implicit width and a hypothesis about it, both kept as parameters. -/
 def guardedBody {width : Nat} (_wide : 32 < width) : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.const32 (BitVec.ofNat 32 width), .ret] }
+  { returnsValue := true, locals := [], code := [.ldc_i4 (BitVec.ofNat 32 width), .ret] }
 
 cil_instruction_equations guardedBody
 
 /--
 info: Tests.InstructionEquations.guardedBody_instruction0 {width : Nat} (_wide : 32 < width) :
-  (guardedBody _wide).code[0]? = some (CIL.Op.const32 (BitVec.ofNat 32 width))
+  (guardedBody _wide).code[0]? = some (CIL.Instruction.ldc_i4 (BitVec.ofNat 32 width))
 -/
 #guard_msgs (whitespace := lax) in #check guardedBody_instruction0
 
 example (wide : 32 < 40) :
-    ∃ op, (guardedBody wide).code[0]? = some op ∧ op = .const32 (BitVec.ofNat 32 40) :=
+    ∃ op, (guardedBody wide).code[0]? = some op ∧ op = .ldc_i4 (BitVec.ofNat 32 40) :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
 end Tests.InstructionEquations

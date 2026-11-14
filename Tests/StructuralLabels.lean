@@ -9,9 +9,9 @@ open CIL
 def method0Signature : String := "System.UInt32 Labels.Calls::Root(System.UInt32)"
 def method1Signature : String := "System.UInt32 Labels.Calls::Step(System.UInt32)"
 def method0 : Method :=
-  { code := [.arg 0, .call 1 1, .setLocal 0,
-      .local 0, .brzero 6, .branch 3,
-      .local 0, .brnonzero 6,
+  { code := [.arg 0, .call 1 1, .stloc 0,
+      .ldloc 0, .brfalse 6, .br 3,
+      .ldloc 0, .brtrue 6,
       .arg 0, .call 1 1, .ret],
     locals := [.i32 0], returnsValue := true }
 def method1 : Method := { code := [.arg 0, .ret], locals := [], returnsValue := true }
@@ -26,8 +26,9 @@ open CIL
 
 /-- `n` nops, a call to method 1 and a back edge to the call's argument, as one list literal. -/
 macro "long_code% " n:num : term => do
-  let nops ← (List.range n.getNat).toArray.mapM fun _ => `(Op.nop)
-  let tail ← #[`(Op.arg 0), `(Op.call 1 1), `(Op.branch $(Lean.quote n.getNat))].mapM id
+  let nops ← (List.range n.getNat).toArray.mapM fun _ => `(Instruction.nop)
+  let tail ← #[`(Instruction.arg 0), `(Instruction.call 1 1),
+      `(Instruction.br $(Lean.quote n.getNat))].mapM id
   `([$(nops ++ tail),*])
 
 bind_method root rootBody := "System.UInt32 Labels.Calls::Root(System.UInt32)"
@@ -45,7 +46,7 @@ bind_loop outer := rootBody [0]
 bind_loop inner := rootBody [1]
 
 example : outer = 3 ∧ outer.latch = 5 ∧ inner = 6 ∧ inner.latch = 7 := ⟨rfl, rfl, rfl, rfl⟩
-example : rootBody.code[inner.latch]? = some (.brnonzero inner) := rfl
+example : rootBody.code[inner.latch]? = some (.brtrue inner) := rfl
 example := inner.backEdge
 
 /--
@@ -91,7 +92,8 @@ at 2 sites; select one with [i]:
 bind_call either := step from rootBody
 
 -- `relabel` and `targets` agree, so loop detection sees every branch `cil_embed` maps.
-example : (Op.switch [3, 0, 7]).targets = [3, 0, 7] ∧ (Op.nativeBinary (.blt 2)).targets = [2] ∧ (Op.call 1 1).targets = [] :=
+example : (Instruction.switch [3, 0, 7]).targets = [3, 0, 7] ∧
+    (Instruction.nativeBinary (.blt 2)).targets = [2] ∧ (Instruction.call 1 1).targets = [] :=
   ⟨rfl, rfl, rfl⟩
 
 -- Extracted bodies run to thousands of ops; labels past the default recursion depth still bind.

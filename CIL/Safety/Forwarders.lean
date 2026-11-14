@@ -58,7 +58,7 @@ theorem plainLoads_unchanged (indices : List Nat) (values : List Value) :
 /-- The body that performs `loads` in order, calls `callee` with the loaded values and
     returns its result through `ret narrow`. -/
 def forwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
-    (narrow : Option CIL.NarrowKind) : List CIL.Op :=
+    (narrow : Option CIL.NarrowKind) : List CIL.Instruction :=
   loads.map (fun load => .arg load.1 load.2) ++ [.call callee loads.length, .ret narrow]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
@@ -69,7 +69,6 @@ structure Forwards (body calleeBody : CIL.Method) (loads : List (Nat × Option C
   code : body.code = forwarderCode loads callee narrow
   locals : body.locals = []
   localKinds : body.localKinds = []
-  vectorArgs : body.vectorArgs = []
   parameterHomes : body.parameterHomes = []
   returnsValue : body.returnsValue = calleeBody.returnsValue
 
@@ -85,15 +84,15 @@ theorem Forwards.enterFrame {body calleeBody : CIL.Method}
     {narrow : Option CIL.NarrowKind} (forwards : Forwards body calleeBody loads callee narrow)
     (args : List Value) (memory : Memory) :
     CIL.Safety.enterFrame body args memory =
-      .ok (⟨memory.nextIdentity, [], [], [], 0⟩, memory) := by
+      .ok (⟨memory.nextIdentity, [], [], 0⟩, memory) := by
   have noLocals : makeSelectedLocals memory.nextIdentity body.opaqueVectorLocals [] []
       memory = .ok ([], [], memory) := by
     unfold makeSelectedLocals
     split
     · rfl
     · simp only [makeSelectedLocalsFrom]
-  simp only [CIL.Safety.enterFrame, forwards.localKinds, forwards.locals, forwards.vectorArgs,
-    forwards.parameterHomes, noLocals, makeArgumentHomes, makeParameterHomes, Bind.bind,
+  simp only [CIL.Safety.enterFrame, forwards.localKinds, forwards.locals,
+    forwards.parameterHomes, noLocals, makeParameterHomes, Bind.bind,
     Except.bind, Pure.pure, Except.pure, List.map_nil, List.append_nil]
 
 #print axioms Forwards.enterFrame
@@ -311,9 +310,9 @@ theorem MethodContract.Holds.forward {Input Output : Type}
 /-- The body that performs `loads` in order, loads the address of local 0, calls `callee`
     with them and returns its result through `ret narrow`. -/
 def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
-    (narrow : Option CIL.NarrowKind) : List CIL.Op :=
+    (narrow : Option CIL.NarrowKind) : List CIL.Instruction :=
   loads.map (fun load => .arg load.1 load.2) ++
-    [.localAddr 0, .call callee (loads.length + 1), .ret narrow]
+    [.ldloca 0, .call callee (loads.length + 1), .ret narrow]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
     `calleeBody`, with the address of its only local, a byte home of `kind` created from
@@ -335,7 +334,6 @@ structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Optio
   notObject : kind ≠ .object
   fits : InitializerFits kind initial
   opaqueVectorLocals : body.opaqueVectorLocals = []
-  vectorArgs : body.vectorArgs = []
   parameterHomes : body.parameterHomes = []
   returnsValue : body.returnsValue = calleeBody.returnsValue
 
@@ -384,7 +382,7 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
     (args : List Value) (memory : Memory) (wellFormed : memory.WellFormed) :
     ∃ home result,
       CIL.Safety.enterFrame body args memory =
-        .ok (⟨memory.nextIdentity, [.bytes kind home], [home.allocation], [], 0⟩, result) ∧
+        .ok (⟨memory.nextIdentity, [.bytes kind home], [home.allocation], 0⟩, result) ∧
       memory.nextIdentity ≤ home.allocation ∧
       access result home (localWidth kind) 1 true = .ok () ∧
       LocalHolds kind initial result home ∧
@@ -399,7 +397,7 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
     makeLocal_preserves_wellFormed _ _ _ _ _ _ _ wellFormed made⟩
   simp only [CIL.Safety.enterFrame, forwards.opaqueVectorLocals, makeSelectedLocals,
     List.isEmpty_nil, ite_true, forwards.localKinds, forwards.locals, makeLocals, made,
-    forwards.vectorArgs, makeArgumentHomes, forwards.parameterHomes, makeParameterHomes,
+    forwards.parameterHomes, makeParameterHomes,
     List.map_nil, Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
 
 #print axioms ForwardsOut.enterFrame
@@ -499,8 +497,8 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
       List.getElem?_append_left (by simpa using bound), List.getElem?_map, located]
     rfl
   rw [Nat.zero_add, List.append_nil]
-  let frame : Frame := ⟨memory.nextIdentity, [.bytes kind home], [home.allocation], [], 0⟩
-  have addressed : step body (.localAddr 0) loads.length (outer.args input) frame
+  let frame : Frame := ⟨memory.nextIdentity, [.bytes kind home], [home.allocation], 0⟩
+  have addressed : step body (.ldloca 0) loads.length (outer.args input) frame
       loaded.reverse entered =
         .ok (.next (loads.length + 1) (.reference (.address home) :: loaded.reverse) frame
           entered) := by

@@ -18,6 +18,9 @@ var extractor = Assembly.Load(File.ReadAllBytes(ExtractorPath));
 var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 var translate = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("Translate", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;
+string? Lean(object? operation) => (string?)operation?.GetType()
+    .GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, Type.EmptyTypes)!
+    .Invoke(operation, null);
 var profile = select.Invoke(null, ["scalar"]);
 var cases = 0;
 var pending = new List<(GeneratedVerification Request, string Name, int Count)>();
@@ -103,8 +106,8 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         alias.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
         math.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
     }
-    var originalModel = (string?)translate.Invoke(null, [math, profile]);
-    var aliasModel = (string?)translate.Invoke(null, [alias, profile]);
+    var originalModel = Lean(translate.Invoke(null, [math, profile]));
+    var aliasModel = Lean(translate.Invoke(null, [alias, profile]));
     if (originalModel is null || originalModel != aliasModel)
         throw new InvalidOperationException("Primitive helper must share its Math model: " + alias.FullName);
     var values = new ulong[] { 0, 1, 2, 127, 128, 255, 32767, 32768, 65535, int.MaxValue, 1UL << 31, uint.MaxValue, long.MaxValue, 1UL << 63, ulong.MaxValue }
@@ -138,7 +141,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
     var binders = $"({string.Join(" ", variables)} : CIL.W{stackWidth})";
     var evaluation = $"CIL.evalIntegerMath .{operation} {width} {signed} [{string.Join(", ", loaded)}]";
     var invocation = $"CIL.Safety.invoke Extracted.program 8 0 [{inputsLean}] CIL.Safety.Memory.empty";
-    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], [], 0⟩ [{stack}] CIL.Safety.Memory.empty = _\n";
+    var prefix = $"  change CIL.Safety.run Extracted.program {8 - argc} 0 {argc} [{inputsLean}] ⟨0, [], [], 0⟩ [{stack}] CIL.Safety.Memory.empty = _\n";
     var instruction = $"(body := Extracted.method0) (op := .intrinsic (.scalar (.math .{operation} {width} {signed})) {argc})";
     var argumentsLean = string.Join(" ", variables);
     var caseArguments = string.Join(" ", variables.Select(variable => "test." + variable));
@@ -153,7 +156,7 @@ foreach (var method in runtime.GetMethods(BindingFlags.Public | BindingFlags.Sta
         $"    (evaluated : {evaluation} = .ok (.i{resultWidth} r)) :\n" +
         $"    {invocation} = .ok (CIL.Safety.Memory.empty, [.scalar (.i{resultWidth} {Narrow(method.ReturnType, "r")})]) := by\n" + prefix +
         $"  refine (CIL.Safety.run_next {instruction} (by rfl) (by rfl)\n" +
-        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], [], 0⟩ CIL.Safety.Memory.empty) from ?_)).trans (by rfl)\n" +
+        $"    (show CIL.Safety.step _ _ _ _ _ _ _ = .ok (.next {argc + 1} [.scalar (.i{resultWidth} r)] ⟨0, [], [], 0⟩ CIL.Safety.Memory.empty) from ?_)).trans (by rfl)\n" +
         "  math_wrapper_step evaluated\n" +
         $"theorem wrapper_fault_full {binders} (fault : CIL.ArithmeticFault)\n" +
         $"    (evaluated : {evaluation} = .error fault) :\n" +

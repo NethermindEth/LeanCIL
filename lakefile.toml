@@ -17,6 +17,10 @@ srcDir = ".lake/leancil"
 roots = ["Extracted", "ExtractedSymbols"]
 defaultFacets = []
 
+# Opt-in binding audit; no CIL module imports it.
+[[lean_lib]]
+name = "StrictBinding"
+
 [[lean_lib]]
 name = "Tests.Support"
 
@@ -24,7 +28,40 @@ name = "Tests.Support"
 name = "Tests.Semantics"
 
 [[lean_lib]]
+name = "Tests.BodyEncoding"
+
+[[lean_lib]]
+name = "Tests.BodyDecoding"
+
+[[lean_lib]]
+name = "Tests.BodyLiteral"
+
+[[lean_lib]]
+name = "Tests.KernelEquation"
+
+[[lean_lib]]
+name = "Tests.MetadataBuilder"
+
+[[lean_lib]]
+name = "Tests.MetadataDecoding"
+
+[[lean_lib]]
+name = "Tests.MetadataWorld"
+
+[[lean_lib]]
+name = "Tests.MetadataBinding"
+
+[[lean_lib]]
+name = "Tests.GenericOwnerScaling"
+
+[[lean_lib]]
 name = "Tests.LiteralDisplay"
+
+[[lean_lib]]
+name = "Tests.Identity"
+
+[[lean_lib]]
+name = "Tests.ResolutionFacts"
 
 [[lean_lib]]
 name = "Tests.Automation"
@@ -324,3 +361,15 @@ name = "Tests.CallingFields"
 
 [[lean_lib]]
 name = "Tests.PublicProofSurface"
+
+[[lean_lib]]
+name = "Tests.StrictBinding"
+
+[[lean_lib]]
+name = "Tests.Crypto"
+
+[[lean_lib]]
+name = "Tests.MetadataAssemblies"
+
+[[lean_lib]]
+name = "Tests.PinnedIndexScaling"

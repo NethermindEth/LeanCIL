@@ -5,7 +5,7 @@ import CIL.Safety.Execution
 # Checked execution across feature profiles
 
 The checked interpreter gives the same result for a program under two feature profiles
-whenever every instruction agrees on them (`CIL.Op.ProfileAgreement`): only feature tests
+whenever every instruction agrees on them (`CIL.Instruction.ProfileAgreement`): only feature tests
 and intrinsics consult the profile. `CIL.Safety.ProfileCertificate` lifts this to
 invocation certificates and `CIL.Safety.ProfileContract` to method and outcome contracts.
 -/
@@ -18,7 +18,7 @@ theorem enterFrame_profile (body : CIL.Method) (profile : CIL.FeatureProfile)
 
 /-- A checked step does not depend on the method's profile when the instruction agrees on
     both profiles. -/
-theorem step_profile_eq (body : CIL.Method) (op : CIL.Op) (p q : CIL.FeatureProfile)
+theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.FeatureProfile)
     (agreement : op.ProfileAgreement p q) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (memory : Memory) :
     step { body with profile := p } op pc args frame stack memory =
@@ -26,7 +26,8 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Op) (p q : CIL.FeatureProf
   unfold step
   split <;> try rfl
   all_goals split <;> try rfl
-  all_goals simp only [CIL.Op.ProfileAgreement] at agreement
+  all_goals split <;> try rfl
+  all_goals simp only [CIL.Instruction.ProfileAgreement] at agreement
   all_goals try simp only [agreement]
   all_goals simp only [CIL.step_profile_eq op p q agreement]
 

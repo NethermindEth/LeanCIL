@@ -4,18 +4,11 @@ import CIL.Extraction.Dispatch
 
 namespace CIL.Extraction
 
-/-- A branch cannot enter the call after skipping its constrained prefix. -/
-private def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
-  match instruction.operand with
-  | .target target => target == pc
-  | .targets targets => targets.contains pc
-  | _ => false
-
 /-- The selected program entry must be precisely the resolved target, declared by its closed
     owner and instantiated at the site's method type arguments, with a receiver argument exactly
     when the target is an instance method. -/
 private def selectedImplementation (methods : Nat → Option SpecializedMethod) (receiver : TypeExpr)
-    (site : CallSite) (target : ConstrainedTarget) (emitted : Op) : Bool :=
+    (site : CallSite) (target : ConstrainedTarget) (emitted : Instruction) : Bool :=
   let resolved := target.method
   let arguments := siteMethodArguments site
   match emitted, namedType (ownerBase (target.declaringType receiver)) with
@@ -45,7 +38,7 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option Constraine
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
     (methods : Nat → Option SpecializedMethod)
     (current previous next : Option RawInstruction) (live nextLive : Option Bool)
-    (emitted : Option Op) (targeted : Nat → Bool) (pc : Nat) : Bool :=
+    (emitted : Option Instruction) (targeted : Nat → Bool) (pc : Nat) : Bool :=
   if live != some true then true else
   -- A type test stays in the opcode it lowers, against a class its lineage decides.
   if let some (.objectTest type _) := emitted then
@@ -85,7 +78,7 @@ def constrainedSiteCheckWith (resolve : TypeExpr → CallSite → Option Constra
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
     (methods : Nat → Option SpecializedMethod)
     (rawAt : Nat → Option RawInstruction) (liveAt : Nat → Option Bool)
-    (codeAt : Nat → Option Op) (targeted : Nat → Bool) (pc : Nat) : Bool :=
+    (codeAt : Nat → Option Instruction) (targeted : Nat → Bool) (pc : Nat) : Bool :=
   constrainedSiteWindow resolve virtualValid castable methods (rawAt pc) (rawAt (pc - 1))
     (rawAt (pc + 1)) (liveAt pc) (liveAt (pc + 1)) (codeAt pc) targeted pc
 
@@ -96,39 +89,16 @@ def constrainedSiteCheck (types : List DispatchType) (methods : Nat → Option S
     (castTargetValid (findDispatchType types)) methods
 /-- The per-site rule stated with optional list lookups, including missing-neighbor rejection. -/
 def constrainedSiteValid (types : List DispatchType) (methods : List SpecializedMethod)
-    (raw : RawMethod) (reachable : List Bool) (code : List Op) (pc : Nat) : Bool :=
+    (raw : RawMethod) (reachable : List Bool) (code : List Instruction) (pc : Nat) : Bool :=
   constrainedSiteCheck types (methods[·]?) (raw.code[·]?) (reachable[·]?) (code[·]?)
     (fun target => raw.code.any (branchesTo target)) pc
-
-/-- All decoded branch destinations, including switch arms and unreachable instructions. -/
-def constrainedBranchTargets (raw : List RawInstruction) : List Nat :=
-  raw.flatMap fun instruction => match instruction.operand with
-    | .target target => [target]
-    | .targets targets => targets
-    | _ => []
-
-/-- Collecting branch destinations preserves the rejection rule at every possible pc. -/
-theorem constrainedBranchTargets_contains (raw : List RawInstruction) (pc : Nat) :
-    (constrainedBranchTargets raw).contains pc = raw.any (branchesTo pc) := by
-  induction raw with
-  | nil => rfl
-  | cons instruction rest ih =>
-    cases instruction with
-    | mk offset opcode operand =>
-      change _ = (branchesTo pc ⟨offset, opcode, operand⟩ || rest.any (branchesTo pc))
-      simp only [constrainedBranchTargets, List.flatMap_cons, List.contains_append]
-      change (_ || (constrainedBranchTargets rest).contains pc) = _
-      rw [ih]
-      cases operand <;> simp [branchesTo, BEq.beq, eq_comm]
-
-#print axioms constrainedBranchTargets_contains
 
 /-- Traverse adjacent raw instructions and parallel state/code lists without positional lookup. -/
 def constrainedSites (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
     (methods : Nat → Option SpecializedMethod)
     (targeted : Nat → Bool) : Nat → Option RawInstruction →
-      List RawInstruction → List Bool → List Op → Bool
+      List RawInstruction → List Bool → List Instruction → Bool
   | pc, previous, instruction :: raw, live :: states, emitted :: code =>
     constrainedSiteWindow resolve virtualValid castable methods (some instruction) previous
       raw.head?
@@ -143,8 +113,8 @@ def constrainedSites (resolve : TypeExpr → CallSite → Option ConstrainedTarg
 theorem constrainedSites_eq (resolve : TypeExpr → CallSite → Option ConstrainedTarget)
     (virtualValid : CallSite → List (TypeExpr × Nat) → Nat → Bool) (castable : TypeExpr → Bool)
     (methods : Nat → Option SpecializedMethod) (targeted : Nat → Bool)
-    (wholeRaw : List RawInstruction) (wholeStates : List Bool) (wholeCode : List Op)
-    (raw : List RawInstruction) (states : List Bool) (code : List Op)
+    (wholeRaw : List RawInstruction) (wholeStates : List Bool) (wholeCode : List Instruction)
+    (raw : List RawInstruction) (states : List Bool) (code : List Instruction)
     (pc : Nat)
     (previous : Option RawInstruction)
     (rawSuffix : raw = wholeRaw.drop pc) (stateSuffix : states = wholeStates.drop pc)
@@ -202,7 +172,7 @@ def ConstrainedCallsValid (types : List DispatchType) (methods : List Specialize
       (castTargetValid fun identity =>
         ((DispatchIndex.ofTypes types).findType identity).map (·.raw))
       (FlowIndex.ofList methods).get?
-      (Std.TreeSet.ofList (constrainedBranchTargets raw.code) compare).contains
+      (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
       0 raw.code.head? raw.code reachable emitted.code = true
 
 /-- Indexed validation is exactly the original per-pc rule, including malformed evidence. -/
@@ -223,16 +193,16 @@ theorem ConstrainedCallsValid_iff_original (types : List DispatchType)
     · rw [constrainedSites_eq (resolveConstrained types)
         (virtualTableValid types (findDispatchType types) (FlowIndex.ofList methods).get?)
         (castTargetValid (findDispatchType types)) (FlowIndex.ofList methods).get?
-        (Std.TreeSet.ofList (constrainedBranchTargets raw.code) compare).contains
+        (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
         raw.code reachable emitted.code raw.code reachable emitted.code 0 raw.code.head?
         (by simp) (by simp) (by simp) (by simp [List.head?_eq_getElem?]) stateLength codeLength]
       have index : (FlowIndex.ofList methods).get? = (methods[·]?) := by
         funext pc
         exact FlowIndex.get?_ofList methods pc
-      have targets : (Std.TreeSet.ofList (constrainedBranchTargets raw.code) compare).contains =
+      have targets : (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
           (fun target => raw.code.any (branchesTo target)) := by
         funext pc
-        rw [Std.TreeSet.contains_ofList, constrainedBranchTargets_contains]
+        rw [Std.TreeSet.contains_ofList, branchTargets_contains]
       rw [index, targets, ← List.range_eq_range']
       rfl
     · simp [codeLength]

@@ -18,7 +18,7 @@ internal static class MetadataValidation
         var marker = markers[0];
         var constructor = marker.Constructor;
         if (markers.Length != 1 || marker.AttributeType is TypeSpecification ||
-            !RuntimeModels.ExactScope(marker.AttributeType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(marker.AttributeType, PlatformAssemblies.SystemRuntime) ||
             constructor.Name != ".ctor" || !constructor.HasThis || constructor.ExplicitThis ||
             constructor.CallingConvention != MethodCallingConvention.Default ||
             constructor.HasGenericParameters || constructor.Parameters.Count != 0 ||
@@ -69,8 +69,8 @@ internal static class MetadataValidation
     internal static int? IntegerVectorWidth(TypeReference type)
     {
         if (type is not GenericInstanceType { GenericArguments.Count: 1 } vector ||
-            !RuntimeModels.ExactScope(vector.ElementType.Scope, "System.Runtime.Intrinsics") ||
-            !RuntimeModels.ExactScope(vector.GenericArguments[0].Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(vector.ElementType, PlatformAssemblies.SystemRuntimeIntrinsics) ||
+            !RuntimeModels.ExactScope(vector.GenericArguments[0], PlatformAssemblies.SystemRuntime) ||
             vector.GenericArguments[0].FullName is not ("System.Byte" or "System.Int32" or "System.UInt32" or
                 "System.Int64" or "System.UInt64")) return null;
         return vector.ElementType.FullName switch
@@ -105,7 +105,10 @@ internal static class MetadataValidation
             MethodSpecialization.SignatureType(reference.FieldType) !=
                 MethodSpecialization.SignatureType(definition.FieldType))
             throw new InvalidDataException("Mismatched aggregate field signature: " + reference.FullName);
-        return Fields(reference.DeclaringType).Single(field => field.Definition == definition);
+        // The owner and the field resolve separately and must reach one definition, or the field is not the owner's.
+        return Array.Find(Fields(reference.DeclaringType), field => field.Definition == definition) ??
+            throw new InvalidDataException("Unresolved aggregate field: " + reference.FullName +
+                " is not an instance field of its declaring type as resolved");
     }
 
     // A read-only validation/emission phase owns its context; metadata rewrites require a new one.
@@ -433,6 +436,11 @@ internal static class MetadataValidation
 
     const string OpenGenericMethod = "Unsupported method metadata: open generic method";
     const string OpenGenericMember = "Unsupported method metadata: member of an open generic type";
+    // The runtime-async implementation flag, absent from Cecil 0.11.6: such a body returns the awaited result and
+    // the runtime builds the declared task, so the translated body would not compute the method's return value.
+    const MethodImplAttributes RuntimeAsync = (MethodImplAttributes)0x2000;
+    const string RuntimeAsyncMethod = "Unsupported method metadata: runtime-async method\n" +
+        "  Its body returns the awaited result, not the declared task.";
 
     // With `blocked`, failures after the selector resolves, the entry's shape included, are recorded
     // and the walk continues past them; without it, the first failure throws. Only profile-reachable
@@ -450,7 +458,7 @@ internal static class MetadataValidation
         string? Attribute(string name) => module.Assembly.CustomAttributes
             .SingleOrDefault(a => a.AttributeType.FullName == name)?.ConstructorArguments.Single().Value as string;
         if ((module.Assembly.Name.FullName != assemblyIdentity && module.Assembly.Name.Name != assemblyIdentity) ||
-            Attribute("System.Runtime.Versioning.TargetFrameworkAttribute") != ".NETCoreApp,Version=v10.0" ||
+            Attribute("System.Runtime.Versioning.TargetFrameworkAttribute") != ".NETCoreApp,Version=v11.0" ||
             // MSBuild configuration names are case-insensitive: `-c release` stamps "release".
             !string.Equals(Attribute("System.Reflection.AssemblyConfigurationAttribute"), "Release",
                 StringComparison.OrdinalIgnoreCase) ||
@@ -549,6 +557,8 @@ internal static class MetadataValidation
                     (method.ImplAttributes & (MethodImplAttributes.CodeTypeMask | MethodImplAttributes.ManagedMask |
                         MethodImplAttributes.InternalCall | MethodImplAttributes.ForwardRef)) != 0)
                     throw new InvalidDataException("Unsupported method metadata: no managed IL body");
+                if ((method.ImplAttributes & RuntimeAsync) != 0)
+                    throw new InvalidDataException(RuntimeAsyncMethod);
             }, named: true)) return;
             // Every other rejection is its own blocker; the body and callees are still analysed.
             void Reject(Func<bool> rejected, string reason) => Check(method, null, () =>

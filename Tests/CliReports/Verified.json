@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "result": "verified",
   "stage": null,
   "theorem": "ExampleProof.correctness",
@@ -16,6 +16,86 @@
   ],
   "statement": "ExampleProof.correctness (x y : CIL.W64) :\n  ∃ result,\n    Except.map Prod.snd\n          (CIL.Safety.invoke Extracted.program 4 0\n            [CIL.Safety.Value.scalar (CIL.Value.i64 x), CIL.Safety.Value.scalar (CIL.Value.i64 y)]\n            CIL.Safety.Memory.empty) =\n        Except.ok [CIL.Safety.Value.scalar (CIL.Value.i64 result)] ∧\n      BitVec.toNat result = (BitVec.toNat x + BitVec.toNat y) % 2 ^ 64",
   "specification": [],
+  "binding": {
+    "mode": "default",
+    "digests": null,
+    "sources": null,
+    "images": [],
+    "facts": [
+      {
+        "id": "body-bytes",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "metadata-rows",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "platform-type-kinds",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "enum-underlying-types",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "value-tuple-field-order",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "object-fields",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "layout-content",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "dispatch-catalogs",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "static-data",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "generic-constraints",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "public-key-tokens",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      },
+      {
+        "id": "import-identities",
+        "status": "trusted",
+        "theorem": null,
+        "reason": null
+      }
+    ]
+  },
   "failures": [],
   "messages": [
     {

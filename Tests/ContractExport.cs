@@ -35,10 +35,13 @@ Directory.CreateDirectory(appRoot);
 Directory.CreateDirectory(package);
 Directory.CreateDirectory(callerPackage);
 File.WriteAllText(Path.Combine(libraryRoot, "Lib.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>ImportFixture.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(appRoot, "App.csproj"), """
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>ImportFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
+<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+<AssemblyName>ImportFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup>
+<ItemGroup><ProjectReference Include="../Lib/Lib.csproj" /></ItemGroup></Project>
 """);
 string librarySource = Path.Combine(libraryRoot, "Library.cs");
 File.WriteAllText(librarySource, "namespace ImportFixture; public static class Library { public static ulong AddOne(ulong value) => value + 1; public static ulong AddSame(ulong value) => value + 1; " +
@@ -230,7 +233,7 @@ if (cohort != "core")
 
         CallerVerify();
         var report = JsonNode.Parse(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")))!;
-        if (report["schema"]!.GetValue<int>() != 4 || report["contractImports"]!.AsArray().Count != 1 ||
+        if (report["schema"]!.GetValue<int>() != 5 || report["contractImports"]!.AsArray().Count != 1 ||
             report["imports"]![0]!["acceptedVia"]!.GetValue<string>() != "published-certification" ||
             !report["imports"]![0]!["deploymentObligation"]!.GetValue<string>()
                 .Contains("exact implementation bytes", StringComparison.Ordinal))
@@ -284,8 +287,8 @@ if (cohort != "core")
 completed.CompleteCase("core.publication");
 CallerVerify();
 JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")));
-if (initialCaller.GetProperty("schema").GetInt32() != 4)
-    throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
+if (initialCaller.GetProperty("schema").GetInt32() != 5)
+    throw new InvalidOperationException("Imported contract verification did not produce the schema-5 trust report.");
 completed.CompleteCase("core.caller");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
 

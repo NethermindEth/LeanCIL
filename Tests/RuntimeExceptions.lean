@@ -8,15 +8,15 @@ inductive Case where
   | add | sub | mul | convert | divide | remainder | signedDivide | signedRemainder
   deriving DecidableEq
 
-def operation : Case → CIL.Op
-  | .add => .checkedArithmetic .add true
-  | .sub => .checkedArithmetic .sub true
-  | .mul => .checkedArithmetic .mul true
-  | .convert => .checkedConvert 8 false false
-  | .divide => .divide false false
-  | .remainder => .divide false true
-  | .signedDivide => .divide true false
-  | .signedRemainder => .divide true true
+def operation : Case → CIL.Instruction
+  | .add => .add_ovf
+  | .sub => .sub_ovf
+  | .mul => .mul_ovf
+  | .convert => .conv_ovf .u1
+  | .divide => .div_un
+  | .remainder => .rem_un
+  | .signedDivide => .div
+  | .signedRemainder => .rem
 
 def arguments : Case → List CIL.Safety.Value
   | .add => [.scalar (.i32 2147483647), .scalar (.i32 1)]
@@ -73,7 +73,8 @@ theorem wrong_outcomes (which : Case) : ¬ (contract which (wrongName which)).Ho
     (by cases which <;> decide) raised
 
 def zeroDivisorMethod (remainder : Bool) : CIL.Method := {
-  code := [.arg 0, .arg 1, .divide false remainder, .ret], locals := [], returnsValue := true }
+  code := [.arg 0, .arg 1, if remainder then .rem_un else .div_un, .ret], locals := [],
+  returnsValue := true }
 
 def zeroDivisorContract : OutcomeContract CIL.W32 where
   args value := [.scalar (.i32 value), .scalar (.i32 0)]
@@ -84,7 +85,7 @@ def zeroDivisorContract : OutcomeContract CIL.W32 where
 
 theorem divide_and_mod_zero (remainder : Bool) : zeroDivisorContract.HoldsCLR [zeroDivisorMethod remainder] 0 := by
   intro value memory _
-  exact ⟨4, ⟨0, 2, .arithmetic .divideByZero⟩, rfl, rfl⟩
+  cases remainder <;> exact ⟨4, ⟨0, 2, .arithmetic .divideByZero⟩, rfl, rfl⟩
 
 theorem unnamed_faults (exception : String) :
     ExecutionFault.clrException (.arithmetic .invalidOperands) ≠ some exception ∧

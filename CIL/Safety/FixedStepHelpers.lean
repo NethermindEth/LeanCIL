@@ -15,7 +15,8 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (formed : source.WellFormed) (operation : CIL.Op) (pc : Nat) (profile : CIL.FeatureProfile)
+    (formed : source.WellFormed) (operation : CIL.Instruction) (pc : Nat)
+    (profile : CIL.FeatureProfile)
     (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow (do
       match pureArity operation with
@@ -23,7 +24,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
         if stack.length < argc then .error .invalidState else
           let values ← CIL.Safety.scalars (stack.take argc)
           let some (.next destination result _) :=
-            CIL.step operation false pc [] 0 values (fun _ => none) profile |
+            CIL.step operation false pc [] values (fun _ => none) profile |
               .error .invalidState
           let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
           return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -37,7 +38,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if stack.length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars (stack.take argc)
             let some (.next destination result _) :=
-              CIL.step operation false pc [] 0 values (fun _ => none) profile |
+              CIL.step operation false pc [] values (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
             return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -50,7 +51,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if (stack.map mapping.value).length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars ((stack.map mapping.value).take argc)
             let some (.next destination result _) :=
-              CIL.step operation false pc [] 0 values (fun _ => none) profile |
+              CIL.step operation false pc [] values (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue target)
             return FrameAction.next destination (result ++ (stack.map mapping.value).drop argc)
@@ -90,30 +91,29 @@ inductive FixedStepFamily where
   | reference | numeric | boundary | other | excluded
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
-def fixedStepFamily : CIL.Op → FixedStepFamily
-  | .local .. | .localAddr _ | .setLocal .. | .vectorLocal _ | .vectorLocalAddr _
-  | .setVectorLocal _ | .initializeSpanLocal .. | .stackAlloc _ | .newArray _ | .newVector256 ..
+def fixedStepFamily : CIL.Instruction → FixedStepFamily
+  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
   | .sub => .reference
-  | .ltu | .gtu | .eq => .reference
-  | .bltu _ | .bgeu _ | .bgtu _ | .bleu _ => .reference
-  | .brzero _ | .brnonzero _ | .beq _ | .bne _ => .reference
-  | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
-  | .divide .. => .numeric
-  | .managed _ | .arg .. | .vectorArg _ | .vectorArgAddr _ | .call .. | .callInstance ..
-  | .callVirtual .. | .objectTest .. | .tailCall ..
+  | .clt_un | .cgt_un | .ceq => .reference
+  | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
+  | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
+  | .intrinsic .. | .nativeBinary _ | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
+  | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
+  | .managed _ | .arg .. | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
+  | .tailCall ..
   | .throw _ | .ret _ => .boundary
   | _ => .other
 
 /-- The dispatcher rejects a narrow argument whose source value contains unspecified bits. -/
-def argumentUnspecified (operation : CIL.Op) (arguments : List Value) : Bool :=
+def argumentUnspecified (operation : CIL.Instruction) (arguments : List Value) : Bool :=
   match operation with
   | .arg position (some _) => (arguments[position]?.map Value.hasUnspecified).getD false
   | _ => false
 
 /-- Allocation renaming cannot change the narrow argument observation. -/
 theorem argumentUnspecified_map (mapping : AllocationRenaming)
-    (operation : CIL.Op) (arguments : List Value) :
+    (operation : CIL.Instruction) (arguments : List Value) :
     argumentUnspecified operation (arguments.map mapping.value) =
       argumentUnspecified operation arguments := by
   cases operation <;> try rfl
@@ -123,22 +123,22 @@ theorem argumentUnspecified_map (mapping : AllocationRenaming)
 #print axioms argumentUnspecified_map
 
 /-- The finite reference-operation family exposes only the cases that can observe references. -/
-inductive ReferenceStepOperation : CIL.Op → Prop where
+inductive ReferenceStepOperation : CIL.Instruction → Prop where
   | sub : ReferenceStepOperation .sub
-  | ltu : ReferenceStepOperation .ltu
-  | gtu : ReferenceStepOperation .gtu
-  | eq : ReferenceStepOperation .eq
-  | bltu (destination : Nat) : ReferenceStepOperation (.bltu destination)
-  | bgeu (destination : Nat) : ReferenceStepOperation (.bgeu destination)
-  | bgtu (destination : Nat) : ReferenceStepOperation (.bgtu destination)
-  | bleu (destination : Nat) : ReferenceStepOperation (.bleu destination)
-  | brzero (destination : Nat) : ReferenceStepOperation (.brzero destination)
-  | brnonzero (destination : Nat) : ReferenceStepOperation (.brnonzero destination)
+  | clt_un : ReferenceStepOperation .clt_un
+  | cgt_un : ReferenceStepOperation .cgt_un
+  | ceq : ReferenceStepOperation .ceq
+  | blt_un (destination : Nat) : ReferenceStepOperation (.blt_un destination)
+  | bge_un (destination : Nat) : ReferenceStepOperation (.bge_un destination)
+  | bgt_un (destination : Nat) : ReferenceStepOperation (.bgt_un destination)
+  | ble_un (destination : Nat) : ReferenceStepOperation (.ble_un destination)
+  | brfalse (destination : Nat) : ReferenceStepOperation (.brfalse destination)
+  | brtrue (destination : Nat) : ReferenceStepOperation (.brtrue destination)
   | beq (destination : Nat) : ReferenceStepOperation (.beq destination)
-  | bne (destination : Nat) : ReferenceStepOperation (.bne destination)
+  | bne_un (destination : Nat) : ReferenceStepOperation (.bne_un destination)
 
 /-- Reference-family classification supplies its finite case analysis independently of step goals. -/
-theorem referenceStepOperation (operation : CIL.Op)
+theorem referenceStepOperation (operation : CIL.Instruction)
     (family : fixedStepFamily operation = .reference) : ReferenceStepOperation operation := by
   cases operation <;> try cases family
   all_goals constructor
@@ -178,13 +178,13 @@ macro "fixed_fallback" : tactic => `(tactic| (
       | exact fallback
       | (exfalso
          have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
-             CIL.Op.sub = CIL.Op.sub →
+             CIL.Instruction.sub = CIL.Instruction.sub →
              originalStack = Value.scalar offset :: Value.reference reference :: tail → False :=
            by assumption
          exact excluded _ _ _ rfl rfl)
       | (exfalso
          have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
-             CIL.Op.sub = CIL.Op.sub →
+             CIL.Instruction.sub = CIL.Instruction.sub →
              originalStack = Value.scalar offset :: Value.readOnlyReference reference :: tail →
                False := by assumption
          exact excluded _ _ _ rfl rfl)
@@ -208,20 +208,33 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     cases observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
+    -- Past the faulting-arithmetic arms, the dispatcher's catch-all holds every other arm. Its
+    -- exclusions are cleared so the arms' own names stay the newest inaccessible ones.
+    all_goals try (
+      rename_i addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
+        convOvf convOvfUn
+      guard_hyp div : ∀ (y x : CIL.Value) (rest : List Value), operation = .div →
+        stack = Value.scalar y :: Value.scalar x :: rest → False
+      clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
+        convOvfUn
+      split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,
       metadata.returnsValue]
     all_goals try exact (related.stepFallback frames formed operation pc sourceBody.profile
       stack bounds observable)
-    case h_85 =>
+    -- Only the dispatcher's final arm excludes `.managed`, so the guard skips every other arm
+    -- and fails if no arm is left to select.
+    any_goals
+      first
+        | (have excludesManaged : ∀ native, operation = .managed native → False := by assumption
+           clear excludesManaged)
+        | fail "not the dispatcher's fallback arm"
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noManaged : ∀ op, operation = .managed op → False := by assumption
          have noArg : ∀ position, operation = .arg position none → False := by assumption
          have noNarrowArg : ∀ position kind, operation = .arg position (some kind) → False :=
-           by assumption
-         have noVectorArg : ∀ position, operation = .vectorArg position → False := by assumption
-         have noVectorAddress : ∀ position, operation = .vectorArgAddr position → False :=
            by assumption
          have noCall : ∀ callee argc, operation = .call callee argc → False := by assumption
          have noTailCall : ∀ callee argc, operation = .tailCall callee argc → False := by assumption
@@ -235,8 +248,6 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          cases operation <;> try cases boundary
          all_goals try exact False.elim (noManaged _ rfl)
          all_goals try exact False.elim (noArgument _ _ rfl)
-         all_goals try exact False.elim (noVectorArg _ rfl)
-         all_goals try exact False.elim (noVectorAddress _ rfl)
          all_goals try exact False.elim (noCall _ _ rfl)
          all_goals try exact False.elim (noTailCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)

@@ -18,7 +18,7 @@ partial class Program
         Directory.CreateDirectory(package);
         File.WriteAllText(Path.Combine(assemblyRoot, "Components.csproj"), """
         <Project Sdk="Microsoft.NET.Sdk">
-          <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+          <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
         </Project>
         """);
         File.WriteAllText(Path.Combine(assemblyRoot, "Methods.cs"), """
@@ -28,6 +28,10 @@ partial class Program
             public static ulong Second(ulong value) => Helper(value) + 2;
             public static ulong Third(ulong value) => Helper(value) + 3;
             public static ulong Fourth(ulong value) => Helper(value) + 4;
+            public static ulong Leaf(ulong value) => value ^ 5UL;
+            public static ulong Wrapped(ulong value) => Leaf(value) + 6;
+            public static ulong ViaWrapped(ulong value) => Wrapped(value) + 7;
+            public static ulong ViaBoth(ulong value) => Wrapped(value) + Helper(value);
             public static ulong Helper(ulong value)
             {
                 BODY
@@ -50,7 +54,8 @@ partial class Program
         namespace ExampleProof
         /-- Every method and connection in this extraction satisfies the translation validator. -/
         theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-            Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
+            Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+          Extracted.translation_valid
         #print axioms correctness
         end ExampleProof
         """);
@@ -90,6 +95,7 @@ partial class Program
         var changedCall = SplitExtractionComponents(original.Replace(".call 1 1", ".call 0 1", StringComparison.Ordinal));
         if (changedCall.Sources.Keys.Intersect(first.Sources.Keys).Count() != 2 || changedCall.InputHash == first.InputHash)
             throw new Exception("A changed callee connection retained the caller component or input identity.");
+        CheckCalleeIndexReuse(cli, assembly, directory);
         // A long method raises the emitted recursion depth; a component at another depth would not compile it.
         const string deepOption = "\nset_option maxRecDepth 8192\n";
         var deepened = SplitExtractionComponents(original.Replace("\nset_option maxRecDepth 4096\n", deepOption,
@@ -180,6 +186,53 @@ partial class Program
             foreach (var (name, value) in saved) Environment.SetEnvironmentVariable(name, value);
         }
     }
+
+    // A helper whose callee sits at another index in a second extraction is not shared: only the header, which holds
+    // no program indices, is. The helper's own method number and the import of its callee's component change too,
+    // so its texts are also compared with both erased: they may differ only in the `.call` line and in the link
+    // definition that repeats the callee's index.
+    static void CheckCalleeIndexReuse(string[] cli, string assembly, string directory)
+    {
+        var requests = new[] { "ViaWrapped", "ViaBoth" }.Select(method =>
+            new GeneratedExtraction(assembly, "Methods::" + method + "(ulong)",
+                Path.Combine(directory, method))).ToArray();
+        ExtractBatch("extract", null, requests, cli[1]);
+        var texts = requests.Select(request => File.ReadAllText(Path.Combine(request.Output, "Extracted.lean")))
+            .ToArray();
+        var shared = SplitExtractionComponents(texts[0]).Sources.Keys
+            .Intersect(SplitExtractionComponents(texts[1]).Sources.Keys).ToArray();
+        if (shared.Length != 1)
+            throw new Exception("Expected only the header to be shared when a helper's callee index differs, found " +
+                shared.Length + " shared components.");
+        // Wrapped is method 1 beside ViaWrapped and method 2 beside ViaBoth, and its callee Leaf moves from 2 to 3.
+        var differing = CalleeIndexDifferences(texts[0], texts[1], "Methods::Wrapped(");
+        if (differing is not [("@[cil_code] def method#Link1 : Link := .direct 2",
+                "@[cil_code] def method#Link1 : Link := .direct 3"), (".call 2 1,", ".call 3 1,")])
+            throw new Exception("The helper's components must differ only in its call and its link, found:\n" +
+                string.Join("\n", differing.Select(pair => pair.First + "  |  " + pair.Second)));
+        Console.WriteLine(
+            "PASS a helper whose callee moves differs only in its call and link and shares only the header");
+    }
+
+    /// <summary>
+    /// The lines of the component holding <paramref name="signature"/> that differ between two extractions, once
+    /// imports are dropped and method numbers are erased, trimmed and in order. Both components must have as many
+    /// lines.
+    /// </summary>
+    static (string First, string Second)[] CalleeIndexDifferences(string first, string second, string signature)
+    {
+        string[] Lines(string text) => [.. SplitExtractionComponents(text).Sources.Values
+            .Single(source => source.Contains(signature, StringComparison.Ordinal)).Split('\n')
+            .Where(line => !line.StartsWith("import ", StringComparison.Ordinal))
+            .Select(line => ComponentMethodNumber().Replace(line.Trim(), "method#"))];
+        var (left, right) = (Lines(first), Lines(second));
+        if (left.Length != right.Length)
+            throw new Exception($"The components of {signature} have {left.Length} and {right.Length} lines.");
+        return [.. left.Zip(right).Where(pair => pair.First != pair.Second)];
+    }
+
+    [GeneratedRegex(@"\bmethod[0-9]+")]
+    private static partial Regex ComponentMethodNumber();
 
     static void CheckConsumerCompilation(string[] cli, string package, string proof, string[] outputs)
     {

@@ -7,7 +7,9 @@ if (args is not ([] or ["--prepare-only"]))
     throw new ArgumentException("Usage: ExtractionEvidence.cs [--prepare-only]");
 using var fixtures = new Program();
 fixtures.PrepareLeanFixtures(
-    "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence", "Tests.ScalarEvidence",
+    "Tests.MetadataBuilder", "Tests.BodyEncoding", "Tests.ExtractionLayout", "Tests.ExtractionParameters",
+    "Tests.FeatureEvidence",
+    "Tests.ScalarEvidence",
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
     "Tests.MemorySpanExecution", "Tests.ManagedPointerValues", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences",
@@ -28,7 +30,7 @@ foreach (var name in new[]
 {
     "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables",
     "MemorySpans", "ReferenceInstructions", "PointerOperations", "Objects", "StaticValues", "StaticScalarValues",
-    "TranslationAudit"
+    "TranslationAudit", "MetadataDifferential"
 })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");

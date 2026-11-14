@@ -43,7 +43,7 @@ private abbrev State (memory : Memory) (home : Reference) :=
 /-- The loop test, with the input and `count` on the stack. -/
 bind_cutpoint header (memory : Memory) (value : W32) (home : Reference)
     (state : State memory home) :=
-  tallyBody at loop.latch matching (fun op => op matches .bne _) with entry.frame memory home,
+  tallyBody at loop.latch matching (fun op => op matches .bne_un _) with entry.frame memory home,
     [.scalar (.i32 value), .scalar (.i32 state.values.1)], state.memory
 
 /-- `TallyTwice` returns twice its input and allocates nothing the caller sees. -/

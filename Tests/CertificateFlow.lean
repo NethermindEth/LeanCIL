@@ -25,7 +25,8 @@ private def forward : RawMethod := raw
   [⟨0, 43, .target 3⟩, ⟨1, 0, .none⟩, ⟨2, 0, .none⟩, ⟨3, 42, .none⟩]
 
 /-- Pruned sites retain explicit holes. -/
-private def forwardCode : List Op := [.branch 3, .unsupported "hole", .unsupported "hole", .ret]
+private def forwardCode : List Instruction :=
+  [.br 3, .unsupported "hole", .unsupported "hole", .ret]
 
 /-- Only the branch and its destination are reachable. -/
 private def forwardFeatures : FeatureCertificate := [emptyState, none, none, emptyState]
@@ -53,7 +54,7 @@ theorem missing_target_rejected :
 theorem bounds_rejected :
     ([4, 1000000] : List Nat).all (fun target =>
       let body := { forward with code := forward.code.set 0 ⟨0, 43, .target target⟩ }
-      let emitted := forwardCode.set 0 (.branch target)
+      let emitted := forwardCode.set 0 (.br target)
       !decide (FeatureFlowValid #[] (fun _ => none) body .scalar forwardFeatures
         [true, false, false, true] emitted) &&
       !decide (ScalarFlowValid #[] body forwardFeatures forwardScalars emitted)) = true := by decide
@@ -63,7 +64,7 @@ theorem bounds_rejected :
 theorem backedge_valid :
     let body := raw [⟨0, 0, .none⟩, ⟨1, 0, .none⟩, ⟨2, 43, .target 0⟩]
     let features := List.replicate 3 emptyState
-    let emitted := [.nop, .nop, .branch 0]
+    let emitted := [.nop, .nop, .br 0]
     FeatureFlowValid #[] (fun _ => none) body .scalar features [true, true, true] emitted ∧
     ScalarFlowValid #[] body features (List.replicate 3 (some [])) emitted := by decide
 #print axioms backedge_valid

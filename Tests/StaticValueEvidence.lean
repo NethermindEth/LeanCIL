@@ -9,7 +9,8 @@ private def zeros : List (BitVec 8) := [0, 0]
 
 /-- Returns its zero-initialized two-byte aggregate local. -/
 private def initializer : Method := {
-  code := [.local 0, .ret none], locals := [.aggregate zeros], localKinds := [.aggregate 2], returnsValue := true }
+  code := [.ldloc 0, .ret none], locals := [.aggregate zeros], localKinds := [.aggregate 2],
+  returnsValue := true }
 
 private def descriptor (bytes : List (BitVec 8)) (init : Option StaticInitializer) : StaticDescriptor :=
   { identity := 0, fieldName := "Fixture::Zero", bytes, initializer := init }
@@ -44,7 +45,7 @@ example : StaticValuesValid (load zeros [7] none) := by decide +kernel
 
 /-- A constructor writes through the ordinary checked aggregate temporary. -/
 private def constructor : Method := {
-  code := [.arg 0, .const32 7, .storeScalar 1, .ret none]
+  code := [.arg 0, .ldc_i4 7, .storeScalar 1, .ret none]
   locals := [], returnsValue := false }
 
 private def constructed (bytes : List (BitVec 8)) (callee : Method := constructor) : Program :=

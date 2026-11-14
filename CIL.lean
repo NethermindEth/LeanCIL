@@ -2,13 +2,13 @@
 -- modules are tried in every consumer, so regrouping could change proof behaviour.
 
 -- Reference semantics, feature profiles, method embeddings and extraction metadata
-import CIL.AggregateMemory
 import CIL.CodeSuffix
 import CIL.ExecutionLemmas
 import CIL.Embedding.Basic
 import CIL.Embedding.BaseStep
 import CIL.Embedding.Tactic
 import CIL.Features
+import CIL.Identity
 import CIL.Imports
 import CIL.InstructionEquations
 import CIL.Instructions
@@ -48,7 +48,6 @@ import CIL.Safety.AccessRequirements
 import CIL.Safety.AccessSlices
 import CIL.Safety.AllocationExtension
 import CIL.Safety.ArgumentEquivalence
-import CIL.Safety.ArgumentHomeValues
 import CIL.Safety.AggregateHomeValues
 import CIL.Safety.AggregateLocals
 import CIL.Safety.ValueBitCasts
@@ -214,6 +213,9 @@ Allocation-renaming proofs are optional: import `CIL.Safety.AllocationRefinement
 
 * `CIL.Types`, `CIL.Instructions`, `CIL.Layout` and `CIL.Memory`: values, opcodes, aggregate
   layouts and byte memory.
+* `CIL.Identity`: metadata names, user strings, assemblies, type identities, primitive types and
+  type kinds as values whose equality the kernel decides on codes, with `name!` and `str!`
+  literals.
 * `CIL.Semantics`: the shared single-instruction evaluator (`CIL.step`). Checked execution
   delegates value-only instructions to it; `CIL.SymbolicExecution` supplies shared simp sets.
 * `CIL.Features`, `CIL.SIMD.*` and `CIL.ProfileEquivalence`: hardware feature profiles, the

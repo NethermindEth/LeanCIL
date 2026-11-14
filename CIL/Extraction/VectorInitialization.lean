@@ -25,14 +25,14 @@ private def primitiveWidth (type : TypeExpr) : Option Nat := do
   primitiveFieldWidth kind
 
 /-- Whether an emitted memory operation transfers a vector snapshot. -/
-private def vectorMemory : Op → Bool
+private def vectorMemory : Instruction → Bool
   | .memory .load128 | .memory .load256 | .memory .load512
   | .memory .store128 | .memory .store256 | .memory .store512
   | .memory (.vector128Unsafe ..) => true
   | _ => false
 
 /-- Vector object operations preserve the exact token's storage width and opcode semantics. -/
-def vectorObjectMatches (raw : RawInstruction) (emitted : Op) : Bool :=
+def vectorObjectMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
   match raw.operand with
   | .type type =>
     if !vectorFamily type || raw.opcode ∉ [0x70, 0x71, 0x81, 0xfe15, 0xfe1c] then
@@ -45,7 +45,7 @@ def vectorObjectMatches (raw : RawInstruction) (emitted : Op) : Bool :=
       | none => false
       | some width => match raw.opcode, emitted with
         | 0x70, .copyObject bytes | 0xfe15, .initAggregate bytes => bytes == width
-        | 0xfe1c, .const32 bits => bits.toNat == width
+        | 0xfe1c, .ldc_i4 bits => bits.toNat == width
         | 0x71, .memory .load128 | 0x81, .memory .store128 => width == 16
         | 0x71, .memory .load256 | 0x81, .memory .store256 => width == 32
         | 0x71, .memory .load512 | 0x81, .memory .store512 => width == 64
@@ -55,7 +55,7 @@ def vectorObjectMatches (raw : RawInstruction) (emitted : Op) : Bool :=
 /-- An emitted `initAggregate` comes from an `initobj` of a struct, whose width the layout
     check binds, or of a vector or primitive of exactly that width; no other emission may
     come from an `initobj` of a vector type. -/
-def vectorInitializationMatches (raw : RawInstruction) (emitted : Op) : Bool :=
+def vectorInitializationMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
   vectorObjectMatches raw emitted && match emitted with
   | .initAggregate width =>
     raw.opcode == 65045 && match raw.operand with
@@ -81,7 +81,7 @@ instance (closed : RawMethod) (reachable : List Bool) (method : Method) :
 theorem vector_initialization_checked {closed : RawMethod} {reachable : List Bool}
     {method : Method}
     (valid : VectorInitializationsValid closed reachable method) (pc : Nat)
-    (instruction : RawInstruction) (emitted : Op)
+    (instruction : RawInstruction) (emitted : Instruction)
     (rawAt : closed.code[pc]? = some instruction) (liveAt : reachable[pc]? = some true)
     (emittedAt : method.code[pc]? = some emitted) :
     vectorInitializationMatches instruction emitted = true := by

@@ -13,13 +13,15 @@ opcode/operand combination has its own regression test, or that the model is equ
   Unsupported operand shapes can fail during checked execution even when translation succeeds.
 - Extraction rejects every opcode the table does not list.
 
-Every row is subject to the common target restrictions: Release IL-only .NET 10 assemblies,
+Every row is subject to the common target restrictions: Release IL-only .NET 11 assemblies,
 64-bit little-endian execution, admitted types, no exception handlers and validated reachable
 control flow. Ordinary managed calls must have an acyclic extraction order; checked tail
 transfers may form cycles. A translated method still requires a proof of the desired property;
 exhausted fuel, invalid states and unsupported operations are failures, never implicit successes.
 Release configuration does not guarantee that a compiler emits only supported instructions:
-reachable exception handling, for example, is rejected.
+reachable exception handling, for example, is rejected. A runtime-async method, which carries
+the `Async` implementation flag, is rejected as an entry and as a callee: its body returns the
+awaited result and the runtime builds the declared task.
 
 ## Translated opcodes
 
@@ -61,10 +63,10 @@ external enum dependencies are not supported.
 | `dup`, `pop` | Complete within the admitted model | Duplicate or discard a supported stack value; stack underflow fails. |
 | `ldarg`, `ldarg.s`, `ldarg.0` to `ldarg.3` | Partial | Load admitted argument values; struct instance methods have a managed-reference `this` at index zero, and instance methods of admitted classes an object-reference `this`; a `string` argument is an opaque object reference (see [class instances](SOUNDNESS-RUNTIME.md#class-instances)); narrow integers are truncated and sign- or zero-extended to `i32`. Reference values undergo validity checks. |
 | `starg`, `starg.s` | Partial | Assign a private parameter home using its declared storage type. Narrow stores truncate; byref assignment changes the private reference slot. Does not overwrite the caller's by-value source. |
-| `ldarga`, `ldarga.s` | Partial | Address the same private parameter home read by `ldarg` and written by `starg`. Addresses expire when the frame returns. Taking the address of a byref parameter is rejected; nested-reference storage is unsupported. |
+| `ldarga`, `ldarga.s` | Partial | Address the same private parameter home read by `ldarg` and written by `starg`; for a span parameter, push the home's checked view, which stands for its address. Addresses expire when the frame returns. Taking the address of a byref parameter is rejected; nested-reference storage is unsupported. |
 | `ldloc`, `ldloc.s`, `ldloc.0` to `ldloc.3` | Partial | Load admitted scalar, vector, aggregate or managed-reference locals. Narrow integers are sign- or zero-extended to `i32`; initialization and lifetime rules apply. |
 | `stloc`, `stloc.s`, `stloc.0` to `stloc.3` | Partial | Store values compatible with the declared local storage kind; narrow integer locals truncate an `i32` to their physical width. No general object or reference-bearing aggregate storage. |
-| `ldloca`, `ldloca.s` | Partial | Form a checked reference to byte-backed local storage. Taking the address of a managed-reference local is explicitly unsupported. |
+| `ldloca`, `ldloca.s` | Partial | Form a checked reference to byte-backed local storage; for a span local, push its checked view, which stands for its address. Taking the address of a managed-reference local is explicitly unsupported. |
 | `neg` | Partial | Wrapping negation of an `i32` or `i64`; the signed minimum maps to itself. No floating-point or reference operands. |
 | `add` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. Also accepts a checked reference and an int32 or native integer byte offset in either operand order, preserving allocation identity and its readonly restriction and checking lifetime and bounds when forming the result. Supplied immutable native handler tables also admit checked byte-offset addition. No floating-point operands or arbitrary numeric address fabrication. |
 | `sub` | Partial | Wrapping scalar subtraction; also subtract an int32/native byte offset from a checked reference, preserving its readonly restriction, or compute the native byte difference of two live references within one allocation. Null, cross-allocation differences and invalid resulting positions fail. |
@@ -625,7 +627,7 @@ its translation to `skipInit`.
 storage types. `NullRef` pushes the model's null managed reference, which a
 byref local or argument can hold like any other reference. `IsNullRef` returns
 1 for it and 0 for every other reference, live or not, without accessing memory.
-Every load, store, copy, initialization, field or lane access of one or more
+Every load, store, copy, initialization or field access of one or more
 bytes through null faults with `nullDereference`, the model's
 `NullReferenceException`, and no address is formed from it; zero-length block
 operations access nothing. Extraction evidence binds each call to its operation in both
@@ -671,7 +673,7 @@ emitted as unsupported placeholders
 ([feature getters and profiles](SIMD.md#feature-getters-profiles-and-execution-restrictions)).
 Execution that reaches a placeholder fails.
 
-Exact `IntPtr.Size`, `UIntPtr.Size` and `Environment.Is64BitProcess` getters produce `8`, `8`
+Exact `IntPtr.Size`, `UIntPtr.Size` and `System.Environment.Is64BitProcess` getters produce `8`, `8`
 and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
 `ldsfld BitConverter.IsLittleEndian` produces `true`, since every valid profile is
 little-endian. The extractor checks the exact System.Runtime field and that it is
@@ -697,12 +699,7 @@ A validated byref-like aggregate without reference or byref fields is admitted; 
 spans, byref/pointer arguments and unsupported storage are rejected. What the query does and
 does not establish is in [runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions).
 
-## Lean-only operations and implementation sources
-
-The Lean `CIL.Op` type and memory/SIMD modules contain operations that the extractor does not
-emit, including vector argument homes, fixed vector-lane helpers, `newVector256` and additional
-memory helpers. Their existence is not evidence that the corresponding arbitrary CIL or .NET API
-is extractable. The checked memory interpreter implements generic aggregate operations.
+## Implementation sources
 
 The implementation this inventory describes is:
 
@@ -783,7 +780,7 @@ and `divRemBits_zero` and `divRemBits_overflow` the faults.
 
 Native-width overloads use the validated 64-bit target. The 128-bit (`Int128` and `UInt128`
 `BigMul`), generic-math and other unlisted helper overloads are unsupported. The extractor
-validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention
+validates the exact .NET 11 runtime assembly identity, declaring type, static calling convention
 and signature. Correspondence to the runtime's implementation is an assumption; see
 [portable bit helpers](SOUNDNESS-RUNTIME.md#portable-bit-helpers).
 

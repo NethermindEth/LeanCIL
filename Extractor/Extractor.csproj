@@ -9,7 +9,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>leancil</ToolCommandName>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <DefineConstants>$(DefineConstants);LEANCIL_TOOL</DefineConstants>
@@ -33,7 +33,10 @@
     <Compile Include="../scripts/FailureReports.cs" Link="FailureReports.cs" />
     <Compile Include="../scripts/VerifyReports.cs" Link="VerifyReports.cs" />
     <Compile Include="../scripts/LibraryAudit.cs" Link="LibraryAudit.cs" />
-    <Content Include="../CIL/**/*.lean;../CIL.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
+    <Compile Include="../scripts/BindingAudit.cs" Link="BindingAudit.cs" />
+    <Compile Include="../scripts/DeepCheckInputs.cs" Link="DeepCheckInputs.cs" />
+    <Compile Include="../scripts/BindingImage.cs" Link="BindingImage.cs" />
+    <Content Include="../CIL/**/*.lean;../CIL.lean;../StrictBinding/**/*.lean;../StrictBinding.lean;../lakefile.toml;../lake-manifest.json;../lean-toolchain">
       <Link>verification/%(Identity)</Link>
       <TargetPath>verification/$([MSBuild]::MakeRelative('$(MSBuildProjectDirectory)/..', '%(FullPath)'))</TargetPath>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

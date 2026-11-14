@@ -4,7 +4,8 @@ open CIL CIL.Extraction
 
 namespace Tests.UnsafeCallEvidence
 
-private def scope := "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+private def scope :=
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
 private def unsafeType : TypeExpr := .atom scope "System.Runtime.CompilerServices.Unsafe"
 private def word : TypeExpr := .atom scope "System.UInt64"
 private def call : CallSite := {
@@ -41,7 +42,7 @@ example : ¬ UnsafeCallsValid [] (raw call) [true] [] := by decide +kernel
 
 -- `NullRef` must push the null reference: no other operation with its stack effect.
 example : UnsafeCallsValid [] (raw nullCall) [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.const32 0] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.ldc_i4 0] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory (.staticAddress [])] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory .isNullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { nullCall with target := .external "forged" }) [true] [.memory .nullRef] := by decide +kernel

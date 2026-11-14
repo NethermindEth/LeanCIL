@@ -9,15 +9,12 @@ Suspended frames retain their correspondence when nested calls add mappings and 
 
 namespace CIL.Safety
 
-/-- A retained activation, including private dead homes and vector argument homes. -/
+/-- A retained activation, including private dead homes. -/
 structure Frame.Renamed (indices : LocalIndexMap) (mapping : AllocationRenaming)
     (scopes : Nat → Nat → Prop) (source target : Frame) : Prop where
   activation : scopes source.activation target.activation
   locals : indices.Selects (LocalSlot.Renamed mapping) source.locals target.locals
   owned : OwnedAllocations mapping source.owned target.owned
-  arguments : target.arguments = source.arguments.map
-    (fun home => (home.1, mapping.localSlot home.2))
-  argumentBounds : ∀ home ∈ source.arguments, home.2.Below mapping.sourceLimit
   stackBytes : target.stackBytes = source.stackBytes
 
 /-- Nested calls can extend identity and scope correspondence without rewriting suspended frames. -/
@@ -27,16 +24,9 @@ theorem Frame.Renamed.extend {indices : LocalIndexMap} {earlier later : Allocati
     (extension : earlier.Extends later)
     (scopeExtension : ∀ left right, before left right → after left right) :
     Frame.Renamed indices later after source target := by
-  refine ⟨scopeExtension _ _ related.activation,
+  exact ⟨scopeExtension _ _ related.activation,
     related.locals.imp (fun _ _ slots => slots.extend extension),
-    related.owned.extend extension, ?_, ?_, related.stackBytes⟩
-  · rw [related.arguments]
-    apply List.map_congr_left
-    intro home member
-    exact congrArg (fun slot => (home.1, slot))
-      (extension.localSlot home.2 (related.argumentBounds home member)).symm
-  · intro home member
-    exact (related.argumentBounds home member).mono extension.source home.2
+    related.owned.extend extension, related.stackBytes⟩
 #print axioms Frame.Renamed.extend
 
 /-- Assignment to a retained local updates its relocated target operand. -/
@@ -50,7 +40,7 @@ theorem Frame.Renamed.setLocal {indices : LocalIndexMap} {mapping : AllocationRe
       { target with
         locals := target.locals.set (indices.index position) (mapping.localSlot slot) } :=
   ⟨related.activation, related.locals.set position bound slot _ ⟨slotBound, rfl⟩,
-    related.owned, related.arguments, related.argumentBounds, related.stackBytes⟩
+    related.owned, related.stackBytes⟩
 #print axioms Frame.Renamed.setLocal
 
 /-- A paired dynamic allocation adds corresponding ownership and the same quota charge. -/
@@ -66,7 +56,7 @@ theorem Frame.Renamed.addOwned {indices : LocalIndexMap} {mapping : AllocationRe
         owned := mapping.image identity :: target.owned
         stackBytes := target.stackBytes + reserved } :=
   ⟨related.activation, related.locals, .keep identity bound related.owned,
-    related.arguments, related.argumentBounds, congrArg (· + reserved) related.stackBytes⟩
+    congrArg (· + reserved) related.stackBytes⟩
 #print axioms Frame.Renamed.addOwned
 
 end CIL.Safety

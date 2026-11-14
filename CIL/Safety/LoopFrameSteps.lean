@@ -210,7 +210,7 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   let below ← loopFreshName `storedBelow
   -- A local store is a `storeLocal` fact the next step reads; a struct store is a whole step.
   let mut takesStep := true
-  let store ← if op.isAppOfArity ``CIL.Op.setFieldAt 2 then do
+  let store ← if op.isAppOfArity ``CIL.Instruction.setFieldAt 2 then do
       let some offsetTerm := argument? op 0 | return false
       let some offset ← literalNat? offsetTerm | return false
       let some (_, top) := stack[0]? | return false
@@ -228,7 +228,7 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
       let value ← Term.exprToSyntax payload
       `(tactic| obtain ⟨$after, $stepped, $framed, $below⟩ := CIL.Safety.LoopFrame.store_field
         $frame $(quote index) $valid $(quote field) $value)
-    else if op.isAppOfArity ``CIL.Op.initAggregate 1 then do
+    else if op.isAppOfArity ``CIL.Instruction.initAggregate 1 then do
       let some widthTerm := lastArgument? op | return false
       let some width ← literalNat? widthTerm | return false
       let some (_, top) := stack[0]? | return false
@@ -243,10 +243,8 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
       let layoutTerm ← Term.exprToSyntax layout
       `(tactic| obtain ⟨$after, $stepped, $framed, $below⟩ := CIL.Safety.LoopFrame.zero_aggregate
         $frame $(quote index) $layoutTerm [$zeros,*] (valid := $valid))
-    else if op.isAppOfArity ``CIL.Op.setLocal 2 then do
-      -- A narrowing store changes the value, which `LoopFrame.store` does not model.
-      let #[slotIndex, narrowing] := op.getAppArgs | return false
-      unless (← whnf narrowing).isAppOf ``Option.none do return false
+    else if op.isAppOfArity ``CIL.Instruction.stloc 1 then do
+      let #[slotIndex] := op.getAppArgs | return false
       let some index ← literalNat? slotIndex | return false
       let some (_, top) := stack[0]? | return false
       let top ← whnf top
@@ -451,14 +449,14 @@ partial def loopWalk (tactic : String) (mode : LoopStepping) (explicit : Array T
   if let .resume target := mode then
     if position == some target then return
   -- A call or return an advance stops at is left for the next tactic.
-  if mode == .advance && stopped.any fun op => callsCallee op || op == ``CIL.Op.ret then
+  if mode == .advance && stopped.any fun op => callsCallee op || op == ``CIL.Instruction.ret then
     return
   if ← loopFrameStore facts.core layouts footprint then
     return ← loopWalk tactic mode explicit layouts footprint true
   -- Where the walk stopped is the mode's stop, or a store no frame lemma takes.
   let stops : Lean.Name → Bool := match mode with
-    | .finish => (· == ``CIL.Op.ret)
-    | .advance => fun op => callsCallee op || op == ``CIL.Op.ret
+    | .finish => (· == ``CIL.Instruction.ret)
+    | .advance => fun op => callsCallee op || op == ``CIL.Instruction.ret
     | _ => fun _ => false
   loopStuck tactic facts.all prepared stops
 

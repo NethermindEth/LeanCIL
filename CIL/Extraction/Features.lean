@@ -247,7 +247,7 @@ where
 
 /-- The word an emitted parameterless call pushes when `constants` knows its callee's return.
     `constants` reads each callee's own certificate, which its own obligation validates. -/
-def calleeConstant (constants : Nat → Option W32) : Op → Option W32
+def calleeConstant (constants : Nat → Option W32) : Instruction → Option W32
   | .call index 0 => constants index
   | _ => none
 
@@ -292,11 +292,11 @@ def constantComparison (opcode : Nat) (left right : W32) : Option W32 := do
     | 65028 => some 4 | 65029 => some 9
     | _ => comparisonBranchIndex opcode
   let (operation, negate) ← match index with
-    | 0 => some (Op.eq, false) | 5 => some (.eq, true)
-    | 1 => some (.lt, true) | 2 => some (.gt, false)
-    | 3 => some (.gt, true) | 4 => some (.lt, false)
-    | 6 => some (.ltu, true) | 7 => some (.gtu, false)
-    | 8 => some (.gtu, true) | 9 => some (.ltu, false)
+    | 0 => some (Instruction.ceq, false) | 5 => some (.ceq, true)
+    | 1 => some (.clt, true) | 2 => some (.cgt, false)
+    | 3 => some (.cgt, true) | 4 => some (.clt, false)
+    | 6 => some (.clt_un, true) | 7 => some (.cgt_un, false)
+    | 8 => some (.cgt_un, true) | 9 => some (.clt_un, false)
     | _ => none
   let .i32 value ← binary operation (.i32 left) (.i32 right) | none
   return if negate then (if value == 0 then 1 else 0) else value
@@ -446,7 +446,7 @@ private def rawFeatureEffect (instruction : RawInstruction) : Option (Nat × Nat
 
 /-- Raw and emitted instructions have the same known stack effect, and an emitted call
     or construction comes from the matching raw opcode. -/
-private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) : Bool :=
+private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   let returnsValue := match instruction.operand with
     | .call site => site.returnsValue
     | .indirectCall result .. => result != .void
@@ -454,7 +454,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) 
   let properCall := match emitted with
     | .call .. => instruction.opcode == 40 || instruction.opcode == 111
     | .callInstance .. | .callVirtual .. => instruction.opcode == 111
-    | .newAggregate .. | .newVector256 .. | .newObject .. => instruction.opcode == 115
+    | .newAggregate .. | .newObject .. => instruction.opcode == 115
     | .objectTest .. => instruction.opcode ∈ [116, 117]
     | _ => true
   properCall && match rawFeatureEffect instruction, emittedFeatureEffect emitted returnsValue with
@@ -464,9 +464,8 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Op) 
 /-- Bind every control-flow operation and every operation that propagates a known
     feature fact to the actual emitted instruction. Unknown operations may not
     emit an unsupported hole on a reachable path. -/
-private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
-    (eligible : Nat → Option W32 → Bool)
-    (instruction : RawInstruction) (emitted : Op) : Bool :=
+def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
+    (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     Id.run do
   -- These terminal/transfer encodings have no admitted emitted counterpart.
   if instruction.opcode ∈ [39, 122, 220, 65041, 65044, 65050] then return false
@@ -478,18 +477,18 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
       | _, _ => false
   if let .stackAlloc _ := emitted then return false
   if let some word := constant32 instruction <|> platformField instruction then
-    return match emitted with | .const32 actual => word == actual | _ => false
+    return match emitted with | .ldc_i4 actual => word == actual | _ => false
   -- Any other static load is never a constant.
-  if instruction.opcode == 126 && (match emitted with | .const32 _ => true | _ => false) then
+  if instruction.opcode == 126 && (match emitted with | .ldc_i4 _ => true | _ => false) then
     return false
   if let .call site := instruction.operand then
     if referenceContentQuery site then
       return match referenceContentConstant layouts site, emitted with
-        | some expected, .const32 actual => instruction.opcode == 40 && expected == actual
+        | some expected, .ldc_i4 actual => instruction.opcode == 40 && expected == actual
         | _, _ => false
     if platformQuery site then
       return match platformConstant site, emitted with
-        | some expected, .const32 actual => instruction.opcode == 40 && expected == actual
+        | some expected, .ldc_i4 actual => instruction.opcode == 40 && expected == actual
         | _, _ => false
     if let some feature := featureGetter site then
       return match emitted with
@@ -497,29 +496,22 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
         | _ => false
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036, 10, 11, 12, 13, 19, 65038] then
     let some index := localIndex instruction | return false
-    let narrow := match raw.locals[index]? with
-      | some (.atom _ "System.Boolean") => some NarrowKind.unsigned8 | _ => none
     return match emitted with
-      | .local actual actualNarrow =>
-        instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index &&
-          (!eligible index (some 0) || actualNarrow == narrow)
-      | .setLocal actual actualNarrow =>
-        instruction.opcode ∈ [10, 11, 12, 13, 19, 65038] && actual == index &&
-          (!eligible index (some 0) || actualNarrow == narrow)
+      | .ldloc actual => instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index
+      | .stloc actual => instruction.opcode ∈ [10, 11, 12, 13, 19, 65038] && actual == index
       | _ => false
   if instruction.opcode ∈ [18, 65037] then
     return match localIndex instruction, emitted with
-      | some index, .localAddr actual => index == actual
-      | some index, .local actual none => index == actual && spanLocalOp raw.locals instruction
+      | some index, .ldloca actual => index == actual
       | _, _ => false
   -- Argument homes are appended after all raw locals. Their precise mapping is
   -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
   if instruction.opcode ∈ [15, 65034] then
     return match emitted with
-      | .localAddr index | .local index none => raw.locals.length <= index
+      | .ldloca index => raw.locals.length <= index
       | _ => false
   if instruction.opcode ∈ [16, 65035] then
-    return match emitted with | .setLocal index none => raw.locals.length <= index | _ => false
+    return match emitted with | .stloc index => raw.locals.length <= index | _ => false
   -- A span address on the stack is already the view it names, so copying the span emits nothing.
   if instruction.opcode == 113 then
     if let .type type := instruction.operand then
@@ -534,72 +526,64 @@ private def featureOpMatchesWith (layouts : Array RawLayout) (raw : RawMethod)
     | _ => emitted
   return match instruction.opcode, instruction.operand, emitted with
     -- Stack duplication, bitwise operations and exact comparison signedness.
-    | 37, _, .dup | 95, _, .band | 96, _, .bor | 97, _, .bxor | 65025, _, .eq => true
-    | 65026, _, .gt | 65027, _, .gtu | 65028, _, .lt | 65029, _, .ltu => true
+    | 37, _, .dup | 95, _, .and | 96, _, .or | 97, _, .xor | 65025, _, .ceq => true
+    | 65026, _, .cgt | 65027, _, .cgt_un | 65028, _, .clt | 65029, _, .clt_un => true
     -- Branches, short and long forms, must keep their target.
-    | 43, .target x, .branch y | 56, .target x, .branch y
-    | 44, .target x, .brzero y | 57, .target x, .brzero y
-    | 45, .target x, .brnonzero y | 58, .target x, .brnonzero y
+    | 43, .target x, .br y | 56, .target x, .br y
+    | 44, .target x, .brfalse y | 57, .target x, .brfalse y
+    | 45, .target x, .brtrue y | 58, .target x, .brtrue y
     | 46, .target x, .beq y | 59, .target x, .beq y
     | 47, .target x, .bge y | 60, .target x, .bge y
     | 48, .target x, .bgt y | 61, .target x, .bgt y
     | 49, .target x, .ble y | 62, .target x, .ble y
     | 50, .target x, .blt y | 63, .target x, .blt y
-    | 51, .target x, .bne y | 64, .target x, .bne y
-    | 52, .target x, .bgeu y | 65, .target x, .bgeu y
-    | 53, .target x, .bgtu y | 66, .target x, .bgtu y
-    | 54, .target x, .bleu y | 67, .target x, .bleu y
-    | 55, .target x, .bltu y | 68, .target x, .bltu y => x == y
+    | 51, .target x, .bne_un y | 64, .target x, .bne_un y
+    | 52, .target x, .bge_un y | 65, .target x, .bge_un y
+    | 53, .target x, .bgt_un y | 66, .target x, .bgt_un y
+    | 54, .target x, .ble_un y | 67, .target x, .ble_un y
+    | 55, .target x, .blt_un y | 68, .target x, .blt_un y => x == y
     | 69, .targets x, .switch y => x == y
     | 42, _, .ret _ => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
-    | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .branch _ | _, _, .switch _
-    | _, _, .brzero _ | _, _, .brnonzero _ => false
+    | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
+    | _, _, .brfalse _ | _, _, .brtrue _ => false
     | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
         fallbackFeatureEffect instruction emitted
 
-/-- Bind an emitted operation using the raw local-eligibility rule. -/
-def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod) :=
-  featureOpMatchesWith layouts raw (featureLocalEligible raw)
-
 /-- A decided typeof branch preserves its raw target or falls through without a stack effect. -/
-def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : Op) : Bool :=
+def typeBranchMatches (instruction : RawInstruction) (taken : Bool) (emitted : Instruction) :
+    Bool :=
   match instruction.operand, emitted with
-  | .target target, .branch actual => taken && actual == target
+  | .target target, .br actual => taken && actual == target
   | .target _, .nop => !taken
   | _, _ => false
 
 /-- Fold operands emit nothing, a type comparison emits its decided word or branch and a folded
     `throw` raises its constructed type. Outside a decided test, type handles and
     `System.Type` calls have no admitted translation. -/
-private def featureOpMatchesAtWith (layouts : Array RawLayout) (raw : RawMethod)
-    (eligible : Nat → Option W32 → Bool)
+def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
     (role : Option FoldRole)
-    (instruction : RawInstruction) (emitted : Op) : Bool :=
+    (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   match role, emitted with
   | some .head, .nop | some .interior, .nop => true
-  | some (.result value), .const32 word => word == if value then 1 else 0
+  | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
   | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
   | some (.raise name), .throw exception => name == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
     index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with
     | .call site => site.returnType == raw.returnType &&
-      featureOpMatchesWith layouts raw eligible instruction (.call target count)
+      featureOpMatches layouts raw instruction (.call target count)
     | _ => false
   | some .tailCall, .managed (.call signature catalog true) =>
     signature.result == callableType raw.returnType &&
-      featureOpMatchesWith layouts raw eligible instruction
+      featureOpMatches layouts raw instruction
         (.managed (.call signature catalog false))
-  | some .argument, _ => featureOpMatchesWith layouts raw eligible instruction emitted
+  | some .argument, _ => featureOpMatches layouts raw instruction emitted
   | some _, _ => false
   | none, _ => !typeTestInstruction instruction &&
-      featureOpMatchesWith layouts raw eligible instruction emitted
-
-/-- Fold-aware instruction matching stated independently of any eligibility index. -/
-def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod) :=
-  featureOpMatchesAtWith layouts raw (featureLocalEligible raw)
+      featureOpMatches layouts raw instruction emitted
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     be well shaped, match its emitted instruction, and flow into a weaker state at every
@@ -610,11 +594,11 @@ private def checkFeatureSiteWith (layouts : Array RawLayout) (constants : Nat �
     (profile : FeatureProfile)
     (certificate : Nat → Option (Option FeatureState))
     (roles : Nat → Option (Option FoldRole)) :
-    (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Op → Bool
+    (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Instruction → Bool
   | _, none, .unsupported _ => true
   | ((instruction, role), pc), some state, emitted =>
     wellShaped raw eligible state &&
-      featureOpMatchesAtWith layouts raw eligible role instruction emitted &&
+      featureOpMatchesAt layouts raw role instruction emitted &&
       match featureTransferAtWith layouts raw eligible profile (calleeConstant constants emitted)
           role instruction state,
           featureSuccessors role pc instruction state with
@@ -644,7 +628,7 @@ private def checkFeatureSite (layouts : Array RawLayout) (constants : Nat → Op
     index, the word a parameterless call to that method pushes. -/
 def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32)
     (raw : RawMethod) (profile : FeatureProfile)
-    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Op) : Prop :=
+    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Instruction) : Prop :=
   certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
   reachable = certificate.map Option.isSome ∧
   certificate[0]? = some (some { stack := [], locals := List.replicate raw.locals.length none }) ∧
@@ -656,7 +640,7 @@ def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32
 
 instance (layouts : Array RawLayout) (constants : Nat → Option W32) (raw : RawMethod)
     (profile : FeatureProfile) (certificate : FeatureCertificate)
-    (reachable : List Bool) (code : List Op) :
+    (reachable : List Bool) (code : List Instruction) :
     Decidable (FeatureFlowValid layouts constants raw profile certificate reachable code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
@@ -664,7 +648,7 @@ instance (layouts : Array RawLayout) (constants : Nat → Option W32) (raw : Raw
     as indexing the complete certificate and fold-role lists at every site. -/
 theorem FeatureFlowValid_iff_list (layouts : Array RawLayout) (constants : Nat → Option W32)
     (raw : RawMethod) (profile : FeatureProfile)
-    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Op) :
+    (certificate : FeatureCertificate) (reachable : List Bool) (code : List Instruction) :
     FeatureFlowValid layouts constants raw profile certificate reachable code ↔
       certificate.length = raw.code.length ∧ code.length = raw.code.length ∧
       reachable = certificate.map Option.isSome ∧
@@ -729,7 +713,7 @@ theorem factsWeaken_preserves {source target : List (Option W32)} {values : List
 /-- Abstract execution edges are computed from raw instructions, incoming facts and the
     emitted call targets, rather than copied from the extractor's claimed reachable mask. -/
 def FeatureEdge (layouts : Array RawLayout) (constants : Nat → Option W32) (raw : RawMethod)
-    (profile : FeatureProfile) (certificate : FeatureCertificate) (code : List Op)
+    (profile : FeatureProfile) (certificate : FeatureCertificate) (code : List Instruction)
     (pc target : Nat) : Prop :=
   ∃ instruction role state emitted after successors,
     (raw.code.zip (foldRoles raw.locals raw.code))[pc]? = some (instruction, role) ∧
@@ -742,7 +726,7 @@ def FeatureEdge (layouts : Array RawLayout) (constants : Nat → Option W32) (ra
     including backedges and every possible switch destination. -/
 theorem FeatureFlowValid.edge_closed {layouts : Array RawLayout}
     {constants : Nat → Option W32} {raw : RawMethod} {profile : FeatureProfile}
-    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Op}
+    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
     (valid : FeatureFlowValid layouts constants raw profile certificate reachable code)
     {pc target : Nat}
     (edge : FeatureEdge layouts constants raw profile certificate code pc target) :
@@ -773,7 +757,7 @@ theorem FeatureFlowValid.edge_closed {layouts : Array RawLayout}
 /-- The pcs reachable from entry along recomputed feature edges. -/
 inductive FeaturePath (layouts : Array RawLayout) (constants : Nat → Option W32)
     (raw : RawMethod) (profile : FeatureProfile) (certificate : FeatureCertificate)
-    (code : List Op) : Nat → Prop where
+    (code : List Instruction) : Nat → Prop where
   | entry : FeaturePath layouts constants raw profile certificate code 0
   | next {pc target} : FeaturePath layouts constants raw profile certificate code pc →
       FeatureEdge layouts constants raw profile certificate code pc target →
@@ -783,7 +767,7 @@ inductive FeaturePath (layouts : Array RawLayout) (constants : Nat → Option W3
     reachable mask; this includes cyclic paths without a bound on iterations. -/
 theorem FeatureFlowValid.path_reachable {layouts : Array RawLayout}
     {constants : Nat → Option W32} {raw : RawMethod} {profile : FeatureProfile}
-    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Op}
+    {certificate : FeatureCertificate} {reachable : List Bool} {code : List Instruction}
     (valid : FeatureFlowValid layouts constants raw profile certificate reachable code)
     {pc : Nat} (path : FeaturePath layouts constants raw profile certificate code pc) :
     reachable[pc]? = some true := by

@@ -490,7 +490,7 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.otherMemoryInstruction _ _
 
 theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
-    (operation : CIL.Op) (stack : List Value) :
+    (operation : CIL.Instruction) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (instruction operation stack m)
       (instruction operation stack n) := by
   unfold CIL.Safety.instruction

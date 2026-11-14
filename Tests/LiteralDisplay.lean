@@ -71,8 +71,8 @@ open CIL.Safety in
     byte; `high` and `count` are the literals a case checks. -/
 def literalBody (high count narrow : Nat) : CIL.Method :=
   { returnsValue := true, locals := [], code :=
-      [.const32 (BitVec.ofNat 32 high), .convI8, .arg 0, .const32 (BitVec.ofNat 32 count), .shl,
-        .const32 (BitVec.ofNat 32 narrow), .convU1, .ret] }
+      [.ldc_i4 (BitVec.ofNat 32 high), .conv_i8, .arg 0, .ldc_i4 (BitVec.ofNat 32 count), .shl,
+        .ldc_i4 (BitVec.ofNat 32 narrow), .conv_u1, .ret] }
 
 section LiteralOperands
 open CIL.Safety

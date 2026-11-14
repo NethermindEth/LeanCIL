@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -88,6 +90,61 @@ static partial class Documentation
             .Order(StringComparer.Ordinal).ToArray();
 
     internal static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
+
+    /// <summary>Extensions of the tracked files that are text.</summary>
+    static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".lean", ".cs", ".md", ".toml", ".json", ".yml", ".txt", ".tsv", ".csv" };
+
+    /// <summary>The bytes below 0x20 that text may not hold: all but tab, line feed and carriage return.</summary>
+    static readonly SearchValues<byte> ControlBytes = SearchValues.Create(
+        [.. Enumerable.Range(0, 0x20).Where(value => value is not (9 or 10 or 13)).Select(value => (byte)value)]);
+
+    /// <summary>
+    /// Whether a character above ASCII shows nothing, shows as a space or reorders the text around it: a
+    /// format character such as a zero-width space or a bidirectional override, a line or paragraph
+    /// separator, a space other than U+0020, or a control character.
+    /// </summary>
+    static bool IsInvisible(Rune rune) => Rune.GetUnicodeCategory(rune) is UnicodeCategory.Format
+        or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator or UnicodeCategory.SpaceSeparator
+        or UnicodeCategory.Control;
+
+    /// <summary>
+    /// One problem per control byte and per invisible character in the text files among
+    /// <paramref name="tracked"/> (paths relative to the root), each read once. A shell that expands a backtick
+    /// escape writes a control byte into a docstring, and git then treats the file as binary. A reader of a
+    /// diff cannot see an invisible character, and a bidirectional override shows code in another order than
+    /// the compiler reads it; source spells such a character as an escape.
+    /// </summary>
+    internal static List<string> ControlCharacterProblems(string root, IEnumerable<string> tracked)
+    {
+        var problems = new List<string>();
+        foreach (var relative in tracked.Where(path => TextExtensions.Contains(Path.GetExtension(path))))
+        {
+            var path = Path.Combine(root, relative);
+            if (!File.Exists(path)) continue;
+            var bytes = File.ReadAllBytes(path);
+            var (line, offset) = (1, 0);
+            while (bytes.AsSpan(offset).IndexOfAny(ControlBytes) is var found and >= 0)
+            {
+                line += bytes.AsSpan(offset, found).Count((byte)'\n');
+                offset += found;
+                problems.Add(
+                    $"{relative}:{line}: control byte 0x{bytes[offset]:X2}; text holds only tab and line ends");
+                offset++;
+            }
+            (line, offset) = (1, 0);
+            while (bytes.AsSpan(offset).IndexOfAnyInRange((byte)0x80, (byte)0xFF) is var found and >= 0)
+            {
+                line += bytes.AsSpan(offset, found).Count((byte)'\n');
+                offset += found;
+                Rune.DecodeFromUtf8(bytes.AsSpan(offset), out var rune, out var consumed);
+                if (IsInvisible(rune))
+                    problems.Add($"{relative}:{line}: invisible character U+{rune.Value:X4}; write it as an escape");
+                offset += consumed;
+            }
+        }
+        return problems;
+    }
 
     /// <summary>
     /// Whether a path under the root names an entry with exactly this spelling, as a case-sensitive

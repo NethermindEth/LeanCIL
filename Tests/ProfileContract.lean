@@ -78,8 +78,8 @@ theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by
 theorem avx2_family_holds (target : FeatureProfile) (wide : target.avx2 = true) :
     avx2Contract.Holds (reprofile program target) 0 :=
   avx2_holds.reprofile avx2Profile uniform (Program.ProfileAgreement.of_flags _ _ _ (by
-    simp [Program.profileReads, Op.profileReads, program, avx2Profile, FeatureProfile.evaluate,
-      wide]))
+    simp [Program.profileReads, Instruction.profileReads, program, avx2Profile,
+      FeatureProfile.evaluate, wide]))
 
 /-- The normal-return outcome form carries over: method 0 never raises. -/
 theorem outcome_holds :
@@ -175,7 +175,7 @@ theorem intrinsic_disagrees : ¬ intrinsicProgram.ProfileAgreement avx512Profile
   intro agreement
   have available := agreement _ (List.mem_singleton_self _) (.intrinsic (.avx512DQ .mul64) 2)
     (by simp)
-  simp [Op.ProfileAgreement, Intrinsic.available, avx512Profile, avx2Profile] at available
+  simp [Instruction.ProfileAgreement, Intrinsic.available, avx512Profile, avx2Profile] at available
 
 /-- info: 'Tests.ProfileContract.uniform' does not depend on any axioms -/
 #guard_msgs in #print axioms uniform

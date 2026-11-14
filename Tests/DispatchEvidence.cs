@@ -6,8 +6,9 @@
 if (args is not ([] or ["--prepare-only"]))
     throw new ArgumentException("Usage: DispatchEvidence.cs [--prepare-only]");
 using var fixtures = new Program();
-fixtures.PrepareLeanFixtures("Tests.ConstrainedEvidence", "Tests.ConstantCalls", "Tests.NativeMethodTables",
-    "Tests.StackAllocation", "Tests.StackAllocationEvidence");
+fixtures.PrepareLeanFixtures("Tests.ConstrainedEvidence", "Tests.MetadataBuilder",
+    "Tests.BodyEncoding", "Tests.ConstantCalls",
+    "Tests.NativeMethodTables", "Tests.StackAllocation", "Tests.StackAllocationEvidence");
 if (args is ["--prepare-only"]) return;
 Run(["dotnet", "run", "--file", "Tests/ConstrainedResolution.cs"], streamOutput: true,
     progress: "ConstrainedResolution");

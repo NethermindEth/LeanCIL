@@ -72,4 +72,11 @@ internal static class Arithmetic
     public static ulong TypeCheck(ulong x) => ReferenceEquals(typeof(ulong), typeof(uint)) ? x : unchecked(x + 1);
     public static ulong Distance(ulong x, ulong y) => x < y ? y - x : x - y;
     public static int Larger(int x, int y) => x < y ? y : x;
+    public static int AtLeastFive(int x) => x < 5 ? 5 : x;
+    public static uint AtMostFive(uint x) => x > 5 ? 5 : x;
+    public static int FiveToOne(int x)
+    {
+        if (x == 5) return 1;
+        return x;
+    }
 }

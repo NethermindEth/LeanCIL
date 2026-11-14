@@ -15,7 +15,7 @@ stepping.
 namespace CIL.Safety
 
 /-- Observing an unspecified operand faults before any instruction changes memory or state. -/
-theorem step_unspecified {body : CIL.Method} {operation : CIL.Op} {pc : Nat}
+theorem step_unspecified {body : CIL.Method} {operation : CIL.Instruction} {pc : Nat}
     {args stack : List Value} {frame : Frame} {memory : Memory}
     (unknown : unspecifiedOperands (observerCount operation) stack = true) :
     step body operation pc args frame stack memory =
@@ -27,12 +27,15 @@ section InstructionEquations
 
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
 
+-- Equations that hold by unfolding are closed by `id rfl`: simp applies a lemma proved by `rfl`
+-- without a proof term, so the kernel would reduce `step` again at every use.
+
 /-- Expose an argument load without expanding the instruction dispatcher. -/
 @[cil_step] theorem step_argument_eq (index : Nat) (stack : List Value) :
     step body (.arg index) pc args frame stack memory = do
       let some value := args[index]? | .error .invalidState
       return FrameAction.next (pc + 1) ((← checkedValue memory value) :: stack) frame memory :=
-  rfl
+  id rfl
 
 /-- A narrowed argument load checks that the selected argument has no unspecified bits,
     then extends an i32 according to the parameter's declared width. -/
@@ -79,31 +82,31 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 @[cil_step] theorem step_return_narrow_eq (kind : CIL.NarrowKind) (bits : CIL.W32) :
     step body (.ret (some kind)) pc args frame [.scalar (.i32 bits)] memory =
       if body.returnsValue then .ok (.returned [.scalar (.i32 (kind.extend bits))] memory)
-      else .error .invalidState := rfl
+      else .error .invalidState := id rfl
 
 -- Conditional branches on an i32 or i64 operand.
-@[cil_step] theorem step_brzero_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
-    step body (.brzero target) pc args frame (.scalar (.i32 value) :: rest) memory = do
+@[cil_step] theorem step_brfalse_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
+    step body (.brfalse target) pc args frame (.scalar (.i32 value) :: rest) memory = do
       let some taken := CIL.truth (.i32 value) | .error .invalidState
-      return FrameAction.next (if taken then pc + 1 else target) rest frame memory := rfl
+      return FrameAction.next (if taken then pc + 1 else target) rest frame memory := id rfl
 
-@[cil_step] theorem step_brzero_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
-    step body (.brzero target) pc args frame (.scalar (.i64 value) :: rest) memory = do
+@[cil_step] theorem step_brfalse_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
+    step body (.brfalse target) pc args frame (.scalar (.i64 value) :: rest) memory = do
       let some taken := CIL.truth (.i64 value) | .error .invalidState
-      return FrameAction.next (if taken then pc + 1 else target) rest frame memory := rfl
+      return FrameAction.next (if taken then pc + 1 else target) rest frame memory := id rfl
 
-@[cil_step] theorem step_brnonzero_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
-    step body (.brnonzero target) pc args frame (.scalar (.i32 value) :: rest) memory = do
+@[cil_step] theorem step_brtrue_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :
+    step body (.brtrue target) pc args frame (.scalar (.i32 value) :: rest) memory = do
       let some taken := CIL.truth (.i32 value) | .error .invalidState
-      return FrameAction.next (if taken then target else pc + 1) rest frame memory := rfl
+      return FrameAction.next (if taken then target else pc + 1) rest frame memory := id rfl
 
-@[cil_step] theorem step_brnonzero_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
-    step body (.brnonzero target) pc args frame (.scalar (.i64 value) :: rest) memory = do
+@[cil_step] theorem step_brtrue_i64_eq (target : Nat) (value : CIL.W64) (rest : List Value) :
+    step body (.brtrue target) pc args frame (.scalar (.i64 value) :: rest) memory = do
       let some taken := CIL.truth (.i64 value) | .error .invalidState
-      return FrameAction.next (if taken then target else pc + 1) rest frame memory := rfl
+      return FrameAction.next (if taken then target else pc + 1) rest frame memory := id rfl
 
 /-- The dispatcher arm for an op that only touches the stack and memory. -/
-def instructionStep (op : CIL.Op) (pc : Nat) (frame : Frame) (stack : List Value)
+def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : List Value)
     (memory : Memory) :
     ExecutionResult FrameAction := do
   let (memory, values) ← instruction op stack memory
@@ -165,27 +168,12 @@ def instructionStep (op : CIL.Op) (pc : Nat) (frame : Frame) (stack : List Value
       instructionStep (.setAggregateFieldAt offset size) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
-@[cil_step] theorem step_lane_eq {index} (stack : List Value) :
-    step body (.lane index) pc args frame stack memory =
-      instructionStep (.lane index) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_laneAddress_eq {index} (stack : List Value) :
-    step body (.laneAddress index) pc args frame stack memory =
-      instructionStep (.laneAddress index) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_setLane_eq {index} (stack : List Value) :
-    step body (.setLane index) pc args frame stack memory =
-      instructionStep (.setLane index) pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 2 stack <;> rfl
-@[cil_step] theorem step_const32_eq {word} (stack : List Value) :
-    step body (.const32 word) pc args frame stack memory =
-      instructionStep (.const32 word) pc frame stack memory := rfl
-@[cil_step] theorem step_const64_eq {word} (stack : List Value) :
-    step body (.const64 word) pc args frame stack memory =
-      instructionStep (.const64 word) pc frame stack memory := rfl
+@[cil_step] theorem step_ldc_i4_eq {value} (stack : List Value) :
+    step body (.ldc_i4 value) pc args frame stack memory =
+      instructionStep (.ldc_i4 value) pc frame stack memory := id rfl
+@[cil_step] theorem step_ldc_i8_eq {value} (stack : List Value) :
+    step body (.ldc_i8 value) pc args frame stack memory =
+      instructionStep (.ldc_i8 value) pc frame stack memory := id rfl
 @[cil_step] theorem step_load64_eq (stack : List Value) :
     step body .load64 pc args frame stack memory =
       instructionStep .load64 pc frame stack memory := by
@@ -198,52 +186,33 @@ def instructionStep (op : CIL.Op) (pc : Nat) (frame : Frame) (stack : List Value
   cases observed : unspecifiedOperands 2 stack <;> rfl
 @[cil_step] theorem step_dup_eq (stack : List Value) :
     step body .dup pc args frame stack memory =
-      instructionStep .dup pc frame stack memory := rfl
+      instructionStep .dup pc frame stack memory := id rfl
 @[cil_step] theorem step_pop_eq (stack : List Value) :
     step body .pop pc args frame stack memory =
-      instructionStep .pop pc frame stack memory := rfl
+      instructionStep .pop pc frame stack memory := id rfl
 @[cil_step] theorem step_skipInit_eq (stack : List Value) :
     step body .skipInit pc args frame stack memory =
       instructionStep .skipInit pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_asRef_eq (stack : List Value) :
-    step body .asRef pc args frame stack memory =
-      instructionStep .asRef pc frame stack memory := by
-  simp only [step, instructionStep, instruction, observerCount, pureArity]
-  cases observed : unspecifiedOperands 1 stack <;> rfl
-
 -- Locals go through the frame's slot for `index`.
-@[cil_step] theorem step_local_eq (index : Nat) (narrow : Option CIL.NarrowKind)
-    (stack : List Value) :
-    step body (.local index narrow) pc args frame stack memory = do
+@[cil_step] theorem step_ldloc_eq (index : Nat) (stack : List Value) :
+    step body (.ldloc index) pc args frame stack memory = do
       let some slot := frame.locals[index]? | .error .invalidState
-      return FrameAction.next (pc + 1) ((← loadLocal memory slot) :: stack) frame memory := rfl
+      return FrameAction.next (pc + 1) ((← loadLocal memory slot) :: stack) frame memory := id rfl
 
-@[cil_step] theorem step_vectorLocal_eq (index : Nat) (stack : List Value) :
-    step body (.vectorLocal index) pc args frame stack memory = do
+@[cil_step] theorem step_ldloca_eq (index : Nat) (stack : List Value) :
+    step body (.ldloca index) pc args frame stack memory = do
       let some slot := frame.locals[index]? | .error .invalidState
-      return FrameAction.next (pc + 1) ((← loadLocal memory slot) :: stack) frame memory := rfl
+      return FrameAction.next (pc + 1) ((← localAddress memory slot) :: stack) frame memory :=
+  id rfl
 
-@[cil_step] theorem step_localAddr_eq (index : Nat) (stack : List Value) :
-    step body (.localAddr index) pc args frame stack memory = do
-      let some slot := frame.locals[index]? | .error .invalidState
-      return FrameAction.next (pc + 1) ((← localAddress memory slot) :: stack) frame memory := rfl
-
-@[cil_step] theorem step_setLocal_eq (index : Nat) (narrow : Option CIL.NarrowKind)
-    (value : Value) (rest : List Value) :
-    step body (.setLocal index narrow) pc args frame (value :: rest) memory = do
+@[cil_step] theorem step_stloc_eq (index : Nat) (value : Value) (rest : List Value) :
+    step body (.stloc index) pc args frame (value :: rest) memory = do
       let some slot := frame.locals[index]? | .error .invalidState
       let (slot, memory) ← storeLocal memory slot value
       return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }
-        memory := rfl
-
-@[cil_step] theorem step_setVectorLocal_eq (index : Nat) (value : Value) (rest : List Value) :
-    step body (.setVectorLocal index) pc args frame (value :: rest) memory = do
-      let some slot := frame.locals[index]? | .error .invalidState
-      let (slot, memory) ← storeLocal memory slot value
-      return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }
-        memory := rfl
+        memory := id rfl
 
 /-- A constructor checks its arguments and replaces its typed local at the call instruction. -/
 @[cil_step] theorem step_initializeSpanLocal_eq (index : Nat)
@@ -285,7 +254,7 @@ def instructionStep (op : CIL.Op) (pc : Nat) (frame : Frame) (stack : List Value
         let value ← checkedIntrinsic operation operands
         return FrameAction.next (pc + 1)
           ((← checkedValue memory (.scalar value)) :: stack.drop argc) frame memory :=
-  rfl
+  id rfl
 
 end InstructionEquations
 
@@ -303,7 +272,7 @@ theorem invoke_of_run {program : CIL.Program} {fuel method : Nat} {body : CIL.Me
 
 /-- A fetched step that continues at `target` costs one unit of fuel. -/
 theorem run_next {program : CIL.Program} {fuel method pc target : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory}
     (methodFound : program[method]? = some body)
     (instructionFound : body.code[pc]? = some op)
@@ -316,7 +285,7 @@ theorem run_next {program : CIL.Program} {fuel method pc target : Nat}
 
 /-- Return through frame expiration and the checked result validation. -/
 theorem run_return {program : CIL.Program} {fuel method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame : Frame} {memory updated : Memory}
     (methodFound : program[method]? = some body)
     (instructionFound : body.code[pc]? = some op)
@@ -331,7 +300,7 @@ theorem run_return {program : CIL.Program} {fuel method pc : Nat}
 
 /-- A fetched step that faults ends the run with that fault, located at its method and pc. -/
 theorem run_fault {program : CIL.Program} {fuel method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value}
     {frame : Frame} {memory : Memory} {fault : ExecutionFault}
     (methodFound : program[method]? = some body)
     (instructionFound : body.code[pc]? = some op)
@@ -357,7 +326,7 @@ theorem invoke_of_run_fault {program : CIL.Program} {fuel method : Nat} {body : 
 /-- Compose one checked fetched step with a terminating continuation without
     fixing the continuation's fuel in the caller proof. -/
 theorem run_next_exists {program : CIL.Program} {method pc target : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory}
     (post : Memory → List Value → Prop)
     (methodFound : program[method]? = some body)
@@ -378,7 +347,7 @@ theorem run_next_exists {program : CIL.Program} {method pc target : Nat}
 /-- Some fuel runs to a successful return satisfying `post` when the fetched instruction
     returns checked values that satisfy it. -/
 theorem run_return_exists {program : CIL.Program} {method pc : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.returned values updated))

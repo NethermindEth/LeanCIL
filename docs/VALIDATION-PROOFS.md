@@ -17,8 +17,8 @@ library and tactic regressions kernel-check the resulting proofs.
 
 ### Stepping
 
-- `Tests.Automation` steps an eight-instruction arithmetic method (`arg, arg, const32, shl, add,
-  const32, gtu, ret`) with symbolic inputs and arbitrary caller memory using `cil_checked_steps`;
+- `Tests.Automation` steps an eight-instruction arithmetic method (`arg, arg, ldc_i4, shl, add,
+  ldc_i4, cgt_un, ret`) with symbolic inputs and arbitrary caller memory using `cil_checked_steps`;
   its axiom assertion permits only `propext` and `Quot.sound`. It checks both paths of a symbolic
   branch from a supplied truth hypothesis, and that failed candidate summaries do not escape their
   transaction. Memory and static dispatch facts keep abstract bitcast results in inferred stacks;
@@ -32,6 +32,11 @@ library and tactic regressions kernel-check the resulting proofs.
   store, with the exact unsolved goal asserted. It also counts exactly 12
   `trace.CIL.factNormalize` events for a 27-instruction run.
 - `Tests.AggregateSetup` and `Tests.Semantics` cover frame setup and interpreter behavior.
+- `Tests.BodyDecoding` checks the method body decoder against hand-made bodies, one rejection per
+  failure kind and the operand table against a static list generated from Mono.Cecil.
+- `Tests.MetadataDecoding` and `Tests.MetadataBinding` check the metadata table, heap and
+  signature decoders and the binding of operands, locals and method definitions to carried
+  metadata, as [VALIDATION-COVERAGE](VALIDATION-COVERAGE.md) describes.
 - `Tests.InterpreterEquations` checks that each shared equation lemma is stored by its LeanCIL
   module, not rebuilt by the importer, and that a tactic macro naming `CIL.step.eq_def`
   elaborates.
@@ -67,7 +72,8 @@ library and tactic regressions kernel-check the resulting proofs.
   opaque vector locals. It checks empty and unmodeled span slots, both mutabilities and every
   supported width. It rejects unsupported widths, scalar span initializers, numeric dead locals
   (in the kernel and in the tactic) and non-trailing dead locals, and reports a changed live
-  instruction under dead locals.
+  instruction under dead locals. It also rejects an embedding whose declared signature,
+  layout environment or call link differs, and names the pc of a differing link.
 - `Tests.OutcomeEmbedding` checks transport of named exceptions and outcome contracts and the
   relocated fault pc, and that changed throws, unsupported execution and fuel exhaustion do not
   transfer.
@@ -127,12 +133,13 @@ library and tactic regressions kernel-check the resulting proofs.
     one word, with no frame lemma, memory or store named: the loop tactics step through the
     local's stores, carry the `Unsafe.Add` result and write authority, and cross the call with
     the frame after it. Without the `Unsafe.Add` fact the tactics stop at the add and the failure
-    names that fact; the tactics stop at a narrowing local store; without the index bound the
-    failure at the call names the footprint side condition; for an unformed argument the failure
-    names the argument check; and for a contract input whose arguments differ from the stack the
-    failure names both the arguments and the stack.
+    names that fact; without the index bound the failure at the call names the footprint side
+    condition; for an unformed argument the failure names the argument check; and for a contract
+    input whose arguments differ from the stack the failure names both the arguments and the stack.
   - At a return `cil_loop_finish` closes the results and confinement and leaves the rest of the
     postcondition open.
+  - `cil_loop_finish` steps a store of 0x1FF to a byte local, its load and the return, and closes
+    the postcondition that the result is 0xFF, the low byte the local's slot keeps.
   - The proofs select what the tactics leave by its obligation tag, so a dropped or renamed tag
     fails the build: `invariant` and `measure` after `cil_loop_recurse`,
     `precondition.stampMethod` for a named callee's open precondition, the third conjunct's
@@ -210,7 +217,8 @@ every case; the prefix theorem checks the widened value.
   implementation, shows the unlinked program faults at the import's call, and composes an imported
   raising `Percent`.
 - `Tests.Linking` links an `AddTo` library whose entry calls its own relocated `Sum` helper and a
-  `Percent` library whose raise reaches `Root` through two relocated calls.
+  `Percent` library whose raise reaches `Root` through two relocated calls, and checks that relocating a
+  body renames its link table with its code.
 - `Tests.ProfileContract` proves a contract for a method that tests AVX2 once, under x86-64-v3,
   and carries it to x86-64-v4, to v3 without 256-bit acceleration and to every profile with AVX2
   on. A raising method's outcome contract carries over too, in outcome, CLR-named and
@@ -303,7 +311,9 @@ These checks cover the behavior that [binding and transport](PROOFS-BINDING.md) 
   changes the managed callee numbering through a wrapper entry point. The suite replays the
   generated equations, extraction certificates, bindings and consumer proofs in the kernel, and
   rejects changed flag values, callees, branch targets, instruction equations, stale extraction
-  source and incompatible profile-dependent parameter homes.
+  source and incompatible profile-dependent parameter homes. It also compiles a template and
+  both profile bindings for a virtual call, a method address, a callable pointer call and a
+  static initializer, each of whose method indices differs between the two profiles.
 
 ## Store view reuse
 

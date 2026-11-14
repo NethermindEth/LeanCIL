@@ -20,33 +20,39 @@ namespace CIL.Embedding
 open CIL
 
 /-- A mixed native operation resumes at the relabeled successor. -/
-theorem nativeBinaryValues_relabel (r : Nat → Nat) (op : Op) (pc q : Nat) (x y : Value)
+theorem nativeBinaryValues_relabel (r : Nat → Nat) (op : Instruction) (pc q : Nat) (x y : Value)
     (next : r (pc + 1) = q + 1) (target : Nat) (values : List Value)
     (h : nativeBinaryValues op pc x y = .ok (target, values)) :
     nativeBinaryValues (op.relabel r) q x y = .ok (r target, values) := by
   unfold nativeBinaryValues at h ⊢
   simp only [bind, Except.bind] at h ⊢
-  rw [widenNativeOperand_relabel]
+  rw [widenNativeOperand_relabel, divideKind?_relabel, checkedKind?_relabel,
+    nativePureBinary_relabel]
   split at h
   rotate_right
   · cases h
   all_goals
     try simp only at h ⊢
-    cases op <;> simp only [Op.relabel, nativePureBinary, Bool.false_eq_true, ↓reduceIte,
-      reduceCtorEq] at h ⊢
-    all_goals (split at h <;> (try (cases h; done)))
-    all_goals rename_i found
+    rcases divided : op.divideKind? with _ | ⟨signed, remainder⟩ <;>
+      rcases checked : op.checkedKind? with _ | ⟨kind, signedness⟩ <;>
+      simp only [divided, checked] at h ⊢
+    -- Faulting arithmetic resumes at the successor; a pure operation relabels its own target.
     all_goals first
-      | ((try simp only [found])
+      | (split at h
+         · cases h
          simp only [pure, Except.pure] at h ⊢
          cases h
-         rw [next]
-         done)
-      | (have stepped := base_relabel_of_nativePure _ rfl r pc q _ _ _ _ _ (fun _ => next) found
-         simp only [Op.relabel] at stepped
-         rw [stepped]
-         cases h
-         rfl)
+         rw [next])
+      | (by_cases pure : nativePureBinary op = true
+         · simp only [pure, ite_true] at h ⊢
+           split at h
+           · rename_i found
+             rw [base_relabel_of_nativePure op pure r pc q _ _ _ _ _ (fun _ => next) found]
+             cases h
+             rfl
+           · cases h
+         · simp only [pure, Bool.false_eq_true, ite_false] at h
+           cases h)
 
 end CIL.Embedding
 
@@ -60,15 +66,19 @@ def FrameAction.relabel (r : Nat → Nat) : FrameAction → FrameAction
   | action => action
 
 /-- What one expected step at `pc` and its actual counterpart at `q` must share. -/
-structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL.Op) (pc q : Nat) :
+structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL.Instruction)
+    (pc q : Nat) :
     Prop where
   profile : actual.profile = expected.profile
   returnsValue : actual.returnsValue = expected.returnsValue
+  declared : actual.declared = expected.declared
+  environment : actual.environment = expected.environment
   statics : staticAt actual q = staticAt expected pc
+  link : actual.linkAt q = expected.linkAt pc
   next : op.continues = true → r (pc + 1) = q + 1
 
 /-- A successful expected step is matched by the relabeled step at the renamed pc. -/
-def StepRelabel (op : CIL.Op) : Prop :=
+def StepRelabel (op : CIL.Instruction) : Prop :=
   ∀ (expected actual : CIL.Method) (r : Nat → Nat) (pc q : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) (action : FrameAction),
     StepContext expected actual r op pc q →
@@ -94,7 +104,7 @@ theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
 
 /-- The shared tail of `step` for instructions without a dedicated case. -/
 theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
-    {stack : List Value} {frame : Frame} {m : Memory} {action : FrameAction} (op : CIL.Op)
+    {stack : List Value} {frame : Frame} {m : Memory} {action : FrameAction} (op : CIL.Instruction)
     (arity : pureArity (op.relabel r) = pureArity op)
     (base : pureArity op ≠ none → BaseRelabel op)
     (plain : pureArity op = none → ∀ result, instruction op stack m = .ok result →
@@ -105,7 +115,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false pc [] 0 values (fun _ => none) profile with
+        match CIL.step op false pc [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -118,7 +128,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false q [] 0 values (fun _ => none) profile with
+        match CIL.step (op.relabel r) false q [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -200,7 +210,7 @@ set_option hygiene false in
 macro "step_relabel_fallback" base:term:max plain:term:max : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rw [context.profile]
   refine fallback_relabel (profile := expected.profile) _ rfl ?_ ?_ context.next h
@@ -230,7 +240,7 @@ set_option hygiene false in
 macro "explicit_intro" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers))
 
 theorem mapError_ok {x : Except ε α} {f : ε → ε'} {a : α} (h : x.mapError f = .ok a) :
@@ -245,15 +255,15 @@ set_option hygiene false in
 local macro "stack_cases" " => " close:tacticSeq : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rcases stack with _ | ⟨v1, rest⟩ <;> (try cases v1)
-  all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+  all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
   all_goals (try rw [context.profile])
   all_goals first
     | (($close); done)
     | (rcases rest with _ | ⟨v2, rest⟩ <;> (try cases v2)
-       all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+       all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
        all_goals (try rw [context.profile])
        all_goals ($close))))
 
@@ -269,7 +279,7 @@ set_option hygiene false in
 macro "plain_cases" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   (try rw [context.profile])
   (try rw [context.returnsValue])))
@@ -285,7 +295,8 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
-theorem step_relabel_nativeBinary (operation : Op) : StepRelabel (.nativeBinary operation) := by
+theorem step_relabel_nativeBinary (operation : Instruction) :
+    StepRelabel (.nativeBinary operation) := by
   stack_cases =>
     first
       | fallback_vacuous
@@ -295,56 +306,44 @@ theorem step_relabel_nativeBinary (operation : Op) : StepRelabel (.nativeBinary 
          simp only [native, Except.mapError, ok_bind_eq] at h ⊢
          lockstep)
 
-theorem step_relabel_divide (signed remainder : Bool) : StepRelabel (.divide signed remainder) := by
+/-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
+theorem step_relabel_faulting (op : Instruction)
+    (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
+  cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
+    Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
+  all_goals stack_cases =>
+    first | fallback_vacuous | lockstep
+
+#print axioms step_relabel_faulting
+
+/-- A successful checked conversion of a signed operand is matched by the relabeled step. -/
+theorem step_relabel_conv_ovf (target : ConvTarget) : StepRelabel (.conv_ovf target) := by
   stack_cases =>
     first | fallback_vacuous | lockstep
 
-theorem step_relabel_checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool) :
-    StepRelabel (.checkedArithmetic kind signed) := by
+#print axioms step_relabel_conv_ovf
+
+/-- A successful checked conversion of an unsigned operand is matched by the relabeled step. -/
+theorem step_relabel_conv_ovf_un (target : ConvTarget) : StepRelabel (.conv_ovf_un target) := by
   stack_cases =>
     first | fallback_vacuous | lockstep
 
-theorem step_relabel_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
-    StepRelabel (.checkedConvert width signed unsignedInput) := by
-  stack_cases =>
-    first | fallback_vacuous | lockstep
+#print axioms step_relabel_conv_ovf_un
 
 theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
     StepRelabel (.arg index narrow) := by
   plain_cases
   cases narrow <;> dsimp only at h ⊢ <;> lookup_lockstep
 
-theorem step_relabel_vectorArg (index : Nat) : StepRelabel (.vectorArg index) := by
-  explicit_intro
-  lockstep
-
-theorem step_relabel_vectorArgAddr (index : Nat) : StepRelabel (.vectorArgAddr index) := by
-  explicit_intro
-  lockstep
-
-theorem step_relabel_local (index : Nat) (narrow : Option NarrowKind) :
-    StepRelabel (.local index narrow) := by
+theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases
   lookup_lockstep
 
-theorem step_relabel_vectorLocal (index : Nat) : StepRelabel (.vectorLocal index) := by
+theorem step_relabel_ldloca (index : Nat) : StepRelabel (.ldloca index) := by
   plain_cases
   lookup_lockstep
 
-theorem step_relabel_vectorLocalAddr (index : Nat) : StepRelabel (.vectorLocalAddr index) := by
-  plain_cases
-  lookup_lockstep
-
-theorem step_relabel_setVectorLocal (index : Nat) : StepRelabel (.setVectorLocal index) := by
-  stack_cases =>
-    first | fallback_vacuous | lookup_lockstep
-
-theorem step_relabel_localAddr (index : Nat) : StepRelabel (.localAddr index) := by
-  plain_cases
-  lookup_lockstep
-
-theorem step_relabel_setLocal (index : Nat) (narrow : Option NarrowKind) :
-    StepRelabel (.setLocal index narrow) := by
+theorem step_relabel_stloc (index : Nat) : StepRelabel (.stloc index) := by
   stack_cases =>
     first | fallback_vacuous | lookup_lockstep
 
@@ -413,14 +412,6 @@ theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall calle
 
 #print axioms step_relabel_tailCall
 
-theorem step_relabel_newVector256 (callee argc : Nat) :
-    StepRelabel (.newVector256 callee argc) := by
-  plain_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    lockstep
-
 theorem step_relabel_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     StepRelabel (.newAggregate callee argc size) := by
   plain_cases
@@ -458,10 +449,10 @@ theorem step_relabel_memory (operation : MemoryOp) : StepRelabel (.memory operat
 theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow) := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   cases narrow
-  · dsimp only [CIL.Op.relabel] at h ⊢
+  · dsimp only [CIL.Instruction.relabel] at h ⊢
     rw [context.returnsValue]
     by_cases sized : stack.length = (if expected.returnsValue then 1 else 0)
     · rw [ite_eq_left sized] at h ⊢
@@ -469,12 +460,12 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
     · rw [ite_eq_right sized] at h
       cases h
   · rcases stack with _ | ⟨v, rest⟩
-    · dsimp only [CIL.Op.relabel] at h ⊢
+    · dsimp only [CIL.Instruction.relabel] at h ⊢
       fallback_vacuous
     · cases v with
       | scalar value =>
         cases value <;> cases rest
-        all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+        all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
         all_goals (try rw [context.returnsValue])
         all_goals first
           | fallback_vacuous
@@ -517,7 +508,7 @@ elab "base_relabels" : tactic => withMainContext do
   replaceMainGoal []
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_eq : StepRelabel .eq := by
+theorem step_relabel_ceq : StepRelabel .ceq := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -526,10 +517,10 @@ theorem step_relabel_eq : StepRelabel .eq := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_eq
+#print axioms step_relabel_ceq
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_brzero (target : Nat) : StepRelabel (.brzero target) := by
+theorem step_relabel_brfalse (target : Nat) : StepRelabel (.brfalse target) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -538,10 +529,10 @@ theorem step_relabel_brzero (target : Nat) : StepRelabel (.brzero target) := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_brzero
+#print axioms step_relabel_brfalse
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_brnonzero (target : Nat) : StepRelabel (.brnonzero target) := by
+theorem step_relabel_brtrue (target : Nat) : StepRelabel (.brtrue target) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -550,7 +541,7 @@ theorem step_relabel_brnonzero (target : Nat) : StepRelabel (.brnonzero target) 
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_brnonzero
+#print axioms step_relabel_brtrue
 
 /-- A type test continues at the next pc with the tested reference or null. -/
 theorem step_relabel_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
@@ -579,7 +570,7 @@ theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := by
 #print axioms step_relabel_beq
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_bne (target : Nat) : StepRelabel (.bne target) := by
+theorem step_relabel_bne_un (target : Nat) : StepRelabel (.bne_un target) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -588,7 +579,7 @@ theorem step_relabel_bne (target : Nat) : StepRelabel (.bne target) := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_bne
+#print axioms step_relabel_bne_un
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_sub : StepRelabel .sub := by
@@ -603,7 +594,7 @@ theorem step_relabel_sub : StepRelabel .sub := by
 #print axioms step_relabel_sub
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_ltu : StepRelabel .ltu := by
+theorem step_relabel_clt_un : StepRelabel .clt_un := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -612,10 +603,10 @@ theorem step_relabel_ltu : StepRelabel .ltu := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_ltu
+#print axioms step_relabel_clt_un
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_gtu : StepRelabel .gtu := by
+theorem step_relabel_cgt_un : StepRelabel .cgt_un := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -624,10 +615,10 @@ theorem step_relabel_gtu : StepRelabel .gtu := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_gtu
+#print axioms step_relabel_cgt_un
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_bltu (target : Nat) : StepRelabel (.bltu target) := by
+theorem step_relabel_blt_un (target : Nat) : StepRelabel (.blt_un target) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -636,10 +627,10 @@ theorem step_relabel_bltu (target : Nat) : StepRelabel (.bltu target) := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_bltu
+#print axioms step_relabel_blt_un
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_bgeu (target : Nat) : StepRelabel (.bgeu target) := by
+theorem step_relabel_bge_un (target : Nat) : StepRelabel (.bge_un target) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -648,10 +639,10 @@ theorem step_relabel_bgeu (target : Nat) : StepRelabel (.bgeu target) := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_bgeu
+#print axioms step_relabel_bge_un
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_bgtu (target : Nat) : StepRelabel (.bgtu target) := by
+theorem step_relabel_bgt_un (target : Nat) : StepRelabel (.bgt_un target) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -660,10 +651,10 @@ theorem step_relabel_bgtu (target : Nat) : StepRelabel (.bgtu target) := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_bgtu
+#print axioms step_relabel_bgt_un
 
 /-- Relabel scalar or reference observations while preserving their result. -/
-theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
+theorem step_relabel_ble_un (target : Nat) : StepRelabel (.ble_un target) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -672,13 +663,13 @@ theorem step_relabel_bleu (target : Nat) : StepRelabel (.bleu target) := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_bleu
+#print axioms step_relabel_ble_un
 
 set_option maxHeartbeats 300000 in
 /-- Every instruction steps in lockstep with its relabeled form. Pure operations
     share the base-step contract; ordinary memory operations share an unchanged
     instruction result. Dedicated dispatcher cases retain their own proofs. -/
-theorem step_relabel (op : CIL.Op) : StepRelabel op := by
+theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   cases op
   case managed operation =>
     cases operation
@@ -703,26 +694,20 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
          all_goals simp only [FrameAction.relabel]
          all_goals rw [context.next rfl])
   case nativeBinary operation => exact step_relabel_nativeBinary operation
-  case divide signed remainder => exact step_relabel_divide signed remainder
-  case checkedArithmetic kind signed => exact step_relabel_checkedArithmetic kind signed
-  case checkedConvert width signed unsignedInput =>
-    exact step_relabel_checkedConvert width signed unsignedInput
+  case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
+    | mul_ovf_un => exact step_relabel_faulting _ rfl
+  case conv_ovf target => exact step_relabel_conv_ovf target
+  case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case arg index narrow => exact step_relabel_arg index narrow
-  case vectorArg index => exact step_relabel_vectorArg index
-  case vectorArgAddr index => exact step_relabel_vectorArgAddr index
-  case «local» index narrow => exact step_relabel_local index narrow
-  case vectorLocal index => exact step_relabel_vectorLocal index
-  case vectorLocalAddr index => exact step_relabel_vectorLocalAddr index
-  case setVectorLocal index => exact step_relabel_setVectorLocal index
+  case ldloc index => exact step_relabel_ldloc index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
-  case localAddr index => exact step_relabel_localAddr index
-  case setLocal index narrow => exact step_relabel_setLocal index narrow
+  case ldloca index => exact step_relabel_ldloca index
+  case stloc index => exact step_relabel_stloc index
   case call method argc => exact step_relabel_call method argc
   case callInstance method argc => exact step_relabel_callInstance method argc
   case callVirtual targets argc => exact step_relabel_callVirtual targets argc
   case tailCall method argc => exact step_relabel_tailCall method argc
-  case newVector256 constructor argc => exact step_relabel_newVector256 constructor argc
   case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
   case newObject constructor argc owner bases size =>
     exact step_relabel_newObject constructor argc owner bases size
@@ -732,32 +717,32 @@ theorem step_relabel (op : CIL.Op) : StepRelabel op := by
   case throw exception => exact step_relabel_throw exception
   case unsupported description => exact step_relabel_unsupported description
   case sub => exact step_relabel_sub
-  case ltu => exact step_relabel_ltu
-  case gtu => exact step_relabel_gtu
-  case bltu target => exact step_relabel_bltu target
-  case bgeu target => exact step_relabel_bgeu target
-  case bgtu target => exact step_relabel_bgtu target
-  case bleu target => exact step_relabel_bleu target
-  case eq => exact step_relabel_eq
-  case brzero target => exact step_relabel_brzero target
-  case brnonzero target => exact step_relabel_brnonzero target
+  case clt_un => exact step_relabel_clt_un
+  case cgt_un => exact step_relabel_cgt_un
+  case blt_un target => exact step_relabel_blt_un target
+  case bge_un target => exact step_relabel_bge_un target
+  case bgt_un target => exact step_relabel_bgt_un target
+  case ble_un target => exact step_relabel_ble_un target
+  case ceq => exact step_relabel_ceq
+  case brfalse target => exact step_relabel_brfalse target
+  case brtrue target => exact step_relabel_brtrue target
   case objectTest type throwing => exact step_relabel_objectTest type throwing
   case beq target => exact step_relabel_beq target
-  case bne target => exact step_relabel_bne target
-  case nop | neg | gt | bgt | ble | convI1 | convI2 | convU2 | convI8 | convI4 | convU1
-    | convU4 | convU8 | convU | bnot | add | mul | band | bor | bxor | shl | shr | shrUn
-    | lt | branch | switch | bge | blt | feature =>
+  case bne_un target => exact step_relabel_bne_un target
+  case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
+    | conv_u4 | conv_u8 | conv_u | conv_i | not | add | mul | and | or | xor | shl | shr | shr_un
+    | clt | br | switch | bge | blt | feature =>
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
-    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | lane
-    | laneAddress | setLane | const32 | const64 | load64 | store64 | dup | pop | skipInit | asRef =>
+    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
+    | ldc_i8 | load64 | store64 | dup | pop | skipInit =>
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
 -- Preserve the named specializations for callers of the existing API.
 theorem step_relabel_nop : StepRelabel .nop := step_relabel _
 theorem step_relabel_neg : StepRelabel .neg := step_relabel _
-theorem step_relabel_gt : StepRelabel .gt := step_relabel _
+theorem step_relabel_cgt : StepRelabel .cgt := step_relabel _
 theorem step_relabel_bgt (target : Nat) : StepRelabel (.bgt target) := step_relabel _
 theorem step_relabel_ble (target : Nat) : StepRelabel (.ble target) := step_relabel _
 theorem step_relabel_loadAggregate (size : Nat) : StepRelabel (.loadAggregate size) :=
@@ -780,48 +765,46 @@ theorem step_relabel_aggregateFieldAt (offset : Nat) (size : Nat) :
     StepRelabel (.aggregateFieldAt offset size) := step_relabel _
 theorem step_relabel_setAggregateFieldAt (offset : Nat) (size : Nat) :
     StepRelabel (.setAggregateFieldAt offset size) := step_relabel _
-theorem step_relabel_lane (index : Fin 4) : StepRelabel (.lane index) := step_relabel _
-theorem step_relabel_laneAddress (index : Fin 4) : StepRelabel (.laneAddress index) :=
-  step_relabel _
-theorem step_relabel_setLane (index : Fin 4) : StepRelabel (.setLane index) := step_relabel _
-theorem step_relabel_const32 (word : W32) : StepRelabel (.const32 word) := step_relabel _
-theorem step_relabel_const64 (word : W64) : StepRelabel (.const64 word) := step_relabel _
-theorem step_relabel_convI1 : StepRelabel .convI1 := step_relabel _
-theorem step_relabel_convI2 : StepRelabel .convI2 := step_relabel _
-theorem step_relabel_convU2 : StepRelabel .convU2 := step_relabel _
-theorem step_relabel_convI8 : StepRelabel .convI8 := step_relabel _
-theorem step_relabel_convI4 : StepRelabel .convI4 := step_relabel _
-theorem step_relabel_convU1 : StepRelabel .convU1 := step_relabel _
-theorem step_relabel_convU4 : StepRelabel .convU4 := step_relabel _
-theorem step_relabel_convU8 : StepRelabel .convU8 := step_relabel _
-theorem step_relabel_convU : StepRelabel .convU := step_relabel _
-theorem step_relabel_bnot : StepRelabel .bnot := step_relabel _
+theorem step_relabel_ldc_i4 (value : W32) : StepRelabel (.ldc_i4 value) := step_relabel _
+theorem step_relabel_ldc_i8 (value : W64) : StepRelabel (.ldc_i8 value) := step_relabel _
+theorem step_relabel_conv_i1 : StepRelabel .conv_i1 := step_relabel _
+theorem step_relabel_conv_i2 : StepRelabel .conv_i2 := step_relabel _
+theorem step_relabel_conv_u2 : StepRelabel .conv_u2 := step_relabel _
+theorem step_relabel_conv_i8 : StepRelabel .conv_i8 := step_relabel _
+theorem step_relabel_conv_i4 : StepRelabel .conv_i4 := step_relabel _
+theorem step_relabel_conv_u1 : StepRelabel .conv_u1 := step_relabel _
+theorem step_relabel_conv_u4 : StepRelabel .conv_u4 := step_relabel _
+theorem step_relabel_conv_u8 : StepRelabel .conv_u8 := step_relabel _
+theorem step_relabel_conv_u : StepRelabel .conv_u := step_relabel _
+/-- A successful `conv_i` step is matched by the relabeled step at the renamed pc. -/
+theorem step_relabel_conv_i : StepRelabel .conv_i := step_relabel _
+#print axioms step_relabel_conv_i
+theorem step_relabel_not : StepRelabel .not := step_relabel _
 theorem step_relabel_add : StepRelabel .add := step_relabel _
 theorem step_relabel_mul : StepRelabel .mul := step_relabel _
-theorem step_relabel_band : StepRelabel .band := step_relabel _
-theorem step_relabel_bor : StepRelabel .bor := step_relabel _
-theorem step_relabel_bxor : StepRelabel .bxor := step_relabel _
+theorem step_relabel_and : StepRelabel .and := step_relabel _
+theorem step_relabel_or : StepRelabel .or := step_relabel _
+theorem step_relabel_xor : StepRelabel .xor := step_relabel _
 theorem step_relabel_shl : StepRelabel .shl := step_relabel _
 theorem step_relabel_shr : StepRelabel .shr := step_relabel _
-theorem step_relabel_shrUn : StepRelabel .shrUn := step_relabel _
-theorem step_relabel_lt : StepRelabel .lt := step_relabel _
+theorem step_relabel_shr_un : StepRelabel .shr_un := step_relabel _
+theorem step_relabel_clt : StepRelabel .clt := step_relabel _
 theorem step_relabel_load64 : StepRelabel .load64 := step_relabel _
 theorem step_relabel_store64 : StepRelabel .store64 := step_relabel _
 theorem step_relabel_dup : StepRelabel .dup := step_relabel _
 theorem step_relabel_pop : StepRelabel .pop := step_relabel _
-theorem step_relabel_branch (target : Nat) : StepRelabel (.branch target) := step_relabel _
+theorem step_relabel_br (target : Nat) : StepRelabel (.br target) := step_relabel _
 theorem step_relabel_switch (targets : List Nat) : StepRelabel (.switch targets) := step_relabel _
 theorem step_relabel_bge (target : Nat) : StepRelabel (.bge target) := step_relabel _
 theorem step_relabel_blt (target : Nat) : StepRelabel (.blt target) := step_relabel _
 theorem step_relabel_skipInit : StepRelabel .skipInit := step_relabel _
-theorem step_relabel_asRef : StepRelabel .asRef := step_relabel _
 theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_relabel _
 
 #print axioms step_relabel
 
 /-- An expected step that throws is matched by the same throw from the relabeled step at the
     renamed pc. -/
-def StepRaise (op : CIL.Op) : Prop :=
+def StepRaise (op : CIL.Instruction) : Prop :=
   ∀ (expected actual : CIL.Method) (r : Nat → Nat) (pc q : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) (exception : String),
     StepContext expected actual r op pc q →
@@ -845,7 +828,7 @@ theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α} {excep
 
 /-- The shared tail of `step` throws only from `instruction`, which both steps share. -/
 theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
-    {stack : List Value} {frame : Frame} {m : Memory} {exception : String} (op : CIL.Op)
+    {stack : List Value} {frame : Frame} {m : Memory} {exception : String} (op : CIL.Instruction)
     (arity : pureArity (op.relabel r) = pureArity op)
     (base : pureArity op ≠ none → BaseRelabel op)
     (plain : pureArity op = none → instruction op stack m = .error (.thrown exception) →
@@ -856,7 +839,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false pc [] 0 values (fun _ => none) profile with
+        match CIL.step op false pc [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -870,7 +853,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false q [] 0 values (fun _ => none) profile with
+        match CIL.step (op.relabel r) false q [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -917,7 +900,7 @@ set_option hygiene false in
 macro "step_raise_fallback" base:term:max plain:term:max : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rw [context.profile]
   refine fallback_raise (profile := expected.profile) _ rfl ?_ ?_ context.next h
@@ -950,7 +933,8 @@ macro "lookup_raise" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
-theorem step_raise_nativeBinary (operation : Op) : StepRaise (.nativeBinary operation) := by
+theorem step_raise_nativeBinary (operation : Instruction) :
+    StepRaise (.nativeBinary operation) := by
   stack_cases =>
     first
       | fallback_raise_vacuous
@@ -961,19 +945,31 @@ theorem step_raise_nativeBinary (operation : Op) : StepRaise (.nativeBinary oper
            simp only [native, Except.mapError, ok_bind_eq] at h ⊢
            raise_lockstep)
 
-theorem step_raise_divide (signed remainder : Bool) : StepRaise (.divide signed remainder) := by
+/-- Division, remainder and overflow-checked arithmetic raise in lockstep with their
+    relabeling. -/
+theorem step_raise_faulting (op : Instruction)
+    (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRaise op := by
+  cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
+    Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
+  all_goals stack_cases =>
+    first | fallback_raise_vacuous | raise_lockstep
+
+#print axioms step_raise_faulting
+
+/-- A throwing checked conversion of a signed operand throws the same from the relabeled step. -/
+theorem step_raise_conv_ovf (target : ConvTarget) : StepRaise (.conv_ovf target) := by
   stack_cases =>
     first | fallback_raise_vacuous | raise_lockstep
 
-theorem step_raise_checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool) :
-    StepRaise (.checkedArithmetic kind signed) := by
+#print axioms step_raise_conv_ovf
+
+/-- A throwing checked conversion of an unsigned operand throws the same from the relabeled
+    step. -/
+theorem step_raise_conv_ovf_un (target : ConvTarget) : StepRaise (.conv_ovf_un target) := by
   stack_cases =>
     first | fallback_raise_vacuous | raise_lockstep
 
-theorem step_raise_checkedConvert (width : Nat) (signed unsignedInput : Bool) :
-    StepRaise (.checkedConvert width signed unsignedInput) := by
-  stack_cases =>
-    first | fallback_raise_vacuous | raise_lockstep
+#print axioms step_raise_conv_ovf_un
 
 theorem step_raise_call (callee argc : Nat) : StepRaise (.call callee argc) := by
   plain_cases
@@ -1010,13 +1006,6 @@ theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee ar
 
 #print axioms step_raise_tailCall
 
-theorem step_raise_newVector256 (callee argc : Nat) : StepRaise (.newVector256 callee argc) := by
-  plain_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    raise_lockstep
-
 theorem step_raise_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     StepRaise (.newAggregate callee argc size) := by
   plain_cases
@@ -1049,10 +1038,10 @@ theorem step_raise_intrinsic (operation : Intrinsic) (argc : Nat) :
 theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
-  dsimp only [CIL.Op.relabel] at h ⊢
+  dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   cases narrow
-  · dsimp only [CIL.Op.relabel] at h ⊢
+  · dsimp only [CIL.Instruction.relabel] at h ⊢
     rw [context.returnsValue]
     by_cases sized : stack.length = (if expected.returnsValue then 1 else 0)
     · rw [ite_eq_left sized] at h ⊢
@@ -1060,12 +1049,12 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
     · rw [ite_eq_right sized] at h
       cases h
   · rcases stack with _ | ⟨v, rest⟩
-    · dsimp only [CIL.Op.relabel] at h ⊢
+    · dsimp only [CIL.Instruction.relabel] at h ⊢
       fallback_raise_vacuous
     · cases v with
       | scalar value =>
         cases value <;> cases rest
-        all_goals (try dsimp only [CIL.Op.relabel] at h ⊢)
+        all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
         all_goals (try rw [context.returnsValue])
         all_goals first
           | fallback_raise_vacuous
@@ -1083,34 +1072,34 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
         cases rest <;> fallback_raise_vacuous
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_eq : StepRaise .eq := by
+theorem step_raise_ceq : StepRaise .ceq := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_eq
+#print axioms step_raise_ceq
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_brzero (target : Nat) : StepRaise (.brzero target) := by
+theorem step_raise_brfalse (target : Nat) : StepRaise (.brfalse target) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_brzero
+#print axioms step_raise_brfalse
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_brnonzero (target : Nat) : StepRaise (.brnonzero target) := by
+theorem step_raise_brtrue (target : Nat) : StepRaise (.brtrue target) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_brnonzero
+#print axioms step_raise_brtrue
 
 /-- A failed cast raises `InvalidCastException` at the same relabelled location. -/
 theorem step_raise_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
@@ -1134,14 +1123,14 @@ theorem step_raise_beq (target : Nat) : StepRaise (.beq target) := by
 #print axioms step_raise_beq
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_bne (target : Nat) : StepRaise (.bne target) := by
+theorem step_raise_bne_un (target : Nat) : StepRaise (.bne_un target) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_bne
+#print axioms step_raise_bne_un
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_sub : StepRaise .sub := by
@@ -1154,67 +1143,67 @@ theorem step_raise_sub : StepRaise .sub := by
 #print axioms step_raise_sub
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_ltu : StepRaise .ltu := by
+theorem step_raise_clt_un : StepRaise .clt_un := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_ltu
+#print axioms step_raise_clt_un
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_gtu : StepRaise .gtu := by
+theorem step_raise_cgt_un : StepRaise .cgt_un := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_gtu
+#print axioms step_raise_cgt_un
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_bltu (target : Nat) : StepRaise (.bltu target) := by
+theorem step_raise_blt_un (target : Nat) : StepRaise (.blt_un target) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_bltu
+#print axioms step_raise_blt_un
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_bgeu (target : Nat) : StepRaise (.bgeu target) := by
+theorem step_raise_bge_un (target : Nat) : StepRaise (.bge_un target) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_bgeu
+#print axioms step_raise_bge_un
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_bgtu (target : Nat) : StepRaise (.bgtu target) := by
+theorem step_raise_bgt_un (target : Nat) : StepRaise (.bgt_un target) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_bgtu
+#print axioms step_raise_bgt_un
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
-theorem step_raise_bleu (target : Nat) : StepRaise (.bleu target) := by
+theorem step_raise_ble_un (target : Nat) : StepRaise (.ble_un target) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun _ => by base_relabels) (by intro absent; contradiction) context.next h
         | raise_lockstep
 
-#print axioms step_raise_bleu
+#print axioms step_raise_ble_un
 
 /-- Instructions dispatched directly to the memory evaluator preserve its faults. -/
-theorem step_raise_instruction (op : CIL.Op)
+theorem step_raise_instruction (op : CIL.Instruction)
     (relabels : ∀ r, op.relabel r = op)
     (dispatch : ∀ body pc args frame stack memory,
       step body op pc args frame stack memory =
@@ -1240,7 +1229,7 @@ theorem step_raise_instruction (op : CIL.Op)
 
 set_option maxHeartbeats 400000 in
 /-- Only `throw` raises by itself; every other throw comes from a computation both steps share. -/
-theorem step_raise (op : CIL.Op) : StepRaise op := by
+theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   cases op
   case managed operation =>
     plain_cases
@@ -1258,20 +1247,17 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
             dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢ <;>
             first | cases h | raise_lockstep)
   case nativeBinary operation => exact step_raise_nativeBinary operation
-  case divide signed remainder => exact step_raise_divide signed remainder
-  case checkedArithmetic kind signed => exact step_raise_checkedArithmetic kind signed
-  case checkedConvert width signed unsignedInput =>
-    exact step_raise_checkedConvert width signed unsignedInput
+  case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
+    | mul_ovf_un => exact step_raise_faulting _ rfl
+  case conv_ovf target => exact step_raise_conv_ovf target
+  case conv_ovf_un target => exact step_raise_conv_ovf_un target
   case arg index narrow =>
     plain_cases
     cases narrow <;> dsimp only at h ⊢ <;> lookup_raise
-  case vectorArg | vectorArgAddr =>
-    explicit_intro
-    raise_lockstep
-  case «local» | vectorLocal | vectorLocalAddr | localAddr =>
+  case ldloc | ldloca =>
     plain_cases
     lookup_raise
-  case setVectorLocal | setLocal =>
+  case stloc =>
     stack_cases =>
       first | fallback_raise_vacuous | lookup_raise
   case initializeSpanLocal =>
@@ -1290,7 +1276,6 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
   case callInstance callee argc => exact step_raise_callInstance callee argc
   case callVirtual targets argc => exact step_raise_callVirtual targets argc
   case tailCall callee argc => exact step_raise_tailCall callee argc
-  case newVector256 callee argc => exact step_raise_newVector256 callee argc
   case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
   case newObject callee argc owner bases size =>
     exact step_raise_newObject callee argc owner bases size
@@ -1307,25 +1292,25 @@ theorem step_raise (op : CIL.Op) : StepRaise op := by
     plain_cases
     fallback_raise_vacuous
   case sub => exact step_raise_sub
-  case ltu => exact step_raise_ltu
-  case gtu => exact step_raise_gtu
-  case bltu target => exact step_raise_bltu target
-  case bgeu target => exact step_raise_bgeu target
-  case bgtu target => exact step_raise_bgtu target
-  case bleu target => exact step_raise_bleu target
-  case eq => exact step_raise_eq
-  case brzero target => exact step_raise_brzero target
-  case brnonzero target => exact step_raise_brnonzero target
+  case clt_un => exact step_raise_clt_un
+  case cgt_un => exact step_raise_cgt_un
+  case blt_un target => exact step_raise_blt_un target
+  case bge_un target => exact step_raise_bge_un target
+  case bgt_un target => exact step_raise_bgt_un target
+  case ble_un target => exact step_raise_ble_un target
+  case ceq => exact step_raise_ceq
+  case brfalse target => exact step_raise_brfalse target
+  case brtrue target => exact step_raise_brtrue target
   case objectTest type throwing => exact step_raise_objectTest type throwing
   case beq target => exact step_raise_beq target
-  case bne target => exact step_raise_bne target
-  case nop | neg | gt | bgt | ble | convI1 | convI2 | convU2 | convI8 | convI4 | convU1
-    | convU4 | convU8 | convU | bnot | add | mul | band | bor | bxor | shl | shr | shrUn
-    | lt | branch | switch | bge | blt | feature =>
+  case bne_un target => exact step_raise_bne_un target
+  case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
+    | conv_u4 | conv_u8 | conv_u | conv_i | not | add | mul | and | or | xor | shl | shr | shr_un
+    | clt | br | switch | bge | blt | feature =>
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
-    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | lane
-    | laneAddress | setLane | const32 | const64 | load64 | store64 | dup | pop | skipInit | asRef =>
+    | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
+    | ldc_i8 | load64 | store64 | dup | pop | skipInit =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)
 
 #print axioms step_raise

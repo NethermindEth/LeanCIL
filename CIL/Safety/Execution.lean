@@ -10,11 +10,11 @@ import CIL.NativeEvaluation
 /-!
 # Checked interpreter
 
-The interpreter that safety proofs reason about. It runs the same instructions as
-`CIL.step`, but over allocation-aware memory and checked values, and it reports why it
-stopped: every fault is an `ExecutionFault` located at a method and pc instead of `none`.
-Value-only instructions are delegated to `CIL.step` through `pureArity`, so the two
-interpreters cannot disagree on arithmetic.
+The interpreter that safety proofs reason about. It runs over allocation-aware memory and
+checked values, and it reports why it stopped: every fault is an `ExecutionFault` located at a
+method and pc instead of `none`. Value-only instructions are delegated to `CIL.step` through
+`pureArity`, so the two interpreters cannot disagree on arithmetic. Locals have only the meaning
+given here, through the kinds of their slots.
 -/
 
 namespace CIL.Safety
@@ -85,18 +85,21 @@ def checkedValue (m : Memory) : Value → ExecutionResult Value
 
 /-- Only the value-only instruction whitelist may use the original pure
     arithmetic semantics. No memory/reference operation can enter this path. -/
-def pureArity : CIL.Op → Option Nat
-  | .convI1 | .convI2 | .convU2 => some 1
+def pureArity : CIL.Instruction → Option Nat
+  | .conv_i1 | .conv_i2 | .conv_u2 => some 1
   | .nop => some 0
   | .neg => some 1
-  | .gt | .bgt _ | .ble _ | .bleu _ => some 2
-  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .bnot => some 1
-  | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
-    | .lt | .ltu | .gtu | .eq => some 2
-  | .brzero _ | .brnonzero _ | .switch _ => some 1
-  | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => some 2
-  | .branch _ | .feature _ => some 0
+  | .cgt | .bgt _ | .ble _ | .ble_un _ => some 2
+  | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .not => some 1
+  | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
+    | .clt | .clt_un | .cgt_un | .ceq => some 2
+  | .brfalse _ | .brtrue _ | .switch _ => some 1
+  | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => some 2
+  | .br _ | .feature _ => some 0
   | .intrinsic _ argc => some argc
+  -- Faulting arithmetic has its own arms in `step`; `CIL.step` would drop the fault.
+  | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un
+    | .mul_ovf | .mul_ovf_un | .conv_ovf _ | .conv_ovf_un _ => none
   | _ => none
 
 /-- The operands of a value-only instruction, all of which must be numeric scalars. -/
@@ -142,16 +145,6 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
       let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
       return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
     return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
-  | .tableAddress signature, .scalar index :: .methodTable table :: rest =>
-    if table.signature != signature then .error .invalidState else pure ()
-    let some index := arrayIndex index | .error .invalidState
-    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
-    if index >= targets.size then .error (.thrown "System.IndexOutOfRangeException") else pure ()
-    let some backing := table.backing | .error .invalidState
-    let base := { table with backing := some { backing with byteOffset := 0 } }
-    let selected ← checkedAt .null nativeMethodWidth
-      (addNativeTable base memory (BitVec.ofNat 64 (nativeMethodWidth * index)))
-    return .next (pc + 1) (.methodTable selected :: rest) frame memory
   | .tableOffset, .scalar offset :: .methodTable table :: rest
   | .tableOffset, .methodTable table :: .scalar offset :: rest =>
     let offset ← match offset with
@@ -195,13 +188,58 @@ def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : E
 
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
-def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
+def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   let unknownArgument := match op with
     | .arg index (some _) => (args[index]?.map Value.hasUnspecified).getD false
     | _ => false
   if unspecifiedOperands (observerCount op) stack || unknownArgument then
     .error (.unsupported "Instruction observes unspecified vector bits") else
+  -- Faulting arithmetic is matched apart from the rest: every arm of one match adds to the cost
+  -- of the match equations each importer that splits `step` regenerates.
+  match op, stack with
+  -- One arm per overflow-checked arithmetic constructor, flags as `checkedKind?` gives them.
+  | .add_ovf, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .add true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .add_ovf_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .add false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .sub_ovf, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .sub true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .sub_ovf_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .sub false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .mul_ovf, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .mul true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .mul_ovf_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.checkedValues .mul false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- One arm per division constructor, flags as `divideKind?` gives them.
+  | .div, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues true false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .div_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues false false x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .rem, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues true true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .rem_un, .scalar y :: .scalar x :: rest =>
+    let value ← (CIL.divideValues false true x y).mapError ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- Overflow-checked conversions, reading the operand as signed or as unsigned.
+  | .conv_ovf target, .scalar x :: rest =>
+    let value ← (CIL.convertInteger target.width target.signed false x).mapError
+      ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | .conv_ovf_un target, .scalar x :: rest =>
+    let value ← (CIL.convertInteger target.width target.signed true x).mapError
+      ExecutionFault.arithmetic
+    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m
   | .sub, .scalar offset :: .reference value :: rest =>
@@ -216,55 +254,55 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .sub, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let result ← referenceDifference m left right
     return .next (pc + 1) (.scalar (.i64 result) :: rest) frame m
-  | .ltu, .reference right :: .reference left :: rest
-  | .ltu, .reference right :: .readOnlyReference left :: rest
-  | .ltu, .readOnlyReference right :: .reference left :: rest
-  | .ltu, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .clt_un, .reference right :: .reference left :: rest
+  | .clt_un, .reference right :: .readOnlyReference left :: rest
+  | .clt_un, .readOnlyReference right :: .reference left :: rest
+  | .clt_un, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m left right
     return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
-  | .gtu, .reference right :: .reference left :: rest
-  | .gtu, .reference right :: .readOnlyReference left :: rest
-  | .gtu, .readOnlyReference right :: .reference left :: rest
-  | .gtu, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .cgt_un, .reference right :: .reference left :: rest
+  | .cgt_un, .reference right :: .readOnlyReference left :: rest
+  | .cgt_un, .readOnlyReference right :: .reference left :: rest
+  | .cgt_un, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m right left
     return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
-  | .bltu target, .reference right :: .reference left :: rest
-  | .bltu target, .reference right :: .readOnlyReference left :: rest
-  | .bltu target, .readOnlyReference right :: .reference left :: rest
-  | .bltu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .blt_un target, .reference right :: .reference left :: rest
+  | .blt_un target, .reference right :: .readOnlyReference left :: rest
+  | .blt_un target, .readOnlyReference right :: .reference left :: rest
+  | .blt_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m left right
     return .next (if less then target else pc + 1) rest frame m
-  | .bgeu target, .reference right :: .reference left :: rest
-  | .bgeu target, .reference right :: .readOnlyReference left :: rest
-  | .bgeu target, .readOnlyReference right :: .reference left :: rest
-  | .bgeu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .bge_un target, .reference right :: .reference left :: rest
+  | .bge_un target, .reference right :: .readOnlyReference left :: rest
+  | .bge_un target, .readOnlyReference right :: .reference left :: rest
+  | .bge_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m left right
     return .next (if less then pc + 1 else target) rest frame m
-  | .bgtu target, .reference right :: .reference left :: rest
-  | .bgtu target, .reference right :: .readOnlyReference left :: rest
-  | .bgtu target, .readOnlyReference right :: .reference left :: rest
-  | .bgtu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .bgt_un target, .reference right :: .reference left :: rest
+  | .bgt_un target, .reference right :: .readOnlyReference left :: rest
+  | .bgt_un target, .readOnlyReference right :: .reference left :: rest
+  | .bgt_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m right left
     return .next (if less then target else pc + 1) rest frame m
-  | .bleu target, .reference right :: .reference left :: rest
-  | .bleu target, .reference right :: .readOnlyReference left :: rest
-  | .bleu target, .readOnlyReference right :: .reference left :: rest
-  | .bleu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .ble_un target, .reference right :: .reference left :: rest
+  | .ble_un target, .reference right :: .readOnlyReference left :: rest
+  | .ble_un target, .readOnlyReference right :: .reference left :: rest
+  | .ble_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m right left
     return .next (if less then pc + 1 else target) rest frame m
   -- Reference observations preserve memory and do not grant byte access authority.
-  | .brzero target, .reference value :: rest
-  | .brzero target, .readOnlyReference value :: rest =>
+  | .brfalse target, .reference value :: rest
+  | .brfalse target, .readOnlyReference value :: rest =>
     let present ← referenceNonNull m value
     return .next (if present then pc + 1 else target) rest frame m
-  | .brnonzero target, .reference value :: rest
-  | .brnonzero target, .readOnlyReference value :: rest =>
+  | .brtrue target, .reference value :: rest
+  | .brtrue target, .readOnlyReference value :: rest =>
     let present ← referenceNonNull m value
     return .next (if present then target else pc + 1) rest frame m
-  | .eq, .reference right :: .reference left :: rest
-  | .eq, .reference right :: .readOnlyReference left :: rest
-  | .eq, .readOnlyReference right :: .reference left :: rest
-  | .eq, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .ceq, .reference right :: .reference left :: rest
+  | .ceq, .reference right :: .readOnlyReference left :: rest
+  | .ceq, .readOnlyReference right :: .reference left :: rest
+  | .ceq, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
   | .beq target, .reference right :: .reference left :: rest
@@ -273,29 +311,29 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
   | .beq target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then target else pc + 1) rest frame m
-  | .bne target, .reference right :: .reference left :: rest
-  | .bne target, .reference right :: .readOnlyReference left :: rest
-  | .bne target, .readOnlyReference right :: .reference left :: rest
-  | .bne target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .bne_un target, .reference right :: .reference left :: rest
+  | .bne_un target, .reference right :: .readOnlyReference left :: rest
+  | .bne_un target, .readOnlyReference right :: .reference left :: rest
+  | .bne_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
   -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
-  | .eq, .object right :: .object left :: rest =>
+  | .ceq, .object right :: .object left :: rest =>
     let equal ← objectEqual m left right
     return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
   | .beq target, .object right :: .object left :: rest =>
     let equal ← objectEqual m left right
     return .next (if equal then target else pc + 1) rest frame m
-  | .bne target, .object right :: .object left :: rest =>
+  | .bne_un target, .object right :: .object left :: rest =>
     let equal ← objectEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
-  | .gtu, .object right :: .object left :: rest =>
+  | .cgt_un, .object right :: .object left :: rest =>
     let present ← objectAboveNull m left right
     return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
-  | .brzero target, .object value :: rest =>
+  | .brfalse target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then pc + 1 else target) rest frame m
-  | .brnonzero target, .object value :: rest =>
+  | .brtrue target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then target else pc + 1) rest frame m
   | .objectTest type throwing, .object value :: rest =>
@@ -318,34 +356,19 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
     let (target, values) ← (CIL.nativeBinaryValues operation pc x y).mapError ExecutionFault.arithmetic
     let values ← (values.map Value.scalar).mapM (checkedValue m)
     return .next target (values ++ rest) frame m
-  | .checkedConvert width signed unsignedInput, .scalar x :: rest =>
-    let value ← (CIL.convertInteger width signed unsignedInput x).mapError ExecutionFault.arithmetic
-    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
-  | .checkedArithmetic kind signed, .scalar y :: .scalar x :: rest =>
-    let value ← (CIL.checkedValues kind signed x y).mapError ExecutionFault.arithmetic
-    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
-  | .divide signed remainder, .scalar y :: .scalar x :: rest =>
-    let value ← (CIL.divideValues signed remainder x y).mapError ExecutionFault.arithmetic
-    return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
   | .arg i none, _ =>
     let some value := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m value) :: stack) frame m
   | .arg i (some kind), _ =>
     let some (.scalar (.i32 bits)) := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m (.scalar (.i32 (kind.extend bits)))) :: stack) frame m
-  | .vectorArg i, _ =>
-    let home ← argumentHome frame i
-    return .next (pc + 1) ((← loadLocal m home) :: stack) frame m
-  | .vectorArgAddr i, _ =>
-    let home ← argumentHome frame i
-    return .next (pc + 1) ((← localAddress m home) :: stack) frame m
-  | .local i _, _ | .vectorLocal i, _ =>
+  | .ldloc i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← loadLocal m slot) :: stack) frame m
-  | .localAddr i, _ | .vectorLocalAddr i, _ =>
+  | .ldloca i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← localAddress m slot) :: stack) frame m
-  | .setLocal i _, value :: rest | .setVectorLocal i, value :: rest =>
+  | .stloc i, value :: rest =>
     let some slot := frame.locals[i]? | .error .invalidState
     let (slot, memory) ← storeLocal m slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set i slot } memory
@@ -378,14 +401,6 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
         return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
       | .object .null :: _ => .error (.thrown "System.NullReferenceException")
       | _ => .error .invalidState
-  | .newVector256 callee argc, _ =>
-    if stack.length < argc then .error .invalidState else
-      let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
-      let (temporary, memory) ← allocateHome m frame.activation (localWidth .vector256)
-      let memory ← storeValue memory (.address temporary) (.v256 0)
-      let frame := { frame with owned := temporary.allocation :: frame.owned }
-      return .construct callee (.reference (.address temporary) :: arguments)
-        (stack.drop argc) frame temporary .vector256 memory
   | .newAggregate callee argc size, _ =>
     if size = 0 || stack.length < argc then .error .invalidState else
       let arguments ← (stack.take argc).reverse.mapM (checkedValue m)
@@ -425,7 +440,7 @@ def step (body : CIL.Method) (op : CIL.Op) (pc : Nat) (args : List Value)
       if stack.length < argc then .error .invalidState else
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false pc [] 0 values (fun _ => none) body.profile | .error .invalidState
+          CIL.step op false pc [] values (fun _ => none) body.profile | .error .invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue m)
         return .next target (result ++ stack.drop argc) frame m
     | none =>

@@ -57,7 +57,8 @@ internal static class VerificationSuites
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),
         new("evidence", "Tests/ExtractionEvidence.cs",
-            "independent extraction certificates and malformed evidence rejection"),
+            "independent extraction certificates, malformed evidence rejection, and the metadata decoder's method " +
+            "names against Cecil's"),
         // Split from evidence so neither job approaches the CI timeout.
         new("dispatch", "Tests/DispatchEvidence.cs",
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
@@ -123,12 +124,18 @@ internal static class VerificationSuites
             "outcome contracts that name exactly when each exception is thrown"),
         // Split from evidence: each fixture alone runs for minutes, so they take separate runners.
         new("scaling", "Tests/TranslationScaling.cs",
-            "compositional certificate for a six-method call graph and its consumer replay"),
+            "compositional certificate for a six-method call graph and its consumer replay, and the header and " +
+            "per-method struct layout checks at a per-layout cost that does not grow with the table"),
         new("excluded", "Tests/ExcludedBranchScaling.cs",
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",
-            "lookup equations of extracted methods, hand-written bodies and templates at a per-instruction " +
-            "cost that does not grow with the method"),
+            "lookup equations of extracted methods, hand-written bodies and templates, and the scalar " +
+            "certificate of array element addresses, loaded and addressed integer locals and native-int " +
+            "locals consumed by calli, the closed argument storage of those native-int locals, and the " +
+            "feature certificate of local loads, stores and addresses, at a per-instruction cost that does " +
+            "not grow with the method, embeddings of bodies with many calls at a per-call kernel cost that " +
+            "does not grow with the calls, and type identity equality at a cost that does not grow with the " +
+            "name"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +
@@ -137,7 +144,7 @@ internal static class VerificationSuites
             "scalar and checked-memory stepping with per-instruction work, proof-size and latency budgets"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
-            "substitution rejection"),
+            "substitution rejection, and the strict binding library and audit"),
         new("pool", "Tests/ItemPool.cs",
             "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
             "they reject"),

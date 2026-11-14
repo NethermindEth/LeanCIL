@@ -33,7 +33,8 @@ theorem add_holds : addContract.Holds addProgram 0 := by
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Calls.Extracted.program [addLib]
 
 /-- The entry fills import slot 0 at index 2 and its call to the helper is renamed from 1 to 3. -/
-example : linked.map (fun body => body.code.flatMap Op.callees) = [[2, 1], [], [3], []] := by decide
+example : linked.map (fun body => body.code.flatMap Instruction.callees) =
+    [[2, 1], [], [3], []] := by decide
 
 /-- `Root`'s conditional proof, discharged by the library proved alone and relocated. -/
 theorem root_composed : rootContract.Holds linked root :=
@@ -112,7 +113,8 @@ theorem percent_holds : percentContract.Holds percentProgram 0 := by
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Outcomes.Extracted.program [percentLib]
 
-example : linked.map (fun body => body.code.flatMap Op.callees) = [[1], [2], [3], []] := by decide
+example : linked.map (fun body => body.code.flatMap Instruction.callees) =
+    [[1], [2], [3], []] := by decide
 
 theorem root_composed : rootContract.Holds linked root :=
   composed (specs := [percentContract.relocatable]) (root_given.mono fun _ met => met 0 (by decide)) rfl
@@ -141,7 +143,8 @@ example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "Sys
   root_composed.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
 
 /-- Two libraries: entries fill slots 0 and 1, then each library's helpers follow in order. -/
-example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map (fun body => body.code.flatMap Op.callees) =
+example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map
+    (fun body => body.code.flatMap Instruction.callees) =
     [[2], [3], [], []] := by decide
 
 #print axioms check_holds
@@ -150,3 +153,100 @@ example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map (fun body => bo
 #print axioms root_prefix_relocated
 
 end Tests.Linking.Outcomes
+
+/-! A relocated body's link table is renamed with its code. -/
+namespace Tests.Linking.Links
+
+open CIL
+
+def body : Method := {
+  code := [.arg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .newAggregate 3 0 8, .ret]
+  locals := [], returnsValue := false }
+
+/-- Direct, virtual and aggregate entries all move by the renaming. -/
+example : (body.relocate (· + 10)).links =
+    [(1, .direct 11), (3, .virtual [(.void, 12)]), (4, .aggregate 13 8)] := rfl
+
+/-- The pcs of the entries stay. -/
+example : (body.relocate (· + 10)).links.map Prod.fst = body.links.map Prod.fst := rfl
+
+example : (body.relocate (· + 10)).linkAt 1 = some (.direct 11) := rfl
+
+/-- A relocated catalog keeps its identities and renames only the body indices. -/
+example (identity : ManagedIdentity) :
+    (Link.indirect [⟨identity, 2⟩]).relocate (· + 5) = .indirect [⟨identity, 7⟩] := rfl
+
+/-- A body made with `withCode` has implied links, and so does its relocation. -/
+example (f : Nat → Nat) (method : Method) (code : List Instruction) :
+    let relocated := (method.withCode code).relocate f
+    relocated.links = linksOfCode relocated.code :=
+  Method.relocate_links_implied f _ rfl
+
+end Tests.Linking.Links
+
+/-! How a proof reads `linkAt` for an extracted method, a template and a literal body. -/
+namespace Tests.Linking.Resolution
+
+open CIL
+
+/-- The link of the call at pc 1, named and tagged as an extraction names it. -/
+@[cil_code] def callLink : Link := .direct 3
+
+/-- An extraction's method: its table and call-site fact are generated, with the table explicit. -/
+def extracted : Method := {
+  code := [.arg 0, .call 3 1, .pop, .ret], locals := [], returnsValue := false
+  links := [(1, callLink)] }
+
+/-- The generated fact of the table. -/
+@[cil_code] theorem extracted_links : extracted.links = [(1, callLink)] := rfl
+
+/-- The generated fact of the call site at pc 1. -/
+@[cil_code] theorem extracted_link1 : extracted.linkAt 1 = some callLink := rfl
+
+/-- A call site: the generated fact and the tagged link definition reach the constructor, so the
+    match of a stepping-style read reduces under `simp only [cil_code]`. -/
+example : (match extracted.linkAt 1 with | some (.direct callee) => callee | _ => 0) = 3 := by
+  simp only [cil_code]
+
+/-- A pc that is not a call site: no fact exists, and the table is read by the listed keys. -/
+example : extracted.linkAt 0 = none :=
+  Method.linkAt_of_unlisted (by simp [extracted_links])
+
+/-- The same read through a scan of the table, which is bounded by the number of calls. -/
+example : extracted.linkAt 2 = none := by
+  simp [Method.linkAt, linkLookup, extracted_links]
+
+/-- A literal body with its default table: one step from an instruction fact. -/
+def literal : Method :=
+  { code := [.arg 0, .call 3 1, .pop, .ret], locals := [], returnsValue := false }
+
+/-- The instruction fact of the call, as `cil_instruction_equations` states it. -/
+theorem literal_at1 : literal.code[1]? = some (.call 3 1) := rfl
+
+/-- The instruction fact of a pc without a call. -/
+theorem literal_at0 : literal.code[0]? = some (.arg 0) := rfl
+
+example : literal.linkAt 1 = some (.direct 3) := by
+  rw [Method.linkAt_of_instruction rfl literal_at1]; rfl
+
+example : literal.linkAt 0 = none := by
+  rw [Method.linkAt_of_instruction rfl literal_at0]; rfl
+
+/-- Evaluation also reads it, at the cost of rebuilding the implied table. -/
+example : literal.linkAt 1 = some (.direct 3) := rfl
+
+/-- A template body takes its callee as a parameter, so its read stays symbolic. -/
+def template (profile : FeatureProfile) (callee : Nat) : Method :=
+  { profile, code := [.arg 0, .call callee 1, .pop, .ret], locals := [], returnsValue := false }
+
+example (profile : FeatureProfile) (callee : Nat) :
+    (template profile callee).linkAt 1 = some (.direct callee) :=
+  (Method.linkAt_of_instruction rfl (pc := 1) (op := .call callee 1) rfl).trans rfl
+
+example (profile : FeatureProfile) (callee : Nat) : (template profile callee).linkAt 2 = none :=
+  (Method.linkAt_of_instruction rfl (pc := 2) (op := .pop) rfl).trans rfl
+
+/-- A body built with `withCode` reads the links of its new code. -/
+example : (literal.withCode [.call 5 0, .ret]).linkAt 0 = some (.direct 5) := rfl
+
+end Tests.Linking.Resolution

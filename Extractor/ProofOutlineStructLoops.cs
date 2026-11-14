@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 
@@ -21,6 +20,11 @@ internal static partial class ProofOutline
         readonly Names identifiers = new();
         int header;
         int names;
+        /// <summary>The operation as a load or store of an 8-byte unsigned struct field, else null.</summary>
+        static StructField? WordField(Operation operation) =>
+            operation is StructField { Access: FieldAccess.Store or FieldAccess.Load, Width: 8, Signed: false } field
+                ? field : null;
+
         string Footprint => "[" + string.Join(", ", fields.Where(item => item.Written)
             .Select(item => $"({item.Address(receiver)}, 8)")) + "]";
         string Parameters => string.Join(" ", spec.Parameters.Select(parameter => parameter.Name));
@@ -46,23 +50,22 @@ internal static partial class ProofOutline
             }).ToArray();
             spec = new(spec.Method, parameters, spec.Result, spec.Symbolic, spec.Classes);
             var loops = body.Loops();
-            if (loops.Count != 1 || !Body.Conditional(body.Ops[loops[0].Latch]) ||
+            if (loops.Count != 1 || !Body.Conditional(body.Operations[loops[0].Latch]) ||
                 spec.Method.Body.Variables.Count != 0 || spec.Parameters.Any(parameter =>
                     parameter.Shape is not (ParameterShape.StructReference or ParameterShape.Scalar) ||
                     parameter.Shape == ParameterShape.Scalar && parameter.Width != 8) ||
-                spec.Result is { Constructor: not ".i64" })
+                spec.Result is { Width: not 8 })
                 throw Unsupported("A struct receiver loop needs one conditional back edge, no local homes, " +
                     "and word arguments with a void or 64-bit result");
             header = body.BlockStart(loops[0].Latch);
-            for (var pc = 0; pc < body.Ops.Length; pc++)
+            for (var pc = 0; pc < body.Operations.Length; pc++)
             {
-                var match = Regex.Match(body.Ops[pc], @"\A\.(fieldAt|setFieldAt) (\d+) 8(?: false)?\z");
-                if (!match.Success) continue;
-                var offset = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+                if (WordField(body.Operations[pc]) is not { } access) continue;
+                var offset = access.Offset;
                 if (spec.Method.Body.Instructions[pc].Operand is not FieldReference reference)
                     throw Unsupported("A receiver field has no metadata name");
                 var known = fields.FindIndex(field => field.Offset == offset);
-                var written = match.Groups[1].Value == "setFieldAt";
+                var written = access.Access == FieldAccess.Store;
                 if (known >= 0) fields[known] = fields[known] with { Written = fields[known].Written || written };
                 else
                 {
@@ -103,7 +106,7 @@ internal static partial class ProofOutline
             Line();
             Line("/-- The checked cutpoint just before the loop condition loads its fields. -/");
             Line($"def header ({receiver} : Reference) (initial : Memory) (state : {StateType}) : LoopState :=");
-            Line($"  ⟨{header}, ⟨initial.nextIdentity, [], [], [], 0⟩, [], state.memory⟩");
+            Line($"  ⟨{header}, ⟨initial.nextIdentity, [], [], 0⟩, [], state.memory⟩");
             lean.Quiet();
             Line("/-- The property preserved at the loop condition. -/");
             lean.Wrapped("def invariant", Grouped(binders.Concat([("initial", "Memory"), ("state", StateType)])),
@@ -123,7 +126,7 @@ internal static partial class ProofOutline
             Line($"  have checked : {spec.ArgumentValues}.mapM (checkedValue initial) =");
             Line($"      .ok {spec.ArgumentValues} := by simp [cil_checked, ← same, state.formed]");
             Line($"  have setup : enterFrame Extracted.method0 {spec.ArgumentValues} initial =");
-            Line("      .ok (⟨initial.nextIdentity, [], [], [], 0⟩, initial) := by rfl");
+            Line("      .ok (⟨initial.nextIdentity, [], [], 0⟩, initial) := by rfl");
             Line($"  refine invoke_loop_satisfies Extracted.lookup0 checked setup {HeaderTerm}");
             Line($"    (invariant {Parameters} initial) (measure {Parameters} initial) (fun start => ?_) ?_");
             Line("  ·");
@@ -165,13 +168,17 @@ internal static partial class ProofOutline
             internal Dictionary<int, string> Reads = [];
             internal Dictionary<int, string> Owned = [];
             internal List<string> Facts = [];
+            /// <summary>The load and store-step facts a branch condition rewrites once a store has run.</summary>
+            internal List<string> Rewritable = [];
+            /// <summary>A field store has run on this path.</summary>
+            internal bool Written;
             internal List<string> Stack = [];
             internal bool Stepped;
             internal ReceiverPath Copy() => new()
             {
                 Memory = Memory, Formed = Formed, WellFormed = WellFormed, Confined = Confined,
                 Values = new(Values), Reads = new(Reads), Owned = new(Owned), Facts = [.. Facts], Stack = [.. Stack],
-                Stepped = Stepped
+                Stepped = Stepped, Rewritable = [.. Rewritable], Written = Written
             };
         }
 
@@ -194,7 +201,7 @@ internal static partial class ProofOutline
         void Walk(ReceiverPath path, int pc, string indent, string hypothesis, bool iteration)
         {
             var visited = new HashSet<int>();
-            while (pc < body.Ops.Length)
+            while (pc < body.Operations.Length)
             {
                 if (pc == header && (path.Stepped || !iteration))
                 {
@@ -209,7 +216,7 @@ internal static partial class ProofOutline
                 }
                 if (!visited.Add(pc)) throw Unsupported("A receiver loop path cycles outside its cutpoint");
                 path.Stepped = true;
-                var op = body.Ops[pc];
+                var op = body.Operations[pc];
                 string Pop()
                 {
                     if (path.Stack.Count == 0) throw Unsupported("A receiver loop has a short symbolic stack");
@@ -217,43 +224,46 @@ internal static partial class ProofOutline
                     path.Stack.RemoveAt(path.Stack.Count - 1);
                     return value;
                 }
-                Match match;
-                if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
-                    path.Stack.Add(spec.Parameters[int.Parse(match.Groups[1].Value)].Name);
+                if (op is Arg { Narrow: null } argument)
+                    path.Stack.Add(spec.Parameters[argument.Index].Name);
                 else if (StructLiteral(op) is { } literal)
                 {
                     if (literal.Width == 8) path.Stack.Add(literal.Term);
-                    else if (pc + 1 < body.Ops.Length && body.Ops[pc + 1] is ".convU8" or ".convI8")
+                    else if (pc + 1 < body.Operations.Length &&
+                        body.Operations[pc + 1] is StackOperation
+                            { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI })
                         path.Stack.Add($"({literal.Term})." +
-                            (body.Ops[++pc] == ".convI8" ? "signExtend" : "setWidth") + " 64");
+                            (body.Operations[++pc] is StackOperation { Kind: StackOpcode.ConvI8 or StackOpcode.ConvI }
+                                ? "signExtend" : "setWidth") +
+                            " 64");
                     else throw Unsupported("A receiver loop needs 64-bit arithmetic and comparisons");
                 }
-                else if (op is ".convU8" or ".convI8" or ".nop") { }
-                else if (op == ".dup") path.Stack.Add(path.Stack[^1]);
-                else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
+                else if (op is StackOperation
+                    { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI or StackOpcode.Nop }) { }
+                else if (op is StackOperation { Kind: StackOpcode.Dup }) path.Stack.Add(path.Stack[^1]);
+                else if (op is StackOperation { IsArithmetic: true } arithmetic)
                 {
                     var right = Pop();
                     var left = Pop();
-                    var symbol = match.Groups[1].Value switch
-                    { "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^" };
+                    var symbol = arithmetic.Symbol;
                     path.Stack.Add($"({left} {symbol} {right})");
                 }
-                else if ((match = Regex.Match(op, @"\A\.(fieldAt|setFieldAt) (\d+) 8(?: false)?\z")).Success)
+                else if (WordField(op) is { } fieldAccess)
                 {
-                    var field = fields.Single(field => field.Offset == int.Parse(match.Groups[2].Value));
-                    var store = match.Groups[1].Value == "setFieldAt";
+                    var field = fields.Single(field => field.Offset == fieldAccess.Offset);
+                    var store = fieldAccess.Access == FieldAccess.Store;
                     var value = store ? Pop() : "";
                     if (Pop() != receiver) throw Unsupported("A receiver loop accesses another struct's field");
                     Access(path, field, store ? value : null, indent);
                     if (!store) path.Stack.Add(path.Values[field.Offset]);
                 }
-                else if (Body.Target(op) is { } target)
+                else if (op is Jump jump)
                 {
-                    if (!Body.Conditional(op)) { pc = target; continue; }
-                    var instruction = op.Split(' ')[0][1..];
+                    var target = jump.Target;
+                    if (!jump.Conditional) { pc = target; continue; }
                     var right = Pop();
-                    var operands = instruction is "brzero" or "brnonzero" ? new[] { right } : [Pop(), right];
-                    var (condition, taken) = Body.Test(instruction, operands, 64);
+                    var operands = jump.Operands == 1 ? new[] { right } : [Pop(), right];
+                    var (condition, taken) = Body.Test(jump, [.. operands.Select(term => new Body.Operand(term))], 64);
                     var fact = "branch" + ++names;
                     Line($"{indent}by_cases {fact} : {condition}");
                     var yes = path.Copy();
@@ -268,7 +278,7 @@ internal static partial class ProofOutline
                     Walk(no, taken ? pc + 1 : target, indent + "  ", hypothesis, iteration);
                     return;
                 }
-                else if (op == ".ret")
+                else if (op is Return { Narrow: null })
                 {
                     lean.Wrapped(indent + "cil_loop_finish", ("[" + string.Join(", ", path.Facts
                         .Concat([path.Confined])) + "]").Terms(), "");
@@ -278,7 +288,8 @@ internal static partial class ProofOutline
                     lean.Noted(indent, "all_goals sorry", "Required postcondition at this return");
                     return;
                 }
-                else throw Unsupported($"A receiver loop does not yet outline `{op}` at {Location(spec.Method, pc)}");
+                else throw Unsupported(
+                    $"A receiver loop does not yet outline `{op.ToLean()}` at {Location(spec.Method, pc)}");
                 pc++;
             }
             throw Unsupported("A receiver loop path has no return or continuing head");
@@ -287,9 +298,8 @@ internal static partial class ProofOutline
         /// <summary>A user name outside the numbered path-fact names emitted by the walk.</summary>
         void NormalizeFacts(ReceiverPath path, string condition, string indent)
         {
-            if (!path.Facts.Any(fact => fact.StartsWith("written", StringComparison.Ordinal))) return;
-            foreach (var fact in path.Facts.Where(fact => fact.StartsWith("stepped", StringComparison.Ordinal) ||
-                fact.StartsWith("loaded", StringComparison.Ordinal)).ToArray())
+            if (!path.Written) return;
+            foreach (var fact in path.Rewritable.ToArray())
             {
                 var normalized = "normalized" + ++names;
                 Line($"{indent}have {normalized} := {fact}");
@@ -317,6 +327,7 @@ internal static partial class ProofOutline
                 Line($"{indent}have loaded{index} := {path.Reads[field.Offset]}.load_word (index := 0) rfl");
                 Line($"{indent}simp only [Reference.element_zero] at loaded{index}");
                 path.Facts.Add("loaded" + index);
+                path.Rewritable.Add("loaded" + index);
                 return;
             }
             Line($"{indent}obtain ⟨memory{index}, written{index}, -, confined{index}, held{index}⟩ :=");
@@ -361,6 +372,8 @@ internal static partial class ProofOutline
             path.Values[field.Offset] = value;
             path.Facts.Add("written" + index);
             path.Facts.Add("stepped" + index);
+            path.Written = true;
+            path.Rewritable.Add("stepped" + index);
             path.Facts.Add(path.Formed);
         }
     }

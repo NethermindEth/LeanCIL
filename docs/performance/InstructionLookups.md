@@ -49,11 +49,55 @@ the heartbeats of a file that holds the imports alone. Each file prints one line
 PASS compiling an extracted method costs <n> heartbeats per instruction at 502 instructions and <n> at 2002, <ratio> times as many
 ```
 
-The suite fails when a ratio exceeds 1.25. Linear equations measure 0.99 for the extraction and
+The suite fails when a ratio exceeds 1.15. Linear equations measure 0.99 for the extraction and
 1.01 for the body and the template; equations proved against the whole list measure 3.09 for the
-extraction and about 3.7 for the body. A ratio that rises toward 1.25 means some proof or
+extraction and about 3.7 for the body. A ratio that rises toward 1.15 means some proof or
 elaboration step walks the code list again. The suite also fails when a `cil_lookup` at a
-computed pc costs more than 1.25 times as much per case at 16 repeated segments as at 4.
+computed pc costs more than 1.15 times as much per case at 16 repeated segments as at 4.
+
+The suite also measures `decide +kernel` on two `CIL.TypeIdentity` values whose names are 20 or 80
+characters long and differ only in their last character, less the same statement closed with
+`sorry`. A name is one code, so the decision costs about 7,500 heartbeats for equal names and
+8,300 for unequal ones at either length; one enclosing type adds about 2,500. The suite fails when the 80-character case costs more
+than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
+check takes about 5 seconds.
+
+The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
+and 512 array element addresses, each followed by a branch, with and without a `readonly.`
+prefix, less the heartbeats of stating the same certificate. It fails when the cost per address
+at 256 or 512 exceeds 1.15 times the cost at 128. The readonly rule reads neighbouring
+instructions from a `FlowIndex` and branch destinations from a `Std.TreeSet`, both built once
+per body, and measures 1.02 for plain and 1.09 for prefixed addresses. A rule that scans the body
+at each address measures 2.6 for plain and 3.4 for prefixed addresses without the branches.
+
+It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
+128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
+of stating the same certificate. Integer locals take a constant and are popped after a load or
+after `ldloca`, which also makes each a receiver fold candidate; native-int locals take a method
+address and are consumed by `calli`, which makes each a pointer local. For the pointer locals it
+also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
+exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a
+`FlowIndex` and pointer locals from a `Std.TreeSet`, built once per body, as does the closed
+argument storage. They measure 1.01 for loaded, 1.12 for addressed and 1.08 for pointer locals,
+and 1.20 for the closed argument storage, whose set lookups cost the logarithm of the locals.
+Checks that walk the locals list or the pointer local list at each site measure 1.33, 1.54, 1.62
+and 2.33.
+
+The suite also checks the kernel heartbeats of `FeatureFlowValid` on generated bodies of 256, 1,024
+and 4,096 instructions that cycle `ldloc.s`, `stloc.s`, `ldloca.s` and `pop` over four `int32`
+locals, less the heartbeats of stating the same certificate. It fails when the cost per instruction
+at 1,024 or 4,096 exceeds 1.25 times the cost at 256. A local load, store or address is checked by
+its opcode and index, and the cost per instruction measures 1.00 at 1,024 and 1.05 at 4,096.
+
+The suite embeds a hand-written body built with `Method.withCode`, one call per segment, into an
+extraction with a dead block after each return, at 512 and 2,048 calls, and reads the kernel
+heartbeats to recheck the lemma `cil_embed` states. It fails when the heartbeats per call grow
+more than 1.15 times. The recheck costs about 56,800 heartbeats per call at both sizes, 1.00
+times; link reads whose cost grows with the square of the calls measure 1.29. The suite also
+embeds a body whose head branches over its first block to its second into an extraction that
+places the second block first, at 256 and 1,024 calls, under the same limit. Its pc map descends
+once, and the link reads and code lookups start again from the head of the table and the code
+there; it costs about 53,800 heartbeats per call at both sizes.
 
 ## Reference figures
 

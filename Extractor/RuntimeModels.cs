@@ -6,11 +6,6 @@ internal static class RuntimeModels
 {
     private static string Vector(int width, string element) => $"System.Runtime.Intrinsics.Vector{width}`1<{element}>";
 
-    private static readonly Version RuntimeAssemblyVersion = new(10, 0, 0, 0);
-    // The Open key signs System.Memory and System.Runtime.Intrinsics; the Microsoft key signs the rest.
-    private const string OpenKeyToken = "cc7b13ffcd2ddd51";
-    private const string MicrosoftKeyToken = "b03f5f7f11d50a3a";
-
     private static readonly int[] VectorWidths = [128, 256, 512];
     private static readonly string[] VectorElements =
     [
@@ -38,10 +33,13 @@ internal static class RuntimeModels
     private const string UInt64Pair = "System.ValueTuple`2<System.UInt64,System.UInt64>";
     private const string Unsafe = "System.Runtime.CompilerServices.Unsafe";
 
-    internal static bool ExactScope(IMetadataScope scope, string name) => scope is AssemblyNameReference assembly &&
-        assembly.Name == name && assembly.Version == RuntimeAssemblyVersion &&
-        string.IsNullOrEmpty(assembly.Culture) && Convert.ToHexString(assembly.PublicKeyToken).ToLowerInvariant() ==
-            (name is "System.Runtime.Intrinsics" or "System.Memory" ? OpenKeyToken : MicrosoftKeyToken);
+    /// <summary>Whether a scope is the row that names <paramref name="platform"/>, column for column.</summary>
+    internal static bool ExactScope(TypeReference type, AssemblyName platform) =>
+        type.Scope is AssemblyNameReference && AssemblyName.OfScope(type, IdentityImage(type)) == platform;
+
+    static MetadataImage IdentityImage(TypeReference type) =>
+        (PinnedAssemblies.Active ?? throw new InvalidDataException("Type identity without a pinned module image"))
+        .Metadata(type.Module);
 
     internal static bool SupportedType(TypeReference type)
     {
@@ -56,7 +54,8 @@ internal static class RuntimeModels
         VectorWidths.Any(width => VectorElements.Any(element => name == Vector(width, element)));
 
     internal static bool HasRuntimeValueTypeBase(TypeDefinition type) =>
-        type.BaseType is { FullName: "System.ValueType" } parent && ExactScope(parent.Scope, "System.Runtime");
+        type.BaseType is { FullName: "System.ValueType" } parent &&
+        ExactScope(parent, PlatformAssemblies.SystemRuntime);
 
     internal static void ValidateTypeIdentity(TypeReference type, ModuleDefinition module,
         string architecture = "scalar")
@@ -96,7 +95,7 @@ internal static class RuntimeModels
         }
         bool expectedValueType = IsModeledValueType(type.FullName);
         var expectedScope = DefiningAssembly(type.FullName);
-        bool valid = type.IsValueType == expectedValueType && ExactScope(type.Scope, expectedScope) &&
+        bool valid = type.IsValueType == expectedValueType && ExactScope(type, expectedScope) &&
             (type.FullName != "System.Void" || type.MetadataType == MetadataType.Void);
         if (!valid) throw new InvalidDataException($"Unsupported type identity: {type.FullName} [{type.Scope}]");
     }
@@ -108,10 +107,11 @@ internal static class RuntimeModels
         "System.Runtime.Intrinsics.Vector128`1" or "System.Runtime.Intrinsics.Vector256`1" or
         "System.Runtime.Intrinsics.Vector512`1" or "System.ValueTuple`2";
 
-    private static string DefiningAssembly(string name) =>
-        name is "System.Buffers.Binary.BinaryPrimitives" or "System.MemoryExtensions" ? "System.Memory" :
-        name.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal) ? "System.Runtime.Intrinsics" :
-        "System.Runtime";
+    private static AssemblyName DefiningAssembly(string name) =>
+        name is "System.Buffers.Binary.BinaryPrimitives" or "System.MemoryExtensions"
+            ? PlatformAssemblies.SystemMemory :
+        name.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal)
+            ? PlatformAssemblies.SystemRuntimeIntrinsics : PlatformAssemblies.SystemRuntime;
 
     internal static void ValidateSignature(MethodReference reference, string architecture = "scalar")
     {
@@ -132,23 +132,25 @@ internal static class RuntimeModels
         reference is { Name: ".ctor", HasThis: true, ExplicitThis: false, Parameters.Count: 0 } &&
         reference is not GenericInstanceMethod && reference.CallingConvention == MethodCallingConvention.Default &&
         reference.ReturnType.MetadataType == MetadataType.Void &&
-        reference.DeclaringType is { FullName: "System.Object" } owner && ExactScope(owner.Scope, "System.Runtime");
+        reference.DeclaringType is { FullName: "System.Object" } owner &&
+        ExactScope(owner, PlatformAssemblies.SystemRuntime);
 
-    internal static string? Translate(MethodReference reference, FeatureProfile profile)
+    internal static Operation? Translate(MethodReference reference, FeatureProfile profile)
     {
         if (ReferenceQueries.Constant(reference, profile.Architecture) is int constant)
-            return $".const32 {constant}";
+            return new Constant(32, constant, true);
         if (reference.ExplicitThis || reference.CallingConvention == MethodCallingConvention.VarArg ||
             (reference.HasThis && reference.Name is not
                 (".ctor" or "get_Item" or "get_Length" or "Slice" or "Clear" or "Fill" or
                  "CopyTo" or "TryCopyTo" or "get_IsEmpty" or "GetPinnableReference")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
-        if (scope is "System.Runtime" or "System.Runtime.Intrinsics" or "System.Memory" &&
-            !ExactScope(reference.DeclaringType.Scope, scope))
+        if (PlatformAssemblies.Claimed(AssemblyName.OfScope(
+                reference.DeclaringType, IdentityImage(reference.DeclaringType))) is { } platform &&
+            !ExactScope(reference.DeclaringType, platform))
             throw new InvalidDataException(
                 $"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
-        string? op = scope switch
+        Operation? op = scope switch
         {
             "System.Runtime" => Scalar(reference)
                 ?? SpanReinterpretation.Translate(reference, profile.Architecture)
@@ -175,19 +177,19 @@ internal static class RuntimeModels
         ("System.Int64", 64, true), ("System.UInt64", 64, false),
         ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
     ];
-    private static readonly (string Name, string Operation, int Arity)[] MathOperations =
+    private static readonly (string Name, ScalarFunction Function, int Arity)[] MathOperations =
     [
-        ("Min", "min", 2), ("Max", "max", 2), ("Clamp", "clamp", 3),
-        ("Abs", "abs", 1), ("Sign", "sign", 1)
+        ("Min", ScalarFunction.Min, 2), ("Max", ScalarFunction.Max, 2), ("Clamp", ScalarFunction.Clamp, 3),
+        ("Abs", ScalarFunction.Abs, 1), ("Sign", ScalarFunction.Sign, 1)
     ];
     private static readonly (string Type, int Width)[] RotatableWords =
         [("System.UInt32", 32), ("System.UInt64", 64), ("System.UIntPtr", 64)];
-    private static readonly (string Name, string Operation)[] Rotations =
-        [("RotateLeft", "rotateLeft"), ("RotateRight", "rotateRight")];
-    private static readonly (string Name, string Operation)[] BitCounts =
+    private static readonly (string Name, ScalarFunction Function)[] Rotations =
+        [("RotateLeft", ScalarFunction.RotateLeft), ("RotateRight", ScalarFunction.RotateRight)];
+    private static readonly (string Name, ScalarFunction Function)[] BitCounts =
     [
-        ("PopCount", "popCount"), ("LeadingZeroCount", "leadingZeroCount"),
-        ("TrailingZeroCount", "trailingZeroCount"), ("Log2", "log2")
+        ("PopCount", ScalarFunction.PopCount), ("LeadingZeroCount", ScalarFunction.LeadingZeroCount),
+        ("TrailingZeroCount", ScalarFunction.TrailingZeroCount), ("Log2", ScalarFunction.Log2)
     ];
     private static readonly (string Type, int Width, bool Signed)[] Pow2Integers =
     [
@@ -201,10 +203,10 @@ internal static class RuntimeModels
         ("System.IntPtr", 64, true), ("System.UIntPtr", 64, false)
     ];
 
-    private static readonly Dictionary<string, string> ScalarOperations = BuildScalarOperations();
+    private static readonly Dictionary<string, Operation> ScalarOperations = BuildScalarOperations();
 
     // Match exact non-generic static signatures, including the defining assembly.
-    private static string? Scalar(MethodReference reference)
+    private static Operation? Scalar(MethodReference reference)
     {
         if (reference.HasThis || reference.HasGenericParameters || reference is GenericInstanceMethod ||
             reference.CallingConvention != MethodCallingConvention.Default) return null;
@@ -216,125 +218,129 @@ internal static class RuntimeModels
         };
     }
 
-    private static string? RuntimeScalar(string signature) => ScalarOperations.GetValueOrDefault(signature);
+    private static Operation? RuntimeScalar(string signature) => ScalarOperations.GetValueOrDefault(signature);
+
+    private static ScalarIntrinsic Scalar(ScalarFunction function, int width, bool signed, int arguments,
+        int result = 32) => new(function, width, signed, result, arguments);
 
     // Exact signatures share the same semantics across Math and primitive integer entry points.
-    private static Dictionary<string, string> BuildScalarOperations()
+    private static Dictionary<string, Operation> BuildScalarOperations()
     {
-        var operations = new Dictionary<string, string>(StringComparer.Ordinal)
+        var operations = new Dictionary<string, Operation>(StringComparer.Ordinal)
         {
             ["System.UInt64 System.Math::BigMul(System.UInt32,System.UInt32)"] =
-                ".intrinsic (.scalar (.bigMul32 false)) 2",
+                Scalar(ScalarFunction.BigMul32, 32, false, 2),
             ["System.Int64 System.Math::BigMul(System.Int32,System.Int32)"] =
-                ".intrinsic (.scalar (.bigMul32 true)) 2",
+                Scalar(ScalarFunction.BigMul32, 32, true, 2),
             ["System.UInt64 System.Math::BigMul(System.UInt64,System.UInt64,System.UInt64&)"] =
-                ".memory (.bigMul64 false)",
-            ["System.Int64 System.Math::BigMul(System.Int64,System.Int64,System.Int64&)"] = ".memory (.bigMul64 true)",
-            ["System.Int32 System.Math::DivRem(System.Int32,System.Int32,System.Int32&)"] = ".memory (.divRemOut 32)",
-            ["System.Int64 System.Math::DivRem(System.Int64,System.Int64,System.Int64&)"] = ".memory (.divRemOut 64)"
+                MemoryOperation.Other("(.bigMul64 false)"),
+            ["System.Int64 System.Math::BigMul(System.Int64,System.Int64,System.Int64&)"] =
+                MemoryOperation.Other("(.bigMul64 true)"),
+            ["System.Int32 System.Math::DivRem(System.Int32,System.Int32,System.Int32&)"] =
+                MemoryOperation.Other("(.divRemOut 32)"),
+            ["System.Int64 System.Math::DivRem(System.Int64,System.Int64,System.Int64&)"] =
+                MemoryOperation.Other("(.divRemOut 64)")
         };
         foreach (var (type, width, signed) in MathIntegers)
             operations.Add($"System.ValueTuple`2<{type},{type}> System.Math::DivRem({type},{type})",
-                $".intrinsic (.scalar (.divRem {width} {LeanBool(signed)})) 2");
+                Scalar(ScalarFunction.DivRem, width, signed, 2));
         foreach (var (type, width, signed) in MathIntegers)
-        foreach (var (name, operation, arity) in MathOperations)
+        foreach (var (name, function, arity) in MathOperations)
         {
             if (!signed && arity == 1) continue;
             var result = name == "Sign" ? "System.Int32" : type;
             var parameters = string.Join(",", Enumerable.Repeat(type, arity));
-            var model = $".intrinsic (.scalar (.math .{operation} {width} {LeanBool(signed)})) {arity}";
+            var model = Scalar(function, width, signed, arity);
             operations.Add($"{result} System.Math::{name}({parameters})", model);
             operations.Add($"{result} {type}::{name}({parameters})", model);
         }
         foreach (var (type, width) in RotatableWords)
         {
-            foreach (var (name, operation) in Rotations)
+            foreach (var (name, function) in Rotations)
                 operations.Add($"{type} System.Numerics.BitOperations::{name}({type},System.Int32)",
-                    $".intrinsic (.scalar (.{operation} {width})) 2");
-            foreach (var (name, operation) in BitCounts)
+                    Scalar(function, width, false, 2));
+            foreach (var (name, function) in BitCounts)
                 operations.Add($"System.Int32 System.Numerics.BitOperations::{name}({type})",
-                    $".intrinsic (.scalar (.{operation} {width} .word32)) 1");
+                    Scalar(function, width, false, 1));
             operations.Add($"{type} System.Numerics.BitOperations::RoundUpToPowerOf2({type})",
-                $".intrinsic (.scalar (.roundUpToPowerOf2 {width})) 1");
+                Scalar(ScalarFunction.RoundUpToPowerOf2, width, false, 1));
         }
         foreach (var (type, width, _) in MathIntegers.Where(integer => integer.Width is 32 or 64))
-        foreach (var (name, operation) in Rotations)
-            operations.Add($"{type} {type}::{name}({type},System.Int32)",
-                $".intrinsic (.scalar (.{operation} {width})) 2");
+        foreach (var (name, function) in Rotations)
+            operations.Add($"{type} {type}::{name}({type},System.Int32)", Scalar(function, width, false, 2));
         foreach (var (type, width, signed) in Pow2Integers)
-        foreach (var (name, operation) in BitCounts)
+        foreach (var (name, function) in BitCounts)
         {
             if (name == "Log2" && signed) continue;
-            operations.Add($"{type} {type}::{name}({type})",
-                $".intrinsic (.scalar (.{operation} {width} .word{width})) 1");
+            operations.Add($"{type} {type}::{name}({type})", Scalar(function, width, false, 1, result: width));
         }
         foreach (var (type, width, signed) in Pow2Integers)
         {
-            var model = $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1";
+            var model = Scalar(ScalarFunction.IsPow2, width, signed, 1);
             operations.Add($"System.Boolean System.Numerics.BitOperations::IsPow2({type})", model);
             operations.Add($"System.Boolean {type}::IsPow2({type})", model);
         }
         foreach (var (type, width, signed) in MathIntegers.Where(integer => integer.Width is 8 or 16))
         {
-            operations.Add($"System.Boolean {type}::IsPow2({type})",
-                $".intrinsic (.scalar (.isPow2 {width} {LeanBool(signed)})) 1");
-            foreach (var (name, operation) in BitCounts.Where(count => count.Name != "Log2"))
-                operations.Add($"{type} {type}::{name}({type})",
-                    $".intrinsic (.scalar (.{operation} {width} .word32)) 1");
+            operations.Add($"System.Boolean {type}::IsPow2({type})", Scalar(ScalarFunction.IsPow2, width, signed, 1));
+            foreach (var (name, function) in BitCounts.Where(count => count.Name != "Log2"))
+                operations.Add($"{type} {type}::{name}({type})", Scalar(function, width, false, 1));
             if (signed) continue;
-            operations.Add($"{type} {type}::Log2({type})", $".intrinsic (.scalar (.log2 {width} .word32)) 1");
-            foreach (var (name, operation) in Rotations)
-                operations.Add($"{type} {type}::{name}({type},System.Int32)",
-                    $".intrinsic (.scalar (.{operation} {width})) 2");
+            operations.Add($"{type} {type}::Log2({type})", Scalar(ScalarFunction.Log2, width, false, 1));
+            foreach (var (name, function) in Rotations)
+                operations.Add($"{type} {type}::{name}({type},System.Int32)", Scalar(function, width, false, 2));
         }
         return operations;
     }
 
     // System.Buffers.Binary.BinaryPrimitives, defined in System.Memory.
-    private static string? ReverseEndianness(string signature)
+    private static Operation? ReverseEndianness(string signature)
     {
         foreach (var (type, width, signed) in ByteAndNativeIntegers)
             if (signature == $"{type} System.Buffers.Binary.BinaryPrimitives::ReverseEndianness({type})")
-                return $".intrinsic (.scalar (.reverseEndianness {width} {LeanBool(signed)})) 1";
+                return Scalar(ScalarFunction.ReverseEndianness, width, signed, 1);
         foreach (var width in new[] { 16, 32, 64 })
         foreach (var signed in new[] { false, true })
         {
             var type = $"System.{(signed ? "Int" : "UInt")}{width}";
             if (signature == $"{type} System.Buffers.Binary.BinaryPrimitives::ReverseEndianness({type})")
-                return $".intrinsic (.scalar (.reverseEndianness {width} {LeanBool(signed)})) 1";
+                return Scalar(ScalarFunction.ReverseEndianness, width, signed, 1);
         }
         return null;
     }
 
-    private static string LeanBool(bool value) => value.ToString().ToLowerInvariant();
-
-    private static string? Runtime(string signature) => signature switch
+    private static Operation? Runtime(string signature) => signature switch
     {
         $"System.Void {Unsafe}::CopyBlock(System.Byte&,System.Byte&,System.UInt32)" or
-        $"System.Void {Unsafe}::CopyBlock(System.Void*,System.Void*,System.UInt32)" => ".memory (.copyBlock 8)",
+        $"System.Void {Unsafe}::CopyBlock(System.Void*,System.Void*,System.UInt32)" =>
+            MemoryOperation.Other("(.copyBlock 8)"),
         $"System.Void {Unsafe}::CopyBlockUnaligned(System.Byte&,System.Byte&,System.UInt32)" or
         $"System.Void {Unsafe}::CopyBlockUnaligned(System.Void*,System.Void*,System.UInt32)" =>
-            ".memory (.copyBlock 1)",
+            MemoryOperation.Other("(.copyBlock 1)"),
         $"System.Void {Unsafe}::InitBlock(System.Byte&,System.Byte,System.UInt32)" or
-        $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" => ".memory (.initBlock 8)",
+        $"System.Void {Unsafe}::InitBlock(System.Void*,System.Byte,System.UInt32)" =>
+            MemoryOperation.Other("(.initBlock 8)"),
         $"System.Void {Unsafe}::InitBlockUnaligned(System.Byte&,System.Byte,System.UInt32)" or
-        $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" => ".memory (.initBlock 1)",
-        $"!!1 {Unsafe}::BitCast<System.Byte,System.Boolean>(!!0)" => ".memory .bitcastByteBool",
-        "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" => ".memory .spanCreate",
+        $"System.Void {Unsafe}::InitBlockUnaligned(System.Void*,System.Byte,System.UInt32)" =>
+            MemoryOperation.Other("(.initBlock 1)"),
+        $"!!1 {Unsafe}::BitCast<System.Byte,System.Boolean>(!!0)" => MemoryOperation.Other(".bitcastByteBool"),
+        "System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)" =>
+            MemoryOperation.Of(new SpanCreate()),
         _ => ArgumentGuards.Translate(signature) ?? Span(signature)
     };
 
-    private static readonly Dictionary<string, string> SpanOperations = BuildSpanOperations();
+    private static readonly Dictionary<string, Operation> SpanOperations = BuildSpanOperations();
 
     // Signatures are immutable: runtime lookup performs no interpolation or per-element scan.
-    private static string? Span(string signature) => SpanOperations.GetValueOrDefault(signature);
+    private static Operation? Span(string signature) => SpanOperations.GetValueOrDefault(signature);
 
     private sealed class ElementSpanOperations
     {
-        internal readonly Dictionary<string, Dictionary<string, string>> Architectures = new(StringComparer.Ordinal);
+        internal readonly Dictionary<string, Dictionary<string, Operation>> Architectures =
+            new(StringComparer.Ordinal);
     }
 
-    private static string? ElementSpan(MethodReference method, string architecture)
+    private static Operation? ElementSpan(MethodReference method, string architecture)
     {
         var element = method.DeclaringType is GenericInstanceType { GenericArguments.Count: 1 } owner
             ? owner.GenericArguments[0]
@@ -352,10 +358,10 @@ internal static class RuntimeModels
         return operations.GetValueOrDefault(method.FullName);
     }
 
-    private static Dictionary<string, string> BuildSpanOperations(
+    private static Dictionary<string, Operation> BuildSpanOperations(
         TypeReference? elementType = null, string architecture = "scalar")
     {
-        var operations = new Dictionary<string, string>(StringComparer.Ordinal);
+        var operations = new Dictionary<string, Operation>(StringComparer.Ordinal);
         var primitives = new[]
         {
             ("System.Byte", 1), ("System.SByte", 1), ("System.Int16", 2), ("System.UInt16", 2),
@@ -365,85 +371,94 @@ internal static class RuntimeModels
         foreach (var (element, width) in elementType is null ? primitives :
             [(elementType.FullName, Spans.ElementWidth(elementType, architecture)!.Value)])
         {
-            var arrayElement = (elementType is null ? Arrays.Primitive(element) :
-                Arrays.Storage(elementType, architecture))?.Expression;
+            var arrayElement = elementType is null ? Arrays.Primitive(element) :
+                Arrays.Storage(elementType, architecture);
             var span = $"System.ReadOnlySpan`1<{element}>";
             var staticElement = elementType is null || Arrays.Primitive(elementType) is not null ||
                 EnumTypes.IsEnum(elementType);
             if (staticElement && arrayElement is not null)
             {
                 operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0)",
-                    $".memory (.arrayFill {arrayElement} false)");
+                    MemoryOperation.Other($"(.arrayFill {arrayElement.Expression} false)"));
                 operations.Add($"System.Void System.Array::Fill<{element}>(!!0[],!!0,System.Int32,System.Int32)",
-                    $".memory (.arrayFill {arrayElement} true)");
+                    MemoryOperation.Other($"(.arrayFill {arrayElement.Expression} true)"));
             }
             if (staticElement) operations.Add("System.ReadOnlySpan`1<!!0> System.Runtime.CompilerServices.RuntimeHelpers::" +
-                $"CreateSpan<{element}>(System.RuntimeFieldHandle)", $".memory (.createSpan {width})");
+                $"CreateSpan<{element}>(System.RuntimeFieldHandle)", MemoryOperation.Other($"(.createSpan {width})"));
             operations.Add($"!0& modreq(System.Runtime.InteropServices.InAttribute) {span}::get_Item(System.Int32)",
-                $".memory (.spanItem {width})");
+                MemoryOperation.Of(new SpanItem(width)));
             operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
-                $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)", ".memory .spanReference");
+                $"GetReference<{element}>(System.ReadOnlySpan`1<!!0>)", MemoryOperation.Other(".spanReference"));
             operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
-                $"GetReference<{element}>(System.Span`1<!!0>)", ".memory .spanReference");
+                $"GetReference<{element}>(System.Span`1<!!0>)", MemoryOperation.Other(".spanReference"));
             foreach (var name in new[] { "System.Span`1", "System.ReadOnlySpan`1" })
             {
                 var owner = $"{name}<{element}>";
                 var writable = name == "System.Span`1";
-                var capability = writable ? "true" : "false";
-                var arrayWhole = $".memory (.arraySpan {arrayElement} {capability} .whole)";
-                if (arrayElement is not null) operations.Add($"System.Void {owner}::.ctor(!0[])", arrayWhole);
-                if (arrayElement is not null) operations.Add($"{name}<!0> {owner}::op_Implicit(!0[])", arrayWhole);
-                if (arrayElement is not null) operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
-                    $".memory (.arraySpan {arrayElement} {capability} .counted)");
+                if (arrayElement is not null)
+                {
+                    var arrayWhole = MemoryOperation.Of(new ArraySpan(arrayElement, writable, ArrayRange.Whole));
+                    operations.Add($"System.Void {owner}::.ctor(!0[])", arrayWhole);
+                    operations.Add($"{name}<!0> {owner}::op_Implicit(!0[])", arrayWhole);
+                    operations.Add($"System.Void {owner}::.ctor(!0[],System.Int32,System.Int32)",
+                        MemoryOperation.Of(new ArraySpan(arrayElement, writable, ArrayRange.Counted)));
+                }
                 operations.Add($"System.Void {owner}::.ctor(System.Void*,System.Int32)",
-                    $".memory (.spanFromReference {width} {capability})");
+                    MemoryOperation.Of(new SpanFromReference(width, writable)));
                 operations.Add($"System.Void {owner}::.ctor(!0&)",
-                    $".memory (.spanSingleReference {width} {capability})");
-                operations.Add($"{name}<!0> {owner}::get_Empty()", $".memory (.spanEmpty {width} {capability})");
-                operations.Add($"System.Int32 {owner}::get_Length()", ".memory .spanLength");
-                operations.Add($"System.Boolean {owner}::get_IsEmpty()", ".memory (.observeView .spanEmpty)");
+                    MemoryOperation.Of(new SpanSingleReference(width, writable)));
+                operations.Add($"{name}<!0> {owner}::get_Empty()",
+                    MemoryOperation.Of(new SpanEmpty(width, writable)));
+                operations.Add($"System.Int32 {owner}::get_Length()", MemoryOperation.Of(new SpanLength()));
+                operations.Add($"System.Boolean {owner}::get_IsEmpty()",
+                    MemoryOperation.Of(new ObserveView(ViewQuery.SpanEmpty)));
                 var pinnableResult = writable ? "!0&" :
                     "!0& modreq(System.Runtime.InteropServices.InAttribute)";
                 operations.Add($"{pinnableResult} {owner}::GetPinnableReference()",
-                    ".memory (.observeView .spanPinnable)");
+                    MemoryOperation.Of(new ObserveView(ViewQuery.SpanPinnable)));
                 operations.Add($"System.Void {owner}::CopyTo(System.Span`1<!0>)",
-                    $".memory (.spanCopy {width} false)");
+                    MemoryOperation.Other($"(.spanCopy {width} false)"));
                 operations.Add($"System.Boolean {owner}::TryCopyTo(System.Span`1<!0>)",
-                    $".memory (.spanCopy {width} true)");
+                    MemoryOperation.Other($"(.spanCopy {width} true)"));
                 if (writable)
                 {
-                    operations.Add($"!0& {owner}::get_Item(System.Int32)", $".memory (.spanItem {width})");
-                    operations.Add($"System.Void {owner}::Clear()", $".memory (.spanFill {width} true)");
-                    operations.Add($"System.Void {owner}::Fill(!0)", $".memory (.spanFill {width} false)");
+                    operations.Add($"!0& {owner}::get_Item(System.Int32)", MemoryOperation.Of(new SpanItem(width)));
+                    operations.Add($"System.Void {owner}::Clear()",
+                        MemoryOperation.Other($"(.spanFill {width} true)"));
+                    operations.Add($"System.Void {owner}::Fill(!0)",
+                        MemoryOperation.Other($"(.spanFill {width} false)"));
                 }
-                operations.Add($"{name}<!0> {owner}::Slice(System.Int32)", ".memory (.spanSlice false)");
-                operations.Add($"{name}<!0> {owner}::Slice(System.Int32,System.Int32)", ".memory (.spanSlice true)");
+                operations.Add($"{name}<!0> {owner}::Slice(System.Int32)", MemoryOperation.Of(new SpanSlice(false)));
+                operations.Add($"{name}<!0> {owner}::Slice(System.Int32,System.Int32)",
+                    MemoryOperation.Of(new SpanSlice(true)));
                 var factory = writable ? "CreateSpan" : "CreateReadOnlySpan";
                 operations.Add($"{name}<!!0> System.Runtime.InteropServices.MemoryMarshal::" +
                     $"{factory}<{element}>(!!0&,System.Int32)",
-                    $".memory (.spanFromReference {width} {capability})");
+                    MemoryOperation.Of(new SpanFromReference(width, writable)));
             }
             operations.Add($"System.ReadOnlySpan`1<!0> System.Span`1<{element}>::" +
-                "op_Implicit(System.Span`1<!0>)", ".memory .spanReadOnly");
+                "op_Implicit(System.Span`1<!0>)", MemoryOperation.Other(".spanReadOnly"));
             operations.Add("!!0& System.Runtime.InteropServices.MemoryMarshal::" +
-                $"GetArrayDataReference<{element}>(!!0[])", ".memory (.observeView .arrayData)");
+                $"GetArrayDataReference<{element}>(!!0[])", MemoryOperation.Of(new ObserveView(ViewQuery.ArrayData)));
             foreach (var (parameters, range) in new[]
             {
-                ("!!0[]", "whole"), ("!!0[],System.Int32", "fromStart"),
-                ("!!0[],System.Int32,System.Int32", "counted")
+                ("!!0[]", ArrayRange.Whole), ("!!0[],System.Int32", ArrayRange.FromStart),
+                ("!!0[],System.Int32,System.Int32", ArrayRange.Counted)
             })
                 if (arrayElement is not null) operations.Add("System.Span`1<!!0> System.MemoryExtensions::" +
-                    $"AsSpan<{element}>({parameters})", $".memory (.arraySpan {arrayElement} true .{range})");
+                    $"AsSpan<{element}>({parameters})", MemoryOperation.Of(new ArraySpan(arrayElement, true, range)));
         }
         return operations;
     }
 
-    private static readonly Dictionary<string, string> PortableVectorOperations = BuildPortableVectorOperations();
+    private static readonly Dictionary<string, Operation> PortableVectorOperations = BuildPortableVectorOperations();
+
+    private static HardwareIntrinsic Hardware(string family, int arguments) => new(family, arguments);
 
     // Lane-independent integer aliases bind exact signatures to the existing whole-vector operations.
-    private static Dictionary<string, string> BuildPortableVectorOperations()
+    private static Dictionary<string, Operation> BuildPortableVectorOperations()
     {
-        var operations = new Dictionary<string, string>(StringComparer.Ordinal);
+        var operations = new Dictionary<string, Operation>(StringComparer.Ordinal);
         foreach (var width in new[] { 128, 256, 512 })
         {
             var genericVector = Vector(width, "!!0");
@@ -456,17 +471,16 @@ internal static class RuntimeModels
                 foreach (var (name, op) in new[]
                     { ("op_BitwiseAnd", "band"), ("op_BitwiseOr", "bor"), ("op_ExclusiveOr", "bxor") })
                     operations.Add($"{memberVector} {vectorOwner}::{name}({memberVector},{memberVector})",
-                        $".intrinsic (.vector (.{op} {width})) 2");
+                        Hardware($".vector (.{op} {width})", 2));
                 operations.Add($"System.Boolean {vectorOwner}::op_Equality({memberVector},{memberVector})",
-                    $".intrinsic (.vector (.equalsAll {width})) 2");
+                    Hardware($".vector (.equalsAll {width})", 2));
                 operations.Add($"{memberVector} {vectorOwner}::op_OnesComplement({memberVector})",
-                    $".intrinsic (.vector (.bnot {width})) 1");
+                    Hardware($".vector (.bnot {width})", 1));
                 operations.Add($"System.Boolean {owner}::EqualsAll<{element}>({genericVector},{genericVector})",
-                    $".intrinsic (.vector (.equalsAll {width})) 2");
-                operations.Add($"{memberVector} {vectorOwner}::get_Zero()",
-                    $".intrinsic (.vector (.zero {width})) 0");
+                    Hardware($".vector (.equalsAll {width})", 2));
+                operations.Add($"{memberVector} {vectorOwner}::get_Zero()", Hardware($".vector (.zero {width})", 0));
                 operations.Add($"{memberVector} {vectorOwner}::get_AllBitsSet()",
-                    $".intrinsic (.vector (.ones {width})) 0");
+                    Hardware($".vector (.ones {width})", 0));
             }
         }
         return operations;
@@ -474,40 +488,42 @@ internal static class RuntimeModels
 
     // Vector128/256.Create<byte>(ReadOnlySpan<byte>) reads the leading bytes and throws
     // ArgumentOutOfRangeException for a short span, exactly as MemoryMarshal.Read of the vector.
-    private static string? VectorFromByteSpan(string signature)
+    private static Operation? VectorFromByteSpan(string signature)
     {
         const string spanParameter = "System.ReadOnlySpan`1<!!0>";
         foreach (var width in new[] { 128, 256 })
             if (signature == $"{Vector(width, "!!0")} {Intrinsics}.Vector{width}::Create<System.Byte>({spanParameter})")
-                return $".memory (.marshalRead (.snapshot .vector{width}) false)";
+                return MemoryOperation.Other($"(.marshalRead (.snapshot .vector{width}) false)");
         return null;
     }
 
     // Vector128.LoadUnsafe<byte> and StoreUnsafe<byte> are Unsafe.Add by the unsigned byte offset, when
     // present, then the unaligned 16-byte transfer of Unsafe.ReadUnaligned or WriteUnaligned.
-    private static string? Vector128ByteTransfer(string signature)
+    private static Operation? Vector128ByteTransfer(string signature)
     {
         const string owner = $"{Intrinsics}.Vector128";
         foreach (var offset in new[] { "false", "true" })
         {
             var offsetParameter = offset == "true" ? ",System.UIntPtr" : "";
             if (signature == $"{Vector(128, "!!0")} {owner}::LoadUnsafe<System.Byte>(!!0&{offsetParameter})")
-                return $".memory (.vector128Unsafe false {offset})";
+                return MemoryOperation.Other($"(.vector128Unsafe false {offset})");
             if (signature ==
                 $"System.Void {owner}::StoreUnsafe<System.Byte>({Vector(128, "!!0")},!!0&{offsetParameter})")
-                return $".memory (.vector128Unsafe true {offset})";
+                return MemoryOperation.Other($"(.vector128Unsafe true {offset})");
         }
         return null;
     }
 
-    private static string? Intrinsic(string signature, FeatureProfile profile)
+    private static Operation? Intrinsic(string signature, FeatureProfile profile)
     {
         if (PortableVectorOperations.TryGetValue(signature, out var operation)) return operation;
-        string? Finish(string intrinsic, int argc, Feature? required = null)
+        Operation Finish(string family, int argc, Feature? required = null) =>
+            Require(Hardware(family, argc), required);
+        Operation Require(Operation intrinsic, Feature? required = null)
         {
             if (required is Feature feature && !profile.Get(feature))
                 throw new InvalidDataException($"Reachable intrinsic lacks {feature}: {signature}");
-            return $".intrinsic ({intrinsic}) {argc}";
+            return intrinsic;
         }
         if (signature == $"{V256UInt64} {Avx2}::And({V256UInt64},{V256UInt64})")
             return Finish(".avx2 .band", 2, Feature.Avx2);
@@ -530,7 +546,7 @@ internal static class RuntimeModels
         if (signature == $"{V512UInt64} {Intrinsics}.Vector512::Create({V256UInt64},{V256UInt64})")
             return Finish(".vector .combine256", 2);
         if (signature == $"{V128UInt64} {Intrinsics}.Vector128::CreateScalarUnsafe(System.UInt64)")
-            return Finish(".vector .createScalarUnsafe64", 1);
+            return Require(new VectorCreateScalarUnsafe64());
         if (VectorFromByteSpan(signature) is { } load) return load;
         if (Vector128ByteTransfer(signature) is { } transfer) return transfer;
         foreach (int width in new[] { 128, 256 })
@@ -646,7 +662,7 @@ internal static class RuntimeModels
             $"System.UInt64 {Intrinsics}.Arm.ArmBase/Arm64::MultiplyHigh(System.UInt64,System.UInt64)" =>
                 Finish(".armBase64 .multiplyHigh64", 2, Feature.ArmBase64),
             $"{UInt64Pair} {X86}.X86Base/X64::DivRem(System.UInt64,System.UInt64,System.UInt64)" =>
-                Finish(".x86Base .divRem64", 3, Feature.X86Base64),
+                Require(new X86BaseDivRem64(), Feature.X86Base64),
             _ => null
         };
     }

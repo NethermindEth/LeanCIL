@@ -21,7 +21,7 @@ import CIL.Safety.SymbolicExecution
 namespace ProofGuide
 
 @[cil_code] def arithmeticMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .const32 1, .shl, .add, .const32 0, .gtu, .ret]
+  code := [.arg 0, .arg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
   locals := [], returnsValue := true }
 
 theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
@@ -161,7 +161,7 @@ monadic binds. The tactics accept these fact forms:
 | Situation | Fact |
 | --- | --- |
 | A branch on a symbolic condition | `v = 0` or `Not (v = 0)` on the condition value; no `CIL.truth` restatement is needed. A literal condition, such as the `1` a decided feature test pushes, decides itself and continues at a numeral program counter |
-| An opcode index stated as closed arithmetic, such as `.local (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.local 7`, the form a fetched opcode has |
+| An opcode index stated as closed arithmetic, such as `.ldloc (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.ldloc 7`, the form a fetched opcode has |
 | A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1` | Fact preparation derives its load at the numeral width an opcode carries |
 | A value known only as `argument : CIL.Value`, loaded as an argument or passed to a call | `numericValue argument = true`; preparation also states it over the unfolded definition, the form the checked value test has when the step reaches it |
 | `bitcastByteBool`, whose operand must be `0` or `1` | None for a comparison result `if c then 1 else 0`; for any other int32, `bits.toNat ≤ 1`. The fact may bound a value inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32` |
@@ -226,7 +226,7 @@ Reference and field instructions have one `@[cil_instruction_step]` equation per
 [InstructionSteps](../CIL/Safety/InstructionSteps.lean), which rewrites a step to checked memory
 and formation operations. They cover the `instruction` arms of `load64`, `store64` and
 `storeScalar` through a reference, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
-width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `asRef`, `skipInit` and `initobj`.
+width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and `initobj`.
 
 - Supply successful encoded byte reads and writes directly: the stepper derives the scalar or
   vector bridge before stepping. Narrow scalar reads support signed and unsigned results. Facts
@@ -348,7 +348,7 @@ to derive snapshots for `untouchedLocals code known`. Effects compose through `a
 one frame-rule application replaces separate disjoint-read proofs for all retained locals. The
 numeric slot identities must remain fixed, and the frame-rule placement must belong to the running
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
-absence of a direct `setLocal` is not evidence that an aliased byte-backed local keeps its value.
+absence of a direct `stloc` is not evidence that an aliased byte-backed local keeps its value.
 
 ## Step loops
 
@@ -682,9 +682,9 @@ The lemmas of `CIL.Safety.StepFlow` give the possible successors of a successful
 unfolding it.
 `step_next_target` proves that an action that stays in the frame resumes at `pc + 1` of a
 continuing instruction or at one of `op.targets`. Given a successful action and its selected
-callee, `step_callee` proves membership in `Op.callees`: a singleton for a direct call or
+callee, `step_callee` proves membership in `Instruction.callees`: a singleton for a direct call or
 construction, or all authenticated targets for an indirect call. Tail transfers enter a callee
-without continuing in the current frame. `step_call_action` and `step_newVector256_action` /
+without continuing in the current frame. `step_call_action` and
 `step_newAggregate_action` separate a call from a construction. The module imports only the step
 simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
 layers.
@@ -696,6 +696,29 @@ Prefer a small `change` or an instruction equation over repeatedly unfolding `ru
 splitting operand constructors, and close definitionally equal cases early. Share the remaining
 family-level reasoning. For concrete execution, compose steps first and simplify the resulting value
 equation separately when needed.
+
+`cil_checked_steps` in every form (including the snapshot forms), `cil_contract_steps` in every
+form, `cil_raise_steps`, `cil_loop_steps`, `cil_loop_advance`, `cil_loop_finish`,
+`cil_loop_recurse` and `cil_loop_outcome_advance` keep, for each simplification of a run, the
+terms that simplification visited and left unchanged. A later step of the same run returns such a
+term as it is instead of visiting it again, so the simplifications of a step visit the terms it
+produced and not the values the run has built. The goals a step leaves are those that plain
+simplification leaves. `set_option cil.stepping.record false` turns the record off; the
+simplifications then still run through `cil_simp_only`, so their messages and info trees differ
+from those of `simp only`. A run starts to use the record after `cil.stepping.warmup` steps (12
+by default), since the goal of a short run is small; a step is one stepping call, and a loop
+instruction takes up to three.
+
+The record holds one set of terms for each list of supplied facts the run steps with, so a loop
+walk whose instructions read different groups of facts keeps them all. Each set is keyed by the
+facts as elaborated, a lemma with implicit arguments or universe parameters included, and by the
+hypotheses in scope. It is dropped when either changes, when a step fails, and when the tactic
+ends. A fact that does not elaborate makes its step run without the record, which
+`trace.CIL.record` reports. A step run outside these tactics, such as a single
+`cil_checked_step`, keeps none. A run also builds its simplification contexts and the list of
+equation hypotheses that `cil_lookup` tries once. Each step still unifies the step lemma with the
+whole state, so on a body whose values grow, the cost per instruction rises slowly with the
+program counter.
 
 To compare the cost of two versions of a proof, measure each with fresh Lean processes and
 prebuilt dependencies, alternating the runs serially on the same machine. Record elapsed time, CPU

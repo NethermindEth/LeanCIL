@@ -18,7 +18,7 @@ def reprofile (program : Program) (profile : FeatureProfile) : Program :=
 
 /-- `p` and `q` answer the profile query `op` makes, if any, the same way: a feature test or
     an intrinsic's availability. -/
-def Op.ProfileAgreement (op : Op) (p q : FeatureProfile) : Prop :=
+def Instruction.ProfileAgreement (op : Instruction) (p q : FeatureProfile) : Prop :=
   match op with
   | .feature featureId => p.evaluate featureId = q.evaluate featureId
   | .intrinsic operation _ => operation.available p = operation.available q
@@ -30,9 +30,9 @@ def Program.ProfileAgreement (program : Program) (p q : FeatureProfile) : Prop :
 
 /-- An intrinsic step observes the profile only through the intrinsic's availability. -/
 theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool) (pc : Nat)
-    (args : List Value) (frame : Nat) (stack : List Value) (memory : Memory)
+    (args : List Value) (stack : List Value) (memory : Memory)
     (profile : FeatureProfile) :
-    step (.intrinsic operation argc) returns pc args frame stack memory profile =
+    step (.intrinsic operation argc) returns pc args stack memory profile =
       if stack.length < argc || !operation.available profile then none else do
         return .next (pc + 1)
           ((← evalIntrinsic operation (stack.take argc).reverse) :: stack.drop argc) memory :=
@@ -41,11 +41,11 @@ theorem step_intrinsic (operation : Intrinsic) (argc : Nat) (returns : Bool) (pc
 #print axioms step_intrinsic
 
 /-- A step under agreeing profiles has the same outcome. -/
-theorem step_profile_eq (op : Op) (p q : FeatureProfile)
+theorem step_profile_eq (op : Instruction) (p q : FeatureProfile)
     (h : op.ProfileAgreement p q) (returns : Bool) (pc : Nat) (args : List Value)
-    (frame : Nat) (stack : List Value) (memory : Memory) :
-    step op returns pc args frame stack memory p =
-      step op returns pc args frame stack memory q := by
+    (stack : List Value) (memory : Memory) :
+    step op returns pc args stack memory p =
+      step op returns pc args stack memory q := by
   cases op <;> try rfl
   case feature id =>
     change p.evaluate id = q.evaluate id at h
@@ -122,12 +122,12 @@ theorem Intrinsic.available_of_required (operation : Intrinsic) (p : FeatureProf
       simp_all [Intrinsic.requiredFeatures, Intrinsic.available, FeatureProfile.evaluate]
   case avx512DQ operation => cases operation <;> simp_all
 
-theorem Op.ProfileAgreement.symm (op : Op) (p q : FeatureProfile)
+theorem Instruction.ProfileAgreement.symm (op : Instruction) (p q : FeatureProfile)
     (h : op.ProfileAgreement p q) : op.ProfileAgreement q p := by
   cases op <;> try trivial
   all_goals exact Eq.symm h
 
-theorem Op.ProfileAgreement.trans (op : Op) (p q r : FeatureProfile)
+theorem Instruction.ProfileAgreement.trans (op : Instruction) (p q r : FeatureProfile)
     (hpq : op.ProfileAgreement p q) (hqr : op.ProfileAgreement q r) :
     op.ProfileAgreement p r := by
   cases op <;> try trivial
@@ -146,7 +146,7 @@ theorem Intrinsic.available_eq_of_required (operation : Intrinsic) (p q : Featur
   case avx512DQ operation => cases operation <;> simp_all
 
 /-- The profile flags `op` reads: the feature it tests, or every feature its intrinsic needs. -/
-def Op.profileReads : Op → List Feature
+def Instruction.profileReads : Instruction → List Feature
   | .feature featureId => [featureId]
   | .intrinsic operation _ => operation.requiredFeatures
   -- A new profile-reading op breaks `step_profile_eq`; covering it in `ProfileAgreement`
@@ -156,7 +156,7 @@ def Op.profileReads : Op → List Feature
 /-- Every profile flag an instruction of any method in the program reads, the same scope
     `Program.ProfileAgreement` quantifies over. -/
 def Program.profileReads (program : Program) : List Feature :=
-  program.flatMap fun body => body.code.flatMap Op.profileReads
+  program.flatMap fun body => body.code.flatMap Instruction.profileReads
 
 /-- Two profiles that agree on every flag the program reads agree on the whole program. The
     hypothesis is decidable, so `decide` closes it for concrete profiles. -/

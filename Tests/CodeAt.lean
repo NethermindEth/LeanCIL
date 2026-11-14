@@ -16,7 +16,7 @@ namespace Tests.CodeAt
 open CIL.Safety
 
 /-- A seven-instruction segment repeated at computed positions. -/
-def sevenInstructions : List CIL.Op := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
+def sevenInstructions : List CIL.Instruction := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
 
 /-- Four identical segments preceded by one instruction. -/
 @[cil_code] def repeatedBody : CIL.Method :=
@@ -90,7 +90,7 @@ theorem placed_run {program : CIL.Program} {method start : Nat} {body : CIL.Meth
 #print axioms placed_run
 
 /-- The segment `left + right` over the first two arguments. -/
-def sumSegment : List CIL.Op := [.arg 0, .arg 1, .add]
+def sumSegment : List CIL.Instruction := [.arg 0, .arg 1, .add]
 
 -- Without a placement the abstract body's instructions are unknown, so stepping cannot start.
 /-- error: cil_checked_steps took no step: the method or instruction lookup -/
@@ -183,7 +183,7 @@ theorem run_placed_method (memory : Memory) (frame : Frame) (left right : CIL.W6
 #guard_msgs in #print axioms run_placed_method
 
 -- The positional hypotheses an older segment theorem threads give the same placement.
-example {body : CIL.Method} {tail : List CIL.Op}
+example {body : CIL.Method} {tail : List CIL.Instruction}
     (positioned : body.code = [.nop, .nop, .nop, .nop] ++ sumSegment ++ tail) :
     CodeAt body 4 sumSegment :=
   CodeAt.of_eq_append positioned rfl
@@ -208,7 +208,7 @@ example {body : CIL.Method} (placed : CodeAt body 4 sumSegment)
 
 -- The bound is needed: the empty segment is placed past the end of any code.
 example : CodeAt placedMethod 100 [] := CodeAt.nil
-example : ¬ ∃ leading tail : List CIL.Op,
+example : ¬ ∃ leading tail : List CIL.Instruction,
     placedMethod.code = leading ++ [] ++ tail ∧ leading.length = 100 := by
   rintro ⟨leading, tail, split, length⟩
   have total := congrArg List.length split

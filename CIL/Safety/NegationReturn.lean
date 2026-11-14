@@ -12,8 +12,8 @@ namespace CIL.Safety
 /-- Execute Boolean negation from its actual constant/equality/return suffix. -/
 theorem run_negation_return (program : CIL.Program) (method pc : Nat) (body : CIL.Method)
     (lookup : program[method]? = some body)
-    (constant : body.code[pc]? = some (.const32 0))
-    (equality : body.code[pc + 1]? = some .eq)
+    (constant : body.code[pc]? = some (.ldc_i4 0))
+    (equality : body.code[pc + 1]? = some .ceq)
     (returned : body.code[pc + 1 + 1]? = some .ret)
     (returns : body.returnsValue = true)
     (args : List Value) (frame : Frame) (memory : Memory) (flag : BitVec 32) :

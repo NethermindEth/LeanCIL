@@ -27,21 +27,21 @@ theorem initial_formed : initial.WellFormed where
 def indices : LocalIndexMap := .skip (.keep (.skip (.keep (.skip .nil))))
 
 /-- The source retains one initialized word32 home and one initialized by its code. -/
-def sourceBody (code : List CIL.Op) : CIL.Method := {
+def sourceBody (code : List CIL.Instruction) : CIL.Method := {
   returnsValue := true
   locals := [.i32 7, .unmodeled]
   localKinds := [.word32, .word32]
   code }
 
 /-- Initialized private word64 homes precede, separate and follow the retained word32 homes. -/
-def targetBody (code : List CIL.Op) : CIL.Method := {
+def targetBody (code : List CIL.Instruction) : CIL.Method := {
   returnsValue := true
   locals := [.i64 17, .i32 7, .i64 23, .unmodeled, .i64 31]
   localKinds := [.word64, .word32, .word64, .word32, .word64]
   code := code.map indices.operation }
 
 /-- Retained local operands, all method metadata and exact frame declarations match. -/
-theorem bodies_related (code : List CIL.Op) :
+theorem bodies_related (code : List CIL.Instruction) :
     Nonempty (MethodRenaming (sourceBody code) (targetBody code)) := by
   refine ⟨⟨indices, ⟨rfl, rfl, rfl⟩,
     .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
@@ -81,7 +81,7 @@ theorem invalid_dead_initializers_rejected :
 #print axioms invalid_dead_initializers_rejected
 
 /-- The child reads seven from its retained initializer after allocating its numeric homes. -/
-def childCode : List CIL.Op := [.local 0, .ret]
+def childCode : List CIL.Instruction := [.ldloc 0, .ret]
 
 /-- The inserted nonzero initializer really writes the fresh private home during frame entry. -/
 theorem private_initializer_readback :
@@ -90,23 +90,25 @@ theorem private_initializer_readback :
 #print axioms private_initializer_readback
 
 /-- A returned child value is stored before later dynamic allocation changes fresh identities. -/
-def allocationPrefix : List CIL.Op :=
-  [.const32 9, .setLocal 0, .call 1 0, .setLocal 1, .const32 4, .stackAlloc false, .pop]
+def allocationPrefix : List CIL.Instruction :=
+  [.ldc_i4 9, .stloc 0, .call 1 0, .stloc 1, .ldc_i4 4, .stackAlloc false, .pop]
 
 /-- The resumed caller reads both retained homes after its child and dynamic allocation. -/
-def returningCode : List CIL.Op := allocationPrefix ++ [.local 0, .local 1, .add, .ret]
+def returningCode : List CIL.Instruction := allocationPrefix ++ [.ldloc 0, .ldloc 1, .add, .ret]
 
 /-- The exceptional fixture raises after both the nested call and dynamic allocation finish. -/
-def throwingCode : List CIL.Op := allocationPrefix ++ [.throw "AfterNestedAllocation"]
+def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw "AfterNestedAllocation"]
 
 /-- Both methods use the same declaration transformation and preserve their callable indices. -/
-def sourceProgram (code : List CIL.Op) : CIL.Program := [sourceBody code, sourceBody childCode]
+def sourceProgram (code : List CIL.Instruction) : CIL.Program :=
+  [sourceBody code, sourceBody childCode]
 
 /-- The actual program relocates every local operand in both caller and child. -/
-def targetProgram (code : List CIL.Op) : CIL.Program := [targetBody code, targetBody childCode]
+def targetProgram (code : List CIL.Instruction) : CIL.Program :=
+  [targetBody code, targetBody childCode]
 
 /-- The complete program satisfies the checked method correspondence, including its child. -/
-theorem programs_related (code : List CIL.Op) :
+theorem programs_related (code : List CIL.Instruction) :
     ProgramRenaming (sourceProgram code) (targetProgram code) := by
   intro method body found
   cases method with
@@ -223,12 +225,14 @@ theorem zero_quota_rejected :
 
 /-- Leaving the first local operand unrelocated violates the exact instruction equation. -/
 theorem unchanged_operand_rejected :
-    ([.local 0] : List CIL.Op) ≠ [.local 0].map indices.operation := by intro equal; cases equal
+    ([.ldloc 0] : List CIL.Instruction) ≠ [.ldloc 0].map indices.operation := by
+  intro equal; cases equal
 #print axioms unchanged_operand_rejected
 
 /-- Replacing the nested call target violates the exact instruction equation. -/
 theorem changed_callee_rejected :
-    ([.call 0 0] : List CIL.Op) ≠ [.call 1 0].map indices.operation := by intro equal; cases equal
+    ([.call 0 0] : List CIL.Instruction) ≠ [.call 1 0].map indices.operation := by
+  intro equal; cases equal
 #print axioms changed_callee_rejected
 
 end Tests.AllocationExecutionRenaming
@@ -238,7 +242,7 @@ open CIL.Safety
 
 /-- A compact method has no local declarations and returns a fixed scalar. -/
 def compact : CIL.Method := {
-  locals := [], returnsValue := true, code := [.const32 7, .ret] }
+  locals := [], returnsValue := true, code := [.ldc_i4 7, .ret] }
 
 /-- The target inserts exactly one unused declaration with its supplied initializer. -/
 def inserted (kind : CIL.LocalKind) (initial : CIL.Value) : CIL.Method := {
@@ -252,7 +256,7 @@ theorem compact_returns (memory : Memory) :
 /-- A valid initializer supplies the existing ordinary-frame width requirements. -/
 theorem inserted_ready (kind : CIL.LocalKind) (initial : CIL.Value)
     (fits : InitializerFits kind initial) : OrdinaryFrame (inserted kind initial) := by
-  refine ⟨rfl, rfl, rfl, ?_⟩
+  refine ⟨rfl, rfl, ?_⟩
   intro selected member
   have same : selected = kind := List.mem_singleton.mp member
   subst selected
@@ -272,7 +276,7 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
     cases found
     refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil, ⟨rfl, rfl, rfl⟩,
       .skip kind initial fits .nil, ?_, inserted_ready kind initial fits, rfl⟩⟩⟩
-    exact ⟨rfl, rfl, rfl, by intro selected member; cases member⟩
+    exact ⟨rfl, rfl, by intro selected member; cases member⟩
   | succ method => cases found
 #print axioms inserted_related
 

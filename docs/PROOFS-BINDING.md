@@ -13,7 +13,7 @@ instruction from an extracted method:
 
 ```lean extracted
 bind_entry entry := Extracted.method0 with [] from CIL.Safety.Memory.empty
-bind_cutpoint cutpoint := Extracted.method0 matching (· matches .brnonzero _) with entry.frame
+bind_cutpoint cutpoint := Extracted.method0 matching (· matches .brtrue _) with entry.frame
 ```
 
 `entry.frame`, `entry.memory` and `entry.home0` (and subsequent numeric homes) come from
@@ -112,8 +112,7 @@ Open it with `obtain ⟨home0, entered, enter⟩ := entry.checked ...` and read 
 `madeN` and `kept`. A fact `valid : view.validate memory = .ok ()` is also supplied in the memory
 after the homes through [`SpanView.validate_below`](../CIL/Safety/FrameMemoryBelow.lean), so an
 assigned span parameter stores without restating its validity. A local that allocates a home
-needs a fitting initializer or `.unmodeled`, and a vector argument home or a numeric parameter
-home is rejected.
+needs a fitting initializer or `.unmodeled`, and a numeric parameter home is rejected.
 [SpanSum](../Examples/Proofs/SpanSum.lean), [FillWords](../Examples/Proofs/FillWords.lean),
 [Struct](../Examples/Proofs/Struct.lean), [Countdown](../Examples/Proofs/Countdown.lean),
 [CountCalls](../Examples/Proofs/CountCalls.lean) and
@@ -144,7 +143,7 @@ with frame` checks that particular instruction rather than requiring a unique pr
 bind_loop outer := Extracted.method0 [0]
 bind_loop inner := Extracted.method0 [1]
 bind_cutpoint cutpoint (frame : Frame) := Extracted.method0 at inner.latch matching
-  (· matches .brnonzero _) with frame
+  (· matches .brtrue _) with frame
 ```
 
 Structural loop occurrences are ordered by head index. Out-of-range locations and wrong instruction
@@ -177,18 +176,20 @@ Embedding relates whole bodies. When only a suffix is shared, `CIL.Safety.Region
 rest first. `RegionClosed program region` says fallthroughs, targets and callee entries of region
 instructions stay in the region; `regionClosedCheck` decides it for a region listed as `(method,
 lower)` suffixes (`inStarts`). `AgreesOn program other region` says `other` has the same methods and
-metadata and the same instruction at every region pc; `AgreesOn.set` and `code_agrees_of_drop` build
-it for one replaced body. Then `run_congr_region` gives equal runs from any region pc, faults
+metadata, link table included, and the same instruction at every region pc; `AgreesOn.set` and
+`code_agrees_of_drop` build it for one replaced body. Then `run_congr_region` gives equal runs from any region pc, faults
 included. Masking the code outside the region with `.unsupported` makes it dead for `Embeds`, so
 `run_refines` carries the suffix run on to a body with a different prefix, for example a suffix
 after inline code to the same suffix after a helper call, one pc earlier.
 
 For a long suffix, import `CIL.Safety.Embedding.Suffix` and use
-`CIL.Embedding.BodyRefines.of_relocated_suffix`. It uses one list equality: `actual.code.drop start
-= (expected.code.drop lower).map (Op.relabel (fun pc => pc - lower + start))`. The expected prefix
-must contain only dead instructions. All branch targets in the suffix must be at least `lower`. The
-constructor also requires equal method metadata, equal static descriptor lists, and equal static
-lookups at each moved pc. If `lower = 0`, `start` must also be zero to preserve method entry.
+`CIL.Embedding.BodyRefines.of_relocated_suffix`. It uses one list equality:
+`actual.code.drop start
+= (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start))`.
+The expected prefix must contain only dead instructions. All branch targets in the suffix must be at
+least `lower`. The constructor also requires equal method metadata except the static sites and link
+table, equal static descriptor lists, and equal static lookups and call links at each moved pc. If
+`lower = 0`, `start` must also be zero to preserve method entry.
 
 The resulting map, `suffixRename lower start`, sends prefix pcs to zero and suffix pcs to `pc -
 lower + start`. Pass the proof to `ProgramRefines.set_body` and then `run_refines`. This avoids
@@ -210,9 +211,65 @@ def double : CIL.Method :=
 
 def program : CIL.Program := [{ code := [.ret], locals := [], returnsValue := false }, double]
 
--- Against an extraction the goal reads `Extracted.program[1]? = some double`.
 theorem found : program[1]? = some double := by cil_body
 ```
+
+An extracted method also carries its declared signature (`declared`), the layout tables shared by
+the whole extraction (`environment`) and a call-link table (`links`), and an equality or an
+embedding compares all of them with the extraction's. A bare literal such as `double` has no
+signature, so it binds only to a method with none. Start from the extraction's method and replace
+its code with `Method.withCode`, which keeps `declared`, `environment` and the other fields, gives
+the body the links its new code implies and resets the static sites, which are keyed by pc like the
+links:
+
+```lean extracted
+import Extracted
+import CIL.MethodBinding
+
+/-- The extraction's method at index 1 with the body this proof expects. -/
+def double : CIL.Method := Extracted.method1.withCode [.arg 0, .arg 0, .add, .ret]
+
+theorem found : Extracted.program[1]? = some double := by cil_body
+```
+
+Do not write `{ Extracted.method1 with code := ... }`: a structure update copies the extraction's
+link table and static sites, which are keyed by the extraction's pcs, so the update agrees with the
+new code only where no call or static access moved. A body that reads statics sets the sites after
+`withCode`, as in `{ Extracted.method1.withCode code with staticSites := [...] }`, one entry per
+static access at the body's pc with the extraction's descriptor for it. `withCode` is also the
+form for a body embedded into an extraction with dead blocks, where the pcs of the calls differ:
+
+```lean
+import CIL.Embedding.Tactic
+
+open CIL
+
+/-- What an extraction emits: a dead block puts the call at pc 3. -/
+def emitted : Method :=
+  { code := [.arg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret],
+    locals := [], returnsValue := true }
+
+/-- The body the proof uses; its call is at pc 2, and `withCode` gives it the link of that pc. -/
+def literal : Method := emitted.withCode [.arg 0, .br 2, .call 1 1, .ret]
+
+theorem literal_embeds : MethodEmbeds [emitted] 0 literal := by cil_embed
+```
+
+A literal that does not bind is reported field by field. A difference in `declared`, `environment`,
+`staticSites` or `links` prints `field declared:`, `field environment:`, `field staticSites:` or
+`field links:` with the value on each side, and the layout tables as their counts. The `links` line
+says to build the body with `withCode` from the extraction's method, and the `staticSites` line says
+that `withCode` resets the sites and what entries to supply after it. `cil_embed` adds the same
+text when the static descriptor lists differ or a moved pc resolves another descriptor. The
+`declared` and `environment` lines name no remedy: take both from the extraction's method.
+
+A proof that steps through a call reads the link at the call's pc. For an extracted method the
+generated fact `methodN_linkPC` gives the link of each call site in logarithmic time, and the
+`cil_code` simp set unfolds its named link to the constructor. For a pc without a call the table is
+read by its listed keys, which costs the number of calls and never gets stuck
+(`Method.linkAt_of_unlisted`). A template or a literal body keeps the table its code implies, and
+`Method.linkAt_of_instruction` reads the link from the instruction equation of its pc in one step,
+whatever the callee of a template is; evaluating `linkAt` instead rebuilds that table.
 
 `cil_body` runs `rfl`, so the proof is the same kernel-checked `Eq.refl`. When `rfl` fails, it
 evaluates both closed sides and reports, for each differing `Method` field, the first differing
@@ -222,8 +279,8 @@ index, both elements and both lengths:
 cil_body: rfl could not prove the method-body binding
 method index 1
 field code: first difference at index 1 (left length 6, right length 6)
-  left:  CIL.Op.brzero 10
-  right: CIL.Op.brzero 4
+  left:  CIL.Instruction.brfalse 10
+  right: CIL.Instruction.brfalse 4
 ```
 
 The left side is the extraction's body. An index past the end of the program is reported with the
@@ -296,7 +353,7 @@ import CIL.StructuralLabels
 bind_loop reduce := rootBody [1]     -- the second loop head in pc order
 bind_call after := step from rootBody [1]
 
-theorem body : (rootBody.code.drop reduce).take 4 = [.local 0, .const32 3, .sub, .setLocal 0] := rfl
+theorem body : (rootBody.code.drop reduce).take 4 = [.ldloc 0, .ldc_i4 3, .sub, .stloc 0] := rfl
 ```
 
 A loop head is the target of a branch at the same or a later pc. `bind_loop` defines `reduce` and
@@ -324,7 +381,7 @@ proof that imports it can name locals by their C# names, resolved in the scope t
 import ExtractedSymbols
 
 theorem stores :
-    sumBody.code[atWide + 1]? = some (.setLocal (local_named sum "carry" at (atWide + 1))) := rfl
+    sumBody.code[atWide + 1]? = some (.stloc (local_named sum "carry" at (atWide + 1))) := rfl
 ```
 
 A name used for one slot needs no `at`; a name the PDB gives two slots, such as `carry` declared in
@@ -353,8 +410,10 @@ A profile can make the extractor emit dead `.unsupported` blocks that shift ever
 target, which breaks a `cil_body` equality even though reachable behaviour is unchanged. `cil_embed`
 (from `CIL.Embedding.Tactic`) proves the weaker `MethodEmbeds` relation instead: every live
 instruction of the literal body appears in the extracted method at a mapped pc, with its code
-targets mapped the same way and its fallthrough kept adjacent. Keep the proof over the literal body
-and transport it with the lemmas in `CIL.Safety.Embedding.Simulation`:
+targets mapped the same way and its fallthrough kept adjacent. The literal body must carry the
+extraction's `declared` and `environment`, and for a body with calls the links of its own code, so
+build it with `Method.withCode` from the extraction's method as shown above. Keep the proof over
+the literal body and transport it with the lemmas in `CIL.Safety.Embedding.Simulation`:
 
 ```lean
 import CIL.Embedding.Tactic
@@ -366,13 +425,13 @@ open CIL (Method MethodEmbeds)
 
 /-- Returns argument 1 on both paths; pc 4 is reached only by the branch. -/
 @[cil_code] def body : Method := {
-  code := [.arg 0, .brzero 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.arg 0, .brfalse 4, .arg 1, .ret, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 /-- `body` as a profile-specific extraction emits it, with a dead block before the branch target. -/
 def extracted : Method := {
-  code := [.arg 0, .brzero 6, .arg 1, .ret,
-    .unsupported "Unreachable under selected profile", .const32 9, .arg 1, .ret]
+  code := [.arg 0, .brfalse 6, .arg 1, .ret,
+    .unsupported "Unreachable under selected profile", .ldc_i4 9, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem bound : MethodEmbeds [extracted] 0 body := by cil_embed
@@ -407,10 +466,10 @@ inserted live one is reported by expected and actual pc:
 cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Op.brzero 4
-  renamed:  CIL.Op.brzero 6
-  actual:   CIL.Op.brzero 4
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Op.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brfalse 4
+  renamed:  CIL.Instruction.brfalse 6
+  actual:   CIL.Instruction.brfalse 4
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.ldc_i4 0x00000009#32) is not the image of any live expected pc
 ```
 
 The kernel check takes about 0.12 s for a 202-instruction body and 1.3 s for 1,414 instructions. See
@@ -432,7 +491,7 @@ open CIL
 
 /-- Reads its one local, a null reference, then returns argument 0. -/
 @[cil_code] def stored : Method := {
-  code := [.local 0, .pop, .arg 0, .ret]
+  code := [.ldloc 0, .pop, .arg 0, .ret]
   locals := [.nullRef], localKinds := [.reference], returnsValue := true }
 
 /-- `stored` with two unused reference locals after its own, as a profile can extract it. -/
@@ -480,7 +539,7 @@ call targets, profiles, return metadata and static sites stay exact. `ProgramRen
 correspondence for every source method. The target is the extraction with the additional dead
 declarations.
 
-This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals`, `vectorArgs` and
+This entry route requires `OrdinaryFrame` on both sides: `opaqueVectorLocals` and
 `parameterHomes` are empty. Retained initializers stay exact, including initialized numeric helpers;
 their successful setup is derived from the actual source execution. Local widths must fit the native
 range; span element widths must be positive and less than `2^64`. These metadata conditions are
@@ -527,14 +586,16 @@ leancil templates shared scalar sse42 v3
 ```
 
 The command reruns exact extraction checking for every input and requires the same assembly bytes.
-`shared/Templates.lean` defines each method once, with a profile parameter, parameters for the
-feature flags it reads, and managed callee indices keyed by full method identity. Every original IL
-instruction keeps its pc. Conditional instructions and excluded paths become `if` expressions and
+`shared/Templates.lean` defines each method once, with a profile parameter, an environment parameter
+for the extraction's layout tables, parameters for the feature flags it reads, and managed callee
+indices keyed by full method identity. Every original IL instruction keeps its pc. Conditional instructions and excluded paths become `if` expressions and
 unsupported padding; `cil_instruction_equations` generates kernel-checked equations for every pc.
 
 `TemplateBindings0.lean`, `TemplateBindings1.lean`, and so on each import `Extracted` and
 `Templates` and prove `Extracted.program[i]? = some (Templates.methodN ...)` by `rfl`, including
-all metadata and callee indices. Compile a binding only against its corresponding extraction,
+all metadata and callee indices. The binding passes `Extracted.profile` and `Extracted.environment`,
+and the call links of the template are those its code implies, so `rfl` also checks them against the
+extraction's link table. Compile a binding only against its corresponding extraction,
 recorded in `templates.json`. Add the shared module and selected binding module to your proof
 package, import that binding from the consumer proof, and run `leancil verify` with that
 extraction and proof package. The templates command generates proof source; it does not replace
@@ -556,8 +617,7 @@ relate its feature fields to the flag arguments it uses. Profiles that produce d
 different instruction counts, or different instructions under identical observed flags are rejected.
 Static descriptors are retained when their complete metadata agrees across the selected profiles,
 including field identities, bytes, initializer indices and arguments. Different static metadata is
-rejected rather than remapped. Imported callee slots and the model's `newVector256` constructor form
-are not supported in template generation.
+rejected rather than remapped. Imported callee slots are not supported in template generation.
 
 ### Instruction equations for parametric bodies
 
@@ -572,11 +632,11 @@ one equation instead of unfolding the body:
 import CIL.InstructionEquations
 import CIL.Safety.SymbolicExecution
 
-abbrev unreachable : CIL.Op := .unsupported "Unreachable under selected profile"
+abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected profile"
 
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
-    .feature .avx2, .brzero 4,
+    .feature .avx2, .brfalse 4,
     if avx2 then .call callee 0 else unreachable,
     if avx2 then .ret else unreachable,
     if avx2 then unreachable else .ret] }

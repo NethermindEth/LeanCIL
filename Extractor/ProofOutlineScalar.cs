@@ -24,11 +24,11 @@ internal static partial class ProofOutline
         ScalarStep Fails) : ScalarStep;
 
     /// <summary>A word on the walked stack: its term, or null when the outline does not name it.</summary>
-    sealed record ScalarWord(string? Term, int Bits);
+    sealed record ScalarWord(string? Term, int Bits, long? Numeral = null);
 
     /// <summary>The paths of a body over word arguments that tests named words or checks arithmetic, with no
     /// backward jump; null when it does neither, has another operation or splits into too many paths.</summary>
-    static ScalarStep? ScalarPaths(Specification spec, string[] ops)
+    static ScalarStep? ScalarPaths(Specification spec, Operation[] ops)
     {
         if (spec.Parameters.Any(parameter => parameter.Shape != ParameterShape.Scalar)) return null;
         var paths = 0;
@@ -38,34 +38,29 @@ internal static partial class ProofOutline
             for (; pc < ops.Length; pc++)
             {
                 var op = ops[pc];
-                Match match;
-                if ((match = Regex.Match(op, @"\A\.arg (\d+)\z")).Success)
+                if (op is Arg { Narrow: null } argument)
                 {
-                    var parameter = spec.Parameters[int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)];
+                    var parameter = spec.Parameters[argument.Index];
                     stack = stack.Push(new(parameter.Name, 8 * parameter.Width));
                 }
-                else if ((match = Regex.Match(op,
-                    @"\A\.const(32|64) (?:(\d+)|\(BitVec\.ofInt \d+ \((-?\d+)\)\))\z")).Success)
-                    stack = stack.Push(new(match.Groups[2].Success ? match.Groups[2].Value
-                        : $"({match.Groups[3].Value})", match.Groups[1].Value == "32" ? 32 : 64));
-                else if ((match = Regex.Match(op, @"\A\.(add|sub|mul|band|bor|bxor)\z")).Success)
+                else if (op is Constant constant)
+                    stack = stack.Push(new(constant.Numeral ? $"{constant.Value}" : $"({constant.Value})",
+                        constant.Width == 32 ? 32 : 64, constant.Numeral ? constant.Value : null));
+                else if (op is StackOperation { IsArithmetic: true } arithmetic)
                 {
                     if (stack.Count < 2) return null;
                     stack = stack.Pop(out var right).Pop(out var left);
-                    var symbol = match.Groups[1].Value switch
-                    {
-                        "add" => "+", "sub" => "-", "mul" => "*", "band" => "&&&", "bor" => "|||", _ => "^^^"
-                    };
+                    var symbol = arithmetic.Symbol;
                     stack = stack.Push(new(left.Term is null || right.Term is null ? null
                         : $"{Operand(left.Term)} {symbol} {Operand(right.Term)}", right.Bits));
                 }
-                else if ((match = Regex.Match(op, @"\A\.checkedArithmetic \.(add|sub|mul) (false|true)\z")).Success)
+                else if (op is CheckedArithmetic checkedOperation)
                 {
                     if (stack.Count < 2) return null;
                     stack = stack.Pop(out var right).Pop(out var left);
                     if (left.Term is null || right.Term is null || left.Bits != right.Bits) return null;
-                    var operation = match.Groups[1].Value;
-                    var signed = match.Groups[2].Value == "true";
+                    var operation = checkedOperation.Operator.ToString().ToLowerInvariant();
+                    var signed = checkedOperation.Signed;
                     var symbol = operation switch { "add" => "+", "sub" => "-", _ => "*" };
                     var fits = Fits(operation, signed, Operand(left.Term), Operand(right.Term), symbol, left.Bits);
                     stack = stack.Push(new($"{Operand(left.Term)} {symbol} {Operand(right.Term)}", left.Bits));
@@ -75,33 +70,36 @@ internal static partial class ProofOutline
                     return new ScalarCheck(fits, $"CIL.checkedValues_{operation}_{reading}_i{left.Bits}",
                         operation, pc, next);
                 }
-                else if (Body.Target(op) is { } target)
+                else if (op is Jump jump)
                 {
+                    var target = jump.Target;
                     if (target <= pc) return null;
-                    if (!Body.Conditional(op)) { pc = target - 1; continue; }
-                    var name = Regex.Match(op, @"\A\.(\w+)").Groups[1].Value;
-                    var operands = new ScalarWord[name is "brzero" or "brnonzero" ? 1 : 2];
+                    if (!jump.Conditional) { pc = target - 1; continue; }
+                    var operands = new ScalarWord[jump.Operands];
                     if (stack.Count < operands.Length) return null;
                     for (var position = operands.Length - 1; position >= 0; position--)
                         stack = stack.Pop(out operands[position]);
                     if (operands.Any(operand => operand.Term is null || operand.Bits != operands[0].Bits))
                         return null;
-                    var (condition, takenWhenTrue) = Body.Test(name, [.. operands.Select(operand =>
-                        Operand(operand.Term!))], operands[0].Bits);
+                    var (condition, takenWhenTrue) = Body.Test(jump, [.. operands.Select(operand =>
+                        new Body.Operand(Operand(operand.Term!), operand.Numeral))], operands[0].Bits);
                     var (holds, fails) = takenWhenTrue ? (target, pc + 1) : (pc + 1, target);
                     decided = true;
                     if (Walk(holds, stack) is not { } holdsStep || Walk(fails, stack) is not { } failsStep)
                         return null;
                     return new ScalarSplit(condition, pc, holds, holdsStep, fails, failsStep);
                 }
-                else if (op is ".ret") return ++paths > MaxScalarPaths ? null : new ScalarReturn();
-                else if (op is ".nop") { }
+                else if (op is Return { Narrow: null }) return ++paths > MaxScalarPaths ? null : new ScalarReturn();
+                else if (op.IsNop) { }
                 else if (Body.Pure(op))
                 {
                     // Conversions and bit counts compute a word the outline does not name; it may be returned.
                     if (stack.Count == 0) return null;
-                    stack = stack.Pop(out var word).Push(new(null, op is ".convU8" or ".convI8" ? 64
-                        : op is ".convU4" or ".convI4" || op.Contains(".word32", StringComparison.Ordinal) ? 32
+                    stack = stack.Pop(out var word).Push(new(null,
+                        op is StackOperation { Kind: StackOpcode.ConvU8 or StackOpcode.ConvI8 or StackOpcode.ConvI }
+                            ? 64
+                        : op is StackOperation { Kind: StackOpcode.ConvU4 or StackOpcode.ConvI4 }
+                            or ScalarIntrinsic { Result: 32 } ? 32
                         : word.Bits));
                 }
                 else return null;

@@ -14,13 +14,27 @@ theorem vector_lane_add :
       some (.v128 (CIL.Vector.pack128 4 6)) := rfl
 
 theorem disabled_intrinsic :
-    (CIL.step (.intrinsic (.avx2 .add64) 2) false 0 [] 0
+    (CIL.step (.intrinsic (.avx2 .add64) 2) false 0 []
       [.v256 1, .v256 2] (fun _ => none)).isSome = false := rfl
+
+/-- A memory whose every address holds an initialized word, so only the instruction can fail. -/
+private def initializedMemory : CIL.Memory := fun _ => some (.i32 1)
+
+-- Locals have no meaning in `CIL.step`: only the checked step reads and writes their slots.
+theorem local_unstepped :
+    (CIL.step (.ldloc 0) false 0 [] [] initializedMemory).isSome = false := rfl
+#print axioms local_unstepped
+theorem stloc_unstepped :
+    (CIL.step (.stloc 0) false 0 [] [.i32 1] initializedMemory).isSome = false := rfl
+#print axioms stloc_unstepped
+theorem ldloca_unstepped :
+    (CIL.step (.ldloca 0) false 0 [] [] initializedMemory).isSome = false := rfl
+#print axioms ldloca_unstepped
 
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl
 
 theorem unsigned_compare_wraps :
-    CIL.binary .ltu (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 0) = some (.i32 0) := by decide
+    CIL.binary .clt_un (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 0) = some (.i32 0) := by decide
 
 theorem add_wraps_at_width :
     CIL.binary .add (.i64 (BitVec.ofNat 64 (2^64-1))) (.i64 1) = some (.i64 0) := by decide
@@ -68,25 +82,26 @@ theorem neg_underflow :
 theorem neg_reference_rejected :
     (step scalarBody .neg 0 [] scalarFrame [Tests.reference] Tests.caller).isOk = false := rfl
 
-theorem gt_mixed_width_rejected :
-    (step scalarBody .gt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk = false := rfl
+theorem cgt_mixed_width_rejected :
+    (step scalarBody .cgt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)]
+      Memory.empty).isOk = false := rfl
 
 theorem branches_reject_underflow :
-    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+    ([CIL.Instruction.bgt 1, .ble 1, .ble_un 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0)] Memory.empty).isOk) = true := rfl
 
 theorem signed_branches_reject_references :
-    ([CIL.Op.bgt 1, .ble 1].all fun op =>
+    ([CIL.Instruction.bgt 1, .ble 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [Tests.reference, Tests.reference] Tests.caller).isOk) = true := rfl
 
 #print axioms signed_branches_reject_references
 
 theorem branches_reject_mixed_widths :
-    ([CIL.Op.bgt 1, .ble 1, .bleu 1].all fun op =>
+    ([CIL.Instruction.bgt 1, .ble 1, .ble_un 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk) = true := rfl
 
 theorem narrow_conversions_reject_references :
-    ([CIL.Op.convI1, .convI2, .convU2].all fun op =>
+    ([CIL.Instruction.conv_i1, .conv_i2, .conv_u2].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [Tests.reference] Tests.caller).isOk) = true := rfl
 
 theorem narrow_read_bounds :
@@ -334,9 +349,9 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 8) ∧
     instructions [.memory .nullRef, .loadScalar 4 true] [] Memory.empty =
       .error (.memory .nullDereference .null 4) ∧
-    instructions [.memory .nullRef, .const64 7, .store64] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i8 7, .store64] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .const32 7, .storeScalar 4] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i4 7, .storeScalar 4] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .loadAggregate 32] [] Memory.empty =
       .error (.memory .nullDereference .null 32) ∧
@@ -348,15 +363,9 @@ theorem null_reference_accesses_fault :
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .fieldAddress 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .const64 7, .setFieldAt 8 8] [] Memory.empty =
-      .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .lane 1] [] Memory.empty =
-      .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .laneAddress 1] [] Memory.empty =
-      .error (.memory .nullDereference .null 0) ∧
-    instructions [.memory .nullRef, .const64 7, .setLane 1] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i8 7, .setFieldAt 8 8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 theorem nested_uninitialized :
     (instruction (.aggregateFieldAt 0 8) [Tests.reference]
@@ -379,11 +388,11 @@ theorem nested_expired :
 
 theorem constructor_zero_size :
     step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 0 0)
-      0 [] ⟨0, [], [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
+      0 [] ⟨0, [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
 
 theorem constructor_stack_underflow :
     step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 1 3)
-      0 [] ⟨0, [], [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
+      0 [] ⟨0, [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
 
 def constructorCaller : CIL.Method := {
   returnsValue := true, locals := [], code := [.newAggregate 1 0 3, .ret] }
@@ -393,7 +402,7 @@ theorem constructor_zero_initialization :
       8 0 [] Memory.empty).map Prod.snd = .ok [.scalar (.aggregate [0, 0, 0])] := rfl
 
 theorem constructor_must_return_void :
-    (invoke [constructorCaller, { returnsValue := true, locals := [], code := [.const32 7, .ret] }]
+    (invoke [constructorCaller, { returnsValue := true, locals := [], code := [.ldc_i4 7, .ret] }]
       8 0 [] Memory.empty).map Prod.snd = .error ⟨0, 0, .invalidState⟩ := rfl
 
 end Tests
@@ -422,22 +431,22 @@ theorem native_mixed_signed_extension :
     CIL.nativeBinaryValues .add 0 (.i64 1) (.i32 4294967295) = .ok (1, [.i64 0]) := rfl
 
 theorem native_checked_unsigned_extension :
-    CIL.nativeBinaryValues (.checkedArithmetic .add false) 0 (.i64 1) (.i32 4294967295) =
+    CIL.nativeBinaryValues .add_ovf_un 0 (.i64 1) (.i32 4294967295) =
       .ok (1, [.i64 4294967296]) := rfl
 
 theorem native_unsigned_branch_rejected :
-    CIL.nativeBinaryValues (.bne 9) 0 (.i64 18446744073709551615) (.i32 4294967295) =
+    CIL.nativeBinaryValues (.bne_un 9) 0 (.i64 18446744073709551615) (.i32 4294967295) =
       .error .invalidOperands := rfl
 
 theorem native_unsigned_branch_family_rejected :
-    CIL.nativeBinaryValues (.bltu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bgtu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bleu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bgeu 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands :=
+    CIL.nativeBinaryValues (.blt_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.bgt_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.ble_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
+    CIL.nativeBinaryValues (.bge_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands :=
   ⟨rfl, rfl, rfl, rfl⟩
 
 theorem native_unsigned_compare_extension :
-    CIL.nativeBinaryValues .gtu 0 (.i64 18446744073709551615) (.i32 4294967295) =
+    CIL.nativeBinaryValues .cgt_un 0 (.i64 18446744073709551615) (.i32 4294967295) =
       .ok (1, [.i32 0]) := rfl
 
 theorem checked_conversion_reference_rejected :
@@ -468,11 +477,11 @@ theorem division_zero (signed remainder : Bool) (x : CIL.W64) :
 
 theorem division_underflow :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], [], 0⟩ [] Memory.empty).isOk = false := rfl
+      .div_un 0 [] ⟨0, [], [], 0⟩ [] Memory.empty).isOk = false := rfl
 
 theorem division_managed_reference_rejected :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], [], 0⟩
+      .div_un 0 [] ⟨0, [], [], 0⟩
       [.scalar (.i32 2), .reference .null] Memory.empty).isOk = false := rfl
 
 
@@ -488,12 +497,12 @@ def divRemMethod (profile : CIL.FeatureProfile) : CIL.Method :=
 
 theorem divRem_checked_fault :
     CIL.Safety.step (divRemMethod { architecture := .x64, x86Base64 := true }) (.intrinsic (.x86Base .divRem64) 3) 0 []
-      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Memory.empty =
+      ⟨0, [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 3), .scalar (.i64 0)] Memory.empty =
       .error (.arithmetic .overflow) := rfl
 
 theorem divRem_requires_x86Base :
     CIL.Safety.step (divRemMethod CIL.FeatureProfile.scalar) (.intrinsic (.x86Base .divRem64) 3) 0 []
-      ⟨0, [], [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Memory.empty =
+      ⟨0, [], [], 0⟩ [.scalar (.i64 3), .scalar (.i64 0), .scalar (.i64 7)] Memory.empty =
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 
 theorem divRem_pure_fault :

@@ -48,8 +48,9 @@ theorem ConstructStorage.confined {memory updated final : Memory} {temporary : R
     resumes on the read-back value. -/
 theorem run_construct_of_contract {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {size : Fin (2^64)} {body : CIL.Method}
-    {op : CIL.Op} {args stack arguments rest : List Value} {frame constructedFrame : Frame}
-    {temporary : Reference} {memory updated : Memory} {this : Input → Reference}
+    {op : CIL.Instruction} {args stack arguments rest : List Value}
+    {frame constructedFrame : Frame} {temporary : Reference} {memory updated : Memory}
+    {this : Input → Reference}
     {value : Input → Output → List (BitVec 8)} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (constructs : c.Constructs size this value) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
@@ -81,7 +82,7 @@ theorem run_construct_of_contract {Input Output : Type} {c : MethodContract Inpu
 /-- A successful construction from a well-formed memory returns a well-formed memory and keeps
     the static world and catalog agreement. -/
 theorem construct_frame_invariants {program : CIL.Program} {method pc callee fuel : Nat}
-    {body : CIL.Method} {op : CIL.Op} {args stack arguments rest values : List Value}
+    {body : CIL.Method} {op : CIL.Instruction} {args stack arguments rest values : List Value}
     {frame constructedFrame : Frame} {temporary : Reference} {kind : CIL.LocalKind}
     {memory updated final : Memory}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
@@ -106,8 +107,9 @@ theorem construct_frame_invariants {program : CIL.Program} {method pc callee fue
     frame invariants. -/
 theorem run_construct_of_contract_formed {Input Output : Type} {c : MethodContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {size : Fin (2^64)} {body : CIL.Method}
-    {op : CIL.Op} {args stack arguments rest : List Value} {frame constructedFrame : Frame}
-    {temporary : Reference} {memory updated : Memory} {this : Input → Reference}
+    {op : CIL.Instruction} {args stack arguments rest : List Value}
+    {frame constructedFrame : Frame} {temporary : Reference} {memory updated : Memory}
+    {this : Input → Reference}
     {value : Input → Output → List (BitVec 8)} {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (constructs : c.Constructs size this value) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)

@@ -84,11 +84,14 @@ not CLR correspondence. See [layout assumptions](SOUNDNESS-RUNTIME.md#sequential
 
 ## Method-body embedding
 
-`MethodEmbeds` checks execution metadata, static descriptors and live instructions under a PC map.
-Entry, branch/call targets and resumable fallthroughs must match. Expected `.unsupported` locations
-constrain no actual code and cannot occur on a successful expected path. Even a live inserted `nop`
-is outside this exact relation. `cil_embed` computes a candidate map; the kernel checks every
-field.
+`MethodEmbeds` checks execution metadata, the declared signature, the layout environment, static
+descriptors, call links and live instructions under a PC map. A body built as
+`extracted.withCode code` keeps the signature and environment of `extracted`, takes the links its
+`code` implies and resets the static sites; `{ extracted with code := ... }` keeps the links and
+static sites of `extracted`, which are keyed by its pcs. Entry, branch/call targets and resumable
+fallthroughs must match. Expected `.unsupported` locations constrain no actual code and cannot
+occur on a successful expected path. Even a live inserted `nop` is outside this exact relation.
+`cil_embed` computes a candidate map; the kernel checks every field.
 
 `ProgramRefines` transfers successful runs with the same fuel and final memory. Outcome variants
 transfer named throws with relocated PCs, preserving method and exception. They do not transfer
@@ -99,7 +102,7 @@ fuel exhaustion, unsupported-operation, invalid-state, memory or arithmetic faul
 | Relation | Preconditions | Guarantee and limit |
 | --- | --- | --- |
 | `MethodEmbedsDeadLocals` | Trailing null/unmodeled reference or bounded span slots; matching retained local/kind lengths; no parameter homes; opaque slots stay retained | Same memory, results and named throws. No invocation-certificate transfer or general `ProgramRefines` composition. |
-| `AllocationRefinement` | Checked local renaming/initializers; ordinary frames without opaque/vector/parameter argument homes; well-formed memory and bounded statics | Scalar results and caller-prefix preservation of allocations, bytes and authority (`BytesBelow`); caller fields agree wherever the source holds null or a caller reference (`SlotsAgreeBelow`); named throws require valid arguments. Fresh identities/counters, caller fields holding fresh objects and arbitrary reference-valued postconditions need not match. |
+| `AllocationRefinement` | Checked local renaming/initializers; ordinary frames without opaque vector locals or parameter homes; well-formed memory and bounded statics | Scalar results and caller-prefix preservation of allocations, bytes and authority (`BytesBelow`); caller fields agree wherever the source holds null or a caller reference (`SlotsAgreeBelow`); named throws require valid arguments. Fresh identities/counters, caller fields holding fresh objects and arbitrary reference-valued postconditions need not match. |
 
 Allocation refinement proves the complete dispatcher simulation with injective retained-allocation
 and activation mappings. Extra private homes lie outside the mapped image. Contract transport also

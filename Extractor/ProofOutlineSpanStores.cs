@@ -8,18 +8,21 @@ internal static partial class ProofOutline
 {
     /// <summary>The element width and store of a static method `(Span&lt;T&gt; target, T value)` whose body only
     /// stores `value` into `target[0]`.</summary>
-    static (int Width, string Op)? SpanStores(Extraction extraction, int index)
+    static (int Width, Operation Op)? SpanStores(Extraction extraction, int index)
     {
         var method = extraction.Methods[index];
-        var ops = extraction.Emitted[index].Ops.Where(op => op != ".nop").ToArray();
+        var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
         if (method.HasThis || method.ReturnType.FullName != "System.Void" || method.Parameters.Count != 2 ||
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
-            !extraction.Emitted[index].Metadata.Contains("locals := [],")) return null;
-        string[] body = [".local 0", ".const32 0", $".memory (.spanItem {width})", ".arg 1"];
-        if (ops.Length != 6 || !ops.Take(4).SequenceEqual(body) || ops[5] != ".ret") return null;
-        var stores = width == 4 ? ops[4] == ".storeScalar 4" : ops[4] is ".store64" or ".storeScalar 8";
-        return stores ? (width, ops[4]) : null;
+            !extraction.Emitted[index].Frame.HasNoLocals) return null;
+        if (ops is not [LocalAddress { Index: 0 }, Constant { Width: 32, Value: 0, Numeral: true },
+                Memory { Operation: SpanItem item }, Arg { Index: 1, Narrow: null }, var store,
+                Return { Narrow: null }] || item.Width != width)
+            return null;
+        var stores = width == 4 ? store is StoreScalar { Width: 4 }
+            : store is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 8 };
+        return stores ? (width, store) : null;
     }
 
     /// <summary>The element width of a writable span of words, or null for any other type.</summary>
@@ -28,14 +31,16 @@ internal static partial class ProofOutline
             ? ElementWidth(span.GenericArguments[0]) : null;
 
     /// <summary>The step lemma of a scalar store through an address whose write succeeds.</summary>
-    static string StoreLemma(string op) => op switch
+    static string StoreLemma(Operation op) => op switch
     {
-        ".store64" => "step_store64_of_write", ".storeScalar 8" => "step_storeScalar_i64_of_write",
+        StackOperation { Kind: StackOpcode.Store64 } => "step_store64_of_write",
+        StoreScalar { Width: 8 } => "step_storeScalar_i64_of_write",
         _ => "step_storeScalar_of_write"
     };
 
     /// <summary>The contract proof of a callee that stores its value into the first element of its span.</summary>
-    static void SpanStoreContract(Writer lean, int index, string name, string pattern, string value, string op)
+    static void SpanStoreContract(Writer lean, int index, string name, string pattern, string value,
+        Operation op)
     {
         lean.Line($"  rintro {pattern} memory ⟨rest, span⟩");
         lean.Line($"  dsimp only [{name}Contract] at span");
@@ -51,7 +56,7 @@ internal static partial class ProofOutline
     /// `span`, given the facts `WritableSpan.write_head` names: entering the frame that homes the span, then
     /// stepping the body.</summary>
     static void SpanStoreRun(Writer lean, string indent, int index, string span, string found, string wrote,
-        string address, string op)
+        string address, Operation op)
     {
         lean.Line($"{indent}have valid := {span}.valid");
         lean.Line($"{indent}have width := {span}.elementWidth");
@@ -61,7 +66,7 @@ internal static partial class ProofOutline
         lean.Line($"{indent}· cil_lookup []");
         lean.Line($"{indent}· cil_checked_side [valid]");
         // Entering the frame homes the span in a local, which the stepping tactics do not set up.
-        lean.Line($"{indent}· simp [enterFrame, Extracted.method{index}, makeLocals, makeArgumentHomes, " +
+        lean.Line($"{indent}· simp [enterFrame, Extracted.method{index}, makeLocals, " +
             "makeParameterHomes,");
         lean.Line($"{indent}    makeLocal, storeLocal, CIL.Safety.Value.hasUnspecified, width, mode, valid, " +
             "checkedAt,");
@@ -73,7 +78,7 @@ internal static partial class ProofOutline
 
     /// <summary>The outline of a method that stores its value into the first element of its span: an empty span
     /// throws, which the precondition must rule out, and a nonempty one is stepped through the write.</summary>
-    static string SpanStoreLine(Specification spec, string op, Writer lean)
+    static string SpanStoreLine(Specification spec, Operation op, Writer lean)
     {
         var target = spec.Parameters[0];
         var value = spec.Parameters[1].Name;

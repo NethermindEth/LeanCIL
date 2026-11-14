@@ -19,8 +19,8 @@ namespace CIL.Embedding
 
 open CIL
 
-theorem Op.relabel_id (op : Op) : op.relabel id = op := by
-  induction op <;> simp only [Op.relabel, id] <;> simp_all
+theorem Instruction.relabel_id (op : Instruction) : op.relabel id = op := by
+  induction op <;> simp only [Instruction.relabel, id] <;> simp_all
 
 /-- The facts about one method that the simulation consumes. -/
 structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
@@ -29,23 +29,25 @@ structure BodyRefines (expected actual : Method) (r : Nat → Nat) : Prop where
   locals : actual.locals = expected.locals
   localKinds : actual.localKinds = expected.localKinds
   opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
-  vectorArgs : actual.vectorArgs = expected.vectorArgs
   parameterHomes : actual.parameterHomes = expected.parameterHomes
+  declared : actual.declared = expected.declared
+  environment : actual.environment = expected.environment
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
   entry : r 0 = 0
   /-- Each live expected instruction sits relabeled at its renamed pc with the same static
-      descriptor, and an instruction that falls through keeps its successor adjacent. -/
+      descriptor and link, and an instruction that falls through keeps its successor adjacent. -/
   code : ∀ p op, expected.code[p]? = some op → op.live = true →
     actual.code[r p]? = some (op.relabel r) ∧ staticAt actual (r p) = staticAt expected p ∧
-    (op.continues = true → r (p + 1) = r p + 1)
+    actual.linkAt (r p) = expected.linkAt p ∧ (op.continues = true → r (p + 1) = r p + 1)
 
 /-- Every body refines itself under the identity renaming. -/
 theorem BodyRefines.refl (body : Method) : BodyRefines body body id :=
-  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
-    fun _ op found _ => ⟨by simp [found, Op.relabel_id], rfl, fun _ => rfl⟩⟩
+  ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl,
+    fun _ op found _ => ⟨by simp [found, Instruction.relabel_id], rfl, rfl, fun _ => rfl⟩⟩
 
 /-- A live instruction at `p` appears in `sites` with its mapped pc and mapped successor. -/
-theorem mem_sites {limit : Nat} {code : List Op} {map : List Nat} {start p : Nat} {op : Op}
+theorem mem_sites {limit : Nat} {code : List Instruction} {map : List Nat} {start p : Nat}
+    {op : Instruction}
     (found : code[p]? = some op) (live : op.live = true) :
     (⟨start + p, map.getD p limit, map.getD (p + 1) limit, op⟩ : Site) ∈
       sites limit start code map := by
@@ -71,26 +73,25 @@ theorem mem_sites {limit : Nat} {code : List Op} {map : List Nat} {start p : Nat
       · exact member
 
 /-- `pick` agrees with pointwise lookup whenever its cursor is `code.drop start`. -/
-theorem pick_eq (code : List Op) (qs : List Nat) (start : Nat) :
+theorem pick_eq (code : List Instruction) (qs : List Nat) (start : Nat) :
     pick code (code.drop start) start qs = qs.map (fun q => code[q]?) := by
   induction qs generalizing start with
   | nil => rfl
   | cons q qs ih =>
-    unfold pick
-    split
-    · rename_i ordered
-      have dropped : (code.drop start).drop (q - start) = code.drop q := by
-        rw [List.drop_drop]; congr 1; omega
-      simp only [dropped, List.head?_drop, ih, List.map_cons]
-    · simp only [ih, List.map_cons]
+    have dropped : (if start ≤ q then (code.drop start).drop (q - start) else code.drop q) =
+        code.drop q := by
+      split
+      · rw [List.drop_drop]; congr 1; omega
+      · rfl
+    simp only [pick, dropped, List.head?_drop, ih, List.map_cons]
 
 /-- The decidable `Embeds` check yields the per-method facts the simulation consumes. -/
 theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat}
     (embeds : Embeds expected actual map) :
     BodyRefines expected actual (rename map actual.code.length) := by
   refine ⟨embeds.profile, embeds.returnsValue, embeds.locals, embeds.localKinds,
-    embeds.opaqueVectorLocals, embeds.vectorArgs, embeds.parameterHomes, embeds.descriptors,
-    embeds.entry, ?_⟩
+    embeds.opaqueVectorLocals, embeds.parameterHomes, embeds.declared,
+    embeds.environment, embeds.descriptors, embeds.entry, ?_⟩
   intro p op found live
   have member := mem_sites (limit := actual.code.length) (map := map) (start := 0) found live
   rw [Nat.zero_add] at member
@@ -101,9 +102,14 @@ theorem _root_.CIL.Embeds.refines {expected actual : Method} {map : List Nat}
   rw [dropped, List.map_map] at picked
   have code := List.map_inj_left.mp picked _ member
   have statics := List.map_inj_left.mp embeds.statics _ member
+  -- The reads are the first entry of each table, as `linkAt` gives.
+  have reads := embeds.links
+  rw [Extraction.linkReads_eq, Extraction.linkReads_eq, List.map_map, List.map_map] at reads
+  have link : actual.linkAt (rename map actual.code.length p) = expected.linkAt p :=
+    List.map_inj_left.mp reads _ member
   have flow := List.all_eq_true.mp embeds.flow _ member
   simp only [Bool.or_eq_true, Bool.not_eq_true', beq_iff_eq] at flow
-  refine ⟨code, statics, fun continues => ?_⟩
+  refine ⟨code, statics, link, fun continues => ?_⟩
   rcases flow with stops | next
   · rw [continues] at stops; cases stops
   · exact next
@@ -119,7 +125,7 @@ theorem enterFrame_congr {expected actual : CIL.Method} {r : Nat → Nat}
     (refines : BodyRefines expected actual r) (args : List Value) (m : Memory) :
     enterFrame actual args m = enterFrame expected args m := by
   simp only [enterFrame, refines.locals, refines.localKinds, refines.opaqueVectorLocals,
-    refines.vectorArgs, refines.parameterHomes]
+    refines.parameterHomes]
 
 /-- `.unsupported` never steps successfully. -/
 theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {args : List Value}
@@ -176,7 +182,8 @@ theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : 
       · cases h
 
 /-- Calls and constructions come only from instructions that resume at the next pc. -/
-theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {args : List Value}
+theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc : Nat}
+    {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body op pc args frame stack m = .ok action)
     (resumes : match action with | .call .. | .construct .. => True | _ => False) :
@@ -184,7 +191,7 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Op} {pc : Nat} {ar
   cases op
   case throw => exact (step_throw h).elim
   case unsupported => exact (step_unsupported h).elim
-  case branch target =>
+  case br target =>
     change Except.ok (.next target stack frame m) = .ok action at h
     cases h
     exact resumes.elim
@@ -332,18 +339,20 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
             cases op <;> first
               | rfl
               | (change Except.error (ExecutionFault.unsupported _) = _ at stepped; cases stepped)
-          obtain ⟨code, statics, next⟩ := refined.code pc op decoded live
+          obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
           have actualStep := step_raise op body target (maps method) pc (maps method pc) args
-            frame stack m exception ⟨refined.profile, refined.returnsValue, statics, next⟩ stepped
+            frame stack m exception ⟨refined.profile, refined.returnsValue, refined.declared,
+              refined.environment, statics, link, next⟩ stepped
           simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
           rfl
         | ok action =>
           simp only [stepped, Except.mapError] at h
           have live : op.live = true := by
             cases op <;> first | rfl | exact (step_unsupported stepped).elim
-          obtain ⟨code, statics, next⟩ := refined.code pc op decoded live
+          obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
           have actualStep := step_relabel op body target (maps method) pc (maps method pc) args
-            frame stack m action ⟨refined.profile, refined.returnsValue, statics, next⟩ stepped
+            frame stack m action ⟨refined.profile, refined.returnsValue, refined.declared,
+              refined.environment, statics, link, next⟩ stepped
           simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
           cases action with
           | next target' stack' frame' m' =>

@@ -13,7 +13,7 @@ namespace CIL.Extraction
 
 /-- The exact assembly defining the supported array extension methods. -/
 def spanMemoryScope : String :=
-  "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+  "System.Memory, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
 /-- The observable choice made by a supported span call. -/
 inductive SpanCall where
@@ -29,7 +29,7 @@ inductive SpanCall where
   deriving DecidableEq, Repr
 
 /-- A span operation's exact semantic parameters, independent of other memory operations. -/
-private def emittedSpanCall : Op → Option SpanCall
+private def emittedSpanCall : Instruction → Option SpanCall
   | .memory (.spanEmpty width writable) => some (.empty width writable)
   | .memory (.spanReinterpret source target writable) => some (.reinterpret source target writable)
   | .memory (.spanCopy width tryCopy) => some (.copy width tryCopy)
@@ -250,7 +250,7 @@ def spanCallReturnsReference (site : CallSite) : Bool :=
 
 /-- Exact span signatures and primitive/vector widths. Aggregate widths are separately bound
     by mandatory LayoutUsesComplete and MethodLayoutsValid evidence. -/
-def spanCallMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
+def spanCallMatches (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     let (sourceWidth, targetWidth) := match emittedSpanCall emitted with
       | some (.reinterpret source target _) => (source, target)
       | some (.copy width _) | some (.fill width _) | some (.item width)

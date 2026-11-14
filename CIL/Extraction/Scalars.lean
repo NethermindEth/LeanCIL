@@ -187,7 +187,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
   else return (.arrayLoad width signed, kind :: tail)
 
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
-private def arrayEmission : Op → Bool
+private def arrayEmission : Instruction → Bool
   | .newArray _ | .newReferenceArray _ => true
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
   | .memory (.arrayAddress ..) => true
@@ -198,7 +198,7 @@ private def arrayEmission : Op → Bool
 
 /-- The emitted array operation agrees exactly with its independently decoded raw opcode. -/
 private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind)
-    (emitted : Op) : Bool :=
+    (emitted : Instruction) : Bool :=
   if instruction.opcode == 141 then
     match instruction.operand, stack, emitted with
     | .type token, length :: _, .newArray element =>
@@ -229,41 +229,37 @@ def scalarCovered (opcode : Nat) : Bool :=
     compareBranch opcode || opcode ∈ [20, 44, 45, 57, 58, 98, 99, 100, 101, 102, 65054]
 
 /-- The emitted operation each covered non-branch opcode must produce. -/
-private def scalarEncodingMatches (opcode : Nat) (emitted : Op) : Bool :=
+private def scalarEncodingMatches (opcode : Nat) (emitted : Instruction) : Bool :=
   match opcode, emitted with
   -- Arithmetic, division and remainder.
   | 88, .add | 89, .sub | 90, .mul => true
-  | 91, .divide true false | 92, .divide false false
-  | 93, .divide true true | 94, .divide false true => true
+  | 91, .div | 92, .div_un | 93, .rem | 94, .rem_un => true
   -- Bitwise, shifts, `neg` and `not`.
-  | 95, .band | 96, .bor | 97, .bxor | 98, .shl | 99, .shr | 100, .shrUn
-  | 101, .neg | 102, .bnot => true
-  -- Conversions; `checkedConvert width signed unsignedInput`.
-  | 103, .convI1 | 104, .convI2 | 105, .convI4 | 106, .convI8 | 109, .convU4 | 110, .convU8 => true
-  | 130, .checkedConvert 8 true true | 131, .checkedConvert 16 true true
-  | 132, .checkedConvert 32 true true | 133, .checkedConvert 64 true true
-  | 134, .checkedConvert 8 false true | 135, .checkedConvert 16 false true
-  | 136, .checkedConvert 32 false true | 137, .checkedConvert 64 false true
-  | 138, .checkedConvert 64 true true | 139, .checkedConvert 64 false true
-  | 179, .checkedConvert 8 true false | 180, .checkedConvert 8 false false
-  | 181, .checkedConvert 16 true false | 182, .checkedConvert 16 false false
-  | 183, .checkedConvert 32 true false | 184, .checkedConvert 32 false false
-  | 185, .checkedConvert 64 true false | 186, .checkedConvert 64 false false => true
-  | 209, .convU2 | 210, .convU1 | 211, .convI8 | 224, .convU => true
-  | 212, .checkedConvert 64 true false | 213, .checkedConvert 64 false false => true
+  | 95, .and | 96, .or | 97, .xor | 98, .shl | 99, .shr | 100, .shr_un
+  | 101, .neg | 102, .not => true
+  -- Conversions, wrapping and overflow-checked.
+  | 103, .conv_i1 | 104, .conv_i2 | 105, .conv_i4 | 106, .conv_i8 | 109, .conv_u4
+  | 110, .conv_u8 => true
+  | 130, .conv_ovf_un .i1 | 131, .conv_ovf_un .i2 | 132, .conv_ovf_un .i4
+  | 133, .conv_ovf_un .i8 | 134, .conv_ovf_un .u1 | 135, .conv_ovf_un .u2
+  | 136, .conv_ovf_un .u4 | 137, .conv_ovf_un .u8 | 138, .conv_ovf_un .i
+  | 139, .conv_ovf_un .u => true
+  | 179, .conv_ovf .i1 | 180, .conv_ovf .u1 | 181, .conv_ovf .i2 | 182, .conv_ovf .u2
+  | 183, .conv_ovf .i4 | 184, .conv_ovf .u4 | 185, .conv_ovf .i8 | 186, .conv_ovf .u8 => true
+  | 209, .conv_u2 | 210, .conv_u1 | 211, .conv_i | 224, .conv_u => true
+  | 212, .conv_ovf .i | 213, .conv_ovf .u => true
   -- Overflow-checked arithmetic and comparisons.
-  | 214, .checkedArithmetic .add true | 215, .checkedArithmetic .add false
-  | 216, .checkedArithmetic .mul true | 217, .checkedArithmetic .mul false
-  | 218, .checkedArithmetic .sub true | 219, .checkedArithmetic .sub false => true
-  | 65025, .eq | 65026, .gt | 65027, .gtu | 65028, .lt | 65029, .ltu => true
+  | 214, .add_ovf | 215, .add_ovf_un | 216, .mul_ovf | 217, .mul_ovf_un
+  | 218, .sub_ovf | 219, .sub_ovf_un => true
+  | 65025, .ceq | 65026, .cgt | 65027, .cgt_un | 65028, .clt | 65029, .clt_un => true
   | _, _ => false
 
 /-- The emitted branch each compare-branch opcode must produce, keeping its target. -/
-private def branchEncodingMatches (opcode target : Nat) (emitted : Op) : Bool :=
+private def branchEncodingMatches (opcode target : Nat) (emitted : Instruction) : Bool :=
   (comparisonBranchIndex opcode).any fun index => match index, emitted with
   | 0, .beq actual | 1, .bge actual | 2, .bgt actual | 3, .ble actual | 4, .blt actual
-  | 5, .bne actual | 6, .bgeu actual | 7, .bgtu actual | 8, .bleu actual
-  | 9, .bltu actual => actual == target
+  | 5, .bne_un actual | 6, .bge_un actual | 7, .bgt_un actual | 8, .ble_un actual
+  | 9, .blt_un actual => actual == target
   | _, _ => false
 
 /-- One operand is a native int and the other an `int32`. -/
@@ -286,22 +282,23 @@ private def referenceComparison (opcode : Nat) (left right : ScalarKind) : Bool 
 
 /-- Mixed native/int32 operands require exactly one `nativeBinary` wrapper; any other pair
     forbids it. -/
-private def nativeWrapped (left right : ScalarKind) (encoding : Op → Bool) : Op → Bool
+private def nativeWrapped (left right : ScalarKind) (encoding : Instruction → Bool) :
+    Instruction → Bool
   | .nativeBinary operation => mixedNative left right && encoding operation
   | operation => !mixedNative left right && encoding operation
 
 /-- The constant an `ldc` instruction must emit; an out-of-range operand has none. -/
-private def literal (instruction : RawInstruction) : Option Op :=
+private def literal (instruction : RawInstruction) : Option Instruction :=
   match instruction.opcode, instruction.operand with
-  | 21, .none => some (.const32 (BitVec.ofInt 32 (-1)))
+  | 21, .none => some (.ldc_i4 (BitVec.ofInt 32 (-1)))
   | 31, .integer value =>
-    if -128 <= value && value < 128 then some (.const32 (BitVec.ofInt 32 value)) else none
+    if -128 <= value && value < 128 then some (.ldc_i4 (BitVec.ofInt 32 value)) else none
   | 32, .integer value =>
-    if -(2^31) <= value && value < 2^31 then some (.const32 (BitVec.ofInt 32 value)) else none
+    if -(2^31) <= value && value < 2^31 then some (.ldc_i4 (BitVec.ofInt 32 value)) else none
   | 33, .integer value =>
-    if -(2^63) <= value && value < 2^63 then some (.const64 (BitVec.ofInt 64 value)) else none
+    if -(2^63) <= value && value < 2^63 then some (.ldc_i8 (BitVec.ofInt 64 value)) else none
   | opcode, .none =>
-    if 22 <= opcode && opcode <= 30 then some (.const32 (BitVec.ofNat 32 (opcode - 22))) else none
+    if 22 <= opcode && opcode <= 30 then some (.ldc_i4 (BitVec.ofNat 32 (opcode - 22))) else none
   | _, _ => none
 
 /-- Pointer addition admits an int32 or native byte offset on either side of the reference. -/
@@ -310,7 +307,8 @@ private def referenceAddition : ScalarKind → ScalarKind → Bool
   | _, _ => false
 
 /-- A covered opcode emits exactly the encoding its operand kinds imply. -/
-def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (emitted : Op) :
+def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
+    (emitted : Instruction) :
     Bool :=
   if instruction.opcode == 141 || arrayCovered instruction.opcode || arrayEmission emitted then
     arrayMatches instruction stack emitted
@@ -320,17 +318,17 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
     instruction.operand == .none && match emitted with | .memory .nullObject => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
     match instruction.operand, stack, emitted with
-    | .target target, value :: _, .brzero actual =>
+    | .target target, value :: _, .brfalse actual =>
       instruction.opcode ∈ [44, 57] && target == actual &&
         (numeric value || value ∈ [.reference, .nullObject, .object])
-    | .target target, value :: _, .brnonzero actual =>
+    | .target target, value :: _, .brtrue actual =>
       instruction.opcode ∈ [45, 58] && target == actual &&
         (numeric value || value ∈ [.reference, .nullObject, .object])
     | _, _, _ => false
   else if 21 <= instruction.opcode && instruction.opcode <= 33 then
     match literal instruction, emitted with
-    | some (.const32 expected), .const32 actual => expected == actual
-    | some (.const64 expected), .const64 actual => expected == actual
+    | some (.ldc_i4 expected), .ldc_i4 actual => expected == actual
+    | some (.ldc_i8 expected), .ldc_i8 actual => expected == actual
     | _, _ => false
   else if compareBranch instruction.opcode then match instruction.operand, stack with
     | .target target, right :: left :: _ =>
@@ -364,13 +362,15 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind) (em
 
 /-- Operations computing a scalar from operands or a literal; only a covered encoding may
     emit one. -/
-private def scalarEmission : Op → Bool
-  | .const32 _ | .const64 _ | .add | .sub | .mul | .divide .. | .band | .bor | .bxor | .shl
-  | .shr | .shrUn | .neg | .bnot | .eq | .lt | .ltu | .gt | .gtu | .convI1 | .convI2 | .convI4
-  | .convI8 | .convU1 | .convU2 | .convU4 | .convU8 | .convU | .checkedConvert ..
-  | .checkedArithmetic .. | .nativeBinary _
-  | .beq _ | .bge _ | .bgt _ | .ble _ | .blt _ | .bne _ | .bgeu _ | .bgtu _ | .bleu _
-  | .bltu _ => true
+private def scalarEmission : Instruction → Bool
+  | .ldc_i4 _ | .ldc_i8 _ | .add | .sub | .mul | .and | .or | .xor | .shl
+  | .shr | .shr_un | .neg | .not | .ceq | .clt | .clt_un | .cgt | .cgt_un | .conv_i1
+  | .conv_i2 | .conv_i4 | .conv_i8 | .conv_u1 | .conv_u2 | .conv_u4 | .conv_u8 | .conv_u
+  | .conv_i | .conv_ovf _ | .conv_ovf_un _
+  | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un
+  | .mul_ovf | .mul_ovf_un | .nativeBinary _
+  | .beq _ | .bge _ | .bgt _ | .ble _ | .blt _ | .bne_un _ | .bge_un _ | .bgt_un _
+  | .ble_un _ | .blt_un _ => true
   | _ => false
 
 /-- Byte width of a non-aggregate `sizeof` operand on the admitted 64-bit target. -/
@@ -412,7 +412,7 @@ private def objectFieldShape (type : TypeExpr) : Option (Nat × Bool) :=
   | _ => none
 
 /-- An instance field instruction on a class, or an emitted class field operation. -/
-private def objectFieldSite (instruction : RawInstruction) (emitted : Op) : Bool :=
+private def objectFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
     | .field (.object _ _) _ _ false => true
     | _ => false) ||
@@ -448,7 +448,7 @@ private def fieldElementMatches (declared emitted : ArrayElement) : Bool :=
     object or null, and as an array slot for a value-array-typed one, whose stored value must
     be an array of that element. `ldflda` never does. -/
 private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
-    (emitted : Op) : Bool :=
+    (emitted : Instruction) : Bool :=
   match instruction.opcode, instruction.operand, stack, emitted with
   | 123, .field (.object scope name) index type false, receiver :: _,
       .memory (.objectField owner offset width signed) =>
@@ -482,7 +482,7 @@ private def objectFieldMatches (instruction : RawInstruction) (stack : List Scal
 
 /-- Only `ldstr` loads a literal, and only its own text; inside a folded throw it emits nothing. -/
 private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInstruction)
-    (emitted : Op) : Bool :=
+    (emitted : Instruction) : Bool :=
   match instruction.opcode, instruction.operand, emitted with
   | 114, .text _, .nop => role ∈ [some .head, some .interior]
   | 114, .text text, .memory (.stringLiteral actual) => role == none && text == actual
@@ -493,10 +493,10 @@ private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInst
     a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (instruction : RawInstruction)
-    (stack : List ScalarKind) (emitted : Op) : Bool :=
+    (stack : List ScalarKind) (emitted : Instruction) : Bool :=
   if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
-    match emitted with | .const32 bits => bits == if value then 1 else 0 | _ => false
+    match emitted with | .ldc_i4 bits => bits == if value then 1 else 0 | _ => false
   else if let .objectTest type throwing := emitted then
     match instruction.operand, stack with
     | .type target, value :: _ =>
@@ -506,7 +506,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if (match instruction.operand with
     | .call site => referenceContentQuery site | _ => false) then
     match instruction.operand, emitted with
-    | .call site, .const32 bits => instruction.opcode == 40 &&
+    | .call site, .ldc_i4 bits => instruction.opcode == 40 &&
       referenceContentConstant layouts site == some bits
     | _, _ => false
   else if instruction.opcode == 77 && (stack.head?).any
@@ -528,7 +528,6 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
       instruction.opcode == 88 && offset ∈ [.word32, .native]
     | .tableLoad signature, .nativeMethodTable actual :: _ =>
       instruction.opcode == 77 && signature == actual
-    | .tableAddress .., _ => false
     | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
     | .tableElement signature, index :: .methodTable actual :: _ =>
       index ∈ [.word32, .native] && signature == actual &&
@@ -546,7 +545,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if objectFieldSite instruction emitted then objectFieldMatches instruction stack emitted
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
-    | _, .const32 bits => sizeConstant instruction bits ||
+    | _, .ldc_i4 bits => sizeConstant instruction bits ||
         platformField instruction == some bits ||
         (instruction.opcode == 40 && match instruction.operand with
           | .call site => platformConstant site == some bits
@@ -745,7 +744,7 @@ private def spanConstructor (opcode : Nat) (site : CallSite) : Option (Nat × Bo
       ">::.ctor(System.Void*,System.Int32)") then none else some (width, writable)
 
 /-- Span constructors retain the exact element width and readonly capability. -/
-private def spanCreateMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
+private def spanCreateMatches (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   let modeled := match instruction.operand with
     | .call site => byteSpanConstructor instruction.opcode site
     | _ => false
@@ -759,10 +758,40 @@ private def spanCreateMatches (instruction : RawInstruction) (emitted : Op) : Bo
     | none => match emitted with | .memory .spanCreate => false | _ => true
   else match emitted with | .memory .spanCreate => false | _ => true
 
-/-- Contextual callable kinds retain the independently derived native home identity. -/
+/-- What a scalar site reads about the body's local slots: the declared type of each slot, and
+    whether a `calli` consumes the slot as a native method pointer. -/
+structure ScalarLocals where
+  typeAt : Nat → Option TypeExpr
+  pointer : Nat → Bool
+
+/-- The local slots as the raw metadata lists state them, scanned at each site. -/
+def ScalarLocals.ofLists (raw : RawMethod) (context : NativeDispatchContext) : ScalarLocals :=
+  ⟨(raw.locals[·]?), context.pointerLocals.contains⟩
+
+/-- The local slots read from a `FlowIndex` of the declared types and a `Std.TreeSet` of the
+    pointer locals, each built once per body. -/
+def ScalarLocals.indexed (raw : RawMethod) (context : NativeDispatchContext) : ScalarLocals :=
+  ⟨(FlowIndex.ofList raw.locals).get?, (Std.TreeSet.ofList context.pointerLocals compare).contains⟩
+
+/-- Indexes built once per body answer every local slot query exactly as the metadata lists do. -/
+theorem ScalarLocals.indexed_eq (raw : RawMethod) (context : NativeDispatchContext) :
+    ScalarLocals.indexed raw context = ScalarLocals.ofLists raw context := by
+  have typeAt : (FlowIndex.ofList raw.locals).get? = (raw.locals[·]?) :=
+    funext (FlowIndex.get?_ofList raw.locals)
+  have pointer : (Std.TreeSet.ofList context.pointerLocals compare).contains =
+      context.pointerLocals.contains := by
+    funext index
+    rw [Std.TreeSet.contains_ofList]
+  rw [ScalarLocals.indexed, ScalarLocals.ofLists, typeAt, pointer]
+
+#print axioms ScalarLocals.indexed_eq
+
+/-- Contextual callable kinds retain the independently derived native home identity; `pointer`
+    holds the locals a `calli` consumes. -/
 private def dispatchScalar (context : NativeDispatchContext) (type : TypeExpr)
-    (index : Option Nat := none) : ScalarKind :=
-  match nativeDispatchStorage context type index with
+    (index : Option Nat := none) (pointer : Nat → Bool := context.pointerLocals.contains) :
+    ScalarKind :=
+  match nativeDispatchStorage context type index pointer with
   | some (.methodTable signature) => .nativeMethodTable signature
   | some (.methodPointer signature) => .methodPointer signature
   | _ => scalarType type
@@ -773,9 +802,10 @@ private def argumentKind (raw : RawMethod)
   if raw.hasThis && index == 0 then some (if raw.objectReceiver then .object else .reference)
   else dispatchScalar context <$> raw.parameters[index - (if raw.hasThis then 1 else 0)]?
 
-/-- The kind an opcode with a fixed one-value push leaves on the stack. -/
+/-- The kind an opcode with a fixed one-value push leaves on the stack, reading local slots
+    through `locals`. -/
 private def pushedKind (raw : RawMethod)
-    (context : NativeDispatchContext)
+    (context : NativeDispatchContext) (locals : ScalarLocals)
     (instruction : RawInstruction) : Option ScalarKind := do
   match argumentOperation instruction with
   | some (.load index) => argumentKind raw context index
@@ -783,14 +813,14 @@ private def pushedKind (raw : RawMethod)
     -- `ldloc`.
     if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] then
       let index ← localIndex instruction
-      return dispatchScalar context (← raw.locals[index]?) (some index)
+      return dispatchScalar context (← locals.typeAt index) (some index) locals.pointer
     -- `ldarga`, `ldloca`, `ldflda` and `ldsflda`.
     else if instruction.opcode ∈ [18, 65037] then
       let index ← localIndex instruction
-      let type ← raw.locals[index]?
+      let type ← locals.typeAt index
       -- A class instance's slot is never addressed, so no byref stands in for a receiver.
       if type matches .object .. then none else
-      if (nativeDispatchStorage context type (some index)).isSome then none else
+      if (nativeDispatchStorage context type (some index) locals.pointer).isSome then none else
         return scalarType (.byref type)
     else if instruction.opcode ∈ [15, 65034] then
       match argumentOperation instruction with
@@ -817,10 +847,12 @@ private def pushedKind (raw : RawMethod)
     else if instruction.opcode ∈ [70, 71, 72, 73, 74, 75, 65052] then some .word32
     else some .other
 
-/-- The stack kinds after `instruction`, or `none` if its operands have the wrong kinds. -/
+/-- The stack kinds after `instruction`, with local slots read through `locals`, or `none` if
+    its operands have the wrong kinds. -/
 def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
     (stack : List ScalarKind) (role : Option FoldRole := none)
-    (context : NativeDispatchContext := nativeDispatchContext raw) : Option (List ScalarKind) := do
+    (context : NativeDispatchContext := nativeDispatchContext raw)
+    (locals : ScalarLocals := .ofLists raw context) : Option (List ScalarKind) := do
   let opcode := instruction.opcode
   if role matches some (.typeBranch _) then
     let _ :: _ :: tail := stack | none
@@ -915,9 +947,11 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   -- Stores to locals and arguments must fit the slot.
   if opcode ∈ [10, 11, 12, 13, 19, 65038] then
     let index ← localIndex instruction
-    let type ← raw.locals[index]?
+    let type ← locals.typeAt index
     let value :: tail := stack | none
-    if storageCompatible value (dispatchScalar context type (some index)) then return tail else none
+    if storageCompatible value (dispatchScalar context type (some index) locals.pointer) then
+      return tail
+    else none
   if let some (.store index) := argumentOperation instruction then
     let expected ← argumentKind raw context index
     let value :: tail := stack | none
@@ -968,21 +1002,24 @@ def scalarTransfer (raw : RawMethod) (instruction : RawInstruction)
   let (pops, pushes) ← rawStackEffect opcode
   if pops > stack.length then none else
     if pushes == 0 then return stack.drop pops
-    else if pushes == 1 then return (← pushedKind raw context instruction) :: stack.drop pops
+    else if pushes == 1 then
+      return (← pushedKind raw context locals instruction) :: stack.drop pops
     else none
 
 /-- A `stloc` of a 64-bit or native value into a 32-bit local, emitted as a store to that
-    same local. The checked interpreter rejects that store, so the site needs no successor. -/
+    same local, whose type `locals` gives. The checked interpreter rejects that store, so the
+    site needs no successor. -/
 def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
-    (stack : List ScalarKind) (emitted : Op) : Bool :=
+    (stack : List ScalarKind) (emitted : Instruction)
+    (locals : ScalarLocals := .ofLists raw (nativeDispatchContext raw)) : Bool :=
   ((do
     if instruction.opcode ∉ [10, 11, 12, 13, 19, 65038] then none else
     let index ← localIndex instruction
-    let type ← raw.locals[index]?
+    let type ← locals.typeAt index
     let value :: _ := stack | none
     return scalarType type == .word32 && value ∈ [.word64, .native] &&
       match emitted with
-      | .setLocal actual _ => actual == index
+      | .stloc actual => actual == index
       | _ => false) : Option Bool).getD false
 
 /-- Whether the immediately preceding raw instruction is a readonly prefix. -/
@@ -991,7 +1028,7 @@ private def followsReadOnly (raw : RawMethod) (pc : Nat) : Bool :=
 
 /-- A readonly prefix is inseparable from its element address, including branch entry. -/
 private def readOnlySiteMatches (raw : RawMethod) (pc : Nat) (instruction : RawInstruction)
-    (emitted : Op) : Bool :=
+    (emitted : Instruction) : Bool :=
   let entered (target : Nat) := raw.code.any fun source => match source.operand with
     | .target destination => destination == target
     | .targets destinations => destinations.contains target
@@ -1006,14 +1043,48 @@ private def readOnlySiteMatches (raw : RawMethod) (pc : Nat) (instruction : RawI
     | _ => false
   else true
 
+/-- The readonly prefix rule of `readOnlySiteMatches`, reading neighbouring raw instructions
+    through `rawAt` and branch entry through `targeted`. -/
+def readOnlySiteWindow (rawAt : Nat → Option RawInstruction) (targeted : Nat → Bool)
+    (pc : Nat) (instruction : RawInstruction) (emitted : Instruction) : Bool :=
+  if instruction.opcode == 65054 then
+    instruction.operand == .none &&
+      (rawAt (pc + 1)).any (fun next => next.opcode == 143) && !targeted (pc + 1)
+  else if instruction.opcode == 143 then
+    -- `pc - 1` saturates at 0, so the first instruction never follows a prefix.
+    let prefixed := pc > 0 && (rawAt (pc - 1)).any (fun previous => previous.opcode == 65054)
+    match emitted with
+    | .memory (.arrayAddress _ writable) => writable == !prefixed && (!prefixed || !targeted pc)
+    | _ => false
+  else true
+
+/-- An index of the body and its branch destinations, each built once, decide the readonly
+    rule exactly as scanning the body at every site does. -/
+theorem readOnlySiteWindow_eq (raw : RawMethod) :
+    readOnlySiteWindow (FlowIndex.ofList raw.code).get?
+      (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
+      readOnlySiteMatches raw := by
+  have rawAt : (FlowIndex.ofList raw.code).get? = (raw.code[·]?) :=
+    funext (FlowIndex.get?_ofList raw.code)
+  have targeted : (Std.TreeSet.ofList (branchTargets raw.code) compare).contains =
+      fun target => raw.code.any (branchesTo target) := by
+    funext target
+    rw [Std.TreeSet.contains_ofList, branchTargets_contains]
+  rw [rawAt, targeted]
+  rfl
+
+#print axioms readOnlySiteWindow_eq
+
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
-    agree with the feature stack depth, emit the right encoding, and give every successor,
-    which must be reachable, exactly the resulting stack kinds. -/
+    agree with the feature stack depth, emit the right encoding, satisfy the readonly rule
+    `readOnly`, and give every successor, which must be reachable, exactly the resulting stack
+    kinds, with local slots read through `locals`. -/
 private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
-    (context : NativeDispatchContext)
+    (context : NativeDispatchContext) (locals : ScalarLocals)
+    (readOnly : Nat → RawInstruction → Instruction → Bool)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
-      Op → Bool
+      Instruction → Bool
   | _, none, none, .unsupported _ => true
   | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
@@ -1022,10 +1093,10 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
           | .initializeSpanLocal actual operation => index == actual && spanConstructorMatches constructor operation
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
-      readOnlySiteMatches raw pc instruction emitted &&
+      readOnly pc instruction emitted &&
       scalarEmissionMatches layouts role instruction stack emitted &&
-      (scalarStoreFault raw instruction stack emitted ||
-      match scalarTransfer raw instruction stack role context,
+      (scalarStoreFault raw instruction stack emitted locals ||
+      match scalarTransfer raw instruction stack role context locals,
           featureSuccessors role pc instruction feature with
       | some after, some successors =>
         successors.all (successor after)
@@ -1035,21 +1106,26 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
 /-- The scalar certificate covers exactly the feature-reachable pcs, starts with an empty
     stack, and passes every site check. -/
 def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
-    (certificate : ScalarCertificate) (code : List Op) : Prop :=
+    (certificate : ScalarCertificate) (code : List Instruction) : Prop :=
   let context := nativeDispatchContext raw
+  let locals := ScalarLocals.indexed raw context
+  let readOnly := readOnlySiteWindow (FlowIndex.ofList raw.code).get?
+    (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
   raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3Flow (fun lookup instruction (feature, stack) emitted =>
-      checkScalarSite layouts raw context (fun after target => match lookup target with
-        | some (some _, incoming) => incoming == some after
-        | _ => false) instruction feature stack emitted)
+      checkScalarSite layouts raw context locals readOnly
+        (fun after target => match lookup target with
+          | some (some _, incoming) => incoming == some after
+          | _ => false) instruction feature stack emitted)
     (.ofList (features.zip certificate)) 0
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx (features.zip certificate) code = true
 
 instance (layouts : Array RawLayout) (raw : RawMethod) (features : FeatureCertificate)
     (certificate : ScalarCertificate)
-    (code : List Op) : Decidable (ScalarFlowValid layouts raw features certificate code) :=
+    (code : List Instruction) :
+    Decidable (ScalarFlowValid layouts raw features certificate code) :=
   inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Pairing feature and scalar states preserves both the reachability and exact stack
@@ -1073,15 +1149,17 @@ theorem scalarSuccessor_zip (features : FeatureCertificate)
 
 #print axioms scalarSuccessor_zip
 
-/-- Streaming scalar validation preserves all list-indexed site checks and lengths. -/
+/-- Streaming scalar validation preserves all list-indexed site checks and lengths, with the
+    readonly rule scanning the body and local slots read from the metadata lists at each site. -/
 theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
     (features : FeatureCertificate)
-    (certificate : ScalarCertificate) (code : List Op) :
+    (certificate : ScalarCertificate) (code : List Instruction) :
     ScalarFlowValid layouts raw features certificate code ↔
       raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
       raw.code.length = code.length ∧ certificate[0]? = some (some []) ∧
       all3 (fun (instruction, feature) stack emitted =>
           checkScalarSite layouts raw (nativeDispatchContext raw)
+            (ScalarLocals.ofLists raw (nativeDispatchContext raw)) (readOnlySiteMatches raw)
             (fun after target => match features[target]? with
             | some (some _) => certificate[target]? == some (some after)
             | _ => false)
@@ -1089,7 +1167,8 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
         ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code =
         true := by
   dsimp only [ScalarFlowValid]
-  rw [all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
+  rw [ScalarLocals.indexed_eq, readOnlySiteWindow_eq,
+    all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
   simp only [scalarSuccessor_zip]
   by_cases featureLength : raw.code.length = features.length
   · by_cases scalarLength : raw.code.length = certificate.length
@@ -1104,10 +1183,10 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
 /-- At every reachable pc the emitted instruction is the scalar encoding the raw one implies. -/
 theorem ScalarFlowValid.instruction_checked {layouts : Array RawLayout} {raw : RawMethod}
     {features : FeatureCertificate}
-    {certificate : ScalarCertificate} {code : List Op}
+    {certificate : ScalarCertificate} {code : List Instruction}
     (valid : ScalarFlowValid layouts raw features certificate code)
     {pc : Nat} {instruction : RawInstruction} {role : Option FoldRole} {feature : FeatureState}
-    {stack : List ScalarKind} {emitted : Op}
+    {stack : List ScalarKind} {emitted : Instruction}
     (rawAt : raw.code[pc]? = some instruction)
     (roleAt : (foldRoles raw.locals raw.code)[pc]? = some role)
     (featureAt : features[pc]? = some (some feature))

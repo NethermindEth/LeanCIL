@@ -18,7 +18,7 @@ example {α : Type} (program : CIL.Program) (method : Nat) (args : List Value)
   loop_outcome_induction program method args configuration invariant measure post none progress state valid
 
 example {Input Output : Type} {c : MethodContract Input Output}
-    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Op}
+    {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
     {post : Memory → List Value → Prop}
     (holds : c.Holds program callee) (input : Input)
@@ -38,7 +38,7 @@ example (program : CIL.Program) (method : Nat) (pre : List Value → Memory → 
 /-! Unsupported execution, invalid state, fuel exhaustion, normal return and another exception never discharge an expected one. -/
 
 @[cil_code] def stuck : CIL.Method := { returnsValue := false, locals := [], code := [.unsupported "fixture"] }
-@[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.branch 0] }
+@[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 @[cil_code] def done : CIL.Method := { returnsValue := false, locals := [], code := [.ret] }
 @[cil_code] def other : CIL.Method := { returnsValue := false, locals := [], code := [.throw "System.ArgumentException"] }
 

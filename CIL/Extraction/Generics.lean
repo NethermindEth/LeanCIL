@@ -1,3 +1,4 @@
+import CIL.CallSite
 import CIL.Extraction.Parameters
 import CIL.Extraction.FlowIndex
 import CIL.Imports
@@ -19,7 +20,7 @@ namespace CIL.Extraction
 
 /-- The exact `System.Runtime.Intrinsics` assembly identity; `runtimeScope` is in `TypeExpr`. -/
 def intrinsicsScope : String :=
-  "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+  "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
 /-- Byte width of an admitted integer vector, bound to both exact runtime type identities. -/
 def integerVectorWidth : TypeExpr → Option Nat
@@ -190,28 +191,6 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
   | _ => none
 
-/-- A call target: a method of this module by metadata token, or another assembly's
-    method by its `scope::signature` identity. -/
-inductive MethodId where
-  | managed (token : Nat)
-  | external (identity : String)
-  deriving DecidableEq, Repr
-
-/-- The metadata of a `call` or `newobj` operand, as declared at the call site. -/
-structure CallSite where
-  declaringType : TypeExpr := .void
-  name : String := ""
-  target : MethodId
-  typeArguments : List TypeExpr
-  parameterCount : Nat
-  hasThis : Bool
-  returnsValue : Bool
-  returnType : TypeExpr := .void
-  parameterTypes : List TypeExpr := []
-  /-- The suffix of `typeArguments` belonging to the declaring type, not the method. -/
-  ownerArgumentCount : Nat := 0
-  deriving DecidableEq, Repr
-
 /-- A decoded instruction operand. A field operand names its owner type and the field's
     index in the owner's raw layout. -/
 inductive RawOperand where
@@ -373,7 +352,7 @@ private def admittedTypeArgument (layouts : List RawLayout) (type : TypeExpr) : 
     | some _ => true
 
 /-- A generic type application split into its constructor and ordered arguments. -/
-private def appliedArguments : TypeExpr → TypeExpr × List TypeExpr
+def appliedArguments : TypeExpr → TypeExpr × List TypeExpr
   | .apply constructor argument =>
     let (head, arguments) := appliedArguments constructor
     (head, arguments ++ [argument])
@@ -431,6 +410,37 @@ def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   | opcode, _ =>
     if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
 
+/-- Whether `instruction` names `pc` as a branch destination or switch arm. -/
+def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .target target => target == pc
+  | .targets targets => targets.contains pc
+  | _ => false
+
+/-- All decoded branch destinations, including switch arms and unreachable instructions. -/
+def branchTargets (raw : List RawInstruction) : List Nat :=
+  raw.flatMap fun instruction => match instruction.operand with
+    | .target target => [target]
+    | .targets targets => targets
+    | _ => []
+
+/-- Collecting branch destinations once answers, for every pc, whether some instruction
+    branches to it. -/
+theorem branchTargets_contains (raw : List RawInstruction) (pc : Nat) :
+    (branchTargets raw).contains pc = raw.any (branchesTo pc) := by
+  induction raw with
+  | nil => rfl
+  | cons instruction rest ih =>
+    cases instruction with
+    | mk offset opcode operand =>
+      change _ = (branchesTo pc ⟨offset, opcode, operand⟩ || rest.any (branchesTo pc))
+      simp only [branchTargets, List.flatMap_cons, List.contains_append]
+      change (_ || (branchTargets rest).contains pc) = _
+      rw [ih]
+      cases operand <;> simp [branchesTo, BEq.beq, eq_comm]
+
+#print axioms branchTargets_contains
+
 /-- The unique raw managed indirect signature and native locals directly consumed as targets. -/
 structure NativeDispatchContext where
   signature : Option ManagedSignature := none
@@ -462,26 +472,50 @@ def nativeDispatchContext (raw : RawMethod) : NativeDispatchContext := Id.run do
     if instruction.opcode != 65044 then previous := some instruction
   return ⟨signature, locals⟩
 
-/-- A native pointer is an input table view; only raw target-feeding integer locals are callable. -/
+/-- A native pointer is an input table view; only raw target-feeding integer locals, those
+    `pointer` holds, are callable. -/
 def nativeDispatchStorage (context : NativeDispatchContext) (type : TypeExpr)
-    (localIndex : Option Nat := none) : Option StorageType := do
+    (localIndex : Option Nat := none) (pointer : Nat → Bool := context.pointerLocals.contains) :
+    Option StorageType := do
   let signature ← context.signature
   if let .pointer element := type then
     if nativeDispatchInteger element then return .methodTable signature
-  if nativeDispatchInteger type && localIndex.any context.pointerLocals.contains then
+  if nativeDispatchInteger type && localIndex.any pointer then
     return .methodPointer signature
   none
 
-/-- Closed argument and local storage, including typed span views, and argument accesses. -/
-def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments := do
-  let context := nativeDispatchContext closed
+/-- Closed argument and local storage, including typed span views, and argument accesses, where
+    `pointer` holds the locals a `calli` consumes. -/
+def closedArgumentsWith (layouts : List RawLayout) (closed : RawMethod)
+    (context : NativeDispatchContext) (pointer : Nat → Bool) : Option RawArguments := do
   let parameters ← closed.parameters.mapM fun type =>
     nativeDispatchStorage context type <|> typeStorage layouts type
   let locals ← closed.locals.zipIdx.mapM fun (type, index) =>
-    nativeDispatchStorage context type (some index) <|> typeStorage layouts type
+    nativeDispatchStorage context type (some index) pointer <|> typeStorage layouts type
   let code ← closed.code.mapM argumentOperation
   let receiver := if closed.objectReceiver then StorageType.object else .reference
   return ⟨(if closed.hasThis then [receiver] else []) ++ parameters, locals, code⟩
+
+/-- Closed argument and local storage, including typed span views, and argument accesses, with
+    the locals a `calli` consumes read from a `Std.TreeSet` built once per body. -/
+def closedArguments (layouts : List RawLayout) (closed : RawMethod) : Option RawArguments :=
+  let context := nativeDispatchContext closed
+  closedArgumentsWith layouts closed context
+    (Std.TreeSet.ofList context.pointerLocals compare).contains
+
+/-- Reading pointer locals from a set built once gives exactly the storage that scanning the
+    pointer local list at each local gives. -/
+theorem closedArguments_eq_list (layouts : List RawLayout) (closed : RawMethod) :
+    closedArguments layouts closed = closedArgumentsWith layouts closed
+      (nativeDispatchContext closed) (nativeDispatchContext closed).pointerLocals.contains := by
+  have pointer : (Std.TreeSet.ofList (nativeDispatchContext closed).pointerLocals
+      compare).contains = (nativeDispatchContext closed).pointerLocals.contains := by
+    funext index
+    rw [Std.TreeSet.contains_ofList]
+  dsimp only [closedArguments]
+  rw [pointer]
+
+#print axioms closedArguments_eq_list
 
 /-- `closed` is `original` instantiated at `arguments`, and `parameterInput` is the
     argument metadata derived from it. -/
@@ -516,18 +550,18 @@ structure SpecializedMethod where
 /-- The callee index and argument count of an emitted call, if its kind matches the raw
     opcode: `call` (40) for `.call`, `callvirt` (111) for a receiver-checked call, `newobj`
     (115) for a construction. -/
-private def managedCallTarget (opcode : Nat) : Op → Option (Nat × Nat)
+private def managedCallTarget (opcode : Nat) : Instruction → Option (Nat × Nat)
   | .call target count | .tailCall target count =>
     if opcode = 40 then some (target, count) else none
   | .callInstance target count => if opcode = 111 then some (target, count) else none
-  | .newAggregate target count _ | .newVector256 target count | .newObject target count .. =>
+  | .newAggregate target count _ | .newObject target count .. =>
     if opcode = 115 then some (target, count) else none
   | _ => none
 
 /-- A class construction allocates an instance of the call site's declaring class, with that
     class's bases and one slot per instance field, whose constructor takes that instance as its
     object receiver. -/
-def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Op → Bool
+def constructedOwnerMatches (site : CallSite) (callee : RawMethod) : Instruction → Bool
   | .newObject _ _ owner bases size => owner == site.declaringType && callee.objectReceiver &&
     bases == callee.objectBases && size == objectFieldOffset callee.objectFieldCount &&
     match owner with | .object .. => true | _ => false
@@ -543,7 +577,7 @@ def RawMethod.isVirtual (method : RawMethod) : Bool :=
 /-- A receiver-checked call enters a non-virtual method of an admitted class, whose receiver is an
     object reference; no other managed call checks its receiver. A virtual callee would need
     dispatch, which one fixed target does not perform. -/
-def checkedReceiverMatches (callee : RawMethod) : Op → Bool
+def checkedReceiverMatches (callee : RawMethod) : Instruction → Bool
   | .callInstance .. => callee.objectReceiver && !callee.isVirtual
   | _ => true
 
@@ -639,7 +673,7 @@ def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
 with the exact substituted type arguments and signature; an external one, a matching import slot. -/
 def validateManagedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
-    (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
+    (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
   if !live then true else
   match emitted with
   | .managed (.address target signature) => managedAddressMatches methods raw target signature
@@ -678,13 +712,12 @@ def validateManagedCallWith (methodCount : Nat)
     | .external identity => match emitted with
       | .call target count =>
         validateImportCallWith methodCount imports raw.opcode site identity target count
-      | .callInstance .. | .tailCall .. | .newAggregate .. | .newVector256 .. | .newObject .. =>
+      | .callInstance .. | .tailCall .. | .newAggregate .. | .newObject .. =>
         false
       | _ => true
   | .indirectCall .. => false
   | _ => match emitted with
-    | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newVector256 ..
-    | .newObject .. => false
+    | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newObject .. => false
     | _ => true
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
@@ -694,14 +727,16 @@ def validateImportCall (methods : List SpecializedMethod) (imports : List Import
 
 /-- The call rule stated against the original lists for use in semantic consequences. -/
 def validateManagedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (raw : RawInstruction) (live : Bool) (emitted : Op) : Bool :=
+    (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
 
-/-- Every call emitted at a live call site of `raw` binds to the method table or an import
-    slot, and no other instruction emits a call. An external site may instead emit a
-    non-call translation, which other validators check. -/
+/-- The emitted link table is the one the emitted code implies. Every call emitted at a live
+    call site of `raw` binds to the method table or an import slot, and no other instruction
+    emits a call. An external site may instead emit a non-call translation, which other
+    validators check. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
+  emitted.links = linksOfCode emitted.code ∧
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
   all3 (validateManagedCallWith methods.length (FlowIndex.ofList methods).get?
     (FlowIndex.ofList imports).get?) raw.code reachable emitted.code = true
@@ -710,6 +745,7 @@ def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportS
 theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
     (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
     ManagedCallsValid methods imports raw reachable emitted ↔
+      emitted.links = linksOfCode emitted.code ∧
       raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
         all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true := by
   have index {α : Type} (values : List α) :
@@ -725,14 +761,15 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
 instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) :
     Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
 /-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
     Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
 macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | (apply (ManagedCallsValid_iff_original _ _ _ _ _).mpr
-       refine ⟨?_, ?_, ?_⟩
+       refine ⟨?_, ?_, ?_, ?_⟩
+       · decide +kernel
        · rfl
        · rfl
        · simp [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
@@ -747,10 +784,10 @@ theorem validated_managed_call {methods : List SpecializedMethod} {imports : Lis
     validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
       (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
   have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
-  have live : pc.val < reachable.length := valid.1 ▸ pc.isLt
-  have present : pc.val < emitted.code.length := valid.2.1 ▸ pc.isLt
+  have live : pc.val < reachable.length := valid.2.1 ▸ pc.isLt
+  have present : pc.val < emitted.code.length := valid.2.2.1 ▸ pc.isLt
   rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
-  exact all3_at valid.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
+  exact all3_at valid.2.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
     (List.getElem?_eq_getElem present)
 
 /-- An accepted live `call` past every extracted method is an external site calling a slot

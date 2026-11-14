@@ -23,7 +23,7 @@ def objectConstructorCall (instruction : RawInstruction) : Bool :=
   | _, _ => false
 
 /-- The `System.Object` constructor call emits `pop`, and no other `call` does. -/
-def objectConstructorMatches (instruction : RawInstruction) (emitted : Op) : Bool :=
+def objectConstructorMatches (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   match emitted with
   | .pop => instruction.opcode != 40 || objectConstructorCall instruction
   | _ => !objectConstructorCall instruction

@@ -20,13 +20,13 @@ theorem layout_valid : layout.Valid := by decide +kernel
 /-- `for (t = default; t.count != value; t.count++) t.sum = addTwo(t.sum); return t.sum;` -/
 @[cil_code] def tally : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 8 0)], localKinds := [.aggregate 8]
-  code := [.localAddr 0, .initAggregate 8, .branch 14, .localAddr 0, .local 0, .fieldAt 4 4,
-    .call 1 1, .setFieldAt 4 4, .localAddr 0, .local 0, .fieldAt 0 4, .const32 1, .add,
-    .setFieldAt 0 4, .local 0, .fieldAt 0 4, .arg 0, .bne 3, .local 0, .fieldAt 4 4, .ret] }
+  code := [.ldloca 0, .initAggregate 8, .br 14, .ldloca 0, .ldloc 0, .fieldAt 4 4,
+    .call 1 1, .setFieldAt 4 4, .ldloca 0, .ldloc 0, .fieldAt 0 4, .ldc_i4 1, .add,
+    .setFieldAt 0 4, .ldloc 0, .fieldAt 0 4, .arg 0, .bne_un 3, .ldloc 0, .fieldAt 4 4, .ret] }
 
 /-- `return x + 2;` -/
 @[cil_code] def addTwo : CIL.Method := {
-  returnsValue := true, locals := [], code := [.arg 0, .const32 2, .add, .ret] }
+  returnsValue := true, locals := [], code := [.arg 0, .ldc_i4 2, .add, .ret] }
 
 /-- The program, with `tally` calling `addTwo` as method 1. -/
 @[cil_code] def program : CIL.Program := [tally, addTwo]
@@ -57,7 +57,7 @@ abbrev State (memory : Memory) (home : Reference) :=
 /-- The loop test, with the input and `count` on the stack. -/
 bind_cutpoint header (memory : Memory) (value : W32) (home : Reference)
     (state : State memory home) :=
-  tally matching (fun op => op matches .bne _) with entry.frame memory home,
+  tally matching (fun op => op matches .bne_un _) with entry.frame memory home,
     [.scalar (.i32 value), .scalar (.i32 state.values.1)], state.memory
 
 /-- The frame lemmas compose by hand: the struct's zeroing and stores are named, the call is
@@ -153,7 +153,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   cil_loop_recurse recurse (count + 1, sum)
 
 -- A store whose home has no frame fact at its memory stops the walk at that store.
-/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Op.setFieldAt 4 4) at memory
+/-- error: cil_loop_recurse: cannot step pc 7 (CIL.Instruction.setFieldAt 4 4) at memory
   final -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
@@ -165,7 +165,7 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
   cil_loop_recurse recurse (0, sum + 2)
 
 -- A contract applied before the loop reaches its call names the instruction it is at.
-/-- error: cil_loop_call: pc 3 is CIL.Op.localAddr 0, not a call; step to the call first with
+/-- error: cil_loop_call: pc 3 is CIL.Instruction.ldloca 0, not a call; step to the call first with
 `cil_loop_advance` -/
 #guard_msgs (whitespace := lax) in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
@@ -176,7 +176,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
   cil_loop_call addTwo_holds sum
 
 -- A call stops `cil_loop_steps`, which names the pc and the tactic that crosses it.
-/-- error: cil_loop_steps: pc 6 is a call (CIL.Op.call 1 1); cross it with `cil_loop_call` -/
+/-- error: cil_loop_steps: pc 6 is a call (CIL.Instruction.call 1 1); cross it with `cil_loop_call` -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
     (frame : LoopFrame [] memory current [.aggregate 8] [.bytes (.aggregate 8) home]
@@ -187,7 +187,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
 
 -- A store with no frame fact at its memory fails naming the pc, the instruction and the
 -- memory, and what to supply.
-/-- error: cil_loop_steps: cannot step pc 7 (CIL.Op.setFieldAt 4 4) at memory
+/-- error: cil_loop_steps: cannot step pc 7 (CIL.Instruction.setFieldAt 4 4) at memory
   final -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory) :
@@ -247,8 +247,8 @@ example : mixed.zeros = [.i32 0, .i32 0, .i32 0, .aggregate (List.replicate 8 0)
     the signed `count` through the struct's address. -/
 @[cil_code] def flagged : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.localAddr 0, .initAggregate 16, .branch 6, .localAddr 0, .const32 1, .setFieldAt 0 1,
-    .local 0, .fieldAt 0 1, .brzero 3, .localAddr 0, .fieldAt 2 2 true, .ret] }
+  code := [.ldloca 0, .initAggregate 16, .br 6, .ldloca 0, .ldc_i4 1, .setFieldAt 0 1,
+    .ldloc 0, .fieldAt 0 1, .brfalse 3, .ldloca 0, .fieldAt 2 2 true, .ret] }
 
 /-- The program of `flagged` alone. -/
 @[cil_code] def flaggedProgram : CIL.Program := [flagged]
@@ -265,7 +265,7 @@ abbrev Flagged (memory : Memory) (home : Reference) :=
 
 /-- The loop test, with nothing on the stack. -/
 bind_cutpoint flaggedHeader (memory : Memory) (home : Reference) (state : Flagged memory home) :=
-  flagged matching (fun op => op matches .local _) with flaggedEntry.frame memory home, [],
+  flagged matching (fun op => op matches .ldloc _) with flaggedEntry.frame memory home, [],
     state.memory
 
 /-- `cil_loop_recurse` zeroes a struct with 1-, 2- and 4-byte and nested fields through its
@@ -332,9 +332,9 @@ example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memo
     flag byte on the exit path. -/
 @[cil_code] def marked : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.localAddr 0, .initAggregate 16, .branch 9, .localAddr 0, .local 0, .fieldAt 4 4,
-    .const32 1, .add, .setFieldAt 4 4, .local 0, .fieldAt 4 4, .arg 0, .bne 3, .localAddr 0,
-    .const32 1, .setFieldAt 0 1, .local 0, .fieldAt 0 1, .ret] }
+  code := [.ldloca 0, .initAggregate 16, .br 9, .ldloca 0, .ldloc 0, .fieldAt 4 4,
+    .ldc_i4 1, .add, .setFieldAt 4 4, .ldloc 0, .fieldAt 4 4, .arg 0, .bne_un 3, .ldloca 0,
+    .ldc_i4 1, .setFieldAt 0 1, .ldloc 0, .fieldAt 0 1, .ret] }
 
 /-- The program of `marked` alone. -/
 @[cil_code] def markedProgram : CIL.Program := [marked]
@@ -352,7 +352,7 @@ abbrev Marked (memory : Memory) (home : Reference) :=
 /-- The loop test, with the input and `total` on the stack. -/
 bind_cutpoint markedHeader (memory : Memory) (value : W32) (home : Reference)
     (state : Marked memory home) :=
-  marked matching (fun op => op matches .bne _) with markedEntry.frame memory home,
+  marked matching (fun op => op matches .bne_un _) with markedEntry.frame memory home,
     [.scalar (.i32 value), .scalar (.i32 state.values)], state.memory
 
 /-- `cil_loop_finish` takes a store on the exit path through the frame and returns the stored
@@ -430,9 +430,9 @@ open Lean in
 /-- `for (i = 0; i != n; i++) stamp(Unsafe.Add(ref p, i), i); return i;`, with `i` an int local. -/
 @[cil_code] def stamps : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.const32 0, .setLocal 0, .branch 12, .arg 1, .local 0, .memory (.add 4 true),
-    .local 0, .call 1 2, .local 0, .const32 1, .add, .setLocal 0, .local 0, .arg 0, .bne 3,
-    .local 0, .ret] }
+  code := [.ldc_i4 0, .stloc 0, .br 12, .arg 1, .ldloc 0, .memory (.add 4 true),
+    .ldloc 0, .call 1 2, .ldloc 0, .ldc_i4 1, .add, .stloc 0, .ldloc 0, .arg 0, .bne_un 3,
+    .ldloc 0, .ret] }
 
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
@@ -474,7 +474,7 @@ abbrev Stamping (memory : Memory) (buffer : Reference) (count : Nat) (home : Ref
 /-- The loop test, with the count and the index on the stack. -/
 bind_cutpoint stampsHeader (memory : Memory) (count : W32) (buffer : Reference)
     (home : Reference) (state : Stamping memory buffer count.toNat home) :=
-  stamps matching (fun op => op matches .bne _) with stampsEntry.frame memory home,
+  stamps matching (fun op => op matches .bne_un _) with stampsEntry.frame memory home,
     [.scalar (.i32 count), .scalar (.i32 state.values)], state.memory
 
 /-- The index stays within the count, and the rest of the buffer stays writable. -/
@@ -533,7 +533,7 @@ theorem stamps_returns_count (memory : Memory) (count : W32) (buffer : Reference
 #print axioms stamps_returns_count
 
 -- Without the `Unsafe.Add` result the advance stops at the add, naming that fact.
-/-- error: cil_loop_advance: cannot step pc 5 (CIL.Op.memory (CIL.MemoryOp.add 4 true)) -/
+/-- error: cil_loop_advance: cannot step pc 5 (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
@@ -544,7 +544,7 @@ example (memory current : Memory) (count index : W32) (buffer home : Reference)
   cil_loop_advance
 
 -- The stuck step shows its pc as a literal, as the message's first line does.
-/-- (CIL.Op.memory (CIL.MemoryOp.add 4 true)) 5 -/
+/-- (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) 5 -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
     (wellFormed : memory.WellFormed) (formed : form memory buffer = .ok buffer)
@@ -568,10 +568,10 @@ stack -/
 open Lean Meta in
 #eval show MetaM Unit from do logInfo (← loopMissingHint #[mkConst ``True])
 
-/-- `i = (byte) 0x1FF; return i;`, storing the int local through a byte narrowing. -/
+/-- `i = (byte) 0x1FF; return i;`: the byte local keeps the low byte of the stored word. -/
 @[cil_code] def narrowed : CIL.Method := {
-  returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.const32 0x1FF, .setLocal 0 (some .unsigned8), .local 0, .ret] }
+  returnsValue := true, locals := [.i32 0], localKinds := [.narrow .unsigned8]
+  code := [.ldc_i4 0x1FF, .stloc 0, .ldloc 0, .ret] }
 
 /-- The program of `narrowed` alone. -/
 @[cil_code] def narrowedProgram : CIL.Program := [narrowed]
@@ -580,13 +580,11 @@ open Lean Meta in
 bind_entry narrowedEntry (memory : Memory) (wellFormed : memory.WellFormed) :=
   narrowed with [] from memory allocating wellFormed
 
--- A narrowing local store is not one `LoopFrame.store` models, so the walk stops at it.
-/-- error: cil_loop_finish: cannot step pc 1 (CIL.Op.setLocal 0 (some CIL.NarrowKind.unsigned8)) -/
-#guard_msgs (whitespace := lax, substring := true) in
+-- A store to a byte home records the truncated word, which the load and the return read back.
 example (memory current : Memory) (home : Reference)
-    (frame : LoopFrame [] memory current [.word32] [.bytes .word32 home]
+    (frame : LoopFrame [] memory current [.narrow .unsigned8] [.bytes (.narrow .unsigned8) home]
       (knownLocals [some (.i32 0)])) :
-    LoopTerminates narrowedProgram 0 [] (fun _ _ => True)
+    LoopTerminates narrowedProgram 0 [] (fun _ results => results = [.scalar (.i32 0xFF)])
       ⟨0, narrowedEntry.frame memory home, [], current⟩ := by
   cil_loop_finish
 
@@ -609,7 +607,7 @@ example (memory current : Memory) (count index : W32) (buffer home slotted : Ref
 
 -- A call whose address argument has no `form` fact does not step, and the failure names the
 -- check and the fact it needs.
-/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not step: its argument checks
+/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call 1 2) does not step: its argument checks
 reduce to -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (home slotted : Reference)
@@ -638,7 +636,7 @@ example (memory : Memory) (count : W32) (buffer home : Reference) (current : Mem
   case postcondition.part3 => exact stored _
 
 -- A call whose stacked argument is not the contract's names both.
-/-- error: cil_loop_call: the call at pc 7 (CIL.Op.call 1 2) does not take the contract's
+/-- error: cil_loop_call: the call at pc 7 (CIL.Instruction.call 1 2) does not take the contract's
 arguments for this input, or is not the named site. -/
 #guard_msgs (whitespace := lax, substring := true) in
 example (memory current : Memory) (count index : W32) (buffer home : Reference)
@@ -768,7 +766,7 @@ example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True 
   walk_to_head
 
 -- A step names each hypothesis its step proof used: the zeroing fact steps `initAggregate`.
-/-- [CIL.step] pc 1: CIL.Op.initAggregate (8 % 2 ^ 64)
+/-- [CIL.step] pc 1: CIL.Instruction.initAggregate (8 % 2 ^ 64)
   source: unknown, since the proof does not import ExtractedSymbols
   by loop_reaches_next
   used zeroing : -/
@@ -779,7 +777,7 @@ example (memory : Memory) (value : W32) (wellFormed : memory.WellFormed) : True 
 
 -- A branch uses no hypothesis, so no fact is named although `setup` and `wellFormed` are in
 -- context; the tactic's summary names the goals it left by obligation tag.
-/-- [CIL.step] pc 2: CIL.Op.branch 14
+/-- [CIL.step] pc 2: CIL.Instruction.br 14
   source: unknown, since the proof does not import ExtractedSymbols
   by loop_reaches_next
   changes pc: 1 + 1 ⟶ 14 -/
@@ -808,7 +806,9 @@ example (memory : Memory) (value : W32) (frame : Frame) :
 
 -- A call tactic applied before the walk reaches a call records the instruction it is at and
 -- that the call site is missing.
-/-- "instruction":"CIL.Op.localAddr 0","method":0,"missing":"callSite","obligation":null,"pc":3 -/
+/--
+"instruction":"CIL.Instruction.ldloca 0","method":0,"missing":"callSite","obligation":null,"pc":3
+-/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
@@ -848,7 +848,7 @@ example (memory : Memory) (value count sum : W32) (home : Reference) (current : 
 
 -- A tactic that stops without an error, leaving a step for the proof, is recorded as stopped
 -- there, with the instruction it did not take.
-/-- "instruction":"CIL.Op.const32 2","method":1,"missing" -/
+/-- "instruction":"CIL.Instruction.ldc_i4 2","method":1,"missing" -/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : Memory) (value : W32) (frame : Frame)
@@ -928,5 +928,166 @@ example (memory : Memory) (home : Reference) : True := by
     unless message.contains "does not establish that access is forbidden" do
       throwError "The missing-authority diagnostic asserted a violation: {message}"
   trivial
+
+/-- Two operands added on the stack, then a `nop` at the state the path reaches. -/
+@[cil_code] def addPair : CIL.Method := {
+  returnsValue := true, locals := [], code := [.arg 0, .arg 1, .add, .nop] }
+
+/-- The program holding only `addPair`. -/
+@[cil_code] def addPairProgram : CIL.Program := [addPair]
+
+-- A fact that is no simp lemma fails the whole-goal rewrite without a message: the walk goes on
+-- and the step takes the facts it can use.
+#guard_msgs in
+example (memory : Memory) (left right : CIL.W64) (frame : Frame) :
+    LoopReaches addPairProgram 0 [.scalar (.i64 left), .scalar (.i64 right)]
+      ⟨0, frame, [], memory⟩ ⟨3, frame, [.scalar (.i64 (left + right))], memory⟩ := by
+  cil_loop_steps [(0 : Nat)]
+
+open Lean Meta Elab Tactic in
+/-- Local reference classification uses the current list and reduces stored slot terms afresh. -/
+theorem localReferenceClassification
+    (_body : CIL.Method) (_memory : Memory) (_home : Reference) (_tail : List LocalSlot) :
+    True := by
+  run_tac withMainContext do
+    let slotType := mkConst ``LocalSlot
+    let body ← Term.elabTerm (mkIdent `_body) none
+    let memory ← Term.elabTerm (mkIdent `_memory) none
+    let home ← Term.elabTerm (mkIdent `_home) none
+    let byteSlot := mkApp2 (mkConst ``LocalSlot.bytes) (mkConst ``CIL.LocalKind.word32) home
+    let spanSlot ← Term.elabTerm (← `(LocalSlot.span 1 true none)) none
+    let unknownTail ← Term.elabTerm (mkIdent `_tail) none
+    let makeList (slots : List Expr) := mkListLit slotType slots
+    let makeStep (locals : Expr) (position : Nat) (load := false) := do
+      let instruction := mkApp (mkConst (if load then ``CIL.Instruction.ldloc
+        else ``CIL.Instruction.ldloca)) (mkNatLit position)
+      let frame ← mkAppM ``Frame.mk #[mkNatLit 0, locals,
+        ← mkListLit (mkConst ``AllocationId) [], mkNatLit 0]
+      let values ← mkListLit (mkConst ``Value) []
+      let result := mkAppN (mkConst ``step)
+        #[body, instruction, mkNatLit 0, values, frame, values, memory]
+      let goal ← mkFreshExprMVar (← mkEq result result)
+      pure (instruction, goal.mvarId!)
+    let check (locals : Expr) (position : Nat) (expected : Bool)
+        (cache : LoopLocalIndex) (load := false) := do
+      let (instruction, goal) ← makeStep locals position load
+      let (actual, cache) ← (loopReadsReferences instruction goal).run cache
+      unless actual == expected do throwError "incorrect local reference classification"
+      pure cache
+    let cache ← check (← makeList [byteSlot]) 0 false {}
+    let cache ← check (← makeList [spanSlot]) 0 true cache
+    let cache ← check (← makeList [byteSlot]) 1 true cache
+    let partialList := mkApp3 (mkConst ``List.cons [Level.zero]) slotType byteSlot unknownTail
+    let cache ← check partialList 0 false cache
+    let _ ← check partialList 1 true cache
+    let unknownSlot ← mkFreshExprMVar slotType
+    let locals ← makeList [unknownSlot]
+    let cache ← check locals 0 true {}
+    unknownSlot.mvarId!.assign byteSlot
+    let _ ← check locals 0 false cache
+    withLetDecl `slot slotType byteSlot fun slot => do
+      let locals ← makeList [slot]
+      let cache ← check locals 0 false {}
+      let declaration ← slot.fvarId!.getDecl
+      let changed := (← getLCtx).modifyLocalDecl declaration.fvarId
+        (fun declaration => declaration.setValue spanSlot)
+      withLCtx changed (← getLocalInstances) do
+        let _ ← check locals 0 true cache
+    withLetDecl `kind (mkConst ``CIL.LocalKind) (mkConst ``CIL.LocalKind.word32) fun kind => do
+      let locals ← makeList [mkApp2 (mkConst ``LocalSlot.bytes) kind home]
+      let cache ← check locals 0 false {} true
+      let changed := (← getLCtx).modifyLocalDecl kind.fvarId!
+        (fun declaration => declaration.setValue (mkConst ``CIL.LocalKind.reference))
+      withLCtx changed (← getLocalInstances) do
+        let _ ← check locals 0 true cache true
+    let measure (localCount addresses : Nat) := do
+      let locals ← makeList (List.replicate localCount byteSlot)
+      let (instruction, goal) ← makeStep locals (localCount - 1)
+      let start ← IO.getNumHeartbeats
+      let mut cache : LoopLocalIndex := {}
+      for _ in [:addresses] do
+        let (reads, updated) ← (loopReadsReferences instruction goal).run cache
+        unless !reads do throwError "a byte address unexpectedly reads a reference"
+        cache := updated
+      return (← IO.getNumHeartbeats) - start
+    let small ← measure 64 64
+    let manyLocals ← measure 512 64
+    let manyBoth ← measure 512 512
+    logInfo m!"local address classification heartbeats: {small}, {manyLocals}, {manyBoth}"
+    unless manyLocals < small * 3 && manyBoth < small * 12 do
+      throwError "local address costs grew too quickly: {small}, {manyLocals}, {manyBoth}"
+  trivial
+
+#print axioms localReferenceClassification
+
+open Lean Meta Elab Tactic in
+/-- Fact-list traversal preserves positions, raw heads and incomplete prefixes in linear work. -/
+theorem factListTraversal (_tail : List (Option Nat)) : True := by
+  run_tac withMainContext do
+    let itemType := mkApp (mkConst ``Option [Level.zero]) (mkConst ``Nat)
+    let unknownTail ← Term.elabTerm (mkIdent `_tail) none
+    let absent := mkApp (mkConst ``Option.none [Level.zero]) (mkConst ``Nat)
+    let present := mkApp2 (mkConst ``Option.some [Level.zero]) (mkConst ``Nat) (mkNatLit 7)
+    withLetDecl `entry itemType present fun entry => do
+      let heads := #[entry, absent, present]
+      let mut list := unknownTail
+      for head in heads.reverse do
+        list := mkApp3 (mkConst ``List.cons [Level.zero]) itemType head list
+      let entries ← listEntries list 4
+      unless entries == #[(4, entry), (5, absent), (6, present)] do
+        throwError "fact entries lost positions, raw heads or an incomplete prefix"
+      unless (← rememberedIndices list 4) == #[4, 6] do
+        throwError "remembered positions lost a reducible head or an incomplete prefix"
+      unless (← listEntries unknownTail 4).isEmpty &&
+          (← rememberedIndices unknownTail 4).isEmpty do
+        throwError "an unknown list has no visible entries"
+    let measure (count : Nat) := do
+      let list ← mkListLit itemType (List.replicate count present)
+      let start ← IO.getNumHeartbeats
+      let entries ← listEntries list 3
+      let entriesCost := (← IO.getNumHeartbeats) - start
+      unless entries.size == count && entries.back?.map Prod.fst == some (count + 2) do
+        throwError "fact traversal lost the last entry"
+      let start ← IO.getNumHeartbeats
+      let indices ← rememberedIndices list 3
+      let indicesCost := (← IO.getNumHeartbeats) - start
+      unless indices.size == count && indices.back? == some (count + 2) do
+        throwError "remembered traversal lost the last position"
+      return (entriesCost, indicesCost)
+    let small ← measure 128
+    let medium ← measure 512
+    let large ← measure 2048
+    logInfo m!"fact-list heartbeats: {small}, {medium}, {large}"
+    unless medium.1 < small.1 * 6 && large.1 < medium.1 * 6 &&
+        medium.2 < small.2 * 6 && large.2 < medium.2 * 6 do
+      throwError "fact-list traversal costs grew too quickly"
+    let measureCopies (count : Nat) := do
+      let mut list := mkApp (mkConst ``List.nil [Level.zero]) itemType
+      for _ in [:count] do
+        list := mkApp3 (mkConst ``List.cons [Level.zero]) itemType present list
+      let _ ← listEntries list
+      let _ ← rememberedIndices list
+      let mut entriesTimes := #[]
+      let mut indicesTimes := #[]
+      for _ in [:3] do
+        let start ← IO.monoMsNow
+        let entries ← listEntries list
+        let middle ← IO.monoMsNow
+        let indices ← rememberedIndices list
+        let stop ← IO.monoMsNow
+        unless entries.size == count && indices.size == count do
+          throwError "fact-list traversal lost entries in a deep list"
+        entriesTimes := entriesTimes.push (middle - start)
+        indicesTimes := indicesTimes.push (stop - middle)
+      return ((entriesTimes.qsort (· < ·))[1]!, (indicesTimes.qsort (· < ·))[1]!)
+    let shorter ← measureCopies 16384
+    let longer ← measureCopies 65536
+    logInfo m!"fact-list median milliseconds: {shorter}, {longer}"
+    -- Heartbeats count small allocations; array copying also needs an elapsed-time check.
+    unless longer.1 < shorter.1 * 8 + 20 && longer.2 < shorter.2 * 8 + 20 do
+      throwError "fact-list copying costs grew too quickly"
+  trivial
+
+#print axioms factListTraversal
 
 end Tests.LoopDiagnostics

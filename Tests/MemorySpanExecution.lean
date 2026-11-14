@@ -23,7 +23,7 @@ private def reader : Method := {
   locals := [], returnsValue := true }
 
 private def caller : Method := {
-  code := [.arg 0, .setLocal 0, .local 0, .arg 1, .arg 2, .memory (.spanSlice true),
+  code := [.arg 0, .stloc 0, .ldloc 0, .arg 1, .arg 2, .memory (.spanSlice true),
     .arg 3, .call 1 2, .ret]
   locals := [.nullRef], localKinds := [.span 4 false], returnsValue := true }
 
@@ -34,7 +34,7 @@ theorem local_slice_and_call :
 #print axioms local_slice_and_call
 
 private def emptyLength : Method := {
-  code := [.arg 0, .const32 3, .const32 0, .memory (.spanSlice true), .memory .spanLength, .ret]
+  code := [.arg 0, .ldc_i4 3, .ldc_i4 0, .memory (.spanSlice true), .memory .spanLength, .ret]
   locals := [], returnsValue := true }
 
 theorem end_empty_slice :
@@ -69,7 +69,7 @@ theorem invalid_index :
 #print axioms invalid_index
 
 private def illegalWriter : Method := {
-  code := [.arg 0, .const32 0, .memory (.spanItem 4), .const32 1, .storeScalar 4, .ret]
+  code := [.arg 0, .ldc_i4 0, .memory (.spanItem 4), .ldc_i4 1, .storeScalar 4, .ret]
   locals := [], returnsValue := false }
 
 theorem readonly_reference_rejects_store :
@@ -78,7 +78,7 @@ theorem readonly_reference_rejects_store :
 #print axioms readonly_reference_rejects_store
 
 private def escaping : Method := {
-  code := [.localAddr 0, .const32 1, .memory (.spanFromReference 4 true), .ret]
+  code := [.ldloca 0, .ldc_i4 1, .memory (.spanFromReference 4 true), .ret]
   locals := [.i32 7], localKinds := [.word32], returnsValue := true }
 
 theorem expired_local_cannot_escape :

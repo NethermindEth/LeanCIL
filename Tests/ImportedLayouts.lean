@@ -117,17 +117,19 @@ theorem rejection_16 : ¬ ImportedLayoutsValid [{ identitySlot with signature :=
 theorem rejection_17 : ¬ ImportedLayoutsValid [{ copySlot with signature := some { copySignature with parameters := [pair, .byref pair] } }] .scalar := by decide +kernel
 #print axioms rejection_17
 
-theorem complete_certificate_valid : TranslationValid [] #[] [] [identitySlot] [] := by decide +kernel
+theorem complete_certificate_valid : TranslationValid [] #[] [] [] [identitySlot] [] := by
+  decide +kernel
 #print axioms complete_certificate_valid
 
 theorem complete_certificate_rejects_open_argument :
-    ¬ TranslationValid [] #[] []
+    ¬ TranslationValid [] #[] [] []
       [{ identitySlot with signature := some { identitySignature with arguments := [.parameter 0] } }] [] := by
   decide +kernel
 #print axioms complete_certificate_rejects_open_argument
 
 theorem complete_certificate_rejects_changed_layout :
-    ¬ TranslationValid [] #[] [] [{ copySlot with layouts := { catalog with actual := [] } }] [] := by
+    ¬ TranslationValid [] #[] [] []
+      [{ copySlot with layouts := { catalog with actual := [] } }] [] := by
   decide +kernel
 #print axioms complete_certificate_rejects_changed_layout
 
@@ -138,7 +140,7 @@ theorem imported_local_bound :
     ImportedLocalLayoutsBound artifactRaw artifactComputed [copySlot] := by decide +kernel
 #print axioms imported_local_bound
 theorem imported_local_certificate :
-    TranslationValid artifactRaw artifactComputed [] [copySlot] [] := by decide +kernel
+    TranslationValid artifactRaw artifactComputed [] [] [copySlot] [] := by decide +kernel
 #print axioms imported_local_certificate
 
 /-- A caller layout that no slot publishes is not bound by an import. -/
@@ -177,7 +179,7 @@ theorem local_rejects_disagreeing_slot : ¬ ImportedLocalLayoutsBound artifactRa
 
 theorem complete_certificate_rejects_changed_local :
     ¬ TranslationValid [privateRaw, leafRaw, { pairArtifact with packing := 1 }] artifactComputed
-      [] [copySlot] [] := by decide +kernel
+      [] [] [copySlot] [] := by decide +kernel
 #print axioms complete_certificate_rejects_changed_local
 
 end Tests.ImportedLayouts

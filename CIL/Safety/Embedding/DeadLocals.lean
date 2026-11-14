@@ -23,25 +23,25 @@ open CIL.Embedding
 
 /-- Replacing a body's locals keeps every step that succeeds or throws: steps read the
     profile, return arity and static sites, never the local declarations. -/
-theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Op) (pc : Nat)
+theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
     (outcome : ExecutionResult FrameAction)
     (stepped : step (actual.withLocalsOf expected) op pc args frame stack memory = outcome)
     (kept : StepKept outcome) :
     step actual op pc args frame stack memory = outcome := by
   have context : StepContext (actual.withLocalsOf expected) actual id op pc pc :=
-    ⟨rfl, rfl, rfl, fun _ => rfl⟩
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, fun _ => rfl⟩
   cases outcome with
   | ok action =>
     have same := step_relabel op _ actual id pc pc args frame stack memory action context stepped
-    rw [Op.relabel_id] at same
+    rw [Instruction.relabel_id] at same
     rw [same]
     cases action <;> rfl
   | error fault =>
     obtain ⟨exception, thrown⟩ := kept
     subst thrown
     have same := step_raise op _ actual id pc pc args frame stack memory exception context stepped
-    rwa [Op.relabel_id] at same
+    rwa [Instruction.relabel_id] at same
 
 #print axioms step_withLocalsOf
 
@@ -186,7 +186,6 @@ theorem enterFrame_deadLocals {expected actual : CIL.Method} {map : List Nat}
   simp only [enterFrame, Method.withLocalsOf, selected, embeds.parameterHomes, bind_map_left,
     map_bind]
   refine bind_congr fun ⟨slots, owned, entered⟩ => ?_
-  refine bind_congr fun ⟨arguments, argumentIds, entered⟩ => ?_
   simp [makeParameterHomes, padSlots, deadSlots, Frame.appendLocals]
 
 #print axioms enterFrame_deadLocals

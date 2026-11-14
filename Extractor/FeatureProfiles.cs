@@ -1,3 +1,4 @@
+using static Nethermind.LeanCIL.LeanText;
 using Mono.Cecil;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -124,8 +125,6 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
     internal static string LeanFeature(Feature feature) =>
         "." + char.ToLowerInvariant(feature.ToString()[0]) + feature.ToString()[1..];
 
-    private static string Bool(bool value) => value ? "true" : "false";
-
     internal static int? PlatformConstant(MethodReference reference)
     {
         var pointerSize = reference.Name == "get_Size" &&
@@ -134,7 +133,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
             reference.DeclaringType.FullName == "System.Environment";
         if (!pointerSize && !processWidth) return null;
         var result = pointerSize ? "System.Int32" : "System.Boolean";
-        if (!RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+        if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference.HasThis || reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default ||
             reference.HasGenericParameters || reference is GenericInstanceMethod || reference.Parameters.Count != 0 ||
             reference.FullName != $"{result} {reference.DeclaringType.FullName}::{reference.Name}()")
@@ -156,8 +155,9 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         if (!PlatformFieldQuery(reference)) return null;
         const string identity = "System.Boolean System.BitConverter::IsLittleEndian";
         var exactReference = reference.DeclaringType is not TypeSpecification &&
-            RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") &&
-            RuntimeModels.ExactScope(reference.FieldType.Scope, "System.Runtime") && reference.FullName == identity;
+            RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) &&
+            RuntimeModels.ExactScope(reference.FieldType, PlatformAssemblies.SystemRuntime) &&
+            reference.FullName == identity;
         // Resolve only exact references: a forged assembly scope must not reach the resolver.
         var field = exactReference ? reference.Resolve() : null;
         if (field is null || field.FullName != identity ||
@@ -174,7 +174,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         if (reference.Name is not ("get_IsSupported" or "get_IsHardwareAccelerated") ||
             !reference.DeclaringType.FullName.StartsWith("System.Runtime.Intrinsics.", StringComparison.Ordinal)) return null;
         // Never reinterpret an unrecognised getter as a disabled capability.
-        if (!RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime.Intrinsics") ||
+        if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntimeIntrinsics) ||
             reference.HasThis || reference.ExplicitThis || reference.CallingConvention != MethodCallingConvention.Default ||
             reference.HasGenericParameters || reference.Parameters.Count != 0 ||
             reference.ReturnType.FullName != "System.Boolean" ||

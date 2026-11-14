@@ -275,7 +275,7 @@ if (!stages.Where(stage => stage.GetProperty("exitCode").GetInt32() == 0 &&
 if (!verified.Contains("Conditional verification: assumes _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
+if (report.GetProperty("schema").GetInt32() != 5 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
     report.GetProperty("imports")[0].GetProperty("acceptedVia").GetString() != "published-certification" ||
     !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");
@@ -865,7 +865,9 @@ void RejectReplayWindowSwap(string expectedDiagnostic, Func<string?> locate, Act
         });
     }
     catch (Exception error) { rejected = error; }
-    if (!replaced) throw new InvalidOperationException("Precondition: verification never reached the interface replay window.");
+    if (!replaced)
+        throw new InvalidOperationException(
+            "Precondition: verification never reached the interface replay window: " + rejected?.Message);
     if (rejected is null || !rejected.Message.Contains(expectedDiagnostic, StringComparison.Ordinal) ||
         File.Exists(Path.Combine(output, "verified.json")))
         throw new InvalidOperationException("Incorrect rejection of an interface olean replaced before replay: " + rejected?.Message);
@@ -874,9 +876,28 @@ string? savedHashCache = Environment.GetEnvironmentVariable("LEANCIL_DISABLE_SUC
 try
 {
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", "true");
-    RejectReplayWindowSwap("Published contract canonical closure digest mismatch: ImportFixture.addOne", () => Directory.EnumerateDirectories(output, "proof-*")
-            .Select(fresh => Path.Combine(fresh, interfaceModule + ".olean")).SingleOrDefault(File.Exists),
-        stage => { using Program single = new(); single.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true, stage: stage); });
+    // A directory a killed run left behind holds an interface olean too, and must not be mistaken for this run's.
+    string staleProof = Path.Combine(output, "proof-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(staleProof);
+    File.WriteAllBytes(Path.Combine(staleProof, interfaceModule + ".olean"), unauditedArtifact);
+    // This run's directory is the one the listing taken before the step lacks, whatever the file system's clock.
+    HashSet<string> earlierProofs = [.. new DirectoryInfo(output).EnumerateDirectories("proof-*")
+        .Select(earlier => earlier.FullName)];
+    try
+    {
+        RejectReplayWindowSwap("Published contract canonical closure digest mismatch: ImportFixture.addOne",
+            () => new DirectoryInfo(output).EnumerateDirectories("proof-*")
+                .Where(fresh => !earlierProofs.Contains(fresh.FullName))
+                .Select(fresh => Path.Combine(fresh.FullName, interfaceModule + ".olean"))
+                .SingleOrDefault(File.Exists),
+            stage =>
+            {
+                using Program single = new();
+                single.Verify(app, "", "", Path.Combine(fixture, "Caller.lean"), output, existingArtifacts: true,
+                    stage: stage);
+            });
+    }
+    finally { Directory.Delete(staleProof, recursive: true); }
     Console.WriteLine("PASS single-file verification binds interface oleans before their closure audit");
     // A token in the proof tells this session apart from concurrent consumer sessions.
     string token = Guid.NewGuid().ToString("N");

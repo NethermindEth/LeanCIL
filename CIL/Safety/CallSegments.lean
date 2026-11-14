@@ -12,7 +12,7 @@ the helper's complete contract and the actual checked write reach the continuati
 namespace CIL.Safety
 
 /-- Load two input words, call a binary scalar helper, and store its result to the output. -/
-def loadCallStoreCode (callee : Nat) : List CIL.Op :=
+def loadCallStoreCode (callee : Nat) : List CIL.Instruction :=
   [.arg 2, .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .call callee 2, .store64]
 
 /-- Compose a load/call/store segment once for any proved helper with scalar encodings.

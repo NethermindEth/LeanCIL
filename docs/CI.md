@@ -9,7 +9,7 @@ the workflow, the selection scripts or a documentation marker.
 
 ## Jobs
 
-All jobs run on `ubuntu-24.04`. A newer run on the same ref cancels the one in progress. Uploaded
+All jobs run on `ubuntu-26.04`. A newer run on the same ref cancels the one in progress. Uploaded
 artifacts are kept for 14 days.
 
 | Job | Name | Limit | Does |
@@ -239,7 +239,8 @@ A source is measured on each tree by the run that verifies it:
   reported as unmeasured. Each extracted method's instruction equations are one row, named for
   its `cil_instruction_equations` command. A directory is measured only while it holds the report
   of an accepted proof, so a suite that also checks rejected proofs against an extraction verifies
-  the accepted one last.
+  the accepted one last. A report that is not a certificate a default `verify` accepts, by its
+  schema and binding section, leaves its directory unmeasured.
 
 ### Row measurement
 
@@ -362,6 +363,15 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
   [public proof surface](PROOFS.md#public-proof-surface).
 - A document declares at most one audience, `users` or `maintainers`, and closes every code
   fence. A Lean block's info string starts with exactly `lean`; another spelling of it fails.
+- No file that git tracks with the extension `.lean`, `.cs`, `.md`, `.toml`, `.json`, `.yml`,
+  `.txt`, `.tsv` or `.csv` holds a byte below 0x20 other than tab, line feed and carriage return;
+  the failure names the file, line and byte. A shell that expands a backtick escape writes such a
+  byte into a docstring, and git then treats the file as binary.
+- No such file holds a character above ASCII that shows nothing, shows as a space or reorders the
+  text around it: a format character such as a zero-width space, a byte order mark or a
+  bidirectional override, a line or paragraph separator, a space other than U+0020, or a control
+  character. The failure names the file, line and code point. A diff does not show such a
+  character, so source spells it as an escape such as `\u200B`.
 
 ### Lean blocks
 

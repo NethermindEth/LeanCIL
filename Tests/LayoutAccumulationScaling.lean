@@ -72,14 +72,16 @@ def expected (count : Nat) : ComputedLayout :=
 theorem baseline128 : baselineLayout #[] (raw 128) = some (expected 128) := by decide +kernel
 #print axioms baseline128
 /-- Linear kernel workload at 128 fields. -/
-theorem candidate128 : computeLayout #[] (raw 128) = some (expected 128) := by decide +kernel
+theorem candidate128 : computeLayout (fun _ => none) (raw 128) = some (expected 128) := by
+  decide +kernel
 #print axioms candidate128
 
 /-- Original append-based kernel workload at 512 fields. -/
 theorem baseline512 : baselineLayout #[] (raw 512) = some (expected 512) := by decide +kernel
 #print axioms baseline512
 /-- Linear kernel workload at 512 fields. -/
-theorem candidate512 : computeLayout #[] (raw 512) = some (expected 512) := by decide +kernel
+theorem candidate512 : computeLayout (fun _ => none) (raw 512) = some (expected 512) := by
+  decide +kernel
 #print axioms candidate512
 
 end Tests.LayoutAccumulationScaling

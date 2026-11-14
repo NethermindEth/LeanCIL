@@ -82,7 +82,7 @@ theorem LocalSnapshots.store_at {body : CIL.Method} {pc index target : Nat}
     (fits : localNumber kind value = .ok number)
     (slot : frame.locals[index]? = some (.bytes kind home))
     (ready : access memory home (localWidth kind) 1 true = .ok ())
-    (stored : step body (.setLocal index) pc args frame (.scalar value :: stack) memory =
+    (stored : step body (.stloc index) pc args frame (.scalar value :: stack) memory =
       .ok (.next target values nextFrame after)) :
     LocalSnapshots after frame.locals (rememberLocal known index (localResult kind value)) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧
@@ -376,13 +376,8 @@ private def prepareSnapshotHome (memory frame index : Expr) (facts : Array Term)
     `localSnapshots`, `localFormed`, `localBelow`, `localAccess` and `localWrite`, or all
     seven with the first suffix `_1`, `_2` that leaves each unused. -/
 private def snapshotStoreNames : TacticM (Array Ident) := withMainContext do
-  let context ← getLCtx
-  let named (index : Nat) (base : String) : Name :=
-    Name.mkSimple (if index == 0 then base else s!"{base}_{index}")
-  let mut index := 0
-  while snapshotStoreBases.any fun base => context.usesUserName (named index base) do
-    index := index + 1
-  return snapshotStoreBases.map fun base => mkIdent (named index base)
+  let index := firstUnusedSuffix (← getLCtx) snapshotStoreBases
+  return snapshotStoreBases.map fun base => mkIdent (suffixedName index base)
 
 /-- What a numeric local store leaves for the walk that took it. -/
 private structure SnapshotStored where
@@ -564,42 +559,44 @@ syntax "cil_checked_steps" "(" &"snapshots" ":=" term ")" "[" term,* "]" : tacti
 elab_rules : tactic
   | `(tactic| cil_checked_steps (snapshots := $snapshot) [$facts:term,*]) => focus do
     let prepared ← prepareStepFacts facts.getElems
-    let mut snapshot := snapshot
-    let mut progressed := false
-    repeat
-      if (← getGoals).isEmpty then break
-      let saved ← saveState
-      try
-        let updated ← withMainContext do
-          let (methodFound, instructionFound, operation) ←
-            cilFetchedOp ``run_next (fun target => target.find? (·.isAppOf ``run)) 3 prepared
-          if operation == ``CIL.Op.setLocal then
-            let stored ← snapshotStore snapshot methodFound instructionFound prepared
-            evalTactic (← `(tactic| cil_strict rw
-              [run_next $methodFound $instructionFound $(stored.stepped)]))
-            pure stored.snapshots
-          else if operation == ``CIL.Op.local then
-            let loaded ← snapshotLoad snapshot methodFound instructionFound prepared
-            evalTactic (← `(tactic| cil_strict rw
-              [run_next $methodFound $instructionFound $loaded]))
-            pure snapshot
-          else if operation == ``CIL.Op.ret then
-            evalTactic (← `(tactic| cil_strict
-              (rw [run_return $methodFound $instructionFound
-                (by cil_checked_step_normalized [$[$prepared:term],*])
-                (by first | rfl | (simp [$[$prepared:term],*]; rfl))]
-               try exact ⟨_, rfl⟩)))
-            pure snapshot
-          else
-            evalTactic (← `(tactic| cil_strict rw [run_next $methodFound $instructionFound
-              (by cil_checked_step_normalized [$[$prepared:term],*])]))
-            pure snapshot
-        snapshot := updated
-        progressed := true
-      catch error =>
-        saved.restore
-        trace[CIL.snapshots] "{error.toMessageData}"
-        break
+    let progressed ← withNormalRun do
+      let mut snapshot := snapshot
+      let mut progressed := false
+      repeat
+        if (← getGoals).isEmpty then break
+        let saved ← saveState
+        try
+          let updated ← withNormalNodes prepared <| withMainContext do
+            let (methodFound, instructionFound, operation) ←
+              cilFetchedOp ``run_next (fun target => target.find? (·.isAppOf ``run)) 3 prepared
+            if operation == ``CIL.Instruction.stloc then
+              let stored ← snapshotStore snapshot methodFound instructionFound prepared
+              evalTactic (← `(tactic| cil_strict rw
+                [run_next $methodFound $instructionFound $(stored.stepped)]))
+              pure stored.snapshots
+            else if operation == ``CIL.Instruction.ldloc then
+              let loaded ← snapshotLoad snapshot methodFound instructionFound prepared
+              evalTactic (← `(tactic| cil_strict rw
+                [run_next $methodFound $instructionFound $loaded]))
+              pure snapshot
+            else if operation == ``CIL.Instruction.ret then
+              evalTactic (← `(tactic| cil_strict
+                (rw [run_return $methodFound $instructionFound
+                  (by cil_checked_step_normalized [$[$prepared:term],*])
+                  (by first | rfl | (simp [$[$prepared:term],*]; rfl))]
+                 try exact ⟨_, rfl⟩)))
+              pure snapshot
+            else
+              evalTactic (← `(tactic| cil_strict rw [run_next $methodFound $instructionFound
+                (by cil_checked_step_normalized [$[$prepared:term],*])]))
+              pure snapshot
+          snapshot := updated
+          progressed := true
+        catch error =>
+          saved.restore
+          trace[CIL.snapshots] "{error.toMessageData}"
+          break
+      return progressed
     unless progressed do throwError "Snapshot stepping took no step; justify the local premises"
 
 /-- Restate each supplied read or formed reference of `memory` that its name did not carry,
@@ -651,7 +648,7 @@ private def snapshotEvidenceAt (memory : Expr) (facts : Array Term) : TacticM Bo
     that fails. After each store it crosses, the step facts are prepared again from `facts`
     at the store's memory, where the store restated the caller facts they name. Returns
     whether a step was taken. -/
-private def snapshotContractWalk (initial : Term) (facts : Array Term)
+private def snapshotContractWalkSteps (initial : Term) (facts : Array Term)
     (continuation : Option Term) (limit : Option Nat) : TacticM Bool := do
   let mut facts := facts
   let mut prepared ← prepareStepFacts facts
@@ -675,15 +672,14 @@ private def snapshotContractWalk (initial : Term) (facts : Array Term)
     let stepFacts := prepared
     -- A numeric local's step through the snapshots; a store's step may be `supplied`.
     let remembered (supplied : Bool) : TacticM (Term × Option SnapshotStored) :=
-      withMainContext do
+      withNormalNodes stepFacts <| withMainContext do
         let (found, instruction, operation) ←
           cilFetchedOp ``run_next_exists some 4 stepFacts
-        let (updated, checked, stored) ← if operation == ``CIL.Op.setLocal ||
-            operation == ``CIL.Op.setVectorLocal then do
+        let (updated, checked, stored) ← if operation == ``CIL.Instruction.stloc then do
             let stored ← snapshotStore snapshot found instruction stepFacts true supplied
             pure (stored.snapshots, stored.stepped, some stored)
           else if supplied then throwError "The instruction is not a numeric store"
-          else if operation == ``CIL.Op.local || operation == ``CIL.Op.vectorLocal then do
+          else if operation == ``CIL.Instruction.ldloc then do
             pure (snapshot, ← snapshotLoad snapshot found instruction stepFacts, none)
           else throwError "The instruction is not a numeric local"
         evalTactic (← `(tactic| (
@@ -731,6 +727,11 @@ private def snapshotContractWalk (initial : Term) (facts : Array Term)
         facts := carried
         prepared ← prepareStepFacts facts
   return progressed
+
+/-- `snapshotContractWalkSteps` on the record of normal-form nodes of this walk. -/
+private def snapshotContractWalk (initial : Term) (facts : Array Term)
+    (continuation : Option Term) (limit : Option Nat) : TacticM Bool :=
+  withNormalRun (snapshotContractWalkSteps initial facts continuation limit)
 
 /-- Compose a finite checked execution while retaining numeric local snapshots. Supplied
     step facts take priority over generated stores, and the snapshots follow a supplied store

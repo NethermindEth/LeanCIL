@@ -76,37 +76,35 @@ def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
 
 /-- Operands an op observes or exposes across a method boundary; `step` rejects the op when
     any of them has unspecified bits. -/
-def observerCount : CIL.Op → Nat
+def observerCount : CIL.Instruction → Nat
   -- Arithmetic and comparisons
-  | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
-  | .checkedConvert .. | .neg | .bnot | .convI1 | .convI2 | .convU2
-  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .stackAlloc _ | .newArray _
-  | .newReferenceArray _ => 1
-  | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
-  | .lt | .ltu | .gt | .gtu | .eq | .bgt _ | .ble _ | .bleu _
-  | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => 2
-  | .brzero _ | .brnonzero _ | .switch _ | .objectTest .. => 1
-  -- Memory, fields and lanes
+  | .nativeBinary _ | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf
+  | .sub_ovf_un | .mul_ovf | .mul_ovf_un => 2
+  | .conv_ovf _ | .conv_ovf_un _ | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2
+  | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .stackAlloc _
+  | .newArray _ | .newReferenceArray _ => 1
+  | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
+  | .clt | .clt_un | .cgt | .cgt_un | .ceq | .bgt _ | .ble _ | .ble_un _
+  | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => 2
+  | .brfalse _ | .brtrue _ | .switch _ | .objectTest .. => 1
+  -- Memory and fields
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
-  | .lane _ | .laneAddress _ | .load64 | .skipInit | .asRef | .initAggregate _ => 1
+  | .load64 | .skipInit | .initAggregate _ => 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
-  | .setLane _ | .store64 | .copyObject _ => 2
+  | .store64 | .copyObject _ => 2
   -- Method boundaries
   | .ret _ => 1
   | .call _ argc | .callInstance _ argc | .callVirtual _ argc | .tailCall _ argc
-  | .newVector256 _ argc
   | .newAggregate _ argc _ | .newObject _ argc .. => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1
-  | .managed (.tableElement _) | .managed (.tableAddress _) | .managed .tableOffset => 2
+  | .managed (.tableElement _) | .managed .tableOffset => 2
   | .managed .tableLength | .managed (.tableLoad _) => 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
-  | .nop | .arg .. | .vectorArg _ | .vectorArgAddr _ | .local .. | .vectorLocal _
-  | .vectorLocalAddr _ | .setVectorLocal _ | .localAddr _ | .setLocal .. | .const32 _
-  | .const64 _ | .dup | .pop
-  | .branch _ | .feature _ | .intrinsic ..
+  | .nop | .arg .. | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _ | .ldc_i8 _
+  | .dup | .pop | .br _ | .feature _ | .intrinsic ..
   | .throw _ | .unsupported _ => 0
 
 /-- A memory check as an execution result; a fault is attributed to `reference` and `width`. -/
@@ -695,7 +693,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (← storeValue memory r (.snapshot .vector128 bytes), rest)
   | .store256, .scalar (.snapshot .vector256 bytes) :: .reference r :: rest =>
     return (← storeValue memory r (.snapshot .vector256 bytes), rest)
-  | .init256, .reference r :: rest => return (← storeValue memory r (.v256 0), rest)
   -- References, pointer arithmetic and bit casts
   | .byteOffset, .reference target :: .reference origin :: rest
   | .byteOffset, .readOnlyReference target :: .reference origin :: rest
@@ -704,7 +701,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let offset ← referenceDifference memory target origin
     return (memory, .scalar (.i64 offset) :: rest)
   | .asRef, .reference r :: rest => return (memory, (← formValue memory r) :: rest)
-  | .bitcast256, .scalar (.v256 bits) :: rest => return (memory, .scalar (.v256 bits) :: rest)
   | .bitcastValue source target, .scalar value :: rest =>
     return (memory, .scalar (← bitcastValue source target value) :: rest)
   | .bitcastByteBool, .scalar (.i32 bits) :: rest =>
@@ -713,9 +709,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   | .bitcastByteBool, .scalar (.i8 bits) :: rest =>
     if bits.toNat ≤ 1 then return (memory, .scalar (.i32 (bits.zeroExtend 32)) :: rest)
     else .error (.unsupported "Noncanonical Boolean representation")
-  | .skipInit, .reference r :: rest =>
-    let _ ← formValue memory r
-    return (memory, rest)
   -- Arrays retain the supplied length; reads and writes use checked element storage.
   | .arraySpan element writable .whole, .array array :: rest =>
     if array.elementType != element then .error .invalidState else pure ()
@@ -1126,7 +1119,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
     fields, vector lanes, constants and stack shuffles. `step` falls back to it for ops with
     neither their own arm nor a value-only meaning; a `.memory` op goes to `memoryInstruction`
     without static-field metadata, and any other op is unsupported here. -/
-def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
+def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
@@ -1245,46 +1238,31 @@ def instruction (op : CIL.Op) (stack : List Value) (m : Memory) :
   | .setFieldAt _ width, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r width)
   | .setAggregateFieldAt _ size, _ :: .readOnlyReference r :: _ =>
     .error (.memory .unwritable r size)
-  -- Field and lane accesses through null fault like `referenceAt`, before any offset is formed.
+  -- Field accesses through null fault like `referenceAt`, before any offset is formed.
   | .fieldAt .., .reference .null :: _ | .fieldAddress _, .reference .null :: _
   | .fieldAt .., .readOnlyReference .null :: _ | .fieldAddress _, .readOnlyReference .null :: _
-  | .lane _, .reference .null :: _ | .laneAddress _, .reference .null :: _
-  | .setFieldAt .., .scalar _ :: .reference .null :: _
-  | .setLane _, .scalar _ :: .reference .null :: _ =>
+  | .setFieldAt .., .scalar _ :: .reference .null :: _ =>
     .error (.memory .nullDereference .null 0)
   -- Memory operations, constants and 64-bit words
   | .memory operation, _ => memoryInstruction operation stack m
-  | .const32 bits, _ => return (m, .scalar (.i32 bits) :: stack)
-  | .const64 bits, _ => return (m, .scalar (.i64 bits) :: stack)
+  | .ldc_i4 bits, _ => return (m, .scalar (.i32 bits) :: stack)
+  | .ldc_i8 bits, _ => return (m, .scalar (.i64 bits) :: stack)
   | .load64, .reference r :: rest | .load64, .readOnlyReference r :: rest =>
     return (m, .scalar (← loadValue m r 8) :: rest)
   | .store64, .scalar (.i64 bits) :: .reference r :: rest =>
     return (← storeValue m r (.i64 bits), rest)
   | .store64, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r 8)
-  -- Vector lanes
-  | .lane index, .reference (.address r) :: rest =>
-    let address ← checkedAt (.address r) 0 (add m r 8 (BitVec.ofNat 64 index.val))
-    return (m, .scalar (← loadValue m (.address address) 8) :: rest)
-  | .lane index, .scalar (.v256 bits) :: rest =>
-    return (m, .scalar (.i64 (CIL.Vector.lane64 bits index.val)) :: rest)
-  | .laneAddress index, .reference (.address r) :: rest =>
-    let address ← checkedAt (.address r) 0 (add m r 8 (BitVec.ofNat 64 index.val))
-    return (m, .reference (.address address) :: rest)
-  | .setLane index, .scalar (.i64 bits) :: .reference (.address r) :: rest =>
-    let address ← checkedAt (.address r) 0 (add m r 8 (BitVec.ofNat 64 index.val))
-    return (← storeValue m (.address address) (.i64 bits), rest)
   -- References and stack shuffles
   | .skipInit, .reference r :: rest =>
     let _ ← formValue m r
     return (m, rest)
-  | .asRef, .reference r :: rest => return (m, (← formValue m r) :: rest)
   | .dup, value :: rest => return (m, value :: value :: rest)
   | .pop, _ :: rest => return (m, rest)
   | _, _ => .error (.unsupported "Not a memory instruction")
 
 /-- Runs `ops` in order with `instruction`, stopping at the first fault. For straight-line
     examples only: it has no branches, calls or frames, which `run` handles. -/
-def instructions (ops : List CIL.Op) (stack : List Value) (m : Memory) :
+def instructions (ops : List CIL.Instruction) (stack : List Value) (m : Memory) :
     ExecutionResult (Memory × List Value) := do
   match ops with
   | [] => return (m, stack)
@@ -1300,7 +1278,7 @@ structure LocatedFault where
   deriving DecidableEq, Repr
 
 /-- `instruction`, with a fault located at `method` and `pc`. -/
-def instructionAt (method pc : Nat) (op : CIL.Op) (stack : List Value) (memory : Memory) :
+def instructionAt (method pc : Nat) (op : CIL.Instruction) (stack : List Value) (memory : Memory) :
     Except LocatedFault (Memory × List Value) :=
   (instruction op stack memory).mapError fun fault => ⟨method, pc, fault⟩
 
@@ -1308,7 +1286,7 @@ def instructionAt (method pc : Nat) (op : CIL.Op) (stack : List Value) (memory :
     the stack when it holds exactly the declared number of results; running off the end is
     `invalidState`. Every other op goes through `instruction`, so branches and calls are
     unsupported here (`run` handles them). -/
-def block (returns : Bool) (args : List Value) (ops : List CIL.Op)
+def block (returns : Bool) (args : List Value) (ops : List CIL.Instruction)
     (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) := do
   match ops with
   | [] => .error .invalidState

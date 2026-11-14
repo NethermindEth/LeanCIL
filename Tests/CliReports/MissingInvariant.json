@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "result": "failed",
   "stage": "proof checking",
   "theorem": "ExampleProof.correctness",
@@ -13,6 +13,7 @@
   "axioms": null,
   "statement": null,
   "specification": null,
+  "binding": null,
   "failures": [
     {
       "kind": "unsolved-goal",
@@ -71,7 +72,8 @@
   "trace": null,
   "unknown": {
     "trace": "not requested; --trace traces each step the proof takes",
-    "goals": "not requested; --goals reports the goal at each sorry and failing tactic"
+    "goals": "not requested; --goals reports the goal at each sorry and failing tactic",
+    "binding": "the run issued no certificate"
   },
   "rerun": [
     "leancil",

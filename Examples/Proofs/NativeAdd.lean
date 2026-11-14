@@ -10,7 +10,7 @@ theorem correctness (x y : W64) :
       Memory.empty).map Prod.snd =
       .ok [.scalar (.i64 (x + y))] := by
   let args : List CIL.Safety.Value := [.scalar (.i64 x), .scalar (.i64 y)]
-  let frame : Frame := ⟨0, [], [], [], 0⟩
+  let frame : Frame := ⟨0, [], [], 0⟩
   have first : CIL.Safety.step Extracted.method0 (.arg 0) 0 args frame [] Memory.empty =
       .ok (.next 1 [.scalar (.i64 x)] frame Memory.empty) := rfl
   have second :

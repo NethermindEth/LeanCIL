@@ -464,9 +464,9 @@ theorem correctness :
     CIL.Safety.invoke Extracted.program 6 0 [.scalar (.i32 0)] CIL.Safety.Memory.empty =
       .error ⟨0, 10, .fuelExhausted⟩ ∧
     Extracted.method0.code[5]? = some .sub ∧
-    CIL.Safety.step Extracted.method0 .sub 5 [] ⟨0, [], [], [], 0⟩
+    CIL.Safety.step Extracted.method0 .sub 5 [] ⟨0, [], [], 0⟩
       [.scalar (.i32 1), .scalar (.i32 4294967295)] CIL.Safety.Memory.empty =
-      .ok (.next 6 [.scalar (.i32 4294967294)] ⟨0, [], [], [], 0⟩ CIL.Safety.Memory.empty) := ⟨rfl, rfl, rfl⟩
+      .ok (.next 6 [.scalar (.i32 4294967294)] ⟨0, [], [], 0⟩ CIL.Safety.Memory.empty) := ⟨rfl, rfl, rfl⟩
 """);
 Console.WriteLine("PASS insufficient fuel and maximum unsigned decrement boundary");
 
@@ -685,7 +685,7 @@ theorem exhausted (fuel : Nat) (args : List CIL.Safety.Value)
   | zero => rfl
   | succ fuel ih =>
     rw [CIL.Safety.run_next Extracted.lookup0 Extracted.method0_instruction0 (show
-      CIL.Safety.step Extracted.method0 (.branch 0) 0 args frame [] memory =
+      CIL.Safety.step Extracted.method0 (.br 0) 0 args frame [] memory =
         .ok (.next 0 [] frame memory) from rfl)]
     exact ih
 theorem correctness (fuel : Nat) (x : CIL.W32) :

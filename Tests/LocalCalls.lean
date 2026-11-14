@@ -77,7 +77,7 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
 @[cil_code] def callerBody : CIL.Method :=
   { locals := [.unmodeled, .v256 42], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.arg 0, .arg 1, .localAddr 0, .call 1 3, .pop, .local 0, .ret] }
+    code := [.arg 0, .arg 1, .ldloca 0, .call 1 3, .pop, .ldloc 0, .ret] }
 
 bind_entry callerEntry (memory : Memory) (left right : CIL.W64)
     (formed : memory.WellFormed) := callerBody
@@ -129,7 +129,7 @@ theorem caller_invokes (memory : Memory) (formed : memory.WellFormed) (left righ
 
 /-- Omitting the helper exposes the actual uninitialized local read, at its checked location. -/
 theorem uninitialized_output_rejected :
-    invoke [{ callerBody with code := [.local 0, .ret] }] 1 0 [] Memory.empty =
+    invoke [{ callerBody with code := [.ldloc 0, .ret] }] 1 0 [] Memory.empty =
       .error ⟨0, 0, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩ := by
   rfl
 
@@ -137,7 +137,7 @@ theorem uninitialized_output_rejected :
 
 /-- A returned address to a private home is checked after teardown and cannot escape. -/
 theorem escaped_home_rejected :
-    invoke [{ callerBody with code := [.localAddr 0, .ret] }] 2 0 [] Memory.empty =
+    invoke [{ callerBody with code := [.ldloca 0, .ret] }] 2 0 [] Memory.empty =
       .error ⟨0, 1, .memory .expiredLifetime (.address ⟨0, 0⟩) 0⟩ := by
   rfl
 
@@ -154,7 +154,7 @@ theorem wrong_helper_rejected :
 
 /-- Writing the vector home instead of the selected word leaves the word uninitialized. -/
 theorem wrong_output_home_rejected :
-    invoke [{ callerBody with code := callerBody.code.set 2 (.localAddr 1) }, multiplyBody]
+    invoke [{ callerBody with code := callerBody.code.set 2 (.ldloca 1) }, multiplyBody]
       10 0 [.scalar (.i64 2), .scalar (.i64 3)] Memory.empty =
       .error ⟨0, 5, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩ := by
   rfl
@@ -205,7 +205,7 @@ def arithmeticFlag (subtract : Bool) (left right : CIL.W64) : CIL.W32 :=
   { locals := [], returnsValue := true,
     code := [.arg 2, .arg 0, .arg 1, if subtract then .sub else .add, .store64] ++
       (if subtract then [.arg 0, .arg 1] else [.arg 0, .arg 1, .add, .arg 0]) ++
-      [.ltu, .ret] }
+      [.clt_un, .ret] }
 
 /-- Arithmetic output storage needs write authority, while the returned flag remains exact. -/
 def arithmeticContract (subtract : Bool) : MethodContract BinaryOutputInput CIL.W32 where

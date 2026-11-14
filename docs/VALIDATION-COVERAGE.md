@@ -44,7 +44,11 @@ modified output files.
   reuse it within that phase, so no analysis is cached across method mutation or profile changes.
   Feature evidence uses the same incoming states as instruction selection.
   `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
-  profiles, feature queries and a loop backedge, and checks source/assembly tampering.
+  profiles, feature queries and a loop backedge, and checks source/assembly tampering. It also extracts
+  scalar, generic-layout and static-initialization methods twice into separate directories, in separate
+  processes and in reversed batch and `--assume-initialized` order, and requires every file to match byte
+  for byte. `Tests/MultiAssembly.cs` does the same with pinned references, where only the same
+  `--reference` order yields identical files because the order numbers the pins.
 
 ### Feature evidence
 
@@ -115,6 +119,44 @@ workflow.
   batch compilation/replay time.
 - `GenericEvidence` also checks that an invalid proof fails batch compilation and that an
   unchecked declaration reaches, and fails, independent kernel replay.
+- `GenericEvidence` mutates the emitted `declared` signature (a parameter, the return type, the
+  receiver and its kind), the call-link table (a changed callee, a dropped entry, an entry at the
+  wrong pc or at a non-call) and the shared layout environment. Each fails its own conjunct with the
+  kernel's failed-decision or definitional-equality message. A changed call target moves its link
+  definition too, so only the call binding can reject it, and each mutation fails the fixture when its
+  text replacement matched nothing.
+- `GenericEvidence` mutates the body evidence of its first sample: a body byte, the header, a token
+  operand byte, a token table key, a token table operand, an emitted instruction offset, `maxStack` and
+  a branch index. Each must fail a body obligation with the kernel's failed-decision message, so a
+  mutation that only breaks parsing does not count, and the unmutated obligation is the positive
+  control.
+  `Tests/BodyDecoding.lean` decodes hand-made tiny and fat bodies with short and long branches, a
+  switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
+  body separately with its specific error, and compares the operand table with a static list
+  generated once from the opcodes of Mono.Cecil.
+  `Tests/BodyEncoding.lean` writes bytes and the metadata slice for the hand-built methods of
+  other Lean fixtures.
+  `Tests/MetadataDecoding.lean` decodes rows, headers, heap entries, signature blobs and
+  assembly names copied from `Examples.dll` (two-byte columns) and from the runtime's
+  `System.Private.CoreLib.dll` (four-byte columns) and compares them with the values
+  System.Reflection.Metadata and Mono.Cecil read from the same positions, and rejects malformed
+  rows, headers, heaps and signatures with their specific errors.
+  `Tests/MetadataBinding.lean` checks every operand form, the locals and a method definition
+  against a hand-built pair of pinned assemblies, and changes one row byte, blob byte, heap
+  offset, scope, instantiation, field index, local or link at a time, each with its exact error.
+  `Tests/MetadataDifferential.cs` writes every reference, type definition, type specification and
+  method specification row of `Examples.dll`, with the links that locate nested types and the
+  definitions of its own methods and Cecil's full name for each method reference, and Lean must
+  spell the same names from the bytes and refuse every reference that names a general array. The
+  kernel decides 128 references per theorem, one theorem at a time, so the memory of a run does
+  not grow with the assembly, and the cost per added reference must stay within 1.25 times from
+  64 to 128 references.
+  Tests/BodyLiteral.lean writes the evidence of one method as literals, proves its body check with
+  the kernel, rejects a changed byte, and requires the elaborator's decide to refuse the check
+  within a small heartbeat budget. Tests/ScalarEvidence.lean does the same for the whole
+  certificate, and reduces the fixture encoder in the elaborator at two method sizes.
+  Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
+  string and field tokens and for 25 and 100 call tokens.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one
@@ -230,7 +272,7 @@ processes, each with its private process and worker checks. Run one with
 | `compile-check` | `Tests/ConsumerComponents.cs` | The components fixture run with `--compile-check` |
 | `support-union` | `Tests/ConsumerSupportUnion.cs` | A fixed three-extraction consumer batch in two orders. Support imported only by later groups must build and replay once; direct and indirect extraction-dependent modules must replay in every consuming group, including repeated import commands on one line. Compiled import headers are authoritative when scheduling misses an import. |
 | `certificate-reuse` | `Tests/ConsumerCertificateReuse.cs` | Four independent verifier processes with distinct proof sources. Unchanged generated certificates keep their authenticated build outputs and run no certificate `lake build`. Reuse requires the complete certificate module parts and traces, unchanged authenticated restored artifacts, and the source/import closure binding. Changed extraction text and self-rehashed corrupt artifacts force rebuilding `Extracted`. Every successful request independently replays `Extracted` and the proof and audits the certificate. Expected rejection groups keep the separate `ExtractionAudit` module. Generated-source tampering is rejected before receipt reuse, and proof code cannot replace restored or freshly built certificate artifacts; both rejection paths remove a stale report. |
-| `components` | `Tests/ConsumerComponents.cs` | Four independently certified wrappers around one helper. The common profile/layout and helper modules must compile and replay once, while all four complete extraction certificates must replay. Profile, helper and call-target changes invalidate their component identities; a consumer source shadowing a generated component must fail without a certificate. |
+| `components` | `Tests/ConsumerComponents.cs` | Four independently certified wrappers around one helper. The common profile/layout and helper modules must compile and replay once, while all four complete extraction certificates must replay. Profile, helper and call-target changes invalidate their component identities. A helper whose callee sits at another index in a second extraction shares only the header with it, and with method numbers and imports erased its two texts differ only in its call and its link; a consumer source shadowing a generated component must fail without a certificate. |
 | `fingerprints` | `Tests/ConsumerFingerprintReuse.cs` | Authenticated canonical fingerprints across independent verifier processes, using two framework modules and a multipart fixture: corrupt receipts, changed or missing parts, module names, auditor bytes, fresh and disabled caches, diagnostic normalization, source/import invalidation and kernel replay. |
 | `certified-fingerprints` | `Tests/CertifiedFingerprints.cs` | Direct normalization compared with an authenticated prepared-library table while local receipts are disabled: identical canonical results across independent receivers, relocation, renamed modules, changed parts and native tools, metadata mutation before publication and consumption, and self-rehashed corruption. The fixture uses two framework modules plus one consumer module. |
 
@@ -301,9 +343,21 @@ performance fixture is never supplied to a verifier as a certified library.
 - CLI regressions cover unchecked-theorem and transitive-helper rejection, stale-report removal
   and changed-code proof failure.
 - `Tests/TranslationScaling.cs` checks the extraction prefix once, then imports it into the
-  compositional certificate and a deliberately failing monolithic certificate. `--measure` also
+  compositional certificate and a monolithic certificate that the elaborator's decide refuses at once,
+  since only the kernel may evaluate the body and metadata check. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
-  The consumer verifies the original extraction.
+  The kernel decides the monolithic certificate of call graphs of 2, 4 and 8 methods, and the
+  heartbeats and peak memory of a method added from 4 to 8 may be at most 1.2 times those of one
+  added from 2 to 4. The consumer verifies the original extraction, the extraction checks at the
+  default heartbeat budget with the kernel counted on the elaborating thread, and the same file
+  fails at 100 heartbeats with a deterministic timeout. The fixture then checks the emitted
+  `Extracted.layouts_validated` theorem over a chain of nested structs, each holding the one
+  before it, and over a chain of generic structs, each holding the previous distinct closed
+  generic owner, and the emitted `Extracted.method0_layouts_validated` theorem over the nested
+  chain. It compiles them with
+  `-DElab.async=false` so kernel heartbeats are counted and under `lean -M 8192`, and requires
+  axioms `[propext, Classical.choice, Quot.sound]`; heartbeats per layout may grow by at most 1.5
+  times from chains of 64 to chains of 512.
 
 ### Proof workspace
 
@@ -326,6 +380,13 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   states, out-of-bounds targets and mismatched certificate lengths. The feature and scalar
   equivalence theorems keep the list-indexed rules, including rejection when the feature and
   scalar certificate lengths differ.
+- `Tests/ScalarEvidence.lean` evaluates the local slot reads of `ScalarFlowValid`, which come
+  from indexes built once per body, at single sites and in whole certificates. They reject a
+  store or load past the declared locals, a null store into an int32 local, a method address
+  stored into a native-int local that no `calli` consumes and the address of a local that a
+  `calli` consumes, as the metadata lists do. `closedArguments`, which reads pointer locals from a
+  set built once per body, gives a method pointer home only to the native-int local a `calli`
+  consumes, as scanning the pointer local list does. It runs in the `evidence` suite.
 - `Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping:
   - Vector and int32 stores, reloads and overwrites with abstract homes and memory, plus
     signed-byte narrowing. The mixed-width case carries Vector256, Vector128 and int32 locals
@@ -371,7 +432,9 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   and branches that skip a prefix. `Tests/ReadOnlyArrayReferences.lean` also checks alias updates,
   read access and rejection of an adapter that would remove the restriction, plus readonly
   `GetReference` results for nonempty, empty and out-of-extent views and field loads, field
-  addresses and rejected field stores through restricted references. Both run in the `evidence`
+  addresses and rejected field stores through restricted references. It evaluates the readonly
+  rule of `ScalarFlowValid` at single sites, which rejects a writable address under a prefix, a
+  prefix with an operand and both sites of a branch to the address. Both run in the `evidence`
   suite.
 - `Tests/StaticScalarValues.cs` compares 16 compiled readonly-field loads with the runtime,
   covering integer widths, Boolean/Char, native integers, signed/unsigned enums, helper
@@ -416,7 +479,16 @@ Its CLI regressions cover initial proof selection and theorem output, an
 addition-to-subtraction source edit and rebuild, recovery using settings kept after the failed
 proof, the invalid-memory-access theorem, the integer opcode, narrow-storage and
 primitive-operation matrices, `new-proof` rejecting an existing file, a stale extraction and a
-struct parameter, and an isolated installation of the packaged .NET tool.
+struct parameter, and an isolated installation of the packaged .NET tool. They also check that a
+default certificate lists every binding fact as trusted, in order, and that a run without settings
+or `--proof` takes no proof from an earlier certificate.
+
+The `core` suite checks that `verify` refuses a certificate of schema 4, one without a binding
+section, one whose binding facts are missing, reordered, repeated or unknown, one with an unknown,
+numeric, absent or misplaced status, one whose default section names a digest file or lacks its
+images, and one whose binding section has mode `deep`. Its consumer test republishes an
+authenticated proof receipt with an unknown status and checks that the next run verifies afresh.
+`scripts/TestProofCost.cs` checks that the proof cost measurement refuses the same certificates.
 
 The runner, the tool and library preparation reject every run of Lean, Lake or the audit
 executable whose output holds an [internal error](CLI.md#diagnostics), so a panic while building

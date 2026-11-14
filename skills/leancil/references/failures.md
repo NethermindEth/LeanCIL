@@ -15,7 +15,7 @@ Invalid: Lean could not prove the selected theorem.
   Goals: add --goals to print the goal at each `sorry` and failing tactic.
 ```
 
-`check`, `verify` and `audit-library` start the first line with `Invalid:`; every other command
+`check`, `verify`, `audit-library` and `audit-binding` start the first line with `Invalid:`; every other command
 starts it with `Error:`. Each Lean error cites `file:line:column` in the file you edit, with
 1-based lines and 0-based columns.
 
@@ -92,7 +92,7 @@ and [traces](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#trac
 | Message | Meaning | Next action |
 | --- | --- | --- |
 | `No method matches selector`, `Ambiguous method selector ... Candidates:` | The selector names no method, or several | Copy the signature from `leancil list` or a candidate, with its parameter list |
-| `Unsupported assembly identity, target framework or build configuration` | The assembly is not a Release, IL-only .NET 10 build, or `--assembly` names another assembly | Build with `-c Release` for `net10.0` |
+| `Unsupported assembly identity, target framework or build configuration` | The assembly is not a Release, IL-only .NET 11 build, or `--assembly` names another assembly | Build with `-c Release` for `net11.0` |
 | `Unsupported static initialisation: T has a static constructor` | The method's type has a static constructor | Ask the user whether every caller runs it first; only then pass `--assume-initialized T` and report it as an assumption |
 | `Unsupported ...` or `Recursive managed dependency` at `metadata and CIL validation` | The named instruction, call, type or signature is outside the supported subset | Report it. `leancil blockers` lists every blocker of a list of methods ([blockers](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#report-extraction-blockers)) |
 | `Stale or mismatched verification artifact: assembly has changed since extraction.` | The DLL was rebuilt after `extract` | Run `extract` again. `verify` does so itself and prints `Re-extracted <directory>: the assembly changed since extraction.` |
@@ -116,7 +116,7 @@ and [traces](https://github.com/NethermindEth/LeanCIL/blob/main/docs/CLI.md#trac
 | `target state not matched at pc N` | The path reached the target pc with another frame, stack or memory | State the fact or the target in the reached form the message shows |
 | A stopped walk with `if c then target else next` as the pc, or `cil_lookup: undecided branch` | No fact decides the branch condition | Pass `c = 0` or its negation, or `split` and resume in each case |
 | `Snapshot stepping took no step; justify the local premises` | The snapshot form found no home, write access or `WellFormed` fact for the first local store | Put those premises in context ([snapshot walks](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#walk-local-stores-and-loads-with-snapshots)) |
-| `cil_body: rfl could not prove the method-body binding` | The expected body differs from the extracted one; the message shows the first difference | Update the expected body, or bind by signature with `bind_method` |
+| `cil_body: rfl could not prove the method-body binding` | The expected body differs from the extracted one; the message shows the first difference. A `field declared:`, `field environment:` or `field links:` line means the body lacks the extraction's signature, layout tables or call links | Update the expected body; build it with `Extracted.methodN.withCode code` so it keeps the extraction's `declared` and `environment` and takes the links its code implies, then set `staticSites` after it when the body reads statics, since `withCode` resets them; or bind by signature with `bind_method` |
 | `no extracted method has signature` | A `bind_method` or `bind_callee` signature is not in this extraction; the message lists the extracted methods with that name | Copy a listed signature |
 | `Case tag ... not found` | A `case` names no open goal; the message lists the open tags | Use a listed tag |
 | ``Tactic `rfl` failed`` on an `invoke` equality | The stated result is not what the method computes for those arguments, or the fuel literal is smaller than the number of steps the run takes | Compare the statement with the C#; raise the fuel |
