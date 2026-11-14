@@ -1,4 +1,5 @@
 import CIL.Identity
+import Std.Data.TreeMap
 
 /-!
 # Typed identity tests
@@ -584,5 +585,115 @@ def checkIdentityCodecCost : IO Unit := do
       previous := best
 
 #eval checkIdentityCodecCost
+
+/-- Every component takes precedence over all following components. -/
+def checkAssemblyComponentOrder : IO Unit := do
+  let lower : AssemblyName := ⟨⟨1⟩, ⟨1, 1, 1, 1⟩, ⟨1⟩, none⟩
+  let upper : AssemblyName := ⟨⟨2⟩, ⟨2, 2, 2, 2⟩, ⟨2⟩, some 0⟩
+  let pairs : Array (AssemblyName × AssemblyName) := #[
+    ({ upper with name := lower.name }, { lower with name := upper.name }),
+    ({ upper with name := lower.name, version := ⟨1, 2, 2, 2⟩ },
+      { lower with version := ⟨2, 1, 1, 1⟩ }),
+    (⟨⟨1⟩, ⟨1, 1, 2, 2⟩, ⟨2⟩, some 0⟩, { lower with version := ⟨1, 2, 1, 1⟩ }),
+    (⟨⟨1⟩, ⟨1, 1, 1, 2⟩, ⟨2⟩, some 0⟩, { lower with version := ⟨1, 1, 2, 1⟩ }),
+    ({ lower with culture := upper.culture, publicKeyToken := upper.publicKeyToken },
+      { lower with version := ⟨1, 1, 1, 2⟩ }),
+    ({ lower with publicKeyToken := upper.publicKeyToken },
+      { lower with culture := upper.culture }),
+    (lower, { lower with publicKeyToken := some 0 }),
+    ({ lower with publicKeyToken := some 0 }, { lower with publicKeyToken := some 1 })]
+  for (left, right) in pairs do
+    unless compare left right == .lt && compare right left == .gt do
+      throw (IO.userError "assembly component precedence changed")
+
+#eval checkAssemblyComponentOrder
+
+/-- Text delimiters, invalid UTF-8, culture and null-token distinctions survive ordered lookup. -/
+def assemblyMapKeys : Array AssemblyName := #[examples,
+  { examples with publicKeyToken := some 0 },
+  { examples with culture := name!"neutral" },
+  { examples with name := name!"A, Version=1.0.0.0" },
+  { examples with name := name!"A", culture := name!"Version=1.0.0.0" },
+  { examples with name := ⟨0x1ff⟩ }, { examples with name := ⟨0x1fe⟩ }]
+
+/-- All distinct assembly components remain separate map entries with their original values. -/
+def checkAssemblyMap : IO Unit := do
+  let mut entries : Std.TreeMap AssemblyName Nat := ∅
+  for bound : index in [:assemblyMapKeys.size] do
+    entries := entries.insert assemblyMapKeys[index] index
+  unless entries.size == assemblyMapKeys.size do
+    throw (IO.userError "distinct assembly keys collapsed")
+  for bound : index in [:assemblyMapKeys.size] do
+    unless entries[assemblyMapKeys[index]]? == some index do
+      throw (IO.userError "assembly lookup returned another identity")
+  unless entries[{ examples with version := ⟨9, 0, 0, 0⟩ }]? == none do
+    throw (IO.userError "absent assembly key was found")
+  entries := entries.insert examples 99
+  unless entries.size == assemblyMapKeys.size && entries[examples]? == some 99 do
+    throw (IO.userError "equal assembly key did not replace its value")
+
+#eval checkAssemblyMap
+
+/-- Equal comparison implies exact identity, including optional tokens and undecodable names. -/
+theorem assemblyMapComparison (left right : AssemblyName) :
+    compare left right = .eq ↔ left = right :=
+  AssemblyName.compare_eq_iff left right
+
+/-- info: 'Tests.Identity.assemblyMapComparison' depends on axioms:
+[propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms assemblyMapComparison
+
+/-- Ordered lookup uses transitive raw component comparisons. -/
+theorem assemblyComparisonTransitive (first second third : AssemblyName)
+    (firstBefore : compare first second = .lt) (secondBefore : compare second third = .lt) :
+    compare first third = .lt :=
+  Std.TransCmp.lt_trans firstBefore secondBefore
+
+/-- info: 'Tests.Identity.assemblyComparisonTransitive' depends on axioms:
+[propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms assemblyComparisonTransitive
+
+/-- Prebuilt names share a byte prefix and differ only in their two final nonzero bytes. -/
+def assemblyCostKeys (count prefixBytes : Nat) : Array AssemblyName := Id.run do
+  let prefixCode := (bitCode? 8 (List.replicate prefixBytes 97)).getD 1
+  return (Array.range count).map fun index =>
+    { examples with name := ⟨(prefixCode <<< 16) + (index / 255 + 1) * 256 + index % 255 + 1⟩ }
+
+/-- Times map construction and successful lookup without timing identity construction. -/
+def measureAssemblyMap (keys : Array AssemblyName) : IO Nat := do
+  let mut best := 1000000000000
+  for _ in [:3] do
+    let started ← IO.monoNanosNow
+    for _ in [:16] do
+      let mut entries : Std.TreeMap AssemblyName Nat := ∅
+      for bound : index in [:keys.size] do entries := entries.insert keys[index] index
+      unless entries.size == keys.size do throw (IO.userError "growing map lost keys")
+      for bound : index in [:keys.size] do
+        unless entries[keys[index]]? == some index do
+          throw (IO.userError "growing map lookup failed")
+    best := min best ((← IO.monoNanosNow) - started)
+  return best
+
+/-- Map cost grows with key count and comparison bit length, with no text decoding. -/
+def checkAssemblyMapCost : IO Unit := do
+  for prefixBytes in [4, 4096] do
+    let mut previous := 0
+    for count in [64, 512, 4096] do
+      let elapsed ← measureAssemblyMap (assemblyCostKeys count prefixBytes)
+      if previous > 0 && elapsed > previous * 20 + 2000000 then
+        throw (IO.userError s!"assembly count cost grew too quickly: {previous} -> {elapsed}")
+      IO.println s!"PASS assembly count {count}, prefix bytes {prefixBytes}: {elapsed} ns"
+      previous := elapsed
+  let mut previous := 0
+  for prefixBytes in [4096, 32768, 262144] do
+    let elapsed ← measureAssemblyMap (assemblyCostKeys 64 prefixBytes)
+    if previous > 0 && elapsed > previous * 20 + 2000000 then
+      throw (IO.userError s!"assembly bit cost grew too quickly: {previous} -> {elapsed}")
+    IO.println s!"PASS assembly count 64, prefix bytes {prefixBytes}: {elapsed} ns"
+    previous := elapsed
+
+#eval checkAssemblyMapCost
 
 end Tests.Identity
