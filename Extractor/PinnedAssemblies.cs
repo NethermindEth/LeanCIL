@@ -28,6 +28,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly PinnedAssemblies? previous;
     readonly DefaultAssemblyResolver platform = new();
     readonly Dictionary<string, ModuleDefinition> modules = new(StringComparer.Ordinal);
+    readonly Dictionary<TypeDefinition, TypeDefinition?> baseClasses = [];
     readonly Dictionary<ModuleDefinition, ModuleDefinition> originals = [];
     readonly Dictionary<ModuleDefinition, byte[]> images = [];
     readonly Dictionary<byte[], PEReader> readers = [];
@@ -82,6 +83,17 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         originals.Add(module, original);
         images.Add(module, image);
         images.Add(original, image);
+    }
+
+    /// <summary>
+    /// The class a type derives from, or null for a root or an unresolved base. Each type's base is resolved once per
+    /// extraction, since resolving a platform base reads its assembly from disk.
+    /// </summary>
+    internal TypeDefinition? BaseClass(TypeDefinition type)
+    {
+        if (!baseClasses.TryGetValue(type, out TypeDefinition? baseClass))
+            baseClasses.Add(type, baseClass = type.BaseType?.Resolve());
+        return baseClass;
     }
 
     /// <summary>The pinned set of the current extraction, or none outside one.</summary>
