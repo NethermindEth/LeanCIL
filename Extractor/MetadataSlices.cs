@@ -253,6 +253,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         readonly HashSet<uint> visited = [];
         readonly HashSet<uint> modifierVisited = [];
         readonly HashSet<uint> fieldsAdded = [];
+        readonly Dictionary<uint, MetadataFieldPrefix> fieldPrefixes = [];
+        readonly HashSet<uint> fieldSignaturesAdded = [];
         readonly HashSet<uint> chainedOwners = [];
         readonly HashSet<uint> chained = [];
         int corlib;
@@ -479,7 +481,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             Text(definition.Namespace);
             if (RowOf(token) < image.Count(0x02)) Row(token + 1);
             if (!definition.BaseType.IsNil) Token(TokenOf(definition.BaseType));
-            if (Extends(definition, "Enum")) FieldRows(definition, signatures: true);
+            if (Extends(definition, "Enum")) FieldRows(token, definition, signatures: true);
             var enclosing = definition.GetDeclaringType();
             if (enclosing.IsNil) return;
             var nesting = NestedClassRow(token);
@@ -492,14 +494,22 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         uint NestedClassRow(uint token) => image.NestedClassRow(RowOf(token)) ??
             throw new InvalidDataException($"No NestedClass row for type 0x{token:X8} in {module.Name}.");
 
-        /// <summary>Every field row of a type, and for an enum the signature of its instance field.</summary>
-        void FieldRows(SrmTypeDefinition definition, bool signatures)
+        /// <summary>The shared field enumeration of one declaring type.</summary>
+        MetadataFieldPrefix Fields(uint owner, SrmTypeDefinition definition)
         {
-            foreach (var handle in definition.GetFields())
-            {
-                Row(TokenOf(handle));
-                if (signatures) Blob(Reader.GetFieldDefinition(handle).Signature);
-            }
+            if (!fieldPrefixes.TryGetValue(owner, out var prefix))
+                fieldPrefixes.Add(owner, prefix = new(definition.GetFields().Select(handle => TokenOf(handle))));
+            return prefix;
+        }
+
+        /// <summary>Every field row of a type, and for an enum the signature of its instance field.</summary>
+        void FieldRows(uint owner, SrmTypeDefinition definition, bool signatures)
+        {
+            var prefix = Fields(owner, definition);
+            prefix.All(Row);
+            if (!signatures || !fieldSignaturesAdded.Add(owner)) return;
+            foreach (var token in prefix.Carried)
+                Blob(Reader.GetFieldDefinition(MetadataTokens.FieldDefinitionHandle(RowOf(token))).Signature);
         }
 
         void Declared(uint member, TypeDefinitionHandle declaring)
@@ -517,11 +527,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             var parent = TokenOf(definition.BaseType);
             Token(parent);
             if ((parent >> 24) == 0x02)
-            {
-                var baseDefinition = Reader.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle(RowOf(parent)));
-                FieldRows(baseDefinition, signatures: false);
-                Chain(baseDefinition);
-            }
+                ClassChain(parent);
             else if ((parent >> 24) == 0x01 && linked.TryGetValue((0, parent), out var target))
                 collection.At(target.Slice).ClassChain(target.Target);
         }
@@ -530,7 +536,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         {
             if (!chained.Add(token)) return;
             var definition = Reader.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle(RowOf(token)));
-            FieldRows(definition, signatures: false);
+            FieldRows(token, definition, signatures: false);
             Chain(definition);
         }
 
@@ -546,11 +552,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             var owner = Reader.GetTypeDefinition(declaring);
             // The owner's fields up to this one: Lean counts the instance fields before it over the carried rows
             // from the owner's first field. Base classes, whose totals the index needs, stay whole.
-            foreach (var sibling in owner.GetFields())
-            {
-                Row(TokenOf(sibling));
-                if (TokenOf(sibling) == token) break;
-            }
+            Fields(TokenOf(declaring), owner).Through(token, Row);
             if (IsClass(owner) && chainedOwners.Add(TokenOf(declaring))) Chain(owner);
         }
 
@@ -625,7 +627,7 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
             if (!classOwner) return;
             if (fieldsAdded.Add(TokenOf(method.GetDeclaringType())))
             {
-                FieldRows(owner, signatures: false);
+                FieldRows(TokenOf(method.GetDeclaringType()), owner, signatures: false);
                 Chain(owner);
             }
         }
