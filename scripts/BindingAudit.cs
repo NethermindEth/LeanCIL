@@ -340,7 +340,7 @@ partial class Program
             "no check compares a reference's token with the key of its image"),
         ("platform-definitions", "Definitions in platform assemblies", "no platform assembly is read"),
         ("dispatch-catalogs", "Completeness of dispatch catalogs", "no check reads the types of an image"),
-        ("import-identities", "Hashed part of generic import identities",
+        ("import-identities", "Generic import definitions",
             "no check recomputes an import identity from its image"),
         ("generic-constraints", "Generic parameter constraints", "no check reads constraints from the image")
     ];

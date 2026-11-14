@@ -211,13 +211,13 @@ internal static class ContractMethodMetadata
         MethodDefinition closed = new MethodSpecialization(definition.Module, architecture).Instantiate(reference);
         // Scalar certificates read the closed return and parameter types from the identity.
         // Keep definition and scoped argument keys before the parameter list.
-        string definitionHash = ContractInterface.Hash(Encoding.UTF8.GetBytes(DefinitionKey(definition, entry)));
+        string definitionKey = Convert.ToHexString(Encoding.UTF8.GetBytes(DefinitionKey(definition, entry)));
         StringBuilder identity = new(definition.Module.Assembly.Name.FullName + "::" + closed.ReturnType.FullName + " " +
-            closed.DeclaringType.FullName + "::" + closed.Name + "|definition|" + definitionHash + "|arguments|");
+            closed.DeclaringType.FullName + "::" + closed.Name + "|definition|" + definitionKey + "|arguments|");
         foreach (TypeReference argument in arguments)
         {
             string scoped = OpenType(argument);
-            identity.Append(scoped.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(scoped);
+            identity.Append(Part(scoped));
         }
         identity.Append('(').AppendJoin(',', closed.Parameters.Select(parameter => parameter.ParameterType.FullName)).Append(')');
         return new(definition, closed, reference, arguments, identity.ToString());
@@ -281,7 +281,8 @@ internal static class ContractMethodMetadata
     {
         Func<TypeReference, string> parameterKey = entry ? EntryParameter : OpenParameter;
         StringBuilder key = new("contract-definition-v1:");
-        key.Append(Part(OpenType(definition.DeclaringType))).Append(Part(definition.Name))
+        string owner = Part(LayoutEvidence.Scope(definition.DeclaringType)) + Part(definition.DeclaringType.FullName);
+        key.Append(Part(owner)).Append(Part(definition.Name))
             .Append(Part(definition.GenericParameters.Count.ToString(CultureInfo.InvariantCulture)))
             .Append(Part(((byte)definition.CallingConvention).ToString(CultureInfo.InvariantCulture)))
             .Append(Part(definition.HasThis ? "1" : "0")).Append(Part(definition.ExplicitThis ? "1" : "0"))
@@ -292,7 +293,8 @@ internal static class ContractMethodMetadata
         return key.ToString();
     }
 
-    static string Part(string value) => value.Length.ToString(CultureInfo.InvariantCulture) + ":" + value;
+    static string Part(string value) =>
+        Encoding.UTF8.GetByteCount(value).ToString(CultureInfo.InvariantCulture) + ":" + value;
 
     // The `in:` tag keeps an `in` reference distinct from a plain one; plain parameters keep their encoding.
     static string OpenParameter(TypeReference type) =>

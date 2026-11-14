@@ -15,7 +15,7 @@ cannot substitute for it.
 | Specialization | Substitute closed method/owner arguments through signatures, locals, operands and calls, including the owner segment of an external call identity (`scope::result owner::member`, open owners spelled `!!n`/`!n`); preserve control flow | Faithful raw definitions and admitted constraints |
 | Feature flow | Entry, transfers, joins, required successors, reachable mask and feature-dependent operations | No complete concrete CLI simulation for every opcode |
 | Method body decoding | Decode the bytes the extractor emitted for a body (tiny or fat header, every standard opcode, branch targets as instruction indices) through the token table and compare `maxStack`, `initLocals`, the locals and every instruction with the original definition | That the bytes are the method's body in the image (reconfirmed by the opt-in [strict binding audit](CLI.md#strict-binding-audit)) and the PE container stay trusted; bodies with exception sections are rejected |
-| Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them | That the carried bytes are the image's, platform definitions, public key tokens, the hashed part of generic import identities, raw layout content, dispatch catalogs, static data and generic parameter constraints |
+| Metadata binding | Decode the table rows, heap entries and signature blobs each method carries and check every token-table entry, every local type and the method's own definition against them, including generic import descriptors and their open signatures and closed arguments | That the carried bytes are the image's, platform definitions, public key tokens, imported implementation definitions, raw layout content, dispatch catalogs, static data and generic parameter constraints |
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
 | Managed/imported calls | Target slot, scoped identity, full signature, argument count, receiver and result | An import slot does not prove its implementation contract |
@@ -194,8 +194,8 @@ copy cannot be detected without the whole stream; every row must still have the 
 widths give, every blob its length prefix and every string one terminating zero), the PE container
 where a body sits in the image and the mapping of its address to its bytes, definitions in platform assemblies (so whether a
 platform type is an enum, the field order of `ValueTuple`, and that `System.Object` declares no
-instance fields), public key tokens (the hash of a key is not computed in the kernel), the hashed
-part of a generic import identity, raw layout content, dispatch catalog completeness, static data
+instance fields), public key tokens (the hash of a key is not computed in the kernel), imported
+implementation definitions, raw layout content, dispatch catalog completeness, static data
 bytes and generic parameter constraints. `check` hashes each assembly and regenerates the
 extraction, so the rows are a deterministic function of hashed inputs.
 ### Folded instruction patterns

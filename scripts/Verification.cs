@@ -3833,7 +3833,7 @@ partial class Program : IDisposable
         GenericConstraints,
         /// <summary>The AssemblyRef public key tokens are the tokens of the referenced images' keys.</summary>
         PublicKeyTokens,
-        /// <summary>The hashed part of each generic import identity is the hash of its definition key.</summary>
+        /// <summary>Each generic import identity names its pinned implementation definition.</summary>
         ImportIdentities
     }
 

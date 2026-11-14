@@ -371,7 +371,7 @@ Valid: strict binding audit of /work/artifacts/Add
   Public key tokens of referenced assemblies: not covered (no check compares a reference's token with the key of its image)
   Definitions in platform assemblies: not covered (no platform assembly is read)
   Completeness of dispatch catalogs: not covered (no check reads the types of an image)
-  Hashed part of generic import identities: not covered (no check recomputes an import identity from its image)
+  Generic import definitions: not covered (no check recomputes an import identity from its image)
   Generic parameter constraints: not covered (no check reads constraints from the image)
   Axioms: Classical.choice, Quot.sound, propext
   Statements defined by: StrictBinding sources 1f2e3d4c...9a8b, Lean leanprover/lean4:v4.35.0 (ran Lean (version 4.35.0, x86_64-w64-windows-gnu, commit eb6cafb7290e8bd5f2937522d8d804f58f02bafc, Release))
