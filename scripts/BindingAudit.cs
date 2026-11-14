@@ -360,8 +360,8 @@ partial class Program
         current = new(afterBase, StringComparer.Ordinal);
         foreach (var (name, hash) in afterSession) current[name] = hash;
         if (!Same(beforeBase, afterBase) ||
-            beforeSession.Any(pair => !afterSession.TryGetValue(pair.Key, out var hash) || hash != pair.Value) ||
-            certifiedModules.Any(pair => !current.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
+            !BindingArtifactsPreserved(beforeSession, afterSession) ||
+            !BindingArtifactsPreserved(certifiedModules, current))
             throw new InvalidOperationException("The certified library changed while building StrictBinding");
         string[] added =
             [.. current.Keys.Where(name => !certifiedModules.ContainsKey(name)).Select(ModuleName).Distinct()];
@@ -377,6 +377,21 @@ partial class Program
         bindingSourcesKey = sourcesKey;
         bindingLeanVersion = leanVersion;
         bindingPreparation = new(library, libraryKey, toolchain, afterBase, afterSession);
+    }
+
+    /// <summary>Existing module families retain exactly their artifacts; additional families are permitted.</summary>
+    static bool BindingArtifactsPreserved(SortedDictionary<string, string> before,
+        SortedDictionary<string, string> after)
+    {
+        HashSet<string> families = new(StringComparer.Ordinal);
+        foreach (var (name, hash) in before)
+        {
+            if (!after.TryGetValue(name, out var current) || current != hash) return false;
+            families.Add(ModuleName(name));
+        }
+        foreach (var name in after.Keys)
+            if (families.Contains(ModuleName(name)) && !before.ContainsKey(name)) return false;
+        return true;
     }
 
     /// <summary>The toolchain declaration and compiler bytes used to prepare the binding library.</summary>
