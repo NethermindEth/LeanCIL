@@ -450,14 +450,14 @@ theorem literal_branch_pc (program : CIL.Program) (index : Nat) (profile : CIL.F
     takes. The facts would otherwise match only an index spelled as the numeral. -/
 theorem coerced_index_facts (program : CIL.Program) (index : Nat) (body : CIL.Method)
     (found : program[index]? = some body) (load : body.code[0]? = some (.local 7))
-    (store : body.code[1]? = some (.setLocal 8)) (frame : Frame) (memory after : Memory)
+    (store : body.code[1]? = some (.stloc 8)) (frame : Frame) (memory after : Memory)
     (bits : BitVec 128)
     (loaded : ∀ pc args stack,
       step body (.local (↑(6 : Fin 10) + 1)) pc args frame stack memory =
         .ok (.next (pc + 1) (.scalar (localResult .vector128 (.v128 bits)) :: stack) frame
           memory))
     (stored : ∀ pc args stack,
-      step body (.setLocal (↑(7 : Fin 10) + 1)) pc args frame (.scalar (.v128 bits) :: stack)
+      step body (.stloc (↑(7 : Fin 10) + 1)) pc args frame (.scalar (.v128 bits) :: stack)
         memory = .ok (.next (pc + 1) stack frame after))
     (continuation : WP (Execution (fun fuel => run program fuel index 2 [] frame [] after))
       (fun _ => True)) :

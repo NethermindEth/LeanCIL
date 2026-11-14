@@ -532,7 +532,7 @@ private def opaqueKindsValid (method : Method) : Bool :=
 private def opaqueAddressesValid (method : Method) : Bool :=
   let slots := Std.TreeSet.ofList method.opaqueVectorLocals
   method.code.all fun operation => match operation with
-    | .localAddr index => !slots.contains index
+    | .ldloca index => !slots.contains index
     | _ => true
 /-- The opaque locals are exactly the eligible ones when the method uses
     `CreateScalarUnsafe` and none otherwise; each is a 128-bit vector slot whose address the
@@ -553,7 +553,7 @@ theorem OpaqueLocalsValid_iff_scan (closed : RawMethod) (method : Method) :
       method.opaqueVectorLocals.all (fun index => method.localKinds[index]? == some .vector128) =
         true ∧
       method.code.all (fun operation => match operation with
-        | .localAddr index => !(index ∈ method.opaqueVectorLocals)
+        | .ldloca index => !(index ∈ method.opaqueVectorLocals)
         | _ => true) = true := by
   simp only [OpaqueLocalsValid, opaqueKindsValid, opaqueAddressesValid,
     FlowIndex.get?_ofList, Std.TreeSet.contains_ofList, List.contains_eq_mem]

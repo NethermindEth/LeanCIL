@@ -20,7 +20,7 @@ theorem step_store_aggregate {body : CIL.Method} {pc index watermark : Nat}
     (ready : access memory reference size 1 true = .ok ())
     (privateHome : watermark ≤ reference.allocation) :
     ∃ result,
-      step body (.setLocal index) pc args frame (.scalar (.aggregate bytes) :: rest) memory =
+      step body (.stloc index) pc args frame (.scalar (.aggregate bytes) :: rest) memory =
         .ok (.next (pc + 1) rest frame result) ∧
       write memory reference bytes 1 = .ok result ∧
       read result reference size 1 = .ok bytes ∧

@@ -74,7 +74,7 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
     // The receiver fold is bound by the feature certificate, independently of the instruction lemmas.
     if (folded is null) continue;
     var forged = Path.Combine(root, name + "-forged.lean");
-    File.WriteAllText(forged, NarrowEvidence(source.Replace(".nop", ".localAddr 0"), obligation));
+    File.WriteAllText(forged, NarrowEvidence(source.Replace(".nop", ".ldloca 0"), obligation));
     rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
         diagnostic => Regex.IsMatch(diagnostic,
             @"Extraction\.FeatureFlowValid rawLayouts\.toArray \(Extraction\.evidenceConstants methodEvidence\) " +

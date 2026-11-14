@@ -152,7 +152,7 @@ The two forms differ:
 
 | | Checked form | Contract form |
 | --- | --- | --- |
-| Instructions other than `.local` and `.setLocal` | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
+| Instructions other than `.local` and `.stloc` | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
 | Finds each store's home | From the premises in context | From a homes hypothesis ([required context](#required-context)) |
 | Restates context facts after a store | `access` equations only; byte-value facts stay at the old memory | `access` equations and the [caller facts](#facts-the-contract-form-carries) |
 | Prepares step facts again after a store | No | Yes |

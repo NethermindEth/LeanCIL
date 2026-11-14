@@ -97,15 +97,15 @@ theorem Frame.Renamed.stepLocal {indices : LocalIndexMap} {mapping : AllocationR
 #print axioms Frame.Renamed.stepLocal
 
 /-- A local address uses its retained byte home or span view at the relocated operand. -/
-theorem Frame.Renamed.stepLocalAddress {indices : LocalIndexMap} {mapping : AllocationRenaming}
+theorem Frame.Renamed.stepLdloca {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (memories : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (sourceBody targetBody : CIL.Method) (position pc : Nat)
     (arguments stack : List Value) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.localAddr position) pc arguments sourceFrame stack source)
-      (step targetBody (.localAddr (indices.index position)) pc (arguments.map mapping.value)
+      (step sourceBody (.ldloca position) pc arguments sourceFrame stack source)
+      (step targetBody (.ldloca (indices.index position)) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
     Bool.false_or, Bool.false_eq_true, ite_false]
@@ -120,18 +120,18 @@ theorem Frame.Renamed.stepLocalAddress {indices : LocalIndexMap} {mapping : Allo
     intro value otherValue loaded same
     subst otherValue
     exact .ok (.next memories frames)
-#print axioms Frame.Renamed.stepLocalAddress
+#print axioms Frame.Renamed.stepLdloca
 
 /-- A local store updates the corresponding slot without exposing private dead homes. -/
-theorem Frame.Renamed.stepSetLocal {indices : LocalIndexMap} {mapping : AllocationRenaming}
+theorem Frame.Renamed.stepStloc {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (memories : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (sourceBody targetBody : CIL.Method) (position pc : Nat)
     (arguments rest : List Value) (value : Value) (valueBound : value.Below mapping.sourceLimit) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.setLocal position) pc arguments sourceFrame (value :: rest) source)
-      (step targetBody (.setLocal (indices.index position)) pc
+      (step sourceBody (.stloc position) pc arguments sourceFrame (value :: rest) source)
+      (step targetBody (.stloc (indices.index position)) pc
         (arguments.map mapping.value) targetFrame ((value :: rest).map mapping.value) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
     Bool.false_or, Bool.false_eq_true, ite_false, List.map_cons]
@@ -155,6 +155,6 @@ theorem Frame.Renamed.stepSetLocal {indices : LocalIndexMap} {mapping : Allocati
     have updated := frames.setLocal position positionBound slotAfter
       (storeLocal_below bounded valueBound stored)
     exact .ok (.next memories updated)
-#print axioms Frame.Renamed.stepSetLocal
+#print axioms Frame.Renamed.stepStloc
 
 end CIL.Safety

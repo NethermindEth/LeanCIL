@@ -139,8 +139,8 @@ theorem store_unavailable {entered memory : Memory} {boundary : Nat} {kinds slot
 
 /-- Zero a struct local, store its int field, then store and reload a word local. -/
 @[cil_code] def structAndWord : CIL.Method := {
-  code := [.localAddr 0, .initAggregate 12, .localAddr 0, .arg 0, .setFieldAt 8 4,
-    .arg 1, .setLocal 1, .local 0, .ret]
+  code := [.ldloca 0, .initAggregate 12, .ldloca 0, .arg 0, .setFieldAt 8 4,
+    .arg 1, .stloc 1, .local 0, .ret]
   locals := [.aggregate zeros, .i64 0], localKinds := [.aggregate 12, .word64],
   returnsValue := true }
 

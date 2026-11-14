@@ -91,7 +91,7 @@ theorem private_initializer_readback :
 
 /-- A returned child value is stored before later dynamic allocation changes fresh identities. -/
 def allocationPrefix : List CIL.Instruction :=
-  [.ldc_i4 9, .setLocal 0, .call 1 0, .setLocal 1, .ldc_i4 4, .stackAlloc false, .pop]
+  [.ldc_i4 9, .stloc 0, .call 1 0, .stloc 1, .ldc_i4 4, .stackAlloc false, .pop]
 
 /-- The resumed caller reads both retained homes after its child and dynamic allocation. -/
 def returningCode : List CIL.Instruction := allocationPrefix ++ [.local 0, .local 1, .add, .ret]

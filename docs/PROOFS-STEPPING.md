@@ -348,7 +348,7 @@ to derive snapshots for `untouchedLocals code known`. Effects compose through `a
 one frame-rule application replaces separate disjoint-read proofs for all retained locals. The
 numeric slot identities must remain fixed, and the frame-rule placement must belong to the running
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
-absence of a direct `setLocal` is not evidence that an aliased byte-backed local keeps its value.
+absence of a direct `stloc` is not evidence that an aliased byte-backed local keeps its value.
 
 ## Step loops
 

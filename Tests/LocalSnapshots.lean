@@ -94,7 +94,7 @@ theorem numeric_frame_store {body : CIL.Method} {pc : Nat} {args stack : List Va
     (homes : NumericHomes entered lower zeroSpecs frame.locals) (formed : entered.WellFormed)
     (count : BitVec 32) :
     ∃ after,
-      step body (.setLocal 1) pc args frame (.scalar (.i32 count) :: stack) entered =
+      step body (.stloc 1) pc args frame (.scalar (.i32 count) :: stack) entered =
         .ok (.next (pc + 1) stack frame after) ∧
       step body (.local 0) pc args frame stack after =
         .ok (.next (pc + 1) (.scalar (.v128 0) :: stack) frame after) ∧

@@ -24,12 +24,12 @@ private def initializedMemory : CIL.Memory := fun _ => some (.i32 1)
 theorem local_unstepped :
     (CIL.step (.local 0) false 0 [] [] initializedMemory).isSome = false := rfl
 #print axioms local_unstepped
-theorem setLocal_unstepped :
-    (CIL.step (.setLocal 0) false 0 [] [.i32 1] initializedMemory).isSome = false := rfl
-#print axioms setLocal_unstepped
-theorem localAddr_unstepped :
-    (CIL.step (.localAddr 0) false 0 [] [] initializedMemory).isSome = false := rfl
-#print axioms localAddr_unstepped
+theorem stloc_unstepped :
+    (CIL.step (.stloc 0) false 0 [] [.i32 1] initializedMemory).isSome = false := rfl
+#print axioms stloc_unstepped
+theorem ldloca_unstepped :
+    (CIL.step (.ldloca 0) false 0 [] [] initializedMemory).isSome = false := rfl
+#print axioms ldloca_unstepped
 
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl
 

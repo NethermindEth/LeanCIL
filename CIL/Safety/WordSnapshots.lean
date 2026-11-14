@@ -110,7 +110,7 @@ theorem WordSnapshots.store {body : CIL.Method} {pc index : Nat} {args stack : L
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (ready : access memory reference 8 1 true = .ok ()) :
     ∃ after,
-      step body (.setLocal index) pc args frame (.scalar (.i64 value) :: stack) memory =
+      step body (.stloc index) pc args frame (.scalar (.i64 value) :: stack) memory =
         .ok (.next (pc + 1) stack frame after) ∧
       WordSnapshots after frame.locals (rememberWord known index value) ∧ after.WellFormed ∧
       MemoryBelow boundary memory after ∧ AccessBelow memory.nextIdentity memory after ∧
