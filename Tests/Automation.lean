@@ -1729,6 +1729,50 @@ example (entries : List Nat) :
   intro found stated
   cil_lookup_assumption
 
+/-- A running sum of fifteen additions, long enough for the stepping record to be used. -/
+@[cil_code] def runningSum : CIL.Method := {
+  locals := [], returnsValue := true,
+  code := [.arg 0, .arg 1, .add, .arg 1, .add, .arg 1, .add, .arg 1, .add, .arg 1, .add,
+    .arg 1, .add, .arg 1, .add, .arg 1, .add, .arg 1, .add, .arg 1, .add, .arg 1, .add,
+    .arg 1, .add, .arg 1, .add, .arg 1, .add, .arg 1, .add, .ret] }
+
+open Lean Elab Tactic Meta in
+/-- Run `steps` and fail when its comparisons of local contexts read more positions than one
+    whole-context comparison per instruction of `runningSum`. Comparing the whole context at each
+    read of the record costs no heartbeats, so only this count shows it. -/
+elab "cil_reads_at_most_one_context_per_instruction " steps:tactic : tactic => do
+  let size := (← withMainContext getLCtx).numIndices
+  let before ← contextReads
+  evalTactic steps
+  let reads := (← contextReads) - before
+  let limit := size * runningSum.code.length
+  unless reads <= limit do
+    throwError "the steps read {reads} context positions; at most {limit} were expected"
+
+-- A step whose goal keeps the local context of the record reads none of its positions, however
+-- many hypotheses are in scope; checking each read of the record against the whole context
+-- read fifteen to twenty contexts per instruction.
+theorem running_sum_reads (memory : Memory) (left right : CIL.W64) (first : right + 1 = right + 1)
+    (second : right + 2 = right + 2) (third : right + 3 = right + 3) :
+    invoke [runningSum] 32 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
+      .ok (memory, [.scalar (.i64 (left + right + right + right + right + right + right + right +
+        right + right + right + right + right + right + right + right))]) := by
+  cil_reads_at_most_one_context_per_instruction cil_checked_steps
+
+#print axioms running_sum_reads
+
+theorem running_sum_contract_reads (memory : Memory) (left right : CIL.W64)
+    (first : right + 1 = right + 1) (second : right + 2 = right + 2) :
+    WP (Execution (fun fuel => invoke [runningSum] fuel 0
+      [.scalar (.i64 left), .scalar (.i64 right)] memory))
+      (fun (final, values) => final = memory ∧ values = [.scalar (.i64 (left + right + right +
+        right + right + right + right + right + right + right + right + right + right + right +
+        right + right))]) := by
+  cil_reads_at_most_one_context_per_instruction
+    (cil_contract_steps []; exact And.intro rfl rfl)
+
+#print axioms running_sum_contract_reads
+
 open Lean Elab Tactic Meta in
 /-- A step that runs out of heartbeats leaves no record behind. The exception is a runtime
     exception, which `try` does not catch, so the cleanup must not depend on a handler. -/

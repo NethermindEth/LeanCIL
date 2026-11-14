@@ -52,29 +52,50 @@ def sameDeclaration (left right : LocalDecl) : Bool :=
   left.fvarId == right.fvarId && left.userName == right.userName && left.type == right.type &&
     left.value? == right.value?
 
-/-- Whether `current` holds every hypothesis of `earlier`, unchanged and in the same positions,
-    followed by any number of others. A step that rewrites a hypothesis in place, renames it or
-    clears it makes this false; a step that only adds hypotheses keeps it true. -/
-def contextExtendedBy (earlier current : LocalContext) : Bool := Id.run do
+/-- Whether `earlier` and `current` are one object in memory, which makes them equal. -/
+private unsafe def sameObjectUnsafe {α : Type} (earlier current : α) : Bool :=
+  ptrAddrUnsafe earlier == ptrAddrUnsafe current
+
+/-- Whether `earlier` and `current` are one object; `false` only means they must be compared. -/
+@[implemented_by sameObjectUnsafe]
+def sameObject {α : Type} (_earlier _current : α) : Bool := false
+
+/-- How many context positions the comparisons of `contextExtendedBy` and `contextKeeps` have
+    read. Tests read it to bound the whole-context comparisons of a step, which cost time but no
+    heartbeats. It lives in the environment, so a backtracked attempt's reads are forgotten. -/
+initialize contextReadsExtension : EnvExtension Nat ←
+  registerEnvExtension (pure 0) (asyncMode := .local)
+
+/-- The context positions compared so far in this environment. -/
+def contextReads : CoreM Nat :=
+  return contextReadsExtension.getState (← getEnv)
+
+/-- Whether every position of `earlier` holds the same hypothesis in `current`, where `cleared`
+    says whether a hypothesis `current` no longer holds is allowed. Two contexts that are one
+    object are equal and read no position; other comparisons are counted in `contextReads`. -/
+def compareContexts (cleared : Bool) (earlier current : LocalContext) : CoreM Bool := do
+  if sameObject earlier current then return true
   if current.numIndices < earlier.numIndices then return false
+  modifyEnv (contextReadsExtension.modifyState · (· + earlier.numIndices))
   for position in [:earlier.numIndices] do
     match earlier.decls[position]!, current.decls[position]! with
     | none, none => pure ()
-    | some old, some new => unless sameDeclaration old new do return false
-    | _, _ => return false
+    | some _, none => unless cleared do return false
+    | some old, some new => unless sameObject old new || sameDeclaration old new do return false
+    | none, some _ => return false
   return true
+
+/-- Whether `current` holds every hypothesis of `earlier`, unchanged and in the same positions,
+    followed by any number of others. A step that rewrites a hypothesis in place, renames it or
+    clears it makes this false; a step that only adds hypotheses keeps it true. -/
+def contextExtendedBy (earlier current : LocalContext) : CoreM Bool :=
+  compareContexts false earlier current
 
 /-- Whether every hypothesis of `earlier` that `current` still holds is unchanged and in the same
     position, so that an index of `earlier`'s equations is right for `current` once the entries of
     cleared hypotheses are skipped. A store that clears the facts it supersedes keeps it true. -/
-def contextKeeps (earlier current : LocalContext) : Bool := Id.run do
-  if current.numIndices < earlier.numIndices then return false
-  for position in [:earlier.numIndices] do
-    match earlier.decls[position]!, current.decls[position]! with
-    | _, none => pure ()
-    | some old, some new => unless sameDeclaration old new do return false
-    | none, some _ => return false
-  return true
+def contextKeeps (earlier current : LocalContext) : CoreM Bool :=
+  compareContexts true earlier current
 
 /-- The head of the left side of the equation `type` states, under any quantifiers. -/
 def equationHead? : Expr → Option Expr
@@ -222,14 +243,15 @@ def setNormalNodes (record : NormalNodes) : CoreM Unit :=
 /-- Whether `record` may be consulted for a goal with local context `context`: a step is running
     and the record was made for this context. A record from another goal or declaration is
     never used. -/
-def NormalNodes.usable (record : NormalNodes) (context : LocalContext) : Bool :=
-  record.active && record.context == contextId context && contextExtendedBy record.locals context
+def NormalNodes.usable (record : NormalNodes) (context : LocalContext) : CoreM Bool := do
+  if !record.active || record.context != contextId context then return false
+  contextExtendedBy record.locals context
 
 /-- The equation index of `record` for `context`: the one it holds, extended, when `context` still
     has every hypothesis it indexed unchanged, and built again otherwise. -/
 def NormalNodes.equationsFor (record : NormalNodes) (context : LocalContext) :
     MetaM EquationIndex := do
-  let known := if contextKeeps record.equationLocals context then record.equations else {}
+  let known := if ← contextKeeps record.equationLocals context then record.equations else {}
   (← known.prune context).extend context
 
 /-- Whether stepping drivers use the record. Turning it off makes every simplification visit the
@@ -250,7 +272,7 @@ register_option cil.stepping.warmup : Nat := {
 def usableNormalNodes : MetaM (Option NormalNodes) := do
   unless cil.stepping.record.get (← getOptions) do return none
   let record ← getNormalNodes
-  return if record.usable (← getLCtx) then some record else none
+  return if ← record.usable (← getLCtx) then some record else none
 
 /-- The terms the simplification `name` visited and left unchanged in earlier steps. -/
 def NormalNodes.normalFor (record : NormalNodes) (name : String) : PersistentHashSet Expr :=
@@ -369,10 +391,10 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
   let context := contextId localContext
   -- A shelf stays valid while the hypotheses it was made for are unchanged, so a step that only
   -- adds hypotheses keeps it; one that rewrites, renames or clears a hypothesis does not.
-  let kept (shelf : NormalShelf) := contextExtendedBy shelf.locals localContext
-  let currentKept := kept outer.toNormalShelf
+  let kept (shelf : NormalShelf) : TacticM Bool := contextExtendedBy shelf.locals localContext
+  let currentKept ← kept outer.toNormalShelf
   let shelves := (if currentKept then #[outer.toNormalShelf] else #[]) ++
-    outer.others.filter kept
+    (← outer.others.filterM kept)
   -- The same syntax in the same context states the same facts, so a walk elaborates them once;
   -- in a longer context a name may refer to a new hypothesis, so the facts are elaborated again.
   let raw := facts.map (·.raw)
@@ -433,6 +455,7 @@ def steppingDischarge? (condition : Expr) : Simp.SimpM (Option Expr) := do
     return some (← mkOfEqTrue (← simplified.getProof))
   else
     return none
+
 /-- Simplify `target` with `ctx`. When the record is usable, a term the simplification `name`
     left unchanged in an earlier step is returned as it is, and the terms this call visited and
     left unchanged are recorded. -/

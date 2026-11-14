@@ -510,7 +510,8 @@ open Lean Elab Tactic Meta in
 private def equationCandidates (lookup : Expr) : TacticM (Array FVarId) := do
   let record ← getNormalNodes
   let context ← getLCtx
-  let index ← if record.driven && contextKeeps record.equationLocals context then
+  let kept ← if record.driven then contextKeeps record.equationLocals context else pure false
+  let index ← if kept then
       record.equations.extend context
     else ({} : EquationIndex).extend context
   -- The index may still name a hypothesis that a store cleared.

@@ -716,9 +716,9 @@ walk whose instructions read different groups of facts keeps them all. Each set 
 facts as elaborated, a lemma with implicit arguments or universe parameters included, and by the
 hypotheses in scope when it was made. A step that only adds hypotheses, as a call does, keeps the
 set; a step that rewrites, renames or clears a hypothesis, which a snapshot or loop-frame store
-does when it supersedes a fact, a step that fails and the end of the tactic drop it. A fact that does not elaborate makes its step run without the
-record, which `trace.CIL.record` reports. A step run outside these tactics, such as a single
-`cil_checked_step`, keeps none.
+does when it supersedes a fact, a step that fails and the end of the tactic drop it. A fact that
+does not elaborate makes its step run without the record, which `trace.CIL.record` reports. A
+step run outside these tactics, such as a single `cil_checked_step`, keeps none.
 
 The simplifications of a step prove an equation theorem's side conditions from the simp set and
 never from a hypothesis, so a simplification gives the same result whatever else is in scope. A
@@ -728,11 +728,14 @@ step on goals of their own instead of inside `by` blocks of a term, which Lean w
 whole local context for. A lookup tries only the hypotheses whose left side may unify with it at
 reducible transparency: the tree unfolds reducible definitions and local definitions as
 unification does, and reads natural-number arithmetic on either side as a wildcard, since
-unification evaluates it. Each step still
-compares the context with the one the record was made for, so the work of a step is linear in the
+unification evaluates it. Each read of the record checks that the goal's local context is the one
+the record was made for; a goal that keeps that context object, as the goals within a step do,
+passes without reading a hypothesis. A step that adds or clears hypotheses, as a store or a call
+does, compares the whole context a few times, so the work of a step is at most linear in the
 hypotheses in scope with a small constant. The `stepping` suite bounds that constant at 100
 heartbeats per hypothesis per instruction and the cost per instruction between sizes at 1.35
-times.
+times. Comparing contexts costs time but no heartbeats, so the automation tests also count the
+context positions a walk compares and allow at most one whole context per instruction.
 
 A snapshot or loop-frame walk adds the same hypotheses at every store: the store's own seven
 named hypotheses, or its memory, step and frame facts, and the memory variable, with a number of
