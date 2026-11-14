@@ -44,7 +44,11 @@ modified output files.
   reuse it within that phase, so no analysis is cached across method mutation or profile changes.
   Feature evidence uses the same incoming states as instruction selection.
   `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
-  profiles, feature queries and a loop backedge, and checks source/assembly tampering.
+  profiles, feature queries and a loop backedge, and checks source/assembly tampering. It also extracts
+  scalar, generic-layout and static-initialization methods twice into separate directories, in separate
+  processes and in reversed batch and `--assume-initialized` order, and requires every file to match byte
+  for byte. `Tests/MultiAssembly.cs` does the same with pinned references, where only the same
+  `--reference` order yields identical files because the order numbers the pins.
 
 ### Feature evidence
 
