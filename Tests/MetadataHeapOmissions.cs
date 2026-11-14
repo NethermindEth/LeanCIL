@@ -199,7 +199,8 @@ double Check(byte[] bytes, int width, bool proof = true)
         foreach (var (heap, read, offset, heapNumber) in new[]
                  { (strings, "stringBytes", Read(2), 0), (blobs, "blobBytes", Read(2 + width), 1) })
         {
-            var entries = string.Join(", ", heap.Select(entry => $"({entry.Key}, [{string.Join(", ", entry.Value)}])"));
+            var entries = string.Join(", ", heap.Select(entry =>
+                $"({entry.Key}, [{string.Join(", ", entry.Value)}])"));
             var namePrefix = "heap" + proofCount++;
             proofs.AppendLine($"/-- Carried heap entries from a position-only field fixture. -/");
             proofs.AppendLine($"def {namePrefix} : SearchTree (List Nat) := SearchTree.ofSorted [{entries}]");

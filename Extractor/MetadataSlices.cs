@@ -100,7 +100,8 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
     internal static void RequireHeapRank(uint rank, int width, string heap)
     {
         if (rank >= OmittedHeapOffset(width))
-            throw new InvalidDataException($"The carried {heap} rank {rank} reaches its reserved omitted-entry offset.");
+            throw new InvalidDataException(
+                $"The carried {heap} rank {rank} reaches its reserved omitted-entry offset.");
     }
 
     internal static string Entries<TKey>(SortedDictionary<TKey, byte[]> entries) where TKey : notnull =>
