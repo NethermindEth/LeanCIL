@@ -18,35 +18,35 @@ the scan, which costs the table's length per query.
 namespace CIL.Extraction
 
 /-- True when the keys increase strictly and none is below `lower`. -/
-def linkKeysAscend : Nat → List (Nat × Link) → Bool
+def keysAscend {α : Type} : Nat → List (Nat × α) → Bool
   | _, [] => true
-  | lower, (key, _) :: rest => decide (lower ≤ key) && linkKeysAscend (key + 1) rest
+  | lower, (key, _) :: rest => decide (lower ≤ key) && keysAscend (key + 1) rest
 
 /-- Ascending keys are all at least the lower bound. -/
-theorem linkKeysAscend_bound (links : List (Nat × Link)) (lower : Nat)
-    (ascending : linkKeysAscend lower links = true) : ∀ entry ∈ links, lower ≤ entry.1 := by
-  induction links generalizing lower with
+theorem keysAscend_bound {α : Type} (entries : List (Nat × α)) (lower : Nat)
+    (ascending : keysAscend lower entries = true) : ∀ entry ∈ entries, lower ≤ entry.1 := by
+  induction entries generalizing lower with
   | nil => simp
   | cons head rest ih =>
-    simp only [linkKeysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
     intro entry member
     rcases List.mem_cons.mp member with rfl | member
     · exact ascending.1
     · have := ih (head.1 + 1) ascending.2 entry member
       omega
 
-#print axioms linkKeysAscend_bound
+#print axioms keysAscend_bound
 
 /-- The entry at a position of an ascending table is the first entry for its key. -/
 theorem find_entry_of_ascending (links : List (Nat × Link)) (lower : Nat)
-    (ascending : linkKeysAscend lower links = true) (position : Nat) (entry : Nat × Link)
+    (ascending : keysAscend lower links = true) (position : Nat) (entry : Nat × Link)
     (found : links[position]? = some entry) :
     links.find? (fun candidate => candidate.1 == entry.1) = some entry := by
   induction links generalizing lower position with
   | nil => simp at found
   | cons head rest ih =>
     obtain ⟨key, link⟩ := head
-    simp only [linkKeysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
     cases position with
     | zero =>
       simp only [List.getElem?_cons_zero, Option.some.injEq] at found
@@ -54,7 +54,7 @@ theorem find_entry_of_ascending (links : List (Nat × Link)) (lower : Nat)
       exact List.find?_cons_of_pos (Nat.beq_refl key)
     | succ position =>
       simp only [List.getElem?_cons_succ] at found
-      have above := linkKeysAscend_bound rest (key + 1) ascending.2 entry
+      have above := keysAscend_bound rest (key + 1) ascending.2 entry
         (List.mem_of_getElem? found)
       have different : ¬ (key == entry.1) = true := by
         simp only [beq_iff_eq]
@@ -68,7 +68,7 @@ theorem find_entry_of_ascending (links : List (Nat × Link)) (lower : Nat)
 
 /-- The literal `index` holds the entries of the ascending table `links`, in order. -/
 def LinkIndexValid (links : List (Nat × Link)) (index : FlowIndex (Nat × Link)) : Prop :=
-  linkKeysAscend 0 links = true ∧ index = FlowIndex.ofList links
+  keysAscend 0 links = true ∧ index = FlowIndex.ofList links
 
 instance (links : List (Nat × Link)) (index : FlowIndex (Nat × Link)) :
     Decidable (LinkIndexValid links index) :=
@@ -131,18 +131,18 @@ theorem linkLookup_dropBelow (query : Nat) (table : List (Nat × Link)) (later :
 
 /-- Dropping the entries below a query keeps the table ascending from the query. -/
 theorem dropBelow_ascend (query : Nat) (table : List (Nat × Link)) :
-    ∀ lower, linkKeysAscend lower table = true →
-      linkKeysAscend query (dropBelow query table) = true := by
+    ∀ lower, keysAscend lower table = true →
+      keysAscend query (dropBelow query table) = true := by
   induction table with
   | nil => intro _ _; rfl
   | cons head rest ih =>
     obtain ⟨key, link⟩ := head
     intro lower ascending
-    simp only [linkKeysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
     by_cases below : key < query
     · simp only [dropBelow, below, ite_true]
       exact ih (key + 1) ascending.2
-    · simp only [dropBelow, below, ite_false, linkKeysAscend, Bool.and_eq_true,
+    · simp only [dropBelow, below, ite_false, keysAscend, Bool.and_eq_true,
         decide_eq_true_eq]
       exact ⟨by omega, ascending.2⟩
 
@@ -177,7 +177,7 @@ theorem dropBelow_zero (table : List (Nat × Link)) : dropBelow 0 table = table 
 /-- Over an ascending table, the first entry left after dropping below a query answers it as a
     scan of the table would. -/
 theorem readHead_dropBelow (query : Nat) (table : List (Nat × Link)) (lower : Nat)
-    (ascending : linkKeysAscend lower table = true) :
+    (ascending : keysAscend lower table = true) :
     readHead query (dropBelow query table) = linkLookup table query := by
   rw [← linkLookup_dropBelow query table query (Nat.le_refl query)]
   have rest_ascends := dropBelow_ascend query table lower ascending
@@ -186,8 +186,8 @@ theorem readHead_dropBelow (query : Nat) (table : List (Nat × Link)) (lower : N
   | cons entry rest =>
     obtain ⟨key, link⟩ := entry
     rw [remaining] at rest_ascends
-    simp only [linkKeysAscend, Bool.and_eq_true, decide_eq_true_eq] at rest_ascends
-    have bounded := linkKeysAscend_bound rest (key + 1) rest_ascends.2
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at rest_ascends
+    have bounded := keysAscend_bound rest (key + 1) rest_ascends.2
     by_cases hit : key = query
     · subst hit
       have first : (((key, link) :: rest).find? fun entry => entry.1 == key) =
@@ -214,7 +214,7 @@ theorem readHead_dropBelow (query : Nat) (table : List (Nat × Link)) (lower : N
 
 /-- While `table` is what is left of an ascending `full` after dropping below `previous`, the
     walk reads each query as a scan of `full` would, in whatever order the queries come. -/
-theorem linkWalk_eq (full : List (Nat × Link)) (ascending : linkKeysAscend 0 full = true)
+theorem linkWalk_eq (full : List (Nat × Link)) (ascending : keysAscend 0 full = true)
     (queries : List Nat) : ∀ (table : List (Nat × Link)) (previous : Nat),
       table = dropBelow previous full →
         linkWalk full table previous queries = queries.map (linkLookup full) := by
@@ -236,7 +236,7 @@ theorem linkWalk_eq (full : List (Nat × Link)) (ascending : linkKeysAscend 0 fu
 /-- The links an embedding reads for the queries: the walk when the table keys ascend, the scan
     otherwise. -/
 def linkReads (links : List (Nat × Link)) (queries : List Nat) : List (Option Link) :=
-  if linkKeysAscend 0 links then linkWalk links links 0 queries
+  if keysAscend 0 links then linkWalk links links 0 queries
   else queries.map (linkLookup links)
 
 /-- However the table and queries are ordered, the reads are the scans' answers. -/
