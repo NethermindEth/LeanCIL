@@ -146,6 +146,7 @@ static partial class StrictBindingFacts
     {
         var text = new StringBuilder("""
             import StrictBinding.Dump
+            import StrictBinding.Sha256
 
             /-!
             # Strict binding fixture
