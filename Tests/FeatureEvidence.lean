@@ -144,6 +144,14 @@ example : featureOpMatches #[] loopRaw (i 39) (.nop) = false := by decide
 -- Unknown-result operations still have to preserve the rest of the stack.
 example : featureOpMatches #[] branchRaw (i 88) (.add) = true := by decide
 example : featureOpMatches #[] branchRaw (i 88) (.nop) = false := by decide
+-- A Boolean local that is never addressed is eligible for constant facts; its load and store bind
+-- to the plain instructions at its own index, since the slot's kind does the narrowing.
+private def booleanRaw := raw [i 6, i 10] [.atom runtimeScope "System.Boolean"] .void
+example : featureOpMatches #[] booleanRaw (i 6) (.local 0) = true := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 10) (.setLocal 0) = true := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 6) (.local 1) = false := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 10) (.local 0) = false := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 6) (.setLocal 0) = false := by decide +kernel
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/

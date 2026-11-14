@@ -144,7 +144,7 @@ def returnFromStack (narrow : Option NarrowKind) (returns : Bool)
 /-- Executes instruction `op` at `pc`. Binary operands are popped as `b :: a :: rest`, so
     `a` was pushed first. `returns` says whether the method returns a value; `profile`
     decides feature tests and intrinsic availability. -/
-def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (frame : Nat)
+def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
   match op, stack with
@@ -154,18 +154,11 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
   | .ldc_i8 w, _ => return .next (pc + 1) (.i64 w :: stack) memory
   | .dup, v :: rest => return .next (pc + 1) (v :: v :: rest) memory
   | .pop, _ :: rest => return .next (pc + 1) rest memory
-  -- Arguments and locals; a read must be initialized.
+  -- Arguments; a read must be initialized.
   | .arg i narrow, _ =>
     let value ← args[i]?
     let value ← narrowValue narrow value
     if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
-  | .local i narrow, _ =>
-    let value ← memory (.local frame i)
-    let value ← narrowValue narrow value
-    if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
-  | .localAddr i, _ => return .next (pc + 1) (.ref (.local frame i) :: stack) memory
-  | .setLocal i narrow, v :: rest =>
-    return .next (pc + 1) rest (write memory (.local frame i) (← narrowValue narrow v))
   -- Arithmetic, through `unary` and `binary`.
   | .neg, v :: rest | .not, v :: rest
   | .conv_ovf _, v :: rest | .conv_ovf_un _, v :: rest

@@ -97,7 +97,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
       if stack.length < argc then Except.error ExecutionFault.invalidState else do
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false pc [] 0 values (fun _ => none) profile |
+          CIL.step op false pc [] values (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue memory)
         pure (FrameAction.next target (result ++ stack.drop argc) (frame.appendLocals extra) memory)
@@ -110,7 +110,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
         if stack.length < argc then Except.error ExecutionFault.invalidState else do
           let values ← scalars (stack.take argc)
           let some (.next target result _) :=
-            CIL.step op false pc [] 0 values (fun _ => none) profile |
+            CIL.step op false pc [] values (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
           let result ← (result.map Value.scalar).mapM (checkedValue memory)
           pure (FrameAction.next target (result ++ stack.drop argc) frame memory)
@@ -473,8 +473,7 @@ theorem step_appendLocals_arg (index : Nat) (narrow : Option NarrowKind) :
 #print axioms step_appendLocals_arg
 
 /-- `local` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_local (index : Nat) (narrow : Option NarrowKind) :
-    StepAppendLocals (.local index narrow) := by
+theorem step_appendLocals_local (index : Nat) : StepAppendLocals (.local index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   cases found : frame.locals[index]? with
@@ -507,8 +506,7 @@ theorem step_appendLocals_localAddr (index : Nat) :
 #print axioms step_appendLocals_localAddr
 
 /-- `setLocal` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_setLocal (index : Nat) (narrow : Option NarrowKind) :
-    StepAppendLocals (.setLocal index narrow) := by
+theorem step_appendLocals_setLocal (index : Nat) : StepAppendLocals (.setLocal index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   cases found : frame.locals[index]? with
@@ -1280,14 +1278,14 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_setAggregateFieldAt offset size
     case arg index narrow =>
       exact step_appendLocals_arg index narrow
-    case «local» index narrow =>
-      exact step_appendLocals_local index narrow
+    case «local» index =>
+      exact step_appendLocals_local index
     case initializeSpanLocal index constructor =>
       exact step_appendLocals_initializeSpanLocal index constructor
     case localAddr index =>
       exact step_appendLocals_localAddr index
-    case setLocal index narrow =>
-      exact step_appendLocals_setLocal index narrow
+    case setLocal index =>
+      exact step_appendLocals_setLocal index
     case ldc_i4 value =>
       exact step_appendLocals_ldc_i4 value
     case ldc_i8 value =>

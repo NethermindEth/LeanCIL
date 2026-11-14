@@ -153,9 +153,9 @@ inductive Instruction where
   | setAggregateFieldAt (offset size : Nat)
   -- Arguments and locals.
   | arg (index : Nat) (narrow : Option NarrowKind := none)
-  | local (index : Nat) (narrow : Option NarrowKind := none)
+  | local (index : Nat)
   | localAddr (index : Nat)
-  | setLocal (index : Nat) (narrow : Option NarrowKind := none)
+  | setLocal (index : Nat)
   | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
   /-- Transfer to a managed method after retiring the current activation. -/
   | tailCall (callee argc : Nat)

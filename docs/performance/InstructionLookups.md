@@ -83,6 +83,12 @@ and 1.20 for the closed argument storage, whose set lookups cost the logarithm o
 Checks that walk the locals list or the pointer local list at each site measure 1.33, 1.54, 1.62
 and 2.33.
 
+The suite also checks the kernel heartbeats of `FeatureFlowValid` on generated bodies of 256, 1,024
+and 4,096 `ldloc.s` and `stloc.s` instructions that cycle over four `int32` locals, less the
+heartbeats of stating the same certificate. It fails when the cost per access at 1,024 or 4,096
+exceeds 1.15 times the cost at 256. A local load or store is checked by its opcode and index, and
+the cost per access measures 1.00 at 1,024 and 1.05 at 4,096.
+
 The suite embeds a hand-written body built with `Method.withCode`, one call per segment, into an
 extraction with a dead block after each return, at 512 and 2,048 calls, and reads the kernel
 heartbeats to recheck the lemma `cil_embed` states. It fails when the heartbeats per call grow

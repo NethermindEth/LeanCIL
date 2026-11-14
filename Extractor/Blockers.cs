@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -76,8 +75,6 @@ internal static class Blockers
         internal string[] TypeArguments { get; init; } = [];
     }
 
-    static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-
     static string Option(string[] args, ref int index)
     {
         var name = args[index];
@@ -138,15 +135,19 @@ internal static class Blockers
         var initializedTypes = root.TryGetProperty("initializedTypes", out var types)
             ? new SortedSet<string>(types.Deserialize<string[]>() ?? [], StringComparer.Ordinal) : new SortedSet<string>(StringComparer.Ordinal);
 
-        var assembly = File.ReadAllBytes(assemblyPath);
-        VectorSignatures.Validate(assembly);
+        // Each admitted entry is extracted again; the batch reads and hashes the image, PDB and extractor once.
+        var batch = new Program.ExtractionBatch();
+        var image = batch.ReadAssembly(assemblyPath);
+        image.ValidateSignatures();
+        var assembly = image.Bytes;
         string identity, symbols;
         Guid mvid;
         using (var probe = ModuleDefinition.ReadModule(new MemoryStream(assembly)))
         {
             identity = probe.Assembly?.Name.FullName ?? throw new InvalidDataException("Input must contain assembly metadata.");
             mvid = probe.Mvid;
-            symbols = Symbols.Read(probe, assemblyPath, out _) is { } origin ? origin == "embedded" ? "embedded portable PDB" : "portable PDB " + origin : "none";
+            symbols = Symbols.Read(probe, assemblyPath, out _, batch.ReadPdb) is { } origin
+                ? origin == "embedded" ? "embedded portable PDB" : "portable PDB " + origin : "none";
         }
 
         var findings = new Dictionary<string, Finding>(StringComparer.Ordinal);
@@ -154,10 +155,10 @@ internal static class Blockers
         // One module serves every entry, so per-method analyses are computed once; each entry's
         // operand rewrites are undone before the next entry is validated.
         var references = referencePaths.Distinct(StringComparer.Ordinal).ToArray();
-        using var pinned = new PinnedAssemblies(assembly, Hash(assembly),
-            references.Select(path => new PinnedAssemblies.Source(path)));
+        using var pinned = new PinnedAssemblies(assembly, image.Hash,
+            references.Select(path => new PinnedAssemblies.Source(path)), batch.ReadAssembly);
         var module = pinned.Selected;
-        Symbols.Read(module, assemblyPath, out _);
+        Symbols.Read(module, assemblyPath, out _, batch.ReadPdb);
         foreach (var entry in entries.EnumerateArray())
         {
             var signature = entry.ValueKind == JsonValueKind.Object ? Text(entry, "signature") : null;
@@ -224,8 +225,8 @@ internal static class Blockers
                     rewrites[index].Instruction.Operand = rewrites[index].Operand;
             }
             // `admitted` means exactly that `extract` succeeds, so an entry without blockers is extracted.
-            if (blocked.Count == 0 && Extract(assemblyPath, signature, profileName, manifestDirectory, expectedAssembly,
-                    typeArguments, initializedTypes, references, imports) is { } rejected)
+            if (blocked.Count == 0 && Extract(batch, assemblyPath, signature, profileName, manifestDirectory,
+                    expectedAssembly, typeArguments, initializedTypes, references, imports) is { } rejected)
                 blocked.Add(new(methods[0], null, rejected, [methods[0]]));
             if (blocked.Count == 0)
             {
@@ -261,6 +262,7 @@ internal static class Blockers
             .ToDictionary(pair => pair.finding, pair => pair.index);
         foreach (var outcome in outcomes) outcome.Findings.Sort((left, right) => ranks[left].CompareTo(ranks[right]));
 
+        batch.RequireUnchanged();
         var report = JsonSerializer.Serialize(new
         {
             schema = 1,
@@ -268,8 +270,8 @@ internal static class Blockers
             assemblyPath = Path.GetFullPath(assemblyPath),
             assemblyIdentity = identity,
             mvid,
-            assemblySha256 = Hash(assembly),
-            extractorSha256 = Hash(File.ReadAllBytes(typeof(LeanEmitter).Assembly.Location)),
+            assemblySha256 = image.Hash,
+            extractorSha256 = batch.ExtractorHash,
             symbols,
             initializedTypes,
             counts = new
@@ -298,9 +300,9 @@ internal static class Blockers
     }
 
     // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any.
-    static Exception? Extract(string assemblyPath, string signature, string profileName, string manifestDirectory,
-        string? expectedAssembly, string[] typeArguments, IEnumerable<string> initializedTypes,
-        IEnumerable<string> references, ImportOptions imports)
+    static Exception? Extract(Program.ExtractionBatch batch, string assemblyPath, string signature, string profileName,
+        string manifestDirectory, string? expectedAssembly, string[] typeArguments,
+        IEnumerable<string> initializedTypes, IEnumerable<string> references, ImportOptions imports)
     {
         var output = Path.Combine(Path.GetTempPath(), "leancil-blockers-" + Guid.NewGuid().ToString("N"));
         string profile = profileName.StartsWith('@') ? "@" + Path.GetFullPath(profileName[1..], manifestDirectory) :
@@ -311,7 +313,7 @@ internal static class Blockers
                 .. expectedAssembly is null ? Array.Empty<string>() : ["--assembly", expectedAssembly],
                 .. typeArguments.SelectMany(argument => new[] { "--type-argument", argument }),
                 .. initializedTypes.SelectMany(type => new[] { "--assume-initialized", type }),
-                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()]);
+                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()], batch);
             return null;
         }
         catch (Exception error) { return error; }

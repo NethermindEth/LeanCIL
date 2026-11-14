@@ -105,7 +105,10 @@ internal static class MetadataValidation
             MethodSpecialization.SignatureType(reference.FieldType) !=
                 MethodSpecialization.SignatureType(definition.FieldType))
             throw new InvalidDataException("Mismatched aggregate field signature: " + reference.FullName);
-        return Fields(reference.DeclaringType).Single(field => field.Definition == definition);
+        // The owner and the field resolve separately and must reach one definition, or the field is not the owner's.
+        return Array.Find(Fields(reference.DeclaringType), field => field.Definition == definition) ??
+            throw new InvalidDataException("Unresolved aggregate field: " + reference.FullName +
+                " is not an instance field of its declaring type as resolved");
     }
 
     // A read-only validation/emission phase owns its context; metadata rewrites require a new one.
