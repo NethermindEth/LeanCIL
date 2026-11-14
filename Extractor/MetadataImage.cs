@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Reflection.Metadata;
@@ -14,6 +15,7 @@ internal sealed class MetadataImage
 {
     readonly ImmutableArray<byte> bytes;
     byte[]? tableHeader;
+    string? decodedHeader;
 
     internal MetadataImage(PEReader image)
     {
@@ -192,11 +194,7 @@ internal sealed class MetadataImage
         var table = (TableIndex)(token >> 24);
         var size = Reader.GetTableRowSize(table);
         var at = Reader.GetTableMetadataOffset(table) + ((int)(token & 0xFFFFFF) - 1) * size;
-        var row = bytes.AsSpan(at, size).ToArray();
-        // A MethodDef row's first column is the body's address, which moves whenever an earlier body changes
-        // size; the carried row has it zeroed so that no method's evidence depends on another method's body.
-        if (table == TableIndex.MethodDef) row.AsSpan(0, sizeof(uint)).Clear();
-        return row;
+        return bytes.AsSpan(at, size).ToArray();
     }
 
     /// <summary>The first <c>Field</c> row of a <c>TypeDef</c> row: its <c>FieldList</c> column.</summary>
@@ -253,10 +251,20 @@ internal sealed class MetadataImage
     /// </summary>
     internal string DecodedHeader()
     {
-        var counts = Enumerable.Range(0, 64).Where(table => Count(table) > 0)
-            .Select(table => string.Create(CultureInfo.InvariantCulture, $"({table}, {Count(table)})"));
-        return string.Create(CultureInfo.InvariantCulture,
-            $".ofCounts {CachedTableHeader()[HeapSizesOffset]} [{string.Join(", ", counts)}]");
+        if (decodedHeader is not null) return decodedHeader;
+        var header = CachedTableHeader();
+        ulong valid = BinaryPrimitives.ReadUInt64LittleEndian(header.AsSpan(8));
+        var counts = new List<string>();
+        int countOffset = 24;
+        for (int table = 0; table < 64; table++)
+        {
+            if ((valid & (1UL << table)) == 0) continue;
+            uint count = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(countOffset));
+            counts.Add(string.Create(CultureInfo.InvariantCulture, $"({table}, {count})"));
+            countOffset += sizeof(uint);
+        }
+        return decodedHeader = string.Create(CultureInfo.InvariantCulture,
+            $".ofCounts {header[HeapSizesOffset]} [{string.Join(", ", counts)}]");
     }
 
     // The `HeapSizes` byte's offset in the table stream header (II.24.2.6).
@@ -277,15 +285,55 @@ internal sealed class MetadataImage
         return (CachedTableHeader()[HeapSizesOffset] & mask) == 0 ? 2 : 4;
     }
 
-    byte[] CachedTableHeader()
+    byte[] CachedTableHeader() => tableHeader ??= ReadTableHeader(bytes.AsSpan());
+
+    /// <summary>The original table header located by the metadata root's stream directory.</summary>
+    internal static byte[] ReadTableHeader(ReadOnlySpan<byte> metadata)
     {
-        if (tableHeader is not null) return tableHeader;
-        var tables = Enumerable.Range(0, 64).Where(table => Count(table) > 0).ToArray();
-        var length = 24 + 4 * tables.Length;
-        var start = tables.Min(table => Reader.GetTableMetadataOffset((TableIndex)table)) - length;
-        var header = bytes.AsSpan(start, length).ToArray();
-        if (header[4] != 2 || header[5] != 0)
-            throw new InvalidDataException("The metadata table stream header was not found where its tables imply.");
-        return tableHeader = header;
+        RequireRange(metadata, 0, 16);
+        if (BinaryPrimitives.ReadUInt32LittleEndian(metadata) != 0x424A5342)
+            throw new BadImageFormatException("Invalid metadata root signature");
+        uint versionLength = BinaryPrimitives.ReadUInt32LittleEndian(metadata[12..]);
+        if (versionLength > int.MaxValue - 16)
+            throw new BadImageFormatException("Metadata version length is too large");
+        int directory = 16 + (int)versionLength;
+        RequireRange(metadata, directory, 4);
+        int streamCount = BinaryPrimitives.ReadUInt16LittleEndian(metadata[(directory + 2)..]);
+        directory += 4;
+        byte[]? found = null;
+        for (int stream = 0; stream < streamCount; stream++)
+        {
+            RequireRange(metadata, directory, 8);
+            uint offset = BinaryPrimitives.ReadUInt32LittleEndian(metadata[directory..]);
+            uint size = BinaryPrimitives.ReadUInt32LittleEndian(metadata[(directory + 4)..]);
+            directory += 8;
+            int nameLength = metadata[directory..].IndexOf((byte)0);
+            if (nameLength < 0 || nameLength >= 32)
+                throw new BadImageFormatException("Invalid metadata stream name");
+            var name = metadata.Slice(directory, nameLength);
+            int paddedLength = (nameLength + 4) & ~3;
+            RequireRange(metadata, directory, paddedLength);
+            directory += paddedLength;
+            if (!name.SequenceEqual("#~"u8) && !name.SequenceEqual("#-"u8)) continue;
+            if (found is not null) throw new BadImageFormatException("Duplicate metadata table stream");
+            if (offset > int.MaxValue || size > int.MaxValue)
+                throw new BadImageFormatException("Metadata table stream is too large");
+            RequireRange(metadata, (int)offset, (int)size);
+            var tableStream = metadata.Slice((int)offset, (int)size);
+            RequireRange(tableStream, 0, 24);
+            if (tableStream[4] != 2 || tableStream[5] != 0 || tableStream[HeapSizesOffset] >= 8)
+                throw new BadImageFormatException("Unsupported metadata table stream header");
+            ulong valid = BinaryPrimitives.ReadUInt64LittleEndian(tableStream[8..]);
+            int length = 24 + sizeof(uint) * System.Numerics.BitOperations.PopCount(valid);
+            RequireRange(tableStream, 0, length);
+            found = tableStream[..length].ToArray();
+        }
+        return found ?? throw new BadImageFormatException("Missing metadata table stream");
+    }
+
+    static void RequireRange(ReadOnlySpan<byte> source, int offset, int length)
+    {
+        if (offset < 0 || length < 0 || offset > source.Length || length > source.Length - offset)
+            throw new BadImageFormatException("Metadata header crosses its container boundary");
     }
 }

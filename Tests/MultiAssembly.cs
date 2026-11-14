@@ -21,6 +21,7 @@ using System.Text.Json.Nodes;
 // Two SDK-built assemblies: App calls into Lib, and Lib is passed as a pinned `--reference`.
 MultiAssemblyFixture fixture = new("MultiAssembly");
 Run(["dotnet", "run", "--file", "Tests/MetadataAssemblyIndexes.cs"]);
+Run(["dotnet", "run", "--file", "Tests/ExactMetadataBytes.cs"]);
 string root = fixture.Root;
 string[] cli = fixture.Cli;
 const string libName = "MultiFixture.Lib";

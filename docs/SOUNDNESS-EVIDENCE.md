@@ -75,9 +75,8 @@ assembly image: System.Reflection.Metadata locates the body in the PE image, and
 stays trusted. The opt-in [deep verification](CLI.md#deep-verification) reconfirms it in the
 kernel for assemblies whose digests you state: each body's bytes must be the bytes at the file
 offset that the section table gives for the RVA in the image's own MethodDef row for that method.
-The carried rows have that RVA column zeroed, so the audit's comparison of a carried row with the
-image's masks it. What the tokens, the locals and the method definition mean is checked against the
-metadata rows the body carries, as the next section describes.
+The carried rows retain the original RVA column. What the tokens, the locals and the method
+definition mean is checked against the metadata rows the body carries, as the next section describes.
 
 A closed generic instantiation carries the bytes of its open definition, in its own `method{n}Bytes`,
 and its own metadata slice, so its component names no other method. A token used at several sites
@@ -114,9 +113,10 @@ and blobs stay kernel decisions. The equations cover the owner and base class na
 (`MethodNames.Spell`), the method's own assembly against its pin, and each assembly's identity; the method's
 signature string is equated the same way.
 A method's evidence is a function of the method and its assemblies and of nothing else in the extraction,
-so a verified method's component is reused by every extraction that holds the method. The `RVA` column of every carried `MethodDef` row is zero: where a
-body sits in the image moves whenever an earlier body changes length, so no method's evidence may depend
-on it. The same holds for `#Strings` and `#Blob` offsets, which move when an earlier name changes length:
+so a verified method's component is reusable across extractions from the same assembly image.
+Each carried `MethodDef` row retains its original `RVA`: moving a body, including by changing an
+earlier body's length, changes the carried evidence.
+The `#Strings` and `#Blob` offsets also move when an earlier name changes length:
 the extractor renumbers them, in the rows and the heap keys, to the rank of each carried entry among the
 carried entries by bytes (the image's own entry order is a hash or suffix sort that one changed name can
 reshuffle), and Lean reads a heap entry only through the offset a row names. (`#US` offsets are named by the body's own `ldstr`
