@@ -31,11 +31,12 @@ context extends without changing a hypothesis, and drops the others, so a driver
 renames or clears a hypothesis, as a snapshot or loop-frame store that clears the facts it
 supersedes does, cannot reach a stale record while a step that only adds hypotheses, as a call
 does, keeps it. The equation index outlives a cleared hypothesis and skips its entries. A step
-in a longer context elaborates its facts
-again, since a name may now refer to a new hypothesis. The record lives in the environment, so a
-backtracked step forgets what it recorded. `withNormalRun` opens it for one driver and restores
-the earlier record when the driver ends, however it ends, `withNormalNodes` drops it when a step
-fails, and a step outside a driver keeps none. `cil.stepping.record` turns the record off.
+in a longer context elaborates its facts again, since a name may now refer to a new hypothesis.
+The record lives in the environment, so a backtracked step forgets what it recorded.
+`withNormalRun` opens it for one driver and restores the earlier record when the driver ends,
+however it ends, `withNormalNodes` drops it when a step fails, and a step outside a driver keeps
+none. `cil.stepping.record` turns the record off; a lookup without an equation index scans the
+local context instead.
 -/
 
 namespace CIL.Safety
@@ -97,11 +98,144 @@ def contextExtendedBy (earlier current : LocalContext) : CoreM Bool :=
 def contextKeeps (earlier current : LocalContext) : CoreM Bool :=
   compareContexts true earlier current
 
+/-- The left side of the equation `type` states, under any quantifiers, whose variables stay
+    loose. -/
+def equationLeft? : Expr → Option Expr
+  | .forallE _ _ body _ => equationLeft? body
+  | .mdata _ body => equationLeft? body
+  | type => type.eq?.map fun (_, lhs, _) => lhs.consumeMData
+
 /-- The head of the left side of the equation `type` states, under any quantifiers. -/
-def equationHead? : Expr → Option Expr
-  | .forallE _ _ body _ => equationHead? body
-  | .mdata _ body => equationHead? body
-  | type => type.eq?.map fun (_, lhs, _) => lhs.consumeMData.getAppFn
+def equationHead? (type : Expr) : Option Expr :=
+  (equationLeft? type).map (·.getAppFn)
+
+/-- `equationHead?` of `type` with its metavariables instantiated, instantiating only those on
+    the way to the head, so a lookup that reads every hypothesis does not rebuild their types. -/
+partial def instantiatedEquationHead? (type : Expr) : MetaM (Option Expr) := do
+  match type with
+  | .forallE _ _ body _ | .mdata _ body => instantiatedEquationHead? body
+  | _ =>
+    if type.getAppFn.isMVar then return equationHead? (← instantiateMVars type)
+    let some (_, left, _) := type.eq? | return none
+    let head := left.consumeMData.getAppFn
+    if head.isMVar then return some (← instantiateMVars left).consumeMData.getAppFn
+    return some head
+
+/-- Whether `head` is a definition that reducible unfolding replaces at the head of a term. -/
+def headUnfolds (head : Expr) : CoreM Bool := do
+  let .const name _ := head | return false
+  if ← isReducible name then return !(← isProjectionFn name)
+  return false
+
+/-- Whether a hypothesis whose left side has head `found` may state a lookup whose left side has
+    head `wanted`, where `wantedUnfolds` is `headUnfolds wanted`: unless both are constants,
+    other ones, and neither is a definition that reducible unfolding replaces. -/
+def headsMayMeet (wanted : Expr) (wantedUnfolds : Bool) (found : Expr) : CoreM Bool := do
+  let (.const wantedName _, .const foundName _) := (wanted, found) | return true
+  if wantedName == foundName || wantedUnfolds then return true
+  headUnfolds found
+
+/-- The functions on natural numbers that unification evaluates on literals. -/
+def naturalEvaluations : List Name :=
+  [``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.div, ``Nat.mod, ``Nat.pow, ``Nat.succ, ``Nat.pred]
+
+/-- The operator classes whose instances on natural numbers unification evaluates on literals. -/
+def naturalOperators : List Name :=
+  [``HAdd.hAdd, ``HSub.hSub, ``HMul.hMul, ``HDiv.hDiv, ``HMod.hMod, ``HPow.hPow, ``Add.add,
+    ``Sub.sub, ``Mul.mul, ``Div.div, ``Mod.mod, ``Pow.pow, ``NatPow.pow, ``HomogeneousPow.pow]
+
+/-- Whether `type` is `Nat` once reduced, as the tree decides it for offsets. -/
+def naturalType (type : Expr) : MetaM Bool :=
+  return (← whnf type).isConstOf ``Nat
+
+/-- Whether `term` is headed by an arithmetic function or operator that unification may
+    evaluate. -/
+def arithmeticHead (term : Expr) : Bool :=
+  match term.getAppFn with
+  | .const name _ => naturalEvaluations.contains name || naturalOperators.contains name
+  | _ => false
+
+/-- `term` with each natural-number arithmetic on literals replaced by its value, which
+    unification equates it with, so that the tree keys it as that literal. -/
+def evaluateNaturals (term : Expr) : MetaM Expr := do
+  unless (term.find? arithmeticHead).isSome do return term
+  Meta.transform term (pre := fun part => do
+    unless arithmeticHead part do return .continue
+    let .const name _ := part.getAppFn | return .continue
+    let onNatural ← if naturalOperators.contains name && part.getAppNumArgs > 0 then
+        naturalType (part.getArg! 0)
+      else pure true
+    unless onNatural do return .continue
+    match ← (evalNat part).run with
+    | some value => return .done (mkNatLit value)
+    | none => return .continue)
+
+/-- Whether the tree keys `term` as a natural-number literal. -/
+partial def treeNumeral (term : Expr) : Bool :=
+  term.isRawNatLit || term.isConstOf ``Nat.zero ||
+    (term.isAppOfArity ``Nat.succ 1 && treeNumeral term.appArg!) ||
+    (term.isAppOfArity ``OfNat.ofNat 3 && treeNumeral (term.getArg! 1))
+
+/-- Whether the tree keys `term`, below the root, as a wildcard: a successor, or a sum on natural
+    numbers whose last operand is a numeral. -/
+def treeOffset (term : Expr) : MetaM Bool := do
+  if term.isAppOfArity ``Nat.succ 1 then return true
+  if term.isAppOfArity ``Nat.add 2 then return treeNumeral term.appArg!
+  if term.isAppOfArity ``Add.add 4 then
+    return treeNumeral term.appArg! && (← naturalType (term.getArg! 0))
+  if term.isAppOfArity ``HAdd.hAdd 6 then
+    return treeNumeral term.appArg! && (← naturalType (term.getArg! 1))
+  return false
+
+/-- Whether unification at reducible transparency, which `cil_lookup_assumption` uses, can equate
+    `term` only with terms whose discrimination-tree keys match its own, where `indexed` says
+    whether the tree keys `term` as an entry or as a lookup. It reads `term` as the tree does,
+    after the same reducible unfolding of let variables and definitions, and fails at what
+    unification decides beyond the keys: natural-number arithmetic it evaluates, except a sum the
+    tree keys as a wildcard in an entry, a structure constructor it matches against projections
+    (structure eta), and a value of a type with one value. Instance arguments and proofs, which
+    the tree does not key, are not read. -/
+partial def keyedExactly (indexed root : Bool) (term : Expr) : MetaM Bool := withReducible do
+  let term ← DiscrTree.reduceDT term root
+  unless root do
+    if treeNumeral term then return true
+    if indexed then if ← treeOffset term then return true
+  let type ← inferType term
+  -- The tree does not key a proof below the root, and unification does not compare proofs.
+  if !root then if ← isProp type then return true
+  let oneValue ← matchConstNonRecStructure (← whnf type).getAppFn
+    (fun _ => pure false) fun induct _ constructor =>
+      return constructor.numFields == 0 && (← useEtaStruct induct.name)
+  if oneValue then return false
+  let function := term.getAppFn
+  if let .const name _ := function then
+    if naturalEvaluations.contains name then return false
+    if naturalOperators.contains name && term.getAppNumArgs > 0 then
+      if ← naturalType (term.getArg! 0) then return false
+    if let some (.ctorInfo constructor) := (← getEnv).find? name then
+      if isNonRecStructure (← getEnv) constructor.induct then return false
+  match function with
+  | .proj _ _ projected => unless ← keyedExactly indexed false projected do return false
+  | .forallE _ domain _ _ => return ← keyedExactly indexed false domain
+  | _ => pure ()
+  let arguments := term.getAppArgs
+  let parameters := (← getFunInfoNArgs function arguments.size).paramInfo
+  for position in [:arguments.size] do
+    let argument := arguments[position]!
+    if parameters[position]?.any (·.isInstance) then continue
+    unless ← keyedExactly indexed false argument do return false
+  return true
+
+/-- An equation hypothesis: its position in the context, its name, and the head of its left
+    side. -/
+structure EquationEntry where
+  /-- Its position in the local context. -/
+  position : Nat
+  /-- The hypothesis. -/
+  hypothesis : FVarId
+  /-- The head of its left side, which `headsMayMeet` compares. -/
+  head : Expr
+  deriving Inhabited
 
 /-- The hypotheses of a local context that state an equation, indexed by their left sides so that
     a lookup reads only those that may unify with it at reducible transparency, as
@@ -110,36 +244,20 @@ def equationHead? : Expr → Option Expr
 structure EquationIndex where
   /-- How many declarations of the context it covers. -/
   covered : Nat := 0
-  /-- Every equation hypothesis, with its position in the context. -/
-  all : Array (Nat × FVarId) := #[]
-  /-- The equation hypotheses by the discrimination-tree keys of their left sides, which tell
-      apart two terms that differ at a constant, a literal or a variable that reducible
-      unfolding does not change. -/
+  /-- Every equation hypothesis, in context order. -/
+  all : Array EquationEntry := #[]
+  /-- The equation hypotheses whose left sides `keyedExactly` accepts, by their discrimination-tree
+      keys. -/
   tree : DiscrTree (Nat × FVarId) := {}
-  /-- The equation hypotheses whose left side the tree cannot key, which every lookup reads. -/
-  unkeyed : Array (Nat × FVarId) := #[]
+  /-- The other equation hypotheses, which a lookup reads by the heads of their left sides. -/
+  unkeyed : Array EquationEntry := #[]
 
 instance : Inhabited EquationIndex := ⟨{}⟩
 
-/-- Whether `term` is arithmetic on natural numbers, which unification evaluates, so that
-    `2 + 1`, `Nat.add 2 1` and `3` are equal although the tree keys them apart. -/
-def naturalArithmetic (term : Expr) : Bool :=
-  let onNatural := term.getAppNumArgs > 0 && (term.getArg! 0).isConstOf ``Nat
-  ([``HAdd.hAdd, ``HSub.hSub, ``HMul.hMul, ``HDiv.hDiv, ``HMod.hMod, ``HPow.hPow].any
-      (term.isAppOfArity · 6) && onNatural) ||
-    ([``Nat.add, ``Nat.sub, ``Nat.mul, ``Nat.div, ``Nat.mod, ``Nat.pow].any
-      (term.isAppOfArity · 2)) ||
-    term.isAppOfArity ``Nat.succ 1 || term.isAppOfArity ``Nat.pred 1
-
-/-- `term` with its natural-number arithmetic replaced by a metavariable, which the tree keys as
-    matching anything; both the indexed left sides and the lookups are read this way. The tree
-    unfolds local definitions itself. -/
-def wildcardArithmetic (term : Expr) : MetaM Expr := do
-  let wildcard ← mkFreshExprMVar (mkConst ``Nat)
-  return term.replace fun part => if naturalArithmetic part then some wildcard else none
-
 /-- The index extended to the hypotheses of `context` that it does not cover. A quantified
-    variable of a hypothesis becomes a metavariable, which the tree keys as matching anything. -/
+    variable of a hypothesis becomes a metavariable, which the tree keys as matching anything; a
+    metavariable the hypothesis itself holds may be assigned later, so that hypothesis is
+    unkeyed. -/
 def EquationIndex.extend (index : EquationIndex) (context : LocalContext) :
     MetaM EquationIndex := do
   if index.covered == context.numIndices then return index
@@ -149,14 +267,16 @@ def EquationIndex.extend (index : EquationIndex) (context : LocalContext) :
     let some declaration := context.decls[position]! | continue
     if declaration.isImplementationDetail then continue
     let type ← instantiateMVars declaration.type
-    unless (equationHead? type).isSome do continue
-    let entry := (declaration.index, declaration.fvarId)
+    let some left := equationLeft? type | continue
+    let entry : EquationEntry := ⟨declaration.index, declaration.fvarId, left.getAppFn⟩
     index := { index with all := index.all.push entry }
-    -- At the caller's depth a metavariable left in a hypothesis is keyed as a wildcard.
-    let keyed? ← withoutModifyingState do
+    let keyed? ← if left.hasExprMVar then pure none else withoutModifyingState do
       let (_, _, body) ← forallMetaTelescope type
       let some (_, left, _) := body.consumeMData.eq? | return none
-      try return some (← index.tree.insert (← wildcardArithmetic left) entry)
+      try
+        let left ← evaluateNaturals left
+        unless ← keyedExactly true true left do return none
+        return some (← index.tree.insert left (entry.position, entry.hypothesis))
       catch _ => return none
     index := match keyed? with
       | some tree => { index with tree }
@@ -168,20 +288,31 @@ def EquationIndex.extend (index : EquationIndex) (context : LocalContext) :
     cannot drop an entry, so a walk would otherwise read every cleared one at each lookup. -/
 def EquationIndex.prune (index : EquationIndex) (context : LocalContext) :
     MetaM EquationIndex := do
-  let live := index.all.foldl (init := 0) fun count (_, free) =>
-    if context.contains free then count + 1 else count
+  let live := index.all.foldl (init := 0) fun count entry =>
+    if context.contains entry.hypothesis then count + 1 else count
   if 2 * live >= index.all.size then return index
   ({} : EquationIndex).extend context
 
-/-- The equation hypotheses that may state the lookup whose left side is `lookup`, in context
-    order; all of them when the tree cannot read the lookup. -/
-def EquationIndex.candidates (index : EquationIndex) (lookup : Expr) : MetaM (Array FVarId) := do
-  -- At the caller's depth a metavariable of the lookup is a wildcard: unification may assign it.
+/-- The equation hypotheses that may state the goal `goal`, in context order: those the tree finds
+    for its left side with the unkeyed ones whose head `headsMayMeet` the goal's, or every one
+    whose head does when `keyedExactly` rejects the left side or the goal is quantified. -/
+def EquationIndex.candidates (index : EquationIndex) (goal : Expr) : MetaM (Array FVarId) := do
+  let some wanted := equationHead? goal | return #[]
+  let wantedUnfolds ← headUnfolds wanted
+  let meeting (entries : Array EquationEntry) : MetaM (Array (Nat × FVarId)) :=
+    entries.filterMapM fun entry => do
+      if ← headsMayMeet wanted wantedUnfolds entry.head then
+        return some (entry.position, entry.hypothesis)
+      return none
   let keyed? ← withoutModifyingState do
-    try return some (← index.tree.getUnify (← wildcardArithmetic lookup))
+    let some (_, lookup, _) := goal.consumeMData.eq? | return none
+    try
+      let lookup ← evaluateNaturals lookup
+      unless ← keyedExactly false true lookup do return none
+      return some (← index.tree.getUnify lookup)
     catch _ => return none
-  let some keyed := keyed? | return index.all.map (·.2)
-  return ((keyed ++ index.unkeyed).qsort (·.1 < ·.1)).map (·.2)
+  let some keyed := keyed? | return (← meeting index.all).map (·.2)
+  return ((keyed ++ (← meeting index.unkeyed)).qsort (·.1 < ·.1)).map (·.2)
 
 /-- What a stepping run has established for one local context and one set of facts. -/
 structure NormalShelf where
@@ -217,8 +348,8 @@ structure NormalNodes extends NormalShelf where
   others : Array NormalShelf := #[]
   /-- The equation hypotheses of `equationLocals`, which every shelf shares. -/
   equations : EquationIndex := {}
-  /-- The local context `equations` was built for. -/
-  equationLocals : LocalContext := {}
+  /-- The local context `equations` was built for; none until a step of the driver builds it. -/
+  equationLocals : Option LocalContext := none
 
 instance : Inhabited NormalNodes := ⟨{}⟩
 
@@ -251,7 +382,9 @@ def NormalNodes.usable (record : NormalNodes) (context : LocalContext) : CoreM B
     has every hypothesis it indexed unchanged, and built again otherwise. -/
 def NormalNodes.equationsFor (record : NormalNodes) (context : LocalContext) :
     MetaM EquationIndex := do
-  let known := if ← contextKeeps record.equationLocals context then record.equations else {}
+  let known ← match record.equationLocals with
+    | some locals => pure (if ← contextKeeps locals context then record.equations else {})
+    | none => pure {}
   (← known.prune context).extend context
 
 /-- Whether stepping drivers use the record. Turning it off makes every simplification visit the
@@ -386,7 +519,7 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
   let equations ← outer.equationsFor localContext
   if outer.steps < cil.stepping.warmup.get (← getOptions) then
     setNormalNodes { outer with
-      steps := outer.steps + 1, equations, equationLocals := localContext }
+      steps := outer.steps + 1, equations, equationLocals := some localContext }
     return ← step
   let context := contextId localContext
   -- A shelf stays valid while the hypotheses it was made for are unchanged, so a step that only
@@ -417,7 +550,7 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
     { selected with
       factsSeen := raw, driven := true, steps := outer.steps, others := remaining,
       context := context, locals := localContext, equations := equations,
-      equationLocals := localContext }
+      equationLocals := some localContext }
   setNormalNodes { current with active := true }
   -- The finalizer also runs for heartbeat and interrupt exceptions, which `catch` does not see.
   let (result, _) ← tryFinally' step fun result? => do
@@ -429,7 +562,7 @@ def withNormalNodes {α : Type} (facts : Array Term) (step : TacticM α) : Tacti
       -- The equation index depends on the hypotheses alone, so it outlives a failed step.
       setNormalNodes (if outer.active then outer else
         { driven := true, steps := outer.steps, equations,
-          equationLocals := localContext })
+          equationLocals := some localContext })
   return result
 
 /-- `simp only [arguments]` on the goal that leaves alone what the running stepping driver

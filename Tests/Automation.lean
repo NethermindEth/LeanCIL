@@ -1287,7 +1287,7 @@ open Lean Elab Tactic in
 def recordIsLeft : TacticM Bool := do
   let record ← getNormalNodes
   return record.driven || record.active || !record.nodes.isEmpty ||
-    record.equations.covered != 0 ||
+    record.equations.covered != 0 || record.equationLocals.isSome ||
     !record.contexts.isEmpty || !record.others.isEmpty
 
 open Lean Elab Tactic in
@@ -1698,38 +1698,117 @@ example (produced stored entry : Memory) (base : Reference) (x : BitVec 32)
     unless (← count `entry) == 2 do throwError "the caller's fact was cleared"
   trivial
 
+open Lean Elab Tactic in
+/-- Closes the goal with `cil_lookup_assumption` both outside a stepping driver, where it scans the
+    local context, and in a step of one, where it reads the driver's equation index; either may
+    find an equation the other misses, so each test runs both. -/
+elab "cil_lookup_both_ways" : tactic => do
+  let saved ← saveState
+  evalTactic (← `(tactic| cil_lookup_assumption))
+  saved.restore
+  withNormalRun (withNormalNodes #[] (evalTactic (← `(tactic| cil_lookup_assumption))))
+
 /-- The lookup it is given, under a name that reducible unfolding removes. -/
 abbrev sameLookup (found : Option Nat) : Option Nat := found
 
 -- A lookup whose left side unfolds at reducible transparency to a variable is stated by an
 -- equation about that variable, although the lookup is written with a constant head.
 example (found : Option Nat) (stated : found = some 3) : sameLookup found = some 3 := by
-  cil_lookup_assumption
+  cil_lookup_both_ways
 
 /-- A list that reducible unfolding spells out. -/
 abbrev lookupList : List Nat := [1, 2]
 
--- The candidate index keeps every hypothesis that unification may equate with the lookup: an
+/-- The first entry of a list, under a name that reducible unfolding removes. -/
+abbrev firstEntry (entries : List Nat) : Option Nat := entries[0]?
+
+/-- Twice a natural number, which reducible unfolding turns into a product. -/
+abbrev twice (count : Nat) : Nat := 2 * count
+
+/-- Another name for natural numbers, which reducible unfolding removes. -/
+abbrev Position := Nat
+
+-- Both lookups find every hypothesis that unification may equate with the lookup: an
 -- abbreviation of a list literal meets an equation about the literal, and arithmetic on natural
 -- numbers meets its result whichever side writes the arithmetic.
 example (stated : ([1, 2] : List Nat)[0]? = some 1) : lookupList[0]? = some 1 := by
-  cil_lookup_assumption
+  cil_lookup_both_ways
 example (entries : List Nat) (stated : entries[Nat.succ 1]? = some 3) :
     entries[Nat.add 1 1]? = some 3 := by
-  cil_lookup_assumption
+  cil_lookup_both_ways
 example (entries : List Nat) (stated : entries[2 * 1]? = some 3) : entries[2]? = some 3 := by
-  cil_lookup_assumption
+  cil_lookup_both_ways
 example (entries : List Nat) (stated : entries[2]? = some 3) : entries[2 * 1]? = some 3 := by
-  cil_lookup_assumption
--- A local definition unfolds during unification, in a lookup and in a hypothesis alike.
+  cil_lookup_both_ways
+-- A local definition unfolds during unification, in a lookup and in a hypothesis alike, and so
+-- does the arithmetic it names.
 example (entries : List Nat) (stated : entries[1]? = some 3) :
     let position := 1; entries[position]? = some 3 := by
   intro position
-  cil_lookup_assumption
+  cil_lookup_both_ways
 example (entries : List Nat) :
     let found := entries[1]?; found = some 3 → entries[1]? = some 3 := by
   intro found stated
-  cil_lookup_assumption
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[2]? = some 3) :
+    let position := 2 * 1; entries[position]? = some 3 := by
+  intro position
+  cil_lookup_both_ways
+example (entries : List Nat) :
+    let position := 2 * 1; entries[position]? = some 3 → entries[2]? = some 3 := by
+  intro position stated
+  cil_lookup_both_ways
+-- A reducible definition unfolds on either side, and so does the arithmetic it names or a type
+-- it renames.
+example (entries : List Nat) (stated : entries[twice 1]? = some 3) : entries[2]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[2]? = some 3) : entries[twice 1]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[((2 : Position) * 1 : Position)]? = some 3) :
+    entries[2]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : firstEntry entries = some 3) : entries[0]? = some 3 := by
+  cil_lookup_both_ways
+example (entries : List Nat) (stated : entries[0]? = some 3) : firstEntry entries = some 3 := by
+  cil_lookup_both_ways
+-- Unification matches a pair against its projections and any two values of a type with one value.
+example (pair : Nat × Nat) (read : Nat × Nat → Option Nat)
+    (stated : read (pair.1, pair.2) = some 1) : read pair = some 1 := by
+  cil_lookup_both_ways
+example (pair : Nat × Nat) (read : Nat × Nat → Option Nat) (stated : read pair = some 1) :
+    read (pair.1, pair.2) = some 1 := by
+  cil_lookup_both_ways
+example (first second : Unit) (read : Unit → Option Nat) (stated : read first = some 1) :
+    read second = some 1 := by
+  cil_lookup_both_ways
+example (first : Unit) (read : Unit → Option Nat) (stated : read () = some 1) :
+    read first = some 1 := by
+  cil_lookup_both_ways
+-- A quantified lookup is closed by the quantified hypothesis that states it.
+example (entries : List Nat) (stated : ∀ position : Nat, entries[position]? = some 1) :
+    ∀ position : Nat, entries[position]? = some 1 := by
+  cil_lookup_both_ways
+
+open Lean Elab Tactic Meta in
+-- A hypothesis whose left side holds a metavariable that is assigned after a step indexed it
+-- still states the lookup at the next step.
+example (entries : List Nat) : True := by
+  run_tac withMainContext do
+    let list ← elabTerm (mkIdent `entries) none
+    let position ← mkFreshExprSyntheticOpaqueMVar (mkConst ``Nat)
+    let found ← mkAppM ``Option.some #[mkNatLit 1]
+    let stated ← mkEq (← mkAppM ``GetElem?.getElem? #[list, position]) found
+    let wanted ← mkEq (← mkAppM ``GetElem?.getElem? #[list, mkNatLit 2]) found
+    let (_, lookup) ← (← mkFreshExprMVar (← mkArrow stated wanted)).mvarId!.intro1P
+    let saved ← getGoals
+    setGoals [lookup]
+    withNormalRun do
+      withNormalNodes #[] (pure ())
+      position.mvarId!.assign (mkNatLit 2)
+      withNormalNodes #[] (evalTactic (← `(tactic| cil_lookup_assumption)))
+    unless (← getGoals).isEmpty do throwError "the lookup was not closed"
+    setGoals saved
+  trivial
 
 /-- A running sum of fifteen additions, long enough for the stepping record to be used. -/
 @[cil_code] def runningSum : CIL.Method := {

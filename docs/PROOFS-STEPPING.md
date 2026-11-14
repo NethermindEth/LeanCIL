@@ -725,16 +725,23 @@ never from a hypothesis, so a simplification gives the same result whatever else
 run builds its simplification contexts once, indexes the equation hypotheses that `cil_lookup`
 tries in a discrimination tree over their left sides as each is added, and runs the tactics of a
 step on goals of their own instead of inside `by` blocks of a term, which Lean would rebuild the
-whole local context for. A lookup tries only the hypotheses whose left side may unify with it at
-reducible transparency: the tree unfolds reducible definitions and local definitions as
-unification does, and reads natural-number arithmetic on either side as a wildcard, since
-unification evaluates it. Each read of the record checks that the goal's local context is the one
+whole local context for. A lookup in a step tries only the hypotheses whose left side may unify
+with it at reducible transparency. The tree reads a term after the reducible unfolding of local
+and reducible definitions that unification applies. A left side or lookup that unification may
+equate with a term the tree keys apart is not read by the tree: natural-number arithmetic that
+unification evaluates, a structure constructor it matches against projections, and a value of a
+type with one value. Such a hypothesis, or every hypothesis for such a lookup, is tried when the
+head of its left side may meet the lookup's, so a lookup in a step finds every hypothesis that a
+lookup outside a run finds. A lookup outside a run, or with `cil.stepping.record` off, reads each
+hypothesis in scope once and tries those whose left side has the lookup's head, a head that is not
+a constant, or a head that reducible unfolding replaces; it builds no index, which would cost more
+than one lookup. Each read of the record checks that the goal's local context is the one
 the record was made for; a goal that keeps that context object, as the goals within a step do,
 passes without reading a hypothesis. A step that adds or clears hypotheses, as a store or a call
 does, compares the whole context a few times, so the work of a step is at most linear in the
 hypotheses in scope with a small constant. The `stepping` suite bounds that constant at 100
 heartbeats per hypothesis per instruction and the cost per instruction between sizes at 1.35
-times. Comparing contexts costs time but no heartbeats, so the automation tests also count the
+times, and bounds a lookup outside a run at 100 heartbeats per hypothesis in scope. Comparing contexts costs time but no heartbeats, so the automation tests also count the
 context positions a walk compares and allow at most one whole context per instruction.
 
 A snapshot or loop-frame walk adds the same hypotheses at every store: the store's own seven

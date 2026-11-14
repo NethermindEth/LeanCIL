@@ -499,31 +499,42 @@ elab "cil_lookup_equation" : tactic => withMainContext do
   unless goals.isEmpty do throwError "The instruction equation left premises"
   replaceMainGoal []
 
-/-- Close a lookup goal `lookup = result` with a hypothesis, up to reducible unfolding, trying
-    only equation hypotheses whose left side may unify with `lookup`; fails otherwise. -/
+/-- Close a lookup goal `lookup = result`, possibly quantified, with a hypothesis, up to reducible
+    unfolding, trying only equation hypotheses whose left side may unify with `lookup`; fails
+    otherwise. -/
 syntax "cil_lookup_assumption" : tactic
 
 open Lean Elab Tactic Meta in
-/-- The equation hypotheses that may state the lookup `lookup`, in context order. A step of a
-    stepping driver extends the index the driver keeps for its hypotheses, which the step's
-    start brought up to date; any other call builds one. -/
-private def equationCandidates (lookup : Expr) : TacticM (Array FVarId) := do
+/-- The equation hypotheses that may state the goal `goal`, in context order. Inside a step of a
+    stepping driver they come from the index the driver keeps, which the step's start brought up
+    to date; any other call scans the context for hypotheses whose head `headsMayMeet` the
+    goal's, which costs less than building an index for one lookup. -/
+private def equationCandidates (goal : Expr) : TacticM (Array FVarId) := do
   let record ← getNormalNodes
   let context ← getLCtx
-  let kept ← if record.driven then contextKeeps record.equationLocals context else pure false
-  let index ← if kept then
-      record.equations.extend context
-    else ({} : EquationIndex).extend context
-  -- The index may still name a hypothesis that a store cleared.
-  return (← index.candidates lookup).filter context.contains
+  if record.driven && cil.stepping.record.get (← getOptions) then
+    if let some locals := record.equationLocals then
+      if ← contextKeeps locals context then
+        let index ← record.equations.extend context
+        -- The index may still name a hypothesis that a store cleared.
+        return (← index.candidates goal).filter context.contains
+  let some wanted := equationHead? goal | return #[]
+  let wantedUnfolds ← headUnfolds wanted
+  let mut found := #[]
+  for declaration in context do
+    if declaration.isImplementationDetail then continue
+    let some head ← instantiatedEquationHead? declaration.type | continue
+    if ← headsMayMeet wanted wantedUnfolds head then found := found.push declaration.fvarId
+  return found
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_lookup_assumption) => withMainContext do
     let goal ← getMainGoal
-    let some (_, lookup, _) := (← instantiateMVars (← goal.getType)).consumeMData.eq?
-      | throwError "cil_lookup_assumption: the goal is not an equation"
-    for hypothesis in ← equationCandidates lookup do
+    let statement ← instantiateMVars (← goal.getType)
+    unless (equationHead? statement).isSome do
+      throwError "cil_lookup_assumption: the goal is not an equation"
+    for hypothesis in ← equationCandidates statement do
       let declaration ← hypothesis.getDecl
       let saved ← saveState
       if declaration.type.isForall then
