@@ -144,8 +144,13 @@ static (double Gigabytes, string Output) MeasurePeakGigabytes(string[] command, 
     long peak = 0;
     while (!process.WaitForExit(200))
     {
-        process.Refresh();
-        peak = Math.Max(peak, process.PeakWorkingSet64);
+        // Lean can exit between the wait and the read; the peak is then the last one read.
+        try
+        {
+            process.Refresh();
+            peak = Math.Max(peak, process.PeakWorkingSet64);
+        }
+        catch (InvalidOperationException) when (process.HasExited) { }
     }
     if (process.ExitCode != 0 || output.Result.Contains("sorryAx", StringComparison.Ordinal))
         throw new InvalidOperationException(
