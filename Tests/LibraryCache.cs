@@ -891,7 +891,8 @@ try
                 $"gave up {gaveUp.GaveUp}, unjudged {gaveUp.Unjudged}, removed [{string.Join(", ", stopped)}]");
         // A clock that lies past the limit after its first reading makes the pass give up whatever the load.
         var stageReadings = 0;
-        passClock = () => Interlocked.Increment(ref stageReadings) == 1 ? passStart : passStart + passLimit + passLimit;
+        passClock = () =>
+            Interlocked.Increment(ref stageReadings) == 1 ? passStart : passStart + passLimit + passLimit;
         libraryEvicted = 0;
         string gaveUpStage;
         try { gaveUpStage = Captured(() => EvictUnusedLibraries(slowRoot, LibraryKeyOf('9'))); }

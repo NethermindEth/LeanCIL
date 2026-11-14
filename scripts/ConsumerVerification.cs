@@ -2110,7 +2110,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         var relative = Path.GetRelativePath(session, Path.Combine(directory, pair.Key));
                         return restoredArtifacts.TryGetValue(relative.Replace('\\', '/'), out var hash) && hash == pair.Value;
                     });
-                    bool publishedInterface = LocationComparer.Equals(directory, generatedModules) && interfaceModuleNames.Contains(module.Key);
+                    bool publishedInterface = LocationComparer.Equals(directory, generatedModules) &&
+                        interfaceModuleNames.Contains(module.Key);
                     if (publishedInterface && (module.Count() != acceptedInterfaceArtifacts.Count(pair => ModuleName(pair.Key) == module.Key) ||
                         module.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value)))
                         throw new InvalidDataException("Published contract interface artifacts changed after their closure audit: " + module.Key);
