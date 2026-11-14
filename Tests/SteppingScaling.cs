@@ -179,8 +179,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     // with every equation hypothesis would try at each instruction.
     var hypothesisLines = string.Join("\n", Enumerable.Range(1, hypotheses ? requested : 0).Select(index =>
         workload == "hypotheseslookup"
-            ? $"  have hypothesis{index} : ([.const32 {index}] : List CIL.Instruction)[0]? = " +
-              $"some (.const32 {index}) := rfl"
+            ? $"  have hypothesis{index} : ([.ldc_i4 {index}] : List CIL.Instruction)[0]? = " +
+              $"some (.ldc_i4 {index}) := rfl"
         : index % 2 == 1
             ? $"  have hypothesis{index} : right + {index} = right + {index} := rfl"
             : $"  obtain ⟨witness{index}, hypothesis{index}⟩ : ∃ witness : CIL.W64, " +

@@ -201,7 +201,7 @@ instructions, and one compilation for every other body.
 - For the hypotheses bodies the sizes are the numbers of hypotheses: in the accumulate, contract
   and loop bodies half of them are equations headed by an operator and half by a local variable,
   and in the lookup body each is an instruction lookup like those stepping makes,
-  `([.const32 i] : List CIL.Instruction)[0]? = some (.const32 i)`. The heartbeats counted are
+  `([.ldc_i4 i] : List CIL.Instruction)[0]? = some (.ldc_i4 i)`. The heartbeats counted are
   those of the proof less those of the same statement closed by `sorry`, so that elaborating the
   hypotheses does not count as stepping. The same ratio limit applies, and one more hypothesis in
   scope may add at most 100 heartbeats to an instruction, which costs about 120,000, between the
