@@ -1,6 +1,7 @@
 import Lean
 import CIL.Extraction.Translation
 import CIL.SIMD.UnspecifiedLanes
+import CIL.Safety.IntrinsicExecution
 
 open CIL CIL.Extraction
 
@@ -472,5 +473,47 @@ theorem exact_call_lengths :
     (¬ ExactIntrinsicsValid (raw call0) [false] (body [])) := by
   decide +kernel
 #print axioms exact_call_lengths
+
+/-! Generated runtime comparisons apply the broadcast execution facts to extracted bodies, which
+    carry their declared signature and the extraction's layouts. Each example states a body in
+    the emitted form and proves its claim with the term the fixture generator writes. -/
+
+/-- The declared signature of a `(ulong, ulong) -> ulong` method. -/
+private def wordSignature : DeclaredSignature :=
+  { parameters := [.atom Extraction.runtimeScope "System.UInt64",
+      .atom Extraction.runtimeScope "System.UInt64"],
+    returnType := .atom Extraction.runtimeScope "System.UInt64" }
+
+/-- A layout environment with one entry, as an extraction that reads a struct records. -/
+private def emittedEnvironment : LayoutEnvironment := { layouts := #[⟨⟨4, []⟩, 4⟩] }
+
+/-- `Avx2.And` of two broadcasts, then lane 0, in the form an extraction emits. -/
+private def emittedAnd : Method :=
+  { profile := profile, returnsValue := true, locals := [], localKinds := [],
+    opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
+    declared := wordSignature, environment := emittedEnvironment, links := [],
+    code := [.arg 0, .intrinsic (.vector (.create64 256)) 1, .arg 1,
+      .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 .band) 2, .ldc_i4 0,
+      .intrinsic (.vector (.extract64 256)) 2, .ret] }
+
+example : (Safety.invoke [emittedAnd] 256 0 [.scalar (.i64 13), .scalar (.i64 6)]
+    Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 4)] := by
+  exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastBinary_word profile .band 0 13 6 4
+    Safety.Memory.empty rfl (by decide) (Safety.checked_broadcast_and 13 6))
+
+/-- `Avx2.ShiftLeftLogical` of a broadcast by a full-width count, in the emitted form. -/
+private def emittedShift : Method :=
+  { profile := profile, returnsValue := true, locals := [.v128 0], localKinds := [.vector128],
+    opaqueVectorLocals := [0], parameterHomes := [], staticSites := [],
+    declared := wordSignature, environment := emittedEnvironment, links := [],
+    code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .setLocal 0, .arg 0,
+      .intrinsic (.vector (.create64 256)) 1, .local 0, .intrinsic (.avx2 .shl64Count) 2,
+      .ldc_i4 0, .intrinsic (.vector (.extract64 256)) 2, .ret] }
+
+example : (Safety.invoke [emittedShift] 256 0 [.scalar (.i64 1), .scalar (.i64 63)]
+    Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 9223372036854775808)] := by
+  exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastShift profile .shl64Count 0 1 63
+    9223372036854775808 Safety.Memory.empty rfl (by decide)
+    (Safety.checked_broadcast_shiftLeft 1 63))
 
 end Tests.ExactIntrinsics

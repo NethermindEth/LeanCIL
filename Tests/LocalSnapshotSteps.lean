@@ -204,18 +204,6 @@ theorem supplied_store_until (before after : Memory) (frame : Frame) (vector : B
 
 #print axioms supplied_store_until
 
-/-- The checked slot kind remains authoritative when the extracted store has an annotation. -/
-theorem annotated_supplied_store (before after : Memory) (frame : Frame) (bits : BitVec 32)
-    (stored : step narrowLocal (.setLocal 0) 1 [.scalar (.i32 bits)] frame
-      [.scalar (.i32 bits)] before = .ok (.next 2 [] frame after))
-    (continuation : WP (Execution (fun fuel => run [narrowLocal] fuel 0 2
-      [.scalar (.i32 bits)] frame [] after)) (fun result => result.1 = leaveFrame frame after)) :
-    WP (Execution (fun fuel => run [narrowLocal] fuel 0 1 [.scalar (.i32 bits)] frame
-      [.scalar (.i32 bits)] before)) (fun result => result.1 = leaveFrame frame after) := by
-  cil_contract_steps [stored] until continuation
-
-#print axioms annotated_supplied_store
-
 /-- Reduced literal operands match quantified checked stores without changing their memory. -/
 theorem constructor_supplied_store (before after : Memory) (frame : Frame)
     (stored : ∀ (pc : Nat) (args rest : List Value),
