@@ -5,6 +5,7 @@
 #:include Verification.cs
 #:include BatchVerification.cs
 #:include CoreExamples.cs
+#:include CertificateCases.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationSuites.cs
 
@@ -364,25 +365,35 @@ var reportPath = Path.Combine(addOutput, "verified.json");
 var savedReport = File.ReadAllText(reportPath);
 try
 {
-    var legacy = JsonSerializer.Deserialize<Report>(savedReport)! with { schema = 2 };
-    File.WriteAllText(reportPath, JsonSerializer.Serialize(legacy, Json));
-    failed = false;
-    try
+    foreach (var (name, text) in CertificateCases.Refused(savedReport))
     {
-        verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
+        File.WriteAllText(reportPath, text);
+        failed = false;
+        try
+        {
+            verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput,
+                check: true);
+        }
+        catch (InvalidOperationException error) when (error.Message.Contains("Stale verification report"))
+        {
+            failed = true;
+        }
+        if (!failed)
+            throw new InvalidOperationException("Certificate with " + name + " accepted");
     }
-    catch (InvalidOperationException error) when (error.Message.Contains("Stale verification report"))
-    {
-        failed = true;
-    }
-    if (!failed)
-        throw new InvalidOperationException("Legacy report without extraction certificate audit accepted");
 }
 finally
 {
     File.WriteAllText(reportPath, savedReport);
 }
-Passed("legacy report without extraction certificate audit rejected");
+// A default certificate serves only a default run, and a well-formed deep one only a deep run.
+if (CertificateProblem(savedReport, BindingMode.Default) is { } defaultProblem)
+    throw new InvalidOperationException("Default certificate refused: " + defaultProblem);
+if (CertificateProblem(savedReport, BindingMode.Deep) is null)
+    throw new InvalidOperationException("Default certificate accepted where a deep one is required");
+if (CertificateProblem(CertificateCases.Deep(savedReport), BindingMode.Deep) is { } deepProblem)
+    throw new InvalidOperationException("Deep certificate refused where a deep one is required: " + deepProblem);
+Passed("certificates of another schema, mode or binding fact list rejected");
 
 Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-v3"), "Stale or mismatched");
 Passed("different feature profile rejected");

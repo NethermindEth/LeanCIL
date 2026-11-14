@@ -441,7 +441,15 @@ Its CLI regressions cover initial proof selection and theorem output, an
 addition-to-subtraction source edit and rebuild, recovery using settings kept after the failed
 proof, the invalid-memory-access theorem, the integer opcode, narrow-storage and
 primitive-operation matrices, `new-proof` rejecting an existing file, a stale extraction and a
-struct parameter, and an isolated installation of the packaged .NET tool.
+struct parameter, and an isolated installation of the packaged .NET tool. They also check that a
+default certificate lists every binding fact as trusted, in order, and that a run without settings
+or `--proof` takes no proof from an earlier certificate.
+
+The `core` suite checks that `verify` refuses a certificate of schema 4, one without a binding
+section, one whose binding facts are missing, reordered, repeated or unknown, one with an unknown,
+numeric, absent or misplaced status, and one whose binding section has mode `deep`. Its consumer test republishes an
+authenticated proof receipt with an unknown status and checks that the next run verifies afresh.
+`scripts/TestProofCost.cs` checks that the proof cost measurement refuses the same certificates.
 
 The runner, the tool and library preparation reject every run of Lean, Lake or the audit
 executable whose output holds an [internal error](CLI.md#diagnostics), so a panic while building
