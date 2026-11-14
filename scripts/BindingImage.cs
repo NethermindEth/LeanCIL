@@ -34,9 +34,6 @@ static class BindingImage
     /// <summary>The lowercase hexadecimal SHA-256 digest of a file.</summary>
     internal static string Digest(byte[] file) => Convert.ToHexStringLower(SHA256.HashData(file));
 
-    /// <summary>The first sixteen digits of the digest: the name of a pinned image's module.</summary>
-    internal static string ShortDigest(byte[] file) => Digest(file)[..16];
-
     /// <summary>The page and image definitions of a file, in the namespace the caller has opened.</summary>
     internal static string Definitions(byte[] file)
     {
