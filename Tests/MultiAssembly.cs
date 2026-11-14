@@ -58,7 +58,8 @@ string lib = Library("Lib", "3 + 1");
 string substitute = Library("Substitute", "3 + 2");
 string versioned = Library("Versioned", "3 + 1", "<AssemblyVersion>2.0.0.0</AssemblyVersion>");
 // An assembly App references but extraction never pins.
-fixture.Build("Other", "MultiFixture.Other", "namespace MultiFixture.Other;\npublic interface IMarker { }\n");
+string other = fixture.Build("Other", "MultiFixture.Other",
+    "namespace MultiFixture.Other;\npublic interface IMarker { }\n");
 string appDirectory = fixture.Project("App", "MultiFixture.App", "",
     """<ProjectReference Include="../Lib/Lib.csproj" /><ProjectReference Include="../Other/Other.csproj" />""");
 File.WriteAllText(Path.Combine(appDirectory, "Application.cs"), """
@@ -256,6 +257,39 @@ RejectedExtract("pinned type without definition", "Unresolved class: MultiFixtur
         Console.WriteLine("PASS the metadata slice refuses a pinned non-modifier type with no definition");
     }
 }
+
+// Extraction is deterministic across processes. The order of --reference options numbers the pins in the
+// certificate, so only extractions with the same order write the same files; every order pins the same assemblies.
+void Deterministic(string name, string selector, string[][] referenceOrders, params string[] extra)
+{
+    string[] outputs = [.. referenceOrders.Select((references, index) =>
+    {
+        string output = Artifact("determinism-" + name + "-" + index);
+        Run([.. cli, "extract", app, selector, output, .. references.SelectMany(Reference), .. extra]);
+        return output;
+    })];
+    string[] Pins(string output) => [.. JsonSerializer.Deserialize<JsonElement>(
+            File.ReadAllText(Path.Combine(output, "identity.json"))).GetProperty("references").EnumerateArray()
+        .Select(pin => pin.GetProperty("sha256").GetString()!).Order(StringComparer.Ordinal)];
+    for (int index = 1; index < outputs.Length; index++)
+    {
+        int same = Array.FindIndex(referenceOrders, order => order.SequenceEqual(referenceOrders[index]));
+        if (same < index && FirstDifference(outputs[same], outputs[index]) is { } difference)
+            throw new InvalidOperationException($"Extraction of {name} is not deterministic: {difference}");
+        if (!Pins(outputs[0]).SequenceEqual(Pins(outputs[index])))
+            throw new InvalidOperationException($"Reference order changed the pinned assemblies of {name}");
+    }
+    Console.WriteLine($"PASS cross-assembly {name}: {outputs.Length} extractions write identical files per order");
+}
+
+string[][] twice = [[lib], [lib]];
+string[][] bothOrders = [[lib, other], [lib, other], [other, lib], [other, lib]];
+Deterministic("Direct", direct, twice);
+Deterministic("Size", "MultiFixture.Application::Size(ulong)", twice,
+    "--type-argument", "MultiFixture.Cell, " + libName);
+Deterministic("RunGenericOn", "MultiFixture.Application::RunGenericOn(ulong)", twice);
+Deterministic("PlainBothPins", scaled, bothOrders, "--type-argument", "MultiFixture.Plain, " + libName);
+Deterministic("MarkedBothPins", scaled, bothOrders, "--type-argument", "MultiFixture.Marked");
 
 // Proofs bind bodies by unscoped signature, so a same-named type in two pinned assemblies is rejected.
 string aliasDirectory = fixture.Project("Alias", "MultiFixture.Alias", "",

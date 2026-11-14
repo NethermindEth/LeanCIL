@@ -105,7 +105,40 @@ private def nativeSiblings : List (Nat × Instruction) := [
   (139, .conv_ovf_un .u8), (185, .conv_ovf .i), (212, .conv_ovf .i8), (186, .conv_ovf .u),
   (213, .conv_ovf .u8), (106, .conv_i), (211, .conv_i8)]
 example : nativeSiblings.all (fun (opcode, operation) =>
-    !scalarOpMatches (i opcode) [.word64] operation) = true := by decide
+    !scalarOpMatches (i opcode) [.word64] operation) = true := by decide +kernel
+
+/-- The ECMA-335 III constructor of each division, overflow-checked, wrapping arithmetic and
+    integer conversion opcode with two stack operands. -/
+private def binaryTable : List (Nat × Instruction) := [
+  (88, .add), (89, .sub), (90, .mul), (91, .div), (92, .div_un), (93, .rem), (94, .rem_un),
+  (214, .add_ovf), (215, .add_ovf_un), (216, .mul_ovf), (217, .mul_ovf_un), (218, .sub_ovf),
+  (219, .sub_ovf_un)]
+/-- The same for the conversion opcodes, which take one stack operand. -/
+private def unaryTable : List (Nat × Instruction) := [
+  (103, .conv_i1), (104, .conv_i2), (105, .conv_i4), (106, .conv_i8), (109, .conv_u4),
+  (110, .conv_u8), (209, .conv_u2), (210, .conv_u1), (211, .conv_i), (224, .conv_u),
+  (130, .conv_ovf_un .i1), (131, .conv_ovf_un .i2), (132, .conv_ovf_un .i4),
+  (133, .conv_ovf_un .i8), (134, .conv_ovf_un .u1), (135, .conv_ovf_un .u2),
+  (136, .conv_ovf_un .u4), (137, .conv_ovf_un .u8), (138, .conv_ovf_un .i),
+  (139, .conv_ovf_un .u),
+  (179, .conv_ovf .i1), (180, .conv_ovf .u1), (181, .conv_ovf .i2), (182, .conv_ovf .u2),
+  (183, .conv_ovf .i4), (184, .conv_ovf .u4), (185, .conv_ovf .i8), (186, .conv_ovf .u8),
+  (212, .conv_ovf .i), (213, .conv_ovf .u)]
+/-- The opcode and emitted constructor pairs, over every opcode of both tables and every
+    constructor they name, where acceptance at `kind` operands differs from the table. The
+    tables name each constructor once, so a row's own position identifies its constructor. -/
+private def tableMismatches (kind : ScalarKind) : List (Nat × Instruction) :=
+  let table := binaryTable ++ unaryTable
+  let stacks := binaryTable.map (fun _ => [kind, kind]) ++ unaryTable.map fun _ => [kind]
+  (table.zip stacks).zipIdx.flatMap fun (((opcode, _), stack), row) =>
+    table.zipIdx.filterMap fun ((_, candidate), column) =>
+      if scalarOpMatches (i opcode) stack candidate == (row == column) then none
+      else some (opcode, candidate)
+/-- Each opcode accepts exactly its own constructor among all 43, at both word widths, so every
+    constructor has its opcode and rejects every sibling. -/
+private theorem scalarTableExact :
+    tableMismatches .word64 = [] ∧ tableMismatches .word32 = [] := by decide +kernel
+#print axioms scalarTableExact
 
 example : scalarOpMatches (i 21) [] (.ldc_i4 (BitVec.ofInt 32 (-1))) = true := by decide
 example : scalarOpMatches (i 30) [] (.ldc_i4 8) = true := by decide
@@ -443,6 +476,100 @@ example : scalarTransfer nativeReturnRaw (i 42) [.native, .word64] = none := by 
 example : ¬ ScalarFlowValid #[] { nativeReturnRaw with returnType := intType }
     nativeReturnFeatures nativeReturnStates nativeReturnMethod.code := by decide
 
+/-- Local slot reads as `ScalarFlowValid` evaluates them, from indexes built once per body. -/
+private def indexedLocals (method : RawMethod) : ScalarLocals :=
+  ScalarLocals.indexed method (nativeDispatchContext method)
+
+/-- `push; stloc.s slot; ldloc.0; ret` over one int32 local. -/
+private def slotRaw (push : RawInstruction) (slot : Nat) : RawMethod :=
+  { raw [push, i 19 (.local slot), i 6, i 42] [] with locals := [intType], returnType := intType }
+private def slotFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1]
+private def slotStates (pushed : ScalarKind) : ScalarCertificate :=
+  [some [], some [pushed], some [], some [.word32]]
+private def slotCode (push : Instruction) (slot : Nat) : List Instruction :=
+  [push, .setLocal slot, .local 0, .ret]
+
+/-- The indexed local reads accept an int32 store to the declared local and reject a store or
+    load past the declared locals and a null store into an int32 local, at the site and in the
+    certificate, as the metadata lists do. -/
+theorem local_slot_sites :
+    let constant := slotRaw (i 22) 0
+    scalarTransfer constant (i 19 (.local 0)) [.word32] (locals := indexedLocals constant) =
+      some [] ∧
+    scalarTransfer constant (i 19 (.local 1)) [.word32] (locals := indexedLocals constant) =
+      none ∧
+    scalarTransfer constant (i 19 (.local 1)) [.word32] = none ∧
+    scalarTransfer constant (i 17 (.local 1)) [] (locals := indexedLocals constant) = none ∧
+    scalarTransfer constant (i 17 (.local 1)) [] = none ∧
+    scalarStoreFault constant (i 19 (.local 1)) [.word64] (.setLocal 1)
+      (indexedLocals constant) = false ∧
+    scalarTransfer constant (i 19 (.local 0)) [.nullObject]
+      (locals := indexedLocals constant) = none ∧
+    scalarTransfer constant (i 19 (.local 0)) [.nullObject] = none ∧
+    ScalarFlowValid #[] constant slotFeatures (slotStates .word32) (slotCode (.ldc_i4 0) 0) ∧
+    ¬ ScalarFlowValid #[] (slotRaw (i 22) 1) slotFeatures (slotStates .word32)
+      (slotCode (.ldc_i4 0) 1) ∧
+    ¬ ScalarFlowValid #[] (slotRaw (i 20) 0) slotFeatures (slotStates .nullObject)
+      (slotCode (.memory .nullObject) 0) := by
+  decide +kernel
+#print axioms local_slot_sites
+
+/-- A static method of no parameters whose address `ldftn` takes and `calli` calls. -/
+private def handler : CallSite :=
+  { target := .managed 2, typeArguments := [], parameterCount := 0, hasThis := false,
+    returnsValue := false }
+private def handlerSignature : ManagedSignature := ⟨.void, []⟩
+
+/-- `ldftn; stloc store; ldloc.1; calli; ret` over two native-int locals, of which `calli`
+    consumes only local 1. -/
+private def pointerRaw (store : Nat) : RawMethod :=
+  { raw [i 65030 (.call handler), i store, i 7, i 41 (.indirectCall .void [] false false 0),
+      i 42] [] with locals := [nativeType, nativeType], returnType := .void }
+private def pointerFeatures : FeatureCertificate :=
+  [unknown 0, unknown 1, unknown 0, unknown 1, unknown 0]
+private def pointerStates : ScalarCertificate :=
+  [some [], some [.methodPointer handlerSignature], some [],
+    some [.methodPointer handlerSignature], some []]
+private def pointerCode (slot : Nat) : List Instruction :=
+  [.managed (.address ⟨⟨"Scope::Fixture", 2, []⟩, 0⟩ handlerSignature), .setLocal slot, .local 1,
+    .managed (.call handlerSignature [] false), .ret]
+
+/-- The indexed pointer locals give a method pointer home only to the native-int local a `calli`
+    consumes: storing a method address into the other local, or taking the consumed local's
+    address, is rejected at the site and in the certificate, as the metadata lists do. -/
+theorem pointer_local_sites :
+    let method := pointerRaw 11
+    let pointer := ScalarKind.methodPointer handlerSignature
+    scalarTransfer method (i 11) [pointer] (locals := indexedLocals method) = some [] ∧
+    scalarTransfer method (i 10) [pointer] (locals := indexedLocals method) = none ∧
+    scalarTransfer method (i 10) [pointer] = none ∧
+    scalarTransfer method (i 6) [] (locals := indexedLocals method) = some [.native] ∧
+    scalarTransfer method (i 7) [] (locals := indexedLocals method) = some [pointer] ∧
+    scalarTransfer method (i 18 (.local 0)) [] (locals := indexedLocals method) =
+      some [.reference] ∧
+    scalarTransfer method (i 18 (.local 1)) [] (locals := indexedLocals method) = none ∧
+    scalarTransfer method (i 18 (.local 1)) [] = none ∧
+    ScalarFlowValid #[] method pointerFeatures pointerStates (pointerCode 1) ∧
+    ¬ ScalarFlowValid #[] (pointerRaw 10) pointerFeatures pointerStates (pointerCode 0) := by
+  decide +kernel
+#print axioms pointer_local_sites
+
+/-- The closed argument storage, reading pointer locals from a set built once per body, gives a
+    method pointer home to the local `calli` consumes and native integer storage to the other,
+    as scanning the pointer local list does; a pointer test that admits no local gives neither
+    a method pointer home. -/
+theorem pointer_local_storage :
+    let method := pointerRaw 11
+    let context := nativeDispatchContext method
+    (closedArguments [] method).map (·.locals) =
+      some [.field .nativeInt, .methodPointer handlerSignature] ∧
+    (closedArgumentsWith [] method context context.pointerLocals.contains).map (·.locals) =
+      some [.field .nativeInt, .methodPointer handlerSignature] ∧
+    (closedArgumentsWith [] method context (fun _ => false)).map (·.locals) =
+      some [.field .nativeInt, .field .nativeInt] := by
+  decide +kernel
+#print axioms pointer_local_storage
+
 private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte")
 private def byteSpanSite : CallSite := {
   declaringType := byteSpanType, name := ".ctor", target := .external
@@ -619,18 +746,18 @@ example : ¬ ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleS
     (unaryHoleCode .conv_i8) := by decide
 -- `conv.r4` is uncovered: the site admits a load, but no conversion or faulting arithmetic.
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
-    (unaryHoleCode .conv_i) := by decide
+    (unaryHoleCode .conv_i) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
-    (unaryHoleCode (.conv_ovf .i)) := by decide
+    (unaryHoleCode (.conv_ovf .i)) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
-    (unaryHoleCode (.conv_ovf_un .u)) := by decide
+    (unaryHoleCode (.conv_ovf_un .u)) := by decide +kernel
 example : ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
-    (unaryHoleCode (.loadScalar 8)) := by decide
+    (unaryHoleCode (.loadScalar 8)) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
-    (unaryHoleCode .rem_un) := by decide
+    (unaryHoleCode .rem_un) := by decide +kernel
 example : ([Instruction.div, .div_un, .rem, .add_ovf, .add_ovf_un, .sub_ovf, .sub_ovf_un, .mul_ovf,
     .mul_ovf_un].all fun emitted => !decide (ScalarFlowValid #[] (unaryHoleRaw 107)
-      unaryHoleFeatures unaryHoleStates (unaryHoleCode emitted))) = true := by decide
+      unaryHoleFeatures unaryHoleStates (unaryHoleCode emitted))) = true := by decide +kernel
 
 private def pushHoleRaw (opcode : Nat) := raw [i opcode, i 38, i 2, i 42] [word]
 private def pushHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1]

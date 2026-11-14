@@ -40,6 +40,12 @@ const long KernelDecisionFloor = 2_000;
 const int FewAddresses = 128;
 const int MoreAddresses = 256;
 const int ManyAddresses = 512;
+// Bodies of these many locals, each stored once and then loaded or addressed. A check that walks the locals list,
+// or the list of locals a `calli` consumes, at each such site costs between 1.3 and 2.3 times as much per
+// instruction at 512 as at 128; reading indexes built once per body costs at most about 1.1 times as much.
+const int FewLocals = 128;
+const int MoreLocals = 256;
+const int ManyLocals = 512;
 
 var directory = At("artifacts/LookupScaling");
 Directory.CreateDirectory(directory);
@@ -725,6 +731,97 @@ foreach (var prefixed in new[] { false, true })
             $"Checking the scalar certificate of {label} costs {addressesMeasured}; the limit is {AllowedGrowth} " +
             $"times the cost per address at {FewAddresses}."));
     Console.WriteLine($"PASS checking the scalar certificate of {label} costs {addressesMeasured}");
+}
+
+// The kernel heartbeats of a check over a body that stores each of its locals once and then loads or addresses
+// it, less those of stating the same check. Integer locals take a constant and are popped after a load or after
+// `ldloca`, which also names each as a receiver fold candidate; native-int locals take a method address and are
+// consumed by `calli`, which makes each a pointer local. The check is the scalar certificate, or for pointer
+// locals also the closed argument storage.
+long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
+{
+    var pointers = slots == LocalSlots.Pointer;
+    var addressed = slots == LocalSlots.Addressed;
+    var slotType = pointers ? "System.IntPtr" : "System.Int32";
+    var kind = pointers ? ".methodPointer signature" : ".word32";
+    var push = pointers ? "⟨0, 65030, .call handler⟩" : "⟨0, 22, .none⟩";
+    var load = addressed ? "⟨0, 18, .local index⟩" : "⟨0, 17, .local index⟩";
+    var consume = pointers ? "⟨0, 41, .indirectCall .void [] false false 0⟩" : "⟨0, 38, .none⟩";
+    var loaded = addressed ? ".reference" : "kind";
+    var pushed = pointers ? ".managed (.address ⟨⟨\"Scaling\", 2, []⟩, 0⟩ signature)" : ".ldc_i4 0";
+    var emittedLoad = addressed ? ".localAddr index" : ".local index";
+    var consumed = pointers ? ".managed (.call signature [] false)" : ".pop";
+    var header = $$"""
+        import CIL.Extraction.Scalars
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        namespace LocalSlots
+        open CIL CIL.Extraction
+        def slotType : TypeExpr := .atom runtimeScope "{{slotType}}"
+        def handler : CallSite :=
+          { target := .managed 2, typeArguments := [], parameterCount := 0, hasThis := false,
+            returnsValue := false }
+        def signature : ManagedSignature := ⟨.void, []⟩
+        def kind : ScalarKind := {{kind}}
+        def segment (index : Nat) : List RawInstruction :=
+          [{{push}}, ⟨0, 19, .local index⟩, {{load}}, {{consume}}]
+        def raw (slots : Nat) : RawMethod := {
+          token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+          callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+          parameters := [], locals := List.replicate slots slotType, initLocals := true, maxStack := 1,
+          genericParameters := [],
+          code := (List.range slots).flatMap segment ++ [⟨0, 42, .none⟩] }
+        def features (slots : Nat) : FeatureCertificate :=
+          (List.replicate slots [some ⟨[], []⟩, some ⟨[none], []⟩, some ⟨[], []⟩, some ⟨[none], []⟩]).flatten ++
+            [some ⟨[], []⟩]
+        def states (slots : Nat) : ScalarCertificate :=
+          (List.replicate slots [some [], some [kind], some [], some [{{loaded}}]]).flatten ++ [some []]
+        def codeSegment (index : Nat) : List Instruction :=
+          [{{pushed}}, .setLocal index, {{emittedLoad}}, {{consumed}}]
+        def code (slots : Nat) : List Instruction := (List.range slots).flatMap codeSegment ++ [.ret]
+        """ + "\n";
+    var statement = storage ? $"(closedArguments [] (raw {count})).isSome = true"
+        : $"ScalarFlowValid #[] (raw {count}) (features {count}) (states {count}) (code {count})";
+    var path = Path.Combine(directory, $"{slots}{(storage ? "Storage" : "Locals")}{count}.lean");
+    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend LocalSlots\n", equations: false);
+    var decided = Heartbeats(path, header + $"""
+        theorem valid : {statement} := by decide +kernel
+        #print axioms valid
+        end LocalSlots
+        """ + "\n", equations: false);
+    return decided - stated;
+}
+(LocalSlots Slots, bool Storage, string Label)[] localChecks =
+[
+    (LocalSlots.Integer, false, "the scalar certificate of integer locals"),
+    (LocalSlots.Addressed, false, "the scalar certificate of addressed integer locals"),
+    (LocalSlots.Pointer, false, "the scalar certificate of native-int locals consumed by calli"),
+    (LocalSlots.Pointer, true, "the closed argument storage of native-int locals consumed by calli"),
+];
+foreach (var (slots, storage, label) in localChecks)
+{
+    // Each local is stored once and loaded or addressed once, between a push and a pop or call; `ret` ends the body.
+    var perInstruction = new[] { FewLocals, MoreLocals, ManyLocals }
+        .Select(count => (Count: count, Cost: (double)LocalSlotCost(slots, count, storage) / (4 * count + 1)))
+        .ToArray();
+    var localsMeasured = string.Join("; ", perInstruction.Select(run => string.Create(CultureInfo.InvariantCulture,
+        $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
+    if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Checking {label} costs {localsMeasured}; the limit is {AllowedGrowth} " +
+            $"times the cost per instruction at {FewLocals} locals."));
+    Console.WriteLine($"PASS checking {label} costs {localsMeasured}");
+}
+
+/// <summary>How the generated bodies of the local slot checks use each local.</summary>
+enum LocalSlots
+{
+    /// <summary>An int32 local that takes a constant and is loaded and popped.</summary>
+    Integer,
+    /// <summary>An int32 local that takes a constant and whose address is taken and popped.</summary>
+    Addressed,
+    /// <summary>A native-int local that takes a method address and is loaded by `calli`.</summary>
+    Pointer,
 }
 
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
