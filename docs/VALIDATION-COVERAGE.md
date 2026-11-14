@@ -349,6 +349,13 @@ For checked-step and loop tactics, see [proof automation](VALIDATION-PROOFS.md#p
   states, out-of-bounds targets and mismatched certificate lengths. The feature and scalar
   equivalence theorems keep the list-indexed rules, including rejection when the feature and
   scalar certificate lengths differ.
+- `Tests/ScalarEvidence.lean` evaluates the local slot reads of `ScalarFlowValid`, which come
+  from indexes built once per body, at single sites and in whole certificates. They reject a
+  store or load past the declared locals, a null store into an int32 local, a method address
+  stored into a native-int local that no `calli` consumes and the address of a local that a
+  `calli` consumes, as the metadata lists do. `closedArguments`, which reads pointer locals from a
+  set built once per body, gives a method pointer home only to the native-int local a `calli`
+  consumes, as scanning the pointer local list does. It runs in the `evidence` suite.
 - `Tests/LocalSnapshotSteps.lean` checks opt-in local snapshot stepping:
   - Vector and int32 stores, reloads and overwrites with abstract homes and memory, plus
     signed-byte narrowing. The mixed-width case carries Vector256, Vector128 and int32 locals
