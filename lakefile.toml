@@ -31,6 +31,9 @@ name = "Tests.ReplayDiagnostics"
 name = "Tests.Semantics"
 
 [[lean_lib]]
+name = "Tests.MixedNativeOpcodes"
+
+[[lean_lib]]
 name = "Tests.BodyEncoding"
 
 [[lean_lib]]

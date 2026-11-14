@@ -66,11 +66,10 @@ example : scalarOpMatches (i 101) [.word64] .not = false := by decide
 example : scalarOpMatches (i 88 (.integer 0)) [.word64, .word64] .add = false := by decide
 example : scalarOpMatches (i 88) [.other, .other] .add = false := by decide
 example : scalarOpMatches (i 88) [.reference, .word32] .add = false := by decide
-example : scalarOpMatches (i 88) [.native, .word64] (.nativeBinary .add) = false := by decide
-example : scalarOpMatches (i 88) [.word32, .native] (.nativeBinary .add) = true := by decide
-example : scalarOpMatches (i 88) [.word32, .native] .add = false := by decide
-example : scalarOpMatches (i 88) [.word64, .word64] (.nativeBinary .add) = false := by decide
-example : scalarOpMatches (i 88) [.word32, .native] (.nativeBinary .sub) = false := by decide
+example : scalarOpMatches (i 88) [.native, .word64] .add = false := by decide
+example : scalarOpMatches (i 88) [.word32, .native] .add = true := by decide
+example : scalarOpMatches (i 88) [.word64, .word64] .sub = false := by decide
+example : scalarOpMatches (i 88) [.word32, .native] .sub = false := by decide
 
 private def arithmeticFlagMutations : List (Nat × Instruction) := [
   (91, .div_un), (91, .rem), (91, .rem_un), (92, .div), (92, .rem_un), (92, .rem),
@@ -178,7 +177,7 @@ example : ¬ TranslationValid [] #[] [] [addEvidence] []
     [{ addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } }] := by decide +kernel
 example : ¬ TranslationValid [] #[] []
     [{ addEvidence with scalarStates := addStates.set 2 (some [.native, .word32]) }] []
-    [{ addMethod with code := addCode.set 2 (.nativeBinary .add) }] := by decide +kernel
+    [addMethod] := by decide +kernel
 example : ¬ ScalarFlowValid #[] { addRaw with maxStack := 1 } addFeatures addStates addCode := by decide
 example : ¬ ScalarFlowValid #[] addRaw addFeatures (addStates.set 0 (some [.word64])) addCode := by decide
 example : ¬ ScalarFlowValid #[] addRaw addFeatures (addStates.drop 1) addCode := by decide
@@ -314,10 +313,10 @@ example : MethodShapeValid argumentRaw argumentMethod := by decide
 
 private def mixedRaw := { raw [i 2, i 3, i 88, i 42] [nativeType, intType] with returnType := nativeType }
 private def mixedStates : ScalarCertificate := [some [], some [.native], some [.word32, .native], some [.native]]
-private def mixedCode : List Instruction := [.arg 0, .arg 1, .nativeBinary .add, .ret]
+private def mixedCode : List Instruction := [.arg 0, .arg 1, .add, .ret]
 example : ScalarFlowValid #[] mixedRaw addFeatures mixedStates mixedCode := by decide
-example : ¬ ScalarFlowValid #[] mixedRaw addFeatures mixedStates (mixedCode.set 2 .add) := by decide
-example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.set 2 (.nativeBinary .add)) := by decide
+example : ¬ ScalarFlowValid #[] mixedRaw addFeatures mixedStates (mixedCode.set 2 .sub) := by decide
+example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.set 2 .sub) := by decide
 example : ¬ ScalarFlowValid #[] { mixedRaw with parameters := [nativeType, word] } addFeatures mixedStates mixedCode := by decide
 
 private def site : CallSite := {
@@ -727,7 +726,6 @@ example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode
 example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode .add) := by decide
 example : ¬ ScalarFlowValid #[] (holeRaw 143 (.type intType)) holeFeatures holeStates
     (holeCode .div) := by decide
-example : ¬ ScalarFlowValid #[] (holeRaw 149) holeFeatures holeStates (holeCode (.nativeBinary .add)) := by decide
 private def holeEvidence (opcode : Nat) (states : ScalarCertificate) : MethodEvidence := withBody {
   body := noBody, original := holeRaw opcode, arguments := [], closed := holeRaw opcode,
   parameterInput := { arguments := [.field .unsigned64, .field .unsigned64], locals := [], code := [.load 0, .load 1, .other, .other, .load 0, .other] },
@@ -984,15 +982,12 @@ private def branches : List (Nat × Instruction) := [
 private theorem branch_encoding_cases :
     (branches.all (fun (opcode, emitted) => branchAt opcode .word64 .word64 emitted) = true) ∧
     (branches.all (fun (opcode, emitted) => branchAt opcode .word32 .word32 emitted) = true) ∧
-    (branches.all (fun (opcode, emitted) => !branchAt opcode .word64 .word64 (.nativeBinary
-      emitted)) = true) ∧
     (branches.all (fun (opcode, _) => !branchAt opcode .word64 .word64 (if opcode ∈ [50, 63]
       then .bge 3 else .blt 3)) = true) ∧
-    (branches.all (fun (opcode, emitted) => branchAt opcode .native .word32 (.nativeBinary
-      emitted) == (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true) ∧
-    (branches.all (fun (opcode, emitted) => branchAt opcode .word32 .native (.nativeBinary
-      emitted) == (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true) ∧
-    (branches.all (fun (opcode, emitted) => !branchAt opcode .native .word32 emitted) = true) ∧
+    (branches.all (fun (opcode, emitted) => branchAt opcode .native .word32
+      emitted == (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true) ∧
+    (branches.all (fun (opcode, emitted) => branchAt opcode .word32 .native
+      emitted == (opcode ∈ [46, 47, 48, 49, 50, 59, 60, 61, 62, 63])) = true) ∧
     (branches.all (fun (opcode, emitted) => !branchAt opcode .native .word64 emitted) = true) ∧
     (branches.all (fun (opcode, emitted) => !branchAt opcode .word32 .word64 emitted) = true) ∧
     (branches.all (fun (opcode, emitted) => branchAt opcode .reference .reference emitted ==

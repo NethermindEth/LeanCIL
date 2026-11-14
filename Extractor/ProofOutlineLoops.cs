@@ -12,11 +12,10 @@ internal static partial class ProofOutline
     {
         internal Operation[] Operations { get; } = operations;
 
-        /// <summary>The jump an operation is, also when the native-width analysis wrapped it.</summary>
+        /// <summary>The branch represented by an operation.</summary>
         internal static Jump? JumpOf(Operation operation) => operation switch
         {
             Jump jump => jump,
-            NativeBinary { Inner: Jump jump } => jump,
             _ => null
         };
 
@@ -790,9 +789,6 @@ internal static partial class ProofOutline
         void LoopHeader(Writer lean)
         {
             var suffix = Suffix(active);
-            if (body.Operations[loop.Latch] is NativeBinary)
-                throw Unsupported($"its loop at {Location(loop.Latch)} tests a native and an int32 value at " +
-                    "its back edge, which the outline does not step");
             if (body.Operations[loop.Latch] is not Jump { Conditional: true } latch)
                 throw Unsupported($"its loop at {Location(loop.Latch)} does not test a condition at its back edge");
             string Projected(Component component) =>
@@ -894,6 +890,9 @@ internal static partial class ProofOutline
             var arity = body.Operations[loop.Latch] is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } ? 1 : 2;
             if (state.Stack.Count != arity)
                 throw Unsupported($"the loop test at {Location(loop.Latch)} uses values from before its block");
+            if (state.Stack is [Number left, Number right] && left.Width != right.Width)
+                throw Unsupported($"its loop at {Location(loop.Latch)} tests operands of different widths at " +
+                    "its back edge, which the outline does not step");
             return state.Stack;
         }
 
@@ -1336,6 +1335,11 @@ internal static partial class ProofOutline
             if (operands.FirstOrDefault(operand => operand is not Number { Narrow: false }) is { } unnamed)
             {
                 Hole(lean, indent, state, $"the test at {Location(pc)} reads {Unnamed(unnamed)}");
+                return;
+            }
+            if (operands.Cast<Number>().Any(number => number.Width != ((Number)operands[0]).Width))
+            {
+                Hole(lean, indent, state, $"the test at {Location(pc)} reads operands of different widths");
                 return;
             }
             var terms = operands.Select(operand => (Number)operand)

@@ -100,12 +100,18 @@ theorem checkedBits_mul_signed {width : Nat} {x y : BitVec width}
   rw [BitVec.ofInt_mul, BitVec.ofInt_toInt, BitVec.ofInt_toInt]
 #print axioms checkedBits_mul_signed
 
-/-- An overflow-checked binary instruction on two `i32` or two `i64` stack values. -/
+/-- The int32 operand of a mixed operation, extended with the operation's signedness. -/
+def widenNative (signed : Bool) (bits : BitVec 32) : BitVec 64 :=
+  if signed then bits.signExtend 64 else bits.zeroExtend 64
+
+/-- Overflow-checked arithmetic on equal widths or a native integer paired with int32. -/
 def checkedValues (kind : CheckedBinaryKind) (signed : Bool) (x y : Value) :
     Except ArithmeticFault Value :=
   match x, y with
   | .i32 x, .i32 y => (checkedBits kind signed x y).map Value.i32
   | .i64 x, .i64 y => (checkedBits kind signed x y).map Value.i64
+  | .i32 x, .i64 y => (checkedBits kind signed (widenNative signed x) y).map Value.i64
+  | .i64 x, .i32 y => (checkedBits kind signed x (widenNative signed y)).map Value.i64
   | _, _ => .error .invalidOperands
 
 /-- An unsigned checked `add` of two `i32` values: a sum that fits is the wrapping sum. -/
@@ -219,11 +225,13 @@ def divideBits (signed remainder : Bool) (x y : BitVec width) :
   else
     return BitVec.ofNat width (if remainder then x.toNat % y.toNat else x.toNat / y.toNat)
 
-/-- `div`, `div.un`, `rem` or `rem.un` on two `i32` or two `i64` stack values. -/
+/-- Division or remainder on equal widths or a mixed pair with int32 sign-extended. -/
 def divideValues (signed remainder : Bool) (x y : Value) : Except ArithmeticFault Value :=
   match x, y with
   | .i32 x, .i32 y => (divideBits signed remainder x y).map Value.i32
   | .i64 x, .i64 y => (divideBits signed remainder x y).map Value.i64
+  | .i32 x, .i64 y => (divideBits signed remainder (x.signExtend 64) y).map Value.i64
+  | .i64 x, .i32 y => (divideBits signed remainder x (y.signExtend 64)).map Value.i64
   | _, _ => .error .invalidOperands
 
 /-- `Math.DivRem` on `width`-bit operands, mirroring the runtime source: the quotient is the

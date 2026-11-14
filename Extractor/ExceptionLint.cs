@@ -103,7 +103,7 @@ internal static class ExceptionLint
 
     static IEnumerable<string> RuntimeExceptions(Operation operation)
     {
-        if (operation is NativeBinary { Inner: var inner }) operation = inner;
+
         if (operation is Divide divide)
         {
             yield return "System.DivideByZeroException";

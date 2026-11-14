@@ -14,7 +14,7 @@ internal static class NativeOperands
         ArraySigned64, ArrayUnsigned64, ArrayNativeInt, ArrayNativeUInt, ArrayBoolean, ArrayCharacter, ArrayComposite
     }
 
-    internal sealed record Certificate(HashSet<Instruction> Mixed, Dictionary<Instruction, StackType[]> Incoming);
+    internal sealed record Certificate(Dictionary<Instruction, StackType[]> Incoming);
 
     /// <summary>
     /// A stack slot's type. A callable pointer or table is named by its metadata alone, so its kind is read from
@@ -145,7 +145,7 @@ internal static class NativeOperands
                 : new(Kind.MethodPointer, kind)
             : Type(type);
         var incoming = new Dictionary<Instruction, StackType[]> { [method.Body.Instructions[0]] = [] };
-        var mixed = new HashSet<Instruction>();
+
         var pending = new Queue<Instruction>();
         pending.Enqueue(method.Body.Instructions[0]);
         while (pending.TryDequeue(out var instruction))
@@ -226,7 +226,7 @@ internal static class NativeOperands
                     if (code is Code.Bne_Un or Code.Bne_Un_S or Code.Bgt_Un or Code.Bgt_Un_S or
                         Code.Bge_Un or Code.Bge_Un_S or Code.Blt_Un or Code.Blt_Un_S or Code.Ble_Un or Code.Ble_Un_S)
                         throw new InvalidDataException($"Unsupported mixed native/int32 unsigned branch; insert explicit conv.i or conv.u: {instruction}");
-                    mixed.Add(instruction);
+
                 }
                 if (instruction.OpCode.FlowControl != FlowControl.Cond_Branch)
                     stack.Add(code is Code.Ceq or Code.Clt or Code.Clt_Un or Code.Cgt or Code.Cgt_Un ? Kind.Word32 :
@@ -363,6 +363,6 @@ internal static class NativeOperands
             if (instruction.OpCode.FlowControl is not (FlowControl.Return or FlowControl.Branch or FlowControl.Throw))
                 Successor(instruction.Next);
         }
-        return new Certificate(mixed, incoming);
+        return new Certificate(incoming);
     }
 }

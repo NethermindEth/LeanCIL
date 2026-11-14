@@ -280,13 +280,6 @@ private def referenceComparison (opcode : Nat) (left right : ScalarKind) : Bool 
       right ∈ [.object, .nullObject]) ||
     (opcode == 65027 && left == .object && right == .nullObject)
 
-/-- Mixed native/int32 operands require exactly one `nativeBinary` wrapper; any other pair
-    forbids it. -/
-private def nativeWrapped (left right : ScalarKind) (encoding : Instruction → Bool) :
-    Instruction → Bool
-  | .nativeBinary operation => mixedNative left right && encoding operation
-  | operation => !mixedNative left right && encoding operation
-
 /-- The constant an `ldc` instruction must emit; an out-of-range operand has none. -/
 private def literal (instruction : RawInstruction) : Option Instruction :=
   match instruction.opcode, instruction.operand with
@@ -334,7 +327,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
     | .target target, right :: left :: _ =>
         (compatibleBinary left right || referenceComparison instruction.opcode left right) &&
         !(mixedNative left right && unsignedBranch instruction.opcode) &&
-        nativeWrapped left right (branchEncodingMatches instruction.opcode target) emitted
+        branchEncodingMatches instruction.opcode target emitted
     | _, _ => false
   else if instruction.operand != .none then false
   else if instruction.opcode == 88 &&
@@ -349,7 +342,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
   else if scalarBinary instruction.opcode then match stack with
     | right :: left :: _ =>
         (compatibleBinary left right || referenceComparison instruction.opcode left right) &&
-        nativeWrapped left right (scalarEncodingMatches instruction.opcode) emitted
+        scalarEncodingMatches instruction.opcode emitted
     | _ => false
   else if instruction.opcode ∈ [98, 99, 100] then match stack with
     | right :: left :: _ =>
@@ -368,7 +361,7 @@ private def scalarEmission : Instruction → Bool
   | .conv_i2 | .conv_i4 | .conv_i8 | .conv_u1 | .conv_u2 | .conv_u4 | .conv_u8 | .conv_u
   | .conv_i | .conv_ovf _ | .conv_ovf_un _
   | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un
-  | .mul_ovf | .mul_ovf_un | .nativeBinary _
+  | .mul_ovf | .mul_ovf_un
   | .beq _ | .bge _ | .bgt _ | .ble _ | .blt _ | .bne_un _ | .bge_un _ | .bgt_un _
   | .ble_un _ | .blt_un _ => true
   | _ => false

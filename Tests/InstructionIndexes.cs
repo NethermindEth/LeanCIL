@@ -280,12 +280,12 @@ bool Pure(object operation, bool plainReturn = true) =>
         [operation, plainReturn])!;
 var nop = Make("StackOperation", Named("StackOpcode", "Nop"));
 var backEdge = Make("Jump", Named("JumpKind", "Less"), 0);
-if (Loops(Body(nop, nop, backEdge)) != 1 || Loops(Body(nop, nop, Make("NativeBinary", backEdge))) != 1)
-    throw new Exception("A back edge the native-width analysis wrapped is not found as a loop");
+if (Loops(Body(nop, nop, backEdge)) != 1)
+    throw new Exception("A conditional back edge is not found as a loop");
 if (!Pure(Make("Arg", 0, null)) || Pure(Make("Arg", 0, Named("Narrowing", "Unsigned8"))) ||
     !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
-    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)) || Pure(Make("NativeBinary", nop)))
-    throw new Exception("The pure operations are no longer exactly the unnarrowed, unwrapped ones");
+    Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
+    throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
 if (Lean(Make("LoadScalar", 4, false)) != ".loadScalar 4" ||
     Lean(Make("LoadScalar", 4, Named("LoadSign", "UnsignedSpelled"))) != ".loadScalar 4 false" ||
     Lean(Make("LoadScalar", 1, true)) != ".loadScalar 1 true" ||

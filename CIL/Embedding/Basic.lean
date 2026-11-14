@@ -21,7 +21,6 @@ namespace CIL
 
 /-- Replaces every code target of an instruction by its image under `r`. -/
 def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
-  | .nativeBinary op => .nativeBinary (op.relabel r)
   | .bgt t => .bgt (r t) | .ble t => .ble (r t) | .ble_un t => .ble_un (r t)
   | .br t => .br (r t) | .switch ts => .switch (ts.map r)
   | .brfalse t => .brfalse (r t) | .brtrue t => .brtrue (r t)
@@ -39,7 +38,6 @@ theorem Instruction.link?_relabel (r : Nat → Nat) (op : Instruction) :
 
 /-- Every code target of an instruction, in operand order. -/
 def Instruction.targets : Instruction → List Nat
-  | .nativeBinary op => op.targets
   | .bgt t | .ble t | .ble_un t | .br t | .brfalse t | .brtrue t
   | .blt_un t | .bge_un t | .bgt_un t | .bge t | .blt t | .beq t | .bne_un t => [t]
   | .switch ts => ts
