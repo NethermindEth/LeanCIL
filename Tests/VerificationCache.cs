@@ -50,6 +50,80 @@ try
     verifier.PublishSuccess("missing", source);
     File.Delete(Path.Combine(SuccessCacheRoot, "missing", "files", "Proof.olean"));
     if (verifier.RestoreSuccess("missing", destination)) throw new Exception("Missing object accepted");
+    var originalModules = new SortedDictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["CIL/Base.olean"] = "base", ["CIL/Base.olean.private"] = "private"
+    };
+    var completeModules = new SortedDictionary<string, string>(originalModules, StringComparer.Ordinal)
+    {
+        ["CIL/Extra.olean"] = "extra"
+    };
+    void CheckPromotion(string label, bool expected, string completeIdentity = "full",
+        Action<SortedDictionary<string, string>>? mutateModules = null, Action<string>? mutateEntry = null,
+        bool unstable = false)
+    {
+        var extractionKey = "extraction-" + label;
+        var proofKey = "proof-" + label;
+        verifier.PublishSuccess(extractionKey, source);
+        verifier.PublishSuccess(proofKey, source);
+        mutateEntry?.Invoke(Path.Combine(SuccessCacheRoot, extractionKey));
+        mutateEntry?.Invoke(Path.Combine(SuccessCacheRoot, proofKey));
+        var modules = new SortedDictionary<string, string>(completeModules, StringComparer.Ordinal);
+        mutateModules?.Invoke(modules);
+        var promotion = new StandaloneCachePromotion("full", originalModules,
+            extractionKey, label, proofKey, label);
+        var guards = 0;
+        verifier.PromoteStandaloneCache(promotion, completeIdentity, modules, () =>
+        {
+            guards++;
+            if (unstable) throw new InvalidOperationException("Changed complete library fixture");
+        });
+        var environment = verifier.StandaloneEnvironmentKey(completeIdentity, modules);
+        var promotedExtraction = StandaloneExtractionKey(environment, label);
+        var promotedProof = StandaloneProofKey(promotedExtraction, label);
+        if (verifier.RestoreSuccess(promotedExtraction, destination) != expected ||
+            verifier.RestoreSuccess(promotedProof, destination) != expected || expected && guards != 2)
+            throw new Exception("Incorrect complete-library promotion: " + label);
+    }
+    CheckPromotion("identical-extension", true);
+    CheckPromotion("source-or-toolchain", false, completeIdentity: "changed-full");
+    CheckPromotion("changed-dependency", false, mutateModules: modules => modules["CIL/Base.olean"] = "changed");
+    CheckPromotion("missing-dependency", false, mutateModules: modules => modules.Remove("CIL/Base.olean"));
+    CheckPromotion("changed-companion", false,
+        mutateModules: modules => modules["CIL/Base.olean.private"] = "changed");
+    CheckPromotion("added-companion", false,
+        mutateModules: modules => modules["CIL/Base.olean.server"] = "unchecked");
+    CheckPromotion("changed-receipt", false,
+        mutateEntry: entry => File.AppendAllText(Path.Combine(entry, "receipt.json"), " "));
+    CheckPromotion("changed-artifact", false,
+        mutateEntry: entry => File.AppendAllText(Path.Combine(entry, "files", "Proof.olean"), "corruption"));
+    CheckPromotion("changed-complete-library", false, unstable: true);
+    Console.WriteLine("PASS complete-library promotion preserves exact families, identity and authenticated artifacts");
+    long previousAllocation = 0;
+    foreach (var count in new[] { 256, 1024, 4096 })
+    {
+        var beforeModules = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        for (var index = 0; index < count; index++) beforeModules[$"CIL/M{index:D5}.olean"] = "hash";
+        var afterModules = new SortedDictionary<string, string>(beforeModules, StringComparer.Ordinal)
+        {
+            ["CIL/Outside.olean"] = "outside"
+        };
+        ModuleArtifactsPreserved(beforeModules, afterModules);
+        var allocationStart = GC.GetAllocatedBytesForCurrentThread();
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        for (var repeat = 0; repeat < 32; repeat++)
+        {
+            if (!ModuleArtifactsPreserved(beforeModules, afterModules))
+                throw new Exception("Identical module families were rejected");
+            verifier.StandaloneEnvironmentKey("full", afterModules);
+        }
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
+        if (previousAllocation > 0 && allocated > previousAllocation * 6)
+            throw new Exception("Complete-library environment allocation grew superlinearly");
+        previousAllocation = allocated;
+        Console.WriteLine($"PASS complete-library environment {count} modules: {allocated} bytes, " +
+            $"{timer.Elapsed.TotalMilliseconds:F2} ms for 32 checks");
+    }
     // Publishing closure A must not carry unrelated B from the same session.
     var session = Path.Combine(directory, "session");
     var artifacts = Path.Combine(session, ".lake/build/lib/lean/Support");

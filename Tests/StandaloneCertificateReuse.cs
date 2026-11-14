@@ -54,6 +54,13 @@ void Verify(string label, int expectedCompilations, params string[] options)
         "Joint kernel replay of consumer proof and dependencies").ToArray();
     if (expectedCompilations > 0 && replays.Length == 0)
         throw new InvalidOperationException("Missing independent kernel replay: " + label);
+    var audits = stages.Where(stage => stage.GetProperty("command") is var command &&
+        command.GetArrayLength() == 3 &&
+        Path.GetFileNameWithoutExtension(command[0].GetString()) == "leancil-audit" &&
+        command[1].GetString()!.EndsWith(".json", StringComparison.Ordinal) &&
+        command[2].GetString()!.EndsWith(".result.json", StringComparison.Ordinal)).ToArray();
+    if (audits.Length == 0)
+        throw new InvalidOperationException("Missing fresh theorem and extraction audit: " + label);
     measurements.Add(new { label, seconds = timer.Elapsed.TotalSeconds,
         frontendProcesses = compilations.Length,
         frontendSeconds = compilations.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()) });

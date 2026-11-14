@@ -47,6 +47,7 @@ partial class Program : IDisposable
     string[]? libraryModules;
     /// <summary>A report was written against a closure entry, so the whole library is still to be built.</summary>
     bool completesLibrary;
+    StandaloneCachePromotion? standaloneCachePromotion;
     /// <summary>The use locks of the cache entries this process reads in place, held until it is disposed.</summary>
     readonly List<FileStream> entryUses = [];
     /// <summary>This process's writable package, which requires <see cref="library"/> by path.</summary>
@@ -1030,6 +1031,7 @@ partial class Program : IDisposable
     string? incrementalLibrary { get; init; }
     string? incrementalDigest { get; init; }
     string? libraryKey;
+    string? fullLibraryKey;
     string? libraryBuild;
 
     // This descriptor is distributed inside the installed CLI, not read from the downloaded archive.
@@ -1949,6 +1951,7 @@ partial class Program : IDisposable
         }
 
         (libraryKey, var sources) = LibraryIdentity(common);
+        fullLibraryKey = libraryKey;
         static bool Set(string variable) => string.Equals(Environment.GetEnvironmentVariable(variable), "true",
             StringComparison.OrdinalIgnoreCase);
         var fresh = freshLibrary || !editorLibrary && (Set("CI") || Set("GITHUB_ACTIONS"));
@@ -4220,9 +4223,9 @@ partial class Program : IDisposable
             }
             // Full artifact identities include transitive support dependencies and every
             // olean part. Cached success is never inferred from an unsigned manifest.
-            var environmentKey = ContentKey("certified-modules-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" + JsonSerializer.Serialize(currentModules));
-            var extractedKey = ContentKey("extraction-audit-v3-direct-certificate\n" + environmentKey + "\n" +
-                Sha(Path.Combine(fresh, "Extracted.lean")));
+            var environmentKey = StandaloneEnvironmentKey(libraryKey!, currentModules);
+            var extractionSuffix = "\n" + Sha(Path.Combine(fresh, "Extracted.lean"));
+            var extractedKey = StandaloneExtractionKey(environmentKey, extractionSuffix);
             string? extractionPublication = null;
             if (RestoreSuccess(extractedKey, fresh))
             {
@@ -4328,10 +4331,11 @@ partial class Program : IDisposable
             }
             RequireStagedProofSources();
             // Cached proofs carry their Lean messages and statement display.
-            var proofKey = ContentKey("theorem-audit-v3\n" + extractedKey + "\n" + proofSourceHash + "\n" +
+            var proofSuffix = "\n" + proofSourceHash + "\n" +
                 (symbols ? symbolsSourceHash + "\n" : "") +
                 SemanticExtractionIdentity(extraction) + "\n" + JsonSerializer.Serialize(extraction.Sources) + "\n" +
-                JsonSerializer.Serialize(acceptedInterfaceArtifacts) + "\n" + theorem + ProofOptionsKey);
+                JsonSerializer.Serialize(acceptedInterfaceArtifacts) + "\n" + theorem + ProofOptionsKey;
+            var proofKey = StandaloneProofKey(extractedKey, proofSuffix);
             var proofRestored = RestoreSuccess(proofKey, fresh);
             if (proofRestored)
             {
@@ -4513,6 +4517,9 @@ partial class Program : IDisposable
                 PublishSuccess(extractedKey, extractionPublication);
             File.WriteAllText(reportPath, JsonSerializer.Serialize(report, Json) + "\n");
             completesLibrary = libraryModules is not null;
+            standaloneCachePromotion = completesLibrary && deep is null && UseSuccessCache
+                ? new(fullLibraryKey!, new(currentModules, StringComparer.Ordinal),
+                    extractedKey, extractionSuffix, proofKey, proofSuffix) : null;
 
             return report;
         }
@@ -4552,6 +4559,11 @@ partial class Program : IDisposable
         {
             using var whole = new Program();
             whole.Library(Inputs(At("CIL.lean")));
+            var promotion = standaloneCachePromotion;
+            standaloneCachePromotion = null;
+            if (promotion is not null)
+                PromoteStandaloneCache(promotion, whole.fullLibraryKey!, whole.SessionModules(whole.session!),
+                    whole.RequireUnchangedLibrary);
         }
         // Whatever stopped the build, the caller reports it; nothing may escape as an unhandled error here.
         catch (Exception error)
@@ -4559,6 +4571,50 @@ partial class Program : IDisposable
             throw new InvalidOperationException("The verified result above stands and its certificate is " +
                 "written, but the whole certified library was not built: " + error.Message, error);
         }
+    }
+
+    /// <summary>Authenticated successes checked in an exact compiled environment before library completion.</summary>
+    sealed record StandaloneCachePromotion(string FullLibraryKey, SortedDictionary<string, string> Modules,
+        string ExtractionKey, string ExtractionSuffix, string ProofKey, string ProofSuffix);
+
+    string StandaloneEnvironmentKey(string key, SortedDictionary<string, string> modules) =>
+        ContentKey("certified-modules-v1\n" + VerificationPolicy + "\n" + key + "\n" +
+            JsonSerializer.Serialize(modules));
+
+    static string StandaloneExtractionKey(string environment, string suffix) =>
+        ContentKey("extraction-audit-v3-direct-certificate\n" + environment + suffix);
+
+    static string StandaloneProofKey(string extraction, string suffix) =>
+        ContentKey("theorem-audit-v3\n" + extraction + suffix);
+
+    /// <summary>Reuses authenticated successes only across a byte-identical extension of their module families.</summary>
+    void PromoteStandaloneCache(StandaloneCachePromotion promotion, string completeKey,
+        SortedDictionary<string, string> completeModules, Action requireStable)
+    {
+        if (!UseSuccessCache || promotion.FullLibraryKey != completeKey ||
+            !ModuleArtifactsPreserved(promotion.Modules, completeModules)) return;
+        var environment = StandaloneEnvironmentKey(completeKey, completeModules);
+        var extraction = StandaloneExtractionKey(environment, promotion.ExtractionSuffix);
+        var proof = StandaloneProofKey(extraction, promotion.ProofSuffix);
+        var staging = Path.Combine(Path.GetTempPath(), "leancil-promotion-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var (original, promoted) in new[]
+                { (promotion.ExtractionKey, extraction), (promotion.ProofKey, proof) })
+            {
+                var destination = Path.Combine(staging, promoted);
+                Directory.CreateDirectory(destination);
+                if (!RestoreSuccess(original, destination)) continue;
+                // Completion must retain its authenticated inputs through cache publication.
+                requireStable();
+                PublishSuccess(promoted, destination);
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            Console.Error.WriteLine("warning: completed-library success cache not updated: " + error.Message);
+        }
+        finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
     }
 }
 /// <summary>

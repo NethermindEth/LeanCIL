@@ -387,8 +387,8 @@ partial class Program
             if (bindingSession != session || prepared.Library != library || prepared.LibraryKey != libraryKey ||
                 prepared.Toolchain != toolchain || bindingSourcesKey != BindingSourcesKey(session) ||
                 !Same(prepared.BaseArtifacts, beforeBase) ||
-                !BindingArtifactsPreserved(prepared.SessionArtifacts, beforeSession) ||
-                !BindingArtifactsPreserved(prepared.CertifiedArtifacts, current))
+                !ModuleArtifactsPreserved(prepared.SessionArtifacts, beforeSession) ||
+                !ModuleArtifactsPreserved(prepared.CertifiedArtifacts, current))
                 throw new InvalidOperationException("The prepared StrictBinding library changed");
             return;
         }
@@ -401,8 +401,8 @@ partial class Program
         current = new(afterBase, StringComparer.Ordinal);
         foreach (var (name, hash) in afterSession) current[name] = hash;
         if (!Same(beforeBase, afterBase) ||
-            !BindingArtifactsPreserved(beforeSession, afterSession) ||
-            !BindingArtifactsPreserved(certifiedModules, current))
+            !ModuleArtifactsPreserved(beforeSession, afterSession) ||
+            !ModuleArtifactsPreserved(certifiedModules, current))
             throw new InvalidOperationException("The certified library changed while building StrictBinding");
         string[] added =
             [.. current.Keys.Where(name => !certifiedModules.ContainsKey(name)).Select(ModuleName).Distinct()];
@@ -422,7 +422,7 @@ partial class Program
     }
 
     /// <summary>Existing module families retain exactly their artifacts; additional families are permitted.</summary>
-    static bool BindingArtifactsPreserved(SortedDictionary<string, string> before,
+    static bool ModuleArtifactsPreserved(SortedDictionary<string, string> before,
         SortedDictionary<string, string> after)
     {
         HashSet<string> families = new(StringComparer.Ordinal);
