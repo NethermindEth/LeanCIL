@@ -24,7 +24,8 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
         if stack.length < argc then .error .invalidState else
           let values ← CIL.Safety.scalars (stack.take argc)
           let some (.next destination result _) :=
-            CIL.step operation false none pc [] values (fun _ => none) profile |
+            CIL.step operation false none pc [] (CIL.widenMixed operation values)
+              (fun _ => none) profile |
               .error .invalidState
           let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
           return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -38,7 +39,8 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if stack.length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars (stack.take argc)
             let some (.next destination result _) :=
-              CIL.step operation false none pc [] values (fun _ => none) profile |
+              CIL.step operation false none pc [] (CIL.widenMixed operation values)
+                (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
             return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -51,7 +53,8 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if (stack.map mapping.value).length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars ((stack.map mapping.value).take argc)
             let some (.next destination result _) :=
-              CIL.step operation false none pc [] values (fun _ => none) profile |
+              CIL.step operation false none pc [] (CIL.widenMixed operation values)
+                (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue target)
             return FrameAction.next destination (result ++ (stack.map mapping.value).drop argc)
@@ -98,7 +101,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
-  | .intrinsic .. | .nativeBinary _ | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
+  | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
   | .managed _ | .arg .. | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
   | .tailCall ..

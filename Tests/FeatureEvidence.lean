@@ -118,8 +118,8 @@ example : featureTransfer #[] branchRaw .scalar (i 65025) ⟨[some 1, some 1], [
 example : featureTransfer #[] branchRaw .scalar (i 65025) ⟨[none, some 1], []⟩ = some ⟨[none], []⟩ := by decide
 example : featureTransfer #[] branchRaw .scalar (i 95) ⟨[], []⟩ = none := by decide
 -- Native operand normalization does not change a binary branch destination.
-example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.nativeBinary (.bgt 2)) = true := by decide
-example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.nativeBinary (.bgt 3)) = false := by decide
+example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.bgt 2) = true := by decide
+example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.bgt 3) = false := by decide
 
 -- A stack-changing replacement for nop used to forge the value at a following
 -- branch while the raw-body analysis still justified pruning its taken edge.
@@ -137,7 +137,6 @@ example : featureOpMatches #[] loopRaw (i 0) (.stloc 0) = false := by decide
 example : featureOpMatches #[] loopRaw (i 38) (.stloc 0) = false := by decide
 example : featureOpMatches #[] loopRaw (i 0) (.bgt 7) = false := by decide
 example : featureOpMatches #[] loopRaw (i 0) (.ret) = false := by decide
-example : featureOpMatches #[] loopRaw (i 0) (.nativeBinary (.bgt 7)) = false := by decide
 example : featureOpMatches #[] loopRaw (i 33 (.integer 0)) (.ldloca 0) = false := by decide
 example : featureOpMatches #[] loopRaw (i 10) (.stloc 1) = false := by decide
 example : featureOpMatches #[] loopRaw (i 18 (.local 0)) (.ldloca 1) = false := by decide
@@ -215,7 +214,7 @@ theorem comparison_certificate :
     let body := raw [i 21, i 22, i 50 (.target 5), i 22, i 42, i 23, i 42]
     let facts := [state [], state [some (-1)], state [some 0, some (-1)], none, none,
       state [], state [some 1]]
-    let code := [.ldc_i4 (-1), .ldc_i4 0, .blt 5, .unsupported "pruned", .unsupported "pruned",
+    let code := [.ldc_i4 (-1), .ldc_i4 0, (.blt 5), .unsupported "pruned", .unsupported "pruned",
       .ldc_i4 1, .ret]
     FeatureFlowValid #[] (fun _ => none)
         body .scalar facts [true, true, true, false, false, true, true] code ∧

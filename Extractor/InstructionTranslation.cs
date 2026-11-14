@@ -73,7 +73,7 @@ internal static class InstructionTranslation
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
         var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
             layouts, constrainedTargets);
-        return nativeOperands.Mixed.Contains(i) ? new NativeBinary(translated) : translated;
+        return translated;
     }
 
     static Operation TranslateCore(Instruction i, MethodDefinition m,

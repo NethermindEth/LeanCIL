@@ -367,10 +367,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       let operands ← scalars (stack.take argc).reverse
       let value ← checkedIntrinsic operation operands
       return .next (pc + 1) ((← checkedValue m (.scalar value)) :: stack.drop argc) frame m
-  | .nativeBinary operation, .scalar y :: .scalar x :: rest =>
-    let (target, values) ← (CIL.nativeBinaryValues operation pc x y).mapError ExecutionFault.arithmetic
-    let values ← (values.map Value.scalar).mapM (checkedValue m)
-    return .next target (values ++ rest) frame m
   | .arg i none, _ =>
     let some value := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m value) :: stack) frame m
@@ -448,7 +444,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       if stack.length < argc then .error .invalidState else
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false none pc [] values (fun _ => none) body.profile | .error .invalidState
+          CIL.step op false none pc [] (CIL.widenMixed op values) (fun _ => none) body.profile
+            | .error .invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue m)
         return .next target (result ++ stack.drop argc) frame m
     | none =>

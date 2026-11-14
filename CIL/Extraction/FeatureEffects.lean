@@ -69,11 +69,6 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
   | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => some (2, 1)
-  | .nativeBinary operation => match operation with
-    | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
-    | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
-    | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => some (2, 1)
-    | _ => none
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .store64 | .copyObject _
   | .setFieldAt .. | .setAggregateFieldAt .. => some (2, 0)

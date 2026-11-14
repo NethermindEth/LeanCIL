@@ -419,7 +419,6 @@ internal static partial class ProofOutline
                     var zero = Pop() is Null;
                     if (zero == (objectTest.Kind == JumpKind.IfZero)) pc = objectTest.Target - 1;
                 }
-                else if (op is NativeBinary) return Stop($"`{op.ToLean()}`, which the outline does not step");
                 else if (op is Jump { Conditional: true } test)
                 {
                     var operands = new Word?[test.Operands];

@@ -311,12 +311,6 @@ internal sealed record FeatureTest(Feature Feature) : Operation
         ".feature " + FeatureProfile.LeanFeature(Feature);
 }
 
-/// <summary>An operation over operands the native-width analysis certified as a native and int32 mixture.</summary>
-internal sealed record NativeBinary(Operation Inner) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".nativeBinary ({Inner.Render(calleeName)})";
-}
-
 internal enum FieldAccess { Load, Store, LoadAggregate, StoreAggregate, Address }
 
 /// <summary>

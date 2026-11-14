@@ -85,7 +85,7 @@ example : binaryStep .mul_ovf 0xFFFFFFFF 2 = pushes 0xFFFFFFFE := rfl
 example : binaryStep .mul_ovf_un 0xFFFFFFFF 2 = overflows := rfl
 
 -- An unsigned checked op zero-extends a native-int `i32`; sign extension would overflow here.
-example : step body (.nativeBinary .mul_ovf_un) 0 [] frame
+example : step body .mul_ovf_un 0 [] frame
     [.scalar (.i32 0x80000000), .scalar (.i64 2)] Memory.empty =
       .ok (.next 1 [.scalar (.i64 0x100000000)] frame Memory.empty) := rfl
 
@@ -193,9 +193,8 @@ example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)
 end LocalAddress
 
 -- Every generated faulting and `conv.i` equation exists and uses only the allowed axioms. At
--- equal widths a faulting equation keeps its helper folded with the operand guard decided, the
--- form the checked bridge reads; an unfolded unsigned bound would expand `2 ^ width`. Mixed
--- widths fault.
+-- all admitted widths a faulting equation keeps its helper folded with the operand guard decided, the
+-- form the checked bridge reads; an unfolded unsigned bound would expand `2 ^ width`.
 run_cmd do
   let binary := ["div", "div_un", "rem", "rem_un", "add_ovf", "add_ovf_un", "sub_ovf",
     "sub_ovf_un", "mul_ovf", "mul_ovf_un"]
@@ -203,14 +202,14 @@ run_cmd do
     if op.startsWith "div" || op.startsWith "rem" then ``CIL.divideValues else ``CIL.checkedValues
   let folded : List (String × Name) :=
     binary.flatMap (fun op =>
-      [(s!"{op}_i32_i32", helperOf op), (s!"{op}_i64_i64", helperOf op)]) ++
+      ["i32_i32", "i64_i64", "i32_i64", "i64_i32"].map fun widths =>
+        (s!"{op}_{widths}", helperOf op)) ++
     ["conv_ovf", "conv_ovf_un"].flatMap fun op =>
       [(s!"{op}_i32", ``CIL.convertInteger), (s!"{op}_i64", ``CIL.convertInteger)]
-  let faulting := binary.map (s!"{·}_i32_i64")
   let plain := ["conv_i_i32", "conv_i_i64"]
-  let names := (folded.map (·.1) ++ faulting ++ plain).map fun suffix =>
+  let names := (folded.map (·.1) ++ plain).map fun suffix =>
     `CIL.Safety ++ Name.mkSimple s!"step_{suffix}_eq"
-  unless names.length == 36 do throwError "expected 36 equations, listed {names.length}"
+  unless names.length == 46 do throwError "expected 46 equations, listed {names.length}"
   let allowed := [``propext, ``Quot.sound, ``Classical.choice]
   for equation in names do
     unless (← getEnv).contains equation do throwError "missing {equation}"
@@ -224,11 +223,6 @@ run_cmd do
     if (type.find? fun term => term.isAppOf ``Bool.rec ||
         term.isConstOf ``CIL.Safety.unspecifiedOperands).isSome then
       throwError "{equation} leaves the operand guard undecided"
-  for suffix in faulting do
-    let equation := `CIL.Safety ++ Name.mkSimple s!"step_{suffix}_eq"
-    let some (_, _, rhs) := (← getConstInfo equation).type.getForallBody.eq?
-      | throwError "{equation} is not an equation"
-    unless rhs.isAppOf ``Except.error do throwError "{equation} does not fault: {rhs}"
 
 section Returns
 

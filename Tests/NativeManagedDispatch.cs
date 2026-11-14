@@ -115,7 +115,7 @@ foreach (var (name, mutated) in new[]
         StringComparison.Ordinal)),
     ("raw-load", scalar.Replace("opcode := 77, operand := .none", "opcode := 76, operand := .none",
         StringComparison.Ordinal)),
-    ("offset", scalar.Replace(".managed .tableOffset", ".nativeBinary (.add)", StringComparison.Ordinal)),
+    ("offset", scalar.Replace(".managed .tableOffset", ".add", StringComparison.Ordinal)),
     ("input", scalar.Replace(".pointer (.atom Extraction.runtimeScope \"System.IntPtr\")",
         ".pointer (.atom Extraction.runtimeScope \"System.Int64\")", StringComparison.Ordinal))
 })

@@ -63,8 +63,6 @@ namespace CIL.Safety
       (value.hasUnspecified || unspecifiedOperands count rest) := rfl
 
 -- How many stack operands each instruction observes.
-@[cil_guard] theorem guard_nativeBinary (op : CIL.Instruction) :
-    observerCount (.nativeBinary op) = 2 := rfl
 /-- A signed division observes both of its operands. -/
 @[cil_guard] theorem guard_div : observerCount .div = 2 := rfl
 #print axioms guard_div

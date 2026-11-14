@@ -15,47 +15,6 @@ instructions reuse the base-step lemmas of `CIL.Embedding.BaseStep`, and the res
 both steps in lockstep with the tactics defined here.
 -/
 
-namespace CIL.Embedding
-
-open CIL
-
-/-- A mixed native operation resumes at the relabeled successor. -/
-theorem nativeBinaryValues_relabel (r : Nat → Nat) (op : Instruction) (pc q : Nat) (x y : Value)
-    (next : r (pc + 1) = q + 1) (target : Nat) (values : List Value)
-    (h : nativeBinaryValues op pc x y = .ok (target, values)) :
-    nativeBinaryValues (op.relabel r) q x y = .ok (r target, values) := by
-  unfold nativeBinaryValues at h ⊢
-  simp only [bind, Except.bind] at h ⊢
-  rw [widenNativeOperand_relabel, divideKind?_relabel, checkedKind?_relabel,
-    nativePureBinary_relabel]
-  split at h
-  rotate_right
-  · cases h
-  all_goals
-    try simp only at h ⊢
-    rcases divided : op.divideKind? with _ | ⟨signed, remainder⟩ <;>
-      rcases checked : op.checkedKind? with _ | ⟨kind, signedness⟩ <;>
-      simp only [divided, checked] at h ⊢
-    -- Faulting arithmetic resumes at the successor; a pure operation relabels its own target.
-    all_goals first
-      | (split at h
-         · cases h
-         simp only [pure, Except.pure] at h ⊢
-         cases h
-         rw [next])
-      | (by_cases pure : nativePureBinary op = true
-         · simp only [pure, ite_true] at h ⊢
-           split at h
-           · rename_i found
-             rw [base_relabel_of_nativePure op pure r pc q _ _ _ _ _ (fun _ => next) found]
-             cases h
-             rfl
-           · cases h
-         · simp only [pure, Bool.false_eq_true, ite_false] at h
-           cases h)
-
-end CIL.Embedding
-
 namespace CIL.Safety
 
 open CIL.Embedding
@@ -115,7 +74,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false none pc [] values (fun _ => none) profile with
+        match CIL.step op false none pc [] (CIL.widenMixed op values) (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -128,7 +87,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false none q [] values (fun _ => none) profile with
+        match CIL.step (op.relabel r) false none q [] (CIL.widenMixed (op.relabel r) values) (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -138,6 +97,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       Pure.pure (FrameAction.next (q + 1) __x.snd frame __x.fst)) =
         Except.ok (action.relabel r) := by
   rw [arity]
+  simp only [widenMixed_relabel]
   cases hp : pureArity op with
   | none =>
     rw [hp] at h
@@ -165,7 +125,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
         simp only at h ⊢
         split at h
         · rename_i target result memory found
-          rw [base (by simp [hp]) r pc q values profile target result memory next found]
+          rw [base (by simp [hp]) r pc q (CIL.widenMixed op values) profile target result memory next found]
           simp only at h ⊢
           cases hc : List.mapM (checkedValue m) (List.map Value.scalar result) with
           | error _ => rw [hc] at h; cases h
@@ -294,17 +254,6 @@ macro "lookup_lockstep" : tactic => `(tactic| (
   · cases h))
 
 -- Instructions with a dedicated case in `step`.
-
-theorem step_relabel_nativeBinary (operation : Instruction) :
-    StepRelabel (.nativeBinary operation) := by
-  stack_cases =>
-    first
-      | fallback_vacuous
-      | (obtain ⟨⟨target, values⟩, found, h⟩ := except_bind_ok h
-         have native := nativeBinaryValues_relabel r operation pc q _ _ (context.next rfl) target
-           values (mapError_ok found)
-         simp only [native, Except.mapError, ok_bind_eq] at h ⊢
-         lockstep)
 
 /-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
 theorem step_relabel_faulting (op : Instruction)
@@ -676,7 +625,6 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
          all_goals cases h
          all_goals simp only [FrameAction.relabel]
          all_goals rw [context.next rfl])
-  case nativeBinary operation => exact step_relabel_nativeBinary operation
   case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
     | mul_ovf_un => exact step_relabel_faulting _ rfl
   case conv_ovf target => exact step_relabel_conv_ovf target
@@ -822,7 +770,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false none pc [] values (fun _ => none) profile with
+        match CIL.step op false none pc [] (CIL.widenMixed op values) (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -836,7 +784,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false none q [] values (fun _ => none) profile with
+        match CIL.step (op.relabel r) false none q [] (CIL.widenMixed (op.relabel r) values) (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -846,6 +794,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       Pure.pure (FrameAction.next (q + 1) __x.snd frame __x.fst)) =
         Except.error (.thrown exception) := by
   rw [arity]
+  simp only [widenMixed_relabel]
   cases hp : pureArity op with
   | none =>
     rw [hp] at h
@@ -871,7 +820,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
         simp only at h ⊢
         split at h
         · rename_i target result memory found
-          rw [base (by simp [hp]) r pc q values profile target result memory next found]
+          rw [base (by simp [hp]) r pc q (CIL.widenMixed op values) profile target result memory next found]
           simp only at h ⊢
           cases hc : List.mapM (checkedValue m) (List.map Value.scalar result) with
           | error _ => rw [hc] at h; cases h; rfl
@@ -915,18 +864,6 @@ macro "lookup_raise" : tactic => `(tactic| (
   · cases h))
 
 -- Instructions with a dedicated case in `step`.
-
-theorem step_raise_nativeBinary (operation : Instruction) :
-    StepRaise (.nativeBinary operation) := by
-  stack_cases =>
-    first
-      | fallback_raise_vacuous
-      | (rcases except_bind_error h with found | ⟨⟨target, values⟩, found, h⟩
-         · exact absurd found mapError_arithmetic_ne_thrown
-         · have native := nativeBinaryValues_relabel r operation pc q _ _ (context.next rfl) target
-             values (mapError_ok found)
-           simp only [native, Except.mapError, ok_bind_eq] at h ⊢
-           raise_lockstep)
 
 /-- Division, remainder and overflow-checked arithmetic raise in lockstep with their
     relabeling. -/
@@ -1209,7 +1146,6 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
         | (cases ‹CIL.Value› <;>
             dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢ <;>
             first | cases h | raise_lockstep)
-  case nativeBinary operation => exact step_raise_nativeBinary operation
   case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
     | mul_ovf_un => exact step_raise_faulting _ rfl
   case conv_ovf target => exact step_raise_conv_ovf target

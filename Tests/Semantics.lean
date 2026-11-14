@@ -2,6 +2,7 @@ import Tests.AggregateSetup
 import Tests.ValueBitCasts
 import Tests.ViewReuse
 import Tests.Support
+import Tests.MixedNativeOpcodes
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.NumericLocalLoad
 
@@ -82,9 +83,11 @@ theorem neg_underflow :
 theorem neg_reference_rejected :
     (step scalarBody .neg 0 [] scalarFrame [Tests.reference] Tests.caller).isOk = false := rfl
 
-theorem cgt_mixed_width_rejected :
+/-- Signed scalar comparison widens mixed native/int32 operands. -/
+theorem cgt_mixed_width :
     (step scalarBody .cgt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)]
-      Memory.empty).isOk = false := rfl
+      Memory.empty).isOk = true := rfl
+#print axioms cgt_mixed_width
 
 theorem branches_reject_underflow :
     ([CIL.Instruction.bgt 1, .ble 1, .ble_un 1].all fun op =>
@@ -96,9 +99,11 @@ theorem signed_branches_reject_references :
 
 #print axioms signed_branches_reject_references
 
-theorem branches_reject_mixed_widths :
-    ([CIL.Instruction.bgt 1, .ble 1, .ble_un 1].all fun op =>
+/-- Mixed unsigned comparison branches remain unsupported. -/
+theorem unsigned_branches_reject_mixed_widths :
+    ([CIL.Instruction.bgt_un 1, .ble_un 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk) = true := rfl
+#print axioms unsigned_branches_reject_mixed_widths
 
 theorem narrow_conversions_reject_references :
     ([CIL.Instruction.conv_i1, .conv_i2, .conv_u2].all fun op =>
@@ -409,45 +414,53 @@ end Tests
 
 namespace Tests
 
-theorem division_mixed_widths_rejected :
-    CIL.divideValues false false (.i32 6) (.i64 2) = .error .invalidOperands := rfl
+/-- Division widens a mixed int32 numerator. -/
+theorem division_mixed_widths :
+    CIL.divideValues false false (.i32 6) (.i64 2) = .ok (.i64 3) := rfl
+#print axioms division_mixed_widths
 
-theorem checked_mixed_widths_rejected :
-    CIL.checkedValues .add false (.i32 6) (.i64 2) = .error .invalidOperands := rfl
+/-- Checked addition widens a mixed int32 operand. -/
+theorem checked_mixed_widths :
+    CIL.checkedValues .add false (.i32 6) (.i64 2) = .ok (.i64 8) := rfl
+#print axioms checked_mixed_widths
 
 theorem checked_conversion_bad_width :
     CIL.convertInteger 7 false true (.i32 1) = .error .invalidOperands := rfl
 
-theorem native_memory_dispatch_rejected :
-    CIL.nativeBinaryValues .load64 0 (.i64 0) (.i32 0) = .error .invalidOperands := rfl
+/-- Memory operations do not widen scalar operands. -/
+theorem native_memory_unchanged :
+    CIL.widenMixed .load64 [.i32 0, .i64 0] = [.i32 0, .i64 0] := rfl
+#print axioms native_memory_unchanged
 
-theorem native_nested_dispatch_rejected :
-    CIL.nativeBinaryValues (.nativeBinary .add) 0 (.i64 0) (.i32 0) = .error .invalidOperands := rfl
+/-- Reference operands do not qualify for integer widening. -/
+theorem native_reference_unchanged :
+    CIL.widenMixed .add [.i32 0, .nullRef] = [.i32 0, .nullRef] := rfl
+#print axioms native_reference_unchanged
 
-theorem native_reference_operand_rejected :
-    CIL.nativeBinaryValues .add 0 .nullRef (.i32 0) = .error .invalidOperands := rfl
-
+/-- Pure mixed arithmetic sign-extends int32. -/
 theorem native_mixed_signed_extension :
-    CIL.nativeBinaryValues .add 0 (.i64 1) (.i32 4294967295) = .ok (1, [.i64 0]) := rfl
+    CIL.widenMixed .add [.i32 4294967295, .i64 1] =
+      [.i64 18446744073709551615, .i64 1] := rfl
+#print axioms native_mixed_signed_extension
 
+/-- Unsigned checked arithmetic zero-extends int32. -/
 theorem native_checked_unsigned_extension :
-    CIL.nativeBinaryValues .add_ovf_un 0 (.i64 1) (.i32 4294967295) =
-      .ok (1, [.i64 4294967296]) := rfl
+    CIL.checkedValues .add false (.i64 1) (.i32 4294967295) = .ok (.i64 4294967296) := rfl
+#print axioms native_checked_unsigned_extension
 
-theorem native_unsigned_branch_rejected :
-    CIL.nativeBinaryValues (.bne_un 9) 0 (.i64 18446744073709551615) (.i32 4294967295) =
-      .error .invalidOperands := rfl
-
+/-- Unsigned branches preserve mixed operands, which the reference step rejects. -/
 theorem native_unsigned_branch_family_rejected :
-    CIL.nativeBinaryValues (.blt_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bgt_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.ble_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bge_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands :=
-  ⟨rfl, rfl, rfl, rfl⟩
+    ([CIL.Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
+      (CIL.step op false none 0 []
+        (CIL.widenMixed op [.i32 4294967295, .i64 0]) (fun _ => none)).isNone) = true := rfl
+#print axioms native_unsigned_branch_family_rejected
 
+/-- Unsigned scalar comparisons sign-extend int32 before comparing. -/
 theorem native_unsigned_compare_extension :
-    CIL.nativeBinaryValues .cgt_un 0 (.i64 18446744073709551615) (.i32 4294967295) =
-      .ok (1, [.i32 0]) := rfl
+    CIL.step .cgt_un false none 0 []
+      (CIL.widenMixed .cgt_un [.i32 4294967295, .i64 18446744073709551615])
+      (fun _ => none) = some (.next 1 [.i32 0] (fun _ => none)) := rfl
+#print axioms native_unsigned_compare_extension
 
 theorem checked_conversion_reference_rejected :
     CIL.convertInteger 32 false true .nullRef = .error .invalidOperands := rfl
