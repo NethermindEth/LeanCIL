@@ -50,22 +50,24 @@ partial class Program
     /// <summary>Marks a directory as an earlier audit's output, which a new audit replaces.</summary>
     const string BindingReportFile = "binding-audit.json";
 
-    /// <summary>The fewest method bodies in a page; each page is its own kernel evaluation.</summary>
-    const int MinimumPageMethods = 250;
+    /// <summary>The method bodies per page until the page cap applies; each page is one kernel evaluation.</summary>
+    const int PageMethodsTarget = 250;
 
-    /// <summary>The most pages; each page decodes the image again.</summary>
-    const int MaximumPages = 32;
+    /// <summary>The most pages; each page prepares the image again, so this bounds the preparation work.</summary>
+    const int MaximumPages = 8;
 
-    // A page holds 250 bodies up to 8000 methods; beyond that the 32-page cap lets pages grow as methods / 32 while
-    // image decodes stay at most 32. Replay checks pages concurrently, so a page's memory is not the peak.
-    static int BindingPageSize(int methods) =>
-        Math.Max(MinimumPageMethods, (methods + MaximumPages - 1) / MaximumPages);
+    // Pages number ceil(methods / 250) up to 8, and then grow as methods / 8, so the image is prepared at most
+    // nine times whatever the method count.
+    static int BindingPageCount(int methods) =>
+        Math.Clamp((methods + PageMethodsTarget - 1) / PageMethodsTarget, 1, MaximumPages);
 
-    static int BindingPageCount(int methods, int? pageSize = null)
+    static int BindingPageSize(int methods)
     {
-        var size = pageSize ?? BindingPageSize(methods);
-        return Math.Max(1, (methods + size - 1) / size);
+        var pages = BindingPageCount(methods);
+        return Math.Max(1, (methods + pages - 1) / pages);
     }
+
+    static int BindingPageCount(int methods, int pageSize) => Math.Max(1, (methods + pageSize - 1) / pageSize);
 
     /// <summary>Facts the default flow trusts that the audit has no check for, in report order.</summary>
     static readonly (string Id, string Title, string Reason)[] UncoveredBindingFacts =
@@ -336,7 +338,7 @@ partial class Program
 
     /// <summary>
     /// The bodies module: one theorem per page of methods, each its own kernel evaluation, and `bodies`, which the
-    /// kernel-checked composition `claimedBodiesBound_of_pages` derives for the whole evidence. The composition
+    /// kernel-checked composition `claimsHold_of_pages` derives for the whole evidence. The composition
     /// needs the pages to number enough to cover the evidence and to be the first pages in order, so no method is
     /// skipped, repeated or reordered.
     /// </summary>
@@ -346,7 +348,7 @@ partial class Program
         var lemmas = string.Concat(Enumerable.Range(0, pages).Select(page => $$"""
             set_option debug.skipKernelTC true in
             /-- The bodies of page {{page}} of the claims are in the pinned images. -/
-            theorem page{{page}} : StrictBinding.ClaimedBodiesBound images
+            theorem page{{page}} : StrictBinding.ClaimsHold StrictBinding.bodyClaimBound images
                 (StrictBinding.claimPage (StrictBinding.bodyClaims Extracted.methodEvidence) {{size}} {{page}}) := by
               decide +kernel
 
@@ -374,7 +376,7 @@ partial class Program
 
             {{lemmas}}/-- The method bodies of `Extracted.methodEvidence` are in the pinned images. -/
             theorem bodies : StrictBinding.BodiesBound images Extracted.methodEvidence :=
-              StrictBinding.claimedBodiesBound_of_pages (size := {{size}}) (count := {{pages}}) prepared
+              StrictBinding.claimsHold_of_pages (size := {{size}}) (count := {{pages}}) prepared
                 (by decide +kernel) {{chain}}.zero{{new string(')', pages)}}
 
             end BindingAudit
@@ -558,7 +560,7 @@ partial class Program
             import Extracted
             import StrictBinding.Evidence
 
-            #eval match StrictBinding.bodiesBound BindingAudit.images
+            #eval match StrictBinding.checkAll StrictBinding.bodyClaimBound BindingAudit.images
                 (StrictBinding.bodyClaims Extracted.methodEvidence) with
               | .ok _ => "the bodies check found no error"
               | .error error => reprStr error

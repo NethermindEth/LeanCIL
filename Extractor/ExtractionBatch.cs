@@ -8,9 +8,9 @@ internal static partial class Program
     sealed record ExtractionRequest(string Assembly, string? Identity, string Entry, string Output, string Profile,
         string[]? InitializedTypes, string[]? TypeArguments = null);
 
-    // Only immutable assembly bytes cross requests. Validation rewrites Cecil instruction operands,
+    // Only immutable assembly and PDB bytes cross requests. Validation rewrites Cecil instruction operands,
     // and symbols attach readers to modules, so every request owns fresh modules and symbol readers.
-    sealed class ExtractionBatch
+    internal sealed class ExtractionBatch
     {
         internal sealed record AssemblySnapshot(byte[] Bytes, string Hash)
         {
@@ -25,6 +25,7 @@ internal static partial class Program
         }
         readonly Dictionary<string, AssemblySnapshot> assemblies = new(StringComparer.Ordinal);
         readonly Dictionary<string, string?> files = new(StringComparer.Ordinal);
+        readonly Dictionary<string, Symbols.PdbFile?> pdbFiles = new(StringComparer.Ordinal);
 
         internal string ExtractorHash { get; }
 
@@ -53,8 +54,20 @@ internal static partial class Program
             snapshot = new(bytes, Hash(bytes));
             assemblies.Add(path, snapshot);
             files.TryAdd(path, snapshot.Hash);
-            Track(Path.ChangeExtension(path, ".pdb"));
+            ReadPdb(Path.ChangeExtension(path, ".pdb"));
             return snapshot;
+        }
+
+        /// <summary>The PDB at <paramref name="path"/>, read and hashed once per batch; null when there is none.
+        /// </summary>
+        internal Symbols.PdbFile? ReadPdb(string path)
+        {
+            path = Path.GetFullPath(path);
+            if (pdbFiles.TryGetValue(path, out var pdb)) return pdb;
+            pdb = Symbols.PdbFile.Load(path);
+            pdbFiles.Add(path, pdb);
+            files.TryAdd(path, pdb?.Sha256);
+            return pdb;
         }
 
         internal void RequireUnchanged()
