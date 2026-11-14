@@ -121,7 +121,7 @@ void CheckMarkers(bool initialization)
 CheckMarkers(false);
 CheckMarkers(true);
 
-(long Allocated, double Milliseconds) MeasureRows(int count, int nameLength)
+RowFixture PrepareRows(int count, int nameLength)
 {
     string path = Path.Combine(root, $"Rows-{count}-{nameLength}.dll");
     using (var assembly = AssemblyDefinition.CreateAssembly(new("Rows", new(1, 0)), "Rows", ModuleKind.Dll))
@@ -138,49 +138,127 @@ CheckMarkers(true);
         }
         assembly.Write(path);
     }
-    using var pinned = new PinnedMetadata(extractor, path);
-    var metadataMethod = pinned.Context.GetType().GetMethod("IdentityMetadata", Instance)!;
-    object metadata = metadataMethod.Invoke(pinned.Context, [pinned.Module])!;
-    var query = metadata.GetType().GetMethod("TopLevelTypeName", Instance)!
-        .CreateDelegate<Func<uint, object?>>(metadata);
-    var cache = (IDictionary)metadata.GetType().GetField("typeNames", Instance)!.GetValue(metadata)!;
-    uint[] tokens = pinned.Module.GetType("Fixture.Owner").Fields
-        .Select(field => ((RequiredModifierType)field.FieldType).ModifierType.MetadataToken.ToUInt32()).ToArray();
-    var timings = new double[5];
-    long allocated = 0;
-    object?[] rows = new object?[count];
-    for (int sample = 0; sample < timings.Length; sample++)
+    var pinned = new PinnedMetadata(extractor, path);
+    try
     {
-        cache.Clear();
-        long start = GC.GetAllocatedBytesForCurrentThread();
-        long started = Stopwatch.GetTimestamp();
-        for (int index = 0; index < count; index++) rows[index] = query(tokens[index]);
-        timings[sample] = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-        allocated = Math.Max(allocated, GC.GetAllocatedBytesForCurrentThread() - start);
+        var metadataMethod = pinned.Context.GetType().GetMethod("IdentityMetadata", Instance)!;
+        object metadata = metadataMethod.Invoke(pinned.Context, [pinned.Module])!;
+        var query = metadata.GetType().GetMethod("TopLevelTypeName", Instance)!
+            .CreateDelegate<Func<uint, object?>>(metadata);
+        var cache = (IDictionary)metadata.GetType().GetField("typeNames", Instance)!.GetValue(metadata)!;
+        uint[] tokens = pinned.Module.GetType("Fixture.Owner").Fields
+            .Select(field => ((RequiredModifierType)field.FieldType).ModifierType.MetadataToken.ToUInt32()).ToArray();
+        return new(pinned, query, cache, tokens);
     }
-    Array.Sort(timings);
-    Require(cache.Count == count, "Each raw row must have exactly one cache entry");
-    long repeatStart = GC.GetAllocatedBytesForCurrentThread();
-    for (int repeat = 0; repeat < 16; repeat++)
-        for (int index = 0; index < count; index++)
-            Require(ReferenceEquals(query(tokens[index]), rows[index]), "Repeated query decoded another row");
-    long repeatAllocated = GC.GetAllocatedBytesForCurrentThread() - repeatStart;
-    Require(repeatAllocated < 1024, "Repeated row queries allocate metadata names");
-    Require(cache.Count == count, "Repeated row queries grew the cache");
-    Console.WriteLine($"Rows={count}, name bytes={nameLength}, allocated={allocated}, " +
-        $"cached allocated={repeatAllocated}, median decode ms={timings[2]:F3}");
-    return (allocated, timings[2]);
+    catch
+    {
+        pinned.Dispose();
+        throw;
+    }
 }
 
-MeasureRows(16, 16);
+long CheckAllocations(RowFixture fixture)
+{
+    long start = GC.GetAllocatedBytesForCurrentThread();
+    fixture.Pass(cold: true);
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - start;
+    Require(fixture.Cache.Count == fixture.Tokens.Length, "Each raw row must have exactly one cache entry");
+    long repeatStart = GC.GetAllocatedBytesForCurrentThread();
+    for (int repeat = 0; repeat < 16; repeat++) fixture.Pass(cold: false);
+    long repeatAllocated = GC.GetAllocatedBytesForCurrentThread() - repeatStart;
+    Require(repeatAllocated < 1024, "Repeated row queries allocate metadata names");
+    Require(fixture.Cache.Count == fixture.Tokens.Length, "Repeated row queries grew the cache");
+    Console.WriteLine($"Rows={fixture.Tokens.Length}, allocated={allocated}, cached allocated={repeatAllocated}");
+    return allocated;
+}
+
+bool GrowthAccepted(double[] batches)
+{
+    for (int index = 1; index < batches.Length; index++)
+        if (batches[index] > batches[index - 1] * 6 + 1) return false;
+    return true;
+}
+
+Require(GrowthAccepted([25, 100, 400]), "Linear batch growth was rejected");
+Require(GrowthAccepted([25, 125, 600]), "N log n batch growth was rejected");
+Require(!GrowthAccepted([25, 400, 6400]), "Quadratic batch growth was accepted");
+
+double Batch(RowFixture fixture, bool cold, int repetitions)
+{
+    long started = Stopwatch.GetTimestamp();
+    for (int repeat = 0; repeat < repetitions; repeat++) fixture.Pass(cold);
+    return Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+}
+
+void CheckTimings(RowFixture[] fixtures, bool cold, int nameLength)
+{
+    const int rounds = 9;
+    const double minimumBatchMilliseconds = 25;
+    foreach (var fixture in fixtures) Batch(fixture, cold, 16);
+    int repetitions = 1;
+    while (Batch(fixtures[0], cold, repetitions) < minimumBatchMilliseconds)
+        repetitions = checked(repetitions * 2);
+    double[][] samples = fixtures.Select(_ => new double[rounds]).ToArray();
+    for (int round = 0; round < rounds; round++)
+        for (int position = 0; position < fixtures.Length; position++)
+        {
+            int index = round % 2 == 0 ? position : fixtures.Length - 1 - position;
+            samples[index][round] = Batch(fixtures[index], cold, repetitions);
+        }
+    double[] medians = samples.Select(values => values.Order().ElementAt(rounds / 2)).ToArray();
+    for (int index = 0; index < fixtures.Length; index++)
+        Console.WriteLine($"Rows={fixtures[index].Tokens.Length}, name bytes={nameLength}, cold={cold}, " +
+            $"passes={repetitions}, median batch ms={medians[index]:F3}, " +
+            $"median pass ms={medians[index] / repetitions:F6}");
+    Require(GrowthAccepted(medians), $"Modifier query CPU growth exceeded 6x+1ms: cold={cold}, bytes={nameLength}");
+}
+
 foreach (int nameLength in new[] { 32, 512 })
 {
-    (long Allocated, double Milliseconds) previous = default;
-    foreach (int count in new[] { 256, 1024, 4096 })
+    var fixtures = new List<RowFixture>();
+    try
     {
-        var measurement = MeasureRows(count, nameLength);
-        Require(previous.Allocated == 0 || measurement.Allocated <= previous.Allocated * 5 + 16384,
-            "Raw row allocations grew superlinearly");
-        previous = measurement;
+        foreach (int count in new[] { 256, 1024, 4096 }) fixtures.Add(PrepareRows(count, nameLength));
+        long previous = 0;
+        foreach (var fixture in fixtures)
+        {
+            long allocated = CheckAllocations(fixture);
+            Require(previous == 0 || allocated <= previous * 5 + 16384,
+                "Raw row allocations grew superlinearly");
+            previous = allocated;
+        }
+        CheckTimings(fixtures.ToArray(), cold: true, nameLength);
+        CheckTimings(fixtures.ToArray(), cold: false, nameLength);
     }
+    finally
+    {
+        for (int index = fixtures.Count - 1; index >= 0; index--) fixtures[index].Dispose();
+    }
+}
+
+/// <summary>One pinned row set with explicit nested-context ownership and retained cache identities.</summary>
+sealed class RowFixture(PinnedMetadata pinned, Func<uint, object?> query, IDictionary cache, uint[] tokens)
+    : IDisposable
+{
+    readonly object?[] rows = new object?[tokens.Length];
+    internal IDictionary Cache => cache;
+    internal uint[] Tokens => tokens;
+
+    internal void Pass(bool cold)
+    {
+        if (cold)
+        {
+            cache.Clear();
+            Array.Clear(rows);
+        }
+        for (int index = 0; index < tokens.Length; index++)
+        {
+            object? row = query(tokens[index]);
+            if (cold) rows[index] = row;
+            else if (!ReferenceEquals(row, rows[index]))
+                throw new Exception("Repeated query decoded another row");
+        }
+    }
+
+    public void Dispose() => pinned.Dispose();
 }
