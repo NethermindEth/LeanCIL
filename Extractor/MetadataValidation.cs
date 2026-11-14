@@ -102,8 +102,8 @@ internal static class MetadataValidation
     {
         var definition = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate field");
         if (definition.IsStatic || reference.Name != definition.Name ||
-            MethodSpecialization.SignatureType(reference.FieldType) !=
-                MethodSpecialization.SignatureType(definition.FieldType))
+            StructuralSignatures.Current.Type(reference.FieldType) !=
+                StructuralSignatures.Current.Type(definition.FieldType))
             throw new InvalidDataException("Mismatched aggregate field signature: " + reference.FullName);
         // The owner and the field resolve separately and must reach one definition, or the field is not the owner's.
         return Array.Find(Fields(reference.DeclaringType), field => field.Definition == definition) ??

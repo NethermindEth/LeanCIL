@@ -23,7 +23,106 @@ internal sealed class MetadataImage
 
     internal MetadataReader Reader { get; }
 
+    const int NamePageSize = 256;
+    MetadataName?[]?[]? names;
+
+    /// <summary>The exact bytes at a heap offset, materialized only for identity output.</summary>
+    internal MetadataName Name(int offset)
+    {
+        int size = Reader.GetHeapSize(HeapIndex.String);
+        if ((uint)offset >= (uint)size) throw new BadImageFormatException("String offset outside its heap");
+        names ??= new MetadataName?[(size - 1) / NamePageSize + 1][];
+        var page = names[offset / NamePageSize] ??= new MetadataName?[NamePageSize];
+        if (page[offset % NamePageSize] is { } name) return name;
+        byte[] entry = StringEntry(offset);
+        return page[offset % NamePageSize] = MetadataName.FromBytes(entry.AsSpan(0, entry.Length - 1));
+    }
+
+    /// <summary>One bounded byte of the raw string heap, including terminators.</summary>
+    internal byte StringByte(int offset)
+    {
+        int size = Reader.GetHeapSize(HeapIndex.String);
+        if ((uint)offset >= (uint)size) throw new BadImageFormatException("String offset outside its heap");
+        return bytes[Reader.GetHeapMetadataOffset(HeapIndex.String) + offset];
+    }
+
+    /// <summary>A raw named row's own columns and its immediate nesting or assembly edge.</summary>
+    internal sealed record NamedRow(int Namespace, int Name, uint Parent, uint Assembly);
+
+    readonly SortedDictionary<uint, NamedRow> namedRows = [];
+
+    /// <summary>The immutable raw row; nesting edges are retained without flattening their ancestors.</summary>
+    internal NamedRow NamedType(uint token)
+    {
+        if (namedRows.TryGetValue(token, out var cached)) return cached;
+        uint table = token >> 24;
+        int number = (int)(token & 0xffffff);
+        if (table is not (1 or 2) || number == 0 || number > Count((int)table))
+            throw new InvalidDataException("Type identity requires a valid TypeDef or TypeRef row");
+        StringHandle space;
+        StringHandle name;
+        uint parent = 0;
+        uint assembly = 0;
+        if (table == 2)
+        {
+            var row = Reader.GetTypeDefinition(MetadataTokens.TypeDefinitionHandle(number));
+            space = row.Namespace;
+            name = row.Name;
+            if (NestedClassRow(number) is { } nestingToken)
+            {
+                byte[] nestingRow = Row(nestingToken);
+                int width = nestingRow.Length / 2;
+                uint enclosing = 0;
+                for (int index = nestingRow.Length - 1; index >= width; index--)
+                    enclosing = enclosing * 256 + nestingRow[index];
+                if (enclosing == 0 || enclosing > Count(2))
+                    throw new InvalidDataException("Nested type has an invalid enclosing row");
+                parent = 0x02000000 | enclosing;
+            }
+            else assembly = 0x20000001;
+        }
+        else
+        {
+            var row = Reader.GetTypeReference(MetadataTokens.TypeReferenceHandle(number));
+            space = row.Namespace;
+            name = row.Name;
+            uint scope = (uint)MetadataTokens.GetToken(row.ResolutionScope);
+            if (row.ResolutionScope.IsNil) throw new InvalidDataException("Type reference has no scope");
+            if (scope >> 24 == 1) parent = scope;
+            else if (scope >> 24 == 0x23 && (scope & 0xffffff) <= Count(0x23)) assembly = scope;
+            else if (scope == 1) assembly = 0x20000001;
+            else throw new InvalidDataException("Type reference has an unsupported resolution scope");
+        }
+        cached = new(MetadataTokens.GetHeapOffset(space), MetadataTokens.GetHeapOffset(name), parent, assembly);
+        namedRows.Add(token, cached);
+        return cached;
+    }
+
     readonly Dictionary<uint, AssemblyName?> assemblyIdentities = [];
+    readonly SortedDictionary<uint, AssemblyName.Columns?> assemblyColumns = [];
+    readonly SortedDictionary<(int Offset, bool FullKey), AssemblyName.KeyColumns> signingKeys = [];
+
+    internal long SigningBytes { get; private set; }
+    internal long SigningReads { get; private set; }
+
+    internal void RecordSigningBytes(int count) { SigningBytes += count; SigningReads++; }
+
+    /// <summary>The normalized signing column for a raw blob and its full-key or token interpretation.</summary>
+    internal AssemblyName.KeyColumns SigningKey(BlobHandle handle, bool fullKey)
+    {
+        var key = (MetadataTokens.GetHeapOffset(handle), fullKey);
+        if (signingKeys.TryGetValue(key, out var columns)) return columns;
+        columns = AssemblyName.ReadKey(this, handle, fullKey);
+        signingKeys.Add(key, columns);
+        return columns;
+    }
+
+    internal AssemblyName.Columns? AssemblyColumns(uint token)
+    {
+        if (assemblyColumns.TryGetValue(token, out var columns)) return columns;
+        assemblyColumns.Add(token, columns = AssemblyName.ReadColumns(this, token));
+        return columns;
+    }
 
     /// <summary>The immutable identity of an assembly row in this image, including invalid null results.</summary>
     internal AssemblyName? AssemblyIdentity(uint token)
@@ -72,15 +171,17 @@ internal sealed class MetadataImage
     {
         if (nesting is null)
         {
-            nesting = [];
+            var entries = new Dictionary<int, uint>();
             var width = Reader.GetTableRowSize(TableIndex.NestedClass) / 2;
             for (var row = 1; row <= Count(0x29); row++)
             {
                 var bytes = Row(0x29000000 + (uint)row);
                 var nested = 0;
                 for (var index = width - 1; index >= 0; index--) nested = nested * 256 + bytes[index];
-                nesting.TryAdd(nested, 0x29000000 + (uint)row);
+                if (!entries.TryAdd(nested, 0x29000000 + (uint)row))
+                    throw new InvalidDataException("Type has duplicate NestedClass rows");
             }
+            nesting = entries;
         }
         return nesting.TryGetValue(typeRow, out var found) ? found : null;
     }

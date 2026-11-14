@@ -58,7 +58,23 @@ internal sealed class LayoutEvidence
     static string ScopedArguments(GenericInstanceType generic) =>
         Identity(generic.ElementType) + "<" + string.Join(",", generic.GenericArguments.Select(argument =>
             MetadataValidation.IsAggregate(argument, generic.Module)
-                ? Identity(argument) : MethodSpecialization.SignatureType(argument))) + ">";
+                ? Identity(argument) : ArgumentText(argument))) + ">";
+
+    static string ArgumentText(TypeReference type) => type switch
+    {
+        GenericParameter parameter => $"{parameter.Type}:{parameter.Position}",
+        ByReferenceType reference => ArgumentText(reference.ElementType) + "&",
+        RequiredModifierType modifier when InReferences.Is(modifier) => ArgumentText(modifier.ElementType) + " in",
+        RequiredModifierType modifier when InitAccessors.Is(modifier) => ArgumentText(modifier.ElementType) + " init",
+        PointerType pointer => ArgumentText(pointer.ElementType) + "*",
+        ArrayType { IsVector: true } array => ArgumentText(array.ElementType) + "[]",
+        GenericInstanceType instance => Identity(instance.ElementType) + "<" +
+            string.Join(",", instance.GenericArguments.Select(ArgumentText)) + ">",
+        FunctionPointerType pointer => $"fn:{pointer.CallingConvention}:{pointer.HasThis}:{pointer.ExplicitThis}:" +
+            ArgumentText(pointer.ReturnType) + "(" +
+            string.Join(",", pointer.Parameters.Select(parameter => ArgumentText(parameter.ParameterType))) + ")",
+        _ => Identity(type)
+    };
 
     internal MetadataValidation.LayoutContext Metadata => layouts;
 
