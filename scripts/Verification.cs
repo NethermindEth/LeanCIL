@@ -24,11 +24,16 @@ partial class Program : IDisposable
         var root = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_ROOT");
         var manifest = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_MANIFEST");
         if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(manifest)) return null;
-        // The runtime may report the assembly with links followed, so both sides are compared resolved.
-        var directory = Path.GetDirectoryName(Path.GetFullPath(manifest))!;
-        return typeof(Program).Assembly.Location is { Length: > 0 } location &&
-            ResolvedRelativePath(directory, location) is not (null or ".") ? Path.GetFullPath(root) : null;
+        return RunsFromFixtures(manifest) ? Path.GetFullPath(root) : null;
     }
+
+    /// <summary>
+    /// Whether this program is a prepared fixture listed in `manifest`, built below the manifest's directory. The
+    /// runtime may report the assembly with links followed, so both sides are compared resolved.
+    /// </summary>
+    static bool RunsFromFixtures(string manifest) =>
+        typeof(Program).Assembly.Location is { Length: > 0 } location &&
+        ResolvedRelativePath(Path.GetDirectoryName(Path.GetFullPath(manifest))!, location) is not (null or ".");
 #endif
 
     static string Source([CallerFilePath] string path = "") => path;
@@ -126,7 +131,7 @@ partial class Program : IDisposable
         foreach (var (path, hash) in fixture.Outputs)
         {
             var full = Path.GetFullPath(path, directory);
-            if (!full.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+            if (ResolvedRelativePath(directory, full) is null or "." ||
                 !File.Exists(full) || Sha(full) != hash)
                 throw new InvalidOperationException("Prepared fixture output changed: " + path);
         }
@@ -492,12 +497,28 @@ partial class Program : IDisposable
     /// `path` relative to `root` once both are resolved through their links, or null when it lies outside `root`:
     /// two spellings of one location agree, and a link cannot carry a path out of `root` unnoticed.
     /// </summary>
-    internal static string? ResolvedRelativePath(string root, string path)
+    internal static string? ResolvedRelativePath(string root, string path) =>
+        RelativeBelow(ResolvedPath(root), ResolvedPath(path));
+
+    /// <summary>`path` relative to `root`, or null when it lies outside; both are taken as already resolved.</summary>
+    internal static string? RelativeBelow(string root, string path)
     {
-        var relative = Path.GetRelativePath(ResolvedPath(root), ResolvedPath(path));
+        var relative = Path.GetRelativePath(root, path);
         return Path.IsPathRooted(relative) || relative == ".." ||
             relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? null : relative;
     }
+
+    /// <summary>
+    /// Whether `path` is `root` or lies below it once links in both are followed, with the platform's case rule.
+    /// </summary>
+    internal static bool Inside(string root, string path) => ResolvedRelativePath(root, path) is not null;
+
+    /// <summary>Whether two paths name one location once links are followed, with the platform's case rule.</summary>
+    internal static bool SameLocation(string first, string second) => ResolvedRelativePath(first, second) == ".";
+
+    /// <summary>Equality of resolved paths under the case rule `Path.GetRelativePath` applies here.</summary>
+    internal static readonly StringComparer LocationComparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     /// <summary>Deletes a tree that may hold git objects, which git marks read-only and Windows refuses to delete.</summary>
     static void DeleteTree(string directory)
@@ -901,8 +922,9 @@ partial class Program : IDisposable
         string Printed(string name) => lake.FirstOrDefault(entry => entry.Key == name).Value ?? "";
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var elanBin = Printed("ELAN_HOME") is { Length: > 0 } home ? Path.Combine(home, "bin") : null;
-        if (elanBin is null || LakeOnPath() is not { } proxy ||
-            !string.Equals(Path.GetDirectoryName(proxy), elanBin, comparison)) return;
+        // PATH may reach the elan directory through a link that Lake's ELAN_HOME does not, or the reverse.
+        if (elanBin is null || LakeOnPath() is not { } proxy || !SameLocation(Path.GetDirectoryName(proxy)!, elanBin))
+            return;
         void Set(string name, Func<string?, string> value)
         {
             var index = inherited.FindIndex(entry => entry.Key.Equals(name, comparison));
@@ -2823,8 +2845,10 @@ partial class Program : IDisposable
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var pending = new Queue<string>(roots);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        string[] compiled = [Path.GetFullPath(Path.Combine(session, ".lake/build/lib/lean")),
-            Path.GetFullPath(Path.Combine(library!, ".lake/build/lib/lean"))];
+        // Lean may spell a file through other links than these directories, so both sides are compared resolved.
+        string[] compiled = [ResolvedPath(Path.Combine(session, ".lake/build/lib/lean")),
+            ResolvedPath(Path.Combine(library!, ".lake/build/lib/lean"))];
+        var toolchain = ResolvedPath(Toolchain);
         while (pending.TryDequeue(out var module))
         {
             if (!seen.Add(module)) continue;
@@ -2836,10 +2860,9 @@ partial class Program : IDisposable
             if (dependencies.Code != 0) return Conservative();
             foreach (var dependency in dependencies.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                var path = Path.GetFullPath(dependency);
-                if (path.StartsWith(Path.GetFullPath(Toolchain) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
-                var name = compiled.Select(directory => Path.GetRelativePath(directory, path).Replace('\\', '/'))
-                    .FirstOrDefault(candidate => !candidate.StartsWith("../", StringComparison.Ordinal) && !Path.IsPathRooted(candidate));
+                var path = ResolvedPath(dependency);
+                if (RelativeBelow(toolchain, path) is not null) continue;
+                var name = CompiledName(compiled, path);
                 if (name is null || !name.EndsWith(".olean", StringComparison.Ordinal)) return Conservative();
                 var imported = name[..^6].Replace('/', '.');
                 // All certified CIL sources are already bound by libraryKey.
@@ -2853,6 +2876,14 @@ partial class Program : IDisposable
         SortedDictionary<string, string> Conservative() => new(snapshot.Where(pair =>
             pair.Key.EndsWith(".lean", StringComparison.Ordinal) && !pair.Key.StartsWith("proof:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal);
     }
+
+    /// <summary>
+    /// `path` relative to the first of the `compiled` directories that holds it, with `/` separators, or null when
+    /// none does; all are taken as resolved.
+    /// </summary>
+    internal static string? CompiledName(string[] compiled, string path) =>
+        compiled.Select(directory => RelativeBelow(directory, path))
+            .FirstOrDefault(name => name is not (null or "."))?.Replace('\\', '/');
 
     static void CopySupportArtifacts(string session, string destination, SortedDictionary<string, string> sources)
     {

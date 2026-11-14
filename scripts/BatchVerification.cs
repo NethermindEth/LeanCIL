@@ -43,7 +43,8 @@ partial class Program
         requests = requests.Select(r => r with { Proof = Path.GetFullPath(r.Proof),
             Output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(r.Output)),
             Assembly = Path.GetFullPath(r.Assembly ?? assembly) }).ToArray();
-        if (requests.Select(r => Path.GetFullPath(r.Output)).Distinct(StringComparer.OrdinalIgnoreCase).Count() != requests.Count)
+        // Outputs differing only in case are distinct on a case-sensitive file system; one reached by a link is not.
+        if (requests.Select(r => ResolvedPath(r.Output)).Distinct(LocationComparer).Count() != requests.Count)
             throw new ArgumentException("Batch outputs must be distinct");
         foreach (var request in requests)
         {

@@ -73,14 +73,15 @@ internal static partial class Program
         var requests = JsonSerializer.Deserialize<ExtractionRequest[]>(File.ReadAllBytes(args[1]),
             new JsonSerializerOptions(JsonSerializerDefaults.Web))
             ?? throw new InvalidDataException("Missing extraction batch requests.");
-        var outputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Outputs differing only in case are distinct on a case-sensitive file system; one reached by a link is not.
+        var outputs = new HashSet<string>(global::Program.LocationComparer);
         foreach (var request in requests)
         {
             if (request is null || string.IsNullOrWhiteSpace(request.Assembly) ||
                 string.IsNullOrWhiteSpace(request.Entry) || string.IsNullOrWhiteSpace(request.Output) ||
                 string.IsNullOrWhiteSpace(request.Profile))
                 throw new InvalidDataException("Incomplete extraction batch request.");
-            if (!outputs.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(request.Output))))
+            if (!outputs.Add(global::Program.ResolvedPath(request.Output)))
                 throw new InvalidDataException("Extraction batch outputs must be distinct.");
         }
         var batch = new ExtractionBatch();

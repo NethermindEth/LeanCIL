@@ -169,9 +169,6 @@ partial class Program
             .Where(root => !Inside(toolchain, Path.GetFullPath(root))));
     }
 
-    /// <summary>Whether `path` is `root` or lies below it once links in both are followed.</summary>
-    static bool Inside(string root, string path) => ResolvedRelativePath(root, path) is not null;
-
     // The caller's roots resolved against its session, then the toolchain library, each root once.
     string CallerLeanPath(string leanPath, string session) => string.Join(Path.PathSeparator,
         leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)

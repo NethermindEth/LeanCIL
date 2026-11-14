@@ -1469,7 +1469,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 Fail([members[k]], failure);
             }
         }
-        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var comparer = LocationComparer;
         var all = Enumerable.Range(0, requests.Count).ToArray();
         var identities = new string[requests.Count];
         var extractions = new ExtractionIdentity[requests.Count];
@@ -1494,16 +1494,21 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         foreach (var i in all)
             try { proofs[i] = Within(root, Path.GetRelativePath(root, Path.GetFullPath(requests[i].Proof))); }
             catch (Exception error) { Fail([i], error); }
-        // Only the last request for an output may leave a certificate, as in sequential runs.
-        var last = all.GroupBy(i => outputs[i], comparer).ToDictionary(group => group.Key, group => group.Max(), comparer);
-        foreach (var output in last.Keys) File.Delete(Path.Combine(output, "verified.json"));
+        // Only the last request for an output may leave a certificate, as in sequential runs. Two spellings of one
+        // output, such as one through a link, are one output; a case-sensitive volume can only lose a certificate.
+        var locations = outputs.Select(ResolvedPath).ToArray();
+        var last = all.GroupBy(i => locations[i], comparer)
+            .ToDictionary(group => group.Key, group => group.Max(), comparer);
+        foreach (var output in outputs.Distinct(StringComparer.Ordinal))
+            File.Delete(Path.Combine(output, "verified.json"));
         var parallel = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism) };
         void CheckExtractions(int[] members)
         {
             Stage(members, "extraction integrity");
-            Parallel.ForEach(Pending(members).GroupBy(i => outputs[i], comparer), parallel, group =>
+            // Grouped by exact location, so a case-sensitive volume checks every directory.
+            Parallel.ForEach(Pending(members).GroupBy(i => locations[i], StringComparer.Ordinal), parallel, group =>
             {
-                try { RunExtractor(["dotnet", ExtractorPath, "check", group.Key]); }
+                try { RunExtractor(["dotnet", ExtractorPath, "check", outputs[group.First()]]); }
                 catch (Exception error) { Fail(group, error); }
             });
         }
@@ -1530,13 +1535,18 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             snapshot = ConsumerSnapshot(root, excluded, fullBundleDependencies);
             var common = Common(snapshot);
+            // Each source is resolved once, so a batch costs one pass over the sources per request.
+            string[] consumerSources = batch
+                ? snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal))
+                    .Select(key => ResolvedPath(key["consumer:".Length..])).ToArray()
+                : [];
             foreach (var i in live)
                 try
                 {
-                    var output = outputs[i] + Path.DirectorySeparatorChar;
-                    if (batch && snapshot.Keys.Any(key => key.StartsWith("consumer:" + output, OperatingSystem.IsWindows()
-                        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
-                        throw new InvalidDataException("Batch outputs must lie outside the consumer sources, for example under artifacts/: " + outputs[i]);
+                    if (consumerSources.Any(source => RelativeBelow(locations[i], source) is not null))
+                        throw new InvalidDataException(
+                            "Batch outputs must lie outside the consumer sources, for example under artifacts/: " +
+                            outputs[i]);
                     before[i] = BoundRequestInputs(i, common);
                     if (!before[i].ContainsKey("consumer:" + proofs[i]))
                         throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
@@ -1653,7 +1663,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     contractImports = ContractImportAssumptions(current), contractDependencies = DeploymentDependencies(current)
                 };
                 outcomes[i].Detail = null;
-                if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
+                if (last[locations[i]] == i)
+                    File.WriteAllText(Path.Combine(outputs[i], "verified.json"),
+                        JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
                 CompleteTiming(i);
                 CacheProgress("certified consumer proof: " + requests[i].Theorem);
@@ -2374,7 +2386,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));
                 ShowConsumerProof(i, receipt);
                 PublishSuccess(proofKeys[i], receipt);
-                if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
+                if (last[locations[i]] == i)
+                    File.WriteAllText(Path.Combine(outputs[i], "verified.json"),
+                        JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
                 CompleteTiming(i);
             }

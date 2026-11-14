@@ -3,6 +3,7 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
+#:include DirectoryLinks.cs
 
 using System.Text.Json;
 using Mono.Cecil;
@@ -81,6 +82,31 @@ using (var verification = new Program())
     }
     Require(rejected, "Generated verification accepted aliased output directories");
 }
+// Two requests writing one directory, one through a link, would overwrite each other's extraction.
+var throughLink = Path.Combine(Path.GetTempPath(), "leancil-batch-link-" + Guid.NewGuid().ToString("N"));
+if (TryLinkDirectory(throughLink, root))
+{
+    try
+    {
+        var linked = Path.Combine(throughLink, Path.GetFileName(duplicates[0].Output));
+        Reject("extract", [duplicates[0], duplicates[1] with { Output = linked }], "outputs must be distinct");
+        using var verification = new Program();
+        var rejected = false;
+        try
+        {
+            verification.VerifyGeneratedBatch(assembly, "Examples",
+                [new(requests[0].Entry, "unused.lean", duplicates[0].Output),
+                    new(requests[1].Entry, "unused.lean", linked)]);
+        }
+        catch (ArgumentException error) when (error.Message == "Batch outputs must be distinct")
+        {
+            rejected = true;
+        }
+        Require(rejected, "Generated verification accepted an output reached through a link");
+    }
+    finally { Directory.Delete(throughLink); }
+}
+else Console.WriteLine("SKIP batch outputs through a link: no directory link or junction could be made");
 var invalid = requests[0] with { Entry = "Missing::Method()", Output = Path.Combine(root, "Invalid") };
 var never = requests[0] with { Output = Path.Combine(root, "Never") };
 Reject("extract", [requests[0], invalid, never], "Missing::Method()");

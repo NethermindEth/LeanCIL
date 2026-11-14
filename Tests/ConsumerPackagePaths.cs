@@ -31,6 +31,22 @@ partial class Program
                 Within(package, ".") == package, "A path inside its package was not returned as spelled under it.");
             Console.WriteLine("PASS a package path that leaves through .. or an absolute path is rejected");
 
+            // A case variant is one location only where the file system says so.
+            var variant = Path.Combine(real, "PACKAGE");
+            var sameUnderCase = Directory.Exists(variant);
+            if (sameUnderCase || LocationComparer == StringComparer.Ordinal)
+            {
+                Require(SameLocation(package, variant) == sameUnderCase &&
+                    Inside(package, Path.Combine(variant, ".lake")) == sameUnderCase &&
+                    new[] { package, variant }.Select(ResolvedPath).Distinct(LocationComparer).Count() ==
+                        (sameUnderCase ? 1 : 2),
+                    $"A case variant of a directory was judged {(sameUnderCase ? "another" : "the same")} location.");
+                Console.WriteLine("PASS a case variant of a directory is " +
+                    (sameUnderCase ? "the same location" : "another location"));
+            }
+            else Console.WriteLine("SKIP case variants: this volume tells case apart, but .NET compares paths here " +
+                "ignoring case");
+
             // Lake reports its directories with links followed, as macOS reaches /var through /private/var.
             var link = Path.Combine(work, "link");
             if (!TryLinkDirectory(link, real))
@@ -65,6 +81,16 @@ partial class Program
             }
             catch (InvalidDataException) { }
             Console.WriteLine("PASS an audited module reached through a link is the checked file; a shadow is not");
+
+            // Guards that keep an output out of an input decide on the location, not the spelling.
+            Require(Inside(linkedPackage, olean) && Inside(package, Path.Combine(linkedBuilt, "Proof.olean")) &&
+                !Inside(linkedPackage, shadow) && SameLocation(linkedPackage, package) &&
+                !SameLocation(linkedBuilt, outside), "A location reached through a link was judged by its spelling.");
+            Require(CompiledName([ResolvedPath(linkedBuilt)], ResolvedPath(olean)) == "Proof.olean" &&
+                CompiledName([ResolvedPath(linkedBuilt)], ResolvedPath(shadow)) is null &&
+                CompiledName([ResolvedPath(linkedBuilt)], ResolvedPath(linkedBuilt)) is null,
+                "A compiled module reached through a link was not named, or a file elsewhere was.");
+            Console.WriteLine("PASS containment and identity of locations reached through a link");
 
             var escape = Path.Combine(package, "escape");
             Require(TryLinkDirectory(escape, outside), "Could not link a package directory outside the package.");

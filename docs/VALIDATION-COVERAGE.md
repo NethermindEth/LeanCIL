@@ -44,7 +44,8 @@ modified output files.
   reuse it within that phase, so no analysis is cached across method mutation or profile changes.
   Feature evidence uses the same incoming states as instruction selection.
   `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
-  profiles, feature queries and a loop backedge, and checks source/assembly tampering.
+  profiles, feature queries and a loop backedge, and checks source/assembly tampering. Two outputs
+  that name one directory, also through a directory link, reject the batch.
 
 ### Feature evidence
 
@@ -243,7 +244,7 @@ processes, each with its private process and worker checks. Run one with
 | `--check` name | Fixture | Checks |
 | --- | --- | --- |
 | `source-resolution` | `Tests/ConsumerSourceResolution.cs` | Consumer source resolution |
-| `package-paths` | `Tests/ConsumerPackagePaths.cs` | Package containment decided with links followed on both sides: a package reached through a directory link holds its own directories in either spelling, an audited module reported with links followed is the checked file and a shadow elsewhere is not, and a path that leaves it through `..`, an absolute path, a link (also a dangling one) or a cycle of links is rejected. The link cases print SKIP where no symbolic link or junction can be made. |
+| `package-paths` | `Tests/ConsumerPackagePaths.cs` | Package containment decided with links followed on both sides: a package reached through a directory link holds its own directories in either spelling, an audited module reported with links followed is the checked file and a shadow elsewhere is not, containment, identity and compiled module names decide on the location rather than the spelling, a case variant of a directory is the same location exactly where the file system finds it, and a path that leaves it through `..`, an absolute path, a link (also a dangling one) or a cycle of links is rejected. The link cases print SKIP where no symbolic link or junction can be made, and the case check on a case-sensitive macOS volume, where .NET compares paths ignoring case. |
 | `compile-check` | `Tests/ConsumerComponents.cs` | The components fixture run with `--compile-check` |
 | `support-union` | `Tests/ConsumerSupportUnion.cs` | A fixed three-extraction consumer batch in two orders. Support imported only by later groups must build and replay once; direct and indirect extraction-dependent modules must replay in every consuming group, including repeated import commands on one line. Compiled import headers are authoritative when scheduling misses an import. |
 | `certificate-reuse` | `Tests/ConsumerCertificateReuse.cs` | Four independent verifier processes with distinct proof sources. Unchanged generated certificates keep their authenticated build outputs and run no certificate `lake build`. Reuse requires the complete certificate module parts and traces, unchanged authenticated restored artifacts, and the source/import closure binding. Changed extraction text and self-rehashed corrupt artifacts force rebuilding `Extracted`. Every successful request independently replays `Extracted` and the proof and audits the certificate. Expected rejection groups keep the separate `ExtractionAudit` module. Generated-source tampering is rejected before receipt reuse, and proof code cannot replace restored or freshly built certificate artifacts; both rejection paths remove a stale report. |
