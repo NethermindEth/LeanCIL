@@ -237,7 +237,7 @@ info: { assembly := spelledNeutral, typeNamespace := name!"N", name := name!"A" 
 #check ({ assembly := spelledNeutral, typeNamespace := name!"N", name := name!"A" } :
   TypeIdentity)
 
-/-- info: { assembly := examples, typeNamespace := { code := 511 }, name := name!"A" } :
+/-- info: { assembly := examples, typeNamespace := { code := 0x1ff }, name := name!"A" } :
   TypeIdentity -/
 #guard_msgs (whitespace := lax) in
 #check ({ assembly := examples, typeNamespace := ⟨511⟩, name := name!"A" } : TypeIdentity)
@@ -247,7 +247,7 @@ info: { assembly := spelledNeutral, typeNamespace := name!"N", name := name!"A" 
 trace: space : MetadataName
 type : TypeIdentity
 free : type = { assembly := examples, typeNamespace := space, name := name!"P" }
-malformed : type = { assembly := examples, typeNamespace := name!"N", name := { code := 767 } }
+malformed : type = { assembly := examples, typeNamespace := name!"N", name := { code := 0x2ff } }
 ⊢ True
 -/
 #guard_msgs in
@@ -260,43 +260,43 @@ example (space : MetadataName) (type : TypeIdentity)
   trivial
 
 -- A code that spells no text prints as its raw structure, never as a name.
-/-- info: { code := 767 } : MetadataName -/
+/-- info: { code := 0x2ff } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 767
 
-/-- info: { code := 0 } : MetadataName -/
+/-- info: { code := 0x0 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 0
 
-/-- info: "{ code := 767 }" -/
+/-- info: "{ code := 0x2ff }" -/
 #guard_msgs in
 #eval (MetadataName.mk 767).display
 
 -- 511 is the byte 0xFF after the leading 1: a well-formed code whose byte is not UTF-8.
-/-- info: { code := 511 } : MetadataName -/
+/-- info: { code := 0x1ff } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 511
 
 -- 120832 is the code unit 0xD800 after the leading 1: an unpaired high surrogate.
-/-- info: { code := 120832 } : UserString -/
+/-- info: { code := 0x1d800 } : UserString -/
 #guard_msgs in
 #check UserString.mk 120832
 
-/-- info: "{ code := 120832 }" -/
+/-- info: "{ code := 0x1d800 }" -/
 #guard_msgs in
 #eval (UserString.mk 120832).display
 
 -- The compiled UTF-8 decision refuses an overlong form (C0 80) and an encoded surrogate
 -- (ED A0 80), and a lone low surrogate (DC00) is no UTF-16 text.
-/-- info: { code := 114816 } : MetadataName -/
+/-- info: { code := 0x1c080 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 114816
 
-/-- info: { code := 32350336 } : MetadataName -/
+/-- info: { code := 0x1eda080 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 32350336
 
-/-- info: { code := 121856 } : UserString -/
+/-- info: { code := 0x1dc00 } : UserString -/
 #guard_msgs in
 #check UserString.mk 121856
 
@@ -337,14 +337,14 @@ example : [PrimitiveType.boolean, .char, .sbyte, .byte, .int16, .uint16, .int32,
 #guard_msgs in
 #check name!"a\x00"
 
-/-- info: { code := 256 } : MetadataName -/
+/-- info: { code := 0x100 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 256
 
 -- A malformed code and a name whose text spells its raw structure display differently.
-#guard (MetadataName.mk 767).display == "{ code := 767 }"
-#guard (name!"{ code := 767 }").display == "\\{ code := 767 }"
-#guard (UserString.mk 120832).display != (str!"{ code := 120832 }").display
+#guard (MetadataName.mk 767).display == "{ code := 0x2ff }"
+#guard (name!"{ code := 0x2ff }").display == "\\{ code := 0x2ff }"
+#guard (UserString.mk 120832).display != (str!"{ code := 0x1d800 }").display
 
 -- Escapes in printed text: a backslash, and control, format, separator and non-ASCII space
 -- characters, each of which would otherwise print as nothing or as a space.
@@ -373,11 +373,11 @@ example : [PrimitiveType.boolean, .char, .sbyte, .byte, .int16, .uint16, .int32,
 #guard MetadataName.ofBytes? [0xF3, 0xA0, 0x81, 0x81] == some ⟨8382349697⟩
 #guard (MetadataName.mk 8382349697).text?.isSome
 
-/-- info: { code := 8382349697 } : MetadataName -/
+/-- info: { code := 0x1f3a08181 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 8382349697
 
-#guard (MetadataName.mk 8382349697).display == "{ code := 8382349697 }"
+#guard (MetadataName.mk 8382349697).display == "{ code := 0x1f3a08181 }"
 
 -- `type!` is display only.
 /-- error: type!"..." is display only; write the TypeIdentity structure -/
