@@ -40,7 +40,8 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("accumulate", [16, 64, 256], true), ("accumulate", [1024], false),
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
-    ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false)
+    ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
+    ("faulting", [16, 64], false)
 };
 foreach (var (workload, sizes, full) in workloads)
     foreach (var requested in sizes)
@@ -80,13 +81,14 @@ foreach (var workload in rows.GroupBy(row => row.Workload))
         CheckGrowth(measurements[index - 1], measurements[index]);
 }
 Console.WriteLine("PASS stepping growth budgets for scalar, memory, accumulate, locals, contract, loop, " +
-    "loopfacts, outcome, lemma, depth and hypotheses bodies; results: " + reportPath);
+    "loopfacts, outcome, lemma, depth, hypotheses and faulting bodies; results: " + reportPath);
 
 // The instructions that open a body, repeat per cycle and end it. The accumulate, contract, lemma,
 // outcome and loop bodies keep one value on the stack that grows by an operand per cycle, and the
 // loop bodies end in a `nop` at the state their path reaches. The locals body stores a reference
 // into each of eight reference locals per cycle. The hypotheses body is an accumulate body of
-// fixed length.
+// fixed length. The faulting body divides, takes a remainder, adds with an overflow check and
+// converts with one, each from the arguments, so each step reads a fact of constant size.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".arg 0", ".arg 1", ".store64", ".arg 0", ".load64", ".pop"], [".arg 0", ".load64", ".ret"]),
@@ -94,6 +96,8 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "loop" or "loopfacts" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
     "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".arg 0", $".setLocal {slot}" })
         .ToArray(), [".local 0", ".ret"]),
+    "faulting" => ([], [".arg 0", ".arg 1", ".div", ".pop", ".arg 0", ".arg 1", ".rem", ".pop", ".arg 0", ".arg 1",
+        ".add_ovf", ".pop", ".arg 0", ".conv_ovf .i4", ".pop"], [".arg 0", ".ret"]),
     _ => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"])
 };
 
@@ -218,6 +222,18 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             {{string.Join("\n", Enumerable.Range(1, requested).Select(index =>
                 $"  have hypothesis{index} : right + {index} = right + {index} := rfl"))}}
               cil_checked_steps
+            """,
+        "faulting" => $$"""
+            /-- Each faulting instruction advances from the fact that its operands do not fault. -/
+            theorem checked (memory : Memory) (left right quotient remainder sum : CIL.W64) (narrowed : CIL.W32)
+                (divided : CIL.divideValues true false (.i64 left) (.i64 right) = .ok (.i64 quotient))
+                (reduced : CIL.divideValues true true (.i64 left) (.i64 right) = .ok (.i64 remainder))
+                (added : CIL.checkedValues .add true (.i64 left) (.i64 right) = .ok (.i64 sum))
+                (converted : CIL.convertInteger 32 true false (.i64 left) = .ok (.i32 narrowed)) :
+                invoke [body] {{operations.Length + 1}} 0
+                  [.scalar (.i64 left), .scalar (.i64 right)] memory =
+                  .ok (memory, [.scalar (.i64 left)]) := by
+              cil_checked_steps [divided, reduced, added, converted]
             """,
         "locals" => $$"""
             /-- Every cycle replaces all eight reference locals of a literal frame. -/

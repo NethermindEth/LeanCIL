@@ -33,13 +33,17 @@ run_cmd do
     let stored := env.header.moduleNames[index.toNat]!
     unless stored == owner do throwError "{name} is stored by {stored}, expected {owner}"
 
--- Every importer that splits `step` rebuilds each match splitter under the default heartbeat
--- budget; one match of 87 alternatives exceeded it, while 79 fit.
+-- A `step` match wider than 79 alternatives exceeds the default heartbeat budget of an importer
+-- that splits it. Finding no matcher means the names changed, and the bound would hold vacuously.
 run_cmd do
   let mut widest := 0
+  let mut found := 0
   for index in [1:200] do
     let name := `CIL.Safety.step ++ Name.mkSimple s!"match_{index}"
-    if let some info ← Meta.getMatcherInfo? name then widest := max widest info.numAlts
+    if let some info ← Meta.getMatcherInfo? name then
+      widest := max widest info.numAlts
+      found := found + 1
+  if found == 0 then throwError "no CIL.Safety.step.match_N matcher found below 200"
   unless widest ≤ 79 do
     throwError "a match in CIL.Safety.step has {widest} alternatives; importers cannot split it"
 
@@ -122,16 +126,84 @@ example (value : CIL.Value) : CIL.unary .conv_i value = CIL.unary .conv_i8 value
 example : unaryStep .conv_i (.i32 0xFFFFFFFF) = pushesValue (.i64 0xFFFFFFFFFFFFFFFF) := rfl
 example : unaryStep .conv_u (.i32 0xFFFFFFFF) = pushesValue (.i64 0xFFFFFFFF) := rfl
 
+section Guards
+variable (left right : CIL.Value) (rest : List CIL.Safety.Value)
+  (leftKnown : left.hasUnspecified = false) (rightKnown : right.hasUnspecified = false)
+include leftKnown rightKnown
+
+-- Each faulting constructor's guard lemma decides its operand guard; without it `cil_guard`
+-- leaves `observerCount` folded and makes no progress.
+example : unspecifiedOperands (observerCount .div) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .div_un) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .rem) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .rem_un) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .add_ovf) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .add_ovf_un) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .sub_ovf) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .sub_ovf_un) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .mul_ovf) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+example : unspecifiedOperands (observerCount .mul_ovf_un) (.scalar right :: .scalar left :: rest) =
+    false := by
+  simp only [cil_guard, leftKnown, rightKnown, Bool.or_false]
+
+end Guards
+
 end FaultingArithmetic
 
--- A faulting step equation keeps its helper folded, the form the checked bridge reads; an
--- unfolded unsigned bound would expand `2 ^ width` instead.
+-- Every generated faulting and `conv.i` equation exists and uses only the allowed axioms. At
+-- equal widths a faulting equation keeps its helper folded with the operand guard decided, the
+-- form the checked bridge reads; an unfolded unsigned bound would expand `2 ^ width`. Mixed
+-- widths fault.
 run_cmd do
-  for (equation, helper) in [
-      (``CIL.Safety.step_add_ovf_un_i32_i32_eq, ``CIL.checkedValues),
-      (``CIL.Safety.step_conv_ovf_un_i64_eq, ``CIL.convertInteger)] do
+  let binary := ["div", "div_un", "rem", "rem_un", "add_ovf", "add_ovf_un", "sub_ovf",
+    "sub_ovf_un", "mul_ovf", "mul_ovf_un"]
+  let helperOf (op : String) : Name :=
+    if op.startsWith "div" || op.startsWith "rem" then ``CIL.divideValues else ``CIL.checkedValues
+  let folded : List (String × Name) :=
+    binary.flatMap (fun op =>
+      [(s!"{op}_i32_i32", helperOf op), (s!"{op}_i64_i64", helperOf op)]) ++
+    ["conv_ovf", "conv_ovf_un"].flatMap fun op =>
+      [(s!"{op}_i32", ``CIL.convertInteger), (s!"{op}_i64", ``CIL.convertInteger)]
+  let faulting := binary.map (s!"{·}_i32_i64")
+  let plain := ["conv_i_i32", "conv_i_i64"]
+  let names := (folded.map (·.1) ++ faulting ++ plain).map fun suffix =>
+    `CIL.Safety ++ Name.mkSimple s!"step_{suffix}_eq"
+  unless names.length == 36 do throwError "expected 36 equations, listed {names.length}"
+  let allowed := [``propext, ``Quot.sound, ``Classical.choice]
+  for equation in names do
+    unless (← getEnv).contains equation do throwError "missing {equation}"
+    let axioms ← collectAxioms equation
+    unless axioms.all allowed.contains do throwError "{equation} depends on {axioms}"
+  for (suffix, helper) in folded do
+    let equation := `CIL.Safety ++ Name.mkSimple s!"step_{suffix}_eq"
     let type := (← getConstInfo equation).type
     unless (type.find? (·.isAppOf helper)).isSome do
       throwError "{equation} no longer applies {helper}"
+    if (type.find? fun term => term.isAppOf ``Bool.rec ||
+        term.isConstOf ``CIL.Safety.unspecifiedOperands).isSome then
+      throwError "{equation} leaves the operand guard undecided"
+  for suffix in faulting do
+    let equation := `CIL.Safety ++ Name.mkSimple s!"step_{suffix}_eq"
+    let some (_, _, rhs) := (← getConstInfo equation).type.getForallBody.eq?
+      | throwError "{equation} is not an equation"
+    unless rhs.isAppOf ``Except.error do throwError "{equation} does not fault: {rhs}"
 
 end Tests.InterpreterEquations
