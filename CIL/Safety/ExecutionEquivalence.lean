@@ -226,6 +226,8 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     same.objectAboveNull, same.virtualTarget, same.objectTest]
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
+    | unfold returnFrom
+    | simp only [same.checkedValues]
     | (apply ResultEquivalent.bind (same.newArray _ _)
        intro left right related
        obtain ⟨view, memory⟩ := left

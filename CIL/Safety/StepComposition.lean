@@ -55,14 +55,23 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 #print axioms step_argument_narrow_eq
 
 /-- Expose return validation without expanding the instruction dispatcher. -/
-@[cil_step] theorem step_return_eq (stack : List Value) :
-    step body .ret pc args frame stack memory =
+@[cil_step] theorem step_ret_eq (narrow : Option CIL.NarrowKind) (stack : List Value) :
+    step body (.ret narrow) pc args frame stack memory =
       if unspecifiedOperands 1 stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length = (if body.returnsValue then 1 else 0) then
-        (do return FrameAction.returned (← stack.mapM (checkedValue memory)) memory)
-      else .error .invalidState := by
+      else returnFrom narrow body.returnsValue stack memory := by
   simp only [step, observerCount, Bool.or_false]
+
+#print axioms step_ret_eq
+
+/-- A plain return validates the declared number of result values. -/
+@[cil_step] theorem returnFrom_none_eq (returnsValue : Bool) (stack : List Value) :
+    returnFrom none returnsValue stack memory =
+      if stack.length = (if returnsValue then 1 else 0) then
+        (do return FrameAction.returned (← stack.mapM (checkedValue memory)) memory)
+      else .error .invalidState := rfl
+
+#print axioms returnFrom_none_eq
 
 /-- A call checks its `argc` arguments, deepest first, and leaves the rest of the stack for the
     caller's continuation. -/
@@ -79,10 +88,13 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 #print axioms step_call_eq
 
 /-- A narrowed return of one i32 extends it to the declared width. -/
-@[cil_step] theorem step_return_narrow_eq (kind : CIL.NarrowKind) (bits : CIL.W32) :
-    step body (.ret (some kind)) pc args frame [.scalar (.i32 bits)] memory =
-      if body.returnsValue then .ok (.returned [.scalar (.i32 (kind.extend bits))] memory)
-      else .error .invalidState := id rfl
+@[cil_step] theorem returnFrom_narrow_eq (kind : CIL.NarrowKind) (returnsValue : Bool)
+    (bits : CIL.W32) :
+    returnFrom (some kind) returnsValue [.scalar (.i32 bits)] memory =
+      if returnsValue then .ok (.returned [.scalar (.i32 (kind.extend bits))] memory)
+      else .error .invalidState := rfl
+
+#print axioms returnFrom_narrow_eq
 
 -- Conditional branches on an i32 or i64 operand.
 @[cil_step] theorem step_brfalse_i32_eq (target : Nat) (value : CIL.W32) (rest : List Value) :

@@ -186,6 +186,20 @@ def checkedIntrinsic (operation : CIL.Intrinsic) (operands : List CIL.Value) : E
     | some value => .ok value
     | none => .error .invalidState
 
+/-- A narrowed return extends one i32 from a value-returning method; a plain return checks
+    the declared arity and validates each returned value. Malformed stacks fault. -/
+def returnFrom (narrow : Option CIL.NarrowKind) (returnsValue : Bool) (stack : List Value)
+    (memory : Memory) : ExecutionResult FrameAction :=
+  match narrow, stack with
+  | some kind, [.scalar (.i32 bits)] =>
+    if returnsValue then .ok (.returned [.scalar (.i32 (kind.extend bits))] memory)
+    else .error .invalidState
+  | some _, _ => .error .invalidState
+  | none, _ =>
+    if stack.length = (if returnsValue then 1 else 0) then do
+      return .returned (← stack.mapM (checkedValue memory)) memory
+    else .error .invalidState
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
@@ -420,14 +434,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let (memory, values) ← staticInstruction body pc operation stack m
     return .next (pc + 1) values frame memory
   | .throw exception, _ => .error (.thrown exception)
-  | .ret (some kind), [.scalar (.i32 bits)] =>
-    if body.returnsValue then
-      return .returned (← [.scalar (.i32 (kind.extend bits))].mapM (checkedValue m)) m
-    else .error .invalidState
-  | .ret none, _ =>
-    if stack.length = (if body.returnsValue then 1 else 0) then
-      return .returned (← stack.mapM (checkedValue m)) m
-    else .error .invalidState
+  | .ret narrow, _ => returnFrom narrow body.returnsValue stack m
   | .newArray element, .scalar length :: rest =>
     let (view, memory) ← newArray m element length
     return .next (pc + 1) (.array view :: rest) frame memory

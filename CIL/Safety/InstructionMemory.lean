@@ -1282,43 +1282,4 @@ def instructionAt (method pc : Nat) (op : CIL.Instruction) (stack : List Value) 
     Except LocatedFault (Memory × List Value) :=
   (instruction op stack memory).mapError fun fault => ⟨method, pc, fault⟩
 
-/-- Runs a straight-line body. A plain `arg` pushes the checked argument, and `ret` returns
-    the stack when it holds exactly the declared number of results; running off the end is
-    `invalidState`. Every other op goes through `instruction`, so branches and calls are
-    unsupported here (`run` handles them). -/
-def block (returns : Bool) (args : List Value) (ops : List CIL.Instruction)
-    (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) := do
-  match ops with
-  | [] => .error .invalidState
-  | .arg index none :: rest =>
-    let some value := args[index]? | .error .invalidState
-    let value ← match value with
-      | .reference reference => formValue m reference
-      | .scalar value => if value.initialized then .ok (.scalar value) else .error .invalidState
-      | .span reference length => .ok (.span reference length)
-      | .methodPointer pointer => .ok (.methodPointer pointer)
-      | .methodTable table => .ok (.methodTable table)
-      | .object reference => formObject m reference
-      | .array view => do
-        let _ ← checkedAt view.reference 0 (view.validate m)
-        pure (.array view)
-      | .bufferSpan view => do
-        let _ ← checkedAt view.reference 0 (view.validate m)
-        pure (.bufferSpan view)
-      | .readOnlyReference reference => do
-        let _ ← formValue m reference
-        pure (.readOnlyReference reference)
-    block returns args rest (value :: stack) m
-  | .ret none :: _ =>
-    if stack.length = (if returns then 1 else 0) then return (m, stack)
-    else .error .invalidState
-  | op :: rest =>
-    let (memory, values) ← instruction op stack m
-    block returns args rest values memory
-
-/-- `block` on a method's code, from an empty stack. -/
-def methodBlock (body : CIL.Method) (args : List Value) (memory : Memory) :
-    ExecutionResult (Memory × List Value) :=
-  block body.returnsValue args body.code [] memory
-
 end CIL.Safety

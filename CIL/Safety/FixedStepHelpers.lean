@@ -239,7 +239,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          have noCall : ∀ callee argc, operation = .call callee argc → False := by assumption
          have noTailCall : ∀ callee argc, operation = .tailCall callee argc → False := by assumption
          have noThrow : ∀ exception, operation = .throw exception → False := by assumption
-         have noReturn : operation = .ret none → False := by assumption
+         have noReturn : ∀ narrow, operation = .ret narrow → False := by assumption
          have noArgument : ∀ position narrow, operation = .arg position narrow → False := by
            intro position narrow
            cases narrow
@@ -251,6 +251,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
          all_goals try exact False.elim (noCall _ _ rfl)
          all_goals try exact False.elim (noTailCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)
+         all_goals try exact False.elim (noReturn _ rfl)
          all_goals simp only [pureArity, CIL.Safety.instruction] at observable
          all_goals repeat first | cases observable | split at observable)
       | (have numeric : fixedStepFamily operation = .numeric := family

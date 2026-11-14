@@ -229,4 +229,75 @@ run_cmd do
       | throwError "{equation} is not an equation"
     unless rhs.isAppOf ``Except.error do throwError "{equation} does not fault: {rhs}"
 
+section Returns
+
+open CIL CIL.Safety
+
+variable (body : Method) (pc : Nat) (args : List Safety.Value)
+  (frame : Frame) (memory : Safety.Memory)
+
+/-- A narrowed return with an empty stack reports a malformed execution state. -/
+theorem narrowReturnEmpty (kind : NarrowKind) :
+    Safety.step body (.ret (some kind)) pc args frame [] memory = .error .invalidState := by
+  rw [step_ret_eq]
+  rfl
+#print axioms narrowReturnEmpty
+
+/-- A narrowed return rejects a scalar of the wrong width. -/
+theorem narrowReturnWrongWidth (kind : NarrowKind) (bits : W64) :
+    Safety.step body (.ret (some kind)) pc args frame [.scalar (.i64 bits)] memory =
+      .error .invalidState := by
+  rw [step_ret_eq]
+  rfl
+#print axioms narrowReturnWrongWidth
+
+/-- A narrowed return rejects extra stack values. -/
+theorem narrowReturnExtraValue (kind : NarrowKind) (bits extra : W32) :
+    Safety.step body (.ret (some kind)) pc args frame
+      [.scalar (.i32 bits), .scalar (.i32 extra)] memory = .error .invalidState := by
+  rw [step_ret_eq]
+  rfl
+#print axioms narrowReturnExtraValue
+
+/-- Narrowing cannot turn a void method into a value-returning method. -/
+theorem narrowReturnVoid (returns : body.returnsValue = false) (kind : NarrowKind) (bits : W32) :
+    Safety.step body (.ret (some kind)) pc args frame [.scalar (.i32 bits)] memory =
+      .error .invalidState := by
+  rw [step_ret_eq]
+  change returnFrom (some kind) body.returnsValue [.scalar (.i32 bits)] memory = _
+  rw [returnFrom_narrow_eq, returns]
+  rfl
+#print axioms narrowReturnVoid
+
+/-- A narrowed return extends exactly the single i32 result. -/
+theorem narrowReturnValue (returns : body.returnsValue = true) (kind : NarrowKind) (bits : W32) :
+    Safety.step body (.ret (some kind)) pc args frame [.scalar (.i32 bits)] memory =
+      .ok (.returned [.scalar (.i32 (kind.extend bits))] memory) := by
+  rw [step_ret_eq]
+  change returnFrom (some kind) body.returnsValue [.scalar (.i32 bits)] memory = _
+  rw [returnFrom_narrow_eq, returns]
+  rfl
+#print axioms narrowReturnValue
+
+/-- A plain return preserves its checked scalar result. -/
+theorem plainReturnValue (returns : body.returnsValue = true) (bits : W32) :
+    Safety.step body .ret pc args frame [.scalar (.i32 bits)] memory =
+      .ok (.returned [.scalar (.i32 bits)] memory) := by
+  rw [step_ret_eq]
+  change returnFrom none body.returnsValue [.scalar (.i32 bits)] memory = _
+  rw [returnFrom_none_eq, returns]
+  rfl
+#print axioms plainReturnValue
+
+/-- A value-returning method rejects an empty plain return. -/
+theorem plainReturnWrongArity (returns : body.returnsValue = true) :
+    Safety.step body .ret pc args frame [] memory = .error .invalidState := by
+  rw [step_ret_eq]
+  change returnFrom none body.returnsValue [] memory = _
+  rw [returnFrom_none_eq, returns]
+  rfl
+#print axioms plainReturnWrongArity
+
+end Returns
+
 end Tests.InterpreterEquations

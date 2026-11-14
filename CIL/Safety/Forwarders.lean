@@ -193,14 +193,16 @@ theorem step_return_unchanged {body : CIL.Method} {narrow : Option CIL.NarrowKin
     have hidden : unspecifiedOperands 1 values = false := by
       simp only [unspecifiedOperands, List.any_eq_false] at known ⊢
       exact fun value member => known value (List.mem_of_mem_take member)
-    simp only [step_return_eq, hidden, Bool.false_eq_true, ↓reduceIte, arity, checked,
+    simp only [step_ret_eq, returnFrom_none_eq, hidden, Bool.false_eq_true, ↓reduceIte,
+      arity, checked,
       Bind.bind, Except.bind, Pure.pure, Except.pure]
   | some kind =>
     obtain ⟨bits, rfl, same⟩ := unchanged
     have returns : body.returnsValue = true := by
       cases returning : body.returnsValue <;> simp_all
-    rw [step_return_narrow_eq, returns, same]
-    rfl
+    simp only [step_ret_eq, unspecifiedOperands, List.take_succ_cons, List.take_zero,
+      List.any_cons, List.any_nil, Value.hasUnspecified, CIL.Value.hasUnspecified,
+      Bool.false_or, Bool.false_eq_true, ↓reduceIte, returnFrom_narrow_eq, returns, same]
 
 #print axioms step_return_unchanged
 
