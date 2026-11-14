@@ -308,6 +308,7 @@ internal static class LeanEmitter
             ];
             foreach (var (field, value) in facts)
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
+            lean.AppendLine($"cil_resolution_facts method{n}");
             // One fact per call site lets a stepping proof read its link without evaluating the table lookup.
             for (var position = 0; position < linkEntries.Count; position++)
             {

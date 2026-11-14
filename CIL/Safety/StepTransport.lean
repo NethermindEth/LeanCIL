@@ -1,5 +1,6 @@
 import CIL.Safety.ActionRenaming
 import CIL.Safety.MemoryInstructionRenaming
+import CIL.Resolution
 
 /-!
 # Allocation-renaming obligation for a checked step
@@ -15,6 +16,7 @@ structure StepMetadata (source target : CIL.Method) : Prop where
   profile : target.profile = source.profile
   returnsValue : target.returnsValue = source.returnsValue
   staticSites : target.staticSites = source.staticSites
+  returnNarrow : target.returnNarrow = source.returnNarrow
 
 /-- One observable checked step transports frames, values and fresh allocation correspondence. -/
 def StepTransport : Prop :=
