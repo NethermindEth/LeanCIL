@@ -359,7 +359,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     (reference : ManagedReference) (rest : List Value) :
     step body .add pc args frame
         (.readOnlyReference reference :: .scalar offset :: rest) memory =
-      step body .add pc args frame (.scalar offset :: .readOnlyReference reference :: rest) memory := by
+      step body .add pc args frame
+        (.scalar offset :: .readOnlyReference reference :: rest) memory := by
   rfl
 #print axioms step_add_readOnly_commuted_eq
 
