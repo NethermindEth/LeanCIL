@@ -119,9 +119,7 @@ def pointReturn : Method :=
 theorem pointReturn_returnNarrow : pointReturn.returnNarrow = none :=
   Method.returnNarrow_of_declared rfl rfl (declaredNarrow_of_not_candidate _ _ rfl)
 
-/--
-info: 'Tests.ResolutionFacts.pointReturn_returnNarrow' depends on axioms: [propext, Quot.sound]
--/
+/-- info: 'Tests.ResolutionFacts.pointReturn_returnNarrow' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms pointReturn_returnNarrow
 
@@ -147,9 +145,7 @@ theorem voidReturn_returnNarrow : voidReturn.returnNarrow = none :=
 #guard_msgs in
 #print axioms declaredNarrow_enum
 
-/--
-info: 'CIL.Extraction.declaredNarrow_of_not_candidate' depends on axioms: [propext, Quot.sound]
--/
+/-- info: 'CIL.Extraction.declaredNarrow_of_not_candidate' depends on axioms: [propext] -/
 #guard_msgs in
 #print axioms declaredNarrow_of_not_candidate
 

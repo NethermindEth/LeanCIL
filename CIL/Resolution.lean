@@ -33,21 +33,16 @@ def PrimitiveType.enumUnderlying : PrimitiveType → Bool
 
 namespace Extraction
 
-/-- The narrowing a value of declared type `type` takes: the small-integer storage of a primitive
-    or of an enum's underlying type, and `none` for every other type. -/
-def declaredNarrow (layouts : List RawLayout) (type : TypeExpr) : Option NarrowKind := do
-  let .field field ← typeStorage layouts type | none
-  match field with
-  | .signed8 => some .signed8
-  | .unsigned8 | .boolean => some .unsigned8
-  | .signed16 => some .signed16
-  | .unsigned16 | .character => some .unsigned16
-  | _ => none
-
 /-- Whether `declaredNarrow` can be `some` for the type's head: an atom or an enum. -/
 def TypeExpr.narrowCandidate : TypeExpr → Bool
   | .atom .. | .enum .. => true
   | _ => false
+
+/-- The narrowing a value of declared type `type` takes: the small-integer storage of a primitive
+    or of an enum's underlying type, and `none` for every other type. Any other head is `none`
+    without decoding its storage, so evaluating it never compares a struct identity. -/
+def declaredNarrow (layouts : List RawLayout) (type : TypeExpr) : Option NarrowKind :=
+  if type.narrowCandidate then (typeStorage layouts type).bind StorageType.narrow else none
 
 /-- A primitive narrows as its own kind, whatever the layout table. -/
 theorem declaredNarrow_primitive (layouts : List RawLayout) (type : PrimitiveType) :
@@ -66,37 +61,20 @@ theorem declaredNarrow_enum (layouts : List RawLayout) (identity : String)
 
 #print axioms declaredNarrow_enum
 
-/-- An enum cannot introduce narrowing when its underlying storage does not narrow. -/
-theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : String)
-    (type : TypeExpr) (narrow : declaredNarrow layouts type = none) :
-    declaredNarrow layouts (.enum identity type) = none := by
-  unfold declaredNarrow at narrow ⊢
-  simp only [typeStorage]
-  cases stored : typeStorage layouts type with
-  | none => simp
-  | some storage =>
-    cases storage <;> try simp
-    case field kind =>
-      cases kind <;> simp_all
-
-#print axioms declaredNarrow_enum_of_none
-
-/-- A type whose storage is never a small-integer field does not narrow. -/
-theorem declaredNarrow_of_storage {layouts : List RawLayout} {type : TypeExpr}
-    (wide : ∀ field, typeStorage layouts type = some (.field field) →
-      ∃ index, field = .aggregate index) :
-    declaredNarrow layouts type = none := by
-  unfold declaredNarrow
-  cases stored : typeStorage layouts type with
+/-- The narrowing of a storage that is never a small-integer field is `none`. -/
+theorem storage_narrow_of_wide {storage : Option StorageType}
+    (wide : ∀ field, storage = some (.field field) → ∃ index, field = .aggregate index) :
+    storage.bind StorageType.narrow = none := by
+  cases storage with
   | none => rfl
   | some storage =>
     cases storage with
     | field field =>
-      obtain ⟨index, rfl⟩ := wide field stored
+      obtain ⟨index, rfl⟩ := wide field rfl
       rfl
     | _ => rfl
 
-#print axioms declaredNarrow_of_storage
+#print axioms storage_narrow_of_wide
 
 /-- Span metadata is never stored as a field. -/
 theorem spanStorage_ne_field (type : TypeExpr) (width : Nat) (field : FieldType) :
@@ -112,11 +90,12 @@ theorem spanStorage_ne_field (type : TypeExpr) (width : Nat) (field : FieldType)
 
 #print axioms spanStorage_ne_field
 
-/-- Only an atom or an enum narrows: every other head's storage is a struct field, a
-    reference, a vector, a span, an array, a callable or an object. -/
-theorem declaredNarrow_of_not_candidate (layouts : List RawLayout) (type : TypeExpr)
-    (shape : type.narrowCandidate = false) : declaredNarrow layouts type = none := by
-  apply declaredNarrow_of_storage
+/-- Every head other than an atom or an enum decodes to a struct field, a reference, a
+    vector, a span, an array, a callable or an object, none of which narrows. -/
+theorem typeStorage_narrow_of_not_candidate (layouts : List RawLayout) (type : TypeExpr)
+    (shape : type.narrowCandidate = false) :
+    (typeStorage layouts type).bind StorageType.narrow = none := by
+  apply storage_narrow_of_wide
   intro field stored
   cases type with
   | atom => simp [TypeExpr.narrowCandidate] at shape
@@ -147,7 +126,51 @@ theorem declaredNarrow_of_not_candidate (layouts : List RawLayout) (type : TypeE
     exact absurd ‹spanStorage _ _ = _› (spanStorage_ne_field _ _ _)
   | _ => simp [typeStorage] at stored
 
+#print axioms typeStorage_narrow_of_not_candidate
+
+/-- `declaredNarrow` is the narrowing of the type's decoded storage, for every type. -/
+theorem declaredNarrow_eq_storage (layouts : List RawLayout) (type : TypeExpr) :
+    declaredNarrow layouts type = (typeStorage layouts type).bind StorageType.narrow := by
+  unfold declaredNarrow
+  split
+  · rfl
+  · next other =>
+    exact (typeStorage_narrow_of_not_candidate layouts type (by simpa using other)).symm
+
+#print axioms declaredNarrow_eq_storage
+
+/-- A type whose storage is never a small-integer field does not narrow. -/
+theorem declaredNarrow_of_storage {layouts : List RawLayout} {type : TypeExpr}
+    (wide : ∀ field, typeStorage layouts type = some (.field field) →
+      ∃ index, field = .aggregate index) :
+    declaredNarrow layouts type = none := by
+  rw [declaredNarrow_eq_storage]
+  exact storage_narrow_of_wide wide
+
+#print axioms declaredNarrow_of_storage
+
+/-- Only an atom or an enum narrows; any other head is `none` without decoding its storage. -/
+theorem declaredNarrow_of_not_candidate (layouts : List RawLayout) (type : TypeExpr)
+    (shape : type.narrowCandidate = false) : declaredNarrow layouts type = none := by
+  simp [declaredNarrow, shape]
+
 #print axioms declaredNarrow_of_not_candidate
+
+/-- An enum cannot introduce narrowing when its underlying storage does not narrow. -/
+theorem declaredNarrow_enum_of_none (layouts : List RawLayout) (identity : String)
+    (type : TypeExpr) (narrow : declaredNarrow layouts type = none) :
+    declaredNarrow layouts (.enum identity type) = none := by
+  rw [declaredNarrow_eq_storage] at narrow ⊢
+  simp only [typeStorage]
+  cases stored : typeStorage layouts type with
+  | none => simp
+  | some storage =>
+    rw [stored] at narrow
+    cases storage <;> try simp
+    case field kind =>
+      cases kind <;> simp_all [StorageType.narrow]
+
+#print axioms declaredNarrow_enum_of_none
 
 end Extraction
 
