@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PinnedMetadata.cs
 #:include ../scripts/BindingAudit.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
@@ -18,7 +19,8 @@ var validate = extractor.GetType("Nethermind.LeanCIL.Arrays", true)!
     .GetMethod("ValidateReadOnly", BindingFlags.Static | BindingFlags.NonPublic)!;
 object Index(MethodDefinition method) => Activator.CreateInstance(indexType,
     BindingFlags.Instance | BindingFlags.NonPublic, null, [method], null)!;
-using var module = ModuleDefinition.CreateModule("Indexes", ModuleKind.Dll);
+using var pinned = new PinnedMetadata(extractor, At("Examples/Assembly/bin/Examples.dll"));
+var module = pinned.Module;
 var method = new MethodDefinition("Body", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Void);
 var first = Instruction.Create(OpCodes.Nop);
 var prefix = Instruction.Create(OpCodes.Readonly);
@@ -98,8 +100,7 @@ caller.Body.Instructions.Add(destination);
 if (Translate(choose) != ".switch [2, 2]") throw new Exception("Switch target order or duplicates changed");
 if (Link(choose) is not null) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
-var runtimeScope = AssemblyNameReference.Parse(
-    "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
+var runtimeScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime");
 module.TypeSystem.UInt64.Scope = runtimeScope;
 var valueType = new TypeReference("System", "ValueType", module, runtimeScope);
 var inner = new TypeDefinition("Fixture", "ZInner", Mono.Cecil.TypeAttributes.Public |
@@ -169,8 +170,7 @@ if (!ReferenceEquals(contextFields.Invoke(freshContext, [inner]), contextFields.
     (int)contextFieldIndex.Invoke(freshContext, [inner, inner.Fields[1], false])! != 1 ||
     (int)contextFieldIndex.Invoke(freshContext, [inner, duplicateField, false])! != -1)
     throw new Exception("Field snapshots lost field identity or instance order");
-var intrinsicsScope = AssemblyNameReference.Parse(
-    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51");
+var intrinsicsScope = module.AssemblyReferences.Single(reference => reference.Name == "System.Runtime.Intrinsics");
 var vector = new GenericInstanceType(new TypeReference("System.Runtime.Intrinsics", "Vector256`1",
     module, intrinsicsScope, true));
 vector.GenericArguments.Add(module.TypeSystem.UInt64);

@@ -39,7 +39,7 @@ internal static class RuntimeModels
 
     static MetadataImage IdentityImage(TypeReference type) =>
         (PinnedAssemblies.Active ?? throw new InvalidDataException("Type identity without a pinned module image"))
-        .Metadata(type.Module);
+        .IdentityMetadata(type.Module);
 
     internal static bool SupportedType(TypeReference type)
     {

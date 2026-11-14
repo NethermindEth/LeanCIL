@@ -8,6 +8,7 @@
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -17,8 +18,9 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/GenericLayouts");
 Directory.CreateDirectory(root);
 var extractor = Assembly.LoadFrom(ExtractorPath);
-using (var module = ModuleDefinition.ReadModule(assembly))
+using (var pinned = new PinnedMetadata(extractor, assembly))
 {
+    var module = pinned.Module;
     var owner = module.GetType("Examples.GenericPair`1");
     var shadow = new TypeDefinition("System", "UInt64", Mono.Cecil.TypeAttributes.Public |
         Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout, owner.BaseType);
