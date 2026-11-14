@@ -4,9 +4,10 @@ import CIL.Extraction.Signatures
 # Metadata table and heap decoding tests
 
 The vectors are rows, header bytes and heap entries copied from `Examples.dll` (two-byte
-columns) and from the 10.0.15 `System.Private.CoreLib.dll` (four-byte string, blob and coded
-columns), together with the values `System.Reflection.Metadata` reads from the same positions
-and the assembly names Mono.Cecil spells. Each rejection changes one fact of a slice that
+columns) and from `System.Private.CoreLib.dll` (four-byte string, blob and coded columns), with
+the major version of each assembly row set to the platform version 11, together with the values
+`System.Reflection.Metadata` reads from the same positions and the assembly names Mono.Cecil
+spells. Each rejection changes one fact of a slice that
 decodes and asserts the exact error.
 -/
 
@@ -33,8 +34,8 @@ def examplesRows : List (Nat × List Nat) := [(16777217, [6, 0, 57, 28, 12, 51])
   (100663297, [80, 32, 0, 0, 0, 0, 150, 0, 111, 14, 52, 10, 1, 0]), (100663298, [85, 32, 0, 0, 0,
   0, 150, 0, 111, 14, 52, 10, 3, 0]), (100663299, [90, 32, 0, 0, 0, 0, 150, 0, 111, 14, 26, 10, 5,
   0]), (167772161, [9, 0, 6, 49, 1, 0]), (167772162, [17, 0, 6, 49, 6, 0]), (167772163, [25, 0, 6,
-  49, 10, 0]), (285212673, [60, 1]), (452984833, [50, 0]), (587202561, [10, 0, 0, 0, 0, 0, 0, 0,
-  0, 0, 0, 0, 77, 17, 217, 23, 0, 0, 0, 0]), (587202562, [10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 86,
+  49, 10, 0]), (285212673, [60, 1]), (452984833, [50, 0]), (587202561, [11, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 77, 17, 217, 23, 0, 0, 0, 0]), (587202562, [11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 86,
   17, 47, 50, 0, 0, 0, 0]), (687865857, [201, 0, 4, 0]), (704643073, [0, 0, 0, 0, 36, 0, 105,
   12]), (721420289, [83, 0, 255, 0])]
 def examplesStrings : List (Nat × List Nat) := [(0, [0]), (3044, [60, 77, 111, 100, 117, 108, 101,
@@ -76,7 +77,7 @@ def examplesExpected : List (Nat × List Nat) := [(16777217, [587202561, 7225, 1
   (67108866, [6, 13349, 4682]), (100663297, [8272, 0, 150, 3695, 2612]), (100663298, [8277, 0,
   150, 3695, 2612]), (100663299, [8282, 0, 150, 3695, 2586]), (167772161, [16777217, 12550, 1]),
   (167772162, [16777218, 12550, 6]), (167772163, [16777219, 12550, 10]), (285212673, [316]),
-  (452984833, [50]), (587202561, [10, 0, 0, 0, 0, 4429, 6105, 0]), (587202562, [10, 0, 0, 0, 0,
+  (452984833, [50]), (587202561, [11, 0, 0, 0, 0, 4429, 6105, 0]), (587202562, [11, 0, 0, 0, 0,
   4438, 12847, 0]), (687865857, [33554633, 33554436]), (704643073, [0, 0, 33554450, 3177]),
   (721420289, [167772201, 255])]
 def examplesUserStrings : List (Nat × List Nat) := [(1, [11, 118, 0, 97, 0, 108, 0, 117, 0, 101,
@@ -91,10 +92,10 @@ def examplesUserUnits : List (Nat × List Nat) := [(1, [118, 97, 108, 117, 101])
   120, 104, 97, 117, 115, 116, 101, 100, 46])]
 def examplesIdentity : String := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
 def examplesRefIdentities : List String := [
-  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
-  "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
-  "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
-  "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, " ++
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+  "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+  "System.Memory, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+  "System.Security.Cryptography, Version=11.0.0.0, Culture=neutral, " ++
     "PublicKeyToken=b03f5f7f11d50a3a"]
 
 def corelibHeader : List Nat := [0, 0, 0, 0, 2, 0, 5, 10, 85, 191, 183, 63, 1, 31, 0, 0, 0, 250,
@@ -105,7 +106,7 @@ def corelibHeader : List Nat := [0, 0, 0, 0, 2, 0, 5, 10, 85, 191, 183, 63, 1, 3
   0, 76, 16, 0, 0, 143, 19, 0, 0, 192, 7, 0, 0]
 def corelibRowSizes : List (Nat × Nat) := [(1, 10), (2, 18), (4, 10), (6, 20), (10, 12), (17, 4),
   (27, 4), (32, 28), (35, 28), (41, 4), (42, 12), (43, 8)]
-def corelibAssemblyRow : List Nat := [4, 128, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0,
+def corelibAssemblyRow : List Nat := [4, 128, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0,
   0, 130, 95, 1, 0, 0, 0, 0, 0]
 def corelibRows : List (Nat × List Nat) := [(33554932, [0, 1, 0, 0, 102, 86, 7, 0, 128, 9, 5, 0,
   44, 2, 37, 7, 66, 38]), (33556432, [0, 1, 16, 0, 139, 153, 8, 0, 153, 155, 5, 0, 148, 2, 53, 23,
@@ -186,7 +187,7 @@ def corelibUserUnits : List (Nat × List Nat) := [(1, [123, 123, 32, 84, 104, 10
   (101, [41]), (105, [116, 97, 114, 103, 101, 116, 67, 108, 97, 115, 115]), (129, [99, 117, 108,
   116, 117, 114, 101])]
 def corelibIdentity : String :=
-  "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
+  "System.Private.CoreLib, Version=11.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
 def corelibRefIdentities : List String := []
 
 /-! ## Decoding -/
