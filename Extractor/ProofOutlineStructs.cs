@@ -40,13 +40,13 @@ internal static partial class ProofOutline
             : $"(BitVec.ofInt {constant.Width} ({constant.Value}))",
             constant.Width == 64 ? 8 : 4) : null;
 
-    /// <summary>The source width in bytes and signedness of a `conv.i1` to `conv.u8`, or null for another
-    /// operation, including the native-width `conv.u`.</summary>
+    /// <summary>The result width in bytes and signedness of a `conv.i1` to `conv.u8` or of `conv.i`, which
+    /// sign-extends like `conv.i8`; null for another operation, including the native-width `conv.u`.</summary>
     static (int Bytes, bool Signed)? SizedConversion(Operation op) => op is StackOperation { Kind: var kind }
         ? kind switch
     {
         StackOpcode.ConvI1 => (1, true), StackOpcode.ConvI2 => (2, true), StackOpcode.ConvI4 => (4, true),
-            StackOpcode.ConvI8 => (8, true),
+            StackOpcode.ConvI8 or StackOpcode.ConvI => (8, true),
         StackOpcode.ConvU1 => (1, false), StackOpcode.ConvU2 => (2, false), StackOpcode.ConvU4 => (4, false),
         StackOpcode.ConvU8 => (8, false),
         _ => null

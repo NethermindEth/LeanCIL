@@ -417,7 +417,7 @@ theorem native_mixed_signed_extension :
     CIL.nativeBinaryValues .add 0 (.i64 1) (.i32 4294967295) = .ok (1, [.i64 0]) := rfl
 
 theorem native_checked_unsigned_extension :
-    CIL.nativeBinaryValues (.checkedArithmetic .add false) 0 (.i64 1) (.i32 4294967295) =
+    CIL.nativeBinaryValues .add_ovf_un 0 (.i64 1) (.i32 4294967295) =
       .ok (1, [.i64 4294967296]) := rfl
 
 theorem native_unsigned_branch_rejected :
@@ -463,11 +463,11 @@ theorem division_zero (signed remainder : Bool) (x : CIL.W64) :
 
 theorem division_underflow :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], 0⟩ [] Memory.empty).isOk = false := rfl
+      .div_un 0 [] ⟨0, [], [], 0⟩ [] Memory.empty).isOk = false := rfl
 
 theorem division_managed_reference_rejected :
     (CIL.Safety.step { returnsValue := true, locals := [], code := [] }
-      (.divide false false) 0 [] ⟨0, [], [], 0⟩
+      .div_un 0 [] ⟨0, [], [], 0⟩
       [.scalar (.i32 2), .reference .null] Memory.empty).isOk = false := rfl
 
 

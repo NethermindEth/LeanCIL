@@ -23,8 +23,8 @@ def nativePureBinary : Instruction → Bool
     Mixed unsigned branches are rejected: CoreCLR's widening depends on whether
     its importer sees a constant, which can change through inlining. -/
 def widenNativeOperand (op : Instruction) (bits : W32) : W64 :=
-  match op with
-  | .checkedArithmetic _ false => bits.zeroExtend 64
+  match op.checkedKind? with
+  | some (_, false) => bits.zeroExtend 64
   | _ => bits.signExtend 64
 
 /-- Runs a mixed `i32`/`i64` binary instruction at `pc`: the next pc and the values it
@@ -35,12 +35,12 @@ def nativeBinaryValues (op : Instruction) (pc : Nat) (x y : Value) :
     | .i32 a, .i64 b => .ok (Value.i64 (widenNativeOperand op a), Value.i64 b)
     | .i64 a, .i32 b => .ok (Value.i64 a, Value.i64 (widenNativeOperand op b))
     | _, _ => .error .invalidOperands
-  match op with
-  | .divide signed remainder =>
+  match op.divideKind?, op.checkedKind? with
+  | some (signed, remainder), _ =>
     return (pc + 1, [← divideValues signed remainder x y])
-  | .checkedArithmetic kind signed =>
+  | none, some (kind, signed) =>
     return (pc + 1, [← checkedValues kind signed x y])
-  | _ =>
+  | none, none =>
     if nativePureBinary op then
       match step op false pc [] 0 [y, x] (fun _ => none) with
       | some (.next target values _) => .ok (target, values)

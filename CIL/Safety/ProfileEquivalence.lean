@@ -26,6 +26,7 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
   unfold step
   split <;> try rfl
   all_goals split <;> try rfl
+  all_goals split <;> try rfl
   all_goals simp only [CIL.Instruction.ProfileAgreement] at agreement
   all_goals try simp only [agreement]
   all_goals simp only [CIL.step_profile_eq op p q agreement]
