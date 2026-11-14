@@ -139,9 +139,10 @@ foreach (var (name, count, expected) in cases)
     {
         var narrowed = NarrowEvidence(source, "method0_scalars_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
-        if (!narrowed.Contains(".eq", StringComparison.Ordinal)) throw new Exception("Missing equality mutation target");
+        if (!narrowed.Contains(".ceq", StringComparison.Ordinal))
+            throw new Exception("Missing equality mutation target");
         var forged = Path.Combine(root, "ForgedEquality.lean");
-        File.WriteAllText(forged, narrowed.Replace(".eq", ".lt", StringComparison.Ordinal));
+        File.WriteAllText(forged, narrowed.Replace(".ceq", ".clt", StringComparison.Ordinal));
         rejected.Add(forged, "PASS independent forged reference equality rejection", "ScalarFlowValid");
     }
     evidence.Add(proof, "PASS runtime, certificate and reference execution: " + name);

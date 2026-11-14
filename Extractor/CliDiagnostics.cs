@@ -50,7 +50,7 @@ internal static class CliDiagnostics
             ? $"\\u{(int)character:X4}" : character.ToString()));
 
     static bool IsBidiControl(char character) =>
-        character is >= '‪' and <= '‮' or >= '⁦' and <= '⁩' or '‎' or '‏' or '؜';
+        character is >= '\u202A' and <= '\u202E' or >= '\u2066' and <= '\u2069' or '\u200E' or '\u200F' or '\u061C';
 
     internal static void Write(Exception error, string stage, bool invalid)
     {

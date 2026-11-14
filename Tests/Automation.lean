@@ -22,7 +22,7 @@ run_cmd do
     throwError "Failed summary escaped its transaction"
 
 @[cil_code] def branchMethod : CIL.Method := {
-  code := [.arg 0, .brzero 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.arg 0, .brfalse 4, .arg 1, .ret, .arg 1, .ret]
   locals := [], returnsValue := true }
 @[cil_code] def branchProgram : CIL.Program := [branchMethod]
 
@@ -48,7 +48,7 @@ example : True := by
     Lean.Core.setMessageLog earlier
 
 @[cil_code] def arithmeticMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .const32 1, .shl, .add, .const32 0, .gtu, .ret]
+  code := [.arg 0, .arg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
   locals := [], returnsValue := true }
 
 -- Symbolic values still reduce definitionally, including the final return.
@@ -62,7 +62,7 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 #guard_msgs in #print axioms checked_arithmetic
 
 @[cil_code] def narrowEqualityMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .bxor, .const32 0, .eq, .ret (some .unsigned8)]
+  code := [.arg 0, .arg 1, .xor, .ldc_i4 0, .ceq, .ret (some .unsigned8)]
   locals := [], returnsValue := true }
 
 def scalarDifference (left right : CIL.W32) : CIL.W32 := left ^^^ right
@@ -86,7 +86,7 @@ theorem checked_narrow_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.F
 #print axioms checked_narrow_return
 
 @[cil_code] def decidedNarrowMethod : CIL.Method := {
-  code := [.const32 0, .const32 0, .eq, .ret (some .unsigned8)]
+  code := [.ldc_i4 0, .ldc_i4 0, .ceq, .ret (some .unsigned8)]
   locals := [], returnsValue := true }
 
 /-- A comparison of literals decides to `1#32` before the narrowed return, which keeps it, so
@@ -266,7 +266,7 @@ theorem checked_negative_literal_return (memory : CIL.Safety.Memory) (frame : CI
 #print axioms checked_negative_literal_return
 /-- A reusable body, bound to an extraction only through a lookup hypothesis. -/
 def wordBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.arg 0, .bnot, .arg 1, .bnot, .bor, .bnot, .ret] }
+  { profile, returnsValue := true, locals := [], code := [.arg 0, .not, .arg 1, .not, .or, .not, .ret] }
 
 theorem word_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (wordBody profile)) (memory : CIL.Safety.Memory) (a b : BitVec 64) :
@@ -297,11 +297,11 @@ example (program : CIL.Program) (index : Nat) (memory : CIL.Safety.Memory) (a b 
 /-- A 27-instruction read-only leaf over symbolic memory: each field load comes from a fact, every step from an
     equation, so no step unfolds the dispatcher. -/
 def leafBody (profile : CIL.FeatureProfile) : CIL.Method := { profile, returnsValue := true, locals := [], code := [
-  .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .bxor,
-  .arg 0, .fieldAt 8 8, .arg 1, .fieldAt 8 8, .bxor, .bor,
-  .arg 0, .fieldAt 16 8, .arg 1, .fieldAt 16 8, .bxor, .bor,
-  .arg 0, .fieldAt 24 8, .arg 1, .fieldAt 24 8, .bxor, .bor,
-  .const32 0, .convI8, .eq, .ret (some .unsigned8)] }
+  .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .xor,
+  .arg 0, .fieldAt 8 8, .arg 1, .fieldAt 8 8, .xor, .or,
+  .arg 0, .fieldAt 16 8, .arg 1, .fieldAt 16 8, .xor, .or,
+  .arg 0, .fieldAt 24 8, .arg 1, .fieldAt 24 8, .xor, .or,
+  .ldc_i4 0, .conv_i8, .ceq, .ret (some .unsigned8)] }
 
 open CIL.Safety in
 theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -316,7 +316,8 @@ theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featur
   cil_checked_steps [fl, fr, field]
 
 def boundBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.arg 0, .arg 1, .bltu 5, .arg 0, .ret, .arg 1, .ret] }
+  { profile, returnsValue := true, locals := [],
+    code := [.arg 0, .arg 1, .blt_un 5, .arg 0, .ret, .arg 1, .ret] }
 
 /-- A fact decides an unsigned i64 branch, so the run falls through to pc 3. -/
 theorem bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -337,7 +338,8 @@ theorem signed_bound_checked (program : CIL.Program) (index : Nat) (profile : CI
 -- The step equations alone rewrite a compare-branch; the dispatcher stays folded.
 example (body : CIL.Method) (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame) (m : CIL.Safety.Memory)
     (x y : CIL.W64) (above : ¬ x < y) :
-    CIL.Safety.step body (.bltu 5) 2 args frame [.scalar (.i64 y), .scalar (.i64 x)] m = .ok (.next 3 [] frame m) := by
+    CIL.Safety.step body (.blt_un 5) 2 args frame [.scalar (.i64 y), .scalar (.i64 x)] m =
+      .ok (.next 3 [] frame m) := by
   simp only [cil_step, above, ↓reduceIte]
 
 -- Guard reduction inspects only consumed values, even with an unknown stack tail.
@@ -384,7 +386,7 @@ theorem guard_unknown_requires_fact (value : CIL.Value) (known : value.hasUnspec
 open CIL.Safety in
 theorem scalar_fact_stack (body : CIL.Method) (args : List Value) (frame : Frame)
     (memory : Memory) (left right : CIL.W64) (word : Nat) (unrelated : word = 7) :
-    ∃ stack, step body .bxor 0 args frame [.scalar (.i64 right), .scalar (.i64 left)] memory =
+    ∃ stack, step body .xor 0 args frame [.scalar (.i64 right), .scalar (.i64 left)] memory =
       .ok (.next 1 stack frame memory) ∧ stack = [.scalar (.i64 (left ^^^ right))] := by
   refine ⟨?_, ?_, ?_⟩
   rotate_left
@@ -754,7 +756,7 @@ theorem feature_step_forall_global (body : CIL.Method) (frame : CIL.Safety.Frame
 
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
 @[cil_code] def addBody : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.arg 0, .const32 8, .memory (.add 8 true), .pop, .const32 1, .ret] }
+  { returnsValue := true, locals := [], code := [.arg 0, .ldc_i4 8, .memory (.add 8 true), .pop, .ldc_i4 1, .ret] }
 
 open CIL.Safety in
 theorem add_run (memory : Memory) (source moved : Reference)
@@ -936,7 +938,7 @@ theorem step_fact_after_have (frame stored : Frame) (memory written : Memory) (v
 #guard_msgs in #print axioms step_fact_after_have
 
 @[cil_code] def nonzeroMethod : CIL.Method := {
-  code := [.arg 0, .brnonzero 4, .arg 1, .ret, .arg 0, .ret]
+  code := [.arg 0, .brtrue 4, .arg 1, .ret, .arg 0, .ret]
   locals := [], returnsValue := true }
 
 -- A branch pc is decided from the condition's own fact, not only from a `CIL.truth` restatement.
@@ -958,7 +960,7 @@ theorem branch_from_zero (memory : CIL.Safety.Memory) (condition value : CIL.W32
 
 -- A literal condition is decided by evaluation, with no fact at all.
 @[cil_code] def literalBranchMethod : CIL.Method := {
-  code := [.const32 5, .brnonzero 4, .arg 0, .ret, .arg 1, .ret]
+  code := [.ldc_i4 5, .brtrue 4, .arg 0, .ret, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem literal_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) :
@@ -1131,7 +1133,7 @@ theorem store_from_wrapped_fact (body : CIL.Method) (args : List Value) (frame :
 
 /-- Compare two words and reinterpret the result as a Boolean. -/
 @[cil_code] def comparedBoolean : CIL.Method := {
-  code := [.arg 0, .arg 1, .eq, .memory .bitcastByteBool, .ret]
+  code := [.arg 0, .arg 1, .ceq, .memory .bitcastByteBool, .ret]
   locals := [], returnsValue := true }
 
 open CIL.Safety in

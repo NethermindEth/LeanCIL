@@ -128,7 +128,7 @@ theorem multiply_left_input {program : CIL.Program} {method : Nat} {body : CIL.M
 /-- The AVX2 permutation stage retains availability and exact intrinsic semantics. -/
 theorem reverse256 {program : CIL.Program} {method start : Nat} {body : CIL.Method}
     (found : program[method]? = some body)
-    (placed : CodeAt body start [.const32 27, .intrinsic (.avx2 .permute4x64) 2])
+    (placed : CodeAt body start [.ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2])
     (arguments : List Value) (frame : Frame) (memory : Memory) (vector reversed : BitVec 256)
     (available : (CIL.Intrinsic.avx2 .permute4x64).available body.profile = true)
     (permuted : checkedIntrinsic (.avx2 .permute4x64) [.v256 vector, .i32 27] =
@@ -157,7 +157,7 @@ theorem multiply_inputs {program : CIL.Program} {method : Nat} {body : CIL.Metho
     (found : program[method]? = some body)
     (leftPlaced : CodeAt body 44 (referencePrefix 0 ++ [.memory .load256, .setLocal 23]))
     (rightPlaced : CodeAt body 49 (referencePrefix 1 ++ [.memory .load256,
-      .const32 27, .intrinsic (.avx2 .permute4x64) 2, .setLocal 24]))
+      .ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2, .setLocal 24]))
     (arguments : List Value) (frame : Frame) (before middle after : Memory)
     (left right : Reference) (leftVector rightVector reversed : BitVec 256)
     (leftArgument : arguments[0]? = some (.reference (.address left)))
@@ -177,7 +177,7 @@ theorem multiply_inputs {program : CIL.Program} {method : Nat} {body : CIL.Metho
   have first := multiply_left_input found leftPlaced arguments frame before middle left
     leftVector leftArgument leftFormed leftLoaded leftStored
   have split : CodeAt body 49 (((referencePrefix 1 ++ [.memory .load256]) ++
-      [.const32 27, .intrinsic (.avx2 .permute4x64) 2]) ++ [.setLocal 24]) := rightPlaced
+      [.ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2]) ++ [.setLocal 24]) := rightPlaced
   have loaded := load256_prefix found 1 split.append_left.append_left arguments frame middle
     right rightVector rightArgument rightFormed rightLoaded
   have reversed := reverse256 found split.append_left.append_right arguments frame middle

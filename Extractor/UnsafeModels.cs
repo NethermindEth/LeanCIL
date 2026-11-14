@@ -71,9 +71,9 @@ internal static class UnsafeModels
 
         if (comparison) return reference.Name switch
         {
-            "AreSame" => new StackOperation(StackOpcode.Eq),
-            "IsAddressLessThan" => new StackOperation(StackOpcode.Ltu),
-            _ => new StackOperation(StackOpcode.Gtu)
+            "AreSame" => new StackOperation(StackOpcode.Ceq),
+            "IsAddressLessThan" => new StackOperation(StackOpcode.CltUn),
+            _ => new StackOperation(StackOpcode.CgtUn)
         };
         if (byteOffset) return MemoryOperation.Other(".byteOffset");
         if (subtractBytes) return new StackOperation(StackOpcode.Sub);

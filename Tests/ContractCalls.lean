@@ -124,7 +124,7 @@ theorem word_input (program : Program) (memory : Safety.Memory) (value : W32)
 
 /-- A concrete helper used only to establish its registered public contract. -/
 @[cil_code] def helper : Method := {
-  returnsValue := true, locals := [], code := [.const32 7, .ret] }
+  returnsValue := true, locals := [], code := [.ldc_i4 7, .ret] }
 
 /-- A method binding fixes the callee index used by the registered theorem. -/
 @[cil_code] def boundProgram : Program := [caller, helper]

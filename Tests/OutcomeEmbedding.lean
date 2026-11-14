@@ -15,12 +15,12 @@ def outOfRange : String := "System.ArgumentOutOfRangeException"
 
 /-- `Check(v) => v > 100 ? throw new ArgumentOutOfRangeException() : v`, as the proof states it. -/
 @[cil_code] def check : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 100, .convI8, .bgtu 6, .arg 0, .ret, .throw outOfRange] }
+  [.arg 0, .ldc_i4 100, .conv_i8, .bgt_un 6, .arg 0, .ret, .throw outOfRange] }
 
 /-- `check` as the profile-specific extraction emits it: a dead block moves the throw to pc 7. -/
 @[cil_code] def extractedCheck : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 100, .convI8, .bgtu 7, .arg 0, .ret, .unsupported "Unreachable under selected profile",
-    .throw outOfRange] }
+  [.arg 0, .ldc_i4 100, .conv_i8, .bgt_un 7, .arg 0, .ret,
+    .unsupported "Unreachable under selected profile", .throw outOfRange] }
 
 @[cil_code] def literal : Program := [outer, check]
 @[cil_code] def extracted : Program := [outer, extractedCheck]
@@ -140,7 +140,7 @@ example : (⟨1, 6, .thrown outOfRange⟩ : LocatedFault).relocate
 /-! A changed reachable throw condition or exception type neither embeds nor satisfies the contract. -/
 
 def renamedException : Method := { extractedCheck with code := extractedCheck.code.set 7 (.throw "System.ArgumentException") }
-def lowerBound : Method := { extractedCheck with code := extractedCheck.code.set 1 (.const32 50) }
+def lowerBound : Method := { extractedCheck with code := extractedCheck.code.set 1 (.ldc_i4 50) }
 
 /--
 error: cil_embed: the expected body does not embed into the extracted method
@@ -157,8 +157,8 @@ example : MethodEmbeds [outer, renamedException] 1 check := by cil_embed
 error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 1 maps to actual pc 1
-  expected: CIL.Instruction.const32 0x00000064#32
-  actual:   CIL.Instruction.const32 0x00000032#32
+  expected: CIL.Instruction.ldc_i4 0x00000064#32
+  actual:   CIL.Instruction.ldc_i4 0x00000032#32
   the instructions differ
 -/
 #guard_msgs (substring := true) in

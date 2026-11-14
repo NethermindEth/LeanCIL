@@ -35,42 +35,42 @@ def binary (op : Instruction) (a b : Value) : Option Value :=
   | .sub, .i32 x, .i32 y => some (.i32 (x - y))
   | .mul, .i64 x, .i64 y => some (.i64 (x * y))
   | .mul, .i32 x, .i32 y => some (.i32 (x * y))
-  | .band, .i64 x, .i64 y => some (.i64 (x &&& y))
-  | .band, .i32 x, .i32 y => some (.i32 (x &&& y))
-  | .bor, .i64 x, .i64 y => some (.i64 (x ||| y))
-  | .bor, .i32 x, .i32 y => some (.i32 (x ||| y))
-  | .bxor, .i64 x, .i64 y => some (.i64 (x ^^^ y))
-  | .bxor, .i32 x, .i32 y => some (.i32 (x ^^^ y))
+  | .and, .i64 x, .i64 y => some (.i64 (x &&& y))
+  | .and, .i32 x, .i32 y => some (.i32 (x &&& y))
+  | .or, .i64 x, .i64 y => some (.i64 (x ||| y))
+  | .or, .i32 x, .i32 y => some (.i32 (x ||| y))
+  | .xor, .i64 x, .i64 y => some (.i64 (x ^^^ y))
+  | .xor, .i32 x, .i32 y => some (.i32 (x ^^^ y))
   -- Shifts.
   | .shl, .i64 x, .i32 count => some (.i64 (x <<< (count.toNat % 64)))
   | .shl, .i32 x, .i32 count => some (.i32 (x <<< (count.toNat % 32)))
-  | .shrUn, .i64 x, .i32 count => some (.i64 (x >>> (count.toNat % 64)))
-  | .shrUn, .i32 x, .i32 count => some (.i32 (x >>> (count.toNat % 32)))
+  | .shr_un, .i64 x, .i32 count => some (.i64 (x >>> (count.toNat % 64)))
+  | .shr_un, .i32 x, .i32 count => some (.i32 (x >>> (count.toNat % 32)))
   | .shr, .i64 x, .i32 count => some (.i64 (x.sshiftRight (count.toNat % 64)))
   | .shr, .i32 x, .i32 count => some (.i32 (x.sshiftRight (count.toNat % 32)))
   -- Native counts use their low bits; extraction distinguishes native values from int64.
   | .shl, .i64 x, .i64 count => some (.i64 (x <<< ((count.setWidth 32).toNat % 64)))
   | .shl, .i32 x, .i64 count => some (.i32 (x <<< ((count.setWidth 32).toNat % 32)))
-  | .shrUn, .i64 x, .i64 count => some (.i64 (x >>> ((count.setWidth 32).toNat % 64)))
-  | .shrUn, .i32 x, .i64 count => some (.i32 (x >>> ((count.setWidth 32).toNat % 32)))
+  | .shr_un, .i64 x, .i64 count => some (.i64 (x >>> ((count.setWidth 32).toNat % 64)))
+  | .shr_un, .i32 x, .i64 count => some (.i32 (x >>> ((count.setWidth 32).toNat % 32)))
   | .shr, .i64 x, .i64 count => some (.i64 (x.sshiftRight ((count.setWidth 32).toNat % 64)))
   | .shr, .i32 x, .i64 count => some (.i32 (x.sshiftRight ((count.setWidth 32).toNat % 32)))
   -- Comparisons.
-  | .eq, .i64 x, .i64 y => some (.i32 (if x = y then 1 else 0))
-  | .eq, .i32 x, .i32 y => some (.i32 (if x = y then 1 else 0))
-  | .lt, .i64 x, .i64 y => some (.i32 (if x.toInt < y.toInt then 1 else 0))
-  | .lt, .i32 x, .i32 y => some (.i32 (if x.toInt < y.toInt then 1 else 0))
-  | .gt, .i64 x, .i64 y => some (.i32 (if y.toInt < x.toInt then 1 else 0))
-  | .gt, .i32 x, .i32 y => some (.i32 (if y.toInt < x.toInt then 1 else 0))
-  | .ltu, .i64 x, .i64 y => some (.i32 (if x < y then 1 else 0))
-  | .ltu, .i32 x, .i32 y => some (.i32 (if x < y then 1 else 0))
-  | .gtu, .i64 x, .i64 y => some (.i32 (if y < x then 1 else 0))
-  | .gtu, .i32 x, .i32 y => some (.i32 (if y < x then 1 else 0))
+  | .ceq, .i64 x, .i64 y => some (.i32 (if x = y then 1 else 0))
+  | .ceq, .i32 x, .i32 y => some (.i32 (if x = y then 1 else 0))
+  | .clt, .i64 x, .i64 y => some (.i32 (if x.toInt < y.toInt then 1 else 0))
+  | .clt, .i32 x, .i32 y => some (.i32 (if x.toInt < y.toInt then 1 else 0))
+  | .cgt, .i64 x, .i64 y => some (.i32 (if y.toInt < x.toInt then 1 else 0))
+  | .cgt, .i32 x, .i32 y => some (.i32 (if y.toInt < x.toInt then 1 else 0))
+  | .clt_un, .i64 x, .i64 y => some (.i32 (if x < y then 1 else 0))
+  | .clt_un, .i32 x, .i32 y => some (.i32 (if x < y then 1 else 0))
+  | .cgt_un, .i64 x, .i64 y => some (.i32 (if y < x then 1 else 0))
+  | .cgt_un, .i32 x, .i32 y => some (.i32 (if y < x then 1 else 0))
   | _ , _, _ => none
 
 /-- Native shift counts normalize to their low 32 bits under the admitted 64-bit runtime. -/
 theorem binary_native_shift_count (operation : Instruction) (value : Value) (count : W64)
-    (shift : operation = .shl ∨ operation = .shr ∨ operation = .shrUn) :
+    (shift : operation = .shl ∨ operation = .shr ∨ operation = .shr_un) :
     binary operation value (.i64 count) = binary operation value (.i32 (count.setWidth 32)) := by
   rcases shift with rfl | rfl | rfl <;> cases value <;> rfl
 
@@ -84,28 +84,28 @@ def unary (op : Instruction) (value : Value) : Option Value :=
     (convertInteger width signed unsignedInput value).toOption
   | .neg, .i32 w => some (.i32 (-w))
   | .neg, .i64 w => some (.i64 (-w))
-  | .bnot, .i64 w => some (.i64 (~~~w))
-  | .bnot, .i32 w => some (.i32 (~~~w))
+  | .not, .i64 w => some (.i64 (~~~w))
+  | .not, .i32 w => some (.i32 (~~~w))
   -- To 8, 16 and 32 bits.
-  | .convI1, .i32 w => some (.i32 (NarrowKind.signed8.extend w))
-  | .convI1, .i64 w => some (.i32 (NarrowKind.signed8.extend (w.setWidth 32)))
-  | .convU1, .i32 w => some (.i32 ((w.setWidth 8).zeroExtend 32))
-  | .convU1, .i64 w => some (.i32 ((w.setWidth 8).zeroExtend 32))
-  | .convI2, .i32 w => some (.i32 (NarrowKind.signed16.extend w))
-  | .convI2, .i64 w => some (.i32 (NarrowKind.signed16.extend (w.setWidth 32)))
-  | .convU2, .i32 w => some (.i32 (NarrowKind.unsigned16.extend w))
-  | .convU2, .i64 w => some (.i32 (NarrowKind.unsigned16.extend (w.setWidth 32)))
-  | .convI4, .i64 w => some (.i32 (w.setWidth 32))
-  | .convI4, .i32 w => some (.i32 w)
-  | .convU4, .i64 w => some (.i32 (w.setWidth 32))
-  | .convU4, .i32 w => some (.i32 w)
+  | .conv_i1, .i32 w => some (.i32 (NarrowKind.signed8.extend w))
+  | .conv_i1, .i64 w => some (.i32 (NarrowKind.signed8.extend (w.setWidth 32)))
+  | .conv_u1, .i32 w => some (.i32 ((w.setWidth 8).zeroExtend 32))
+  | .conv_u1, .i64 w => some (.i32 ((w.setWidth 8).zeroExtend 32))
+  | .conv_i2, .i32 w => some (.i32 (NarrowKind.signed16.extend w))
+  | .conv_i2, .i64 w => some (.i32 (NarrowKind.signed16.extend (w.setWidth 32)))
+  | .conv_u2, .i32 w => some (.i32 (NarrowKind.unsigned16.extend w))
+  | .conv_u2, .i64 w => some (.i32 (NarrowKind.unsigned16.extend (w.setWidth 32)))
+  | .conv_i4, .i64 w => some (.i32 (w.setWidth 32))
+  | .conv_i4, .i32 w => some (.i32 w)
+  | .conv_u4, .i64 w => some (.i32 (w.setWidth 32))
+  | .conv_u4, .i32 w => some (.i32 w)
   -- To 64 bits.
-  | .convI8, .i32 w => some (.i64 (w.signExtend 64))
-  | .convI8, .i64 w => some (.i64 w)
-  | .convU8, .i32 w => some (.i64 (w.zeroExtend 64))
-  | .convU8, .i64 w => some (.i64 w)
-  | .convU, .i32 w => some (.i64 (w.zeroExtend 64))
-  | .convU, .i64 w => some (.i64 w)
+  | .conv_i8, .i32 w => some (.i64 (w.signExtend 64))
+  | .conv_i8, .i64 w => some (.i64 w)
+  | .conv_u8, .i32 w => some (.i64 (w.zeroExtend 64))
+  | .conv_u8, .i64 w => some (.i64 w)
+  | .conv_u, .i32 w => some (.i64 (w.zeroExtend 64))
+  | .conv_u, .i64 w => some (.i64 w)
   | _, _ => none
 
 /-- What a step asks the driver to do next. -/
@@ -138,8 +138,8 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
   match op, stack with
   -- Constants and stack shuffling.
   | .nop, _ => return .next (pc + 1) stack memory
-  | .const32 w, _ => return .next (pc + 1) (.i32 w :: stack) memory
-  | .const64 w, _ => return .next (pc + 1) (.i64 w :: stack) memory
+  | .ldc_i4 w, _ => return .next (pc + 1) (.i32 w :: stack) memory
+  | .ldc_i8 w, _ => return .next (pc + 1) (.i64 w :: stack) memory
   | .dup, v :: rest => return .next (pc + 1) (v :: v :: rest) memory
   | .pop, _ :: rest => return .next (pc + 1) rest memory
   -- Arguments and locals; a read must be initialized.
@@ -155,20 +155,21 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
   | .setLocal i narrow, v :: rest =>
     return .next (pc + 1) rest (write memory (.local frame i) (← narrowValue narrow v))
   -- Arithmetic, through `unary` and `binary`.
-  | .neg, v :: rest | .bnot, v :: rest
+  | .neg, v :: rest | .not, v :: rest
   | .checkedConvert _ _ _, v :: rest
-  | .convI1, v :: rest | .convI2, v :: rest | .convU2, v :: rest
-  | .convI4, v :: rest | .convI8, v :: rest | .convU1, v :: rest
-  | .convU4, v :: rest | .convU8, v :: rest | .convU, v :: rest =>
+  | .conv_i1, v :: rest | .conv_i2, v :: rest | .conv_u2, v :: rest
+  | .conv_i4, v :: rest | .conv_i8, v :: rest | .conv_u1, v :: rest
+  | .conv_u4, v :: rest | .conv_u8, v :: rest | .conv_u, v :: rest =>
     return .next (pc + 1) ((← unary op v) :: rest) memory
   | .add, b :: a :: rest | .sub, b :: a :: rest
   | .divide _ _, b :: a :: rest
   | .checkedArithmetic _ _, b :: a :: rest
-  | .band, b :: a :: rest | .bor, b :: a :: rest
-  | .mul, b :: a :: rest | .bxor, b :: a :: rest
-  | .shl, b :: a :: rest | .shr, b :: a :: rest | .shrUn, b :: a :: rest
-  | .lt, b :: a :: rest | .ltu, b :: a :: rest | .gt, b :: a :: rest | .gtu, b :: a :: rest
-  | .eq, b :: a :: rest =>
+  | .and, b :: a :: rest | .or, b :: a :: rest
+  | .mul, b :: a :: rest | .xor, b :: a :: rest
+  | .shl, b :: a :: rest | .shr, b :: a :: rest | .shr_un, b :: a :: rest
+  | .clt, b :: a :: rest | .clt_un, b :: a :: rest | .cgt, b :: a :: rest
+  | .cgt_un, b :: a :: rest
+  | .ceq, b :: a :: rest =>
     return .next (pc + 1) ((← binary op a b) :: rest) memory
   -- 64-bit loads and stores through a reference.
   | .load64, .ref a :: rest =>
@@ -177,16 +178,18 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
     | _ => none
   | .store64, .i64 w :: .ref a :: rest => return .next (pc + 1) rest (← write64 memory a w)
   -- Unconditional and truth-tested branches.
-  | .branch target, _ => return .next target stack memory
+  | .br target, _ => return .next target stack memory
   | .switch targets, .i32 index :: rest =>
     return .next (targets[index.toNat]?.getD (pc + 1)) rest memory
-  | .brzero target, v :: rest => return .next (if ← truth v then pc + 1 else target) rest memory
-  | .brnonzero target, v :: rest => return .next (if ← truth v then target else pc + 1) rest memory
+  | .brfalse target, v :: rest => return .next (if ← truth v then pc + 1 else target) rest memory
+  | .brtrue target, v :: rest => return .next (if ← truth v then target else pc + 1) rest memory
   -- Compare-and-branch: `a` was pushed first, and every condition is stated with `<` or `≤`.
   | .beq target, .i32 b :: .i32 a :: rest => return .next (if a = b then target else pc + 1) rest memory
   | .beq target, .i64 b :: .i64 a :: rest => return .next (if a = b then target else pc + 1) rest memory
-  | .bne target, .i32 b :: .i32 a :: rest => return .next (if a ≠ b then target else pc + 1) rest memory
-  | .bne target, .i64 b :: .i64 a :: rest => return .next (if a ≠ b then target else pc + 1) rest memory
+  | .bne_un target, .i32 b :: .i32 a :: rest =>
+    return .next (if a ≠ b then target else pc + 1) rest memory
+  | .bne_un target, .i64 b :: .i64 a :: rest =>
+    return .next (if a ≠ b then target else pc + 1) rest memory
   | .blt target, .i32 b :: .i32 a :: rest =>
     return .next (if a.toInt < b.toInt then target else pc + 1) rest memory
   | .blt target, .i64 b :: .i64 a :: rest =>
@@ -203,14 +206,22 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
     return .next (if b.toInt ≤ a.toInt then target else pc + 1) rest memory
   | .bge target, .i64 b :: .i64 a :: rest =>
     return .next (if b.toInt ≤ a.toInt then target else pc + 1) rest memory
-  | .bltu target, .i32 b :: .i32 a :: rest => return .next (if a < b then target else pc + 1) rest memory
-  | .bltu target, .i64 b :: .i64 a :: rest => return .next (if a < b then target else pc + 1) rest memory
-  | .bleu target, .i32 b :: .i32 a :: rest => return .next (if a ≤ b then target else pc + 1) rest memory
-  | .bleu target, .i64 b :: .i64 a :: rest => return .next (if a ≤ b then target else pc + 1) rest memory
-  | .bgtu target, .i32 b :: .i32 a :: rest => return .next (if b < a then target else pc + 1) rest memory
-  | .bgtu target, .i64 b :: .i64 a :: rest => return .next (if b < a then target else pc + 1) rest memory
-  | .bgeu target, .i32 b :: .i32 a :: rest => return .next (if b ≤ a then target else pc + 1) rest memory
-  | .bgeu target, .i64 b :: .i64 a :: rest => return .next (if b ≤ a then target else pc + 1) rest memory
+  | .blt_un target, .i32 b :: .i32 a :: rest =>
+    return .next (if a < b then target else pc + 1) rest memory
+  | .blt_un target, .i64 b :: .i64 a :: rest =>
+    return .next (if a < b then target else pc + 1) rest memory
+  | .ble_un target, .i32 b :: .i32 a :: rest =>
+    return .next (if a ≤ b then target else pc + 1) rest memory
+  | .ble_un target, .i64 b :: .i64 a :: rest =>
+    return .next (if a ≤ b then target else pc + 1) rest memory
+  | .bgt_un target, .i32 b :: .i32 a :: rest =>
+    return .next (if b < a then target else pc + 1) rest memory
+  | .bgt_un target, .i64 b :: .i64 a :: rest =>
+    return .next (if b < a then target else pc + 1) rest memory
+  | .bge_un target, .i32 b :: .i32 a :: rest =>
+    return .next (if b ≤ a then target else pc + 1) rest memory
+  | .bge_un target, .i64 b :: .i64 a :: rest =>
+    return .next (if b ≤ a then target else pc + 1) rest memory
   -- Calls; every argument must be initialized.
   | .call callee argc, _ =>
     if stack.length < argc || (stack.take argc).any (! ·.initialized) then none else

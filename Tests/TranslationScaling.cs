@@ -167,3 +167,91 @@ if (!report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.tran
     !report.GetProperty("theoremAudit").GetString()!.Contains("ExampleProof.correctness"))
     throw new InvalidOperationException("Missing independent certificate/theorem audits.");
 Console.WriteLine("PASS fresh consumer proof-root verifies the multi-method certificate with kernel replay and restricted axioms");
+CheckLayoutTableScaling(extracted);
+
+// The emitted header and method layout theorems over chains of nested and of generic structs: kernel heartbeats
+// per layout may grow by at most 1.5 times from 64 to 512 layouts, and 512 layouts must check within 8 GiB.
+void CheckLayoutTableScaling(string extraction)
+{
+    const double allowedGrowth = 1.5;
+    const int small = 64, large = 512;
+    const string report = "#eval show IO Nat from IO.getNumHeartbeats";
+    const string axioms = "depends on axioms: [propext, Classical.choice, Quot.sound]";
+    string Emitted(string name) => extraction.Split('\n').Select(line => line.TrimEnd('\r'))
+        .Single(line => line.StartsWith($"theorem {name} :", StringComparison.Ordinal));
+    // Each row is a namespace holding one table and the emitted theorem it measures.
+    (string Name, string Namespace, string Theorem)[] rows =
+    [
+        ("the header check of nested structs", "Nested", Emitted("layouts_validated")),
+        ("the header check of generic structs", "Generic", Emitted("layouts_validated")),
+        ("a method's check of nested structs", "Nested", Emitted("method0_layouts_validated"))
+    ];
+    string Table(string space, int count, Func<int, string> raw, Func<int, string> layout) => $$"""
+        namespace {{space}}
+        def rawLayouts : List Extraction.RawLayout := [
+        {{string.Join(",\n", Enumerable.Range(0, count).Select(raw))}}]
+        {{string.Join("\n", Enumerable.Range(0, count).Select(index => $"def layout{index} : AggregateLayout := " +
+            layout(index)))}}
+        def computedLayouts : Array Extraction.ComputedLayout :=
+          #[{{string.Join(", ", Enumerable.Range(0, count).Select(index => $"⟨layout{index}, 8⟩"))}}]
+        def method0 : Method := { code := [.ret], locals := [], returnsValue := false }
+        def method0LayoutUses : List Extraction.LayoutUse := []
+        end {{space}}
+        """;
+    double[] PerLayout(int count)
+    {
+        // T0 holds a ulong and T(k) holds T(k - 1) and then a byte, so each layout reads the one before it.
+        var nested = Table("Nested", count, index =>
+            $"  {{ identity := \"T{index}\", explicit := false, packing := 0, declaredSize := 0, fields := [" +
+            (index == 0 ? "⟨.unsigned64, none⟩" : $"⟨.aggregate {index - 1}, none⟩, ⟨.unsigned8, none⟩") + "] }",
+            index => index == 0 ? "⟨8, [⟨0, 8, false⟩]⟩"
+                : $"⟨{8 * (index + 1)}, [⟨0, {8 * index}, true⟩, ⟨{8 * index}, 1, false⟩]⟩");
+        // Wrap(k)<Leaf> holds Wrap(k - 1)<Leaf>, so each layout looks up the previous distinct generic owner.
+        var generic = Table("Generic", count, index => index == 0
+            ? "  { identity := \"Leaf\", explicit := false, packing := 0, declaredSize := 0, " +
+                "fields := [⟨.unsigned64, none⟩] }"
+            : $"  {{ identity := \"S::Wrap{index}`1<Leaf>\", generic := some {{ owner := .constructor \"S\" " +
+                $"\"Wrap{index}`1\", arity := 1, arguments := [.aggregate \"Leaf\" 0], fields := [" +
+                (index == 1 ? ".parameter 0" : $".apply (.constructor \"S\" \"Wrap{index - 1}`1\") (.parameter 0)") +
+                $"], constraints := [(0, [])] }}, explicit := false, packing := 0, declaredSize := 0, " +
+                $"fields := [⟨.aggregate {index - 1}, none⟩] }}",
+            index => $"⟨8, [⟨0, 8, {(index > 0 ? "true" : "false")}⟩]⟩");
+        var measured = string.Join("\n", rows.Select(row => $"namespace {row.Namespace}\n{row.Theorem}\n" +
+            $"end {row.Namespace}\n{report}"));
+        var audits = string.Join("\n", rows.Select(row =>
+            $"#print axioms {row.Namespace}.{row.Theorem.Split(' ')[1]}"));
+        var path = Path.Combine(directory, $"Layouts{count}.lean");
+        File.WriteAllText(path, $"""
+            import CIL.Extraction.LayoutUses
+            open CIL
+            {nested}
+            {generic}
+            {report}
+            {measured}
+            {audits}
+            """ + "\n");
+        // Without the flag the kernel checks on another thread and its heartbeats go uncounted.
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", "-M", "8192", path], cwd: FixturePackage());
+        var counts = output.Split('\n').Select(line => line.Trim())
+            .Where(line => line.Length > 0 && line.All(char.IsAsciiDigit))
+            .Select(line => long.Parse(line, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        if (counts.Length != rows.Length + 1 || output.Contains("sorryAx", StringComparison.Ordinal) ||
+            rows.Any(row => !output.Contains($"'{row.Namespace}.{row.Theorem.Split(' ')[1]}' {axioms}",
+                StringComparison.Ordinal)))
+            throw new InvalidOperationException($"Unchecked layout tables of {count} layouts:\n{output}");
+        return [.. rows.Select((_, row) => (double)(counts[row + 1] - counts[row]) / count)];
+    }
+    var smallCosts = PerLayout(small);
+    var largeCosts = PerLayout(large);
+    for (var row = 0; row < rows.Length; row++)
+    {
+        var growth = largeCosts[row] / smallCosts[row];
+        var measured = FormattableString.Invariant($"{smallCosts[row]:F0} heartbeats per layout at {small}") +
+            FormattableString.Invariant($" layouts and {largeCosts[row]:F0} at {large}, {growth:F2} times as many");
+        if (growth > allowedGrowth)
+            throw new InvalidOperationException(FormattableString.Invariant(
+                $"{rows[row].Name} costs {measured}; the limit is {allowedGrowth}."));
+        Console.WriteLine($"PASS {rows[row].Name} costs {measured}");
+    }
+    Console.WriteLine($"PASS {large} nested and {large} generic layouts check within 8 GiB");
+}

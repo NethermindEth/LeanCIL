@@ -43,7 +43,8 @@ object Operation(object operation) => operation is not string text ? operation :
 };
 object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadata", returnsValue,
     Listed(Model("InitialValue"), []), Listed(Model("LocalKind"), []), Listed(typeof(int), []),
-    Listed(Model("ParameterHome"), []), Listed(Model("StaticSite"), sites));
+    Listed(Model("ParameterHome"), []), Listed(Model("StaticSite"), sites),
+    "{ parameters := [], returnType := .void }");
 object MethodIn(string identity, object frame, params object[] ops) => Activator.CreateInstance(
     emitter.GetNestedType("Method", BindingFlags.NonPublic)!, identity, frame,
     Typed(Model("Operation"), ops.Select(Operation)))!;
@@ -74,9 +75,11 @@ var templates = File.ReadAllText(Path.Combine(output, "Templates.lean"));
 var firstBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings0.lean"));
 var secondBinding = File.ReadAllText(Path.Combine(output, "TemplateBindings1.lean"));
 if (!templates.Contains("if avx2 then (.call callee0 0) else (.nop)", StringComparison.Ordinal) ||
-    !firstBinding.Contains("Templates.method0 Extracted.profile false 0", StringComparison.Ordinal) ||
-    !secondBinding.Contains("Templates.method1 Extracted.profile)", StringComparison.Ordinal) ||
-    !secondBinding.Contains("Templates.method0 Extracted.profile true 0", StringComparison.Ordinal))
+    !firstBinding.Contains("Templates.method0 Extracted.profile Extracted.environment false 0",
+        StringComparison.Ordinal) ||
+    !secondBinding.Contains("Templates.method1 Extracted.profile Extracted.environment)", StringComparison.Ordinal) ||
+    !secondBinding.Contains("Templates.method0 Extracted.profile Extracted.environment true 0",
+        StringComparison.Ordinal))
     throw new Exception("Template ordering, method remapping or excluded-callee placeholder changed");
 var expected = Directory.GetFiles(output).ToDictionary(path => Path.GetFileName(path)!, File.ReadAllText);
 Emit();

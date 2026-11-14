@@ -34,7 +34,7 @@ private abbrev State (memory : Memory) :=
 
 /-- The loop test, with the node on the stack and in the local. -/
 bind_cutpoint header (memory : Memory) (state : State memory) :=
-  idleBody at loop.latch matching (fun op => op matches .brnonzero _) with
+  idleBody at loop.latch matching (fun op => op matches .brtrue _) with
     { entry.frame memory with locals := [.object (some state.values.1)] },
     [.object state.values.1], state.memory
 

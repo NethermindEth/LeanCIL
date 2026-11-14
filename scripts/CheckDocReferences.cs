@@ -13,7 +13,8 @@ using System.Runtime.CompilerServices;
 // The validation guide's suite table must list exactly the suites the runner accepts. The example proofs
 // are what users copy, so each prints the axioms of its theorems and names no evaluator internal in a
 // simp list, and neither does a Lean block of the documentation. No tracked text file holds a control
-// byte other than tab and line ends.
+// byte other than tab and line ends, or an invisible character such as a zero-width space, a
+// bidirectional override or a no-break space.
 var root = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(SourcePath())!, ".."));
 var pages = Documentation.Documents(root).Select(path => Documentation.Read(root, path)).ToArray();
 var (failures, references, blocks) = Documentation.CheckReferences(root, pages);

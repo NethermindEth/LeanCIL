@@ -261,17 +261,17 @@ theorem step_appendLocals_neg :
 
 #print axioms step_appendLocals_neg
 
-/-- `gt` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_gt :
-    StepAppendLocals .gt := by
+/-- `cgt` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_cgt :
+    StepAppendLocals .cgt := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .gt pc stack frame extra memory
+  exact fallback_appendLocals body.profile .cgt pc stack frame extra memory
 
-#print axioms step_appendLocals_gt
+#print axioms step_appendLocals_cgt
 
 /-- `bgt` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_bgt (target : Nat) :
@@ -297,18 +297,18 @@ theorem step_appendLocals_ble (target : Nat) :
 
 #print axioms step_appendLocals_ble
 
-/-- `bleu` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_bleu (target : Nat) :
-    StepAppendLocals (.bleu target) := by
+/-- `ble_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ble_un (target : Nat) :
+    StepAppendLocals (.ble_un target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.bleu target) pc _ frame extra memory
+    fallback_appendLocals body.profile (.ble_un target) pc _ frame extra memory
 
-#print axioms step_appendLocals_bleu
+#print axioms step_appendLocals_ble_un
 
 /-- `loadAggregate` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_loadAggregate (size : Nat) :
@@ -525,149 +525,149 @@ theorem step_appendLocals_initializeSpanLocal (index : Nat) (constructor : CIL.S
 
 #print axioms step_appendLocals_initializeSpanLocal
 
-/-- `const32` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_const32 (word : W32) :
-    StepAppendLocals (.const32 word) := by
+/-- `ldc_i4` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldc_i4 (value : W32) :
+    StepAppendLocals (.ldc_i4 value) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.const32 word) pc stack frame extra memory
+  exact fallback_appendLocals body.profile (.ldc_i4 value) pc stack frame extra memory
 
-#print axioms step_appendLocals_const32
+#print axioms step_appendLocals_ldc_i4
 
-/-- `const64` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_const64 (word : W64) :
-    StepAppendLocals (.const64 word) := by
+/-- `ldc_i8` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldc_i8 (value : W64) :
+    StepAppendLocals (.ldc_i8 value) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.const64 word) pc stack frame extra memory
+  exact fallback_appendLocals body.profile (.ldc_i8 value) pc stack frame extra memory
 
-#print axioms step_appendLocals_const64
+#print axioms step_appendLocals_ldc_i8
 
-/-- `convI1` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convI1 :
-    StepAppendLocals .convI1 := by
+/-- `conv_i1` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_i1 :
+    StepAppendLocals .conv_i1 := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convI1 pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_i1 pc stack frame extra memory
 
-#print axioms step_appendLocals_convI1
+#print axioms step_appendLocals_conv_i1
 
-/-- `convI2` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convI2 :
-    StepAppendLocals .convI2 := by
+/-- `conv_i2` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_i2 :
+    StepAppendLocals .conv_i2 := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convI2 pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_i2 pc stack frame extra memory
 
-#print axioms step_appendLocals_convI2
+#print axioms step_appendLocals_conv_i2
 
-/-- `convU2` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convU2 :
-    StepAppendLocals .convU2 := by
+/-- `conv_u2` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_u2 :
+    StepAppendLocals .conv_u2 := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convU2 pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_u2 pc stack frame extra memory
 
-#print axioms step_appendLocals_convU2
+#print axioms step_appendLocals_conv_u2
 
-/-- `convI8` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convI8 :
-    StepAppendLocals .convI8 := by
+/-- `conv_i8` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_i8 :
+    StepAppendLocals .conv_i8 := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convI8 pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_i8 pc stack frame extra memory
 
-#print axioms step_appendLocals_convI8
+#print axioms step_appendLocals_conv_i8
 
-/-- `convI4` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convI4 :
-    StepAppendLocals .convI4 := by
+/-- `conv_i4` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_i4 :
+    StepAppendLocals .conv_i4 := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convI4 pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_i4 pc stack frame extra memory
 
-#print axioms step_appendLocals_convI4
+#print axioms step_appendLocals_conv_i4
 
-/-- `convU1` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convU1 :
-    StepAppendLocals .convU1 := by
+/-- `conv_u1` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_u1 :
+    StepAppendLocals .conv_u1 := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convU1 pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_u1 pc stack frame extra memory
 
-#print axioms step_appendLocals_convU1
+#print axioms step_appendLocals_conv_u1
 
-/-- `convU4` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convU4 :
-    StepAppendLocals .convU4 := by
+/-- `conv_u4` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_u4 :
+    StepAppendLocals .conv_u4 := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convU4 pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_u4 pc stack frame extra memory
 
-#print axioms step_appendLocals_convU4
+#print axioms step_appendLocals_conv_u4
 
-/-- `convU8` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convU8 :
-    StepAppendLocals .convU8 := by
+/-- `conv_u8` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_u8 :
+    StepAppendLocals .conv_u8 := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convU8 pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_u8 pc stack frame extra memory
 
-#print axioms step_appendLocals_convU8
+#print axioms step_appendLocals_conv_u8
 
-/-- `convU` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_convU :
-    StepAppendLocals .convU := by
+/-- `conv_u` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_conv_u :
+    StepAppendLocals .conv_u := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .convU pc stack frame extra memory
+  exact fallback_appendLocals body.profile .conv_u pc stack frame extra memory
 
-#print axioms step_appendLocals_convU
+#print axioms step_appendLocals_conv_u
 
-/-- `bnot` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_bnot :
-    StepAppendLocals .bnot := by
+/-- `not` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_not :
+    StepAppendLocals .not := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .bnot pc stack frame extra memory
+  exact fallback_appendLocals body.profile .not pc stack frame extra memory
 
-#print axioms step_appendLocals_bnot
+#print axioms step_appendLocals_not
 
 /-- `add` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_add :
@@ -706,41 +706,41 @@ theorem step_appendLocals_mul :
 
 #print axioms step_appendLocals_mul
 
-/-- `band` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_band :
-    StepAppendLocals .band := by
+/-- `and` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_and :
+    StepAppendLocals .and := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .band pc stack frame extra memory
+  exact fallback_appendLocals body.profile .and pc stack frame extra memory
 
-#print axioms step_appendLocals_band
+#print axioms step_appendLocals_and
 
-/-- `bor` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_bor :
-    StepAppendLocals .bor := by
+/-- `or` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_or :
+    StepAppendLocals .or := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .bor pc stack frame extra memory
+  exact fallback_appendLocals body.profile .or pc stack frame extra memory
 
-#print axioms step_appendLocals_bor
+#print axioms step_appendLocals_or
 
-/-- `bxor` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_bxor :
-    StepAppendLocals .bxor := by
+/-- `xor` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_xor :
+    StepAppendLocals .xor := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .bxor pc stack frame extra memory
+  exact fallback_appendLocals body.profile .xor pc stack frame extra memory
 
-#print axioms step_appendLocals_bxor
+#print axioms step_appendLocals_xor
 
 /-- `shl` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_shl :
@@ -766,68 +766,68 @@ theorem step_appendLocals_shr :
 
 #print axioms step_appendLocals_shr
 
-/-- `shrUn` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_shrUn :
-    StepAppendLocals .shrUn := by
+/-- `shr_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_shr_un :
+    StepAppendLocals .shr_un := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .shrUn pc stack frame extra memory
+  exact fallback_appendLocals body.profile .shr_un pc stack frame extra memory
 
-#print axioms step_appendLocals_shrUn
+#print axioms step_appendLocals_shr_un
 
-/-- `lt` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_lt :
-    StepAppendLocals .lt := by
+/-- `clt` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_clt :
+    StepAppendLocals .clt := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .lt pc stack frame extra memory
+  exact fallback_appendLocals body.profile .clt pc stack frame extra memory
 
-#print axioms step_appendLocals_lt
+#print axioms step_appendLocals_clt
 
-/-- `ltu` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_ltu :
-    StepAppendLocals .ltu := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  append_stack_cases using
-    fallback_appendLocals body.profile .ltu pc _ frame extra memory
-
-#print axioms step_appendLocals_ltu
-
-/-- `gtu` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_gtu :
-    StepAppendLocals .gtu := by
+/-- `clt_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_clt_un :
+    StepAppendLocals .clt_un := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile .gtu pc _ frame extra memory
+    fallback_appendLocals body.profile .clt_un pc _ frame extra memory
 
-#print axioms step_appendLocals_gtu
+#print axioms step_appendLocals_clt_un
 
-/-- `eq` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_eq :
-    StepAppendLocals .eq := by
+/-- `cgt_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_cgt_un :
+    StepAppendLocals .cgt_un := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile .eq pc _ frame extra memory
+    fallback_appendLocals body.profile .cgt_un pc _ frame extra memory
 
-#print axioms step_appendLocals_eq
+#print axioms step_appendLocals_cgt_un
+
+/-- `ceq` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ceq :
+    StepAppendLocals .ceq := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  append_stack_cases using
+    fallback_appendLocals body.profile .ceq pc _ frame extra memory
+
+#print axioms step_appendLocals_ceq
 
 /-- `load64` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_load64 :
@@ -877,17 +877,17 @@ theorem step_appendLocals_pop :
 
 #print axioms step_appendLocals_pop
 
-/-- `branch` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_branch (target : Nat) :
-    StepAppendLocals (.branch target) := by
+/-- `br` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_br (target : Nat) :
+    StepAppendLocals (.br target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile (.branch target) pc stack frame extra memory
+  exact fallback_appendLocals body.profile (.br target) pc stack frame extra memory
 
-#print axioms step_appendLocals_branch
+#print axioms step_appendLocals_br
 
 /-- `switch` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_switch (targets : List Nat) :
@@ -901,31 +901,31 @@ theorem step_appendLocals_switch (targets : List Nat) :
 
 #print axioms step_appendLocals_switch
 
-/-- `brzero` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_brzero (target : Nat) :
-    StepAppendLocals (.brzero target) := by
+/-- `brfalse` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_brfalse (target : Nat) :
+    StepAppendLocals (.brfalse target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.brzero target) pc _ frame extra memory
+    fallback_appendLocals body.profile (.brfalse target) pc _ frame extra memory
 
-#print axioms step_appendLocals_brzero
+#print axioms step_appendLocals_brfalse
 
-/-- `brnonzero` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_brnonzero (target : Nat) :
-    StepAppendLocals (.brnonzero target) := by
+/-- `brtrue` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_brtrue (target : Nat) :
+    StepAppendLocals (.brtrue target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.brnonzero target) pc _ frame extra memory
+    fallback_appendLocals body.profile (.brtrue target) pc _ frame extra memory
 
-#print axioms step_appendLocals_brnonzero
+#print axioms step_appendLocals_brtrue
 
 /-- `objectTest` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
@@ -940,44 +940,44 @@ theorem step_appendLocals_objectTest (type : CIL.Extraction.TypeExpr) (throwing 
 
 #print axioms step_appendLocals_objectTest
 
-/-- `bltu` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_bltu (target : Nat) :
-    StepAppendLocals (.bltu target) := by
+/-- `blt_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_blt_un (target : Nat) :
+    StepAppendLocals (.blt_un target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.bltu target) pc _ frame extra memory
+    fallback_appendLocals body.profile (.blt_un target) pc _ frame extra memory
 
-#print axioms step_appendLocals_bltu
+#print axioms step_appendLocals_blt_un
 
-/-- `bgeu` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_bgeu (target : Nat) :
-    StepAppendLocals (.bgeu target) := by
+/-- `bge_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_bge_un (target : Nat) :
+    StepAppendLocals (.bge_un target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.bgeu target) pc _ frame extra memory
+    fallback_appendLocals body.profile (.bge_un target) pc _ frame extra memory
 
-#print axioms step_appendLocals_bgeu
+#print axioms step_appendLocals_bge_un
 
-/-- `bgtu` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_bgtu (target : Nat) :
-    StepAppendLocals (.bgtu target) := by
+/-- `bgt_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_bgt_un (target : Nat) :
+    StepAppendLocals (.bgt_un target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.bgtu target) pc _ frame extra memory
+    fallback_appendLocals body.profile (.bgt_un target) pc _ frame extra memory
 
-#print axioms step_appendLocals_bgtu
+#print axioms step_appendLocals_bgt_un
 
 /-- `bge` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_bge (target : Nat) :
@@ -1016,18 +1016,18 @@ theorem step_appendLocals_beq (target : Nat) :
 
 #print axioms step_appendLocals_beq
 
-/-- `bne` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_bne (target : Nat) :
-    StepAppendLocals (.bne target) := by
+/-- `bne_un` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_bne_un (target : Nat) :
+    StepAppendLocals (.bne_un target) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.bne target) pc _ frame extra memory
+    fallback_appendLocals body.profile (.bne_un target) pc _ frame extra memory
 
-#print axioms step_appendLocals_bne
+#print axioms step_appendLocals_bne_un
 
 /-- `call` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_call (method : Nat) (argc : Nat) :
@@ -1220,14 +1220,14 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_nop
     case neg =>
       exact step_appendLocals_neg
-    case gt =>
-      exact step_appendLocals_gt
+    case cgt =>
+      exact step_appendLocals_cgt
     case bgt target =>
       exact step_appendLocals_bgt target
     case ble target =>
       exact step_appendLocals_ble target
-    case bleu target =>
-      exact step_appendLocals_bleu target
+    case ble_un target =>
+      exact step_appendLocals_ble_un target
     case loadAggregate size =>
       exact step_appendLocals_loadAggregate size
     case copyObject size =>
@@ -1260,56 +1260,56 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_localAddr index
     case setLocal index narrow =>
       exact step_appendLocals_setLocal index narrow
-    case const32 word =>
-      exact step_appendLocals_const32 word
-    case const64 word =>
-      exact step_appendLocals_const64 word
-    case convI1 =>
-      exact step_appendLocals_convI1
-    case convI2 =>
-      exact step_appendLocals_convI2
-    case convU2 =>
-      exact step_appendLocals_convU2
-    case convI8 =>
-      exact step_appendLocals_convI8
-    case convI4 =>
-      exact step_appendLocals_convI4
-    case convU1 =>
-      exact step_appendLocals_convU1
-    case convU4 =>
-      exact step_appendLocals_convU4
-    case convU8 =>
-      exact step_appendLocals_convU8
-    case convU =>
-      exact step_appendLocals_convU
-    case bnot =>
-      exact step_appendLocals_bnot
+    case ldc_i4 value =>
+      exact step_appendLocals_ldc_i4 value
+    case ldc_i8 value =>
+      exact step_appendLocals_ldc_i8 value
+    case conv_i1 =>
+      exact step_appendLocals_conv_i1
+    case conv_i2 =>
+      exact step_appendLocals_conv_i2
+    case conv_u2 =>
+      exact step_appendLocals_conv_u2
+    case conv_i8 =>
+      exact step_appendLocals_conv_i8
+    case conv_i4 =>
+      exact step_appendLocals_conv_i4
+    case conv_u1 =>
+      exact step_appendLocals_conv_u1
+    case conv_u4 =>
+      exact step_appendLocals_conv_u4
+    case conv_u8 =>
+      exact step_appendLocals_conv_u8
+    case conv_u =>
+      exact step_appendLocals_conv_u
+    case not =>
+      exact step_appendLocals_not
     case add =>
       exact step_appendLocals_add
     case sub =>
       exact step_appendLocals_sub
     case mul =>
       exact step_appendLocals_mul
-    case band =>
-      exact step_appendLocals_band
-    case bor =>
-      exact step_appendLocals_bor
-    case bxor =>
-      exact step_appendLocals_bxor
+    case and =>
+      exact step_appendLocals_and
+    case or =>
+      exact step_appendLocals_or
+    case xor =>
+      exact step_appendLocals_xor
     case shl =>
       exact step_appendLocals_shl
     case shr =>
       exact step_appendLocals_shr
-    case shrUn =>
-      exact step_appendLocals_shrUn
-    case lt =>
-      exact step_appendLocals_lt
-    case ltu =>
-      exact step_appendLocals_ltu
-    case gtu =>
-      exact step_appendLocals_gtu
-    case eq =>
-      exact step_appendLocals_eq
+    case shr_un =>
+      exact step_appendLocals_shr_un
+    case clt =>
+      exact step_appendLocals_clt
+    case clt_un =>
+      exact step_appendLocals_clt_un
+    case cgt_un =>
+      exact step_appendLocals_cgt_un
+    case ceq =>
+      exact step_appendLocals_ceq
     case load64 =>
       exact step_appendLocals_load64
     case store64 =>
@@ -1318,30 +1318,30 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_dup
     case pop =>
       exact step_appendLocals_pop
-    case branch target =>
-      exact step_appendLocals_branch target
+    case br target =>
+      exact step_appendLocals_br target
     case switch targets =>
       exact step_appendLocals_switch targets
-    case brzero target =>
-      exact step_appendLocals_brzero target
-    case brnonzero target =>
-      exact step_appendLocals_brnonzero target
+    case brfalse target =>
+      exact step_appendLocals_brfalse target
+    case brtrue target =>
+      exact step_appendLocals_brtrue target
     case objectTest type throwing =>
       exact step_appendLocals_objectTest type throwing
-    case bltu target =>
-      exact step_appendLocals_bltu target
-    case bgeu target =>
-      exact step_appendLocals_bgeu target
-    case bgtu target =>
-      exact step_appendLocals_bgtu target
+    case blt_un target =>
+      exact step_appendLocals_blt_un target
+    case bge_un target =>
+      exact step_appendLocals_bge_un target
+    case bgt_un target =>
+      exact step_appendLocals_bgt_un target
     case bge target =>
       exact step_appendLocals_bge target
     case blt target =>
       exact step_appendLocals_blt target
     case beq target =>
       exact step_appendLocals_beq target
-    case bne target =>
-      exact step_appendLocals_bne target
+    case bne_un target =>
+      exact step_appendLocals_bne_un target
     case call method argc =>
       exact step_appendLocals_call method argc
     case callInstance method argc =>

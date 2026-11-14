@@ -13,8 +13,92 @@ const int ShortStatements = 125;
 const int LongStatements = 500;
 // Compiling four times the instructions may cost at most this much more per instruction.
 const double AllowedGrowth = 1.15;
+const int FewCalls = 100;
+const int ManyCalls = 400;
+// Link reads whose cost grows with the square of the calls make the recheck of an embedding cost 1.29 times as
+// much per call at 2,048 calls as at 512; linear reads cost the same.
+const int EmbedFewCalls = 512;
+const int EmbedManyCalls = 2048;
+// Segments in each of the two blocks of an embedding whose pc map puts the second block first.
+const int ReorderFewSegments = 128;
+const int ReorderManySegments = 512;
+// Four times the calls of an embedding may cost at most this much more per call.
+const double AllowedEmbedGrowth = 1.15;
+// Two calls in bodies of these many statements: the link output must not grow with the body.
+const int SparseShortStatements = 250;
+const int SparseLongStatements = 1000;
+// Four times the call sites may cost at most this much more per call site.
+const double AllowedCallGrowth = 1.35;
+// Type identities compare one code per name, so a name four times as long may cost at most this much more.
+const double AllowedNameGrowth = 1.05;
+// The most heartbeats deciding equality or inequality of two type identities may cost at either name length.
+const long TypeDecisionLimit = 9_500;
+// `decide +kernel` costs about 2,000 heartbeats for any statement; less means the decision was not measured.
+const long KernelDecisionFloor = 2_000;
+// Bodies of these many array element addresses. A readonly rule that scans the body at every address costs
+// about 1.5 times as much per address at each doubling; the indexed rule costs about 1.1 times as much at 512.
+const int FewAddresses = 128;
+const int MoreAddresses = 256;
+const int ManyAddresses = 512;
 
 var directory = At("artifacts/LookupScaling");
+Directory.CreateDirectory(directory);
+
+// The heartbeats `decide +kernel` adds to the same statement closed with `sorry`, for equal and unequal type
+// identities whose names have 20 and 80 characters and share all but their last character. Each statement is
+// distinct, so no decision reuses the auxiliary lemma of another.
+Dictionary<string, long> TypeDecisionCosts()
+{
+    const string Prefix = "System.Runtime.InteropServices.Marshalling.Collections.Generic.Dictionary.Keys.";
+    string Type(int length, char last)
+    {
+        var name = Prefix[..(length - 1)] + last;
+        return $$"""({ assembly := runtime, typeNamespace := name!"System", name := name!"{{name}}" } : """ +
+            "TypeIdentity)";
+    }
+    var statements = new[] { 20, 80 }.SelectMany(length => new[]
+    {
+        $"#kernel_cost \"equal {length}\" {Type(length, '0')} = {Type(length, '0')}",
+        $"#kernel_cost \"unequal {length}\" Not ({Type(length, '1')} = {Type(length, '2')})"
+    });
+    var path = Path.Combine(directory, "TypeIdentityEquality.lean");
+    File.WriteAllText(path, """
+        import CIL.Identity
+        open CIL Lean Elab Command
+        /-- The core library assembly of .NET 10. -/
+        def runtime : AssemblyName :=
+          { name := name!"System.Runtime", version := { major := 10, minor := 0, build := 0, revision := 0 },
+            culture := name!"", publicKeyToken := some 0xb03f5f7f11d50a3a }
+        /-- Logs what `decide +kernel` costs beyond elaborating the statement. -/
+        elab "#kernel_cost " label:str statement:term : command => do
+          let before <- IO.getNumHeartbeats
+          elabCommand (<- `(example : $statement := sorry))
+          let middle <- IO.getNumHeartbeats
+          elabCommand (<- `(example : $statement := by decide +kernel))
+          let after <- IO.getNumHeartbeats
+          let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
+          logInfo m!"{label.getString} {cost} heartbeats"
+
+        """ + string.Join("\n", statements) + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.TypeDecision().Matches(output).ToDictionary(
+        match => match.Groups[1].Value, match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != 4) throw new InvalidOperationException("Missing type identity decision costs:\n" + output);
+    return costs;
+}
+var decisions = TypeDecisionCosts();
+foreach (var outcome in new[] { "equal", "unequal" })
+{
+    long shortName = decisions[outcome + " 20"], longName = decisions[outcome + " 80"];
+    var measured = $"{shortName} heartbeats at 20 characters and {longName} at 80";
+    if (Math.Min(shortName, longName) < KernelDecisionFloor || Math.Max(shortName, longName) > TypeDecisionLimit ||
+        longName > shortName * AllowedNameGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Deciding {outcome} type identities costs {measured}; the limits are {TypeDecisionLimit} heartbeats " +
+            $"and {AllowedNameGrowth} times as many at 80 characters."));
+    Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
+}
+
 var source = Path.Combine(directory, "Assembly");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Lookups.csproj"), """
@@ -25,8 +109,20 @@ File.WriteAllText(Path.Combine(source, "Lookups.csproj"), """
 string Method(string name, int statements) =>
     $"public static ulong {name}(ulong x, ulong y) {{ ulong word = x; " +
     string.Concat(Enumerable.Repeat("word = word * y + x; ", statements)) + "return word; } ";
+// A body with a call at every statement, to measure what its link table and link facts cost.
+string Calling(string name, int calls) =>
+    $"public static ulong {name}(ulong x, ulong y) {{ ulong word = x; " +
+    string.Concat(Enumerable.Repeat("word = Step(word, y); ", calls)) + "return word; } ";
+// A long body with two calls, where the link table stays the same size as the body grows.
+string Sparse(string name, int statements) =>
+    $"public static ulong {name}(ulong x, ulong y) {{ ulong word = Step(x, y); " +
+    string.Concat(Enumerable.Repeat("word = word * y + x; ", statements)) +
+    "word = Step(word, y); return word; } ";
 File.WriteAllText(Path.Combine(source, "Lookups.cs"), "public static class Lookups { " +
-    Method("Short", ShortStatements) + Method("Long", LongStatements) + "}");
+    Method("Short", ShortStatements) + Method("Long", LongStatements) +
+    "public static ulong Step(ulong a, ulong b) { return a * b + a; } " +
+    Calling("Few", FewCalls) + Calling("Many", ManyCalls) +
+    Sparse("SparseShort", SparseShortStatements) + Sparse("SparseLong", SparseLongStatements) + "}");
 Run(["dotnet", "build", Path.Combine(source, "Lookups.csproj"), "-c", "Release"]);
 var assembly = Path.Combine(source, "bin/Lookups.dll");
 
@@ -79,8 +175,9 @@ long Checked(string path, string text, string binder, string method, string equa
     var extraction = Checked(Path.Combine(output, "Measured.lean"),
         extracted + $"\n#print axioms Extracted.method0_instruction{last}\n",
         "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
-    const string Binder = "(profile : CIL.FeatureProfile) ";
-    var body = "def method0 (profile : FeatureProfile) : Method := { profile := profile," +
+    const string Binder = "(profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) ";
+    var body = "def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method :=" +
+        " { profile := profile," +
         definition.Value[Header.Length..];
     var command = Checked(Path.Combine(output, "Body.lean"), $"""
         import CIL.InstructionEquations
@@ -92,7 +189,8 @@ long Checked(string path, string text, string binder, string method, string equa
         cil_instruction_equations method0
         #print axioms method0_instruction{last}
         end Body
-        """, Binder, "(Body.method0 profile)", $"Body.method0_instruction{last} profile", last);
+        """, Binder, "(Body.method0 profile environment)",
+        $"Body.method0_instruction{last} profile environment", last);
 
     var shared = Path.Combine(output, "Shared");
     Run(["dotnet", ExtractorPath, "templates", shared, output]);
@@ -100,7 +198,8 @@ long Checked(string path, string text, string binder, string method, string equa
     if (!templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
         throw new InvalidOperationException($"The template of {name} has no instruction equations.");
     var template = Checked(Path.Combine(shared, "Measured.lean"), templates,
-        Binder, "(Templates.method0 profile)", $"Templates.method0_instruction{last} profile", last);
+        Binder, "(Templates.method0 profile environment)",
+        $"Templates.method0_instruction{last} profile environment", last);
     return (instructions, [extraction, command, template]);
 }
 
@@ -127,6 +226,159 @@ for (var producer = 0; producer < producers.Length; producer++)
             $"Compiling {producers[producer]} costs {measured}; the limit is {AllowedGrowth}."));
     Console.WriteLine($"PASS compiling {producers[producer]} costs {measured}");
 }
+
+// The extraction of a body with many calls: its link table, link index, per-site facts and the checks that
+// tie them together must each cost the same per call site at four times the size.
+long CallingCost(string name)
+{
+    var output = Path.Combine(directory, name);
+    Run(Extract("extract", assembly, "Lookups", $"Lookups::{name}(ulong,ulong)", output));
+    return Heartbeats(Path.Combine(output, "Measured.lean"), File.ReadAllText(Path.Combine(output, "Extracted.lean")),
+        equations: false);
+}
+var fewCost = (double)(CallingCost("Few") - floor) / FewCalls;
+var manyCost = (double)(CallingCost("Many") - floor) / ManyCalls;
+var callGrowth = manyCost / fewCost;
+var callsMeasured = string.Create(CultureInfo.InvariantCulture,
+    $"{fewCost:F0} heartbeats per call at {FewCalls} calls and {manyCost:F0} at {ManyCalls}, " +
+    $"{callGrowth:F2} times as many");
+if (callGrowth > AllowedCallGrowth)
+    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+        $"Extracting a body with many calls costs {callsMeasured}; the limit is {AllowedCallGrowth}."));
+Console.WriteLine($"PASS extracting a body with many calls costs {callsMeasured}");
+
+// The kernel heartbeats to recheck the proof that `written` embeds into `extraction`, both defined by
+// `definitions`. The two link tables differ and their call sites sit at different pcs, so the kernel cannot close
+// the link clause by comparing equal arguments: it must read both tables, and a read that scans the table per
+// call grows with the call count. `cil_embed` states the proof as an auxiliary lemma, so that lemma is rechecked.
+long EmbeddingCost(string name, string definitions)
+{
+    var path = Path.Combine(directory, name + ".lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Embedding.Tactic
+        set_option maxHeartbeats 0
+        set_option maxRecDepth 100000
+        open CIL
+        namespace Embedded
+        {{definitions}}
+        theorem embeds : MethodEmbeds [extraction] 0 written := by cil_embed
+        end Embedded
+        open Lean in
+        run_cmd do
+          let env ← getEnv
+          let some (.thmInfo declaration) := env.find? `Embedded.embeds | throwError "missing"
+          let start ← IO.getNumHeartbeats
+          let mut count : Nat := 0
+          for name in declaration.value.getUsedConstants do
+            let some (.thmInfo used) := env.find? name | continue
+            let copy : Declaration := .thmDecl { used with name := name ++ `recheck }
+            match env.toKernelEnv.addDeclCore 0 1000000 copy none with
+            | .ok _ => count := count + 1
+            | .error _ => throwError "Kernel rejected the recheck of {name}"
+          let beats := (← IO.getNumHeartbeats) - start
+          logInfo m!"{count} lemmas rechecked, {beats} kernel heartbeats"
+        """ + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var cost = LookupPatterns.EmbeddingRecheck().Match(output);
+    if (!cost.Success || cost.Groups[1].Value == "0")
+        throw new InvalidOperationException("Missing the embedding recheck cost:\n" + output);
+    return long.Parse(cost.Groups[2].Value, CultureInfo.InvariantCulture);
+}
+
+// A hand-written body embedded into an extraction with a dead block after each return.
+string DeadBlocks(int calls) => $$"""
+/-- What an extraction emits for one call followed by a dead block. -/
+def extractedSegment : List Instruction :=
+  [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
+/-- The hand-written segment without the dead block. -/
+def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+/-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
+def extraction : Method :=
+  { locals := [], returnsValue := false,
+    code := (List.replicate {{calls}} extractedSegment).flatten ++ [.ret] }
+/-- The proof's body, built with the links its own code implies, with calls at pcs 1, 5, 9. -/
+def written : Method :=
+  extraction.withCode ((List.replicate {{calls}} writtenSegment).flatten ++ [.ret])
+""";
+
+// A body whose head branches over its first block to its second, embedded into an extraction that places the
+// second block first, so the pc map descends once at every size.
+string Reordered(int segments) => $$"""
+/-- The block after the head. -/
+def first : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+/-- The block the head branches to. -/
+def second : List Instruction := [.arg 1, .call 2 1, .pop, .ret]
+/-- The extraction, with the second block first. -/
+def extraction : Method :=
+  { locals := [], returnsValue := false,
+    code := [.br 1] ++ (List.replicate {{segments}} second).flatten ++
+      (List.replicate {{segments}} first).flatten ++ [.ret] }
+/-- The proof's body, with the blocks in source order. -/
+def written : Method :=
+  extraction.withCode ([.br {{1 + 4 * segments}}] ++ (List.replicate {{segments}} first).flatten ++
+    (List.replicate {{segments}} second).flatten ++ [.ret])
+#guard let map := (MethodBinding.alignLive written.code.toArray extraction.code.toArray).toList
+  (map.zip map.tail).countP (fun (left, right) => right < left) == 1
+""";
+
+// Fails when a fixture at the larger size costs more per call to embed than the allowed growth.
+void CheckEmbeddingGrowth(string fixture, string description, Func<int, string> definitions, int callsPerSize,
+    int few, int many)
+{
+    double Cost(int size) => (double)EmbeddingCost(fixture + size, definitions(size)) / (callsPerSize * size);
+    var fewCost = Cost(few);
+    var manyCost = Cost(many);
+    var growth = manyCost / fewCost;
+    var measured = string.Create(CultureInfo.InvariantCulture,
+        $"{fewCost:F0} kernel heartbeats per call at {callsPerSize * few} calls and {manyCost:F0} at " +
+        $"{callsPerSize * many}, {growth:F2} times as many");
+    if (growth > AllowedEmbedGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Embedding {description} costs {measured}; the limit is {AllowedEmbedGrowth}."));
+    Console.WriteLine($"PASS embedding {description} costs {measured}");
+}
+CheckEmbeddingGrowth("Embedding", "a body with many calls", DeadBlocks, 1, EmbedFewCalls, EmbedManyCalls);
+CheckEmbeddingGrowth("Reordered", "a body whose blocks the extraction reorders", Reordered, 2,
+    ReorderFewSegments, ReorderManySegments);
+
+// The text a method emits for its links and the kernel heartbeats to recheck its link index, for a body
+// with two calls: both depend on the calls, not on the length of the body.
+(long Bytes, long Heartbeats) SparseLinkCost(string name)
+{
+    var output = Path.Combine(directory, name);
+    Run(Extract("extract", assembly, "Lookups", $"Lookups::{name}(ulong,ulong)", output));
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var linkLines = extracted.Split('\n').Where(line => LookupPatterns.LinkLine().IsMatch(line))
+        .Sum(line => (long)line.Length + 1);
+    if (linkLines == 0) throw new InvalidOperationException("The extraction of " + name + " has no link output.");
+    var path = Path.Combine(output, "LinkIndex.lean");
+    File.WriteAllText(path, extracted + """
+
+        open Lean in
+        run_cmd do
+          let env ← getEnv
+          let some (.thmInfo declaration) := env.find? `Extracted.method0_linkIndex_valid
+            | throwError "missing the link index check"
+          let start ← IO.getNumHeartbeats
+          let copy : Declaration := .thmDecl { declaration with name := declaration.name ++ `recheck }
+          match env.toKernelEnv.addDeclCore 0 1000000 copy none with
+          | .ok _ => pure ()
+          | .error _ => throwError "Kernel rejected the link index check"
+          logInfo m!"{(← IO.getNumHeartbeats) - start} kernel heartbeats"
+        """ + "\n");
+    var report = Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    var beats = LookupPatterns.KernelHeartbeats().Match(report);
+    if (!beats.Success) throw new InvalidOperationException("Missing the link index recheck cost:\n" + report);
+    return (linkLines, long.Parse(beats.Groups[1].Value, CultureInfo.InvariantCulture));
+}
+var sparseShort = SparseLinkCost("SparseShort");
+var sparseLong = SparseLinkCost("SparseLong");
+var sparseMeasured = $"{sparseShort.Bytes} link bytes and {sparseShort.Heartbeats} kernel heartbeats at " +
+    $"{SparseShortStatements} statements, {sparseLong.Bytes} and {sparseLong.Heartbeats} at {SparseLongStatements}";
+if (sparseLong.Bytes > sparseShort.Bytes * 1.1 || sparseLong.Heartbeats > sparseShort.Heartbeats * AllowedCallGrowth)
+    throw new InvalidOperationException("A longer body with the same calls emits more link output: " + sparseMeasured);
+Console.WriteLine("PASS link output and index check of a body with two calls do not grow with the body: " +
+    sparseMeasured);
 
 // Subtract the same generated body's cost to isolate computed lookup from equation generation.
 long ComputedLookupCost(int cases)
@@ -166,8 +418,8 @@ const int FewTokens = 125;
 const int ManyTokens = 500;
 // Each called method is an extracted method with a certificate of its own, and composing the certificate of an
 // extraction of about 500 methods exceeds the default heartbeat budget, so the call counts stay below that.
-const int FewCalls = 25;
-const int ManyCalls = 100;
+const int FewCalledMethods = 25;
+const int ManyCalledMethods = 100;
 var tokenSource = Path.Combine(directory, "TokenAssembly");
 Directory.CreateDirectory(tokenSource);
 File.WriteAllText(Path.Combine(tokenSource, "Tokens.csproj"), """
@@ -188,7 +440,7 @@ File.WriteAllText(Path.Combine(tokenSource, "Tokens.cs"),
     "public static class Tokens { public static void Use(string text) { } " +
     StringMethod(FewTokens, "StringsFew") + StringMethod(ManyTokens, "StringsMany") +
     FieldMethod(FewTokens, "FieldsFew") + FieldMethod(ManyTokens, "FieldsMany") +
-    CallMethod(FewCalls, "CallsFew") + CallMethod(ManyCalls, "CallsMany") + "}");
+    CallMethod(FewCalledMethods, "CallsFew") + CallMethod(ManyCalledMethods, "CallsMany") + "}");
 Run(["dotnet", "build", Path.Combine(tokenSource, "Tokens.csproj"), "-c", "Release"]);
 var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
 double TokenCost(string name, string selector, int count, string distinctPattern)
@@ -207,7 +459,8 @@ foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
         @"\(\d+, \.text ""[^""]*""\)", FewTokens, ManyTokens),
     ("Fields", $"Tokens::FieldsFew(Tokens/Wide{FewTokens})", $"Tokens::FieldsMany(Tokens/Wide{ManyTokens})",
         @"\(\d+, \.field ", FewTokens, ManyTokens),
-    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", @"\(\d+, \.call ", FewCalls, ManyCalls)
+    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", @"\(\d+, \.call ", FewCalledMethods,
+        ManyCalledMethods)
 })
 {
     var tokenGrowth = TokenCost(kind + "Many", many, manyCount, pattern) /
@@ -414,3 +667,84 @@ if (incrementRatio > AllowedChainIncrementRatio)
         $"The body check grows by {incrementRatio:F2} times as much from depth {baseDepths[1]} to {baseDepths[2]} ") +
         FormattableString.Invariant(
             $"as from {baseDepths[0]} to {baseDepths[1]}; the limit is {AllowedChainIncrementRatio}."));
+
+// The kernel heartbeats of the scalar certificate of a body whose segments each address an array element, with
+// or without a `readonly.` prefix, and branch to the next segment, less those of stating the same certificate.
+long ArrayAddressCost(bool prefixed, int sites)
+{
+    var flag = prefixed ? "true" : "false";
+    var header = $$"""
+        import CIL.Extraction.Scalars
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        namespace ArrayAddresses
+        open CIL CIL.Extraction
+        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
+        def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
+          [⟨0, 2, .none⟩, ⟨0, 3, .none⟩] ++ (if prefixed then [⟨0, 65054, .none⟩] else []) ++
+            [⟨0, 143, .type intType⟩, ⟨0, 38, .none⟩, ⟨0, 43, .target ((index + 1) * width prefixed)⟩]
+        def raw (prefixed : Bool) (sites : Nat) : RawMethod := {
+          token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+          callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+          parameters := [.array intType, intType], locals := [], initLocals := true, maxStack := 2,
+          genericParameters := [],
+          code := (List.range sites).flatMap (segment prefixed) ++ [⟨0, 42, .none⟩] }
+        def featureSegment (prefixed : Bool) : FeatureCertificate :=
+          [some ⟨[], []⟩, some ⟨[none], []⟩] ++
+            (if prefixed then [some ⟨[none, none], []⟩] else []) ++
+            [some ⟨[none, none], []⟩, some ⟨[none], []⟩, some ⟨[], []⟩]
+        def features (prefixed : Bool) (sites : Nat) : FeatureCertificate :=
+          (List.replicate sites (featureSegment prefixed)).flatten ++ [some ⟨[], []⟩]
+        def stateSegment (prefixed : Bool) : ScalarCertificate :=
+          [some [], some [.array .signed32]] ++
+            (if prefixed then [some [.word32, .array .signed32]] else []) ++
+            [some [.word32, .array .signed32], some [.reference], some []]
+        def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
+          (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
+        def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
+          [.arg 0, .arg 1] ++ (if prefixed then [.nop] else []) ++
+            [.memory (.arrayAddress .signed32 !prefixed), .pop, .br ((index + 1) * width prefixed)]
+        def code (prefixed : Bool) (sites : Nat) : List Instruction :=
+          (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
+        """ + "\n";
+    var statement = $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) " +
+        $"(states {flag} {sites}) (code {flag} {sites})";
+    var path = Path.Combine(directory, $"ArrayAddresses{(prefixed ? "Prefixed" : "")}{sites}.lean");
+    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend ArrayAddresses\n", equations: false);
+    var decided = Heartbeats(path, header + $"""
+        theorem valid : {statement} := by decide +kernel
+        #print axioms valid
+        end ArrayAddresses
+        """ + "\n", equations: false);
+    return decided - stated;
+}
+foreach (var prefixed in new[] { false, true })
+{
+    var label = prefixed ? "readonly element addresses" : "element addresses";
+    var perSite = new[] { FewAddresses, MoreAddresses, ManyAddresses }
+        .Select(sites => (Sites: sites, Cost: (double)ArrayAddressCost(prefixed, sites) / sites)).ToArray();
+    var addressesMeasured = string.Join("; ", perSite.Select(run =>
+        string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per address at {run.Sites}")));
+    if (perSite.Skip(1).Any(run => run.Cost > perSite[0].Cost * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Checking the scalar certificate of {label} costs {addressesMeasured}; the limit is {AllowedGrowth} " +
+            $"times the cost per address at {FewAddresses}."));
+    Console.WriteLine($"PASS checking the scalar certificate of {label} costs {addressesMeasured}");
+}
+
+/// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
+static partial class LookupPatterns
+{
+    [GeneratedRegex(@"([0-9]+) lemmas rechecked, ([0-9]+) kernel heartbeats")]
+    internal static partial Regex EmbeddingRecheck();
+
+    [GeneratedRegex(@"([0-9]+) kernel heartbeats")]
+    internal static partial Regex KernelHeartbeats();
+
+    [GeneratedRegex(@"^(@\[cil_code\] )?(def method0Link|theorem method0_link)")]
+    internal static partial Regex LinkLine();
+
+    [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex TypeDecision();
+}

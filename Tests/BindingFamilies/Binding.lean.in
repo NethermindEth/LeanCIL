@@ -6,6 +6,10 @@ namespace Generated
 theorem signature : Extracted.method0Signature =
     "@returnType@ BindingMethods::@name@(@managed@,@managed@)" := rfl
 #print axioms signature
+/-- The declared types retain the exact managed width and signedness. -/
+def declared : CIL.DeclaredSignature := {
+  parameters := [.atom CIL.Extraction.runtimeScope "@managed@", .atom CIL.Extraction.runtimeScope "@managed@"]
+  returnType := .atom CIL.Extraction.runtimeScope "@returnType@" }
 /-- The complete extracted body retains the reviewed operation and polarity. -/
 theorem binding : Extracted.program[0]? =
     some (BindingSupport.@body@) := rfl
@@ -15,6 +19,7 @@ theorem correctness (left right : CIL.W@width@) (memory : CIL.Safety.Memory) :
     CIL.Safety.invoke Extracted.program @fuel@ 0
       [.scalar (.i@width@ left), .scalar (.i@width@ right)] memory =
       .ok (memory, [.scalar (@value@)]) :=
-  BindingSupport.@shared@ Extracted.program Extracted.profile binding left right memory
+  BindingSupport.@shared@ Extracted.program Extracted.profile Extracted.environment declared binding
+    left right memory
 #print axioms correctness
 end Generated

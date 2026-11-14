@@ -740,7 +740,7 @@ abbrev State (home0 : Reference) :=
 
 -- The cutpoint is the loop's back-edge test at Loops.cs:38.
 bind_cutpoint header (home0 : Reference) (state : State home0) :=
-  Extracted.method0 at loop.latch matching (· matches .brnonzero _)
+  Extracted.method0 at loop.latch matching (· matches .brtrue _)
   with entry.frame home0, [.scalar (.i32 state.values)], state.memory
 
 set_option linter.unusedVariables false in
@@ -1098,7 +1098,7 @@ its result is cached apart from one without it. With `--format json` the goals a
 
 Method and call validation failures name the rejected item and the method containing it. A
 rejected call reports its callee, caller, IL offset and declaring assembly scope. For example, a
-reachable `Environment.ProcessorCount` call is outside the admitted runtime models. Exact closed
+reachable `System.Environment.ProcessorCount` call is outside the admitted runtime models. Exact closed
 `typeof` comparisons are supported; a `GetTypeFromHandle` call outside those patterns is
 unsupported. The diagnostic identifies metadata/CIL validation as the failing stage and links to
 the supported subset.

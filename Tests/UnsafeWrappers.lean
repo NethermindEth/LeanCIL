@@ -75,7 +75,7 @@ example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame)
 
 /-- The complete checked constant-return wrapper, for every size and caller memory. -/
 theorem size_ok (size : BitVec 32) (profile : CIL.FeatureProfile) (memory : Memory) :
-    (invoke [{ profile := profile, code := [.const32 size, .ret], locals := [], returnsValue := true }]
+    (invoke [{ profile := profile, code := [.ldc_i4 size, .ret], locals := [], returnsValue := true }]
       8 0 [] memory).map Prod.snd = .ok [.scalar (.i32 size)] := by
   rfl
 

@@ -25,24 +25,46 @@ theorem _root_.CIL.Instruction.relabel_congr {left right : Nat → Nat} (op : In
     op.relabel left = op.relabel right := by
   induction op <;> simp_all [Instruction.relabel, Instruction.targets]
 
+/-- When both link tables are the ones their code implies, a relocated suffix has the links of
+    the original: its linking instructions are the original's with only their targets renamed. -/
+theorem links_of_relocated_suffix {expected actual : Method} {lower start : Nat}
+    (expectedImplied : expected.links = linksOfCode expected.code)
+    (actualImplied : actual.links = linksOfCode actual.code)
+    (suffix : actual.code.drop start =
+      (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start))) :
+    ∀ pc, lower ≤ pc → actual.linkAt (pc - lower + start) = expected.linkAt pc := by
+  intro pc after
+  rw [Method.linkAt_of_implied actualImplied, Method.linkAt_of_implied expectedImplied]
+  have code := congrArg (fun code => code[pc - lower]?) suffix
+  simp only [List.getElem?_drop, List.getElem?_map, Nat.add_sub_cancel' after] at code
+  rw [Nat.add_comm (pc - lower) start, code]
+  cases expected.code[pc]? <;> simp [Instruction.link?_relabel]
+
+#print axioms links_of_relocated_suffix
+
 /-- The expected code from `lower` on, relabeled and placed at `start` in `actual`, makes
-    `actual` refine `expected` under `suffixRename lower start`. -/
+    `actual` refine `expected` under `suffixRename lower start`. Static sites and link tables
+    may differ, as long as each moved pc resolves the same descriptor and link. -/
 theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start : Nat}
-    (metadata : actual = { expected with code := actual.code, staticSites := actual.staticSites })
+    (metadata : actual = { expected with
+      code := actual.code, staticSites := actual.staticSites, links := actual.links })
     (descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd)
     (entry : lower = 0 → start = 0)
     (dead : ∀ pc op, pc < lower → expected.code[pc]? = some op → op.live = false)
     (suffix : actual.code.drop start =
       (expected.code.drop lower).map (Instruction.relabel (fun pc => pc - lower + start)))
     (targets : ∀ op ∈ expected.code.drop lower, ∀ target ∈ op.targets, lower ≤ target)
-    (statics : ∀ pc, lower ≤ pc → staticAt actual (pc - lower + start) = staticAt expected pc) :
+    (statics : ∀ pc, lower ≤ pc → staticAt actual (pc - lower + start) = staticAt expected pc)
+    (links : ∀ pc, lower ≤ pc → actual.linkAt (pc - lower + start) = expected.linkAt pc) :
     BodyRefines expected actual (suffixRename lower start) := by
   refine ⟨by simpa only using congrArg Method.profile metadata,
     by simpa only using congrArg Method.returnsValue metadata,
     by simpa only using congrArg Method.locals metadata,
     by simpa only using congrArg Method.localKinds metadata,
     by simpa only using congrArg Method.opaqueVectorLocals metadata,
-    by simpa only using congrArg Method.parameterHomes metadata, descriptors, ?_, ?_⟩
+    by simpa only using congrArg Method.parameterHomes metadata,
+    by simpa only using congrArg Method.declared metadata,
+    by simpa only using congrArg Method.environment metadata, descriptors, ?_, ?_⟩
   · by_cases zero : lower = 0
     · simp [suffixRename, zero, entry zero]
     · simp [suffixRename, show 0 < lower by omega]
@@ -62,9 +84,10 @@ theorem BodyRefines.of_relocated_suffix {expected actual : Method} {lower start 
     have code := congrArg (fun code => code[pc - lower]?) suffix
     rw [List.getElem?_drop, List.getElem?_map, fetched, Option.map_some,
       Nat.add_comm start (pc - lower), relabeled] at code
-    refine ⟨?_, ?_, fun _ => ?_⟩
+    refine ⟨?_, ?_, ?_, fun _ => ?_⟩
     · simpa only [suffixRename, ite_eq_right (Nat.not_lt.mpr after)] using code
     · simpa only [suffixRename, ite_eq_right (Nat.not_lt.mpr after)] using statics pc after
+    · simpa only [suffixRename, ite_eq_right (Nat.not_lt.mpr after)] using links pc after
     · simp only [suffixRename, ite_eq_right (Nat.not_lt.mpr after),
         ite_eq_right (show ¬pc + 1 < lower by omega)]
       omega

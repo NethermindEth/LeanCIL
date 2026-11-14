@@ -839,9 +839,10 @@ try
     File.WriteAllText(Path.Combine(racePackage, "lakefile.toml"),
         "name = \"leancil\"\nsrcDir = \"" + Path.Combine(racing, LibraryKeyOf('b')).Replace('\\', '/') + "\"\n");
     var racedPin = PlantPin(racing, racedEntry, racePackage, 2);
+    var pinHook = beforePinRetired;
     beforePinRetired = pin => File.SetLastWriteTimeUtc(pin, DateTime.UtcNow);
     try { EvictLibraries(racing); }
-    finally { beforePinRetired = null; }
+    finally { beforePinRetired = pinHook; }
     if (!File.Exists(racedPin) || !Directory.Exists(racedEntry) ||
         Directory.EnumerateFiles(racing, "*.dead-*").Any())
         throw new Exception("A pin renewed while a pass retired it was deleted, or left under another name");

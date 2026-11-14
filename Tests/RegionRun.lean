@@ -8,13 +8,13 @@ namespace Tests.RegionRun
 open CIL (Method Instruction Embeds)
 open CIL.Safety
 
-def helper : Method := { code := [.arg 0, .const32 6, .shr, .ret], locals := [], returnsValue := true }
+def helper : Method := { code := [.arg 0, .ldc_i4 6, .shr, .ret], locals := [], returnsValue := true }
 
 /-- Computes `count >> 6` inline, then adds one. -/
-def expected : Method := { code := [.arg 0, .const32 6, .shr, .const32 1, .add, .ret], locals := [], returnsValue := true }
+def expected : Method := { code := [.arg 0, .ldc_i4 6, .shr, .ldc_i4 1, .add, .ret], locals := [], returnsValue := true }
 
 /-- The same suffix after a compiled helper call, one pc earlier. -/
-def actual : Method := { code := [.arg 0, .call 1 1, .const32 1, .add, .ret], locals := [], returnsValue := true }
+def actual : Method := { code := [.arg 0, .call 1 1, .ldc_i4 1, .add, .ret], locals := [], returnsValue := true }
 
 def masked : Method :=
   { expected with code := List.replicate 3 (.unsupported "Outside the region") ++ expected.code.drop 3 }
@@ -39,7 +39,7 @@ theorem suffix_moves (fuel : Nat) (args stack : List Value) (frame : Frame) (m :
     fuel 0 3 args frame stack m result ran
 
 /-- A region may call into a whole method listed from pc 0. -/
-def caller : Method := { code := [.const32 5, .ret, .arg 0, .call 1 1, .ret], locals := [], returnsValue := true }
+def caller : Method := { code := [.ldc_i4 5, .ret, .arg 0, .call 1 1, .ret], locals := [], returnsValue := true }
 def rewritten : Method := { caller with code := [.unsupported "Outside the region", .throw "System.Exception", .arg 0, .call 1 1, .ret] }
 
 abbrev calling : Nat → Nat → Prop := fun method pc => inStarts [(0, 2), (1, 0)] method pc = true
@@ -51,29 +51,35 @@ theorem calling_run (fuel : Nat) (args stack : List Value) (frame : Frame) (m : 
       code_agrees_of_drop (lower := 2) rfl (by simpa [calling, inStarts] using inside)) _ _ _ _ _ _ _ (by decide)
 
 /-- A branch back into the prefix leaves the region. -/
-example : regionClosedCheck [{ caller with code := [.const32 0, .ret, .branch 0] }] [(0, 2)] = false := by decide
+example : regionClosedCheck [{ caller with code := [.ldc_i4 0, .ret, .br 0] }] [(0, 2)] = false := by decide
 
 /-- A call into a method the region does not cover from pc 0 leaves it. -/
 example : regionClosedCheck [caller, helper] [(0, 2)] = false := by decide
 
 /-- A whole method of straight-line code is closed. -/
-example : regionClosedCheck [{ caller with code := [.const32 0, .const32 1, .ret] }] [(0, 0)] = true := by decide
+example : regionClosedCheck [{ caller with code := [.ldc_i4 0, .ldc_i4 1, .ret] }] [(0, 0)] = true := by decide
 
 def longSuffix : List Instruction :=
-  List.replicate 96 .nop ++ [.brzero 102, .switch [3, 102], .nativeBinary (.bge 102), .ret]
+  List.replicate 96 .nop ++ [.brfalse 102, .switch [3, 102], .nativeBinary (.bge 102), .ret]
 
 def longExpected (profile : CIL.FeatureProfile) : Method :=
-  { code := [.arg 0, .const32 6, .shr] ++ longSuffix, locals := [], returnsValue := true, profile := profile }
+  { code := [.arg 0, .ldc_i4 6, .shr] ++ longSuffix, locals := [], returnsValue := true, profile := profile }
 
 def longMasked (profile : CIL.FeatureProfile) : Method :=
-  { longExpected profile with code := List.replicate 3 (.unsupported "Outside the region") ++ longSuffix }
+  (longExpected profile).withCode
+    (List.replicate 3 (.unsupported "Outside the region") ++ longSuffix)
 
 def longActual (profile : CIL.FeatureProfile) (callee : Nat) : Method :=
-  { longExpected profile with
-    code := [.arg 0, .call callee 1] ++
-      longSuffix.map (Instruction.relabel (fun pc => pc - 3 + 2)) }
+  (longExpected profile).withCode ([.arg 0, .call callee 1] ++
+    longSuffix.map (Instruction.relabel (fun pc => pc - 3 + 2)))
 
 theorem longSuffix_length : longSuffix.length = 100 := by simp [longSuffix]
+
+/-- The expected body calls nothing, so its link table is empty. -/
+theorem longExpected_links (profile : CIL.FeatureProfile) :
+    (longExpected profile).links = [] := rfl
+
+#print axioms longExpected_links
 
 theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
     CIL.Embedding.BodyRefines (longMasked profile) (longActual profile callee)
@@ -90,9 +96,9 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
     rw [lookup] at found
     cases found
     rfl
-  · simp [longActual, longMasked]
-  · simp only [longMasked, List.drop_append, List.length_replicate, Nat.sub_self, List.drop_zero,
-      List.drop_replicate, List.replicate_zero, List.nil_append]
+  · simp [longActual, longMasked, Method.withCode]
+  · simp only [longMasked, Method.withCode, List.drop_append, List.length_replicate,
+      Nat.sub_self, List.drop_zero, List.drop_replicate, List.replicate_zero, List.nil_append]
     intro op member target inside
     simp only [longSuffix, List.mem_append, List.mem_replicate, List.mem_cons,
       List.not_mem_nil, or_false] at member
@@ -100,6 +106,39 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
       simp_all [Instruction.targets] <;> omega
   · intro pc after
     rfl
+  · exact CIL.Embedding.links_of_relocated_suffix rfl rfl
+      (by simp [longActual, longMasked, Method.withCode])
+
+/-- A call inside the relocated suffix keeps its link at the shifted pc. -/
+def callExpected : Method :=
+  { code := [.arg 0, .ldc_i4 6, .shr, .arg 1, .call 2 1, .ret], locals := [],
+    returnsValue := true }
+
+def callMasked : Method :=
+  callExpected.withCode (List.replicate 3 (.unsupported "Outside the region") ++
+    callExpected.code.drop 3)
+
+def callActual : Method := callExpected.withCode ([.arg 0, .call 1 1] ++ callExpected.code.drop 3)
+
+theorem callSuffix_refines :
+    CIL.Embedding.BodyRefines callMasked callActual (CIL.Embedding.suffixRename 3 2) := by
+  apply CIL.Embedding.BodyRefines.of_relocated_suffix
+  · rfl
+  · rfl
+  · omega
+  · intro pc op before found
+    have unmasked : pc = 0 ∨ pc = 1 ∨ pc = 2 := by omega
+    rcases unmasked with rfl | rfl | rfl <;>
+      (simp [callMasked, Method.withCode] at found; subst found; rfl)
+  · rfl
+  · intro op member target inside
+    simp [callMasked, callExpected, Method.withCode] at member
+    rcases member with rfl | rfl | rfl <;> simp [Instruction.targets] at inside
+  · intro pc after
+    rfl
+  · exact CIL.Embedding.links_of_relocated_suffix rfl rfl rfl
+
+#print axioms callSuffix_refines
 
 theorem longSuffix_moves (profile : CIL.FeatureProfile) (callee fuel : Nat) (args stack : List Value)
     (frame : Frame) (m : Memory) (result : Memory × List Value)
@@ -108,7 +147,7 @@ theorem longSuffix_moves (profile : CIL.FeatureProfile) (callee fuel : Nat) (arg
   have closed : RegionClosed [longExpected profile] suffix := RegionClosed.of_check (by rfl)
   have agrees : AgreesOn [longExpected profile] [longMasked profile] suffix :=
     AgreesOn.set (program := [longExpected profile]) (index := 0) rfl (longMasked profile).code fun _ inside =>
-      code_agrees_of_drop (lower := 3) (by simp [longMasked, longExpected])
+      code_agrees_of_drop (lower := 3) (by simp [longMasked, longExpected, Method.withCode])
         (by simpa [suffix, inStarts] using inside)
   rw [← run_congr_region closed agrees _ _ _ _ _ _ _ (by decide)] at ran
   exact run_refines ((ProgramRefines.refl [longActual profile callee]).set_body (index := 0) rfl
@@ -130,7 +169,7 @@ theorem duplicateStarts :
 
 /-- A later duplicate cannot hide the earlier suffix's escaping branch. -/
 theorem earlierStartRejects : regionClosedCheck
-    [{ caller with code := [.ret, .branch 0, .ret] }] [(0, 2), (0, 1)] = false := by
+    [{ caller with code := [.ret, .br 0, .ret] }] [(0, 2), (0, 1)] = false := by
   decide +kernel
 #print axioms earlierStartRejects
 

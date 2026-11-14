@@ -21,7 +21,7 @@ abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected
 def dispatchBody (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
     .feature .avx2,
-    .brzero 6,
+    .brfalse 6,
     if avx2 then .arg 0 else unreachable,
     if avx2 then .arg 1 else unreachable,
     if avx2 then .call callee 2 else unreachable,
@@ -68,7 +68,7 @@ attribute [local irreducible] dispatchBody
 
 -- `cil_lookup` closes a lookup through the `@[cil_code]` equations where `rfl` cannot.
 example (sse42 avx2 : Bool) (callee : Nat) :
-    ∃ op, (dispatchBody sse42 avx2 callee).code[1]? = some op ∧ op = .brzero 6 :=
+    ∃ op, (dispatchBody sse42 avx2 callee).code[1]? = some op ∧ op = .brfalse 6 :=
   ⟨_, by (fail_if_success rfl); cil_lookup [], by with_reducible rfl⟩
 
 -- Symbolic flags: a fact about each flag decides the fetched instruction's feature test.
@@ -193,18 +193,18 @@ example : ∃ op, fixedBody.code[0]? = some op ∧ op = .nop :=
 
 /-- A body with an implicit width and a hypothesis about it, both kept as parameters. -/
 def guardedBody {width : Nat} (_wide : 32 < width) : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.const32 (BitVec.ofNat 32 width), .ret] }
+  { returnsValue := true, locals := [], code := [.ldc_i4 (BitVec.ofNat 32 width), .ret] }
 
 cil_instruction_equations guardedBody
 
 /--
 info: Tests.InstructionEquations.guardedBody_instruction0 {width : Nat} (_wide : 32 < width) :
-  (guardedBody _wide).code[0]? = some (CIL.Instruction.const32 (BitVec.ofNat 32 width))
+  (guardedBody _wide).code[0]? = some (CIL.Instruction.ldc_i4 (BitVec.ofNat 32 width))
 -/
 #guard_msgs (whitespace := lax) in #check guardedBody_instruction0
 
 example (wide : 32 < 40) :
-    ∃ op, (guardedBody wide).code[0]? = some op ∧ op = .const32 (BitVec.ofNat 32 40) :=
+    ∃ op, (guardedBody wide).code[0]? = some op ∧ op = .ldc_i4 (BitVec.ofNat 32 40) :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
 end Tests.InstructionEquations

@@ -1,4 +1,5 @@
 import CIL.Instructions
+import CIL.Extraction.LinkIndex
 
 /-!
 # Method embeddings
@@ -21,18 +22,26 @@ namespace CIL
 /-- Replaces every code target of an instruction by its image under `r`. -/
 def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
   | .nativeBinary op => .nativeBinary (op.relabel r)
-  | .bgt t => .bgt (r t) | .ble t => .ble (r t) | .bleu t => .bleu (r t)
-  | .branch t => .branch (r t) | .switch ts => .switch (ts.map r)
-  | .brzero t => .brzero (r t) | .brnonzero t => .brnonzero (r t)
-  | .bltu t => .bltu (r t) | .bgeu t => .bgeu (r t) | .bgtu t => .bgtu (r t)
-  | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t) | .bne t => .bne (r t)
+  | .bgt t => .bgt (r t) | .ble t => .ble (r t) | .ble_un t => .ble_un (r t)
+  | .br t => .br (r t) | .switch ts => .switch (ts.map r)
+  | .brfalse t => .brfalse (r t) | .brtrue t => .brtrue (r t)
+  | .blt_un t => .blt_un (r t) | .bge_un t => .bge_un (r t) | .bgt_un t => .bgt_un (r t)
+  | .bge t => .bge (r t) | .blt t => .blt (r t) | .beq t => .beq (r t)
+  | .bne_un t => .bne_un (r t)
   | op => op
+
+/-- Renaming code targets never changes the link an instruction implies. -/
+theorem Instruction.link?_relabel (r : Nat → Nat) (op : Instruction) :
+    (op.relabel r).link? = op.link? := by
+  cases op <;> simp [Instruction.relabel, Instruction.link?]
+
+#print axioms Instruction.link?_relabel
 
 /-- Every code target of an instruction, in operand order. -/
 def Instruction.targets : Instruction → List Nat
   | .nativeBinary op => op.targets
-  | .bgt t | .ble t | .bleu t | .branch t | .brzero t | .brnonzero t
-  | .bltu t | .bgeu t | .bgtu t | .bge t | .blt t | .beq t | .bne t => [t]
+  | .bgt t | .ble t | .ble_un t | .br t | .brfalse t | .brtrue t
+  | .blt_un t | .bge_un t | .bgt_un t | .bge t | .blt t | .beq t | .bne_un t => [t]
   | .switch ts => ts
   | _ => []
 
@@ -55,7 +64,7 @@ theorem Instruction.relabel_of_targets_nil (r : Nat → Nat) (op : Instruction)
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Instruction.continues : Instruction → Bool
   | .managed (.call _ _ true) => false
-  | .branch _ | .tailCall .. | .ret _ | .throw _ | .unsupported _ => false
+  | .br _ | .tailCall .. | .ret _ | .throw _ | .unsupported _ => false
   | _ => true
 
 /-- `.unsupported` faults whenever it executes, so it constrains nothing. -/
@@ -87,15 +96,14 @@ def sites (limit : Nat) : Nat → List Instruction → List Nat → List Site
       ⟨pc, map.headD limit, map.tail.headD limit, op⟩ :: sites limit (pc + 1) rest map.tail
     else sites limit (pc + 1) rest map.tail
 
-/-- `code[q]?` for each `q`, walking `code` once while the pcs increase; `rest` is
-    `code.drop start`. -/
+/-- `code[q]?` for each `q`, walking `code` while the pcs do not decrease and starting again from
+    its head at a pc below the one before; `rest` is `code.drop start`. The pcs cost one step each
+    and the code's length once per descent. -/
 def pick (code : List Instruction) : List Instruction → Nat → List Nat → List (Option Instruction)
   | _, _, [] => []
   | rest, start, q :: qs =>
-    if start ≤ q then
-      let tail := rest.drop (q - start)
-      tail.head? :: pick code tail q qs
-    else code[q]? :: pick code rest start qs
+    let tail := if start ≤ q then rest.drop (q - start) else code.drop q
+    tail.head? :: pick code tail q qs
 
 /-- The static descriptor a `staticAddress` or `staticValue` at `pc` resolves to. -/
 def staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
@@ -106,7 +114,10 @@ end Embedding
 open Embedding in
 /-- `expected` embeds into `actual` under the pc map `map`. Non-code fields agree,
     except that static sites may move as long as each live instruction resolves the
-    same descriptor and the program-wide descriptor list is unchanged. -/
+    same descriptor and the program-wide descriptor list is unchanged. Link tables
+    move the same way: each live instruction has the link its image has. The reads walk a table
+    whose keys ascend, starting again from its head at each queried pc below the one before; a
+    table whose keys do not ascend is scanned once per query. -/
 structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   profile : actual.profile = expected.profile
   returnsValue : actual.returnsValue = expected.returnsValue
@@ -114,6 +125,8 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   localKinds : actual.localKinds = expected.localKinds
   opaqueVectorLocals : actual.opaqueVectorLocals = expected.opaqueVectorLocals
   parameterHomes : actual.parameterHomes = expected.parameterHomes
+  declared : actual.declared = expected.declared
+  environment : actual.environment = expected.environment
   descriptors : actual.staticSites.map Prod.snd = expected.staticSites.map Prod.snd
   entry : rename map actual.code.length 0 = 0
   code : pick actual.code actual.code 0
@@ -123,6 +136,11 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   statics :
     (sites actual.code.length 0 expected.code map).map (fun site => staticAt actual site.image) =
       (sites actual.code.length 0 expected.code map).map (fun site => staticAt expected site.pc)
+  links :
+    Extraction.linkReads actual.links
+        ((sites actual.code.length 0 expected.code map).map Site.image) =
+      Extraction.linkReads expected.links
+        ((sites actual.code.length 0 expected.code map).map Site.pc)
   flow : (sites actual.code.length 0 expected.code map).all
     (fun site => !site.op.continues || site.next == site.image + 1) = true
 

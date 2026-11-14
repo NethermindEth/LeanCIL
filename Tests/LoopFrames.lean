@@ -190,8 +190,8 @@ namespace Extracted
 /-- `while (remaining != 0) remaining--; return remaining;` with `remaining` in a frame home. -/
 @[cil_code] def method0 : CIL.Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true
-  code := [.arg 0, .setLocal 0, .local 0, .brnonzero 6, .local 0, .ret, .local 0, .const32 1,
-    .sub, .setLocal 0, .branch 2] }
+  code := [.arg 0, .setLocal 0, .local 0, .brtrue 6, .local 0, .ret, .local 0, .ldc_i4 1,
+    .sub, .setLocal 0, .br 2] }
 
 /-- The extracted program. -/
 @[cil_code] def program : CIL.Program := [method0]
@@ -212,7 +212,7 @@ bind_entry entry (input : CIL.W32) := downBody with [.scalar (.i32 input)] from 
 
 -- The only conditional branch, selected by its shape, with the home as a binder.
 bind_cutpoint cutpoint (home : Reference) := downBody
-  matching (fun op => match op with | .brnonzero _ => true | _ => false) with entry.frame home
+  matching (fun op => match op with | .brtrue _ => true | _ => false) with entry.frame home
 
 /-- The remaining count, held in the frame home, with the frame facts of the current memory. -/
 abbrev State (home : Reference) :=
@@ -397,9 +397,9 @@ open CIL (W64)
 @[cil_code] def spanSum : CIL.Method := {
   returnsValue := true, locals := [.i64 0], localKinds := [.word64],
   parameterHomes := [(0, .span 8 false)]
-  code := [.const32 0, .convI8, .setLocal 0, .branch 15, .local 0, .local 1, .const32 0,
-    .memory (.spanItem 8), .load64, .add, .setLocal 0, .local 1, .const32 1,
-    .memory (.spanSlice false), .setLocal 1, .local 1, .memory .spanLength, .brnonzero 4,
+  code := [.ldc_i4 0, .conv_i8, .setLocal 0, .br 15, .local 0, .local 1, .ldc_i4 0,
+    .memory (.spanItem 8), .load64, .add, .setLocal 0, .local 1, .ldc_i4 1,
+    .memory (.spanSlice false), .setLocal 1, .local 1, .memory .spanLength, .brtrue 4,
     .local 0, .ret] }
 
 /-- The program of `spanSum` alone. -/
@@ -421,7 +421,7 @@ abbrev SpanSumState (memory : Memory) (home : Reference) :=
 /-- The loop test, with the unread suffix's length on the stack. -/
 bind_cutpoint spanSumHeader (memory : Memory) (home : Reference)
     (state : SpanSumState memory home) :=
-  spanSum matching (· matches .brnonzero _)
+  spanSum matching (· matches .brtrue _)
   with spanSumEntry.frame memory state.values.2.view home,
     [.scalar (.i32 (BitVec.ofNat 32 state.values.2.view.length))], state.memory
 

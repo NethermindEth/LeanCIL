@@ -341,28 +341,6 @@ def castTargetValid (find : TypeExpr → Option DispatchType) (target : TypeExpr
     entry.pinned && !entry.valueType && !entry.interfaceType
   | _ => false
 
-
-/-- Ordered candidate buckets retain every matching metadata entry. -/
-private def groupIndex {α κ : Type} [Ord κ] (key : α → κ) :
-    List α → Std.TreeMap κ (List α)
-  | [] => ∅
-  | value :: rest =>
-    let index := groupIndex key rest
-    index.insert (key value) (value :: index.getD (key value) [])
-/-- Each bucket is exactly the corresponding ordered filter of the input. -/
-private theorem groupIndex_get {α κ : Type} [Ord κ] [Std.TransOrd κ] [Std.LawfulEqOrd κ]
-    [BEq κ] [LawfulBEq κ] (key : α → κ) (values : List α) (query : κ) :
-    (groupIndex key values).getD query [] = values.filter (fun value => key value == query) := by
-  induction values with
-  | nil => simp [groupIndex]
-  | cons value rest ih =>
-    simp only [groupIndex, Std.TreeMap.getD_insert, Std.compare_eq_iff_eq]
-    by_cases same : key value = query
-    · simp [same, ih]
-    · simp [same, ih]
-
-#print axioms groupIndex_get
-
 /-- Add one candidate at each advertised key, without duplicating repeated keys. -/
 private def insertKeys (base : Std.TreeMap Nat (List α)) (value : α) :
     List Nat → Std.TreeMap Nat (List α)
@@ -397,35 +375,6 @@ private theorem multiGroup_get (keys : α → List Nat) (values : List α) (quer
     simp only [multiGroup, insertKeys_get, ih, List.filter_cons]
 
 #print axioms multiGroup_get
-
-/-- Linked UTF-8 bytes avoid indexed string decoding while comparing dispatch keys. -/
-private def keyBytes (text : String) : List UInt8 := text.toByteArray.data.toList
-
-/-- Constructor-delimited type buckets retain scopes and aggregate positions. Exact identity
-    checks below remain mandatory even if two encodings were to share a bucket. -/
-private def typeKeyInto : TypeExpr → List (List UInt8) → List (List UInt8)
-  | .void, rest => keyBytes "void" :: rest
-  | .atom scope name, rest => keyBytes "atom" :: keyBytes scope :: keyBytes name :: rest
-  | .aggregate identity index, rest =>
-    keyBytes "aggregate" :: keyBytes identity :: keyBytes (toString index) :: rest
-  | .enum identity underlying, rest =>
-    keyBytes "enum" :: keyBytes identity :: typeKeyInto underlying rest
-  | .parameter index, rest => keyBytes "parameter" :: keyBytes (toString index) :: rest
-  | .byref element, rest => keyBytes "byref" :: typeKeyInto element rest
-  | .pointer element, rest => keyBytes "pointer" :: typeKeyInto element rest
-  | .array element, rest => keyBytes "array" :: typeKeyInto element rest
-  | .functionPointer result parameters convention hasThis explicitThis, rest =>
-    keyBytes "functionPointer" :: keyBytes (toString convention) ::
-      keyBytes (toString hasThis) :: keyBytes (toString explicitThis) ::
-      typeKeyInto result (typeKeyInto parameters rest)
-  | .signatureParameter head tail, rest =>
-    keyBytes "signatureParameter" :: typeKeyInto head (typeKeyInto tail rest)
-  | .constructor scope name, rest =>
-    keyBytes "constructor" :: keyBytes scope :: keyBytes name :: rest
-  | .apply constructor argument, rest =>
-    keyBytes "apply" :: typeKeyInto constructor (typeKeyInto argument rest)
-  | .object scope name, rest =>
-    keyBytes "object" :: keyBytes scope :: keyBytes name :: rest
 
 /-- Raw metadata and its order-preserving method candidate indexes. -/
 structure DispatchTypeIndex where

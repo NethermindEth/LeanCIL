@@ -66,7 +66,7 @@ def unsafeReferenceHelper (instruction : RawInstruction) : Option UnsafeReferenc
 
 /-- The exact existing operation implementing each reference helper. -/
 def UnsafeReferenceHelper.matches : UnsafeReferenceHelper → Instruction → Bool
-  | .areSame, .eq | .less, .ltu | .greater, .gtu | .byteOffset, .memory .byteOffset
+  | .areSame, .ceq | .less, .clt_un | .greater, .cgt_un | .byteOffset, .memory .byteOffset
   | .subtractBytes, .sub | .asRef, .memory .asRef => true
   | .addBytes expected, .memory (.add width signed) => width == 1 && signed == expected
   | _, _ => false

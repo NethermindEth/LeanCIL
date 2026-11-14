@@ -25,13 +25,13 @@ example : MethodEmbeds [opaqueHomeBody] 0 opaqueHomeBody := by cil_embed
 
 /-- Returns argument 1 on both paths; pc 4 is reached only by the branch. -/
 @[cil_code] def body : Method := {
-  code := [.arg 0, .brzero 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.arg 0, .brfalse 4, .arg 1, .ret, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 /-- `body` with a dead block before the branch target, as a profile-specific extraction emits it. -/
 def inserted : Method := {
-  code := [.arg 0, .brzero 6, .arg 1, .ret,
-    .unsupported "Unreachable under selected profile", .const32 9, .arg 1, .ret]
+  code := [.arg 0, .brfalse 6, .arg 1, .ret,
+    .unsupported "Unreachable under selected profile", .ldc_i4 9, .arg 1, .ret]
   locals := [], returnsValue := true }
 
 -- Each `cil_embed` proof is kernel checked against the extracted method, never against `expected`.
@@ -62,7 +62,7 @@ theorem relocated_suffix (frame : Safety.Frame) (memory : Safety.Memory) (value 
 
 /-- An expected body that still carries a dead block the extraction no longer emits. -/
 def withDeadBlock : Method := {
-  code := [.arg 0, .brzero 6, .arg 1, .ret, .unsupported "Unreachable under selected profile",
+  code := [.arg 0, .brfalse 6, .arg 1, .ret, .unsupported "Unreachable under selected profile",
     .unsupported "Unreachable under selected profile", .arg 1, .ret]
   locals := [], returnsValue := true }
 
@@ -103,26 +103,27 @@ example : MethodEmbeds [{ inserted with code := inserted.code.set 2 (.arg 0 none
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Instruction.brzero 4
-  renamed:  CIL.Instruction.brzero 6
-  actual:   CIL.Instruction.brzero 5
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 5; actual pc 5 (CIL.Instruction.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brfalse 4
+  renamed:  CIL.Instruction.brfalse 6
+  actual:   CIL.Instruction.brfalse 5
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 5; actual pc 5 (CIL.Instruction.ldc_i4 0x00000009#32) is not the image of any live expected pc
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ inserted with code := inserted.code.set 1 (.brzero 5) }] 0 body := by cil_embed
+example : MethodEmbeds [{ inserted with code := inserted.code.set 1 (.brfalse 5) }] 0 body := by
+  cil_embed
 
 -- The branch reaches an inserted live instruction, so the extracted method can return 9.
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 1 maps to actual pc 1
-  expected: CIL.Instruction.brzero 4
-  renamed:  CIL.Instruction.brzero 6
-  actual:   CIL.Instruction.brzero 4
-  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.const32 0x00000009#32) is not the image of any live expected pc
+  expected: CIL.Instruction.brfalse 4
+  renamed:  CIL.Instruction.brfalse 6
+  actual:   CIL.Instruction.brfalse 4
+  code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.ldc_i4 0x00000009#32) is not the image of any live expected pc
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ body with code := [.arg 0, .brzero 4, .arg 1, .ret, .const32 9, .ret, .arg 1, .ret] }] 0 body := by
+example : MethodEmbeds [{ body with code := [.arg 0, .brfalse 4, .arg 1, .ret, .ldc_i4 9, .ret, .arg 1, .ret] }] 0 body := by
   cil_embed
 
 -- The fallthrough of the branch reaches an inserted instruction.
@@ -131,12 +132,12 @@ error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 2 maps to actual pc 2
   expected: CIL.Instruction.arg 1 none
-  actual:   CIL.Instruction.const32 0x00000009#32
+  actual:   CIL.Instruction.ldc_i4 0x00000009#32
   the instructions differ
   expected pc 1 falls through to it, so it must be actual pc 2
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ body with code := [.arg 0, .brzero 5, .const32 9, .arg 1, .ret, .arg 1, .ret] }] 0 body := by
+example : MethodEmbeds [{ body with code := [.arg 0, .brfalse 5, .ldc_i4 9, .arg 1, .ret, .arg 1, .ret] }] 0 body := by
   cil_embed
 
 /--
@@ -219,11 +220,11 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 
 /-- Jumps to a throw. -/
 def thrower : Method :=
-  { code := [.branch 1, .throw "Overflow"], locals := [], returnsValue := false }
+  { code := [.br 1, .throw "Overflow"], locals := [], returnsValue := false }
 
 /-- `thrower` with a dead block before the throw and unused reference and span locals. -/
 def throwerDead : Method := {
-  code := [.branch 2, .unsupported "Unreachable under selected profile", .throw "Overflow"]
+  code := [.br 2, .unsupported "Unreachable under selected profile", .throw "Overflow"]
   locals := [.nullRef, .nullRef], localKinds := [.reference, .span 1 false], returnsValue := false }
 
 /-- A throw of the expected body is raised by the extraction with the dead local. -/
@@ -497,3 +498,237 @@ end DeadLocals
 #guard_msgs (whitespace := lax) in #print axioms numeric_dead_rejected
 
 end Tests.MethodEmbedding
+
+/-! Declared signatures, environments and link tables are embedding fields: an embedding that
+    differs in any of them is rejected, and the diagnostic names the first one. -/
+namespace Tests.MethodEmbedding.Metadata
+
+open CIL
+
+/-- Calls method 1 at pc 1 and enters a virtual table at pc 3. -/
+def caller : Method := {
+  code := [.arg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .ret]
+  locals := [], returnsValue := false }
+
+/-- The pc map of a body onto itself. -/
+private def identityMap : List Nat := [0, 1, 2, 3, 4]
+
+theorem caller_links :
+    linksOfCode caller.code = [(1, .direct 1), (3, .virtual [(.void, 2)])] := rfl
+
+#print axioms caller_links
+
+/-- Only linking instructions have entries, keyed by their pc. -/
+example : linksOfCode [.nop, .call 1 2, .arg 0, .newAggregate 4 0 8, .ret] =
+    [(1, .direct 1), (3, .aggregate 4 8)] := rfl
+
+/-- A table written out in a literal wins over the default. -/
+example : ({ caller with links := [] } : Method).linkAt 1 = none := rfl
+
+/-- The first entry for a pc wins, as in `step`. -/
+example : ({ code := [], locals := [], returnsValue := false, links :=
+    [(2, .direct 5), (2, .direct 6)] } : Method).linkAt 2 = some (.direct 5) := rfl
+
+example : caller.linkAt 0 = none := rfl
+example : caller.linkAt 1 = some (.direct 1) := rfl
+
+/-- Copying a body with new code keeps its table, so a rewrite of the code states its links. -/
+example : ({ caller with code := [] } : Method).links = caller.links := rfl
+
+/-- The declared type of a 32-bit integer parameter. -/
+def int32 : Extraction.TypeExpr := .atom Extraction.runtimeScope "System.Int32"
+
+/-- An instance method's declared types start after `this`. -/
+def instanceSignature : DeclaredSignature := {
+  receiver := some .object, parameters := [int32], returnType := .void }
+
+example : instanceSignature.argumentType 0 = none := rfl
+example : instanceSignature.argumentType 1 = some int32 := rfl
+example : instanceSignature.argumentType 2 = none := rfl
+
+/-- A static method's first argument is its first declared parameter. -/
+example : { instanceSignature with receiver := none }.argumentType 0 =
+    some int32 := rfl
+example : { instanceSignature with receiver := none }.argumentType 1 = none := rfl
+
+theorem caller_embeds : MethodEmbeds [caller] 0 caller := by cil_embed
+
+#print axioms caller_embeds
+
+/-- caller with another declared signature. -/
+private def otherSignature : Method := { caller with declared := instanceSignature }
+/-- caller with other layout tables. -/
+private def otherEnvironment : Method :=
+  { caller with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } }
+/-- caller with another link for its call. -/
+private def otherLink : Method :=
+  { caller with links := [(1, .direct 9), (3, .virtual [(.void, 2)])] }
+
+theorem declared_rejected : ¬ Embeds caller otherSignature identityMap :=
+  fun embedded => absurd embedded.declared (by decide)
+
+theorem environment_rejected : ¬ Embeds caller otherEnvironment identityMap :=
+  fun embedded => absurd embedded.environment (by decide)
+
+theorem links_rejected : ¬ Embeds caller otherLink identityMap :=
+  fun embedded => absurd embedded.links (by decide +kernel)
+
+/-- info: 'Tests.MethodEmbedding.Metadata.declared_rejected' does not depend on any axioms -/
+#guard_msgs in #print axioms declared_rejected
+/-- info: 'Tests.MethodEmbedding.Metadata.environment_rejected' depends on axioms:
+  [propext, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms environment_rejected
+/-- info: 'Tests.MethodEmbedding.Metadata.links_rejected' depends on axioms: [propext] -/
+#guard_msgs in #print axioms links_rejected
+
+/-- The diagnostic of a link difference names the actual pc of the call. -/
+example : (MethodBinding.embedFailure caller otherLink identityMap).map Prod.snd =
+    some (some 1) := by decide +kernel
+
+example : (MethodBinding.embedFailure caller otherSignature identityMap).map Prod.snd =
+    some none := by decide +kernel
+
+example : (MethodBinding.embedFailure caller otherEnvironment identityMap).map Prod.snd =
+    some none := by decide +kernel
+
+example : MethodBinding.embedFailure caller caller identityMap = none := by decide +kernel
+
+/-- A literal that does not bind is told which field differs, and what each side has. -/
+example : (MethodBinding.methodDifferences caller otherSignature).length = 1 := by
+  decide +kernel
+example : (MethodBinding.methodDifferences caller otherEnvironment).length = 1 := by
+  decide +kernel
+example : (MethodBinding.methodDifferences caller otherLink).length = 1 := by decide +kernel
+
+example : (MethodBinding.methodDifferences caller otherSignature).head?.map
+    (·.startsWith "field declared:") = some true := by decide +kernel
+example : (MethodBinding.methodDifferences caller otherEnvironment).head?.map
+    (·.startsWith "field environment:") = some true := by decide +kernel
+example : (MethodBinding.methodDifferences caller otherLink).head?.map
+    (·.startsWith "field links:") = some true := by decide +kernel
+
+/-- What an extraction emits when a dead block puts the call at pc 3. -/
+def moved : Method := {
+  code := [.arg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret]
+  locals := [], returnsValue := true }
+
+/-- The body a proof uses, with its call at pc 2. `withCode` gives it that pc's link. -/
+def viaWithCode : Method := moved.withCode [.arg 0, .br 2, .call 1 1, .ret]
+
+/-- The same code through a structure update, which keeps the link table of the call at pc 3. -/
+def viaUpdate : Method := { moved with code := [.arg 0, .br 2, .call 1 1, .ret] }
+
+theorem with_code_embeds : MethodEmbeds [moved] 0 viaWithCode := by cil_embed
+
+#print axioms with_code_embeds
+
+example : viaWithCode.linkAt 2 = some (.direct 1) := rfl
+example : viaWithCode.linkAt 3 = none := rfl
+example : viaUpdate.linkAt 2 = none := rfl
+
+/-- The update leaves the link at pc 3, so its call has no link and the embedding fails. -/
+theorem update_rejected : ¬ Embeds viaUpdate moved [0, 1, 3, 4] :=
+  fun embedded => absurd embedded.links (by decide +kernel)
+
+#print axioms update_rejected
+
+-- The diagnostic of the rejected update names `withCode`.
+#guard ((MethodBinding.embedFailure viaUpdate moved [0, 1, 3, 4]).map fun failure =>
+    (failure.1.splitOn "withCode").length) == some 2
+
+#guard ((MethodBinding.methodDifferences moved viaWithCode).map fun line =>
+    (line.splitOn "withCode").length) == [1, 2]
+
+/-- The static field the fixtures below read. -/
+def staticField : StaticDescriptor :=
+  { identity := 1, fieldName := "Fixture::Value", bytes := List.replicate 8 0 }
+
+/-- What an extraction emits when a dead block puts a static read at pc 2. -/
+def staticMoved : Method := {
+  code := [.br 2, .unsupported "Unreachable under selected profile",
+    .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
+  locals := [], returnsValue := false, staticSites := [(2, staticField)] }
+
+/-- The body a proof uses, with its static read at pc 1; `withCode` leaves it no static sites. -/
+def staticWritten : Method :=
+  staticMoved.withCode [.br 1, .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
+
+/-- Whether the first embedding failure of `expected` contains each of `phrases`. -/
+def failureMentions (expected : Method) (phrases : List String) : Bool :=
+  match MethodBinding.embedFailure expected staticMoved [0, 2, 3, 4] with
+  | some (message, _) => phrases.all fun phrase => (message.splitOn phrase).length > 1
+  | none => false
+
+-- Without sites the descriptor lists differ, and the message says what to supply.
+#guard failureMentions staticWritten ["static descriptors", "staticSites :="]
+
+-- A site kept at the extraction's pc resolves no descriptor at the body's read.
+#guard failureMentions { staticWritten with staticSites := [(2, staticField)] }
+  ["different static descriptor", "staticSites :="]
+
+theorem static_sites_embed :
+    MethodEmbeds [staticMoved] 0 { staticWritten with staticSites := [(1, staticField)] } := by
+  cil_embed
+
+#print axioms static_sites_embed
+
+/-- A table whose keys do not ascend, with a repeated pc whose first entry wins. -/
+def unsortedTable : List (Nat × Link) := [(3, .direct 1), (1, .direct 2), (3, .direct 9)]
+
+/-- The table takes the scan, since its keys do not ascend. -/
+example : Extraction.linkKeysAscend 0 unsortedTable = false := by decide
+
+/-- The scan answers each query with the first entry for it, in query order. -/
+example : Extraction.linkReads unsortedTable [1, 3, 2] =
+    [some (.direct 2), some (.direct 1), none] := by decide
+
+/-- The walk over this table would stop at `(3, .direct 1)` for pc 1 and miss `(1, .direct 2)`,
+    which is why a table whose keys do not ascend takes the scan. -/
+example : Extraction.linkWalk unsortedTable unsortedTable 0 [1] ≠
+    [1].map (linkLookup unsortedTable) := by decide
+
+/-- An ascending table read with decreasing queries, as a map that reorders blocks gives: the
+    walk starts again from the head at pc 1, below pc 3, and finds the entry it had passed. -/
+example : Extraction.linkReads [(1, .direct 2), (3, .direct 1)] [3, 1, 2] =
+    [some (.direct 1), some (.direct 2), none] := by decide
+
+/-- A table with a link at every even pc. -/
+def evenTable : List (Nat × Link) := (List.range 20).map fun index => (2 * index, .direct index)
+
+/-- Queries that descend at every other step, below and above each key, read as scans would. -/
+example : Extraction.linkWalk evenTable evenTable 0
+      [7, 2, 30, 0, 39, 38, 1, 12, 11, 40, 5, 4] =
+    [7, 2, 30, 0, 39, 38, 1, 12, 11, 40, 5, 4].map (linkLookup evenTable) := by decide
+
+/-- Fully descending queries read as scans would. -/
+example : Extraction.linkWalk evenTable evenTable 0 (List.range 42).reverse =
+    (List.range 42).reverse.map (linkLookup evenTable) := by decide
+
+/-- An extraction that places the block the head branches to before the block after the head. -/
+def reorderedExtraction : Method := {
+  code := [.br 1, .arg 1, .call 2 1, .pop, .ret, .arg 0, .call 1 1, .pop, .ret]
+  locals := [], returnsValue := false }
+
+/-- The body a proof uses, with the blocks in source order. -/
+def reorderedWritten : Method :=
+  reorderedExtraction.withCode
+    [.br 5, .arg 0, .call 1 1, .pop, .ret, .arg 1, .call 2 1, .pop, .ret]
+
+-- The map sends the second block back to pc 1, so the link reads descend once.
+#guard MethodBinding.alignLive reorderedWritten.code.toArray reorderedExtraction.code.toArray ==
+  #[0, 5, 6, 7, 8, 1, 2, 3, 4]
+
+theorem reordered_embeds : MethodEmbeds [reorderedExtraction] 0 reorderedWritten := by cil_embed
+
+#print axioms reordered_embeds
+
+/-- Where the walk never descends it answers as the scan does. -/
+example : Extraction.linkReads [(1, .direct 2), (3, .direct 1)] [1, 2, 3] =
+    [1, 2, 3].map (linkLookup [(1, .direct 2), (3, .direct 1)]) := by decide
+
+/-- Whichever branch runs, the reads are the per-query lookups. -/
+example : Extraction.linkReads unsortedTable [1, 3, 2] =
+    [1, 3, 2].map (linkLookup unsortedTable) :=
+  Extraction.linkReads_eq unsortedTable _
+
+end Tests.MethodEmbedding.Metadata

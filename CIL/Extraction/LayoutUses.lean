@@ -72,7 +72,7 @@ private def checkSize (size alignment : Nat) : SizeAccess → Instruction → Bo
   | .store, .memory (.marshalWrite (.snapshot (.aggregate width)) _) => width == size
   | .load, .loadAggregate width | .store, .storeAggregate width
   | .initialize, .initAggregate width | .copy, .copyObject width => width == size
-  | .sizeOf, .const32 bits => bits.toNat == size
+  | .sizeOf, .ldc_i4 bits => bits.toNat == size
   | .construct, .newAggregate _ _ width => width.val == size
   | .spanElement, .memory (.spanEmpty width _)
   | .spanElement, .initializeSpanLocal _ (.empty width _)

@@ -219,7 +219,8 @@ internal static partial class TemplateEmitter
             Line($"/-- The stable managed identity of `method{index}`. -/");
             Line($"def method{index}Signature : String := {JsonSerializer.Serialize(template.Identity)}");
             Line("/-- A fixed-PC template for the selected flag combinations, with explicit callee indices. -/");
-            lean.Append($"@[cil_code] def method{index} (profile : FeatureProfile)");
+            lean.Append($"@[cil_code] def method{index} (profile : FeatureProfile) " +
+                $"({FrameMetadata.EnvironmentLean} : LayoutEnvironment)");
             foreach (var feature in template.Features) lean.Append($" ({Flag(feature)} : Bool)");
             for (var callee = 0; callee < template.Callees.Length; callee++) lean.Append($" (callee{callee} : Nat)");
             Line($" : Method := {{ profile, {template.Frame.ToLean(Callee)}, code := [");
@@ -251,7 +252,7 @@ internal static partial class TemplateEmitter
         {
             var templateIndex = templateIndices[variant.Methods[index].Identity];
             var template = templates[templateIndex];
-            var arguments = new List<string> { "Extracted.profile" };
+            var arguments = new List<string> { "Extracted.profile", "Extracted.environment" };
             arguments.AddRange(template.Features.Select(feature => LeanText.Bool(variant.Profile.Get(feature))));
             foreach (var callee in template.Callees)
             {

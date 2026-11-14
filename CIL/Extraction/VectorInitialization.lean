@@ -45,7 +45,7 @@ def vectorObjectMatches (raw : RawInstruction) (emitted : Instruction) : Bool :=
       | none => false
       | some width => match raw.opcode, emitted with
         | 0x70, .copyObject bytes | 0xfe15, .initAggregate bytes => bytes == width
-        | 0xfe1c, .const32 bits => bits.toNat == width
+        | 0xfe1c, .ldc_i4 bits => bits.toNat == width
         | 0x71, .memory .load128 | 0x81, .memory .store128 => width == 16
         | 0x71, .memory .load256 | 0x81, .memory .store256 => width == 32
         | 0x71, .memory .load512 | 0x81, .memory .store512 => width == 64
