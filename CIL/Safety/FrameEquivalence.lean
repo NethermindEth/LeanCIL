@@ -99,7 +99,7 @@ theorem Memory.Equivalent.loadLocal {m n : Memory} (same : m.Equivalent n)
 theorem Memory.Equivalent.localAddress {m n : Memory} (same : m.Equivalent n)
     (slot : LocalSlot) :
     CIL.Safety.localAddress m slot = CIL.Safety.localAddress n slot := by
-  cases slot <;> simp only [CIL.Safety.localAddress, same.formValue]
+  cases slot <;> simp only [CIL.Safety.localAddress, same.formValue, same.loadLocal]
 
 theorem Memory.Equivalent.allocateHome {m n : Memory} (same : m.Equivalent n)
     (activation width alignment : Nat) :

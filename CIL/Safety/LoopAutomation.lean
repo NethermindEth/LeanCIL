@@ -215,8 +215,9 @@ def loopScalarOnly : List Lean.Name :=
 
 open Lean Meta in
 /-- Whether the step obligation `step` of the fetched `op` can check a reference or span: any
-    instruction but `loopScalarOnly`, an argument load or local store of a non-scalar, and a load
-    of a local that is not a byte home. -/
+    instruction but `loopScalarOnly`, an argument load or local store of a non-scalar, a load of
+    a local that is not a byte home or holds a reference, and the address of a local that is not a
+    byte home. -/
 def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
   let op ← whnfR op
   let some name := op.getAppFn.constName? | return true
@@ -235,8 +236,8 @@ def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
     let stack ← whnfR stack
     let some #[_, top, _] := argumentsOf? stack ``List.cons 3 | return true
     return !(← scalar top)
-  if name == ``CIL.Instruction.local then
-    -- Loading a span or reference local checks it.
+  if name == ``CIL.Instruction.local || name == ``CIL.Instruction.localAddr then
+    -- Loading a span or reference local checks it, and so does taking a span local's address.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
     let frame ← whnfR frame
@@ -244,7 +245,7 @@ def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
     let some (_, slot) := (← listEntries locals).find? (·.1 == index) | return true
     let slot ← whnfR slot
     let some #[kind, _] := argumentsOf? slot ``LocalSlot.bytes 2 | return true
-    return (← whnfR kind).isConstOf ``CIL.LocalKind.reference
+    return name == ``CIL.Instruction.local && (← whnfR kind).isConstOf ``CIL.LocalKind.reference
   return false
 
 open Lean Meta in

@@ -503,14 +503,12 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
   if instruction.opcode ∈ [18, 65037] then
     return match localIndex instruction, emitted with
       | some index, .localAddr actual => index == actual
-      | some index, .local actual =>
-        index == actual && spanLocalOp (raw.locals[·]?) instruction
       | _, _ => false
   -- Argument homes are appended after all raw locals. Their precise mapping is
   -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
   if instruction.opcode ∈ [15, 65034] then
     return match emitted with
-      | .localAddr index | .local index => raw.locals.length <= index
+      | .localAddr index => raw.locals.length <= index
       | _ => false
   if instruction.opcode ∈ [16, 65035] then
     return match emitted with | .setLocal index => raw.locals.length <= index | _ => false

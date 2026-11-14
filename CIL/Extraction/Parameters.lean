@@ -200,8 +200,6 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
       let slot ← homeAt index
       match emitted with
       | .localAddr actual => return actual == slot
-      | .local actual => return actual == slot && match type with
-          | .span .. | .aggregateSpan .. => true | _ => false
       | _ => return false).getD false
   | .other => match emitted with
       | .arg .. => false
