@@ -593,7 +593,8 @@ if (fieldIncrementRatio > AllowedFieldIncrementRatio)
     throw new Exception(FormattableString.Invariant(
         $"The tables check grows by {fieldIncrementRatio:F2} times as much from {fieldCounts[1]} to ") +
         FormattableString.Invariant(
-            $"{fieldCounts[2]} fields as from {fieldCounts[0]} to {fieldCounts[1]}; the limit is {AllowedFieldIncrementRatio}."));
+            $"{fieldCounts[2]} fields as from {fieldCounts[0]} to {fieldCounts[1]}; ") +
+        FormattableString.Invariant($"the limit is {AllowedFieldIncrementRatio}."));
 
 // `spelled?` reads a name's bytes in one pass, and `cil_kernel_rfl` equates the result with the name's literal:
 // the cost grows with the length of the name and no faster. Each file is measured against the same file with
@@ -636,7 +637,8 @@ var deepSource = Path.Combine(directory, "DeepAssembly");
 Directory.CreateDirectory(deepSource);
 File.WriteAllText(Path.Combine(deepSource, "Deep.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize><AssemblyName>Bodies</AssemblyName></PropertyGroup>
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize>
+    <AssemblyName>Bodies</AssemblyName></PropertyGroup>
 </Project>
 """);
 string Deep(int depth) =>

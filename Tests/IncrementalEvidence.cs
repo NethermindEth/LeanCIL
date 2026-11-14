@@ -177,7 +177,8 @@ var lateBefore = Component(Extracted(withoutLiteral, "Workspace.Lit::Late(ulong)
 var lateAfter = Component(Extracted(withLiteral, "Workspace.Lit::Late(ulong)", "LateAfter"), 0, "Late");
 if (lateBefore == lateAfter)
     throw new InvalidOperationException(
-        "A literal added to an earlier method did not move the `ldstr` operand of a later one: the case tests nothing.");
+        "A literal added to an earlier method did not move the `ldstr` operand of a later one: " +
+        "the case tests nothing.");
 if (!Regex.IsMatch(lateAfter, @"(?m)^def method0Body :"))
     throw new InvalidOperationException("The refreshed component of Late has no body definition.");
 Console.WriteLine("PASS a literal added to one method leaves a method without literals byte-identical and refreshes " +

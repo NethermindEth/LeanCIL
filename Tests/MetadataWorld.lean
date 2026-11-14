@@ -166,8 +166,8 @@ def ownWorld : Step OwnTokens := do
   let lazyValueRef ←
     row Table.memberRef [(lazySpec - 0x1B000000) * 8 + 4, valueName, parameterField]
   link linkDefinition holderValueRef 1 (tokenOf Table.field 3)
-  pure { pairRef := pairRef, secondField := secondField, firstRef := firstRef, sumRef := sumRef, objectRef := objectRef,
-         consoleRef := consoleRef, boxRef := boxRef, holderValueRef := holderValueRef,
+  pure { pairRef := pairRef, secondField := secondField, firstRef := firstRef, sumRef := sumRef,
+         objectRef := objectRef, consoleRef := consoleRef, boxRef := boxRef, holderValueRef := holderValueRef,
          lazyValueRef := lazyValueRef, writeLine := writeLine, getRef := getRef, idRef := idRef,
          idSpec := idSpec,
          countField := countField, totalField := totalField, main := main,

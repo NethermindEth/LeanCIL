@@ -361,7 +361,8 @@ if (admittedMethods.Length != 0)
 // extraction stops at it and names the instruction, the method and the stage.
 var volatileSource = Path.Combine(directory, "VolatileAssembly");
 Directory.CreateDirectory(volatileSource);
-File.WriteAllText(Path.Combine(volatileSource, "Volatile.csproj"), File.ReadAllText(Path.Combine(source, "Fixture.csproj")));
+File.WriteAllText(Path.Combine(volatileSource, "Volatile.csproj"),
+    File.ReadAllText(Path.Combine(source, "Fixture.csproj")));
 File.WriteAllText(Path.Combine(volatileSource, "Volatile.cs"), """
 public sealed class Flag { public volatile int Raised; }
 public static class Access
@@ -374,8 +375,8 @@ Run(["dotnet", "build", Path.Combine(volatileSource, "Volatile.csproj"), "-c", "
 foreach (var (selector, method) in new[] { ("Access::Read(Flag)", "System.Int32 Access::Read(Flag)"),
     ("Access::Write(Flag)", "System.Void Access::Write(Flag)") })
 {
-    var refused = Execute(["dotnet", ExtractorPath, "extract", Path.Combine(volatileSource, "bin/Volatile.dll"), selector,
-        Path.Combine(directory, "VolatileExtraction")]);
+    var refused = Execute(["dotnet", ExtractorPath, "extract", Path.Combine(volatileSource, "bin/Volatile.dll"),
+        selector, Path.Combine(directory, "VolatileExtraction")]);
     Require(refused.Code != 0 && refused.Output.Contains("Unsupported instruction: IL_", StringComparison.Ordinal) &&
         refused.Output.Contains("volatile.", StringComparison.Ordinal) &&
         refused.Output.Contains("Method: " + method, StringComparison.Ordinal) &&
