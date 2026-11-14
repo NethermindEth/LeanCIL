@@ -1545,4 +1545,25 @@ example : True := by
           throwError "a node was recorded twice"
   trivial
 
+open Lean Elab Tactic Meta in
+/-- No `cil_step` equation about `CIL.Safety.step` is an rfl lemma. Simp applies an rfl lemma
+    without a proof term, and the kernel then reduces `step` again at every use. -/
+example : True := by
+  run_tac do
+    let some extension ← getSimpExtension? `cil_step | throwError "cil_step is not a simp set"
+    let mut examined := 0
+    let mut rflEquations := #[]
+    for origin in (← extension.getTheorems).lemmaNames.toList do
+      let .decl name .. := origin | continue
+      let aboutStep ← forallTelescope (← getConstInfo name).type fun _ conclusion =>
+        pure <| conclusion.eq?.any fun (_, lhs, _) => lhs.getAppFn.isConstOf ``CIL.Safety.step
+      unless aboutStep do continue
+      examined := examined + 1
+      if (← isRflTheorem name) || (← isBackwardRflTheorem name) then
+        rflEquations := rflEquations.push name
+    if examined == 0 then throwError "cil_step holds no equation about CIL.Safety.step"
+    unless rflEquations.isEmpty do
+      throwError "cil_step equations about CIL.Safety.step proved by rfl: {rflEquations.toList}"
+  trivial
+
 end Tests.Automation

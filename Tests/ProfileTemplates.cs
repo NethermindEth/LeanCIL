@@ -10,7 +10,7 @@ var shared = Path.Combine(directory, "Shared");
 Directory.CreateDirectory(source);
 File.WriteAllText(Path.Combine(source, "Dispatch.csproj"), """
 <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>
-<TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize><AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+<TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize><AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 </PropertyGroup></Project>
 """);
 File.WriteAllText(Path.Combine(source, "Dispatch.cs"), """

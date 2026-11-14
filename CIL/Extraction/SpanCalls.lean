@@ -13,7 +13,7 @@ namespace CIL.Extraction
 
 /-- The exact assembly defining the supported array extension methods. -/
 def spanMemoryScope : String :=
-  "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+  "System.Memory, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
 
 /-- The observable choice made by a supported span call. -/
 inductive SpanCall where

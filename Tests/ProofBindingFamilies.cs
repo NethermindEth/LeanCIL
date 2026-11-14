@@ -36,7 +36,7 @@ string Build(string name, bool changed)
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Methods.csproj"), """
         <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>
-          <TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize>
+          <TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize>
         </PropertyGroup></Project>
         """);
     var methods = File.ReadAllText(At("Tests/BindingFamilies/Methods.cs"));

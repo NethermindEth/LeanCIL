@@ -7,7 +7,7 @@ extractor admits, and how to review and record a change to either. Read it when 
 baselines fails.
 
 The `dispatch` suite checks a pinned source corpus against Roslyn 4.14.0, 5.0.0 and 5.9.0,
-using the same .NET 10.0.0 reference pack and optimized compilation. Each compiler runs at its
+using the same .NET 11.0.0 reference pack and optimized compilation. Each compiler runs at its
 default language version and at `latest`; compilers supporting C# 14 also run explicitly at `14`.
 The default column omits `/langversion`, so it tests the compiler default, not an SDK-selected
 language version. Compiler binaries

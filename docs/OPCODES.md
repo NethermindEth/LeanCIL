@@ -13,13 +13,15 @@ opcode/operand combination has its own regression test, or that the model is equ
   Unsupported operand shapes can fail during checked execution even when translation succeeds.
 - Extraction rejects every opcode the table does not list.
 
-Every row is subject to the common target restrictions: Release IL-only .NET 10 assemblies,
+Every row is subject to the common target restrictions: Release IL-only .NET 11 assemblies,
 64-bit little-endian execution, admitted types, no exception handlers and validated reachable
 control flow. Ordinary managed calls must have an acyclic extraction order; checked tail
 transfers may form cycles. A translated method still requires a proof of the desired property;
 exhausted fuel, invalid states and unsupported operations are failures, never implicit successes.
 Release configuration does not guarantee that a compiler emits only supported instructions:
-reachable exception handling, for example, is rejected.
+reachable exception handling, for example, is rejected. A runtime-async method, which carries
+the `Async` implementation flag, is rejected as an entry and as a callee: its body returns the
+awaited result and the runtime builds the declared task.
 
 ## Translated opcodes
 
@@ -778,7 +780,7 @@ and `divRemBits_zero` and `divRemBits_overflow` the faults.
 
 Native-width overloads use the validated 64-bit target. The 128-bit (`Int128` and `UInt128`
 `BigMul`), generic-math and other unlisted helper overloads are unsupported. The extractor
-validates the exact .NET 10 runtime assembly identity, declaring type, static calling convention
+validates the exact .NET 11 runtime assembly identity, declaring type, static calling convention
 and signature. Correspondence to the runtime's implementation is an assumption; see
 [portable bit helpers](SOUNDNESS-RUNTIME.md#portable-bit-helpers).
 

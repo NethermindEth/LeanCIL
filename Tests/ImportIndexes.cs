@@ -38,7 +38,7 @@ try
     var contract = JsonSerializer.Deserialize(JsonSerializer.Serialize(new
     {
         Schema = 1, SemanticsVersion = 1, FormatVersion = 1, FrameworkKey = framework,
-        AssemblyIdentity = "Fixture", Mvid = Guid.NewGuid(), TargetFramework = ".NETCoreApp,Version=v10.0",
+        AssemblyIdentity = "Fixture", Mvid = Guid.NewGuid(), TargetFramework = ".NETCoreApp,Version=v11.0",
         ImplementationSha256 = digest, IsReferenceAssembly = false,
         InterfaceModules = new[] { new { Name = "Published", Source = "namespace Published\nend Published\n" } },
         InterfaceDigest = digest, Exports = exports, Certifications = certifications,

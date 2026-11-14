@@ -56,11 +56,12 @@ internal static class RuntimeAssetSelection
     {
         string target = Text(Object(deps, "runtimeTarget"), "name");
         string[] parts = target.Split('/');
-        if (parts.Length > 2 || !Framework(parts[0])) throw new InvalidDataException("Contract discovery requires net10.0: " + target);
+        if (parts.Length > 2 || !Framework(parts[0]))
+            throw new InvalidDataException("Contract discovery requires net11.0: " + target);
         return parts.Length == 2 ? parts[1] : null;
     }
 
-    static bool Framework(string target) => target is "net10.0" or ".NETCoreApp,Version=v10.0";
+    static bool Framework(string target) => target is "net11.0" or ".NETCoreApp,Version=v11.0";
 
     internal static string Architecture(string rid)
     {
@@ -120,7 +121,9 @@ internal static class RuntimeAssetSelection
                     name.Split('/') is [string ridFramework, string targetRid] && Framework(ridFramework) && targetRid == rid).ToArray();
             string[] exact = choices.Where(name => name.Contains('/')).ToArray();
             string[] selected = exact.Length > 0 ? exact : choices;
-            if (selected.Length != 1) throw new InvalidDataException("Missing or ambiguous net10.0 discovery target for RID " + (rid ?? "portable"));
+            if (selected.Length != 1)
+                throw new InvalidDataException(
+                    "Missing or ambiguous net11.0 discovery target for RID " + (rid ?? "portable"));
             target = selected[0];
         }
         JsonElement selectedTarget = Object(targets, target);

@@ -200,12 +200,14 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
 
 #print axioms virtualCall_null
 
+-- These equations are closed by `id rfl` because simp applies a lemma proved by `rfl` without a
+-- proof term, and the kernel would then reduce `step` again at every use.
 /-- `ceq` on two object references pushes their identity comparison. -/
 @[cil_step high] theorem step_ceq_object_eq (left right : ManagedReference) (rest : List Value) :
     step body .ceq pc args frame (.object right :: .object left :: rest) memory = do
       let equal ← objectEqual memory left right
       return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame memory :=
-  rfl
+  id rfl
 
 /-- `beq` on two object references branches when they are the same instance. -/
 @[cil_step high] theorem step_beq_object_eq (target : Nat) (left right : ManagedReference)
@@ -213,7 +215,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.beq target) pc args frame (.object right :: .object left :: rest) memory = do
       let equal ← objectEqual memory left right
       return .next (if equal then target else pc + 1) rest frame memory :=
-  rfl
+  id rfl
 
 /-- `bne.un` on two object references branches when they are different instances. -/
 @[cil_step high] theorem step_bne_un_object_eq (target : Nat) (left right : ManagedReference)
@@ -221,7 +223,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.bne_un target) pc args frame (.object right :: .object left :: rest) memory = do
       let equal ← objectEqual memory left right
       return .next (if equal then pc + 1 else target) rest frame memory :=
-  rfl
+  id rfl
 
 /-- `cgt.un` of an object reference against null pushes whether the reference is present. -/
 @[cil_step high] theorem step_cgt_un_object_eq (left right : ManagedReference)
@@ -229,7 +231,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body .cgt_un pc args frame (.object right :: .object left :: rest) memory = do
       let present ← objectAboveNull memory left right
       return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame memory :=
-  rfl
+  id rfl
 
 /-- `brfalse` on an object reference branches when it is null. -/
 @[cil_step high] theorem step_brfalse_object_eq (target : Nat) (value : ManagedReference)
@@ -237,7 +239,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.brfalse target) pc args frame (.object value :: rest) memory = do
       let present ← objectNonNull memory value
       return .next (if present then pc + 1 else target) rest frame memory :=
-  rfl
+  id rfl
 
 /-- `brtrue` on an object reference branches when it is present. -/
 @[cil_step high] theorem step_brtrue_object_eq (target : Nat) (value : ManagedReference)
@@ -245,7 +247,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.brtrue target) pc args frame (.object value :: rest) memory = do
       let present ← objectNonNull memory value
       return .next (if present then target else pc + 1) rest frame memory :=
-  rfl
+  id rfl
 
 /-- `isinst` and `castclass` replace an object reference by its tested form: itself when its
     runtime lineage holds the class, else null or `InvalidCastException`. -/
@@ -254,21 +256,21 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.objectTest type throwing) pc args frame (.object value :: rest) memory = do
       let result ← objectTest memory type throwing value
       return .next (pc + 1) (.object result :: rest) frame memory :=
-  rfl
+  id rfl
 
 /-- `newarr` of a class with an int32 length allocates the array and pushes it. -/
 @[cil_step high] theorem step_newReferenceArray_i32_eq (element : CIL.Extraction.TypeExpr)
     (bits : BitVec 32) (rest : List Value) :
     step body (.newReferenceArray element) pc args frame (.scalar (.i32 bits) :: rest) memory = do
       let (array, allocated) ← newReferenceArray memory element (.i32 bits)
-      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := rfl
+      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := id rfl
 
 /-- `newarr` of a class with a native length allocates the array and pushes it. -/
 @[cil_step high] theorem step_newReferenceArray_i64_eq (element : CIL.Extraction.TypeExpr)
     (bits : BitVec 64) (rest : List Value) :
     step body (.newReferenceArray element) pc args frame (.scalar (.i64 bits) :: rest) memory = do
       let (array, allocated) ← newReferenceArray memory element (.i64 bits)
-      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := rfl
+      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := id rfl
 
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
 @[cil_step high] theorem step_nullObject_eq (stack : List Value) :
