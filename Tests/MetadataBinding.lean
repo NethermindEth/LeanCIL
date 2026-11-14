@@ -237,7 +237,8 @@ theorem rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
 private def rejectsWithoutLibSlice (token : Nat) (operand : RawOperand) (error : MetadataError) :
     Bool :=
   match (do
-    let env := MetadataEnv.ofSlices [← own.1.index] [bytesOf libScope]
+    let env := MetadataEnv.ofSlices [← own.1.index]
+      (({} : AssemblyPrefixes).insert (bytesOf libScope))
     checkEntry env 0 token operand) with
   | .error found => found == error
   | .ok _ => false

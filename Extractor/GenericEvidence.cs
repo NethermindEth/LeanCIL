@@ -401,7 +401,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
             $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, " +
             $"identities := {identities}, tables := method{number}Tables, names := method{number}Names, " +
-            $"pinned := pinnedIdentities{instantiation} }}",
+            $"pinned := pinnedIndex{instantiation} }}",
             identified, $"method{number}_tables_valid");
     }
 
@@ -479,6 +479,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Every body lists these identities; one proof that they spell the pins serves them all.
         lean.AppendLine("def pinnedIdentities : List (List Nat) := " +
             List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity")));
+        lean.AppendLine("def pinnedIndex : Extraction.PinnedIndex := cil_pin_index pinnedIdentities");
+        lean.AppendLine("#print axioms pinnedIndex");
         lean.AppendLine("theorem pinned_identities_spelled : pinnedIdentities.mapM Extraction.spelled? = " +
             "some (assemblies.map (·.identity)) := by cil_kernel_rfl");
     }

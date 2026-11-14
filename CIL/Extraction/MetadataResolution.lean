@@ -108,7 +108,7 @@ structure MetadataEnv where
   pinned : AssemblyPrefixes
 
 /-- Build all assembly lookups once, keeping the first occurrence of each identity. -/
-def MetadataEnv.ofSlices (slices : List MetadataIndex) (pinned : List (List Nat) := []) :
+def MetadataEnv.ofSlices (slices : List MetadataIndex) (pinned : AssemblyPrefixes := {}) :
     MetadataEnv := Id.run do
   let mut identities : Std.TreeMap.Raw (List Nat) Nat := {}
   let mut position := 0
@@ -119,7 +119,7 @@ def MetadataEnv.ofSlices (slices : List MetadataIndex) (pinned : List (List Nat)
   return {
     slices := SearchTree.ofSorted (slices.zipIdx.map fun (index, position) => (position, index))
     identities := identities
-    pinned := pinned.foldl AssemblyPrefixes.insert {} }
+    pinned := pinned }
 
 /-- The slice at a position, or `unresolvedType` for a token that points outside the list. -/
 def MetadataEnv.slice (env : MetadataEnv) (position token : Nat) :
@@ -141,6 +141,39 @@ def assemblyStem : List Nat → List Nat
   | [] => []
   | byte :: rest =>
     if versionMarker.isPrefixOf (byte :: rest) then versionMarker else byte :: assemblyStem rest
+
+/-- A package's complete identities and their kernel-checked prefix lookup. -/
+structure PinnedIndex where
+  identities : List (List Nat)
+  prefixes : AssemblyPrefixes
+  indexed : prefixes = (identities.map assemblyStem).foldl AssemblyPrefixes.insert {}
+
+/-- Construct a checked index directly from its complete identity list. -/
+def PinnedIndex.ofIdentities (identities : List (List Nat)) : PinnedIndex :=
+  ⟨identities, (identities.map assemblyStem).foldl AssemblyPrefixes.insert {}, rfl⟩
+
+/-- Complete identities determine every component of a checked pin index. -/
+theorem PinnedIndex.ext {first second : PinnedIndex}
+    (identities : first.identities = second.identities) : first = second := by
+  cases first with
+  | mk first firstPrefixes firstIndexed =>
+    cases second with
+    | mk second secondPrefixes secondIndexed =>
+      dsimp at identities
+      subst second
+      cases firstIndexed
+      cases secondIndexed
+      rfl
+#print axioms PinnedIndex.ext
+
+/-- Checked pin indexes are equal exactly when their complete identities are equal. -/
+instance : DecidableEq PinnedIndex := fun first second =>
+  if same : first.identities = second.identities then .isTrue (PinnedIndex.ext same)
+  else .isFalse (fun equal => same (congrArg PinnedIndex.identities equal))
+
+/-- The complete identities determine the displayed pin index. -/
+instance : Repr PinnedIndex where
+  reprPrec index precedence := reprPrec index.identities precedence
 
 /-- `Namespace.Name`, or the bare name for the global namespace. -/
 def qualifiedName (namespace_ name : List Nat) : List Nat :=
