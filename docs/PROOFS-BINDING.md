@@ -235,8 +235,9 @@ theorem found : Extracted.program[1]? = some double := by cil_body
 Do not write `{ Extracted.method1 with code := ... }`: a structure update copies the extraction's
 link table and static sites, which are keyed by the extraction's pcs, so the update agrees with the
 new code only where no call or static access moved. A body that reads statics sets the sites after
-`withCode`, as in `{ Extracted.method1.withCode code with staticSites := [...] }`. `withCode` is also
-the form for a body embedded into an extraction with dead blocks, where the pcs of the calls differ:
+`withCode`, as in `{ Extracted.method1.withCode code with staticSites := [...] }`, one entry per
+static access at the body's pc with the extraction's descriptor for it. `withCode` is also the
+form for a body embedded into an extraction with dead blocks, where the pcs of the calls differ:
 
 ```lean
 import CIL.Embedding.Tactic
@@ -258,8 +259,9 @@ A literal that does not bind is reported field by field. A difference in `declar
 `staticSites` or `links` prints `field declared:`, `field environment:`, `field staticSites:` or
 `field links:` with the value on each side, and the layout tables as their counts. The `links` line
 says to build the body with `withCode` from the extraction's method, and the `staticSites` line says
-that `withCode` resets the sites. The `declared` and `environment` lines name no remedy: take both
-from the extraction's method.
+that `withCode` resets the sites and what entries to supply after it. `cil_embed` adds the same
+text when the static descriptor lists differ or a moved pc resolves another descriptor. The
+`declared` and `environment` lines name no remedy: take both from the extraction's method.
 
 A proof that steps through a call reads the link at the call's pc. For an extracted method the
 generated fact `methodN_linkPC` gives the link of each call site in logarithmic time, and the

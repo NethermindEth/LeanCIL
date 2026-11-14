@@ -62,7 +62,8 @@ def linksHint : String :=
 /-- What to do when a body's static sites differ: `Method.withCode` resets them. -/
 def staticSitesHint : String :=
   "\n  static sites are keyed by pc; `Method.withCode` resets them, so a body that reads statics \
-    sets `staticSites` after it"
+    supplies its own after it: `{ body with staticSites := [(pc, descriptor), ...] }`, one entry \
+    per static access at the body's pc, with the descriptor the extraction has for that access"
 
 /-- One line per differing `Method` field, in declaration order. -/
 def methodDifferences (left right : Method) : List String :=

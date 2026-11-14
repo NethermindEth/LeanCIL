@@ -101,6 +101,7 @@ theorem linksOfCode_relocate (f : Nat → Nat) (code : List Instruction) :
       simp only [List.map_cons, List.zipIdx_cons, List.filterMap_cons, ih,
         Instruction.link?_relocate]
       cases op.link? <;> simp
+  rw [linksOfCode_eq_zipIdx, linksOfCode_eq_zipIdx]
   exact general code 0
 
 #print axioms linksOfCode_relocate

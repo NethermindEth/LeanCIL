@@ -134,4 +134,44 @@ theorem branch_into_address_rejected :
     ¬ CIL.Extraction.ScalarFlowValid #[] (raw 3) features states (code false) := by decide +kernel
 #print axioms branch_into_address_rejected
 
+/-- The readonly rule as `ScalarFlowValid` evaluates it, over a body's indexed instructions and
+    collected branch destinations. -/
+private def readOnlyAt (body : CIL.Extraction.RawMethod) :=
+  CIL.Extraction.readOnlySiteWindow (CIL.Extraction.FlowIndex.ofList body.code).get?
+    (Std.TreeSet.ofList (CIL.Extraction.branchTargets body.code) compare).contains
+
+/-- The accepted certificate passes the readonly rule at its prefix and its element address. -/
+theorem prefix_sites_accepted :
+    readOnlyAt (raw 2) 2 ⟨2, 65054, .none⟩ .nop = true ∧
+    readOnlyAt (raw 2) 3 ⟨4, 143, .type intType⟩ (.memory (.arrayAddress .signed32 false)) =
+      true := by decide +kernel
+#print axioms prefix_sites_accepted
+
+/-- A writable address under the prefix fails the readonly rule at the address itself. -/
+theorem writable_address_site_rejected :
+    readOnlyAt (raw 2) 3 ⟨4, 143, .type intType⟩ (.memory (.arrayAddress .signed32 true)) =
+      false := by decide +kernel
+#print axioms writable_address_site_rejected
+
+/-- The accepted body with only its prefix given an operand. -/
+private def operandRaw : CIL.Extraction.RawMethod :=
+  { raw 2 with code := (raw 2).code.set 2 ⟨2, 65054, .integer 0⟩ }
+
+/-- A prefix that carries an operand fails the readonly rule at the prefix while its address
+    still passes, and the certificate is rejected. -/
+theorem prefix_operand_rejected :
+    readOnlyAt operandRaw 2 ⟨2, 65054, .integer 0⟩ .nop = false ∧
+    readOnlyAt operandRaw 3 ⟨4, 143, .type intType⟩ (.memory (.arrayAddress .signed32 false)) =
+      true ∧
+    ¬ CIL.Extraction.ScalarFlowValid #[] operandRaw features states (code false) := by
+  decide +kernel
+#print axioms prefix_operand_rejected
+
+/-- A branch to the element address fails the readonly rule at both the prefix and the address. -/
+theorem entered_sites_rejected :
+    readOnlyAt (raw 3) 2 ⟨2, 65054, .none⟩ .nop = false ∧
+    readOnlyAt (raw 3) 3 ⟨4, 143, .type intType⟩ (.memory (.arrayAddress .signed32 false)) =
+      false := by decide +kernel
+#print axioms entered_sites_rejected
+
 end Tests.ReadOnlyArrayReferences

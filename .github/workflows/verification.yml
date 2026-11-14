@@ -16,7 +16,7 @@ concurrency:
 jobs:
   select:
     name: Select verification suites
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.select.outputs.matrix }}
@@ -27,7 +27,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Test verification helpers
@@ -75,7 +75,7 @@ jobs:
     name: Prepare certified Lean library
     needs: select
     if: needs.select.outputs.has-suites == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -102,7 +102,7 @@ jobs:
           persist-credentials: false
           # The first parent is the main commit this checkout builds on.
           fetch-depth: 2
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Install pinned elan
@@ -262,7 +262,7 @@ jobs:
     name: Build extractor, examples and shared fixtures
     needs: select
     if: needs.select.outputs.has-suites == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     outputs:
       artifact-id: ${{ steps.tools-artifact.outputs.artifact-id }}
@@ -275,7 +275,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Build the extractor and example assembly
@@ -299,7 +299,7 @@ jobs:
     name: Verify (${{ matrix.suite }})
     needs: [select, prepare, tools]
     if: needs.select.outputs.has-suites == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       # The certified library may be an artifact of the earlier run that donated it.
@@ -334,7 +334,7 @@ jobs:
           fetch-depth: 0
 
       - name: Install .NET SDK
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
 
@@ -466,7 +466,7 @@ jobs:
     needs: [select, suites]
     if: >-
       ${{ !cancelled() && needs.select.outputs.cost-sources != '' && needs.select.outputs.cost-sources != '[]' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -483,7 +483,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 2
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Download the head's rows
@@ -554,13 +554,13 @@ jobs:
     name: Build and verify
     needs: [select, prepare, tools, suites]
     if: always()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
       - name: Download this run's verification transcripts and timings

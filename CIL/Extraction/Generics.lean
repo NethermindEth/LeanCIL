@@ -410,6 +410,37 @@ def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   | opcode, _ =>
     if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
 
+/-- Whether `instruction` names `pc` as a branch destination or switch arm. -/
+def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .target target => target == pc
+  | .targets targets => targets.contains pc
+  | _ => false
+
+/-- All decoded branch destinations, including switch arms and unreachable instructions. -/
+def branchTargets (raw : List RawInstruction) : List Nat :=
+  raw.flatMap fun instruction => match instruction.operand with
+    | .target target => [target]
+    | .targets targets => targets
+    | _ => []
+
+/-- Collecting branch destinations once answers, for every pc, whether some instruction
+    branches to it. -/
+theorem branchTargets_contains (raw : List RawInstruction) (pc : Nat) :
+    (branchTargets raw).contains pc = raw.any (branchesTo pc) := by
+  induction raw with
+  | nil => rfl
+  | cons instruction rest ih =>
+    cases instruction with
+    | mk offset opcode operand =>
+      change _ = (branchesTo pc ⟨offset, opcode, operand⟩ || rest.any (branchesTo pc))
+      simp only [branchTargets, List.flatMap_cons, List.contains_append]
+      change (_ || (branchTargets rest).contains pc) = _
+      rw [ih]
+      cases operand <;> simp [branchesTo, BEq.beq, eq_comm]
+
+#print axioms branchTargets_contains
+
 /-- The unique raw managed indirect signature and native locals directly consumed as targets. -/
 structure NativeDispatchContext where
   signature : Option ManagedSignature := none

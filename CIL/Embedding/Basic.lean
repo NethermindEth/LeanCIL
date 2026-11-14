@@ -96,15 +96,14 @@ def sites (limit : Nat) : Nat → List Instruction → List Nat → List Site
       ⟨pc, map.headD limit, map.tail.headD limit, op⟩ :: sites limit (pc + 1) rest map.tail
     else sites limit (pc + 1) rest map.tail
 
-/-- `code[q]?` for each `q`, walking `code` once while the pcs increase; `rest` is
-    `code.drop start`. -/
+/-- `code[q]?` for each `q`, walking `code` while the pcs do not decrease and starting again from
+    its head at a pc below the one before; `rest` is `code.drop start`. The pcs cost one step each
+    and the code's length once per descent. -/
 def pick (code : List Instruction) : List Instruction → Nat → List Nat → List (Option Instruction)
   | _, _, [] => []
   | rest, start, q :: qs =>
-    if start ≤ q then
-      let tail := rest.drop (q - start)
-      tail.head? :: pick code tail q qs
-    else code[q]? :: pick code rest start qs
+    let tail := if start ≤ q then rest.drop (q - start) else code.drop q
+    tail.head? :: pick code tail q qs
 
 /-- The static descriptor a `staticAddress` or `staticValue` at `pc` resolves to. -/
 def staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
@@ -116,9 +115,9 @@ open Embedding in
 /-- `expected` embeds into `actual` under the pc map `map`. Non-code fields agree,
     except that static sites may move as long as each live instruction resolves the
     same descriptor and the program-wide descriptor list is unchanged. Link tables
-    move the same way: each live instruction has the link its image has. The reads walk each
-    table once while its keys ascend and the queried pcs do not decrease; otherwise each query
-    scans the table. -/
+    move the same way: each live instruction has the link its image has. The reads walk a table
+    whose keys ascend, starting again from its head at each queried pc below the one before; a
+    table whose keys do not ascend is scanned once per query. -/
 structure Embeds (expected actual : Method) (map : List Nat) : Prop where
   profile : actual.profile = expected.profile
   returnsValue : actual.returnsValue = expected.returnsValue

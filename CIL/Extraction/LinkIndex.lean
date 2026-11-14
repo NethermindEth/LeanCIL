@@ -8,10 +8,11 @@ Two forms keep a read of a method's link table from costing the table's length. 
 emits, per method with calls, a balanced index of the table's entries (call sites only) and one
 equation checking that literal against the table, so a per-site fact reads its link in
 logarithmic time. An embedding reads the link of every live instruction on each side; when the
-table keys ascend and the queried pcs do not decrease, which holds for every extracted table and
-every embedding whose pc map keeps the order of the blocks, one walk over the table answers all
-queries. A hand-written table without ascending keys, or a map that reorders blocks, takes the
-scan, which costs the table's length per query.
+table keys ascend, which holds for every extracted table and every table `linksOfCode` builds, a
+walk over the table answers all queries. The walk advances while the queried pcs do not
+decrease and starts again from the head of the table at each pc below the one before, so a map
+that reorders a few blocks costs a few passes. A hand-written table without ascending keys takes
+the scan, which costs the table's length per query.
 -/
 
 namespace CIL.Extraction
@@ -92,34 +93,20 @@ def dropBelow (query : Nat) : List (Nat × Link) → List (Nat × Link)
   | [] => []
   | (key, link) :: rest => if key < query then dropBelow query rest else (key, link) :: rest
 
-/-- One link per query, for ascending queries over an ascending table, in a single pass. -/
-def linkWalk : List (Nat × Link) → List Nat → List (Option Link)
-  | _, [] => []
-  | table, query :: queries =>
-    match dropBelow query table with
-    | [] => none :: linkWalk [] queries
-    | (key, link) :: rest =>
-      (if key = query then some link else none) :: linkWalk ((key, link) :: rest) queries
+/-- The link the first entry gives `query`: its link when its key is `query`, else none. -/
+def readHead (query : Nat) : List (Nat × Link) → Option Link
+  | [] => none
+  | (key, link) :: _ => if key = query then some link else none
 
-/-- True when the queries do not decrease and none is below `lower`. -/
-def queriesAscend : Nat → List Nat → Bool
-  | _, [] => true
-  | lower, query :: rest => decide (lower ≤ query) && queriesAscend query rest
-
-/-- Ascending queries are all at least the lower bound. -/
-theorem queriesAscend_bound (queries : List Nat) (lower : Nat)
-    (ascending : queriesAscend lower queries = true) : ∀ query ∈ queries, lower ≤ query := by
-  induction queries generalizing lower with
-  | nil => simp
-  | cons head rest ih =>
-    simp only [queriesAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
-    intro query member
-    rcases List.mem_cons.mp member with rfl | member
-    · exact ascending.1
-    · have := ih head ascending.2 query member
-      omega
-
-#print axioms queriesAscend_bound
+/-- One link per query over `full`, whose keys ascend. `table` is `full` from the entry the
+    previous query stopped at; a query below the previous one starts again from the head of
+    `full`. The queries cost one step each and `full`'s length once per such descent. -/
+def linkWalk (full : List (Nat × Link)) :
+    List (Nat × Link) → Nat → List Nat → List (Option Link)
+  | _, _, [] => []
+  | table, previous, query :: queries =>
+    let remaining := dropBelow query (if query < previous then full else table)
+    readHead query remaining :: linkWalk full remaining query queries
 
 /-- Entries below the query never match it or a later query. -/
 theorem linkLookup_dropBelow (query : Nat) (table : List (Nat × Link)) (later : Nat)
@@ -161,71 +148,95 @@ theorem dropBelow_ascend (query : Nat) (table : List (Nat × Link)) :
 
 #print axioms dropBelow_ascend
 
-/-- The walk reads each query as a scan of the table would. -/
-theorem linkWalk_eq (queries : List Nat) : ∀ (table : List (Nat × Link)) (lower : Nat),
-    linkKeysAscend lower table = true → queriesAscend lower queries = true →
-      linkWalk table queries = queries.map (linkLookup table) := by
+/-- Dropping below a query what is left after dropping below an earlier one drops below the
+    query. -/
+theorem dropBelow_dropBelow (earlier query : Nat) (table : List (Nat × Link))
+    (after : earlier ≤ query) :
+    dropBelow query (dropBelow earlier table) = dropBelow query table := by
+  induction table with
+  | nil => rfl
+  | cons head rest ih =>
+    obtain ⟨key, link⟩ := head
+    by_cases below : key < earlier
+    · simp only [dropBelow, below, ite_true, show key < query by omega]
+      exact ih
+    · simp only [dropBelow, below, ite_false]
+
+#print axioms dropBelow_dropBelow
+
+/-- No key is below zero, so dropping below zero keeps the table. -/
+theorem dropBelow_zero (table : List (Nat × Link)) : dropBelow 0 table = table := by
+  cases table with
+  | nil => rfl
+  | cons head rest =>
+    obtain ⟨key, link⟩ := head
+    simp [dropBelow]
+
+#print axioms dropBelow_zero
+
+/-- Over an ascending table, the first entry left after dropping below a query answers it as a
+    scan of the table would. -/
+theorem readHead_dropBelow (query : Nat) (table : List (Nat × Link)) (lower : Nat)
+    (ascending : linkKeysAscend lower table = true) :
+    readHead query (dropBelow query table) = linkLookup table query := by
+  rw [← linkLookup_dropBelow query table query (Nat.le_refl query)]
+  have rest_ascends := dropBelow_ascend query table lower ascending
+  cases remaining : dropBelow query table with
+  | nil => rfl
+  | cons entry rest =>
+    obtain ⟨key, link⟩ := entry
+    rw [remaining] at rest_ascends
+    simp only [linkKeysAscend, Bool.and_eq_true, decide_eq_true_eq] at rest_ascends
+    have bounded := linkKeysAscend_bound rest (key + 1) rest_ascends.2
+    by_cases hit : key = query
+    · subst hit
+      have first : (((key, link) :: rest).find? fun entry => entry.1 == key) =
+          some (key, link) := List.find?_cons_of_pos (Nat.beq_refl key)
+      simp only [readHead, linkLookup, ite_true]
+      rw [first]
+      rfl
+    · have different : ¬ (key == query) = true := by
+        simp only [beq_iff_eq]
+        exact hit
+      have none_after : (rest.find? fun entry => entry.1 == query) = none := by
+        rw [List.find?_eq_none]
+        intro other member
+        have := bounded other member
+        simp only [beq_iff_eq]
+        omega
+      have skip : (((key, link) :: rest).find? fun entry => entry.1 == query) =
+          rest.find? fun entry => entry.1 == query := List.find?_cons_of_neg different
+      simp only [readHead, linkLookup, hit, ite_false]
+      rw [skip, none_after]
+      rfl
+
+#print axioms readHead_dropBelow
+
+/-- While `table` is what is left of an ascending `full` after dropping below `previous`, the
+    walk reads each query as a scan of `full` would, in whatever order the queries come. -/
+theorem linkWalk_eq (full : List (Nat × Link)) (ascending : linkKeysAscend 0 full = true)
+    (queries : List Nat) : ∀ (table : List (Nat × Link)) (previous : Nat),
+      table = dropBelow previous full →
+        linkWalk full table previous queries = queries.map (linkLookup full) := by
   induction queries with
   | nil => intros; rfl
   | cons query queries ih =>
-    intro table lower tableAscends queriesAscends
-    simp only [queriesAscend, Bool.and_eq_true, decide_eq_true_eq] at queriesAscends
-    have rest_ascends := dropBelow_ascend query table lower tableAscends
-    have later := queriesAscend_bound queries query queriesAscends.2
-    have same : queries.map (linkLookup (dropBelow query table)) =
-        queries.map (linkLookup table) :=
-      List.map_congr_left fun later_query member =>
-        linkLookup_dropBelow query table later_query (later later_query member)
-    have head_same := linkLookup_dropBelow query table query (Nat.le_refl query)
-    unfold linkWalk
-    cases remaining : dropBelow query table with
-    | nil =>
-      rw [remaining] at rest_ascends head_same same
-      have tail := ih [] query rfl queriesAscends.2
-      refine congr (congrArg List.cons ?_) ?_
-      · rw [← head_same]; rfl
-      · rw [tail]; exact same
-    | cons entry rest =>
-      obtain ⟨key, link⟩ := entry
-      rw [remaining] at rest_ascends head_same same
-      have tail := ih ((key, link) :: rest) query rest_ascends queriesAscends.2
-      have bounded : ∀ other ∈ rest, key + 1 ≤ other.1 := by
-        simp only [linkKeysAscend, Bool.and_eq_true, decide_eq_true_eq] at rest_ascends
-        exact linkKeysAscend_bound rest (key + 1) rest_ascends.2
-      have at_least : query ≤ key := by
-        simp only [linkKeysAscend, Bool.and_eq_true, decide_eq_true_eq] at rest_ascends
-        exact rest_ascends.1
-      refine congr (congrArg List.cons ?_) ?_
-      · rw [← head_same]
-        by_cases hit : key = query
-        · subst hit
-          have first : (((key, link) :: rest).find? fun entry => entry.1 == key) =
-              some (key, link) := List.find?_cons_of_pos (Nat.beq_refl key)
-          simp only [linkLookup, ite_true]
-          rw [first]
-          rfl
-        · have different : ¬ (key == query) = true := by
-            simp only [beq_iff_eq]
-            exact hit
-          have none_after : (rest.find? fun entry => entry.1 == query) = none := by
-            rw [List.find?_eq_none]
-            intro other member
-            have := bounded other member
-            simp only [beq_iff_eq]
-            omega
-          have skip : (((key, link) :: rest).find? fun entry => entry.1 == query) =
-              rest.find? fun entry => entry.1 == query := List.find?_cons_of_neg different
-          simp only [linkLookup, hit, ite_false]
-          rw [skip, none_after]
-          rfl
-      · rw [tail]; exact same
+    intro table previous suffix
+    have restarted : dropBelow query (if query < previous then full else table) =
+        dropBelow query full := by
+      split
+      · rfl
+      · rw [suffix]
+        exact dropBelow_dropBelow previous query full (by omega)
+    simp only [linkWalk, List.map_cons, restarted]
+    rw [readHead_dropBelow query full 0 ascending, ih (dropBelow query full) query rfl]
 
 #print axioms linkWalk_eq
 
-/-- The links an embedding reads for the queries: the walk when the table keys ascend and the
-    queries do not decrease, the scan otherwise. -/
+/-- The links an embedding reads for the queries: the walk when the table keys ascend, the scan
+    otherwise. -/
 def linkReads (links : List (Nat × Link)) (queries : List Nat) : List (Option Link) :=
-  if linkKeysAscend 0 links && queriesAscend 0 queries then linkWalk links queries
+  if linkKeysAscend 0 links then linkWalk links links 0 queries
   else queries.map (linkLookup links)
 
 /-- However the table and queries are ordered, the reads are the scans' answers. -/
@@ -233,9 +244,8 @@ theorem linkReads_eq (links : List (Nat × Link)) (queries : List Nat) :
     linkReads links queries = queries.map (linkLookup links) := by
   unfold linkReads
   split
-  · rename_i ordered
-    simp only [Bool.and_eq_true] at ordered
-    exact linkWalk_eq queries links 0 ordered.1 ordered.2
+  · rename_i ascending
+    exact linkWalk_eq links ascending queries links 0 (dropBelow_zero links).symm
   · rfl
 
 #print axioms linkReads_eq
