@@ -23,6 +23,19 @@ if (args is ["--request-scaling"])
 }
 
 using Program verification = new();
+var replayDeclaration = "BindingAudit.I" + new string('a', 64) + ".hash0._proof_1_1";
+var replayDiagnostic = BindingDiagnostic($"""
+    Command failed (1): C:/{new string('p', 320)}/leanchecker.exe BindingAudit.I{new string('a', 64)}
+    leanchecker found a problem in BindingAudit.I{new string('a', 64)}
+    uncaught exception: while replaying declaration '{replayDeclaration}':
+    (kernel) application type mismatch
+      id (Eq.refl Bool.true)
+    """);
+if (!replayDiagnostic.Contains(replayDeclaration, StringComparison.Ordinal) ||
+    !replayDiagnostic.Contains("(kernel) application type mismatch", StringComparison.Ordinal) ||
+    replayDiagnostic.Length > 303)
+    throw new InvalidOperationException("Binding diagnostic lost the rejected replay declaration or its error");
+Console.WriteLine("PASS replay diagnostics retain the declaration and kernel rejection after a long command");
 SortedDictionary<string, string> certifiedArtifacts = new(StringComparer.Ordinal)
 {
     ["CIL.olean"] = "main",
