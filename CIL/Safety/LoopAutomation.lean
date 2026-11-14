@@ -192,7 +192,7 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
   [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.local,
-    ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.ldc_i4,
+    ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.skipInit,
     ``CIL.Instruction.initAggregate, ``CIL.Instruction.fieldAddress]
 
@@ -200,7 +200,7 @@ def loopMovesOnly : List Lean.Name :=
     that `loopReadsReferences` shows is a scalar. -/
 def loopScalarOnly : List Lean.Name :=
   [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.local,
-    ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.ldc_i4,
+    ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.nativeBinary,
     ``CIL.Instruction.div, ``CIL.Instruction.div_un, ``CIL.Instruction.rem,
     ``CIL.Instruction.rem_un, ``CIL.Instruction.add_ovf, ``CIL.Instruction.add_ovf_un,
@@ -271,11 +271,11 @@ def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex Meta
     let entries ← listEntries args
     let some (_, value) := entries.find? (·.1 == index) | return true
     return !(← scalar value)
-  if name == ``CIL.Instruction.setLocal then
+  if name == ``CIL.Instruction.stloc then
     let stack ← whnfR stack
     let some #[_, top, _] := argumentsOf? stack ``List.cons 3 | return true
     return !(← scalar top)
-  if name == ``CIL.Instruction.local || name == ``CIL.Instruction.localAddr then
+  if name == ``CIL.Instruction.local || name == ``CIL.Instruction.ldloca then
     -- Loading a span or reference local checks it, and so does taking a span local's address.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
@@ -298,7 +298,7 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) :
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
   let some #[_, _, _, _, frame, _, memory] := argumentsOf? lhs ``CIL.Safety.step 7
     | return true
-  if op.isAppOf ``CIL.Instruction.setLocal then
+  if op.isAppOf ``CIL.Instruction.stloc then
     -- A span or reference local's store reduces without a fact.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
@@ -324,7 +324,7 @@ def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
     Array (Array Lean.Syntax.Term) :=
   if op == ``CIL.Instruction.ret then
     #[facts.addresses, facts.fields, facts.cases, facts.references] else
-  #[if op == ``CIL.Instruction.localAddr then facts.addresses else #[],
+  #[if op == ``CIL.Instruction.ldloca then facts.addresses else #[],
     if op == ``CIL.Instruction.fieldAt then facts.fields else #[],
     if loopMovesOnly.contains op then #[] else facts.cases,
     if references then facts.references else #[]]
@@ -454,7 +454,7 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
   -- A struct store no fact steps ends any walk but `.reach`, for the frame lemmas to take.
   let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&
     (op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initAggregate ||
-      op == ``CIL.Instruction.setLocal))
+      op == ``CIL.Instruction.stloc))
   let mut taken := 0
   let mut localIndex : LoopLocalIndex := {}
   repeat
@@ -480,7 +480,7 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     let saved ← saveState
     let fetched? ← observing? do
       let fetched ← loopFetch core
-      let stores := [``CIL.Instruction.setLocal, ``CIL.Instruction.setFieldAt,
+      let stores := [``CIL.Instruction.stloc, ``CIL.Instruction.setFieldAt,
         ``CIL.Instruction.initAggregate]
       let classify : StateT LoopLocalIndex MetaM (Bool × Bool) := do
         let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then

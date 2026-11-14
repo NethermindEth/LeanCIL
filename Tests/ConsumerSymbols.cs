@@ -84,7 +84,8 @@ File.WriteAllText(proof, """
     namespace ExampleProof
     -- The second block stores the wide product in its own `carry`.
     theorem correctness :
-        Client.sumBody.code[Client.atWide + 1]? = some (.setLocal (local_named Client.sum "carry" at (Client.atWide + 1))) := rfl
+        Client.sumBody.code[Client.atWide + 1]? =
+          some (.stloc (local_named Client.sum "carry" at (Client.atWide + 1))) := rfl
     end ExampleProof
     """);
 var plain = Path.Combine(package, "Plain.lean");
@@ -96,7 +97,7 @@ File.WriteAllText(plain, $$"""
     bind_method sum sumBody := "{{Sum}}"
     bind_callee wide wideBody := "System.UInt64 Names.Calls::Wide(System.UInt32,System.UInt32)" from sumBody
     bind_call atWide := wide from sumBody
-    theorem correctness : sumBody.code[atWide + 1]? = some (.setLocal 1) := rfl
+    theorem correctness : sumBody.code[atWide + 1]? = some (.stloc 1) := rfl
     end ExampleProof
     """);
 Run(["lake", "update"], package);
@@ -156,7 +157,7 @@ var statement = Statement(first);
 if (Cached(first) || !Replayed("ExtractedSymbols") || !Replayed("Client.Named"))
     throw new InvalidOperationException("ExtractedSymbols and its importer were not checked and replayed.");
 // The statement holds the chosen slot, not a reference to the PDB names.
-if (!statement.Contains("setLocal 1") || statement.Contains("local_named") || statement.Contains("ExtractedSymbols"))
+if (!statement.Contains("stloc 1") || statement.Contains("local_named") || statement.Contains("ExtractedSymbols"))
     throw new InvalidOperationException("Unexpected elaborated statement: " + statement);
 if (!Cached(Verify(named, proof))) throw new InvalidOperationException("An unchanged proof importing ExtractedSymbols was not reused.");
 if (Cached(Verify(plainOutput, plain)) || Replayed("ExtractedSymbols"))

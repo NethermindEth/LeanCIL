@@ -18,7 +18,7 @@ theorem local_address {memory other : Memory} {reference : Reference} {kind : CI
     (slot : frame.locals[index]? = some (.bytes kind reference))
     (wrongMemory : form other reference = .ok reference)
     (formed : form memory reference = .ok reference) :
-    step body (.localAddr index) pc args frame rest memory =
+    step body (.ldloca index) pc args frame rest memory =
       .ok (.next (pc + 1) (.reference (.address reference) :: rest) frame memory) := by
   fail_if_success solve | cil_checked_step [slot, wrongMemory]
   cil_checked_step [slot, formed]

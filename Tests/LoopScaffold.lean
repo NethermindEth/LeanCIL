@@ -277,8 +277,8 @@ open CIL.Safety
 /-- `while (remaining != 0) remaining--; return remaining;` with `remaining` in a frame home. -/
 @[cil_code] def countdown : CIL.Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true
-  code := [.arg 0, .setLocal 0, .local 0, .brtrue 6, .local 0, .ret, .local 0, .ldc_i4 1,
-    .sub, .setLocal 0, .br 2] }
+  code := [.arg 0, .stloc 0, .local 0, .brtrue 6, .local 0, .ret, .local 0, .ldc_i4 1,
+    .sub, .stloc 0, .br 2] }
 
 /-- The program holding only `countdown`. -/
 @[cil_code] def program : CIL.Program := [countdown]
@@ -380,9 +380,9 @@ open CIL.Safety
 @[cil_code] def sum : CIL.Method := {
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
-  code := [.ldc_i4 0, .conv_i8, .setLocal 0, .br 15, .local 0, .local 1, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .setLocal 0, .local 1, .ldc_i4 1,
-    .memory (.spanSlice false), .setLocal 1, .local 1, .memory .spanLength, .brtrue 4,
+  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .local 0, .local 1, .ldc_i4 0,
+    .memory (.spanItem 8), .load64, .add, .stloc 0, .local 1, .ldc_i4 1,
+    .memory (.spanSlice false), .stloc 1, .local 1, .memory .spanLength, .brtrue 4,
     .local 0, .ret] }
 
 /-- The program holding only `sum`. -/
@@ -504,9 +504,9 @@ theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.
 @[cil_code] def sumByAddress : CIL.Method := {
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
-  code := [.ldc_i4 0, .conv_i8, .setLocal 0, .br 15, .local 0, .localAddr 1, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .setLocal 0, .localAddr 1, .ldc_i4 1,
-    .memory (.spanSlice false), .setLocal 1, .localAddr 1, .memory .spanLength, .brtrue 4,
+  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .local 0, .ldloca 1, .ldc_i4 0,
+    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldloca 1, .ldc_i4 1,
+    .memory (.spanSlice false), .stloc 1, .ldloca 1, .memory .spanLength, .brtrue 4,
     .local 0, .ret] }
 
 /-- The program holding only `sumByAddress`. -/

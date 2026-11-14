@@ -201,14 +201,14 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       let some slot := frame.locals[index]? | .error .invalidState
       return FrameAction.next (pc + 1) ((← loadLocal memory slot) :: stack) frame memory := id rfl
 
-@[cil_step] theorem step_localAddr_eq (index : Nat) (stack : List Value) :
-    step body (.localAddr index) pc args frame stack memory = do
+@[cil_step] theorem step_ldloca_eq (index : Nat) (stack : List Value) :
+    step body (.ldloca index) pc args frame stack memory = do
       let some slot := frame.locals[index]? | .error .invalidState
       return FrameAction.next (pc + 1) ((← localAddress memory slot) :: stack) frame memory :=
   id rfl
 
-@[cil_step] theorem step_setLocal_eq (index : Nat) (value : Value) (rest : List Value) :
-    step body (.setLocal index) pc args frame (value :: rest) memory = do
+@[cil_step] theorem step_stloc_eq (index : Nat) (value : Value) (rest : List Value) :
+    step body (.stloc index) pc args frame (value :: rest) memory = do
       let some slot := frame.locals[index]? | .error .invalidState
       let (slot, memory) ← storeLocal memory slot value
       return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }

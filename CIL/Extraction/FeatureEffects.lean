@@ -86,7 +86,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
-  | .localAddr _ | .setLocal .. | .initializeSpanLocal ..
+  | .ldloca _ | .stloc .. | .initializeSpanLocal ..
   | .feature _ | .ret _ | .throw _ | .unsupported _ | .br _ | .switch _ | .brfalse _
   | .brtrue _ | .bgt _ | .ble _ | .ble_un _ | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _
   | .blt _ | .beq _ | .bne_un _ => none

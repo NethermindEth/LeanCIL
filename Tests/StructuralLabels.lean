@@ -9,7 +9,7 @@ open CIL
 def method0Signature : String := "System.UInt32 Labels.Calls::Root(System.UInt32)"
 def method1Signature : String := "System.UInt32 Labels.Calls::Step(System.UInt32)"
 def method0 : Method :=
-  { code := [.arg 0, .call 1 1, .setLocal 0,
+  { code := [.arg 0, .call 1 1, .stloc 0,
       .local 0, .brfalse 6, .br 3,
       .local 0, .brtrue 6,
       .arg 0, .call 1 1, .ret],

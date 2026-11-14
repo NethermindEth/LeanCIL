@@ -49,7 +49,7 @@ theorem step_store_word64 {body : CIL.Method} {pc index : Nat} {args rest : List
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (ready : access memory reference 8 1 true = .ok ()) :
     ∃ result,
-      step body (.setLocal index) pc args frame (.scalar (.i64 word) :: rest) memory =
+      step body (.stloc index) pc args frame (.scalar (.i64 word) :: rest) memory =
         .ok (.next (pc + 1) rest
           { frame with locals := frame.locals.set index (.bytes .word64 reference) } result) ∧
       write memory reference (numberBytes word.toNat 8) 1 = .ok result ∧
@@ -67,7 +67,7 @@ theorem step_store_word64_same_frame {body : CIL.Method} {pc index : Nat}
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (ready : access memory reference 8 1 true = .ok ()) :
     ∃ result,
-      step body (.setLocal index) pc args frame (.scalar (.i64 word) :: rest) memory =
+      step body (.stloc index) pc args frame (.scalar (.i64 word) :: rest) memory =
         .ok (.next (pc + 1) rest frame result) ∧
       write memory reference (numberBytes word.toNat 8) 1 = .ok result ∧
       read result reference 8 1 = .ok (numberBytes word.toNat 8) := by

@@ -199,7 +199,7 @@ theorem LocalSnapshots.store {body : CIL.Method} {pc index : Nat} {args stack : 
     (slot : frame.locals[index]? = some (.bytes kind home))
     (ready : access memory home (localWidth kind) 1 true = .ok ()) :
     ∃ after,
-      step body (.setLocal index) pc args frame (.scalar value :: stack) memory =
+      step body (.stloc index) pc args frame (.scalar value :: stack) memory =
         .ok (.next (pc + 1) stack frame after) ∧
       LocalSnapshots after frame.locals (rememberLocal known index (localResult kind value)) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧

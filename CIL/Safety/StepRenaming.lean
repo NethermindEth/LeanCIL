@@ -69,7 +69,7 @@ theorem stepTransport : StepTransport := by
     | exact ⟨mapping, .refl mapping,
         frames.stepLocal memories sourceBody targetBody _ pc arguments stack⟩
     | exact ⟨mapping, .refl mapping,
-        frames.stepLocalAddress memories sourceBody targetBody _ pc arguments stack⟩
+        frames.stepLdloca memories sourceBody targetBody _ pc arguments stack⟩
     | (cases stack with
        | nil =>
          simp only [step, observerCount, unspecifiedOperands, List.take_nil, List.any_nil,
@@ -77,7 +77,7 @@ theorem stepTransport : StepTransport := by
          cases observable
        | cons value rest =>
          exact ⟨mapping, .refl mapping,
-           frames.stepSetLocal memories sourceBody targetBody _ pc arguments rest value
+           frames.stepStloc memories sourceBody targetBody _ pc arguments rest value
              (bounds value (List.mem_cons_self ..))⟩)
 #print axioms stepTransport
 

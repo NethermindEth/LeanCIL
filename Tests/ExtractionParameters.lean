@@ -10,7 +10,7 @@ def raw : RawArguments := {
   code := [.load 0, .store 3, .address 1, .load 3] }
 def reachable : List Bool := [true, true, true, true]
 def method : Method := {
-  code := [.arg 0, .setLocal 2, .localAddr 1, .local 2]
+  code := [.arg 0, .stloc 2, .ldloca 1, .local 2]
   locals := [.i64 0], localKinds := [.word64]
   parameterHomes := [(1, .word32), (3, .word32)]
   returnsValue := true }
@@ -21,9 +21,9 @@ example : validateParameterHomes #[] raw reachable { method with parameterHomes 
 example : validateParameterHomes #[] raw reachable
     { method with parameterHomes := [(3, .word32), (1, .word32)] } = false := by decide
 example : validateParameterHomes #[] raw reachable
-    { method with code := [.arg 0, .setLocal 2, .localAddr 1, .arg 3] } = false := by decide
+    { method with code := [.arg 0, .stloc 2, .ldloca 1, .arg 3] } = false := by decide
 example : validateParameterHomes #[] raw reachable
-    { method with code := [.arg 0, .setLocal 1, .localAddr 1, .local 2] } = false := by decide
+    { method with code := [.arg 0, .stloc 1, .ldloca 1, .local 2] } = false := by decide
 example : validateParameterHomes #[] raw reachable
     { method with localKinds := [.word32] } = false := by decide
 example : validateParameterHomes #[] raw reachable
@@ -42,7 +42,7 @@ example : validateParameterHomes #[] { raw with code := [.load 0, .store 9, .add
 -- view the home holds; a load of the home in its place is rejected.
 def spanArgument : RawArguments :=
   { arguments := [.span 4 true], locals := [], code := [.address 0] }
-example : validateArgumentOpIn spanArgument [0] (.address 0) true (.localAddr 0) = true := by
+example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldloca 0) = true := by
   decide
 example : validateArgumentOpIn spanArgument [0] (.address 0) true (.local 0) = false := by
   decide
@@ -53,7 +53,7 @@ def pruned : RawArguments := {
 example : ParameterHomesValid #[] pruned [false, true]
     { code := [.unsupported "pruned", .arg 0], locals := [], returnsValue := true } := by decide
 example : validateParameterHomes #[] pruned [false, true]
-    { code := [.setLocal 0, .arg 0], locals := [], returnsValue := true } = false := by decide
+    { code := [.stloc 0, .arg 0], locals := [], returnsValue := true } = false := by decide
 
 /-- An `Option` `mapM` relates each output entry to the input entry at the same index. -/
 private theorem mapM_entry {α β : Type} {f : α → Option β} :

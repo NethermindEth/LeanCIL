@@ -23,7 +23,7 @@ private def reader : Method := {
   locals := [], returnsValue := true }
 
 private def caller : Method := {
-  code := [.arg 0, .setLocal 0, .local 0, .arg 1, .arg 2, .memory (.spanSlice true),
+  code := [.arg 0, .stloc 0, .local 0, .arg 1, .arg 2, .memory (.spanSlice true),
     .arg 3, .call 1 2, .ret]
   locals := [.nullRef], localKinds := [.span 4 false], returnsValue := true }
 
@@ -78,7 +78,7 @@ theorem readonly_reference_rejects_store :
 #print axioms readonly_reference_rejects_store
 
 private def escaping : Method := {
-  code := [.localAddr 0, .ldc_i4 1, .memory (.spanFromReference 4 true), .ret]
+  code := [.ldloca 0, .ldc_i4 1, .memory (.spanFromReference 4 true), .ret]
   locals := [.i32 7], localKinds := [.word32], returnsValue := true }
 
 theorem expired_local_cannot_escape :

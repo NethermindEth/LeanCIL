@@ -365,10 +365,10 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .local i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← loadLocal m slot) :: stack) frame m
-  | .localAddr i, _ =>
+  | .ldloca i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← localAddress m slot) :: stack) frame m
-  | .setLocal i, value :: rest =>
+  | .stloc i, value :: rest =>
     let some slot := frame.locals[i]? | .error .invalidState
     let (slot, memory) ← storeLocal m slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set i slot } memory

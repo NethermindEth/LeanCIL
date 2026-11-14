@@ -187,7 +187,8 @@ example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 18, .local 0⟩] 
 example : ¬ OpaqueLocalsValid { withLocal with code := [⟨0, 65037, .local 0⟩] } localBody
     := by decide +kernel
 example : ¬ OpaqueLocalsValid withLocal
-    { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1, .localAddr 0] } := by decide +kernel
+    { localBody with code := [.intrinsic (.vector .createScalarUnsafe64) 1, .ldloca 0] } := by
+  decide +kernel
 example : ¬ OpaqueLocalsValid withLocal { localBody with localKinds := [.word64] }
     := by decide +kernel
 example : ¬ OpaqueLocalsValid { withLocal with locals := [.atom runtimeScope "System.UInt64"] } localBody := by decide +kernel
@@ -508,7 +509,7 @@ private def emittedShift : Method :=
   { profile := profile, returnsValue := true, locals := [.v128 0], localKinds := [.vector128],
     opaqueVectorLocals := [0], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
-    code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .setLocal 0, .arg 0,
+    code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0, .arg 0,
       .intrinsic (.vector (.create64 256)) 1, .local 0, .intrinsic (.avx2 .shl64Count) 2,
       .ldc_i4 0, .intrinsic (.vector (.extract64 256)) 2, .ret] }
 

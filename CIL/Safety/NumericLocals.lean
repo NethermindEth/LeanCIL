@@ -76,7 +76,7 @@ theorem step_store_numeric_local {body : CIL.Method} {pc index : Nat} {args rest
     (slot : frame.locals[index]? = some (.bytes kind reference))
     (ready : access memory reference (localWidth kind) 1 true = .ok ()) :
     ∃ result,
-      step body (.setLocal index) pc args frame (.scalar value :: rest) memory =
+      step body (.stloc index) pc args frame (.scalar value :: rest) memory =
         .ok (.next (pc + 1) rest frame result) ∧
       write memory reference (numberBytes number (localWidth kind)) 1 = .ok result ∧
       read result reference (localWidth kind) 1 = .ok (numberBytes number (localWidth kind)) := by

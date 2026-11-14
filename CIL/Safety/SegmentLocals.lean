@@ -15,7 +15,7 @@ namespace CIL.Safety
 /-- Direct local destinations named by a code segment. -/
 def segmentStores (code : List CIL.Instruction) : List Nat := code.filterMap fun operation =>
   match operation with
-  | .setLocal index | .initializeSpanLocal index _ => some index
+  | .stloc index | .initializeSpanLocal index _ => some index
   | _ => none
 
 /-- The remembered values of locals outside a segment's direct-store set. -/
