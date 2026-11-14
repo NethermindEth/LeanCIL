@@ -214,11 +214,50 @@ def loopScalarOnly : List Lean.Name :=
     ``CIL.Instruction.beq, ``CIL.Instruction.bne_un]
 
 open Lean Meta in
+/-- Constructor-spine entries of the last local list inspected by a loop walk. Slot expressions
+    are reduced afresh in the current context; no context-dependent reduction is retained. -/
+structure LoopLocalIndex where
+  /-- The exact list expression whose constructor prefix is indexed. -/
+  source : Option Expr := none
+  /-- The syntactically present slots, in list order. -/
+  entries : Array Expr := #[]
+  /-- The tail after those slots; a literal nil proves every later position absent. -/
+  tail : Option Expr := none
+  deriving Inhabited
+
+open Lean Meta in
+/-- Read a local slot, indexing an unchanged constructor spine once per walk. A nonconstructor
+    tail is reduced in the current context on each access beyond the indexed prefix. -/
+def loopLocalAt (locals : Expr) (index : Nat) : StateT LoopLocalIndex MetaM (Option Expr) := do
+  let locals ← instantiateMVars locals
+  let cached ← get
+  let (entries, tail) ← if !locals.hasMVar && cached.source == some locals then
+      pure (cached.entries, cached.tail.getD locals)
+    else do
+      let mut entries := #[]
+      let mut tail := locals
+      while let some #[_, slot, rest] := argumentsOf? tail.consumeMData ``List.cons 3 do
+        entries := entries.push slot
+        tail := rest
+      if !locals.hasMVar then
+        set ({ source := some locals, entries, tail := some tail } : LoopLocalIndex)
+      pure (entries, tail)
+  if let some slot := entries[index]? then return some slot
+  let mut tail := tail
+  let mut position := entries.size
+  repeat
+    let some #[_, slot, rest] := argumentsOf? (← whnf tail) ``List.cons 3 | return none
+    if position == index then return some slot
+    position := position + 1
+    tail := rest
+  return none
+
+open Lean Meta in
 /-- Whether the step obligation `step` of the fetched `op` can check a reference or span: any
     instruction but `loopScalarOnly`, an argument load or local store of a non-scalar, a load of
     a local that is not a byte home or holds a reference, and the address of a local that is not a
     byte home. -/
-def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
+def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex MetaM Bool := do
   let op ← whnfR op
   let some name := op.getAppFn.constName? | return true
   unless loopScalarOnly.contains name do return true
@@ -242,7 +281,7 @@ def loopReadsReferences (op : Expr) (step : MVarId) : MetaM Bool := do
     let some index ← literalNat? indexTerm | return true
     let frame ← whnfR frame
     let some #[_, locals, _, _] := argumentsOf? frame ``Frame.mk 4 | return true
-    let some (_, slot) := (← listEntries locals).find? (·.1 == index) | return true
+    let some slot ← loopLocalAt locals index | return true
     let slot ← whnfR slot
     let some #[kind, _] := argumentsOf? slot ``LocalSlot.bytes 2 | return true
     return name == ``CIL.Instruction.local && (← whnfR kind).isConstOf ``CIL.LocalKind.reference
@@ -252,7 +291,8 @@ open Lean Meta in
 /-- Whether the store `op` with obligation `step` can step without the frame lemmas: it is not a
     byte home's local store or a struct field store or zeroing, or a hypothesis or one of `known`
     states a store or step at its memory, such as the frame lemmas produce. -/
-def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) : MetaM Bool :=
+def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) :
+    StateT LoopLocalIndex MetaM Bool :=
     step.withContext do
   let op ← whnfR op
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
@@ -264,7 +304,7 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) : MetaM Bool
     let some index ← literalNat? indexTerm | return true
     let frame ← whnfR frame
     let some #[_, locals, _, _] := argumentsOf? frame ``Frame.mk 4 | return true
-    let some (_, slot) := (← listEntries locals).find? (·.1 == index) | return true
+    let some slot ← loopLocalAt locals index | return true
     unless (← whnfR slot).isAppOf ``LocalSlot.bytes do return true
   else unless
       op.isAppOf ``CIL.Instruction.setFieldAt || op.isAppOf ``CIL.Instruction.initAggregate do
@@ -416,6 +456,7 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     (op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initAggregate ||
       op == ``CIL.Instruction.setLocal))
   let mut taken := 0
+  let mut localIndex : LoopLocalIndex := {}
   repeat
     if (← getGoals).isEmpty then return none
     let rewriting := if ← withNormalNodes prepared loopMentionsStackOperations then rewriteStack
@@ -441,13 +482,17 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
       let fetched ← loopFetch core
       let stores := [``CIL.Instruction.setLocal, ``CIL.Instruction.setFieldAt,
         ``CIL.Instruction.initAggregate]
-      let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
-          pure !(← loopStoreKnown fetched.op fetched.step facts.known)
-        else pure false
-      return (fetched, ← loopReadsReferences fetched.op fetched.step, unknownStore)
+      let classify : StateT LoopLocalIndex MetaM (Bool × Bool) := do
+        let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
+            pure !(← loopStoreKnown fetched.op fetched.step facts.known)
+          else pure false
+        return (← loopReadsReferences fetched.op fetched.step, unknownStore)
+      let ((references, unknownStore), indexed) ← classify.run localIndex
+      return (fetched, references, unknownStore, indexed)
     saved.restore
-    let some (fetched, references, unknownStore) := fetched?
+    let some (fetched, references, unknownStore, indexed) := fetched?
       | loopStuck tactic facts.all prepared stops; return none
+    localIndex := indexed
     let op := ((← whnfR fetched.op).getAppFn.constName?).getD Name.anonymous
     let finishing := mode == .finish && op == ``CIL.Instruction.ret
     -- A call or return ends an advance before any step; a resumed walk tries the store first,
