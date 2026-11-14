@@ -147,6 +147,25 @@ foreach (var transitive in new[] { false, true })
 }
 Console.WriteLine("PASS CLI kernel replay rejects unchecked theorems and transitive helpers");
 
+// A false body check names the method and the part that differs: the same tactic the extraction's certificate
+// uses, stated for a body whose method claims a maximum stack depth its bytes do not give.
+var falseBody = Path.Combine(auditOutput, "FalseBody.lean");
+File.WriteAllText(falseBody, """
+    import Extracted
+    theorem ExampleProof.falseBody : CIL.Extraction.bodyMatches Extracted.method0Body
+        { Extracted.method0Original with maxStack := 99 } [] = true := by
+      cil_body_decodes
+    """.ReplaceLineEndings("\n") + "\n");
+var falseCertificate = Execute([.. cli, "verify", auditOutput, "--proof", falseBody, "--theorem",
+    "ExampleProof.falseBody"]);
+var falseText = falseCertificate.Stderr.ReplaceLineEndings("\n");
+if (falseCertificate.Code != 1 || falseCertificate.Stdout.Length != 0 || !falseText.Contains("Lean errors (") ||
+    !falseText.Contains("Method System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64): " +
+        "the decoded method does not match its body bytes or metadata: the maximum stack depth differ"))
+    throw new InvalidOperationException("verify did not name the method and the false body check: " +
+        falseCertificate.Output);
+Console.WriteLine("PASS CLI verify names the method and the part of a false body check");
+
 // The unchanged addition contract must fail after changing + to - and rebuilding.
 var methodsPath = Path.Combine(fixture, "Methods.cs");
 var methods = File.ReadAllText(methodsPath);

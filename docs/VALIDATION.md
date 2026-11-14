@@ -59,7 +59,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `imports` | implementation-bound contract imports and conditional caller verification |
 | `exceptionlint` | diagnostic XML exception drift without proof claims |
 | `contracts` | universal checked contracts, caller memory preservation and incorrect implementations |
-| `evidence` | independent extraction certificates and malformed evidence rejection |
+| `evidence` | independent extraction certificates, malformed evidence rejection, and the metadata decoder's method names against Cecil's |
 | `dispatch` | constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage |
 | `loops` | cyclic control-flow validation, universal termination, negative contracts and class/word-array composition |
 | `outlines-control` | generated outlines for control flow, arithmetic and value types, completed proofs and rejection checks |
@@ -102,7 +102,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `outcomes` | outcome contracts that name exactly when each exception is thrown |
 | `scaling` | compositional certificate for a six-method call graph and its consumer replay, and the header and per-method struct layout checks at a per-layout cost that does not grow with the table |
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
-| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads and stores, at a per-instruction cost that does not grow with the method, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, and type identity equality at a cost that does not grow with the name |
+| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads and stores, at a per-instruction cost that does not grow with the method, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, and type identity equality at a cost that does not grow with the name; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
 | `stepping` | full scalar, checked-memory, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses and faulting bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, and the strict binding library and audit |
