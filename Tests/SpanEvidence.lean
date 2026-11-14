@@ -110,7 +110,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar
 
 -- Span locals outside a receiver fold retain ordinary load/store flow.
 private def loadCode := [i 2, i 10, i 6, i 42]
-private def loadOps : List Instruction := [.arg 0, .stloc 0, .local 0, .ret none]
+private def loadOps : List Instruction := [.arg 0, .stloc 0, .ldloc 0, .ret none]
 private def loadStates : FeatureCertificate := [state [], state [none], state [], state [none]]
 example : FeatureFlowValid #[] (fun _ => none) (raw [intType] loadCode) .scalar loadStates
     (List.replicate 4 true) loadOps := by decide

@@ -77,7 +77,7 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
 @[cil_code] def callerBody : CIL.Method :=
   { locals := [.unmodeled, .v256 42], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.arg 0, .arg 1, .ldloca 0, .call 1 3, .pop, .local 0, .ret] }
+    code := [.arg 0, .arg 1, .ldloca 0, .call 1 3, .pop, .ldloc 0, .ret] }
 
 bind_entry callerEntry (memory : Memory) (left right : CIL.W64)
     (formed : memory.WellFormed) := callerBody
@@ -129,7 +129,7 @@ theorem caller_invokes (memory : Memory) (formed : memory.WellFormed) (left righ
 
 /-- Omitting the helper exposes the actual uninitialized local read, at its checked location. -/
 theorem uninitialized_output_rejected :
-    invoke [{ callerBody with code := [.local 0, .ret] }] 1 0 [] Memory.empty =
+    invoke [{ callerBody with code := [.ldloc 0, .ret] }] 1 0 [] Memory.empty =
       .error ⟨0, 0, .memory .uninitialized (.address ⟨0, 0⟩) 8⟩ := by
   rfl
 

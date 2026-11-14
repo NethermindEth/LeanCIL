@@ -177,8 +177,8 @@ example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)
     (view : Option SpanView)
     (slot : frame.locals[0]? = some (.span width writable view)) :
     step body (.ldloca 0) pc args frame stack memory =
-      step body (.local 0) pc args frame stack memory := by
-  simp only [step_ldloca_eq, step_local_eq, slot, localAddress]
+      step body (.ldloc 0) pc args frame stack memory := by
+  simp only [step_ldloca_eq, step_ldloc_eq, slot, localAddress]
 
 -- Taking a byte home's address pushes the formed home reference.
 example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)

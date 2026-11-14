@@ -196,8 +196,8 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 1 stack <;> rfl
 -- Locals go through the frame's slot for `index`.
-@[cil_step] theorem step_local_eq (index : Nat) (stack : List Value) :
-    step body (.local index) pc args frame stack memory = do
+@[cil_step] theorem step_ldloc_eq (index : Nat) (stack : List Value) :
+    step body (.ldloc index) pc args frame stack memory = do
       let some slot := frame.locals[index]? | .error .invalidState
       return FrameAction.next (pc + 1) ((← loadLocal memory slot) :: stack) frame memory := id rfl
 

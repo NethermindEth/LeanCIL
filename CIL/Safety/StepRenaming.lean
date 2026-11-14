@@ -67,7 +67,7 @@ theorem stepTransport : StepTransport := by
     | exact memories.stepNewAggregate frames sourceFormed targetFormed staticBounds
         sourceBody targetBody _ _ pc _ arguments stack bounds
     | exact ⟨mapping, .refl mapping,
-        frames.stepLocal memories sourceBody targetBody _ pc arguments stack⟩
+        frames.stepLdloc memories sourceBody targetBody _ pc arguments stack⟩
     | exact ⟨mapping, .refl mapping,
         frames.stepLdloca memories sourceBody targetBody _ pc arguments stack⟩
     | (cases stack with

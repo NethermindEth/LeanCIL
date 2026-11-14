@@ -22,7 +22,7 @@ private def initializedMemory : CIL.Memory := fun _ => some (.i32 1)
 
 -- Locals have no meaning in `CIL.step`: only the checked step reads and writes their slots.
 theorem local_unstepped :
-    (CIL.step (.local 0) false 0 [] [] initializedMemory).isSome = false := rfl
+    (CIL.step (.ldloc 0) false 0 [] [] initializedMemory).isSome = false := rfl
 #print axioms local_unstepped
 theorem stloc_unstepped :
     (CIL.step (.stloc 0) false 0 [] [.i32 1] initializedMemory).isSome = false := rfl

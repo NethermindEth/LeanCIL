@@ -23,7 +23,7 @@ private def reader : Method := {
   locals := [], returnsValue := true }
 
 private def caller : Method := {
-  code := [.arg 0, .stloc 0, .local 0, .arg 1, .arg 2, .memory (.spanSlice true),
+  code := [.arg 0, .stloc 0, .ldloc 0, .arg 1, .arg 2, .memory (.spanSlice true),
     .arg 3, .call 1 2, .ret]
   locals := [.nullRef], localKinds := [.span 4 false], returnsValue := true }
 

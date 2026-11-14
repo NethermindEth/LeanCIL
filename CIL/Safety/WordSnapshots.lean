@@ -94,7 +94,7 @@ theorem WordSnapshots.load {body : CIL.Method} {pc index : Nat} {args stack : Li
     {frame : Frame} {memory : Memory} {known : Nat → Option (BitVec 64)}
     (snapshots : WordSnapshots memory frame.locals known) (value : BitVec 64)
     (specified : known index = some value) :
-    step body (.local index) pc args frame stack memory =
+    step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.i64 value) :: stack) frame memory) := by
   obtain ⟨reference, slot, loaded⟩ := snapshots index value specified
   exact step_load_numeric_local .word64 (.i64 value) value.toNat rfl slot loaded

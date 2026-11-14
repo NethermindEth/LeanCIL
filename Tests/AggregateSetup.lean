@@ -82,7 +82,7 @@ theorem private_store_load {body : CIL.Method} {frame : Frame}
     ∃ result,
       step body (.stloc index) 0 [] frame [.scalar (.aggregate bytes)] memory =
         .ok (.next 1 [] frame result) ∧
-      step body (.local index) 1 [] frame [] result =
+      step body (.ldloc index) 1 [] frame [] result =
         .ok (.next 2 [.scalar (.aggregate bytes)] frame result) ∧
       MemoryBelow watermark memory result := by
   obtain ⟨result, stored, _, loaded, _, _, preserved⟩ :=

@@ -60,7 +60,7 @@ theorem step_load_numeric_local {body : CIL.Method} {pc index : Nat} {args stack
     (slot : frame.locals[index]? = some (.bytes kind reference))
     (loaded : read memory reference (localWidth kind) 1 =
       .ok (numberBytes number (localWidth kind))) :
-    step body (.local index) pc args frame stack memory =
+    step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (localResult kind value) :: stack) frame memory) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
     Bool.false_or, Bool.false_eq_true, ite_false, slot,

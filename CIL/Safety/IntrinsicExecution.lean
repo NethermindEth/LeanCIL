@@ -137,7 +137,7 @@ theorem checked_broadcast_andNot (left right : W64) :
   environment := environment
   localKinds := [.vector128], opaqueVectorLocals := [0]
   code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0,
-    .arg 0, .intrinsic (.vector (.create64 256)) 1, .local 0,
+    .arg 0, .intrinsic (.vector (.create64 256)) 1, .ldloc 0,
     .intrinsic (.avx2 operation) 2, .ldc_i4 lane,
     .intrinsic (.vector (.extract64 256)) 2, .ret] }
 

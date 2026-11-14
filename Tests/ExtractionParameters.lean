@@ -10,7 +10,7 @@ def raw : RawArguments := {
   code := [.load 0, .store 3, .address 1, .load 3] }
 def reachable : List Bool := [true, true, true, true]
 def method : Method := {
-  code := [.arg 0, .stloc 2, .ldloca 1, .local 2]
+  code := [.arg 0, .stloc 2, .ldloca 1, .ldloc 2]
   locals := [.i64 0], localKinds := [.word64]
   parameterHomes := [(1, .word32), (3, .word32)]
   returnsValue := true }
@@ -23,18 +23,18 @@ example : validateParameterHomes #[] raw reachable
 example : validateParameterHomes #[] raw reachable
     { method with code := [.arg 0, .stloc 2, .ldloca 1, .arg 3] } = false := by decide
 example : validateParameterHomes #[] raw reachable
-    { method with code := [.arg 0, .stloc 1, .ldloca 1, .local 2] } = false := by decide
+    { method with code := [.arg 0, .stloc 1, .ldloca 1, .ldloc 2] } = false := by decide
 example : validateParameterHomes #[] raw reachable
     { method with localKinds := [.word32] } = false := by decide
 example : validateParameterHomes #[] raw reachable
     { method with locals := [] } = false := by decide
 example : validateParameterHomes #[] raw [true, true, true] method = false := by decide
-example : validateArgumentOp raw reachable .other true (.local 2) = false := by decide
+example : validateArgumentOp raw reachable .other true (.ldloc 2) = false := by decide
 example : validateArgumentOp raw reachable .other true (.arg 0) = false := by decide
 -- A local operand must name one of the declared locals: two locals admit index 1 and reject 2.
 def twoLocals : RawArguments := { raw with locals := [.field .unsigned64, .field .unsigned64] }
-example : validateArgumentOpIn twoLocals [] .other true (.local 1) = true := by decide
-example : validateArgumentOpIn twoLocals [] .other true (.local 2) = false := by decide
+example : validateArgumentOpIn twoLocals [] .other true (.ldloc 1) = true := by decide
+example : validateArgumentOpIn twoLocals [] .other true (.ldloc 2) = false := by decide
 example : validateParameterHomes #[] { raw with code := [.load 0, .store 9, .address 1, .load 3] }
     reachable method = false := by decide
 
@@ -44,7 +44,7 @@ def spanArgument : RawArguments :=
   { arguments := [.span 4 true], locals := [], code := [.address 0] }
 example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldloca 0) = true := by
   decide
-example : validateArgumentOpIn spanArgument [0] (.address 0) true (.local 0) = false := by
+example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldloc 0) = false := by
   decide
 
 -- Dead argument stores create no home; their emitted site must actually be unsupported.

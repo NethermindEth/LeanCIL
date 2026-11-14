@@ -13,7 +13,7 @@ namespace CIL.Safety
 
 /-- Relocate each local load, address or store through the retained declaration map. -/
 def LocalIndexMap.operation (indices : LocalIndexMap) : CIL.Instruction → CIL.Instruction
-  | .local position => .local (indices.index position)
+  | .ldloc position => .ldloc (indices.index position)
   | .ldloca position => .ldloca (indices.index position)
   | .stloc position => .stloc (indices.index position)
   | .initializeSpanLocal position constructor =>

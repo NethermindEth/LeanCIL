@@ -11,7 +11,7 @@ open CIL
 
 private def byteHomeBody : Method := {
   locals := [.v128 0], localKinds := [.vector128], returnsValue := false,
-  code := [.local 0, .pop, .ret] }
+  code := [.ldloc 0, .pop, .ret] }
 private def opaqueHomeBody : Method := { byteHomeBody with opaqueVectorLocals := [0] }
 
 example : CIL.MethodBinding.embedFailure byteHomeBody byteHomeBody [0, 1, 2] = none := by decide +kernel
@@ -184,7 +184,7 @@ section DeadLocals
 
 /-- Reads its one local, a null reference, then returns argument 0. -/
 @[cil_code] def stored : Method := {
-  code := [.local 0, .pop, .arg 0, .ret]
+  code := [.ldloc 0, .pop, .arg 0, .ret]
   locals := [.nullRef], localKinds := [.reference], returnsValue := true }
 
 /-- `stored` as extracted with two unused reference locals after its own, as a profile-specific
@@ -396,7 +396,7 @@ expected pc 2 maps to actual pc 2
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbedsDeadLocals
-    [{ storedDead with code := [.local 0, .pop, .arg 1, .ret] }] 0 stored := by
+    [{ storedDead with code := [.ldloc 0, .pop, .arg 1, .ret] }] 0 stored := by
   cil_embed
 
 /-- A numeric dead local fails the kernel-checked condition itself, not only the tactic. -/

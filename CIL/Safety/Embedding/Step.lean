@@ -335,7 +335,7 @@ theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
   plain_cases
   cases narrow <;> dsimp only at h ⊢ <;> lookup_lockstep
 
-theorem step_relabel_local (index : Nat) : StepRelabel (.local index) := by
+theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases
   lookup_lockstep
 
@@ -699,7 +699,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case conv_ovf target => exact step_relabel_conv_ovf target
   case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case arg index narrow => exact step_relabel_arg index narrow
-  case «local» index => exact step_relabel_local index
+  case ldloc index => exact step_relabel_ldloc index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
   case ldloca index => exact step_relabel_ldloca index
@@ -1254,7 +1254,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case arg index narrow =>
     plain_cases
     cases narrow <;> dsimp only at h ⊢ <;> lookup_raise
-  case «local» | ldloca =>
+  case ldloc | ldloca =>
     plain_cases
     lookup_raise
   case stloc =>
