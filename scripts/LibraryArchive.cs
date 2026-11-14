@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include CertifiedLibraryArchive.cs
 #:include CertifiedLibraryDonor.cs
+#:include Verification.cs
 
 switch (args)
 {
