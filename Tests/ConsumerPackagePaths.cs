@@ -199,6 +199,16 @@ partial class Program
             reject(package, "../Package/Secret.lean", "a sibling named in another case");
             reject(package, Path.Combine(directory, "PACKAGE", "New.lean"),
                 "a missing directory named in another case");
+            File.WriteAllText(Path.Combine(sibling, "Fixture.cs"), "");
+            var checkout = Root;
+            Root = package;
+            try
+            {
+                FixtureInputs("../Package/Fixture.cs");
+                throw new Exception("A fixture input in a sibling named in another case was taken as checked out.");
+            }
+            catch (InvalidOperationException) { }
+            finally { Root = checkout; }
             require(!SameLocation(package, sibling) && !Inside(package, Path.Combine(sibling, "Secret.lean")) &&
                 Inside(package, Path.Combine(package, ".lake")) &&
                 new[] { package, sibling }.Select(ResolvedPath).Distinct(LocationComparer).Count() == 2,

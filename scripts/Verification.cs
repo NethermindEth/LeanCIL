@@ -82,8 +82,8 @@ partial class Program : IDisposable
         void Add(string path)
         {
             path = Path.GetFullPath(path);
-            var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
-            if (relative.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            // A sibling of the checkout whose name differs only in case is outside it where case is told apart.
+            var relative = RelativeBelow(Path.GetFullPath(Root), path)?.Replace('\\', '/') ??
                 throw new InvalidOperationException("Fixture input is outside the checkout: " + path);
             if (!inputs.TryAdd(relative, Sha(path))) return;
             if (Path.GetExtension(path) != ".cs") return;
