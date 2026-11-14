@@ -1175,6 +1175,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         var excluded = generatedModules.Concat(["Extracted", "ExtractedSymbols", "ExtractionAudit"])
             .ToHashSet(StringComparer.Ordinal);
+        // Lake lists source directories with links followed, as macOS reaches /var through /private/var, while
+        // package roots are spelled as given: one location counts once, or every module there looks ambiguous.
+        sourceDirectories = [.. sourceDirectories.DistinctBy(ResolvedPath, LocationComparer)];
         var imports = new Dictionary<string, string[]>(StringComparer.Ordinal);
         var pending = new Queue<string>();
         foreach (var proof in proofs)
