@@ -142,8 +142,9 @@ theorem expectedHomes_eq_scan (layouts : Array ComputedLayout) (raw : RawArgumen
   simp only [expectedHomes, FlowIndex.get?_ofList]
 
 #print axioms expectedHomes_eq_scan
-/-- The narrowing a load of a small-integer argument applies. -/
-private def argumentNarrow : StorageType → Option NarrowKind
+/-- The narrowing a value held in this storage takes: a small-integer field's own width and
+    signedness, and `none` for every other storage. -/
+def StorageType.narrow : StorageType → Option NarrowKind
   | .field .signed8 => some .signed8
   | .field .unsigned8 | .field .boolean => some .unsigned8
   | .field .signed16 => some .signed16
@@ -185,7 +186,7 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
       let type ← argumentAt index
       match homeAt index, emitted with
       | some slot, .ldloc actual => return actual == slot
-      | none, .arg actual narrow => return actual == index && narrow == argumentNarrow type
+      | none, .arg actual narrow => return actual == index && narrow == type.narrow
       | _, _ => return false).getD false
   | .store index => (do
       let _ ← argumentAt index

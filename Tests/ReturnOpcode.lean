@@ -5,7 +5,9 @@ import CIL.Resolution
 /-!
 # Declared return narrowing
 
-The return instruction obtains its narrowing from the method's declared metadata.
+The return instruction obtains its narrowing from the method's declared metadata. A body in the
+emitted form, with a struct return and a non-empty layout environment, still evaluates by `rfl`
+under the default recursion limit, as generated boundary claims are proved.
 -/
 
 namespace Tests.ReturnOpcode
@@ -97,5 +99,65 @@ theorem byte_not_full_width :
     byteBody.declared.returnType ≠ .atom Extraction.runtimeScope "System.Int32" := by
   decide
 #print axioms byte_not_full_width
+
+/-- A struct of two 32-bit fields, recorded with the generic identity an extraction writes;
+    the identity is as long as a closed generic struct's, whose comparison once exhausted the
+    elaborator's recursion limit. -/
+private def pairLayouts : List Extraction.RawLayout := [
+  { identity := "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::\
+      Examples.StaticPair`1<System.Runtime, Version=11.0.0.0, Culture=neutral, \
+      PublicKeyToken=b03f5f7f11d50a3a::System.UInt32>",
+    explicit := false, auto := true, packing := -1, declaredSize := -1,
+    fields := [{ type := .signed32, offset := none }, { type := .signed32, offset := none }] }]
+
+/-- The layout environment an extraction records for `pairLayouts`. -/
+private def pairEnvironment : LayoutEnvironment :=
+  { rawLayouts := pairLayouts, layouts := #[⟨⟨8, [⟨0, 4, false⟩, ⟨4, 4, false⟩]⟩, 4⟩] }
+
+/-- `Math.DivRem(int, int)` in the emitted form: a declared struct return over a non-empty
+    environment, with the identity written out as a literal as an extraction writes it. -/
+private def pairDivRem : Method :=
+  { profile := .scalar, returnsValue := true, locals := [], environment := pairEnvironment,
+    declared := {
+      parameters := [.atom Extraction.runtimeScope "System.Int32",
+        .atom Extraction.runtimeScope "System.Int32"],
+      returnType := .aggregate "Examples, Version=1.0.0.0, Culture=neutral, \
+        PublicKeyToken=null::Examples.StaticPair`1<System.Runtime, Version=11.0.0.0, \
+        Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::System.UInt32>" 0 }
+    code := [.arg 0, .arg 1, .intrinsic (.scalar (.divRem 32 true)) 2, .ret] }
+
+/-- A generated boundary claim about a struct-returning body is proved by evaluation, with the
+    proof term a generated fixture uses and the default recursion limit. -/
+theorem pair_return_evaluates :
+    (invoke [pairDivRem] 8 0 [.scalar (.i32 7), .scalar (.i32 2)] Memory.empty).map Prod.snd =
+      .ok [.scalar (.aggregate [3, 0, 0, 0, 1, 0, 0, 0])] := by
+  rfl
+#print axioms pair_return_evaluates
+
+/-- The existential form of a generated struct claim elaborates by the same evaluation. -/
+theorem pair_return_exists :
+    ∃ bytes, (invoke [pairDivRem] 8 0 [.scalar (.i32 7), .scalar (.i32 2)]
+      Memory.empty).map Prod.snd = .ok [.scalar (.aggregate bytes)] ∧ bytes.length = 8 :=
+  ⟨_, rfl, by decide⟩
+#print axioms pair_return_exists
+
+/-- `Math.DivRem(sbyte, sbyte).Remainder` in the emitted form over the same environment, whose
+    narrowing return compares only its runtime scope and primitive name. -/
+private def sbyteRemainder : Method :=
+  { pairDivRem with
+    declared := {
+      parameters := [.atom Extraction.runtimeScope "System.SByte",
+        .atom Extraction.runtimeScope "System.SByte"],
+      returnType := .atom Extraction.runtimeScope "System.SByte" }
+    code := [.arg 0 (some .signed8), .arg 1 (some .signed8),
+      .intrinsic (.scalar (.divRem 8 true)) 2, .fieldAt 1 1 true, .ret] }
+
+/-- A narrowing return over a non-empty environment is proved by evaluation, and the remainder
+    of -7 by 2 comes back sign-extended. -/
+theorem sbyte_return_evaluates :
+    (invoke [sbyteRemainder] 8 0 [.scalar (.i32 4294967289), .scalar (.i32 2)]
+      Memory.empty).map Prod.snd = .ok [.scalar (.i32 4294967295)] := by
+  rfl
+#print axioms sbyte_return_evaluates
 
 end Tests.ReturnOpcode
