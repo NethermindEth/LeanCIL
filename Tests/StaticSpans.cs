@@ -73,7 +73,8 @@ queue.Flush();
 // Unsupported element types, identities and by-reference spans remain rejected.
 foreach (var (mutation, marker) in new[]
 {
-    ("element", "Unsupported type: System.ReadOnlySpan`1<System.Double>"), ("scope", "Unresolved aggregate"),
+    ("element", "Unsupported type: System.ReadOnlySpan`1<System.Double>"),
+    ("scope", "Unsupported type identity: System.ReadOnlySpan`1 [Foreign.Runtime, Version=10.0.0.0"),
     ("value-type", "Unsupported type identity"), ("byref-return", "Unsupported by-reference span")
 })
 {
@@ -90,7 +91,12 @@ foreach (var (mutation, marker) in new[]
         switch (mutation)
         {
             case "element": span.GenericArguments[0] = module.TypeSystem.Double; break;
-            case "scope": span.ElementType.Scope = new AssemblyNameReference("Foreign.Runtime", new Version(10, 0, 0, 0)); break;
+            case "scope":
+                // The foreign scope is a written AssemblyRef row, so the identity check rejects it.
+                var foreign = new AssemblyNameReference("Foreign.Runtime", new Version(10, 0, 0, 0));
+                module.AssemblyReferences.Add(foreign);
+                span.ElementType.Scope = foreign;
+                break;
             case "value-type": span.IsValueType = false; break;
             case "byref-return": getter.ReturnType = new ByReferenceType(span); break;
         }
