@@ -275,14 +275,15 @@ Array Operations(params object[] operations)
 object Body(params object[] operations) => Activator.CreateInstance(bodyType, Declared, null,
     [Operations(operations)], null)!;
 int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
-bool Pure(object operation) => (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation")])!.Invoke(null,
-    [operation])!;
+bool Pure(object operation, bool plainReturn = true) =>
+    (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation"), typeof(bool)])!.Invoke(null,
+        [operation, plainReturn])!;
 var nop = Make("StackOperation", Named("StackOpcode", "Nop"));
 var backEdge = Make("Jump", Named("JumpKind", "Less"), 0);
 if (Loops(Body(nop, nop, backEdge)) != 1 || Loops(Body(nop, nop, Make("NativeBinary", backEdge))) != 1)
     throw new Exception("A back edge the native-width analysis wrapped is not found as a loop");
 if (!Pure(Make("Arg", 0, null)) || Pure(Make("Arg", 0, Named("Narrowing", "Unsigned8"))) ||
-    !Pure(Make("Return", [null])) || Pure(Make("Return", Named("Narrowing", "Signed16"))) ||
+    !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
     Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)) || Pure(Make("NativeBinary", nop)))
     throw new Exception("The pure operations are no longer exactly the unnarrowed, unwrapped ones");
 if (Lean(Make("LoadScalar", 4, false)) != ".loadScalar 4" ||
