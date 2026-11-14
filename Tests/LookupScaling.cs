@@ -12,6 +12,11 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
+if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
+{
+    ArgumentResolutionCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -20,6 +25,7 @@ if (args.Contains("--return-step-only", StringComparer.Ordinal))
 CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
+ArgumentResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -187,6 +193,81 @@ void ReturnResolutionCosts(bool stepOnly = false)
             Console.WriteLine($"PASS return resolution {(simplifier ? "simplifier" : "fact")} {dimension}: " +
                 string.Join("; ", samples.Select(sample =>
                     $"{sample.Size} = {(simplifier ? sample.Simplifier : sample.Facts)} heartbeats")));
+        }
+    }
+}
+
+// Argument facts walk the parameter types and homes once, so a method's facts and the reads of every argument
+// through them cost about the same per argument at 8, 32 and 128 int32 parameters, with no homes and with every
+// other argument homed. A fact proved by evaluating `parameters[index]?` or by searching the homes costs about four
+// times as much per argument at each step. A fact walks at most one 16-entry block of a named suffix, so below one
+// block a fact walks fewer entries and costs up to a third less.
+void ArgumentResolutionCosts()
+{
+    const double AllowedArgumentGrowth = 1.35;
+    var resolutionDirectory = At("artifacts/LookupScaling/ArgumentResolution");
+    Directory.CreateDirectory(resolutionDirectory);
+    const string Int32Type = ".atom runtimeScope \"System.Int32\"";
+    foreach (var homed in new[] { false, true })
+    {
+        var samples = new List<(int Size, long Facts, long Reads)>();
+        foreach (var size in new[] { 8, 32, 128 })
+        {
+            // Each homed argument's slot follows the one declared local, in argument order.
+            var slots = Enumerable.Range(0, size).Where(index => homed && index % 2 == 1)
+                .Select((index, position) => (index, position))
+                .ToDictionary(home => home.index, home => 1 + home.position);
+            var homes = string.Join(", ", slots.Keys.Order().Select(index => $"({index}, .word32)"));
+            var signature = $"{{ parameters := [{string.Join(", ", Enumerable.Repeat(Int32Type, size))}] }}";
+            var code = string.Join(", ", Enumerable.Range(0, size).Select(index =>
+                slots.TryGetValue(index, out var slot) ? $".ldloc {slot}, .pop" : $".arg {index}, .pop")) + ", .ret";
+            var accesses = string.Join(", ", Enumerable.Range(0, size).Select(index =>
+                slots.TryGetValue(index, out var slot) ? $".home {slot}" : ".value none"));
+            var reads = string.Join(", ", Enumerable.Range(0, size).Select(index => $"body.argumentAccess {index}"));
+            var source = $$"""
+                import CIL.Safety.ValueSteps
+                open CIL CIL.Extraction Lean Elab Command
+                set_option maxRecDepth 8192
+                /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+                elab "#resolution_cost " label:str " in " command:command : command => do
+                  let before <- IO.getNumHeartbeats
+                  elabCommand command
+                  let after <- IO.getNumHeartbeats
+                  logInfo m!"resolution {label.getString} {after - before} heartbeats"
+                def body : Method := {
+                  code := [{{code}}], locals := [.i32 0], localKinds := [.word32],
+                  parameterHomes := [{{homes}}], returnsValue := false, declared := {{signature}} }
+                theorem body_returnsValue : body.returnsValue = false := rfl
+                theorem body_declared : body.declared = {{signature}} := rfl
+                #resolution_cost "fact" in cil_resolution_facts body
+                #resolution_cost "simplifier" in
+                theorem body_reads : [{{reads}}] = [{{accesses}}] := by simp only [cil_code]
+                #print axioms body_argumentAccess{{size - 1}}
+                #print axioms body_reads
+                """ + "\n";
+            var path = Path.Combine(resolutionDirectory, $"{(homed ? "Homed" : "Unhomed")}{size}.lean");
+            File.WriteAllText(path, source);
+            var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+            if (output.Contains("sorryAx", StringComparison.Ordinal))
+                throw new InvalidOperationException("Argument resolution introduced an unproved theorem.");
+            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            if (costs.Length != 2)
+                throw new InvalidOperationException("Missing argument resolution costs: " + output);
+            samples.Add((size, long.Parse(costs[0].Groups[2].Value, CultureInfo.InvariantCulture),
+                long.Parse(costs[1].Groups[2].Value, CultureInfo.InvariantCulture)));
+        }
+        var label = homed ? "with every other argument homed" : "without homes";
+        foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
+            { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
+        {
+            var perArgument = samples.Select(sample => (double)cost(sample) / sample.Size).ToArray();
+            var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+                $"{sample.Size} = {(double)cost(sample) / sample.Size:F0}")));
+            if (perArgument.Skip(1).Zip(perArgument).Any(pair => pair.First > pair.Second * AllowedArgumentGrowth))
+                throw new InvalidOperationException(
+                    $"Argument {name} {label} cost {measured} heartbeats per argument; the limit is " +
+                    $"{AllowedArgumentGrowth} times the cost per argument at the size before.");
+            Console.WriteLine($"PASS argument {name} {label}: {measured} heartbeats per argument");
         }
     }
 }
