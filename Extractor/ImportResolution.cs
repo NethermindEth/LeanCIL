@@ -37,6 +37,7 @@ internal sealed class ImportResolution : IDisposable
     readonly HashSet<string>? allowedDependencies;
     readonly string? validatingAssembly;
     readonly bool ownsLibraries = true;
+    readonly PinnedAssemblies? identityOwner;
     readonly HashSet<Library> used = [];
     readonly Dictionary<string, Source> discovered = new(StringComparer.Ordinal);
     readonly List<Binding> bindings = [];
@@ -52,6 +53,7 @@ internal sealed class ImportResolution : IDisposable
 
     internal ImportResolution(IEnumerable<Source> sources)
     {
+        identityOwner = PinnedAssemblies.Active;
         try
         {
             foreach (Source source in sources)
@@ -108,14 +110,19 @@ internal sealed class ImportResolution : IDisposable
                     if (simpleNames.Contains(module.Assembly.Name.Name))
                         throw new InvalidDataException("Ambiguous import assembly simple name: " + module.Assembly.Name.Name);
                     var library = new Library(source, contract, ContractInterface.Hash(sidecar), module);
-                    var pinned = PinnedAssemblies.Active ?? throw new InvalidDataException(
+                    var pinned = identityOwner ?? throw new InvalidDataException(
                         "Import identity without a pinned module context");
                     pinned.RegisterIdentityImage(module, implementation);
                     libraries.Add(library);
                     librariesByIdentity.Add(contract.AssemblyIdentity, library);
                     simpleNames.Add(module.Assembly.Name.Name);
                 }
-                catch { module.Dispose(); throw; }
+                catch
+                {
+                    identityOwner?.UnregisterIdentityImage(module);
+                    module.Dispose();
+                    throw;
+                }
     }
 
     void ValidateGraph()
@@ -133,6 +140,7 @@ internal sealed class ImportResolution : IDisposable
 
     ImportResolution(ImportResolution parent, ContractInterface contract)
     {
+        identityOwner = parent.identityOwner;
         libraries = parent.libraries;
         librariesByIdentity = parent.librariesByIdentity;
         simpleNames = parent.simpleNames;
@@ -434,7 +442,11 @@ internal sealed class ImportResolution : IDisposable
     public void Dispose()
     {
         if (!ownsLibraries) return;
-        foreach (Library library in libraries) library.Module.Dispose();
+        foreach (Library library in libraries)
+        {
+            identityOwner?.UnregisterIdentityImage(library.Module);
+            library.Module.Dispose();
+        }
         libraries.Clear();
         librariesByIdentity.Clear();
         simpleNames.Clear();

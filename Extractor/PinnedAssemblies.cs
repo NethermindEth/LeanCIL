@@ -171,6 +171,12 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         catch { reader.Dispose(); throw; }
     }
 
+    /// <summary>Releases an import's metadata when its owning resolution ends.</summary>
+    internal void UnregisterIdentityImage(ModuleDefinition module)
+    {
+        if (identityImages.Remove(module, out var image)) image.Reader.Dispose();
+    }
+
     /// <summary>The raw identity rows of an executable pin or a verified contract import.</summary>
     internal MetadataImage IdentityMetadata(ModuleDefinition module) =>
         identityImages.TryGetValue(module, out var image) ? image.Metadata : Metadata(module);
