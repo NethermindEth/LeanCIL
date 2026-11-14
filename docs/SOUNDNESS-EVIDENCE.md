@@ -177,7 +177,8 @@ What `MetadataResolution` and `MetadataBinding` check:
   method range holds the row, and its `GenericParam` rows and the method's give the generic
   parameter counts and flags; a class receiver also checks the class layout facts. A row whose
   flags give it no IL body (abstract, platform invoke, internal call, or a code type other than
-  IL) is refused. The `RVA` and `ParamList` columns are not read.
+  IL) is refused, and so is a runtime-async row (`ImplFlags` 0x2000), whose body returns the
+  result its signature states as a task. The `RVA` and `ParamList` columns are not read.
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a

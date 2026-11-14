@@ -537,6 +537,10 @@ def platformInvokeFlag : Nat := 0x2000
 /-- The `MethodDef` implementation flag of a method the runtime implements itself. -/
 def internalCallFlag : Nat := 0x1000
 
+/-- The `MethodDef` implementation flag of a runtime-async method, whose body returns the result
+    its signature states as a task. -/
+def runtimeAsyncFlag : Nat := 0x2000
+
 /-- Whether a `MethodDef` row's flags say the method has no IL body in the image. -/
 def hasNoBody (flags implFlags : Nat) : Bool :=
   implFlags % 4 != 0 || flags / abstractMethodFlag % 2 == 1 ||
@@ -588,6 +592,8 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
     throw (.methodMismatch method.token)
   -- A row with native, runtime or no code has no IL body for the decoded bytes to be.
   if hasNoBody row.flags row.implFlags then throw (.bodyLocation method.token)
+  -- A runtime-async body returns its task's result, which the model would read as the task itself.
+  if row.implFlags / runtimeAsyncFlag % 2 == 1 then throw (.runtimeAsync method.token)
   let signature ← decodeMethodSig (← index.blob row.signature)
   let convention := signature.convention
   if method.hasThis != (convention / hasThisFlag % 2 == 1) ||
