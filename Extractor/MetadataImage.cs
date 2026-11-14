@@ -194,7 +194,11 @@ internal sealed class MetadataImage
         var table = (TableIndex)(token >> 24);
         var size = Reader.GetTableRowSize(table);
         var at = Reader.GetTableMetadataOffset(table) + ((int)(token & 0xFFFFFF) - 1) * size;
-        return bytes.AsSpan(at, size).ToArray();
+        var row = bytes.AsSpan(at, size).ToArray();
+        // A MethodDef row's first column is the body's address, which moves whenever an earlier body changes
+        // size; the carried row has it zeroed so that no method's evidence depends on another method's body.
+        if (table == TableIndex.MethodDef) row.AsSpan(0, sizeof(uint)).Clear();
+        return row;
     }
 
     /// <summary>The first <c>Field</c> row of a <c>TypeDef</c> row: its <c>FieldList</c> column.</summary>

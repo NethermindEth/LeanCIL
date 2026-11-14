@@ -60,15 +60,26 @@ byte[] root = pe.GetMetadata().GetContent().ToArray();
 var (tableOffset, tableSize) = TableStream(root);
 byte[] header = metadata.TableHeader();
 Require(root.AsSpan(tableOffset, header.Length).SequenceEqual(header), "Header differs from original bytes");
+// A carried MethodDef row has its RVA column zeroed: an earlier body's length moves the image's own RVA of a
+// later method, and that method's evidence must not change with it.
 byte[] later = metadata.Row(0x06000002);
 int rowOffset = metadata.Reader.GetTableMetadataOffset(TableIndex.MethodDef) +
     metadata.Reader.GetTableRowSize(TableIndex.MethodDef);
-Require(root.AsSpan(rowOffset, later.Length).SequenceEqual(later), "MethodDef differs from original bytes");
-Require(BitConverter.ToUInt32(later) != 0, "MethodDef RVA was erased");
+uint imageRva = BitConverter.ToUInt32(root, rowOffset);
+Require(imageRva != 0, "The fixture's MethodDef row has no RVA, so masking it tests nothing");
+Require(BitConverter.ToUInt32(later) == 0, "The carried MethodDef row kept its RVA column");
+Require(root.AsSpan(rowOffset + 4, later.Length - 4).SequenceEqual(later.AsSpan(4)),
+    "The carried MethodDef row differs from the image's row outside its RVA column");
 using var longerPe = new PEReader(new MemoryStream(Image(100)));
-byte[] moved = new MetadataImage(longerPe).Row(0x06000002);
-Require(BitConverter.ToUInt32(moved) != BitConverter.ToUInt32(later), "Earlier body did not shift later RVA");
-Require(moved.AsSpan(4).SequenceEqual(later.AsSpan(4)), "Unexpected non-RVA difference");
+var longer = new MetadataImage(longerPe);
+byte[] longerRoot = longerPe.GetMetadata().GetContent().ToArray();
+Require(BitConverter.ToUInt32(longerRoot, rowOffset) != imageRva, "A longer earlier body did not move the RVA");
+Require(longer.Row(0x06000002).AsSpan().SequenceEqual(later),
+    "A longer earlier body changed the carried row of a later method");
+int typeOffset = metadata.Reader.GetTableMetadataOffset(TableIndex.TypeDef) +
+    metadata.Reader.GetTableRowSize(TableIndex.TypeDef);
+Require(metadata.Row(0x02000002).AsSpan().SequenceEqual(
+    root.AsSpan(typeOffset, metadata.Reader.GetTableRowSize(TableIndex.TypeDef))), "TypeDef row differs from image");
 
 // The last present table has no later rows whose positions depend on its count.
 byte[] zeroImage = (byte[])original.Clone();
@@ -115,7 +126,7 @@ foreach (int offset in new[] { tableOffset + 4, tableOffset + 5, tableOffset + 6
 }
 header[0] ^= 0xff;
 Require(metadata.TableHeader()[0] == root[tableOffset], "Caller changed cached header");
-Console.WriteLine("PASS exact rows, shifted RVA, present-zero table, truncations and unsupported headers");
+Console.WriteLine("PASS masked MethodDef RVA, exact rows, present-zero table, truncations and unsupported headers");
 
 // Warm the immutable header cache before measuring repeated row/header requests.
 _ = metadata.DecodedHeader();

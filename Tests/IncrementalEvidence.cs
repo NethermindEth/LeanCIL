@@ -9,8 +9,12 @@
 
 using System.Text.RegularExpressions;
 
-// Evidence is reusable across extractions from the same assembly image. Exact MethodDef RVA bytes
-// also bind each carried method row to its location, so moving a body changes its evidence.
+// A method's evidence, its metadata slice, lookup tables, body and validity theorems, must be a function of the
+// method and its assemblies and of nothing else in the extraction or the image. An edit to one method moves things
+// in the image that another method's evidence could pick up (a longer body moves every later body, a changed name
+// moves heap entries, whose order the image fixes by a hash or a suffix sort), and extracting a different entry
+// method changes which other methods the extraction holds. The fixture has the shape of the workspace test, whose
+// refresh of only the edited method rests on this, with a helper that two entry methods share.
 var directory = At("artifacts/IncrementalEvidence");
 string Build(string name, string method, string body)
 {
@@ -96,14 +100,14 @@ foreach (var (method, label) in new[] { ("Workspace.Third::Thrice(ulong)", "Thri
     ("Workspace.Wide::get_IsZeroOrOne()", "Wide") })
 {
     var expected = Component(Extracted(baseline, method, "Baseline" + label), 0, label);
-    if (expected == Component(Extracted(longer, method, "Longer" + label), 0, label))
+    if (expected != Component(Extracted(longer, method, "Longer" + label), 0, label))
         throw new InvalidOperationException(
-            $"Lengthening Twice did not change the carried RVA of {label}.");
+            $"Lengthening Twice changed the evidence of {label}: the incremental refresh would redo it.");
     if (expected != Component(Extracted(renamed, method, "Renamed" + label), 0, label))
         throw new InvalidOperationException(
             $"Renaming Twice changed the evidence of {label}: the image's heap order must not reach the evidence.");
 }
-Console.WriteLine("PASS shifted bodies change evidence; renamed methods preserve unrelated evidence");
+Console.WriteLine("PASS lengthening or renaming one method leaves the evidence of the other methods byte-identical");
 
 // Two entry methods that share a helper: the helper's whole component is the same in both extractions, so a
 // consumer that verified it once reuses it.
@@ -149,7 +153,8 @@ Console.WriteLine("PASS a generic helper's instantiations have identical compone
 
 // A string literal is a `#US` heap entry whose offset the image fixes by the order of the literals. A literal added to
 // an earlier method moves every later literal's offset, which changes the `ldstr` operand bytes of the methods that
-// use them. Body growth also moves later MethodDef RVAs, including methods without string literals.
+// use them and nothing in a method that uses none: that evidence stays byte-identical, and the evidence of a method
+// whose operand moved is refreshed with its new token, so its body bytes and carried user string differ.
 string BuildLiteral(string name, string earlyStatement)
 {
     var assembly = Build(name, "Twice", "x + x");
@@ -170,9 +175,9 @@ var withoutLiteral = BuildLiteral("NoEarlyLiteral", "");
 var withLiteral = BuildLiteral("EarlyLiteral", "Use(\"an earlier literal\");");
 var plainBefore = Component(Extracted(withoutLiteral, "Workspace.Lit::Plain(ulong)", "PlainBefore"), 0, "Plain");
 var plainAfter = Component(Extracted(withLiteral, "Workspace.Lit::Plain(ulong)", "PlainAfter"), 0, "Plain");
-if (plainBefore == plainAfter)
+if (plainBefore != plainAfter)
     throw new InvalidOperationException(
-        "Growing an earlier body did not change the carried RVA of Plain.");
+        "A literal added to another method changed the evidence of a method that has none.");
 var lateBefore = Component(Extracted(withoutLiteral, "Workspace.Lit::Late(ulong)", "LateBefore"), 0, "Late");
 var lateAfter = Component(Extracted(withLiteral, "Workspace.Lit::Late(ulong)", "LateAfter"), 0, "Late");
 if (lateBefore == lateAfter)
@@ -181,5 +186,5 @@ if (lateBefore == lateAfter)
         "the case tests nothing.");
 if (!Regex.IsMatch(lateAfter, @"(?m)^def method0Body :"))
     throw new InvalidOperationException("The refreshed component of Late has no body definition.");
-Console.WriteLine("PASS an earlier literal refreshes later body addresses and " +
+Console.WriteLine("PASS a literal added to one method leaves a method without literals byte-identical and refreshes " +
     "the evidence of a method whose ldstr operand moved");
