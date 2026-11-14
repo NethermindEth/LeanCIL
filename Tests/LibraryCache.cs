@@ -862,18 +862,40 @@ try
         if (singleRead.Elapsed > TimeSpan.FromSeconds(30) || slowEntries.Any(path => !Directory.Exists(path)) ||
             !single.SequenceEqual(new[] { Path.GetFileName(unpinnedStale) }))
             throw new Exception("A lakefile that never answers delayed the pass, or its entries were removed");
-        // The whole pass is bounded too: it stops reading, stops removing, and says so.
+        // The whole pass is bounded too: a read under way when the limit comes is cut off there rather than at
+        // the read limit, and the pass then stops reading and removing, and says so. The pass sees only its own
+        // clock: the first reading fixes the limit, the second, taken by the first read, leaves it a moment,
+        // and every later one lies past it, so machine load cannot change what the pass does.
         PlantEntry(slowRoot, LibraryKeyOf('f'), Days(30));
-        packageReadLimit = TimeSpan.FromSeconds(30);
-        passLimit = TimeSpan.FromMilliseconds(500);
-        var wholePass = System.Diagnostics.Stopwatch.StartNew();
+        var passStart = DateTime.UtcNow;
+        var passReadings = 0;
+        var clockBefore = passClock;
+        packageReader = _ => { neverAnswers.Wait(TimeSpan.FromSeconds(10)); return ""; };
+        packageReadLimit = TimeSpan.FromHours(1);
+        passLimit = TimeSpan.FromHours(1);
+        passClock = () => Interlocked.Increment(ref passReadings) switch
+        {
+            1 => passStart,
+            2 => passStart + passLimit - TimeSpan.FromMilliseconds(200),
+            _ => passStart + passLimit + passLimit
+        };
         var gaveUp = new PassReport();
-        var stopped = EvictUnused(slowRoot, KeyName(), LibraryStaging(), Days(7), null, null, null, true, gaveUp);
-        if (wholePass.Elapsed > TimeSpan.FromSeconds(20) || !gaveUp.GaveUp || stopped.Count != 0 ||
-            !Directory.Exists(Path.Combine(slowRoot, LibraryKeyOf('f'))))
-            throw new Exception("The pass was not bounded, or did not say that it gave up");
+        List<string> stopped;
+        try { stopped = EvictUnused(slowRoot, KeyName(), LibraryStaging(), Days(7), null, null, null, true, gaveUp); }
+        finally { passClock = clockBefore; }
+        // A read waited for until the read limit would have answered after ten seconds and been judged.
+        if (!gaveUp.GaveUp || gaveUp.Unjudged != 1 || stopped.Count != 0 ||
+            !Directory.Exists(Path.Combine(slowRoot, LibraryKeyOf('f'))) ||
+            slowEntries.Any(path => !Directory.Exists(path)))
+            throw new Exception("The pass was not bounded, or did not say that it gave up: " +
+                $"gave up {gaveUp.GaveUp}, unjudged {gaveUp.Unjudged}, removed [{string.Join(", ", stopped)}]");
+        // A clock that lies past the limit after its first reading makes the pass give up whatever the load.
+        var stageReadings = 0;
+        passClock = () => Interlocked.Increment(ref stageReadings) == 1 ? passStart : passStart + passLimit + passLimit;
         libraryEvicted = 0;
-        var gaveUpStage = Captured(() => EvictUnusedLibraries(slowRoot, LibraryKeyOf('9')));
+        string gaveUpStage;
+        try { gaveUpStage = Captured(() => EvictUnusedLibraries(slowRoot, LibraryKeyOf('9'))); }
+        finally { passClock = clockBefore; }
         if (!gaveUpStage.Contains("END ") || !gaveUpStage.Contains("s limit") || !gaveUpStage.Contains("(exit 0, ") ||
             WithoutStageProgress(gaveUpStage).Length != 0)
             throw new Exception("A pass that gave up did not report it: " + gaveUpStage);

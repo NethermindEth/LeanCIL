@@ -489,8 +489,10 @@ These tests cover preparation:
   the CLI document, a package whose lakefile names the entry keeps it however old its pin and
   however the cache directory is spelled, and no pass raises. A lakefile that never answers, and
   an injected reader that blocks, delay a pass by a bounded time; the named-pipe check prints SKIP
-  on Windows. Opening an entry evicts nothing, and a publication reports its removal as a stage
-  with the number removed and nothing else on stderr. Malformed settings keep the defaults and
+  on Windows. The pass limit is checked on an injected clock, so a read under way when the limit
+  comes is cut off there and the pass gives up whatever the machine's load. Opening an entry
+  evicts nothing, and a publication reports its removal as a stage with the number removed and
+  nothing else on stderr. Malformed settings keep the defaults and
   huge ones clamp. The link checks print SKIP when no symbolic link or junction can be made. The
   `workspace` suite checks that both package kinds pin the entry they require.
 - The `workspace` suite checks that a full audit, contract imports and a package import are never
