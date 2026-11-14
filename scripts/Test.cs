@@ -228,14 +228,15 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
-    "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding"],
+    "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
+    "Tests.ResolutionFacts"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
     + "local snapshot, struct field view, loop frame, contract consequence, invocation certificate, call transport, "
     + "buffer contents, linking, "
-    + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity and method body "
-    + "decoding tests");
+    + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity, method body "
+    + "decoding and declared narrowing tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
 
