@@ -102,7 +102,8 @@ theorem checkedNative_bind {mapping : AllocationRenaming} {relation : β → γ 
       (checkedAt .null nativeMethodWidth target >>= targetNext) := by
   cases checked : source with
   | error fault =>
-    simp [checked, checkedAt, Except.mapError, Bind.bind, Except.bind, SuccessOrThrow] at observable
+    simp [checked, checkedAt, Except.mapError, Bind.bind, Except.bind, SuccessOrThrow]
+      at observable
   | ok value =>
     simp only [checked, checkedAt, Except.mapError, Bind.bind, Except.bind] at observable ⊢
     rw [preserved value checked]

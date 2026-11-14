@@ -523,7 +523,8 @@ theorem step_relabel_add : StepRelabel .add := by
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
         | (split at h
-           all_goals repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           all_goals repeat
+             (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
            all_goals cases h
            all_goals simp only [FrameAction.relabel, context.next rfl, Pure.pure, Except.pure])
 
