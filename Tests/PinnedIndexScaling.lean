@@ -29,7 +29,8 @@ private def methodCheck (pinned : PinnedIndex) (position : Nat) : Bool :=
   let metadata : MethodMetadata := { own := { corlib := position } }
   let tables : IndexTables :=
     { rows := .leaf, strings := .leaf, blobs := .leaf,
-      userStrings := .leaf, links := .leaf, instanceBefore := .leaf, instanceTotal := .leaf }
+      userStrings := .leaf, links := .leaf, instanceBefore := .leaf, instanceTotal := .leaf,
+      genericOwners := .leaf }
   match metadata.environmentWith [[88]] [tables] pinned with
   | .error _ => false
   | .ok env => env.pinned.matches [65, 0, 0, 44, 99]
