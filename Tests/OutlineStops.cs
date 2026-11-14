@@ -104,3 +104,66 @@ if (read.Code != 0 || !read.Proof.Contains("not outlined: `.load64`", StringComp
     throw new Exception("A read wider than the span's elements was outlined as a read of its element:\n" +
         read.Output + read.Proof);
 Console.WriteLine("PASS a span read of another width than its elements is a hole");
+
+// A local of a narrow integer type stays the author's in every outline family, which reads it from the local's
+// type: the straight-line outline does not step its store, the loop outline refuses its kind and the object
+// outline refuses a numeric frame that holds it.
+MethodDefinition NarrowLocal(ModuleDefinition module, string name, TypeReference parameter)
+{
+    var method = Added(module, name, module.TypeSystem.Int32, parameter);
+    method.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Byte));
+    method.Body.InitLocals = true;
+    return method;
+}
+
+var straight = Outline("NarrowStraight", "System.Int32 Examples.NativeIntegers::NarrowStraight(System.Int32)",
+    module =>
+{
+    var code = NarrowLocal(module, "NarrowStraight", module.TypeSystem.Int32).Body.Instructions;
+    code.Add(Instruction.Create(OpCodes.Ldarg_0));
+    code.Add(Instruction.Create(OpCodes.Stloc_0));
+    code.Add(Instruction.Create(OpCodes.Ldloc_0));
+    code.Add(Instruction.Create(OpCodes.Ret));
+});
+if (straight.Code != 0 || !straight.Proof.Contains("not outlined: `.setLocal 0` at IL_0001", StringComparison.Ordinal))
+    throw new Exception("A store to a byte local was stepped by the straight-line outline:\n" +
+        straight.Output + straight.Proof);
+Console.WriteLine("PASS a store to a byte local is a hole in the straight-line outline");
+
+var looped = Outline("NarrowLoop", "System.Int32 Examples.NativeIntegers::NarrowLoop(System.Int32)", module =>
+{
+    var code = NarrowLocal(module, "NarrowLoop", module.TypeSystem.Int32).Body.Instructions;
+    var head = Instruction.Create(OpCodes.Ldloc_0);
+    code.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+    code.Add(Instruction.Create(OpCodes.Stloc_0));
+    code.Add(head);
+    code.Add(Instruction.Create(OpCodes.Ldc_I4_1));
+    code.Add(Instruction.Create(OpCodes.Add));
+    code.Add(Instruction.Create(OpCodes.Stloc_0));
+    code.Add(Instruction.Create(OpCodes.Ldloc_0));
+    code.Add(Instruction.Create(OpCodes.Ldarg_0));
+    code.Add(Instruction.Create(OpCodes.Blt, head));
+    code.Add(Instruction.Create(OpCodes.Ldloc_0));
+    code.Add(Instruction.Create(OpCodes.Ret));
+});
+if (looped.Code == 0 ||
+    !looped.Output.Contains("local `local0` has kind .narrow .unsigned8", StringComparison.Ordinal))
+    throw new Exception("A loop over a byte local was not refused by its kind:\n" + looped.Output);
+Console.WriteLine("PASS a loop over a byte local is refused by its kind in the loop outline");
+
+var framed = Outline("NarrowObject", "System.Int32 Examples.NativeIntegers::NarrowObject(Examples.Account)", module =>
+{
+    var account = module.GetType("Examples.Account");
+    var code = NarrowLocal(module, "NarrowObject", account).Body.Instructions;
+    code.Add(Instruction.Create(OpCodes.Ldarg_0));
+    code.Add(Instruction.Create(OpCodes.Ldfld, account.Fields.Single(field => field.Name == "Balance")));
+    code.Add(Instruction.Create(OpCodes.Conv_U1));
+    code.Add(Instruction.Create(OpCodes.Stloc_0));
+    code.Add(Instruction.Create(OpCodes.Ldloc_0));
+    code.Add(Instruction.Create(OpCodes.Ret));
+});
+if (framed.Code != 0 ||
+    !framed.Proof.Contains("a class frame with mixed numeric homes and unsupported local", StringComparison.Ordinal))
+    throw new Exception("A byte local beside an object argument was stepped by the object outline:\n" +
+        framed.Output + framed.Proof);
+Console.WriteLine("PASS a byte local in a method over an object is a hole in the object outline");

@@ -128,8 +128,9 @@ internal static class VerificationSuites
         new("excluded", "Tests/ExcludedBranchScaling.cs",
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",
-            "lookup equations of extracted methods, hand-written bodies and templates, and the scalar " +
-            "certificate of array element addresses, at a per-instruction cost that does not grow with the method, " +
+            "lookup equations of extracted methods, hand-written bodies and templates, the scalar certificate of " +
+            "array element addresses and the feature certificate of local loads and stores, at a per-instruction " +
+            "cost that does not grow with the method, " +
             "embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, " +
             "and type identity equality at a cost that does not grow with the name"),
         new("gates", "Tests/ProofGates.cs",
