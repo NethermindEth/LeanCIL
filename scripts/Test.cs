@@ -115,7 +115,7 @@ if (suite is "all" or "evidence")
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
-        "Tests/TranslationAudit.cs"]);
+        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs"]);
 if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
@@ -229,6 +229,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
     "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
+    "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
     "Tests.ResolutionFacts"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "

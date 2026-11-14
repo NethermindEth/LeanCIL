@@ -13,8 +13,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     ImportResolution? imports = null)
 {
     // Closed instantiations share their definition's bytes; the first method to use a body names them.
-    readonly Dictionary<(ModuleDefinition Module, uint Token), int> bodyBytes = [];
     readonly ExternalIdentityEvidence externalIdentities = new();
+    readonly MetadataSlices? metadata = pinned is null ? null : new(pinned);
     int methodParameterCount;
 
     // Type serialization needs no method bodies; only method and dispatch evidence read originals.
@@ -176,7 +176,11 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             case FieldReference field:
                 var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
                 var index = 0;
-                var fieldType = field.FieldType;
+                // A field signature's `!n` is the declaring type's parameter: the declaring instance's argument.
+                var fieldType = field.FieldType.ContainsGenericParameter &&
+                    field.DeclaringType is GenericInstanceType instance
+                    ? GenericStructs.Substitute((field.Resolve() ?? throw new InvalidDataException(
+                        "Unresolved generic field: " + field.FullName)).FieldType, instance) : field.FieldType;
                 if (field.DeclaringType.Scope is ModuleDefinition ||
                     PinnedAssemblies.Active?.ModuleOf(field.DeclaringType) is not null)
                 {
@@ -311,6 +315,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         externalIdentities.Emit(lean);
         lean.AppendLine($"def method{number}Original : Extraction.RawMethod := {originalEvidence}");
         lean.AppendLine(body.Bytes);
+        if (body.Slices.Length > 0)
+            foreach (var line in body.Slices.Split('\n')) lean.AppendLine(line);
         lean.AppendLine(body.Definition);
         lean.AppendLine($"def method{number}TypeArgumentsRaw : List Extraction.TypeExpr := {List(MethodSpecialization.Arguments(method).Select(Type))}");
         lean.AppendLine($"def method{number}Closed : Extraction.RawMethod := {closedEvidence}");
@@ -320,7 +326,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $" Extraction.SpecializationValid rawLayouts method{number}Original method{number}TypeArgumentsRaw" +
             $" method{number}Closed method{number}RawArguments := by constructor <;> rfl");
         lean.AppendLine($"theorem method{number}_body_validated :" +
-            $" Extraction.BodyDecodes method{number}Body method{number}Original := {LeanEmitter.Decide}");
+            $" Extraction.BodyDecodes assemblies ⟨{Quote(PinIdentity(method.Module))}⟩ method{number}Body" +
+            $" method{number}Original method{number}TypeArgumentsRaw method{number}Signature :=" +
+            $" ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, pinned_identities_spelled," +
+            " by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩");
     }
 
     static readonly HashSet<Instruction> EmptySet = [];
@@ -333,28 +342,31 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     /// The body bytes of an original method and its token table: each token read from the body, with the operand
     /// the extractor resolved it to. The Lean decoder reads the same bytes and checks them against the code.
     /// </summary>
-    (string Bytes, string Definition) Body(MethodDefinition original, MethodDefinition admitted,
+    (string Bytes, string Slices, string Definition, string Identified, string TablesValid) Body(
+        MethodDefinition original, MethodDefinition admitted,
         IReadOnlySet<Instruction> reachable, int number)
     {
         var body = Pinned.Body(original);
         var bytes = body.Bytes;
         var instructions = new InstructionIndex(original);
         var operands = new List<(uint Token, string Key, string Operand)>();
+        var positions = new Dictionary<uint, int>();
         for (var index = 0; index < original.Body.Instructions.Count; index++)
         {
             var instruction = original.Body.Instructions[index];
             if (!HasToken(instruction.OpCode)) continue;
-            var at = body.HeaderLength + instruction.Offset + instruction.OpCode.Size;
-            if (at + sizeof(uint) > bytes.Length)
-                throw new InvalidDataException($"Method body of {original.FullName} ends inside a token operand.");
-            var token = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at, sizeof(uint)));
+            var token = TokenOperand(original, body, instruction);
             var site = admitted.Body.Instructions[index];
             // An external identity is a materialized name at a reachable site and a literal at an unreachable
             // one. The literal spelling names the operand, so two sites share a token only if it agrees.
             var key = Operand(original, instructions, instruction, site, EmptySet);
             var operand = Operand(original, instructions, instruction, site, reachable);
-            var known = operands.FindIndex(entry => entry.Token == token);
-            if (known < 0) operands.Add((token, key, operand));
+            var known = positions.GetValueOrDefault(token, -1);
+            if (known < 0)
+            {
+                positions[token] = operands.Count;
+                operands.Add((token, key, operand));
+            }
             else if (operands[known].Key != key)
                 throw new InvalidDataException($"""
                     Metadata token 0x{token:X8} resolves to two operands in {original.FullName}.
@@ -364,15 +376,111 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             // either; the name spares the reachable site a conversion.
             else if (reachable.Contains(site)) operands[known] = (token, key, operand);
         }
-        var definition = (original.Module, original.MetadataToken.ToUInt32());
-        var data = bodyBytes.TryGetValue(definition, out var first)
-            ? $"method{first}Bytes" : List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
-        bodyBytes.TryAdd(definition, number);
+        // Each closed instantiation carries its own bytes and metadata slice, built from the open definition and the
+        // assembly, so a method's component names no other method and does not depend on which instantiations the
+        // extraction holds or in which order.
+        var data = List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        var classOwner = original.HasThis && ObjectTypes.Is(original.DeclaringType);
+        var (rows, tables, assemblies) = (metadata ?? throw new InvalidOperationException(
+            "Method evidence requires the pinned assemblies.")).Method(original,
+            operands.Select(entry => entry.Token).Append(original.Body.LocalVarToken.ToUInt32())
+                .Where(token => token != 0), classOwner);
+        // The kernel decides once that the literal tables are the decoder's; the body check reads them by name.
+        var slices = $"def method{number}Metadata : Extraction.MethodMetadata := {rows}\n" +
+            $"def method{number}Tables : List Extraction.IndexTables := {tables}\n" +
+            $"def method{number}Names : Extraction.MethodNames := {Names(original, classOwner, admitted.FullName)}\n" +
+            $"theorem method{number}_tables_valid : Extraction.tablesMatch method{number}Metadata " +
+            $"method{number}Tables = true := by decide +kernel";
         var table = List(operands.Select(entry => $"({entry.Token}, {entry.Operand})"));
-        return ($"def method{number}Bytes : List Nat := {data}",
+        var identities = List(assemblies.Select(index => $"assembly{index}Identity"));
+        var identified = assemblies.Reverse().Aggregate("Extraction.AllIdentified.nil",
+            (rest, index) => $"(Extraction.AllIdentified.cons assembly{index}_identified {rest})");
+        var arguments = MethodSpecialization.Arguments(admitted);
+        var instantiation = arguments.Count == 0 ? "" : $", instantiation := {List(arguments.Select(Resolved))}";
+        return ($"def method{number}Bytes : List Nat := {data}", slices,
             $"def method{number}Body : Extraction.BodyEvidence := {{ bytes := method{number}Bytes, " +
-            $"tokens := {{ operands := {table}, localSignature := {original.Body.LocalVarToken.ToUInt32()}, " +
-            $"locals := {Locals(original)} }} }}");
+            $"tokens := {{ operands := {table} }}, metadata := method{number}Metadata, " +
+            $"identities := {identities}, tables := method{number}Tables, names := method{number}Names, " +
+            $"pinned := pinnedIdentities{instantiation} }}",
+            identified, $"method{number}_tables_valid");
+    }
+
+    static string Utf8(string text) => MetadataSlices.Bytes(Encoding.UTF8.GetBytes(text));
+
+    /// <summary>
+    /// The owner and base class names the method's metadata spells and the signature the extraction selects it by,
+    /// as UTF-8 bytes: Lean reads the same names from the carried rows and proves by <c>cil_kernel_rfl</c> that they
+    /// spell the strings the evidence states.
+    /// </summary>
+    static string Names(MethodDefinition original, bool classOwner, string signature)
+    {
+        var bases = classOwner
+            ? ObjectTypes.Bases(original.DeclaringType)
+                .Select(type => $"({Utf8(LayoutEvidence.Scope(type))}, {Utf8(type.FullName)})")
+            : [];
+        return $"{{ owner := {Utf8(LayoutEvidence.Identity(original.DeclaringType))}, bases := {List(bases)}, " +
+            $"signature := {Utf8(signature)} }}";
+    }
+
+    // A type argument of a generic instance as the resolved type the instance's signature names. Lean admits it
+    // against the argument's type expression and spells the instance's full name from it, so only the element type
+    // code or the scope and name, and whether a generic head spells scoped arguments, are stated.
+    static string Resolved(TypeReference type) => type switch
+    {
+        _ when type.IsPrimitive || type.MetadataType is MetadataType.String or MetadataType.Object =>
+            $".primitive {(int)type.MetadataType}",
+        ArrayType { IsVector: true } array => $".szarray ({Resolved(array.ElementType)})",
+        GenericInstanceType generic => $".genericInst {Named(generic.ElementType, GenericStructs.Is(generic))} " +
+            generic.GenericArguments.Reverse().Aggregate(".nil",
+                (rest, argument) => $"(.cons ({Resolved(argument)}) {rest})"),
+        _ => $".named {Named(type, false)}"
+    };
+
+    static string Named(TypeReference type, bool scopedArguments) =>
+        $"{{ scope := {Utf8(LayoutEvidence.Scope(type))}, name := {Utf8(type.FullName)}, parts := [], " +
+        $"kind := .external none, pinned := {Bool(scopedArguments)} }}";
+
+    static uint TokenOperand(MethodDefinition original, MethodBodyBytes.Body body, Instruction instruction)
+    {
+        var at = body.HeaderLength + instruction.Offset + instruction.OpCode.Size;
+        if (at + sizeof(uint) > body.Bytes.Length)
+            throw new InvalidDataException($"Method body of {original.FullName} ends inside a token operand.");
+        return BinaryPrimitives.ReadUInt32LittleEndian(body.Bytes.AsSpan(at, sizeof(uint)));
+    }
+
+    /// <summary>
+    /// The identity block of each pinned assembly: its table header and <c>Assembly</c> row, a function of the
+    /// assembly alone, so every extraction of it writes the same bytes.
+    /// </summary>
+    internal void EmitAssemblyMetadata(StringBuilder lean)
+    {
+        var slices = metadata ??
+            throw new InvalidOperationException("Method evidence requires the pinned assemblies.");
+        foreach (var (module, index) in Pinned.Modules.Select((module, index) => (module, index)))
+        {
+            var identity = Pinned.Original(module).Assembly.Name.FullName;
+            lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := " +
+                slices.AssemblyBlock(module));
+            lean.AppendLine($"def assembly{index}Identity : List Nat := " +
+                MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(identity)));
+            // The assembly's header bytes decode to the stated header, its bytes spell this identity, and it is the
+            // string the block states: one proof for every method of the assembly.
+            lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +
+                $"assembly{index}Metadata assembly{index}Identity := " +
+                "⟨by cil_kernel_rfl, by cil_kernel_rfl, by cil_kernel_rfl⟩");
+        }
+        // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
+        var pins = Pinned.Pins.ToArray();
+        for (var k = 0; k < pins.Length; k++)
+            lean.AppendLine(
+                $"def assembly{k} : Extraction.AssemblyPin := {{ identity := {Quote(pins[k].Identity)} }}");
+        lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
+            string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
+        // Every body lists these identities; one proof that they spell the pins serves them all.
+        lean.AppendLine("def pinnedIdentities : List (List Nat) := " +
+            List(Pinned.Modules.Select((_, index) => $"assembly{index}Identity")));
+        lean.AppendLine("theorem pinned_identities_spelled : pinnedIdentities.mapM Extraction.spelled? = " +
+            "some (assemblies.map (·.identity)) := by cil_kernel_rfl");
     }
 
     string DispatchTypes(MethodDefinition method)

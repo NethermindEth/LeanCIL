@@ -40,7 +40,8 @@ partial class Program
         namespace ExampleProof
         /-- The extracted program satisfies its translation evidence. -/
         theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-            Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
+            Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+          Extracted.translation_valid
         #print axioms correctness
         end ExampleProof
         """);

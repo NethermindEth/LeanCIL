@@ -216,6 +216,7 @@ internal static class LeanEmitter
         lean.AppendLine($"@[cil_code] def {FrameMetadata.EnvironmentLean} : LayoutEnvironment := " +
             "{ rawLayouts := rawLayouts, layouts := computedLayouts }");
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
+        genericEvidence.EmitAssemblyMetadata(lean);
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
@@ -316,13 +317,6 @@ internal static class LeanEmitter
                     $"Extraction.linkAt_of_entry (position := {position}) method{n}_linkIndex_valid rfl");
             }
         }
-        // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
-        PinnedAssemblies.Pin[] pins = pinned.Pins.ToArray();
-        for (var k = 0; k < pins.Length; k++)
-            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := " +
-                $"{{ identity := {JsonSerializer.Serialize(pins[k].Identity)} }}");
-        lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
-            string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
@@ -335,7 +329,8 @@ internal static class LeanEmitter
                 $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
                 $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
                 $"dispatchTypes := method{n}DispatchTypes, " +
-                $"assembly := assembly{pinned.Index(methods[n].Module)} }}")) + "]");
+                $"assembly := assembly{pinned.Index(methods[n].Module)}, " +
+                $"signature := method{n}Signature }}")) + "]");
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);
@@ -347,8 +342,9 @@ internal static class LeanEmitter
                 $"method{n}Closed) method{n}Reachable method{n} := {proof}");
         }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
-        // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them.
-        lean.AppendLine("def signatures : List String := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}Signature")) + "]");
+        // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them. Each
+        // entry is its evidence record's, which the body check equates with the full name its metadata row spells.
+        lean.AppendLine("def signatures : List String := methodEvidence.map Extraction.MethodEvidence.signature");
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
         lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
@@ -364,7 +360,8 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +
                 $"Extraction.MethodEnvironmentValid rawLayouts computedLayouts method{n} := rfl");
-            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
+            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts " +
+                $"computedLayouts assemblies methodEvidence imports methodEvidence[{n}] method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
@@ -379,7 +376,8 @@ internal static class LeanEmitter
             "Extraction.ImportedLocalLayoutsBound rawLayouts computedLayouts imports := " + Decide);
         lean.AppendLine("theorem attribution_validated : " +
             "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
-        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
+        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
+            "assemblies methodEvidence imports program := by");
         lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated");
         for (int n = 0; n < methods.Length; n++)
