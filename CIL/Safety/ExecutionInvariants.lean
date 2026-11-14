@@ -331,6 +331,8 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply managedStep_contract; assumption
+    | unfold returnFrom at h
+    | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
     | solve |
         apply StepContract.initializeSpanLocal
         all_goals assumption

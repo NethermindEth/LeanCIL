@@ -370,8 +370,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
            intro first second same
            subst second
            exact .ok (.next related frames))
-      | (try simp only [List.map_nil, List.length_map, ← List.map_take, ← List.map_drop,
-           ← List.map_reverse, metadata.returnsValue]
+      | (try simp only [List.length_map, ← List.map_take, ← List.map_drop, ← List.map_reverse]
          repeat first
          | exact .error _
          | exact .ok (.returned related)
@@ -394,7 +393,29 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
             intro first second same
             subst second)
          | (split <;> try simp only [*, Bool.false_eq_true, ite_false])
-         skip))
+         skip)
+      all_goals
+        rename_i narrow
+        cases narrow with
+        | none =>
+          simp only [returnFrom, List.length_map]
+          by_cases sized : stack.length = (if sourceBody.returnsValue then 1 else 0)
+          · simp only [sized, ↓reduceIte]
+            apply (related.checkedValues stack bounds).bind
+            intro first second same
+            subst second
+            exact .ok (.returned related)
+          · simp only [sized, ↓reduceIte]
+            exact .error .invalidState
+        | some kind =>
+          cases stack with
+          | nil => exact .error .invalidState
+          | cons value rest =>
+            cases value <;> try exact .error .invalidState
+            rename_i scalar
+            cases scalar <;> cases rest <;> try exact .error .invalidState
+            simp only [returnFrom, List.map_cons, List.map_nil, AllocationRenaming.value]
+            split <;> first | exact .ok (.returned related) | exact .error .invalidState)
 #print axioms Memory.Renamed.stepBoundary
 
 end CIL.Safety

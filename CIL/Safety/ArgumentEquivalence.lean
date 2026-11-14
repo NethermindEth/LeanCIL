@@ -31,14 +31,6 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Instruction) (pc : Nat)
         return FrameAction.next (pc + 1)
           ((← checkedValue memory (.scalar (.i32 (kind.extend bits)))) :: stack) frame memory)
         (agreement index (some kind) rfl)
-  case ret narrow =>
-    cases narrow <;> try rfl
-    cases stack with
-    | nil => rfl
-    | cons value rest =>
-      cases value <;> try rfl
-      rename_i scalar
-      cases scalar <;> cases rest <;> rfl
   all_goals
     cases stack with
     | nil => rfl

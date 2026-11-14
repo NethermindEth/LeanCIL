@@ -1174,8 +1174,13 @@ theorem step_appendLocals_ret (narrow : Option NarrowKind) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
-  frame_natural
+  simp only [step, observerCount, Bool.or_false]
+  simp only [returnFrom]
+  repeat' first
+    | rfl
+    | (simp only [map_bind, map_pure, FrameAction.appendLocals]; done)
+    | (apply bind_congr; intro)
+    | split
 
 #print axioms step_appendLocals_ret
 

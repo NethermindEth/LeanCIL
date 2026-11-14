@@ -451,36 +451,17 @@ theorem step_relabel_ret (narrow : Option NarrowKind) : StepRelabel (.ret narrow
   unfold step at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
-  cases narrow
-  · dsimp only [CIL.Instruction.relabel] at h ⊢
-    rw [context.returnsValue]
-    by_cases sized : stack.length = (if expected.returnsValue then 1 else 0)
-    · rw [ite_eq_left sized] at h ⊢
-      lockstep
-    · rw [ite_eq_right sized] at h
-      cases h
-  · rcases stack with _ | ⟨v, rest⟩
-    · dsimp only [CIL.Instruction.relabel] at h ⊢
-      fallback_vacuous
-    · cases v with
-      | scalar value =>
-        cases value <;> cases rest
-        all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
-        all_goals (try rw [context.returnsValue])
-        all_goals first
-          | fallback_vacuous
-          | (by_cases returns : expected.returnsValue = true
-             · simp only [returns, ↓reduceIte] at h ⊢
-               lockstep
-             · simp only [returns, ↓reduceIte, Bool.false_eq_true] at h
-               cases h)
-      | reference reference =>
-        cases rest <;> fallback_vacuous
-      | span reference length =>
-        cases rest <;> fallback_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _
-      | object _ =>
-        cases rest <;> fallback_vacuous
+  rw [context.returnsValue]
+  have returned : ∃ values memory, action = .returned values memory := by
+    unfold returnFrom at h
+    repeat' first
+      | split at h
+      | (obtain ⟨_, _, h⟩ := except_bind_ok h)
+      | (cases h <;> exact ⟨_, _, rfl⟩)
+  obtain ⟨values, memory, rfl⟩ := returned
+  exact h
+
+#print axioms step_relabel_ret
 
 theorem step_relabel_unsupported (description : String) :
     StepRelabel (.unsupported description) := by
@@ -1040,36 +1021,14 @@ theorem step_raise_ret (narrow : Option NarrowKind) : StepRaise (.ret narrow) :=
   unfold step at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
-  cases narrow
-  · dsimp only [CIL.Instruction.relabel] at h ⊢
-    rw [context.returnsValue]
-    by_cases sized : stack.length = (if expected.returnsValue then 1 else 0)
-    · rw [ite_eq_left sized] at h ⊢
-      raise_lockstep
-    · rw [ite_eq_right sized] at h
-      cases h
-  · rcases stack with _ | ⟨v, rest⟩
-    · dsimp only [CIL.Instruction.relabel] at h ⊢
-      fallback_raise_vacuous
-    · cases v with
-      | scalar value =>
-        cases value <;> cases rest
-        all_goals (try dsimp only [CIL.Instruction.relabel] at h ⊢)
-        all_goals (try rw [context.returnsValue])
-        all_goals first
-          | fallback_raise_vacuous
-          | (by_cases returns : expected.returnsValue = true
-             · simp only [returns, ↓reduceIte] at h ⊢
-               raise_lockstep
-             · simp only [returns, ↓reduceIte, Bool.false_eq_true] at h
-               cases h)
-      | reference reference =>
-        cases rest <;> fallback_raise_vacuous
-      | span reference length =>
-        cases rest <;> fallback_raise_vacuous
-      | bufferSpan _ | readOnlyReference _ | array _ | methodPointer _ | methodTable _
-      | object _ =>
-        cases rest <;> fallback_raise_vacuous
+  rw [context.returnsValue]
+  unfold returnFrom at h ⊢
+  repeat' first
+    | (split at h <;> simp_all only)
+    | raise_lockstep
+    | cases h
+
+#print axioms step_raise_ret
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_ceq : StepRaise .ceq := by
