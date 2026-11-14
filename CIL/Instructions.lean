@@ -99,15 +99,35 @@ def SpanConstructor.operation : SpanConstructor → MemoryOp
   | .reference width writable => .spanFromReference width writable
   | .singleReference width writable => .spanSingleReference width writable
 
+/-- Target of an overflow-checked conversion; `i` and `u` are native-sized. -/
+inductive ConvTarget where
+  | i1 | u1 | i2 | u2 | i4 | u4 | i8 | u8 | i | u
+  deriving DecidableEq, Repr
+
+/-- Result width in bits; native int is 64 bits on every admitted profile. -/
+def ConvTarget.width : ConvTarget → Nat
+  | .i1 | .u1 => 8
+  | .i2 | .u2 => 16
+  | .i4 | .u4 => 32
+  | .i8 | .u8 | .i | .u => 64
+
+/-- Whether the target range is signed. -/
+def ConvTarget.signed : ConvTarget → Bool
+  | .i1 | .i2 | .i4 | .i8 | .i => true
+  | .u1 | .u2 | .u4 | .u8 | .u => false
+
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
 inductive Instruction where
   /-- Widen the int32 operand of a metadata-validated mixed native operation. -/
   | nativeBinary (operation : Instruction)
-  | divide (signed remainder : Bool)
-  | checkedArithmetic (kind : CheckedBinaryKind) (signed : Bool)
-  | checkedConvert (width : Nat) (signed unsignedInput : Bool)
+  -- Division and remainder; `divideKind?` gives their flags.
+  | div | div_un | rem | rem_un
+  -- Overflow-checked arithmetic; `checkedKind?` gives their flags.
+  | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf | mul_ovf_un
+  -- Overflow-checked conversion to `target`, reading the operand as signed or as unsigned.
+  | conv_ovf (target : ConvTarget) | conv_ovf_un (target : ConvTarget)
   /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
   | stackAlloc (initLocals : Bool)
   /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
@@ -145,7 +165,8 @@ inductive Instruction where
   | ldc_i4 (value : W32)
   | ldc_i8 (value : W64)
   | conv_i1 | conv_i2 | conv_u2
-  | conv_i8 | conv_i4 | conv_u1 | conv_u4 | conv_u8 | conv_u | not | add | sub | mul | and | or
+  | conv_i8 | conv_i4 | conv_u1 | conv_u4 | conv_u8 | conv_u | conv_i | not | add | sub | mul
+  | and | or
   | xor | shl | shr | shr_un | clt | clt_un | cgt_un | ceq | load64 | store64 | dup | pop
   -- Control flow.
   | br (target : Nat)
@@ -190,6 +211,24 @@ inductive Instruction where
 
 /-- The name of the instruction type, for tactics that recognise its constructors. -/
 def instructionTypeName : Lean.Name := ``CIL.Instruction
+
+/-- `(signed, remainder)` of a division or remainder instruction. -/
+def Instruction.divideKind? : Instruction → Option (Bool × Bool)
+  | .div => some (true, false)
+  | .div_un => some (false, false)
+  | .rem => some (true, true)
+  | .rem_un => some (false, true)
+  | _ => none
+
+/-- `(kind, signed)` of an overflow-checked arithmetic instruction. -/
+def Instruction.checkedKind? : Instruction → Option (CheckedBinaryKind × Bool)
+  | .add_ovf => some (.add, true)
+  | .add_ovf_un => some (.add, false)
+  | .sub_ovf => some (.sub, true)
+  | .sub_ovf_un => some (.sub, false)
+  | .mul_ovf => some (.mul, true)
+  | .mul_ovf_un => some (.mul, false)
+  | _ => none
 
 /-- A literal, call or construction whose value a static constructor stores in a readonly field. -/
 structure StaticInitializer where

@@ -62,15 +62,17 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .nop => some (0, 0)
   | .ldc_i4 _ | .ldc_i8 _ | .arg .. | .local .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
-  | .conv_u4 | .conv_u8 | .conv_u | .checkedConvert ..
+  | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
   | .aggregateFieldAt .. | .objectTest .. => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
-  | .clt | .clt_un | .cgt | .cgt_un | .ceq | .divide .. | .checkedArithmetic .. => some (2, 1)
+  | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
+  | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => some (2, 1)
   | .nativeBinary operation => match operation with
     | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
-    | .clt | .clt_un | .cgt | .cgt_un | .ceq | .divide .. | .checkedArithmetic .. => some (2, 1)
+    | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
+    | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => some (2, 1)
     | _ => none
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .store64 | .copyObject _
