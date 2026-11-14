@@ -242,8 +242,8 @@ example {program : CIL.Program} {before after : Memory} (kept : FrameInvariants 
 -- equation; unfolding `CIL.step`, or re-elaborating a tactic per step, exceeds the budget.
 def loadedGuardBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := false, locals := [], code :=
-    [.local 0, .ldc_i4 4, .blt_un 7, .local 0, .ldc_i4 0, .bge 7, .nop, .ret,
-      .local 1, .local 2, .blt_un 7, .ret] }
+    [.ldloc 0, .ldc_i4 4, .blt_un 7, .ldloc 0, .ldc_i4 0, .bge 7, .nop, .ret,
+      .ldloc 1, .ldloc 2, .blt_un 7, .ret] }
 
 set_option maxHeartbeats 2000 in
 theorem loaded_unsigned_branch (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -449,11 +449,11 @@ theorem literal_branch_pc (program : CIL.Program) (index : Nat) (profile : CIL.F
     a `Fin` literal, and a loaded `localResult` of a typed value is the value the next fact
     takes. The facts would otherwise match only an index spelled as the numeral. -/
 theorem coerced_index_facts (program : CIL.Program) (index : Nat) (body : CIL.Method)
-    (found : program[index]? = some body) (load : body.code[0]? = some (.local 7))
+    (found : program[index]? = some body) (load : body.code[0]? = some (.ldloc 7))
     (store : body.code[1]? = some (.stloc 8)) (frame : Frame) (memory after : Memory)
     (bits : BitVec 128)
     (loaded : ∀ pc args stack,
-      step body (.local (↑(6 : Fin 10) + 1)) pc args frame stack memory =
+      step body (.ldloc (↑(6 : Fin 10) + 1)) pc args frame stack memory =
         .ok (.next (pc + 1) (.scalar (localResult .vector128 (.v128 bits)) :: stack) frame
           memory))
     (stored : ∀ pc args stack,

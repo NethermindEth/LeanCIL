@@ -191,7 +191,7 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
-  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.local,
+  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.ldloc,
     ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.skipInit,
     ``CIL.Instruction.initAggregate, ``CIL.Instruction.fieldAddress]
@@ -199,7 +199,7 @@ def loopMovesOnly : List Lean.Name :=
 /-- Instructions that read no reference: they compare or compute on scalars, or move a value
     that `loopReadsReferences` shows is a scalar. -/
 def loopScalarOnly : List Lean.Name :=
-  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.local,
+  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.ldloc,
     ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.nativeBinary,
     ``CIL.Instruction.div, ``CIL.Instruction.div_un, ``CIL.Instruction.rem,
@@ -275,7 +275,7 @@ def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex Meta
     let stack ← whnfR stack
     let some #[_, top, _] := argumentsOf? stack ``List.cons 3 | return true
     return !(← scalar top)
-  if name == ``CIL.Instruction.local || name == ``CIL.Instruction.ldloca then
+  if name == ``CIL.Instruction.ldloc || name == ``CIL.Instruction.ldloca then
     -- Loading a span or reference local checks it, and so does taking a span local's address.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
@@ -284,7 +284,7 @@ def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex Meta
     let some slot ← loopLocalAt locals index | return true
     let slot ← whnfR slot
     let some #[kind, _] := argumentsOf? slot ``LocalSlot.bytes 2 | return true
-    return name == ``CIL.Instruction.local && (← whnfR kind).isConstOf ``CIL.LocalKind.reference
+    return name == ``CIL.Instruction.ldloc && (← whnfR kind).isConstOf ``CIL.LocalKind.reference
   return false
 
 open Lean Meta in

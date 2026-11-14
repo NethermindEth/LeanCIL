@@ -497,7 +497,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036, 10, 11, 12, 13, 19, 65038] then
     let some index := localIndex instruction | return false
     return match emitted with
-      | .local actual => instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index
+      | .ldloc actual => instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index
       | .stloc actual => instruction.opcode ∈ [10, 11, 12, 13, 19, 65038] && actual == index
       | _ => false
   if instruction.opcode ∈ [18, 65037] then

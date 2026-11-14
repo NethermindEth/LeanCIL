@@ -56,7 +56,7 @@ theorem helper_holds {program : CIL.Program} {callee : Nat}
 @[cil_code] def caller : CIL.Method :=
   { locals := [.i64 42, .unmodeled], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.arg 0, .arg 1, .ldloca 1, .call 1 3, .local 1, .ret] }
+    code := [.arg 0, .arg 1, .ldloca 1, .call 1 3, .ldloc 1, .ret] }
 
 bind_entry entry (memory : Memory) (left right : BitVec 256)
     (formed : memory.WellFormed) := caller

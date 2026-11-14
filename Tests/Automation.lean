@@ -858,7 +858,7 @@ theorem literal_stack_cleanup (program : CIL.Program) (frame : Frame) (memory : 
 /-- A supplied step fact is used before the op's own equation, which here cannot read the frame's slot;
     the body is `cil_code`, so the fact must be tried before the lookup unfolds it. -/
 @[cil_code] def slotBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.stloc 0, .local 0, .ret] }
+  { profile, returnsValue := true, locals := [], code := [.stloc 0, .ldloc 0, .ret] }
 
 open CIL.Safety in
 theorem step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -866,7 +866,7 @@ theorem step_facts_first (program : CIL.Program) (index : Nat) (profile : CIL.Fe
     (memory written : Memory) (value : CIL.W32)
     (store : step (slotBody profile) (.stloc 0) 0 args frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written))
-    (load : ∀ stack, step (slotBody profile) (.local 0) 1 args stored stack written =
+    (load : ∀ stack, step (slotBody profile) (.ldloc 0) 1 args stored stack written =
       .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
     run program 3 index 0 args frame [.scalar (.i32 value)] memory =
       .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
@@ -883,7 +883,7 @@ theorem applied_step_facts_first (program : CIL.Program) (index : Nat) (profile 
     (store : ∀ value : CIL.W32,
       step (slotBody profile) (.stloc 0) 0 args frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written))
-    (load : ∀ stack, step (slotBody profile) (.local 0) 1 args stored stack written =
+    (load : ∀ stack, step (slotBody profile) (.ldloc 0) 1 args stored stack written =
       .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
     run program 3 index 0 args frame [.scalar (.i32 value)] memory =
       .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
@@ -894,14 +894,14 @@ theorem applied_step_facts_first (program : CIL.Program) (index : Nat) (profile 
 
 /-- An extracted program's lookup unfolds the body to its literal, so a fact on the named body must still match. -/
 @[cil_code] def slotMethod : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.stloc 0, .local 0, .ret] }
+  { returnsValue := true, locals := [], code := [.stloc 0, .ldloc 0, .ret] }
 @[cil_code] def slotProgram : CIL.Program := [slotMethod]
 
 open CIL.Safety in
 theorem named_body_step_facts (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
     (store : step slotMethod (.stloc 0) 0 [] frame [.scalar (.i32 value)] memory =
       .ok (.next 1 [] stored written))
-    (load : ∀ stack, step slotMethod (.local 0) 1 [] stored stack written =
+    (load : ∀ stack, step slotMethod (.ldloc 0) 1 [] stored stack written =
       .ok (.next 2 (.scalar (.i32 value) :: stack) stored written)) :
     run slotProgram 3 0 0 [] frame [.scalar (.i32 value)] memory =
       .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by
@@ -915,7 +915,7 @@ open CIL.Safety in
 theorem quantified_body_step_facts (frame stored : Frame) (memory written : Memory) (value : CIL.W32)
     (store : ∀ body pc args, step body (.stloc 0) pc args frame [.scalar (.i32 value)] memory =
       .ok (.next (pc + 1) [] stored written))
-    (load : ∀ body pc args stack, step body (.local 0) pc args stored stack written =
+    (load : ∀ body pc args stack, step body (.ldloc 0) pc args stored stack written =
       .ok (.next (pc + 1) (.scalar (.i32 value) :: stack) stored written)) :
     run slotProgram 3 0 0 [] frame [.scalar (.i32 value)] memory =
       .ok (leaveFrame stored written, [.scalar (.i32 value)]) := by

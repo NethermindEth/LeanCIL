@@ -69,8 +69,8 @@ void Reject(string name, string mutated)
 
 // Mutate lookup lemmas along with code so their rfl proofs cannot cause the rejection.
 Reject("omitted-home", baseline.Replace("[(0, .word32)]", "[]"));
-Reject("wrong-slot", baseline.Replace(".stloc 0", ".stloc 1").Replace(".local 0", ".local 1"));
-Reject("omitted-redirection", baseline.Replace(".local 0", ".arg 0"));
+Reject("wrong-slot", baseline.Replace(".stloc 0", ".stloc 1").Replace(".ldloc 0", ".ldloc 1"));
+Reject("omitted-redirection", baseline.Replace(".ldloc 0", ".arg 0"));
 Reject("wrong-home-type", baseline.Replace("[(0, .word32)]", "[(0, .word64)]"));
 Reject("omitted-raw-site", baseline.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"));
 rejected.Check();

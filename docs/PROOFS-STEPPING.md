@@ -161,7 +161,7 @@ monadic binds. The tactics accept these fact forms:
 | Situation | Fact |
 | --- | --- |
 | A branch on a symbolic condition | `v = 0` or `Not (v = 0)` on the condition value; no `CIL.truth` restatement is needed. A literal condition, such as the `1` a decided feature test pushes, decides itself and continues at a numeral program counter |
-| An opcode index stated as closed arithmetic, such as `.local (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.local 7`, the form a fetched opcode has |
+| An opcode index stated as closed arithmetic, such as `.ldloc (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.ldloc 7`, the form a fetched opcode has |
 | A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1` | Fact preparation derives its load at the numeral width an opcode carries |
 | A value known only as `argument : CIL.Value`, loaded as an argument or passed to a call | `numericValue argument = true`; preparation also states it over the unfolded definition, the form the checked value test has when the step reaches it |
 | `bitcastByteBool`, whose operand must be `0` or `1` | None for a comparison result `if c then 1 else 0`; for any other int32, `bits.toNat ≤ 1`. The fact may bound a value inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32` |

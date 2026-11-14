@@ -238,7 +238,7 @@ string TranslateArgument(Instruction instruction, Dictionary<int, int> positions
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
         0, Index(argumentMethod), null, null, positions, null, null, null])!);
 if (TranslateArgument(storeArgument, homePositions) != ".stloc 3" ||
-    TranslateArgument(loadArgument, homePositions) != ".local 3" ||
+    TranslateArgument(loadArgument, homePositions) != ".ldloc 3" ||
     TranslateArgument(addressArgument, homePositions) != ".ldloca 3")
     throw new Exception("Home translation lost the raw-local offset or slot index");
 if (TranslateArgument(loadArgument, []) != ".arg 1")

@@ -184,7 +184,7 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
   | .load index => (do
       let type ← argumentAt index
       match homeAt index, emitted with
-      | some slot, .local actual => return actual == slot
+      | some slot, .ldloc actual => return actual == slot
       | none, .arg actual narrow => return actual == index && narrow == argumentNarrow type
       | _, _ => return false).getD false
   | .store index => (do
@@ -203,7 +203,7 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
       | _ => return false).getD false
   | .other => match emitted with
       | .arg .. => false
-      | .local index | .stloc index | .ldloca index | .initializeSpanLocal index _ =>
+      | .ldloc index | .stloc index | .ldloca index | .initializeSpanLocal index _ =>
         index < localCount
       | _ => true
 

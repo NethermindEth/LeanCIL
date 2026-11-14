@@ -574,7 +574,7 @@ elab_rules : tactic
               evalTactic (← `(tactic| cil_strict rw
                 [run_next $methodFound $instructionFound $(stored.stepped)]))
               pure stored.snapshots
-            else if operation == ``CIL.Instruction.local then
+            else if operation == ``CIL.Instruction.ldloc then
               let loaded ← snapshotLoad snapshot methodFound instructionFound prepared
               evalTactic (← `(tactic| cil_strict rw
                 [run_next $methodFound $instructionFound $loaded]))
@@ -679,7 +679,7 @@ private def snapshotContractWalkSteps (initial : Term) (facts : Array Term)
             let stored ← snapshotStore snapshot found instruction stepFacts true supplied
             pure (stored.snapshots, stored.stepped, some stored)
           else if supplied then throwError "The instruction is not a numeric store"
-          else if operation == ``CIL.Instruction.local then do
+          else if operation == ``CIL.Instruction.ldloc then do
             pure (snapshot, ← snapshotLoad snapshot found instruction stepFacts, none)
           else throwError "The instruction is not a numeric local"
         evalTactic (← `(tactic| (

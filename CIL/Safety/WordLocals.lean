@@ -37,7 +37,7 @@ theorem step_load_word64 {body : CIL.Method} {pc index : Nat} {args stack : List
     {frame : Frame} {memory : Memory} {reference : Reference} {word : BitVec 64}
     (slot : frame.locals[index]? = some (.bytes .word64 reference))
     (loaded : read memory reference 8 1 = .ok (numberBytes word.toNat 8)) :
-    step body (.local index) pc args frame stack memory =
+    step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.i64 word) :: stack) frame memory) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, Bool.false_or,
     Bool.false_eq_true, ite_false, slot, load_local_word64_of_read loaded, Bind.bind, Except.bind,

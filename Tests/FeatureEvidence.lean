@@ -84,7 +84,7 @@ private def loopStates : FeatureCertificate := [state [] [none], state [some 0] 
   state [] [none], state [some 1] [none],
   state [] [some 1], state [] [none]]
 private def loopCode : List Instruction :=
-  [.ldc_i4 0, .stloc 0, .local 0, .ldc_i4 0, .bne_un 8, .ldc_i4 1, .stloc 0, .br 2, .ret]
+  [.ldc_i4 0, .stloc 0, .ldloc 0, .ldc_i4 0, .bne_un 8, .ldc_i4 1, .stloc 0, .br 2, .ret]
 example : FeatureFlowValid #[] (fun _ => none) loopRaw .scalar loopStates
     (List.replicate 9 true) loopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none)
@@ -152,20 +152,20 @@ example : featureOpMatches #[] branchRaw (i 88) (.nop) = false := by decide
 -- A Boolean local that is never addressed is eligible for constant facts; its load and store bind
 -- to the plain instructions at its own index, since the slot's kind does the narrowing.
 private def booleanRaw := raw [i 6, i 10] [.atom runtimeScope "System.Boolean"] .void
-example : featureOpMatches #[] booleanRaw (i 6) (.local 0) = true := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 6) (.ldloc 0) = true := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 10) (.stloc 0) = true := by decide +kernel
-example : featureOpMatches #[] booleanRaw (i 6) (.local 1) = false := by decide +kernel
-example : featureOpMatches #[] booleanRaw (i 10) (.local 0) = false := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 6) (.ldloc 1) = false := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 10) (.ldloc 0) = false := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 6) (.stloc 0) = false := by decide +kernel
 -- Taking the address of a span local or of an argument home binds only the address instruction,
 -- whose step pushes the span's view; a load in its place is rejected.
 private def spanRaw := raw [i 18 (.local 0), i 15 (.argument 0)]
   [.apply (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.UInt32")] .void
 example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloca 0) = true := by decide +kernel
-example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.local 0) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloc 0) = false := by decide +kernel
 example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloca 1) = true := by
   decide +kernel
-example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.local 1) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloc 1) = false := by decide +kernel
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/
@@ -305,7 +305,7 @@ theorem switch_backedge_weakening :
       i 43 (.target 2), i 42] [intType] .void
     let facts := [state [] [none], state [some 0] [none], state [] [none], state [none] [none],
       state [] [none], state [some 1] [none], state [] [some 1], state [] [none]]
-    let code := [.ldc_i4 0, .stloc 0, .local 0, .switch [4, 7], .ldc_i4 1, .stloc 0,
+    let code := [.ldc_i4 0, .stloc 0, .ldloc 0, .switch [4, 7], .ldc_i4 1, .stloc 0,
       .br 2, .ret]
     FeatureFlowValid #[] (fun _ => none) body .scalar facts (List.replicate 8 true) code ∧
     ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 2 (state [] [some 0]))

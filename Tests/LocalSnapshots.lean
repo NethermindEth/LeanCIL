@@ -68,9 +68,9 @@ theorem vector_and_int_survive {body : CIL.Method} {pc : Nat} {args stack : List
     (callerWrite : write afterInt target bytes 1 = .ok afterOther)
     (belowFrame : target.allocation < boundary)
     (storeVector : write afterOther vectorHome (numberBytes vector.toNat 16) 1 = .ok final) :
-    step body (.local 0) pc args frame stack final =
+    step body (.ldloc 0) pc args frame stack final =
         .ok (.next (pc + 1) (.scalar (.v128 vector) :: stack) frame final) ∧
-      step body (.local 1) pc args frame stack final =
+      step body (.ldloc 1) pc args frame stack final =
         .ok (.next (pc + 1) (.scalar (.i32 count) :: stack) frame final) := by
   have intKnown := (LocalSnapshots.empty start frame.locals).after_write homes 1 .word32 intHome
     (.i32 count) count.toNat rfl intSlot storeInt
@@ -96,9 +96,9 @@ theorem numeric_frame_store {body : CIL.Method} {pc : Nat} {args stack : List Va
     ∃ after,
       step body (.stloc 1) pc args frame (.scalar (.i32 count) :: stack) entered =
         .ok (.next (pc + 1) stack frame after) ∧
-      step body (.local 0) pc args frame stack after =
+      step body (.ldloc 0) pc args frame stack after =
         .ok (.next (pc + 1) (.scalar (.v128 0) :: stack) frame after) ∧
-      step body (.local 1) pc args frame stack after =
+      step body (.ldloc 1) pc args frame stack after =
         .ok (.next (pc + 1) (.scalar (.i32 count) :: stack) frame after) := by
   obtain ⟨intHome, intSlot, _, _, intReady⟩ := homes.home_at 1 ⟨.word32, .i32 0, 0, rfl⟩ rfl
   obtain ⟨after, stepped, known, _⟩ := homes.snapshots.store (body := body) (pc := pc)
@@ -115,7 +115,7 @@ theorem narrow_store_loads_extended {body : CIL.Method} {pc : Nat} {args stack :
     (homes : WritableHomes entered boundary [.narrow .signed8] frame.locals)
     (slot : frame.locals[0]? = some (.bytes (.narrow .signed8) home)) (bits : BitVec 32)
     (stored : write start home (numberBytes bits.toNat 1) 1 = .ok final) :
-    step body (.local 0) pc args frame stack final =
+    step body (.ldloc 0) pc args frame stack final =
       .ok (.next (pc + 1) (.scalar (.i32 ((bits.setWidth 8).signExtend 32)) :: stack)
         frame final) :=
   ((LocalSnapshots.empty start frame.locals).after_write homes 0 (.narrow .signed8) home
@@ -132,7 +132,7 @@ theorem word_store_loads_as_local {body : CIL.Method} {pc index : Nat}
     (homes : WritableHomes entered boundary kinds frame.locals) (formed : before.WellFormed)
     (word : BitVec 64) (slot : frame.locals[index]? = some (.bytes .word64 home))
     (written : write before home (numberBytes word.toNat 8) 1 = .ok after) :
-    step body (.local index) pc args frame stack after =
+    step body (.ldloc index) pc args frame stack after =
       .ok (.next (pc + 1) (.scalar (.i64 word) :: stack) frame after) := by
   have locals := (snapshots.after_write homes formed index home word slot written).toLocalSnapshots
   rw [wordLocals_rememberWord] at locals
@@ -184,7 +184,7 @@ theorem byte_overwrite_loads_latest {body : CIL.Method} {pc : Nat} {args stack :
     (slot : frame.locals[0]? = some (.bytes .byte home))
     (first : write start home (numberBytes 7 1) 1 = .ok middle)
     (second : write middle home (numberBytes 200 1) 1 = .ok final) :
-    step body (.local 0) pc args frame stack final =
+    step body (.ldloc 0) pc args frame stack final =
       .ok (.next (pc + 1) (.scalar (.i32 200) :: stack) frame final) := by
   have once := (LocalSnapshots.empty start frame.locals).after_write homes 0 .byte home
     (.i32 7) 7 rfl slot first
@@ -219,7 +219,7 @@ theorem vector_survives_callee_frame {body : CIL.Method} {pc : Nat} {args stack 
     {frame : Frame} {caller returned : Memory} {vector : BitVec 128}
     (snapshots : LocalSnapshots caller frame.locals (vectorKnown vector))
     (roundTrip : MemoryBelow caller.nextIdentity caller returned) (formed : caller.WellFormed) :
-    step body (.local 0) pc args frame stack returned =
+    step body (.ldloc 0) pc args frame stack returned =
       .ok (.next (pc + 1) (.scalar (.v128 vector) :: stack) frame returned) :=
   (snapshots.after_below roundTrip formed).load (.v128 vector) rfl
 
@@ -251,11 +251,11 @@ theorem overlapping_write_not_apart (home : Reference) (byte : BitVec 8) :
 
 /-- Loads a vector local and returns it. -/
 @[cil_code] def loadVectorBody : CIL.Method := {
-  code := [.local 0, .ret], locals := [.v128 0], localKinds := [.vector128],
+  code := [.ldloc 0, .ret], locals := [.v128 0], localKinds := [.vector128],
   returnsValue := true }
 
 /-- The stepping tactics take a snapshot load as a supplied step fact, with no change to the
-    tactics: the `.local` step pushes the remembered vector. -/
+    tactics: the `.ldloc` step pushes the remembered vector. -/
 theorem load_fact_steps (program : CIL.Program) (found : program[0]? = some loadVectorBody)
     (args : List Value) (frame : Frame) (memory : Memory) (vector : BitVec 128)
     (known : Nat → Option CIL.Value) (snapshots : LocalSnapshots memory frame.locals known)

@@ -362,7 +362,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .arg i (some kind), _ =>
     let some (.scalar (.i32 bits)) := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m (.scalar (.i32 (kind.extend bits)))) :: stack) frame m
-  | .local i, _ =>
+  | .ldloc i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← loadLocal m slot) :: stack) frame m
   | .ldloca i, _ =>

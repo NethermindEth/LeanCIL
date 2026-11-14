@@ -153,7 +153,7 @@ inductive Instruction where
   | setAggregateFieldAt (offset size : Nat)
   -- Arguments and locals.
   | arg (index : Nat) (narrow : Option NarrowKind := none)
-  | local (index : Nat)
+  | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)
   | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
