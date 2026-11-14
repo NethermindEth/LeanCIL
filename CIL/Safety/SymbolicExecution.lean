@@ -1124,15 +1124,12 @@ elab_rules : tactic
       ``CIL.Instruction.conv_i2, ``CIL.Instruction.conv_u2, ``CIL.Instruction.conv_i8,
       ``CIL.Instruction.conv_i4, ``CIL.Instruction.conv_u1, ``CIL.Instruction.conv_u4,
       ``CIL.Instruction.conv_u8, ``CIL.Instruction.conv_u, ``CIL.Instruction.conv_i,
-      ``CIL.Instruction.conv_ovf, ``CIL.Instruction.conv_ovf_un, ``CIL.Instruction.not,
+      ``CIL.Instruction.not,
       ``CIL.Instruction.add, ``CIL.Instruction.sub, ``CIL.Instruction.mul,
       ``CIL.Instruction.and, ``CIL.Instruction.or, ``CIL.Instruction.xor,
       ``CIL.Instruction.shl, ``CIL.Instruction.shr, ``CIL.Instruction.shr_un,
       ``CIL.Instruction.clt, ``CIL.Instruction.clt_un, ``CIL.Instruction.cgt_un,
-      ``CIL.Instruction.ceq, ``CIL.Instruction.div, ``CIL.Instruction.div_un,
-      ``CIL.Instruction.rem, ``CIL.Instruction.rem_un, ``CIL.Instruction.add_ovf,
-      ``CIL.Instruction.add_ovf_un, ``CIL.Instruction.sub_ovf, ``CIL.Instruction.sub_ovf_un,
-      ``CIL.Instruction.mul_ovf, ``CIL.Instruction.mul_ovf_un].contains operation
+      ``CIL.Instruction.ceq].contains operation
     if scalar && lhs.isAppOfArity ``CIL.Safety.step 7 then
       -- Reuse the selected value equation without rewriting its symbolic arithmetic result.
       let mut widths := #[]

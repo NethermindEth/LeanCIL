@@ -113,16 +113,16 @@ def localIndex (instruction : RawInstruction) : Option Nat :=
   | 65036, .local n | 65037, .local n | 65038, .local n => some n
   | _, _ => none
 
-/-- Whether `instruction` names a typed span local. -/
-def spanLocalOp (locals : List TypeExpr) (instruction : RawInstruction) : Bool :=
+/-- Whether `instruction` names a typed span local, with each local's type given by `localAt`. -/
+def spanLocalOp (localAt : Nat → Option TypeExpr) (instruction : RawInstruction) : Bool :=
   match localIndex instruction with
-  | some index => (locals[index]?.map spanLocal).getD false
+  | some index => ((localAt index).map spanLocal).getD false
   | none => false
 
 /-- `stloc s; ldloca s` over a span local `s`: the span stays on the stack as the receiver. -/
-def receiverFold (locals : List TypeExpr) (a b : RawInstruction) : Bool :=
+def receiverFold (localAt : Nat → Option TypeExpr) (a b : RawInstruction) : Bool :=
   a.opcode ∈ [10, 11, 12, 13, 19, 65038] && (b.opcode == 18 || b.opcode == 65037) &&
-    localIndex a == localIndex b && spanLocalOp locals a
+    localIndex a == localIndex b && spanLocalOp localAt a
 
 /-- A receiver fold ends at a length call or an item call with a single index push. -/
 private def spanReceiverUse (code : List RawInstruction) : Bool :=
@@ -251,22 +251,22 @@ inductive FoldRole where
   deriving DecidableEq, Repr
 
 /-- Resetting a span local binds its exact type and never exposes its storage address. -/
-private def spanDefaultFold (locals : List TypeExpr) (head : RawInstruction)
+private def spanDefaultFold (localAt : Nat → Option TypeExpr) (head : RawInstruction)
     (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
   if !(head.opcode ∈ [18, 65037]) then none else pure ()
   let index ← localIndex head
-  let localType ← locals[index]?
+  let localType ← localAt index
   let some ⟨_, 65045, .type initialized⟩ := tail.head? | none
   if initialized != localType then none else pure ()
   let .span width writable ← spanStorage localType | none
   return [some .head, some (.spanConstructor index (.empty width writable))]
 
 /-- A constructor fold admits at most three pure single-value argument pushes. -/
-private def spanConstructorFold (locals : List TypeExpr) (head : RawInstruction)
+private def spanConstructorFold (localAt : Nat → Option TypeExpr) (head : RawInstruction)
     (tail : List RawInstruction) : Option (List (Option FoldRole)) := do
   if !(head.opcode ∈ [18, 65037]) then none else pure ()
   let index ← localIndex head
-  let localType ← locals[index]?
+  let localType ← localAt index
   let pushes := (tail.take 4).takeWhile fun instruction => instruction.opcode ∈
     [2, 3, 4, 5, 14, 65033, 6, 7, 8, 9, 17, 65036,
       20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]
@@ -279,11 +279,12 @@ private def spanConstructorFold (locals : List TypeExpr) (head : RawInstruction)
     some (some .head :: List.replicate pushes.length (some .argument) ++
       [some (.spanConstructor index constructor)])
 
-/-- The roles of a fold starting at `a`, if any; type tests take precedence. -/
-private def foldAt (locals receiverLocals : List TypeExpr)
+/-- The roles of a fold starting at `a`, if any; type tests take precedence. `localAt` gives
+    each local's type and `receiverAt` the type of each local a receiver fold may name. -/
+private def foldAt (localAt receiverAt : Nat → Option TypeExpr)
     (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
-  spanDefaultFold locals a tail <|> spanConstructorFold locals a tail <|>
+  spanDefaultFold localAt a tail <|> spanConstructorFold localAt a tail <|>
   (match a, tail with
     | ⟨_, 20, .none⟩, ⟨_, 122, .none⟩ :: _ =>
       some [some .head, some (.raise "System.NullReferenceException")]
@@ -295,7 +296,7 @@ private def foldAt (locals receiverLocals : List TypeExpr)
       | _ => none
     | _, _ => none) <|>
   (match tail with
-    | b :: rest => if receiverFold receiverLocals a b && spanReceiverUse rest then
+    | b :: rest => if receiverFold receiverAt a b && spanReceiverUse rest then
         some [some .head, some .interior] else none
     | _ => none) <|>
   (match tail with
@@ -306,14 +307,15 @@ private def foldAt (locals receiverLocals : List TypeExpr)
   (throwFold (a :: tail)).map fun (count, name) =>
     some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
 
-/-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural. -/
-def foldRolesFrom (locals receiverLocals : List TypeExpr) :
+/-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural.
+    Local types come from `localAt` and receiver fold candidates from `receiverAt`. -/
+def foldRolesFrom (localAt receiverAt : Nat → Option TypeExpr) :
     List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
   | _, [] => []
-  | role :: pending, _ :: tail => role :: foldRolesFrom locals receiverLocals pending tail
-  | [], a :: tail => match foldAt locals receiverLocals a tail with
-    | some (role :: pending) => role :: foldRolesFrom locals receiverLocals pending tail
-    | _ => none :: foldRolesFrom locals receiverLocals [] tail
+  | role :: pending, _ :: tail => role :: foldRolesFrom localAt receiverAt pending tail
+  | [], a :: tail => match foldAt localAt receiverAt a tail with
+    | some (role :: pending) => role :: foldRolesFrom localAt receiverAt pending tail
+    | _ => none :: foldRolesFrom localAt receiverAt [] tail
 
 /-- Exact counts of decoded local operands, including indexes outside the declared locals. -/
 private def localUseCounts : List RawInstruction → Std.TreeMap Nat Nat
@@ -341,22 +343,27 @@ private theorem localUseCounts_get (code : List RawInstruction) (index : Nat) :
 
 #print axioms localUseCounts_get
 
-/-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. -/
+/-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. Local
+    types and receiver fold candidates are read from `FlowIndex`es built once per body. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
-  if locals.isEmpty then foldRolesFrom [] [] [] code else
+  if locals.isEmpty then foldRolesFrom (fun _ => none) (fun _ => none) [] code else
   let counts := localUseCounts code
   let singleUse := locals.zipIdx.map fun (type, index) =>
     if counts.getD index 0 == 2 then type else .void
-  foldRolesFrom locals singleUse [] code
+  foldRolesFrom (FlowIndex.ofList locals).get? (FlowIndex.ofList singleUse).get? [] code
 
-/-- Indexed role discovery agrees with filtering the whole body separately for each local. -/
+/-- Indexed role discovery agrees with reading the locals list and filtering the whole body
+    separately for each local at every site. -/
 theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction) :
-    foldRoles locals code = foldRolesFrom locals
-      (locals.zipIdx.map fun (type, index) =>
+    foldRoles locals code = foldRolesFrom (locals[·]?)
+      ((locals.zipIdx.map fun (type, index) =>
         if (code.filter fun instruction => localIndex instruction == some index).length == 2
-          then type else .void) [] code := by
+          then type else .void)[·]?) [] code := by
+  have indexed (values : List TypeExpr) : (FlowIndex.ofList values).get? = (values[·]?) :=
+    funext (FlowIndex.get?_ofList values)
   cases locals <;> simp only [foldRoles, List.isEmpty_nil, List.isEmpty_cons,
-    Bool.false_eq_true, ↓reduceIte, List.zipIdx_nil, List.map_nil, localUseCounts_get]
+    Bool.false_eq_true, ↓reduceIte, List.zipIdx_nil, List.map_nil, List.getElem?_nil, indexed,
+    localUseCounts_get]
 
 #print axioms foldRoles_eq_filter
 
