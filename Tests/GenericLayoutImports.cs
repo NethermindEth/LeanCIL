@@ -9,6 +9,8 @@
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include PinnedMetadata.cs
+#:include GenericImportIdentities.cs
+#:include ../Extractor/ExternalIdentityEvidence.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -51,11 +53,14 @@ public static class Library
         destination.Head.Value = source.Head.Value;
     }
     public static T Identity<T>(T value) where T : unmanaged => value;
+    public static void Ignore<T>(T value) where T : unmanaged { }
+    public static T First<T, U>(T left, U right) where T : unmanaged where U : unmanaged => left;
     public static T Overload<T>(T value) where T : unmanaged => value;
     public static ulong Overload<T>(ulong value) where T : unmanaged => value + 1;
     public static T Unsupported<T>(T value) where T : class => value;
 }
 public static class Generic<T> { public static ulong Value(ulong value) => value; }
+public static class \u03A9wner { public static T \u03A9dentity<T>(T value) where T : unmanaged => value; }
 """;
 File.WriteAllText(libSource, libSourceText);
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), """
@@ -139,6 +144,8 @@ for (int index = 0; index < overloads.Count; index++)
 if (overloadBodies[0] == overloadBodies[1])
     throw new InvalidOperationException("Generic overload regression requires distinct actual method bodies.");
 Console.WriteLine("PASS distinct generic definitions retain distinct closed contract identities");
+CheckGenericImportIdentities(lib, root, methodMetadata);
+if (args is ["--identities-only"]) return;
 
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(package, "lakefile.toml"),

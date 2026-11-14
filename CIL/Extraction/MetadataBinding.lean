@@ -1,5 +1,6 @@
 import CIL.Extraction.MetadataResolution
 import CIL.Extraction.Assemblies
+import CIL.Extraction.MetadataContractIdentity
 
 /-!
 # Binding token operands and method definitions to metadata
@@ -15,8 +16,7 @@ kind allows. `checkLocals` does the same for local variable types and `methodIde
 for the method definition itself.
 
 Not checked, as `docs/SOUNDNESS-EVIDENCE.md` states: that the carried rows are the image's,
-definitions in platform assemblies, public key tokens and the hashed part of generic import
-identities.
+definitions in platform assemblies, imported implementation definitions and public key tokens.
 -/
 
 namespace CIL.Extraction
@@ -341,9 +341,49 @@ def MethodSite.externalName (site : MethodSite) : Option (List Nat) := do
   let parameters ← site.parameters.mapM (cecilName false resolveFuel)
   some (head.scope ++ [58, 58] ++ methodFullName result owner site.name parameters)
 
-/-- Whether an external identity is exactly the one the member spells. -/
-def MethodSite.externalMatches (site : MethodSite) (identity : String) : Bool :=
-  site.externalName == some (bytesOf identity)
+/-- The exact open definition fields of a generic imported contract. -/
+def MethodSite.contractDefinitionKey (site : MethodSite) (frame : Frame) :
+    Option (List Nat) := do
+  let owner ← site.owner.head
+  let result ← contractTypeKey frame resolveFuel site.result
+  let parameters ← site.parameters.mapM (contractTypeKey frame resolveFuel)
+  let fields := [contractPart owner.scope ++ contractPart owner.name, site.name,
+    bytesOf (toString site.genericArity), bytesOf (toString (site.convention % 0x20)),
+    bytesOf (if site.convention / hasThisFlag % 2 == 1 then "1" else "0"),
+    bytesOf (if site.convention / explicitThisFlag % 2 == 1 then "1" else "0"), result,
+    bytesOf (toString parameters.length)] ++ parameters
+  pure (bytesOf "contract-definition-v1:" ++ (fields.map contractPart).flatten)
+
+/-- The exact closed contract identity, retaining its open definition and scoped arguments. -/
+def MethodSite.contractName (site : MethodSite) (frame : Frame) : Option (List Nat) := do
+  let .named owner := site.owner | none
+  let some arguments := site.methodArguments | none
+  if site.definition.isSome || arguments.isEmpty || arguments.length != site.genericArity ||
+      site.convention != 0x10 || frame.corlib != some runtimeScopeBytes ||
+      !arguments.all contractInteger then none else do
+    let definition ← site.contractDefinitionKey frame
+    let keys ← arguments.mapM (contractTypeKey frame resolveFuel)
+    let argumentNames ← arguments.mapM (cecilName false resolveFuel)
+    let indexedNames := SearchTree.ofSorted
+      (argumentNames.zipIdx.map fun (name, index) => (index, name))
+    let result ← contractClosedName indexedNames resolveFuel site.result
+    let parameters ← site.parameters.mapM (contractClosedName indexedNames resolveFuel)
+    let name := site.name ++ [60] ++ (argumentNames.intersperse [44]).flatten ++ [62] ++
+      bytesOf "|definition|" ++ contractHex definition ++ bytesOf "|arguments|" ++
+      (keys.map contractPart).flatten
+    pure (owner.scope ++ [58, 58] ++ methodFullName result owner.name name parameters)
+
+/-- Whether the external target exactly spells its member or its closed generic contract. -/
+def MethodSite.externalMatches (site : MethodSite) (frame : Frame) (identity : String) : Bool :=
+  site.externalName == some (bytesOf identity) ||
+    site.contractName frame == some (bytesOf identity)
+
+/-- A reconstructed generic contract identity passes the exact target comparison. -/
+theorem MethodSite.externalMatches_contract (site : MethodSite) (frame : Frame)
+    (identity : String) (matched : site.contractName frame = some (bytesOf identity)) :
+    site.externalMatches frame identity = true := by
+  simp [MethodSite.externalMatches, matched]
+#print axioms MethodSite.externalMatches_contract
 
 /-- Check a `.call` operand against the member its token names. -/
 def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : CallSite) :
@@ -385,7 +425,7 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
       if target == definition then .ok {} else .error (.operandMismatch token)
     | none => .error (.operandMismatch token)
   | .external identity =>
-    if extracted || !(site.externalMatches identity) then .error (.operandMismatch token)
+    if extracted || !(site.externalMatches frame identity) then .error (.operandMismatch token)
     else .ok {}
 
 /-! ## Indirect calls and strings -/
