@@ -313,6 +313,7 @@ partial class Program
         var entries = string.Join(",\n   ", plan.Images.Select(image =>
             $"{{ identity := {LeanString(image.Identity)}, image := {image.Module}.image }}"));
         return $"""
+            import Lean
             import StrictBinding.Image
             {imports}
             /-!
@@ -324,13 +325,21 @@ partial class Program
 
             namespace BindingAudit
 
+            open Lean Elab in
+            /-- Exact pinned-image list constructors with independently elaborated elements. -/
+            elab "pinnedImages%[" items:term,* "]" : term => do
+              let type := mkConst ``StrictBinding.PinnedImage
+              let values <- items.getElems.mapM fun item => Term.elabTermEnsuringType item (some type)
+              return values.foldr (mkApp3 (mkConst ``List.cons [.zero]) type)
+                (mkApp (mkConst ``List.nil [.zero]) type)
+
             /-- The pinned images the audit reads. -/
             def images : List StrictBinding.PinnedImage :=
-              [{entries}]
+              pinnedImages%[{entries}]
 
             /-- The identities and image constants of `images`, as the driver states them. -/
             theorem images_eq : images =
-              [{entries}] := rfl
+              pinnedImages%[{entries}] := rfl
 
             end BindingAudit
             """;
@@ -395,10 +404,17 @@ partial class Program
         static JsonElement Nat(string hex) => JsonDocument.Parse("{\"nat\":" +
             BigInteger.Parse("0" + hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + "}").RootElement;
         var pinned = Const("StrictBinding.PinnedImage");
-        var images = plan.Images.Reverse().Aggregate(App(Const("List.nil", 0), pinned), (rest, image) =>
-            App(Const("List.cons", 0), pinned,
-                App(Const("StrictBinding.PinnedImage.mk"), new { str = image.Identity },
-                    Const(image.Module + ".image")), rest));
+        var images = new
+        {
+            list = new
+            {
+                type = pinned,
+                level = 0,
+                items = plan.Images.Select(image =>
+                    App(Const("StrictBinding.PinnedImage.mk"), new { str = image.Identity },
+                        Const(image.Module + ".image"))).ToArray()
+            }
+        };
         var imagesEq = App(Const("Eq", 1), App(Const("List", 0), pinned), Const("BindingAudit.images"), images);
         var bodies = App(Const("StrictBinding.BodiesBound"), Const("BindingAudit.images"),
             Const("Extracted.methodEvidence"));
