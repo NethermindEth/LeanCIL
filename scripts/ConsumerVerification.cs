@@ -1403,12 +1403,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     Report VerifyConsumer(string assembly, string proof, string output, string theorem, string root,
-        string? settings, Action<string>? stage, DeepCheckInputs? deepChecks = null)
+        string? settings, Action<string>? stage, DeepCheckInputs? deepChecks = null, DeepCheckRun? deepRun = null)
     {
         ProofMessages = null;
         VerifiedStatement = null;
         var outcome = VerifyConsumerRequests(root, [new(assembly, output, proof, theorem, settings)],
-            (_, value) => stage?.Invoke(value), batch: false, deepChecks: deepChecks)[0];
+            (_, value) => stage?.Invoke(value), batch: false, deepChecks: deepChecks, deepRun: deepRun)[0];
         ProofMessages = outcome.ProofMessages(proof);
         VerifiedStatement = outcome.Statement;
         if (outcome.Located() is { } error) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error);
@@ -1471,8 +1471,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // `finished` reports each request once its outcome is final, possibly from parallel workspaces.
     ConsumerOutcome[] VerifyConsumerRequests(string root, IReadOnlyList<ConsumerRequest> requests,
         Action<int, string>? stage, bool batch, int parallelism = 1,
-        Action<int, ConsumerOutcome>? finished = null, bool checkOnly = false, DeepCheckInputs? deepChecks = null)
+        Action<int, ConsumerOutcome>? finished = null, bool checkOnly = false, DeepCheckInputs? deepChecks = null,
+        DeepCheckRun? deepRun = null)
     {
+        deepRun = DeepCheckRun.Claim(deepChecks, deepRun);
         if (deepChecks is not null && (batch || checkOnly || requests.Count != 1 ||
             requests[0].ExpectRejection || requests[0].ExportAudit is not null))
             throw new InvalidDataException("Deep checks require one ordinary consumer verification request.");
@@ -1548,9 +1550,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var last = all.GroupBy(i => outputs[i], comparer).ToDictionary(group => group.Key, group => group.Max(), comparer);
         foreach (var output in last.Keys) File.Delete(Path.Combine(output, "verified.json"));
         var parallel = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism) };
-        void CheckExtractions(int[] members)
+        void CheckExtractions(int[] members, bool reportStage = true)
         {
-            Stage(members, "extraction integrity");
+            if (reportStage) Stage(members, "extraction integrity");
             Parallel.ForEach(Pending(members).GroupBy(i => outputs[i], comparer), parallel, group =>
             {
                 try { RunExtractor(["dotnet", ExtractorPath, "check", group.Key]); }
@@ -1610,11 +1612,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Fail(live, error);
             return outcomes;
         }
-        void Recheck(int[] members)
+        void Recheck(int[] members, bool reportStage = true)
         {
             var started = DateTimeOffset.UtcNow;
             var elapsed = System.Diagnostics.Stopwatch.StartNew();
-            CheckExtractions(members);
+            CheckExtractions(members, reportStage);
             members = Pending(members);
             if (members.Length == 0) return;
             try
@@ -1634,6 +1636,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
         live = Pending(all);
         if (live.Length == 0) return outcomes;
+        if (deepRun is not null)
+        {
+            Stage(live, "arguments");
+            try
+            {
+                extractions[0] = ExtractionIdentity.Read(outputs[0]);
+                matchedPins = deepRun.Begin(extractions[0]);
+            }
+            catch (Exception error)
+            {
+                Fail(live, error);
+                return outcomes;
+            }
+        }
         Stage(live, "Lean library build");
         string certifiedLibrary;
         Dictionary<string, string> certifiedBase;
@@ -1644,8 +1660,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Library(Inputs(proofs[live[0]], requests[live[0]].Settings));
             if (deepChecks is not null)
             {
-                extractions[0] = ExtractionIdentity.Read(outputs[0]);
-                matchedPins = deepChecks.MatchPins(extractions[0].Root);
+                deepRun!.Attempt!.RequireIdentity(ExtractionIdentity.Read(outputs[0]));
                 PrepareBindingLibrary(this.session!);
             }
             certifiedLibrary = library!;
@@ -2185,7 +2200,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 Directory.CreateDirectory(deepRoot);
                 leanPath += Path.PathSeparator + deepRoot;
                 deep = BuildDeepSession(deepRoot, leanPath, extractedPaths[0],
-                    extractions[members[0]], matchedPins!);
+                    extractions[members[0]], matchedPins!, () => Stage(proceeding, "deep-check sources"));
                 importDirectories = [.. importDirectories, deepRoot];
                 artifactSnapshots = [.. artifactSnapshots.Select(snapshot =>
                     (snapshot.Directory, Artifacts: DirectoryArtifacts(snapshot.Directory))),
@@ -2439,6 +2454,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     Stage([i], "theorem audit");
                     RequireAuditedConstants(audited);
                     deep?.RequireAudited(audited);
+                    deepRun?.Attempt?.RequireIdentity(extractions[i]);
+                    if (deep is not null)
+                    {
+                        Recheck([i], reportStage: false);
+                        if (!Live(i)) throw outcomes[i].Error!;
+                        RequireCertifiedLibraryContents();
+                    }
+                    RequireDeepStable();
+                    deep?.RequireTheorems(audited, [.. proofAudits, .. BindingRequestsForConsumer()],
+                        deepRun?.Attempt);
                     foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
                     var proofAudit = namedAudits[proofAudits[0].name];
                     audits[i] = (AuditText(proofAudit), AuditedAxioms(proofAudit), audited, proofAudit);

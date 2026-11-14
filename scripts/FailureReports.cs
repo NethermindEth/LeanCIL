@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 // Deterministic failure taxonomy from the stage, LeanCIL's own messages and Lean's stable error prefixes.
@@ -21,7 +22,40 @@ internal static partial class FailureReports
     internal sealed record Diagnostic(string kind, string? resource, string? module, string? file, int? line, int? column, string message);
     internal sealed record Report(int schema, string kind, string? resource, string stage, string theorem, string module,
         string proof, string output, Method? method, string? file, int? line, int? column, Diagnostic[] diagnostics,
-        string message, string[] rerun);
+        string message, string[] rerun,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] BindingFailure? binding = null);
+
+    /// <summary>A failed attempt can identify a rejected check or an incomplete check.</summary>
+    [JsonConverter(typeof(BindingFailureStatusNames))]
+    internal enum BindingFailureStatus { NotCovered, Failed }
+
+    sealed class BindingFailureStatusNames : JsonConverter<BindingFailureStatus>
+    {
+        public override BindingFailureStatus Read(ref Utf8JsonReader reader, Type type,
+            JsonSerializerOptions options) => reader.TokenType == JsonTokenType.String
+            ? reader.GetString() switch
+            {
+                "not covered" => BindingFailureStatus.NotCovered,
+                "failed" => BindingFailureStatus.Failed,
+                _ => throw new JsonException("Expected not covered or failed")
+            }
+            : throw new JsonException("Expected a binding failure status string");
+
+        public override void Write(Utf8JsonWriter writer, BindingFailureStatus value,
+            JsonSerializerOptions options) => writer.WriteStringValue(value switch
+            {
+                BindingFailureStatus.NotCovered => "not covered",
+                BindingFailureStatus.Failed => "failed",
+                _ => throw new JsonException("Invalid binding failure status")
+            });
+    }
+
+    internal sealed record BindingFailureDigest(string path, string sha256);
+    internal sealed record BindingFailureImage(string identity, string sha256,
+        BindingFailureStatus status, string reason);
+    internal sealed record BindingFailureFact(string id, BindingFailureStatus status, string reason);
+    internal sealed record BindingFailure(BindingFailureDigest digests, BindingFailureImage[] images,
+        BindingFailureFact[] facts);
 
     // Elaborator and kernel exhaustion messages.
     static readonly (string Prefix, string Resource)[] Resources =

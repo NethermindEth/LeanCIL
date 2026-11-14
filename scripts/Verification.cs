@@ -4064,8 +4064,10 @@ partial class Program : IDisposable
 
     Report Verify(string assembly, string identity, string entry, string proof, string output,
         string profile = "scalar", string theorem = "ExampleProof.correctness", bool check = false, bool existingArtifacts = false,
-        string? settings = null, Action<string>? stage = null, DeepCheckInputs? deepChecks = null)
+        string? settings = null, Action<string>? stage = null, DeepCheckInputs? deepChecks = null,
+        DeepCheckRun? deepRun = null)
     {
+        deepRun = DeepCheckRun.Claim(deepChecks, deepRun);
         assembly = Path.GetFullPath(assembly);
         proof = Path.GetFullPath(proof);
         output = Path.GetFullPath(output);
@@ -4119,10 +4121,15 @@ partial class Program : IDisposable
         if (before["proof:" + proof] != proofSourceHash)
             throw new InvalidOperationException("Proof inputs changed before their source snapshot");
         ExtractionIdentity extraction = ExtractionIdentity.Read(output);
-        var matchedPins = deepChecks?.MatchPins(extraction.Root);
         referenceOnlyAuthoring = ReferenceOnlyImports(extraction);
         string[] selected = SelectionModules.Selected(
             SourceImport().Matches(proofSource).Select(import => import.Groups[1].Value), extraction.Root, proof);
+        IReadOnlyList<DeepCheckInputs.Pin>? matchedPins = null;
+        if (deepRun is not null)
+        {
+            stage?.Invoke("arguments");
+            matchedPins = deepRun.Begin(extraction);
+        }
 
         // Retain the selected bytes before support or interface builds can run code.
         void RequireOriginalProofSources()
@@ -4271,7 +4278,7 @@ partial class Program : IDisposable
             {
                 stage?.Invoke("deep checks");
                 deep = BuildDeepSession(fresh, leanPath, Path.Combine(fresh, "Extracted.olean"),
-                    extraction, matchedPins!);
+                    extraction, matchedPins!, () => stage?.Invoke("deep-check sources"));
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next,
                     [.. deep.Modules.Where(module => module != "Extracted")
@@ -4472,6 +4479,18 @@ partial class Program : IDisposable
                 RequireAuditedModule(audited, "ExtractedImports", Path.Combine(fresh, "ExtractedImports.olean"));
             RequireAuditedConstants(audited);
             deep?.RequireAudited(audited);
+            deepRun?.Attempt?.RequireIdentity(extraction);
+            if (deep is not null)
+            {
+                RequireOriginalProofSources();
+                if (!Same(before, Inputs(proof, settings)))
+                    throw new InvalidOperationException("Inputs changed during verification");
+                RunExtractor(existingArtifacts ? ["dotnet", ExtractorPath, "check", output]
+                    : Extract("check", assembly, identity, entry, output, profile));
+                RequireCertifiedLibraryContents();
+            }
+            RequireDeepStable();
+            deep?.RequireTheorems(audited, proofAudits, deepRun?.Attempt);
             var auditedTheorems = audited.theorems.ToDictionary(result => result.name, StringComparer.Ordinal);
             foreach (var request in proofAudits) AuditedAxioms(auditedTheorems[request.name]);
             stage?.Invoke("extraction certificate audit");

@@ -8,6 +8,103 @@ using System.Text.RegularExpressions;
 // assembly files whose SHA-256 digests the caller states.
 partial class Program
 {
+    /// <summary>One call's retained inputs and attempt, available to its caller after a failure.</summary>
+    sealed class DeepCheckRun(DeepCheckInputs inputs)
+    {
+        bool claimed;
+        internal DeepCheckInputs Inputs { get; } = inputs;
+        internal DeepCheckAttempt? Attempt { get; private set; }
+
+        internal static DeepCheckRun? Claim(DeepCheckInputs? inputs, DeepCheckRun? run)
+        {
+            if (inputs is null)
+            {
+                if (run is not null) throw new ArgumentException("Deep-check holder requires inputs.");
+                return null;
+            }
+            run ??= new(inputs);
+            if (!ReferenceEquals(inputs, run.Inputs))
+                throw new ArgumentException("Deep-check holder inputs do not match.");
+            if (run.claimed) throw new ArgumentException("Deep-check holder was already used.");
+            run.claimed = true;
+            return run;
+        }
+
+        internal IReadOnlyList<DeepCheckInputs.Pin> Begin(ExtractionIdentity identity)
+        {
+            if (!claimed || Attempt is not null)
+                throw new InvalidOperationException("Deep-check attempt requires one claimed request.");
+            var pins = Inputs.MatchPins(identity.Root);
+            Attempt = new(Inputs, identity.Sha256, pins);
+            return pins;
+        }
+    }
+
+    /// <summary>Rejected targets of an incomplete verification; successful facts are never retained.</summary>
+    sealed class DeepCheckAttempt
+    {
+        readonly FailureReports.BindingFailureDigest digests;
+        readonly (string Identity, string Digest)[] images;
+        readonly HashSet<string> imageDigests;
+        readonly Dictionary<string, string> rejectedImages = new(StringComparer.Ordinal);
+        readonly Dictionary<BindingFact, string> rejectedFacts = [];
+        internal string IdentitySha256 { get; }
+
+        internal DeepCheckAttempt(DeepCheckInputs inputs, string identitySha256,
+            IReadOnlyList<DeepCheckInputs.Pin> pins)
+        {
+            digests = new(inputs.Path, inputs.Digest);
+            IdentitySha256 = identitySha256;
+            images = [.. pins.Select(pin => (pin.Identity, pin.Image.Digest))];
+            imageDigests = images.Select(image => image.Digest).ToHashSet(StringComparer.Ordinal);
+        }
+
+        internal void RequireIdentity(ExtractionIdentity identity)
+        {
+            if (IdentitySha256 != identity.Sha256 ||
+                IdentitySha256 != Sha(Path.Combine(identity.Output, "identity.json")))
+                throw new InvalidDataException("Deep-check extraction identity changed.");
+        }
+
+        internal void RejectImage(string digest, string reason)
+        {
+            if (!imageDigests.Contains(digest)) throw new ArgumentException("Unknown deep-check image.");
+            ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+            rejectedImages.TryAdd(digest, reason);
+        }
+
+        internal void RejectFact(BindingFact fact, string reason)
+        {
+            if (!Enum.IsDefined(fact)) throw new ArgumentException("Unknown binding fact.");
+            ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+            rejectedFacts.TryAdd(fact, reason);
+        }
+
+        internal FailureReports.BindingFailure Failure(string stage, string diagnostic)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(stage);
+            var incomplete = "verification did not complete: " + stage +
+                (string.IsNullOrWhiteSpace(diagnostic) ? "" : ": " + diagnostic);
+            return new(digests,
+                [.. images.Select(image => new FailureReports.BindingFailureImage(image.Identity, image.Digest,
+                    rejectedImages.ContainsKey(image.Digest) ? FailureReports.BindingFailureStatus.Failed
+                        : FailureReports.BindingFailureStatus.NotCovered,
+                    rejectedImages.GetValueOrDefault(image.Digest) ?? incomplete))],
+                [.. Enum.GetValues<BindingFact>().Select(fact => new FailureReports.BindingFailureFact(
+                    JsonSerializer.SerializeToElement(fact).GetString()!,
+                    rejectedFacts.ContainsKey(fact) ? FailureReports.BindingFailureStatus.Failed
+                        : FailureReports.BindingFailureStatus.NotCovered,
+                    rejectedFacts.GetValueOrDefault(fact) ?? incomplete))]);
+        }
+    }
+
+    /// <summary>A generated request's optional subject; a request cannot name both kinds.</summary>
+    abstract record BindingSubject
+    {
+        internal sealed record Fact(BindingFact Value) : BindingSubject;
+        internal sealed record Image(string Digest) : BindingSubject;
+    }
+
     internal const string BindingAuditUsage =
         "Usage: leancil audit-binding extraction-directory --sha256 hex [--assembly-path assembly.dll] " +
         "[--reference-sha256 Lib=hex]... [--require item,...] [--output directory] " +
@@ -30,10 +127,40 @@ partial class Program
         BindingImagePin[] Images, int Methods, int? PageSize = null);
 
     /// <summary>Artifacts and requests that must join the caller's extraction and proof audit.</summary>
-    sealed record DeepSessionContribution(string[] Modules, BindingRequest[] Requests,
+    sealed record DeepSessionContribution(string[] Modules, BindingTargets Targets,
         SortedDictionary<string, string> Artifacts, SortedDictionary<string, string> Hashes,
         SortedDictionary<string, string> SourceHashes, string SourceDirectory)
     {
+        internal BindingRequest[] Requests => Targets.Requests;
+
+        /// <summary>Attributes only complete named audit rejections after physical guards have passed.</summary>
+        internal void RequireTheorems(AuditedOleans audited, IReadOnlyList<AuditRequest> expected,
+            DeepCheckAttempt? attempt)
+        {
+            var named = audited.theorems.ToDictionary(result => result.name, StringComparer.Ordinal);
+            var expectedNames = expected.Select(request => request.name).ToHashSet(StringComparer.Ordinal);
+            if (expectedNames.Count != expected.Count || !expectedNames.SetEquals(named.Keys) ||
+                Targets.Theorems.Keys.Any(name => !expectedNames.Contains(name)) ||
+                audited.theorems.Any(result => result.error is null && result.axioms is null))
+                throw new InvalidDataException("Incomplete deep-check theorem audit result.");
+            RequireAudited(audited);
+            foreach (var request in Requests)
+            {
+                var result = named[request.Audit.name];
+                string? rejection = result.error;
+                if (rejection is null && result.axioms is { } axioms &&
+                    axioms.Any(axiom => !ApprovedAxioms.Contains(axiom)))
+                    rejection = "Unapproved proof axioms: " + string.Join(", ", axioms);
+                if (rejection is not null && attempt is not null)
+                    switch (Targets.Theorems[request.Audit.name])
+                    {
+                        case BindingSubject.Fact fact: attempt.RejectFact(fact.Value, rejection); break;
+                        case BindingSubject.Image image: attempt.RejectImage(image.Digest, rejection); break;
+                    }
+            }
+            foreach (var request in Requests) AuditedAxioms(named[request.Audit.name]);
+        }
+
         internal void RequireStable()
         {
             if (!Same(Hashes, BindingArtifactHashes(Artifacts.Values)))
@@ -83,7 +210,7 @@ partial class Program
 
     /// <summary>Builds deep modules against the caller's existing extraction in its verification session.</summary>
     DeepSessionContribution BuildDeepSession(string session, string leanPath, string extractedOlean,
-        ExtractionIdentity identity, IReadOnlyList<DeepCheckInputs.Pin> matchedPins)
+        ExtractionIdentity identity, IReadOnlyList<DeepCheckInputs.Pin> matchedPins, Action? sourcesReady = null)
     {
         session = Path.GetFullPath(session);
         extractedOlean = Path.GetFullPath(extractedOlean);
@@ -103,14 +230,15 @@ partial class Program
         if (Directory.Exists(directory))
             throw new InvalidOperationException("Deep-check modules already exist in the session: " + directory);
         Directory.CreateDirectory(directory);
+        var targets = new BindingTargets(BindingRequests(plan));
         WriteBindingSources(plan);
+        sourcesReady?.Invoke();
         var sources = BindingSourceHashes(directory);
         var failures = BuildBindingModules(plan, leanPath, buildExtracted: false);
         if (failures.Count != 0)
             throw new InvalidOperationException("Deep-check module build failed: " +
                 string.Join("; ", failures.Select(pair => pair.Key + ": " + pair.Value)));
-        var requests = BindingRequests(plan);
-        string[] modules = [.. requests.Select(request => request.Module).Distinct(StringComparer.Ordinal)];
+        string[] modules = [.. targets.Requests.Select(request => request.Module).Distinct(StringComparer.Ordinal)];
         SortedDictionary<string, string> artifacts = new(StringComparer.Ordinal) { ["Extracted"] = extractedOlean };
         foreach (var module in modules.Where(module => module != "Extracted"))
         {
@@ -120,7 +248,7 @@ partial class Program
         }
         if (!Same(extractedHashes, BindingArtifactHashes([extractedOlean])))
             throw new InvalidDataException("Deep-check artifact changed: " + extractedOlean);
-        DeepSessionContribution contribution = new(modules, requests, artifacts,
+        DeepSessionContribution contribution = new(modules, targets, artifacts,
             BindingArtifactHashes(artifacts.Values), sources, directory);
         contribution.RequireStable();
         return contribution;
@@ -617,7 +745,17 @@ partial class Program
     }
 
     /// <summary>A theorem the audit expects in a module, with the type the driver derives from the plan.</summary>
-    sealed record BindingRequest(string Module, AuditRequest Audit);
+    sealed record BindingRequest(string Module, AuditRequest Audit, BindingSubject? Subject = null);
+
+    /// <summary>Generator-owned request and module subjects, indexed before any generated code runs.</summary>
+    sealed class BindingTargets(BindingRequest[] requests)
+    {
+        internal BindingRequest[] Requests { get; } = requests;
+        internal Dictionary<string, BindingSubject?> Theorems { get; } = requests.ToDictionary(
+            request => request.Audit.name, request => request.Subject, StringComparer.Ordinal);
+        internal Dictionary<string, BindingSubject?> Modules { get; } = requests.ToDictionary(
+            request => request.Module, request => request.Subject, StringComparer.Ordinal);
+    }
 
     /// <summary>The audited theorems with expected types built from the plan, never from module text.</summary>
     static BindingRequest[] BindingRequests(BindingPlan plan)
@@ -646,11 +784,12 @@ partial class Program
         [
             new("Extracted", ExtractionCertificate("Extracted.translation_valid")),
             new(ImagesModule, new("BindingAudit.images_eq", imagesEq, ApprovedAxioms)),
-            new(BodiesModule, new("BindingAudit.bodies", bodies, ApprovedAxioms)),
+            new(BodiesModule, new("BindingAudit.bodies", bodies, ApprovedAxioms),
+                new BindingSubject.Fact(BindingFact.BodyBytes)),
             .. plan.Images.DistinctBy(image => image.Sha256).Select(image => new BindingRequest(image.Module,
                 new(image.Theorem,
                 App(Const("StrictBinding.DigestIs"), Const(image.Module + ".image"), Nat(image.Sha256)),
-                ApprovedAxioms)))
+                ApprovedAxioms), new BindingSubject.Image(image.Sha256)))
         ];
     }
 
