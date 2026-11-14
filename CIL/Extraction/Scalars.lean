@@ -333,7 +333,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
   else if instruction.opcode == 88 &&
       (stack[0]? == some .reference || stack[1]? == some .reference) then
     match stack, emitted with
-    | right :: left :: _, .memory (.add 1 true) => referenceAddition left right
+    | right :: left :: _, .add => referenceAddition left right
     | _, _ => false
   else if instruction.opcode == 89 && (stack.drop 1).head? == some .reference then
     match stack.head?, emitted with

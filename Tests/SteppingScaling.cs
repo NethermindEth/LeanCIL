@@ -23,11 +23,20 @@ if (args is ["--self-test"])
 {
     return;
 }
+string[]? selectedWorkloads = null;
+if (Array.IndexOf(args, "--workloads") is var selection && selection >= 0)
+{
+    if (selection != args.Length - 2)
+        throw new ArgumentException("--workloads requires a final comma-separated list.");
+    selectedWorkloads = args[^1].Split(',', StringSplitOptions.RemoveEmptyEntries);
+    args = args[..selection];
+}
 var package = args switch
 {
     [] => FixturePackage(),
     ["--package", var path] => Path.GetFullPath(path),
-    _ => throw new ArgumentException("Usage: SteppingScaling.cs [--package <compiled checkout>] | --self-test")
+    _ => throw new ArgumentException(
+        "Usage: SteppingScaling.cs [--package <compiled checkout>] [--workloads <names>] | --self-test")
 };
 var directory = At("artifacts/SteppingScaling");
 Directory.CreateDirectory(directory);
@@ -42,12 +51,19 @@ var rows = new List<SteppingMeasurement>();
 var workloads = new (string Name, int[] Sizes, bool Full)[]
 {
     ("scalar", [16, 64, 256], true), ("memory", [16, 64, 256], true),
+    ("reference", [16, 64, 256], true),
     ("accumulate", [16, 64, 256], true), ("accumulate", [1024], false),
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
     ("faulting", [16, 64], false)
 };
+if (selectedWorkloads is not null)
+{
+    if (selectedWorkloads.Length == 0 || selectedWorkloads.Any(name => !workloads.Any(row => row.Name == name)))
+        throw new ArgumentException("Unknown or empty stepping workload selection.");
+    workloads = workloads.Where(row => selectedWorkloads.Contains(row.Name, StringComparer.Ordinal)).ToArray();
+}
 foreach (var (workload, sizes, full) in workloads)
     foreach (var requested in sizes)
         rows.Add(Measure(workload, requested, full));
@@ -85,8 +101,8 @@ foreach (var workload in rows.GroupBy(row => row.Workload))
     for (var index = 1; index < measurements.Length; index++)
         CheckGrowth(measurements[index - 1], measurements[index]);
 }
-Console.WriteLine("PASS stepping growth budgets for scalar, memory, accumulate, locals, contract, loop, " +
-    "loopfacts, outcome, lemma, depth, hypotheses and faulting bodies; results: " + reportPath);
+Console.WriteLine("PASS stepping growth budgets for " +
+    string.Join(", ", rows.Select(row => row.Workload).Distinct()) + "; results: " + reportPath);
 
 // The instructions that open a body, repeat per cycle and end it. The accumulate, contract, lemma,
 // outcome and loop bodies keep one value on the stack that grows by an operand per cycle, and the
@@ -97,6 +113,7 @@ Console.WriteLine("PASS stepping growth budgets for scalar, memory, accumulate, 
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".arg 0", ".arg 1", ".store64", ".arg 0", ".load64", ".pop"], [".arg 0", ".load64", ".ret"]),
+    "reference" => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"]),
     "accumulate" or "contract" or "hypotheses" or "lemma" or "outcome" => ([".arg 0"], [".arg 1", ".add"], [".ret"]),
     "loop" or "loopfacts" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
     "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".arg 0", $".stloc {slot}" })
@@ -143,6 +160,16 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         """ + "\n";
     var statement = workload switch
     {
+        "reference" => $$"""
+            /-- Repeated byte offsets retain checked reference formation and displacement. -/
+            theorem checked (memory : Memory) (target moved : Reference) (offset : CIL.W32)
+                (formed : formValue memory (.address target) = .ok (.reference (.address target)))
+                (displaced : add memory target 1 (BitVec.ofInt 64 offset.toInt) = .ok moved) :
+                invoke [body] {{operations.Length + 1}} 0
+                  [.reference (.address target), .scalar (.i32 offset)] memory =
+                  .ok (memory, [.reference (.address target)]) := by
+              cil_checked_steps [formed, displaced]
+            """,
         "memory" => $$"""
             /-- Checked reads and writes advance from reusable operation facts through the full body. -/
             theorem checked (memory : Memory) (target : Reference) (word : CIL.W64)

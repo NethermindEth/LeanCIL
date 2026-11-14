@@ -65,7 +65,7 @@ example : scalarOpMatches (i 102) [.word64] .not = true := by decide
 example : scalarOpMatches (i 101) [.word64] .not = false := by decide
 example : scalarOpMatches (i 88 (.integer 0)) [.word64, .word64] .add = false := by decide
 example : scalarOpMatches (i 88) [.other, .other] .add = false := by decide
-example : scalarOpMatches (i 88) [.reference, .word32] .add = false := by decide
+example : scalarOpMatches (i 88) [.reference, .word32] .add = true := by decide
 example : scalarOpMatches (i 88) [.native, .word64] .add = false := by decide
 example : scalarOpMatches (i 88) [.word32, .native] .add = true := by decide
 example : scalarOpMatches (i 88) [.word64, .word64] .sub = false := by decide
