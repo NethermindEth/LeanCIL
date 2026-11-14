@@ -154,7 +154,7 @@ internal static class ContractMethodMetadata
                 { IsValueType: true, HasGenericParameters: false } referenced)
                 throw new InvalidDataException("Closed entry type argument is not a non-generic value type of " +
                     owner[0].Assembly.Name.FullName + ": " + name);
-            return module.ImportReference(referenced);
+            return referenced;
         }
         return module.GetType(name) is { IsValueType: true, HasGenericParameters: false } local
             ? local : throw new InvalidDataException(
