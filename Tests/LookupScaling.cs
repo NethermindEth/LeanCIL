@@ -126,22 +126,14 @@ File.WriteAllText(Path.Combine(source, "Lookups.cs"), "public static class Looku
 Run(["dotnet", "build", Path.Combine(source, "Lookups.csproj"), "-c", "Release"]);
 var assembly = Path.Combine(source, "bin/Lookups.dll");
 
-const string Report = "\n#eval show IO Nat from IO.getNumHeartbeats\n";
-
-// Heartbeats count the elaborator's and the kernel's work on one thread, so they repeat exactly
-// where compile time varies with the machine's load.
+// The heartbeats `text` costs, imports included.
 long Heartbeats(string path, string text, bool equations = true)
 {
-    File.WriteAllText(path, text + Report);
-    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    if (output.Contains("sorryAx", StringComparison.Ordinal))
-        throw new InvalidOperationException("Untrusted lookup equations: " + path);
-    var count = Regex.Match(output, @"(?m)^([0-9]+)\r?$");
-    if (!count.Success) throw new InvalidOperationException("Missing heartbeat count:\n" + output);
+    var (count, output) = CountHeartbeats(path, text);
     // Each file reports the last equation's axioms once; a report per equation would walk the body each time.
     if (equations && Regex.Matches(output, @"_instruction[0-9]+' depends on axioms: \[propext\]").Count != 1)
         throw new InvalidOperationException("Instruction equations must depend on propext alone:\n" + output);
-    return long.Parse(count.Groups[1].Value, CultureInfo.InvariantCulture);
+    return count;
 }
 
 // The last pc is the farthest from the head of the code list. Its equation must keep the statement

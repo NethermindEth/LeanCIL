@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 #:package Mono.Cecil
 
 using System.Reflection.Metadata;
@@ -19,6 +20,10 @@ using TypeSpecification = Mono.Cecil.TypeSpecification;
 // names, from the bytes alone. Member references whose owner or signature mentions a generic parameter are spelled by
 // the extractor's own owner rule and are covered by the extraction suites, so they are counted and skipped here.
 // The extractor refuses general arrays, so Lean must refuse every reference that names one.
+// References decided by one kernel theorem, which bounds the memory of each decision.
+const int ReferencesPerTheorem = 128;
+// The cost per added reference may grow at most this much from half to all of one theorem's references.
+const double AllowedIncrementRatio = 1.25;
 var assembly = args.Length > 0 ? args[0] : At("Examples/Assembly/bin/Examples.dll");
 var name = Path.GetFileNameWithoutExtension(assembly);
 var output = At("artifacts/MetadataDifferential");
@@ -177,7 +182,14 @@ var assemblyRowAt = reader.GetTableMetadataOffset(TableIndex.Assembly);
 var assemblyRow = meta.AsSpan(assemblyRowAt, reader.GetTableRowSize(TableIndex.Assembly)).ToArray();
 var identityText = JsonSerializer.Serialize(module.Assembly.Name.FullName);
 var linkList = string.Join(", ", links.Select(link => $"⟨{link.Kind}, {(uint)link.Source}, 0, {link.Target}⟩"));
-var lean = $$"""
+// Each compared reference with the UTF-8 bytes of Cecil's name, then each general-array reference with none. The
+// names are written as bytes because encoding a string literal in the kernel costs more than reading the reference.
+var checks = expected.Select(entry => (entry.Token, Name: (string?)entry.Name))
+    .Concat(refused.Select(token => (Token: token, Name: (string?)null))).ToList();
+string Check((int Token, string? Name) entry) =>
+    $"({(uint)entry.Token}, {(entry.Name is null ? "none" : "some " + Bytes(Encoding.UTF8.GetBytes(entry.Name)))})";
+string Checks(IEnumerable<(int Token, string? Name)> entries) => "[" + string.Join(", ", entries.Select(Check)) + "]";
+var prefix = $$"""
     import CIL.Extraction.MetadataBinding
 
     namespace Differential
@@ -194,37 +206,65 @@ var lean = $$"""
         rows :={{Entries(rows)}}, strings := {{Entries(strings)}}, blobs := {{Entries(blobs)}}, corlib := {{corlib}},
         links := [{{linkList}}] }
 
-    def expected : List (Nat × String) := [{{string.Join(", ", expected.Select(entry =>
-        $"({(uint)entry.Token}, {JsonSerializer.Serialize(entry.Name)})"))}}]
-
-    def refused : List Nat := [{{string.Join(", ", refused.Select(token => (uint)token))}}]
-
-    /-- The method references Lean spells otherwise than Cecil's `FullName`, and the references to general
-        arrays it reads at all. -/
-    def mismatches : List Nat :=
+    /-- The references among `entries` that Lean reads otherwise than Cecil: one Lean spells otherwise
+        than the bytes of Cecil's `FullName` or cannot read, or one to a general array (no name) that
+        Lean reads. -/
+    def disagreements (entries : List (Nat × Option (List Nat))) : List Nat :=
       match slice.index with
       | .error _ => [0]
       | .ok index =>
         let env : MetadataEnv := { slices := [index] }
-        (expected.filterMap fun (token, name) =>
-          match env.methodSite token with
-          | .ok site => if site.externalName == some (bytesOf name) then none else some token
-          | .error _ => some token) ++
-        refused.filter fun token => (env.methodSite token).toBool
+        entries.filterMap fun (token, name) =>
+          match env.methodSite token, name with
+          | .ok site, some name => if site.externalName == some name then none else some token
+          | .error _, some _ => some token
+          | .ok _, none => some token
+          | .error _, none => none
 
-    theorem names_agree : mismatches = [] := by decide +kernel
-    #print axioms names_agree
-
-    end
-    end Differential
     """;
+// One kernel decision per chunk, checked one at a time, bounds the memory of the run; each rebuilds the index.
+var chunks = checks.Chunk(ReferencesPerTheorem).ToList();
+var theorems = chunks.Select((chunk, number) => $"""
+    theorem agrees{number} : disagreements {Checks(chunk)} = [] := by decide +kernel
+    #print axioms agrees{number}
+
+    """);
 var path = Path.Combine(output, name + ".lean");
-File.WriteAllText(path, lean.ReplaceLineEndings("\n"));
+File.WriteAllText(path, (prefix + string.Concat(theorems) + "end\nend Differential\n").ReplaceLineEndings("\n"));
 Console.WriteLine($"{name}: {expected.Count} method references compared with Cecil, {refused.Count} on general " +
-    $"arrays refused, {skipped} open or modified ones skipped");
-Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    $"arrays refused, {skipped} open or modified ones skipped, {chunks.Count} " +
+    "theorems");
+Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
 Console.WriteLine($"PASS Lean spells every compared method reference of {name} as Cecil does and refuses " +
     "general arrays");
+
+// The decision over nested samples of the compared references: each sample holds every other reference of the
+// next, so the samples mix references alike, and the cost per added reference must not grow with the sample.
+var sampleSizes = new[] { ReferencesPerTheorem / 4, ReferencesPerTheorem / 2, ReferencesPerTheorem };
+if (expected.Count < ReferencesPerTheorem)
+    throw new InvalidOperationException($"{name} has fewer than {ReferencesPerTheorem} references to sample.");
+var costs = sampleSizes.Select(size =>
+{
+    var stride = ReferencesPerTheorem / size;
+    var sample = expected.Take(ReferencesPerTheorem).Where((_, position) => position % stride == 0)
+        .Select(entry => (entry.Token, Name: (string?)entry.Name));
+    return CountHeartbeats(Path.Combine(output, $"Sample{size}.lean"), prefix + $"""
+        theorem agrees : disagreements {Checks(sample)} = [] := by decide +kernel
+        end
+        end Differential
+        """).Heartbeats;
+}).ToArray();
+var incrementRatio = (double)(costs[2] - costs[1]) / (sampleSizes[2] - sampleSizes[1]) /
+    ((double)(costs[1] - costs[0]) / (sampleSizes[1] - sampleSizes[0]));
+Console.WriteLine(FormattableString.Invariant(
+    $"Deciding {string.Join("/", sampleSizes)} references costs {string.Join("/", costs)} heartbeats; ") +
+    FormattableString.Invariant($"the cost per added reference grows {incrementRatio:F2} times"));
+if (incrementRatio > AllowedIncrementRatio)
+    throw new InvalidOperationException(FormattableString.Invariant(
+        $"The cost per added reference grows {incrementRatio:F2} times from {sampleSizes[1]} to ") +
+        FormattableString.Invariant($"{sampleSizes[2]} references; the limit is {AllowedIncrementRatio}."));
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS the cost per added reference grows {incrementRatio:F2} times, within {AllowedIncrementRatio}"));
 
 // The table stream header: the bytes from the reserved word through the last row count.
 static byte[] DifferentialHeader(MetadataReader reader, System.Collections.Immutable.ImmutableArray<byte> meta)

@@ -143,7 +143,10 @@ workflow.
   `Tests/MetadataDifferential.cs` writes every reference, type definition, type specification and
   method specification row of `Examples.dll`, with the links that locate nested types and the
   definitions of its own methods and Cecil's full name for each method reference, and Lean must
-  spell the same names from the bytes and refuse every reference that names a general array.
+  spell the same names from the bytes and refuse every reference that names a general array. The
+  kernel decides 128 references per theorem, one theorem at a time, so the memory of a run does
+  not grow with the assembly, and the cost per added reference must stay within 1.25 times from
+  64 to 128 references.
   Tests/BodyLiteral.lean writes the evidence of one method as literals, proves its body check with
   the kernel, rejects a changed byte, and requires the elaborator's decide to refuse the check
   within a small heartbeat budget. Tests/ScalarEvidence.lean does the same for the whole
