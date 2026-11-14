@@ -3830,9 +3830,9 @@ partial class Program : IDisposable
     /// One image a deep run read: its display identity, SHA-256, role and status, with the theorem that reconfirmed
     /// its digest or why it is not covered.
     /// </summary>
-    internal sealed record ImageResult([property: JsonRequired] string identity, [property: JsonRequired] string sha256,
-        [property: JsonRequired] ImageRole role, [property: JsonRequired] BindingStatus status, string? theorem,
-        string? reason);
+    internal sealed record ImageResult([property: JsonRequired] string identity,
+        [property: JsonRequired] string sha256, [property: JsonRequired] ImageRole role,
+        [property: JsonRequired] BindingStatus status, string? theorem, string? reason);
 
     /// <summary>One binding fact's status, with the theorem that reconfirmed it or why it is not covered.</summary>
     internal sealed record BindingFactResult([property: JsonRequired] BindingFact id,
