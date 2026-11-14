@@ -3043,11 +3043,54 @@ partial class Program : IDisposable
         finally { File.Delete(request); File.Delete(result); }
     }
 
+    /// <summary>Resolves directory aliases, including ancestors of build directories not yet created.</summary>
+    static string PhysicalImportDirectory(string path)
+    {
+        const int maximumLinks = 64;
+        var remainingLinks = maximumLinks;
+        string Resolve(string absolute)
+        {
+            var root = Path.GetPathRoot(absolute)
+                ?? throw new InvalidDataException("Import directory must be absolute: " + absolute);
+            var current = root;
+            foreach (var component in absolute[root.Length..].Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (component == ".") continue;
+                if (component == "..")
+                {
+                    current = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(current)) ?? root;
+                    continue;
+                }
+                var candidate = Path.Combine(current, component);
+                var directory = new DirectoryInfo(candidate);
+                if (directory.LinkTarget is { } target)
+                {
+                    if (--remainingLinks < 0)
+                        throw new InvalidDataException("Import directory has too many symbolic links: " + path);
+                    current = Resolve(Path.IsPathFullyQualified(target) ? target : Path.Combine(current, target));
+                    if (!Directory.Exists(current))
+                        throw new InvalidDataException(
+                            "Import directory has an unresolved symbolic link: " + candidate);
+                }
+                else current = candidate;
+            }
+            return Path.TrimEndingDirectorySeparator(current);
+        }
+        return Resolve(path);
+    }
+
     // The audited module must be the artifact that was hashed and replayed, not a shadow on the search path.
     static void RequireAuditedModule(AuditedOleans audited, string module, string path)
     {
+        static string PhysicalArtifact(string artifact)
+        {
+            var absolute = Path.IsPathFullyQualified(artifact) ? artifact :
+                Path.Combine(Environment.CurrentDirectory, artifact);
+            return Path.Combine(PhysicalImportDirectory(Path.GetDirectoryName(absolute)!), Path.GetFileName(absolute));
+        }
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!Path.GetFullPath(audited.modules[module]).Equals(Path.GetFullPath(path), comparison))
+        if (!PhysicalArtifact(audited.modules[module]).Equals(PhysicalArtifact(path), comparison))
             throw new InvalidDataException($"Audited module {module} resolved to {audited.modules[module]}, not {path}");
     }
 
