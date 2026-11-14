@@ -688,6 +688,49 @@ structure AssemblyName where
   publicKeyToken : Option Nat
   deriving DecidableEq, Hashable
 
+section AssemblyOrder
+
+attribute [local instance] lexOrd
+
+/-- Raw identity components in lexicographic comparison order. -/
+private def AssemblyName.orderKey (assembly : AssemblyName) :
+    Nat × Nat × Nat × Nat × Nat × Nat × Option Nat :=
+  (assembly.name.code, assembly.version.major, assembly.version.minor,
+    assembly.version.build, assembly.version.revision, assembly.culture.code,
+    assembly.publicKeyToken)
+
+/-- Assembly order compares raw name codes, version components, culture and optional token. -/
+instance : Ord AssemblyName where
+  compare := compareOn AssemblyName.orderKey
+
+/-- Assembly comparison is transitive and reverses when its arguments are exchanged. -/
+instance : Std.TransOrd AssemblyName :=
+  inferInstanceAs (Std.TransCmp (compareOn AssemblyName.orderKey))
+
+/-- Assembly comparison identifies exactly equal raw identity components. -/
+instance : Std.LawfulEqOrd AssemblyName where
+  compare_self := Std.ReflCmp.compare_self (cmp := compareOn AssemblyName.orderKey)
+  eq_of_compare {left right} equal := by
+    have keys : left.orderKey = right.orderKey := Std.LawfulEqOrd.eq_of_compare equal
+    cases left with | mk leftName leftVersion leftCulture leftToken =>
+      cases right with | mk rightName rightVersion rightCulture rightToken =>
+        cases leftName; cases rightName; cases leftVersion; cases rightVersion
+        cases leftCulture; cases rightCulture
+        simpa only [AssemblyName.orderKey, Prod.mk.injEq, AssemblyName.mk.injEq,
+          MetadataName.mk.injEq, Version.mk.injEq, and_assoc] using keys
+
+/-- Equal assembly comparison results preserve every raw identity component. -/
+theorem AssemblyName.compare_eq_iff (left right : AssemblyName) :
+    compare left right = .eq ↔ left = right :=
+  Std.LawfulEqOrd.compare_eq_iff_eq
+
+/-- info: 'CIL.AssemblyName.compare_eq_iff' depends on axioms:
+[propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms AssemblyName.compare_eq_iff
+
+end AssemblyOrder
+
 /-- One row of a type's nesting chain: its namespace column and its name column. -/
 structure TypeLevel where
   typeNamespace : MetadataName
