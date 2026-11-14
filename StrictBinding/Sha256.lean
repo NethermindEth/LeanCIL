@@ -12,15 +12,11 @@ constant: the image is well formed and its SHA-256 is the stated number.
 
 namespace StrictBinding.Sha256
 
-/-- Addition modulo `2 ^ 32`. -/
-def add (left right : Nat) : Nat := Nat.mod (Nat.add left right) 4294967296
+open CIL.Crypto (add xor3 choose majority blockWords padded wordsValue)
 
 /-- Rotation of a 32-bit word to the right. -/
 def rotr (word amount : Nat) : Nat :=
   Nat.lor (Nat.shiftRight word amount) (Nat.mod (Nat.shiftLeft word (32 - amount)) 4294967296)
-
-/-- Exclusive or of three words. -/
-def xor3 (a b c : Nat) : Nat := Nat.xor (Nat.xor a b) c
 
 /-- The compression function's upper-case sigma of `a`. -/
 def bigSigma0 (word : Nat) : Nat := xor3 (rotr word 2) (rotr word 13) (rotr word 22)
@@ -33,14 +29,6 @@ def smallSigma0 (word : Nat) : Nat := xor3 (rotr word 7) (rotr word 18) (Nat.shi
 
 /-- The message schedule's lower-case sigma of the fifteenth word back. -/
 def smallSigma1 (word : Nat) : Nat := xor3 (rotr word 17) (rotr word 19) (Nat.shiftRight word 10)
-
-/-- Selects `f` where `e` has a bit set and `g` elsewhere. -/
-def choose (e f g : Nat) : Nat :=
-  Nat.xor (Nat.land e f) (Nat.land (Nat.sub 4294967295 e) g)
-
-/-- The bitwise majority of three words. -/
-def majority (a b c : Nat) : Nat :=
-  xor3 (Nat.land a b) (Nat.land a c) (Nat.land b c)
 
 /-- The 64 round constants. -/
 def roundConstants : List Nat :=
@@ -74,11 +62,6 @@ def rounds : List Nat → List Nat → Nat → Nat → Nat → Nat → Nat → N
     rounds ks ws (add t1 t2) a b c (add d t1) e f g
   | _, _, a, b, c, d, e, f, g, h => [a, b, c, d, e, f, g, h]
 
-/-- The sixteen big-endian words of one 64-byte block. -/
-def blockWords (block : Nat) : List Nat :=
-  [480, 448, 416, 384, 352, 320, 288, 256, 224, 192, 160, 128, 96, 64, 32, 0].map
-    fun shift => Nat.mod (Nat.shiftRight block shift) 4294967296
-
 /-- One block applied to the state. -/
 def compress (state : List Nat) (block : Nat) : List Nat :=
   match state with
@@ -97,19 +80,6 @@ def hashBlocks : List Nat → List Nat → List Nat
   | state, block :: blocks =>
     let next := compress state block
     bif Nat.beq (next.foldl Nat.add 0) 0 then hashBlocks next blocks else hashBlocks next blocks
-
-/-- The chunks of a message of `length` bytes with the FIPS padding: the `0x80` byte follows the
-    last data byte and the bit length ends the last block. -/
-def padded (chunks : List Nat) (length : Nat) : List Nat :=
-  let tail := length % 64
-  let opened :=
-    if tail == 0 then 0x80 * 2 ^ 504 else chunks.getLastD 0 + 0x80 * 2 ^ (8 * (63 - tail))
-  let full := if tail == 0 then chunks else chunks.dropLast
-  if tail < 56 then full ++ [opened + 8 * length] else full ++ [opened, 8 * length]
-
-/-- The big-endian number of a list of 32-bit words. -/
-def wordsValue (words : List Nat) : Nat :=
-  words.foldl (fun acc word => acc * 4294967296 + word) 0
 
 /-- All pages hashed in order, each from the state the previous one left. -/
 def hashPages : List Nat → List (List Nat) → List Nat
@@ -161,7 +131,7 @@ instance (image : ImageBytes) (digest : Nat) : Decidable (DigestIs image digest)
 theorem digestIs_of_hashes {image : ImageBytes} {digest : Nat} {final : List Nat}
     {blocks : List (List Nat)} (plan : Sha256.hashPlan image.pages image.length = blocks)
     (chain : Sha256.PagesHash Sha256.initialState blocks final)
-    (wellFormed : image.wellFormed = true) (value : Sha256.wordsValue final = digest) :
+    (wellFormed : image.wellFormed = true) (value : CIL.Crypto.wordsValue final = digest) :
     DigestIs image digest := by
   refine ⟨wellFormed, ?_⟩
   unfold Sha256.ofPages

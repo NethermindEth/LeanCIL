@@ -84,7 +84,7 @@ theorem sha256_second_page_of_one_chunk : DigestIs (ImageBytes.ofBytes (pattern 
 #print axioms sha256_second_page_of_one_chunk
 
 /-- The 64 bytes `0, 1, ..., 63` as one chunk. -/
-private def firstChunk : Nat := bytesValue (List.range 64)
+private def firstChunk : Nat := CIL.Crypto.bytesValue (List.range 64)
 
 /-- The byte 64 and its zero padding. -/
 private def secondChunk : Nat := 0x40 * 2 ^ 504
@@ -97,13 +97,13 @@ private def afterFirstPage : List Nat := Sha256.hashBlocks Sha256.initialState [
 
 /-- The state after the second page and its padding block. -/
 private def afterSecondPage : List Nat :=
-  Sha256.hashBlocks afterFirstPage (Sha256.padded [secondChunk] 65)
+  Sha256.hashBlocks afterFirstPage (CIL.Crypto.padded [secondChunk] 65)
 
 /-- A digest assembled from separate page results equals the one a single evaluation proves. -/
 theorem digest_from_page_results : DigestIs twoPages
     0x4bfd2c8b6f1eec7a2afeb48b934ee4b2694182027e6d0fc075074f2fabb31781 :=
   digestIs_of_hashes (final := afterSecondPage)
-    (blocks := [[firstChunk], Sha256.padded [secondChunk] 65]) (by decide +kernel)
+    (blocks := [[firstChunk], CIL.Crypto.padded [secondChunk] 65]) (by decide +kernel)
     (.cons (next := afterFirstPage) (by decide +kernel)
       (.cons (by decide +kernel) (.nil _))) (by decide +kernel) (by decide +kernel)
 #print axioms digest_from_page_results
@@ -146,40 +146,42 @@ theorem short_chunk_list_is_malformed :
 
 /-! ## SHA-1 and key tokens -/
 
-theorem sha1_abc : Sha1.ofBytes (asciiOf "abc") = 0xa9993e364706816aba3e25717850c26c9cd0d89d := by
+theorem sha1_abc : CIL.Crypto.Sha1.ofBytes (asciiOf "abc") =
+    0xa9993e364706816aba3e25717850c26c9cd0d89d := by
   decide +kernel
 #print axioms sha1_abc
 
-theorem sha1_empty : Sha1.ofBytes [] = 0xda39a3ee5e6b4b0d3255bfef95601890afd80709 := by
+theorem sha1_empty : CIL.Crypto.Sha1.ofBytes [] = 0xda39a3ee5e6b4b0d3255bfef95601890afd80709 := by
   decide +kernel
 #print axioms sha1_empty
 
-theorem sha1_pattern_55 : Sha1.ofBytes (pattern 55) =
+theorem sha1_pattern_55 : CIL.Crypto.Sha1.ofBytes (pattern 55) =
     0x8ae2d46729cfe68ff927af5eec9c7d1b66d65ac2 := by decide +kernel
 #print axioms sha1_pattern_55
 
-theorem sha1_pattern_56 : Sha1.ofBytes (pattern 56) =
+theorem sha1_pattern_56 : CIL.Crypto.Sha1.ofBytes (pattern 56) =
     0x636e2ec698dac903498e648bd2f3af641d3c88cb := by decide +kernel
 #print axioms sha1_pattern_56
 
-theorem sha1_pattern_63 : Sha1.ofBytes (pattern 63) =
+theorem sha1_pattern_63 : CIL.Crypto.Sha1.ofBytes (pattern 63) =
     0x6d942da0c4392b123528f2905c713a3ce28364bd := by decide +kernel
 #print axioms sha1_pattern_63
 
-theorem sha1_pattern_65 : Sha1.ofBytes (pattern 65) =
+theorem sha1_pattern_65 : CIL.Crypto.Sha1.ofBytes (pattern 65) =
     0x69bd728ad6e13cd76ff19751fde427b00e395746 := by decide +kernel
 #print axioms sha1_pattern_65
 
-theorem sha1_pattern_64 : Sha1.ofBytes (pattern 64) =
+theorem sha1_pattern_64 : CIL.Crypto.Sha1.ofBytes (pattern 64) =
     0xc6138d514ffa2135bfce0ed0b8fac65669917ec7 := by decide +kernel
 #print axioms sha1_pattern_64
 
-theorem sha1_pattern_120 : Sha1.ofBytes (pattern 120) =
+theorem sha1_pattern_120 : CIL.Crypto.Sha1.ofBytes (pattern 120) =
     0xd3dbd653bd8597b7475321b60a36891278e6a04a := by decide +kernel
 #print axioms sha1_pattern_120
 
 /-- The token of a 160-byte key is the last eight digest bytes in reverse order. -/
-theorem key_token_of_a_160_byte_key : Sha1.keyToken (pattern 160) = 0x473c444ebb4661a5 := by
+theorem key_token_of_a_160_byte_key : CIL.Crypto.Sha1.keyToken (pattern 160) =
+    0x473c444ebb4661a5 := by
   decide +kernel
 #print axioms key_token_of_a_160_byte_key
 
