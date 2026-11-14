@@ -13,6 +13,12 @@ struct, object, pointer, array and span types never narrow; a misspelled name or
 name from another assembly is not a primitive; and a method that returns nothing never narrows,
 whatever its declared return type says. The method facts are proved by lemma application, as a
 generated fact is, so no proof below evaluates a type name except the misspelling cases.
+
+Pins how a method reads each argument: an argument without a home narrowed as its declared type
+requires, `this` as it arrives, and a homed argument from the slot after the declared locals,
+which is the slot the argument check expects. `cil_resolution_facts` states the same for static
+and instance methods and across suffix blocks, refuses homes out of argument order, and the
+simplifier reads a literal body without facts and leaves a symbolic one alone.
 -/
 
 namespace Tests.ResolutionFacts
@@ -283,5 +289,198 @@ theorem shape_narrowing {rawLayouts : List RawLayout} {layouts : Array ComputedL
 #print axioms shape_narrowing
 
 end Generated
+
+
+/-! ## Argument access -/
+
+/-- A byte parameter and an int parameter, returning an int. -/
+def twoParameterSignature : DeclaredSignature :=
+  { parameters := [.atom runtimeScope "System.Byte", .atom runtimeScope "System.Int32"],
+    returnType := .atom runtimeScope "System.Int32" }
+
+/-- A static method with a byte parameter read as it arrives and an int parameter that the body
+    stores to, so it has a home after the method's one local. -/
+def twoParameters : Method :=
+  { code := [.ldc_i4 0, .stloc 1, .arg 0 (some .unsigned8), .ret], locals := [.i32 0],
+    localKinds := [.word32], parameterHomes := [(1, .word32)], returnsValue := true,
+    declared := twoParameterSignature }
+
+-- The byte argument is read narrowed to its declared width.
+example : twoParameters.argumentAccess 0 = .value (some .unsigned8) :=
+  Method.argumentAccess_value rfl rfl (declaredNarrow_primitive _ .byte)
+
+-- The stored argument is read from its home, the slot after the one declared local.
+example : twoParameters.argumentAccess 1 = .home 1 := Method.argumentAccess_home rfl rfl
+
+-- An index past the declared parameters has no type and is read as it arrives.
+example : twoParameters.argumentAccess 2 = .value none := Method.argumentAccess_undeclared rfl rfl
+
+/-- The return fact the facts command also reads. -/
+theorem twoParameters_returnsValue : twoParameters.returnsValue = true := rfl
+#print axioms twoParameters_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem twoParameters_declared : twoParameters.declared = twoParameterSignature := rfl
+#print axioms twoParameters_declared
+
+cil_resolution_facts twoParameters
+
+example : twoParameters.argumentAccess 0 = .value (some .unsigned8) :=
+  twoParameters_argumentAccess0
+example : twoParameters.argumentAccess 1 = .home 1 := twoParameters_argumentAccess1
+example : twoParameters.argumentAccess 1 = .home 1 := by simp only [cil_code]
+
+/--
+info: 'Tests.ResolutionFacts.twoParameters_argumentAccess0' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in
+#print axioms twoParameters_argumentAccess0
+
+/--
+info: 'Tests.ResolutionFacts.twoParameters_argumentAccess1' depends on axioms: [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs in
+#print axioms twoParameters_argumentAccess1
+
+/-- A value-type instance method's signature: a short and a byte-backed enum. -/
+def instanceSignature : DeclaredSignature :=
+  { receiver := some .reference,
+    parameters := [.atom runtimeScope "System.Int16",
+      .enum "Examples.Flags" (.atom runtimeScope "System.Byte")] }
+
+/-- An instance method: `this` is stored to, so it has the home; its parameters follow. -/
+def instanceMethod : Method :=
+  { code := [.ret], locals := [], parameterHomes := [(0, .reference)], returnsValue := false,
+    declared := instanceSignature }
+
+/-- The return fact the facts command also reads. -/
+theorem instanceMethod_returnsValue : instanceMethod.returnsValue = false := rfl
+#print axioms instanceMethod_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem instanceMethod_declared : instanceMethod.declared = instanceSignature := rfl
+#print axioms instanceMethod_declared
+
+cil_resolution_facts instanceMethod
+
+-- Parameter i of an instance method is argument i + 1.
+example : instanceMethod.argumentAccess 0 = .home 0 := instanceMethod_argumentAccess0
+example : instanceMethod.argumentAccess 1 = .value (some .signed16) :=
+  instanceMethod_argumentAccess1
+example : instanceMethod.argumentAccess 2 = .value (some .unsigned8) :=
+  instanceMethod_argumentAccess2
+
+/-- An unhomed `this` is read as it arrives. -/
+def unhomedThis : Method :=
+  { code := [.ret], locals := [], returnsValue := false,
+    declared := { receiver := some .object, parameters := [.atom runtimeScope "System.Char"] } }
+
+/-- The return fact the facts command also reads. -/
+theorem unhomedThis_returnsValue : unhomedThis.returnsValue = false := rfl
+#print axioms unhomedThis_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem unhomedThis_declared : unhomedThis.declared =
+    { receiver := some .object, parameters := [.atom runtimeScope "System.Char"] } := rfl
+#print axioms unhomedThis_declared
+
+cil_resolution_facts unhomedThis
+
+example : unhomedThis.argumentAccess 0 = .value none := unhomedThis_argumentAccess0
+example : unhomedThis.argumentAccess 1 = .value (some .unsigned16) := unhomedThis_argumentAccess1
+
+/-- Forty parameters, so the facts read three blocks of parameter types, with homes before the
+    first block boundary, on both sides of it, at the last index of a block and at the end. -/
+def wide : Method :=
+  { code := [.ret], locals := [.i32 0, .i32 0],
+    localKinds := [.word32, .word32], returnsValue := false,
+    parameterHomes := [(3, .word32), (15, .word32), (16, .word32), (17, .word32), (31, .word32),
+      (39, .narrow .unsigned16)],
+    declared := { parameters := (List.replicate 39 (.atom runtimeScope "System.Int32")) ++
+      [.atom runtimeScope "System.Char"] } }
+
+/-- The return fact the facts command also reads. -/
+theorem wide_returnsValue : wide.returnsValue = false := rfl
+#print axioms wide_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem wide_declared : wide.declared = { parameters :=
+    (List.replicate 39 (.atom runtimeScope "System.Int32")) ++
+      [.atom runtimeScope "System.Char"] } := rfl
+#print axioms wide_declared
+
+cil_resolution_facts wide
+
+-- Each fact agrees with the definition, decided by evaluation.
+example : wide.argumentAccess 0 = .value none := wide_argumentAccess0
+example : wide.argumentAccess 3 = .home 2 := wide_argumentAccess3
+example : wide.argumentAccess 4 = .value none := wide_argumentAccess4
+example : wide.argumentAccess 15 = .home 3 := wide_argumentAccess15
+example : wide.argumentAccess 16 = .home 4 := wide_argumentAccess16
+example : wide.argumentAccess 17 = .home 5 := wide_argumentAccess17
+example : wide.argumentAccess 18 = .value none := wide_argumentAccess18
+example : wide.argumentAccess 32 = .value none := wide_argumentAccess32
+example : wide.argumentAccess 39 = .home 7 := wide_argumentAccess39
+example : ∀ index, index < 40 → wide.argumentAccess index =
+    if index ∈ [3, 15, 16, 17, 31, 39] then .home (2 + [3, 15, 16, 17, 31, 39].idxOf index)
+    else .value none := by decide
+
+/-- A method whose homes do not ascend; a fact would otherwise depend on their order. -/
+def unordered : Method :=
+  { code := [.ret], locals := [], parameterHomes := [(1, .word32), (0, .word32)],
+    returnsValue := false, declared := { parameters := [.atom runtimeScope "System.Int32",
+      .atom runtimeScope "System.Int32"] } }
+
+/-- The return fact the facts command also reads. -/
+theorem unordered_returnsValue : unordered.returnsValue = false := rfl
+#print axioms unordered_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem unordered_declared : unordered.declared = { parameters :=
+    [.atom runtimeScope "System.Int32", .atom runtimeScope "System.Int32"] } := rfl
+#print axioms unordered_declared
+
+/-- error: cil_resolution_facts: the parameter homes of Tests.ResolutionFacts.unordered do not ascend -/
+#guard_msgs in
+cil_resolution_facts unordered
+
+-- The simplifier reads a literal body's argument access without generated facts.
+example : twoParameters.argumentAccess 0 = .value (some .unsigned8) := by simp only [cil_step]
+example : wide.argumentAccess 39 = .home 7 := by simp only [cil_step]
+
+/-- A method whose homes are not known. -/
+def symbolicHomes (homes : List (Nat × LocalKind)) : Method :=
+  { code := [], locals := [], parameterHomes := homes, returnsValue := false,
+    declared := twoParameterSignature }
+
+example : (symbolicHomes []).argumentAccess 1 = .value none := by simp only [cil_step]
+
+-- A symbolic home list leaves the access for a caller's fact.
+example (homes : List (Nat × LocalKind)) (access : ArgumentAccess)
+    (known : (symbolicHomes homes).argumentAccess 0 = access) :
+    (symbolicHomes homes).argumentAccess 0 = access := by
+  fail_if_success simp only [cil_step]
+  exact known
+
+/-- Two methods that differ only in their locals' initial values read arguments alike. -/
+example : ({ twoParameters with locals := [.i32 7] } : Method).argumentAccess =
+    twoParameters.argumentAccess := Method.argumentAccess_congr rfl rfl rfl rfl
+
+/-- The raw view of `twoParameters`: a byte and an int argument, one int local, and a body that
+    stores to the int argument and loads the byte. -/
+def twoParametersRaw : RawArguments :=
+  { arguments := [.field .unsigned8, .field .signed32], locals := [.field .signed32],
+    code := [.other, .store 1, .load 0, .other] }
+
+/-- The argument check accepts `twoParameters` against its raw view. -/
+theorem twoParameters_homesValid :
+    ParameterHomesValid #[] twoParametersRaw [true, true, true, true] twoParameters := by decide
+#print axioms twoParameters_homesValid
+
+-- The home slot the check expects is the slot `argumentAccess` reads.
+example : twoParameters.argumentAccess 1 = .home (1 + 0) :=
+  argumentAccess_of_homed twoParameters_homesValid (by decide)
+example : twoParameters.argumentAccess 0 = .value (some .unsigned8) :=
+  argumentAccess_of_unhomed twoParameters_homesValid (by decide)
 
 end Tests.ResolutionFacts

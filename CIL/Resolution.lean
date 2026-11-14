@@ -1,4 +1,5 @@
 import CIL.Extraction.TypeStorage
+import CIL.Extraction.LinkIndex
 import CIL.Identity
 
 /-!
@@ -9,6 +10,12 @@ the storage of a primitive or of an enum's underlying type. `CIL.Method.returnNa
 to a method's declared return type. The lemmas here state the narrowing of every primitive, of
 every enum over a primitive and of every other type head, so a generated fact names a method's
 narrowing by lemma application and no generated proof evaluates a type name.
+
+`CIL.Method.argumentAccess` says how a method reads each argument: from the frame slot of its
+parameter home, which follows the declared locals, or as the incoming value narrowed as its
+declared type requires. Under `ParameterHomesValid` the home slot is the one the argument check
+expects. The key lemmas over ascending homes let a generated fact name an argument's home
+position without searching the homes before it.
 -/
 
 namespace CIL
@@ -205,5 +212,264 @@ theorem Method.returnsValue_of_returnNarrow {body : Method} {kind : NarrowKind}
   split at narrowed <;> simp_all
 
 #print axioms Method.returnsValue_of_returnNarrow
+
+/-! ## Argument access -/
+
+namespace Extraction
+
+/-- Below an ascending table, every entry has a larger key than `key`, so none has `key`. -/
+theorem findIdx?_none_of_keysAscend {α : Type} {entries : List (Nat × α)} {lower key : Nat}
+    (ascending : keysAscend lower entries = true) (below : key < lower) :
+    entries.findIdx? (fun entry => entry.1 == key) = none := by
+  rw [List.findIdx?_eq_none_iff]
+  intro entry member
+  have := keysAscend_bound entries lower ascending entry member
+  simp only [beq_eq_false_iff_ne, ne_eq]
+  omega
+
+#print axioms findIdx?_none_of_keysAscend
+
+/-- A table ascending from `lower` ascends from any bound its first key reaches. -/
+theorem keysAscend_raise {α : Type} {entries : List (Nat × α)} {lower higher : Nat}
+    (ascending : keysAscend lower entries = true)
+    (raised : (entries.head?.all fun entry => decide (higher ≤ entry.1)) = true) :
+    keysAscend higher entries = true := by
+  cases entries with
+  | nil => rfl
+  | cons head rest =>
+    obtain ⟨key, value⟩ := head
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending ⊢
+    simp only [List.head?_cons, Option.all_some, decide_eq_true_eq] at raised
+    exact ⟨raised, ascending.2⟩
+
+#print axioms keysAscend_raise
+
+/-- The entry at `position` of an ascending table is the first with its key. -/
+theorem findIdx?_of_keysAscend {α : Type} {entries rest : List (Nat × α)}
+    {lower position key : Nat} {value : α} (ascending : keysAscend lower entries = true)
+    (placed : entries.drop position = (key, value) :: rest) :
+    entries.findIdx? (fun entry => entry.1 == key) = some position := by
+  induction entries generalizing lower position with
+  | nil => simp at placed
+  | cons head tail ih =>
+    obtain ⟨first, other⟩ := head
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
+    cases position with
+    | zero =>
+      simp only [List.drop_zero, List.cons.injEq, Prod.mk.injEq] at placed
+      obtain ⟨⟨rfl, -⟩, -⟩ := placed
+      simp [List.findIdx?_cons]
+    | succ position =>
+      simp only [List.drop_succ_cons] at placed
+      have later := keysAscend_bound tail (first + 1) ascending.2 (key, value)
+        (List.mem_of_mem_drop (placed ▸ List.mem_cons_self))
+      rw [List.findIdx?_cons, ih ascending.2 placed]
+      simp only [beq_iff_eq]
+      split
+      · omega
+      · rfl
+
+#print axioms findIdx?_of_keysAscend
+
+/-- No entry of an ascending table has a key strictly between the key at `position` and the
+    next one. -/
+theorem findIdx?_none_after {α : Type} {entries rest : List (Nat × α)}
+    {lower position previous key : Nat} {value : α}
+    (ascending : keysAscend lower entries = true)
+    (placed : entries.drop position = (previous, value) :: rest) (below : previous < key)
+    (above : (rest.head?.all fun entry => decide (key < entry.1)) = true) :
+    entries.findIdx? (fun entry => entry.1 == key) = none := by
+  induction entries generalizing lower position with
+  | nil => simp at placed
+  | cons head tail ih =>
+    obtain ⟨first, other⟩ := head
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
+    cases position with
+    | zero =>
+      simp only [List.drop_zero, List.cons.injEq, Prod.mk.injEq] at placed
+      obtain ⟨⟨rfl, -⟩, rfl⟩ := placed
+      have beyond := keysAscend_raise (higher := key + 1) ascending.2 (by
+        cases tail with
+        | nil => rfl
+        | cons next _ =>
+          simp only [List.head?_cons, Option.all_some, decide_eq_true_eq] at above ⊢
+          omega)
+      rw [List.findIdx?_cons, findIdx?_none_of_keysAscend beyond (Nat.lt_succ_self key)]
+      simp only [beq_iff_eq]
+      split
+      · omega
+      · rfl
+    | succ position =>
+      simp only [List.drop_succ_cons] at placed
+      have later := keysAscend_bound tail (first + 1) ascending.2 (previous, value)
+        (List.mem_of_mem_drop (placed ▸ List.mem_cons_self))
+      rw [List.findIdx?_cons, ih ascending.2 placed]
+      simp only [beq_iff_eq]
+      split
+      · omega
+      · rfl
+
+#print axioms findIdx?_none_after
+
+end Extraction
+
+/-- How a method reads argument `index`: the incoming value narrowed as its declared type
+    requires, or the frame slot of the argument's parameter home. -/
+inductive ArgumentAccess where
+  | value (narrow : Option NarrowKind)
+  | home (slot : Nat)
+  deriving DecidableEq, Repr
+
+/-- Homes follow the declared local kinds in `parameterHomes` order; an argument without a home
+    is read from the incoming arguments, narrowed by its declared type (none for `this`). -/
+def Method.argumentAccess (body : Method) (index : Nat) : ArgumentAccess :=
+  match body.parameterHomes.findIdx? (fun home => home.1 == index) with
+  | some position => .home (body.localKinds.length + position)
+  | none => .value ((body.declared.argumentType index).bind
+      (Extraction.declaredNarrow body.environment.rawLayouts))
+
+/-- An argument without a home is read narrowed as its declared type requires. -/
+theorem Method.argumentAccess_value {body : Method} {index : Nat} {type : Extraction.TypeExpr}
+    {narrow : Option NarrowKind}
+    (unhomed : body.parameterHomes.findIdx? (fun home => home.1 == index) = none)
+    (declared : body.declared.argumentType index = some type)
+    (narrowed : Extraction.declaredNarrow body.environment.rawLayouts type = narrow) :
+    body.argumentAccess index = .value narrow := by
+  simp [Method.argumentAccess, unhomed, declared, narrowed]
+
+#print axioms Method.argumentAccess_value
+
+/-- An argument without a home or a declared type, such as `this`, is read as it is. -/
+theorem Method.argumentAccess_undeclared {body : Method} {index : Nat}
+    (unhomed : body.parameterHomes.findIdx? (fun home => home.1 == index) = none)
+    (declared : body.declared.argumentType index = none) :
+    body.argumentAccess index = .value none := by
+  simp [Method.argumentAccess, unhomed, declared]
+
+#print axioms Method.argumentAccess_undeclared
+
+/-- A homed argument is read from its home's slot, after the declared locals. -/
+theorem Method.argumentAccess_home {body : Method} {index position slot : Nat}
+    (homed : body.parameterHomes.findIdx? (fun home => home.1 == index) = some position)
+    (placed : body.localKinds.length + position = slot) :
+    body.argumentAccess index = .home slot := by
+  simp [Method.argumentAccess, homed, placed]
+
+#print axioms Method.argumentAccess_home
+
+/-- Two methods with the same homes, local count, signature and layouts read every argument
+    alike. -/
+theorem Method.argumentAccess_congr {expected actual : Method}
+    (homes : actual.parameterHomes = expected.parameterHomes)
+    (localCount : actual.localKinds.length = expected.localKinds.length)
+    (declared : actual.declared = expected.declared)
+    (environment : actual.environment = expected.environment) :
+    actual.argumentAccess = expected.argumentAccess := by
+  funext index
+  simp only [Method.argumentAccess, homes, localCount, declared, environment]
+
+#print axioms Method.argumentAccess_congr
+
+/-- Parameter `index` of a static method is argument `index`. -/
+theorem DeclaredSignature.argumentType_static {signature : DeclaredSignature} {index : Nat}
+    {type : Extraction.TypeExpr} (static : signature.receiver = none)
+    (found : signature.parameters[index]? = some type) :
+    signature.argumentType index = some type := by
+  simp [DeclaredSignature.argumentType, static, found]
+
+#print axioms DeclaredSignature.argumentType_static
+
+/-- Parameter `index` of an instance method is argument `index + 1`. -/
+theorem DeclaredSignature.argumentType_instance {signature : DeclaredSignature} {index : Nat}
+    {receiver : Receiver} {type : Extraction.TypeExpr}
+    (instanceMethod : signature.receiver = some receiver)
+    (found : signature.parameters[index]? = some type) :
+    signature.argumentType (index + 1) = some type := by
+  simp [DeclaredSignature.argumentType, instanceMethod, found]
+
+#print axioms DeclaredSignature.argumentType_instance
+
+/-- Argument 0 of an instance method, `this`, has no declared parameter type. -/
+theorem DeclaredSignature.argumentType_this {signature : DeclaredSignature} {receiver : Receiver}
+    (instanceMethod : signature.receiver = some receiver) : signature.argumentType 0 = none := by
+  simp [DeclaredSignature.argumentType, instanceMethod]
+
+#print axioms DeclaredSignature.argumentType_this
+
+namespace Extraction
+
+/-- A list an option-valued function maps entirely has as many results as inputs. -/
+private theorem length_of_mapM {α β : Type} {inputs : List α} {outputs : List β}
+    {make : α → Option β} (made : inputs.mapM make = some outputs) :
+    outputs.length = inputs.length := by
+  induction inputs generalizing outputs with
+  | nil => simp_all
+  | cons input rest ih =>
+    simp only [List.mapM_cons, Option.bind_eq_bind, Option.bind_eq_some_iff,
+      Option.pure_def, Option.some.injEq] at made
+    obtain ⟨_, -, others, remaining, rfl⟩ := made
+    simp [ih remaining]
+
+/-- Searching the expected homes for an argument searches the required home indices. -/
+private theorem homeKeys_findIdx? {layouts : Array ComputedLayout} {raw : RawArguments}
+    {reachable : List Bool} {homes : List (Nat × LocalKind)} {index : Nat}
+    (expected : expectedHomes layouts raw reachable = some homes) :
+    homes.findIdx? (fun home => home.1 == index) =
+      (requiredHomeIndices raw reachable).findIdx? (· == index) := by
+  unfold expectedHomes at expected
+  generalize requiredHomeIndices raw reachable = indices at expected ⊢
+  induction indices generalizing homes with
+  | nil => simp_all
+  | cons key rest ih =>
+    simp only [List.mapM_cons, Option.bind_eq_some_iff, bind, pure, Option.some.injEq]
+      at expected
+    obtain ⟨entry, made, others, remaining, rfl⟩ := expected
+    obtain ⟨_, -, _, -, rfl⟩ := made
+    simp [List.findIdx?_cons, ih remaining]
+
+/-- Under `ParameterHomesValid`, a homed argument is read from the slot the argument check
+    expects of it: the raw locals' count plus its position among the required homes. -/
+theorem argumentAccess_of_homed {layouts : Array ComputedLayout} {raw : RawArguments}
+    {reachable : List Bool} {method : Method} {index : Nat}
+    (valid : ParameterHomesValid layouts raw reachable method)
+    (homed : index ∈ requiredHomeIndices raw reachable) :
+    method.argumentAccess index =
+      .home (raw.locals.length + (requiredHomeIndices raw reachable).idxOf index) := by
+  obtain ⟨-, -, kinds, -, homes, -⟩ := valid
+  apply Method.argumentAccess_home (position := (requiredHomeIndices raw reachable).idxOf index)
+  · rw [homeKeys_findIdx? homes]
+    cases found : (requiredHomeIndices raw reachable).findIdx? (· == index) with
+    | none =>
+      rw [List.findIdx?_eq_none_iff] at found
+      simp at found
+      exact absurd rfl (found index homed)
+    | some position =>
+      show some position = some (List.findIdx (· == index) (requiredHomeIndices raw reachable))
+      rw [List.findIdx_eq_getD_findIdx?, found]
+      rfl
+  · rw [length_of_mapM kinds]
+
+#print axioms argumentAccess_of_homed
+
+/-- Under `ParameterHomesValid`, an argument without a required home is read from the incoming
+    arguments, narrowed as its declared type requires. -/
+theorem argumentAccess_of_unhomed {layouts : Array ComputedLayout} {raw : RawArguments}
+    {reachable : List Bool} {method : Method} {index : Nat}
+    (valid : ParameterHomesValid layouts raw reachable method)
+    (unhomed : index ∉ requiredHomeIndices raw reachable) :
+    method.argumentAccess index = .value ((method.declared.argumentType index).bind
+      (declaredNarrow method.environment.rawLayouts)) := by
+  obtain ⟨-, -, -, -, homes, -⟩ := valid
+  have missing : method.parameterHomes.findIdx? (fun home => home.1 == index) = none := by
+    rw [homeKeys_findIdx? homes, List.findIdx?_eq_none_iff]
+    intro key member
+    simp only [beq_eq_false_iff_ne, ne_eq]
+    rintro rfl
+    exact unhomed member
+  simp [Method.argumentAccess, missing]
+
+#print axioms argumentAccess_of_unhomed
+
+end Extraction
 
 end CIL

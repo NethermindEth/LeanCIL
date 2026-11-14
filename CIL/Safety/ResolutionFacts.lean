@@ -2,15 +2,20 @@ import CIL.Resolution
 import CIL.InstructionEquations
 
 /-!
-# Return metadata facts
+# Return and argument metadata facts
 
-Generated facts and value stepping share a proof-producing return-type chooser. Primitive and
-non-candidate heads use storage lemmas, without evaluating code or layout tables.
+Generated facts and value stepping share a proof-producing chooser for declared narrowing.
+Primitive and non-candidate heads use storage lemmas, without evaluating code or layout tables.
+`cil_resolution_facts` declares a method's return narrowing and, for each declared argument,
+how the method reads it (`CIL.Method.argumentAccess`). The argument facts walk the parameter
+types and the parameter homes once through named suffixes, as `CIL.CodeSuffix` does for code,
+so a method's facts cost time linear in its arguments and homes.
 -/
 
 namespace CIL.Safety.ResolutionFacts
 
 open Lean Meta Elab Command
+open CIL.InstructionEquations (Body listElements listLiteral declareSuffixes suffixBlock)
 
 /-- A recognized runtime primitive, checked by its complete scope and type name. -/
 def primitive? (type : Expr) : Option Name := do
@@ -84,7 +89,244 @@ def returnProof? (method returns declared : Expr) : MetaM (Option Expr) := withD
   return some (← mkAppOptM ``CIL.Method.returnNarrow_of_declared
     #[some method, some type, none, some returns, some declaredType, some resolved])
 
-/-- Declares a method's kernel-checked return narrowing from its named signature facts. -/
+/-- `Nat × LocalKind`, the type of a parameter home. -/
+def homeType : Expr :=
+  mkApp2 (mkConst ``Prod [.zero, .zero]) (mkConst ``Nat) (mkConst ``CIL.LocalKind)
+
+/-- The literal `some value` or `none` of type `Option Nat`. -/
+def natOption : Option Nat → Expr
+  | some value => mkApp2 (mkConst ``Option.some [.zero]) (mkConst ``Nat) (mkNatLit value)
+  | none => mkApp (mkConst ``Option.none [.zero]) (mkConst ``Nat)
+
+/-- `Eq.refl value` at the type `Option Nat`. -/
+def natOptionRefl (value : Option Nat) : Expr :=
+  mkApp2 (mkConst ``Eq.refl [.one]) (mkApp (mkConst ``Option [.zero]) (mkConst ``Nat))
+    (natOption value)
+
+/-- The raw layouts a method's declared types refer to. -/
+def layoutsOf (method : Expr) : Expr :=
+  mkApp (mkConst ``CIL.LayoutEnvironment.rawLayouts)
+    (mkApp (mkConst ``CIL.Method.environment) method)
+
+/-- Each home's argument index, key and slot kind, when every key reduces to a literal. -/
+def homeKeys? (homes : Array Expr) : MetaM (Option (Array (Nat × Expr × Expr))) := do
+  let mut keys := #[]
+  for home in homes do
+    let (``Prod.mk, #[_, _, key, kind]) := (← whnf home).getAppFnArgs | return none
+    let some value ← (Meta.evalNat key).run | return none
+    keys := keys.push (value, key, kind)
+  return some keys
+
+/-- How `method` reads argument `index`, proved from premises the kernel decides by walking the
+    homes, the local kinds and the parameters up to `index`; for a literal body in a proof. -/
+def argumentProof? (method : Expr) (index : Nat) : MetaM (Option Expr) := withDefault do
+  let argument := mkNatLit index
+  let (homes, complete) ← listElements (mkApp (mkConst ``CIL.Method.parameterHomes) method)
+  unless complete do return none
+  let some keys ← homeKeys? homes | return none
+  if let some position := keys.findIdx? (·.1 == index) then
+    let (kinds, complete) ← listElements (mkApp (mkConst ``CIL.Method.localKinds) method)
+    unless complete do return none
+    let slot := mkNatLit (kinds.size + position)
+    return some (mkAppN (mkConst ``CIL.Method.argumentAccess_home)
+      #[method, argument, mkNatLit position, slot, natOptionRefl (some position),
+        ← mkEqRefl slot])
+  let declared := mkApp (mkConst ``CIL.Method.declared) method
+  let type ← whnf (mkApp2 (mkConst ``CIL.DeclaredSignature.argumentType) declared argument)
+  match type.getAppFnArgs with
+  | (``Option.none, _) =>
+    return some (mkAppN (mkConst ``CIL.Method.argumentAccess_undeclared)
+      #[method, argument, natOptionRefl none, ← mkEqRefl type])
+  | (``Option.some, #[_, parameter]) =>
+    let some narrowed ← declaredProof? (layoutsOf method) parameter | return none
+    let some (_, _, result) := (← inferType narrowed).eq? | return none
+    return some (mkAppN (mkConst ``CIL.Method.argumentAccess_value)
+      #[method, argument, parameter, ← whnf result, natOptionRefl none, ← mkEqRefl type,
+        narrowed])
+  | _ => return none
+
+/-- What a method's argument facts read: its receiver, parameter types and homes. -/
+structure Signature where
+  /-- The receiver's value, for an instance method. -/
+  receiver : Option Expr
+  /-- The declared parameter types, `this` excluded. -/
+  parameters : Array Expr
+  /-- Each home's argument index, key and slot kind, ascending by index. -/
+  homes : Array (Nat × Expr × Expr)
+  /-- The number of local kinds, read only when the method has homes. -/
+  localCount : Nat
+
+/-- Reads the signature of the method `body` names. Fails on a part that does not reduce to a
+    literal and on homes whose argument indices do not ascend. -/
+def readSignature (body : Body) : MetaM Signature := withDefault do
+  let method := body.constant ""
+  let declared := mkApp (mkConst ``CIL.Method.declared) method
+  let receiverValue ← whnf (mkApp (mkConst ``CIL.DeclaredSignature.receiver) declared)
+  let receiver ← match receiverValue.getAppFnArgs with
+    | (``Option.none, _) => pure none
+    | (``Option.some, #[_, value]) => pure (some value)
+    | _ => throwError "cil_resolution_facts: the receiver of {body.name} is unresolved"
+  let (parameters, complete) ←
+    listElements (mkApp (mkConst ``CIL.DeclaredSignature.parameters) declared)
+  unless complete do
+    throwError "cil_resolution_facts: the parameter types of {body.name} are unresolved"
+  let (homes, complete) ← listElements (mkApp (mkConst ``CIL.Method.parameterHomes) method)
+  let some keys ← homeKeys? homes
+    | throwError "cil_resolution_facts: the parameter homes of {body.name} are unresolved"
+  unless complete do
+    throwError "cil_resolution_facts: the parameter homes of {body.name} are unresolved"
+  for position in [1:keys.size] do
+    unless keys[position - 1]!.1 < keys[position]!.1 do
+      throwError "cil_resolution_facts: the parameter homes of {body.name} do not ascend"
+  let mut localCount := 0
+  unless keys.isEmpty do
+    let (kinds, complete) ← listElements (mkApp (mkConst ``CIL.Method.localKinds) method)
+    unless complete do
+      throwError "cil_resolution_facts: the local kinds of {body.name} are unresolved"
+    localCount := kinds.size
+  return { receiver, parameters, homes := keys, localCount }
+
+/-- The suffix of a list from `position` on as a literal: the rest of its block, then the next
+    named suffix `body{stem}{start}` or `[]`. -/
+def suffixFrom (body : Body) (stem : String) (elementType : Expr) (elements : Array Expr)
+    (position : Nat) : Expr :=
+  let stop := min (position - position % suffixBlock + suffixBlock) elements.size
+  let rest := if stop < elements.size then body.constant s!"{stem}{stop}" else
+    mkApp (mkConst ``List.nil [.zero]) elementType
+  listLiteral elementType (elements.extract position stop) rest
+
+/-- `list.drop position = suffix`, from the named suffix that starts the position's block, with
+    the suffix `suffixFrom` gives; the proof walks at most one block. -/
+def placedAt (body : Body) (stem : String) (elementType list : Expr) (elements : Array Expr)
+    (position : Nat) : Expr × Expr :=
+  let offset := position % suffixBlock
+  let start := position - offset
+  let next := suffixFrom body stem elementType elements position
+  (mkApp8 (mkConst ``CIL.CodeSuffix.advance) elementType list (body.constant s!"{stem}{start}")
+    next (mkNatLit start) (mkNatLit offset) (body.constant s!"{stem}{start}_placed")
+    (mkApp2 (mkConst ``Eq.refl [.one]) (mkApp (mkConst ``List [.zero]) elementType) next), next)
+
+/-- `list[position]? = some element`, from the named suffix that starts the position's block. -/
+def foundAt (body : Body) (stem : String) (elementType list : Expr) (elements : Array Expr)
+    (position : Nat) : MetaM Expr := do
+  let offset := position % suffixBlock
+  let start := position - offset
+  let element := elements[position]!
+  return mkApp8 (mkConst ``CIL.CodeSuffix.lookup) elementType list
+    (body.constant s!"{stem}{start}") (mkNatLit start) element (mkNatLit offset)
+    (body.constant s!"{stem}{start}_placed") (← mkEqRefl (← mkAppM ``Option.some #[element]))
+
+/-- Declares `body_argumentAccess{index}` for every argument of the method `body` names and adds
+    each to `cil_code`. One pass walks the parameter types and the homes together; each fact
+    applies a `CIL.Method.argumentAccess` lemma to premises that read at most one block of a
+    named suffix, so the facts cost time linear in the arguments and homes. -/
+def declareArgumentFacts (body : Body) (simpSet : SimpExtension) : TermElabM Unit := do
+  let signature ← readSignature body
+  let shift := if signature.receiver.isSome then 1 else 0
+  let count := signature.parameters.size + shift
+  if count = 0 then return
+  let method := body.constant ""
+  let declared := mkApp (mkConst ``CIL.Method.declared) method
+  let typeExpr := mkConst ``CIL.Extraction.TypeExpr
+  let localKind := mkConst ``CIL.LocalKind
+  let parameterList := mkApp (mkConst ``CIL.DeclaredSignature.parameters) declared
+  let homeList := mkApp (mkConst ``CIL.Method.parameterHomes) method
+  let homes := signature.homes
+  let homeElements := homes.map fun (_, key, kind) =>
+    mkApp4 (mkConst ``Prod.mk [.zero, .zero]) (mkConst ``Nat) localKind key kind
+  declareSuffixes body typeExpr "_parameterSuffix"
+    (fun start => s!"The declared parameter types of `{body.name}` from parameter {start} on")
+    parameterList signature.parameters
+  let ascending := body.constant "_homesAscend"
+  let localCount := body.constant "_localCount"
+  let boolTrue ← mkEqRefl (mkConst ``Bool.true)
+  unless homes.isEmpty do
+    declareSuffixes body homeType "_homeSuffix"
+      (fun start => s!"The parameter homes of `{body.name}` from position {start} on")
+      homeList homeElements
+    let ascends := mkApp3 (mkConst ``CIL.Extraction.keysAscend) localKind (mkNatLit 0) homeList
+    body.prove "_homesAscend" s!"The parameter homes of `{body.name}` ascend by argument."
+      (← mkEq ascends (mkConst ``Bool.true)) boolTrue
+    let length := mkApp2 (mkConst ``List.length [.zero]) localKind
+      (mkApp (mkConst ``CIL.Method.localKinds) method)
+    body.prove "_localCount" s!"The number of declared locals of `{body.name}`."
+      (← mkEq length (mkNatLit signature.localCount))
+      (← mkEqRefl (mkNatLit signature.localCount))
+  let placedHome := placedAt body "_homeSuffix" homeType homeList homeElements
+  let mut passed := 0
+  for index in [0:count] do
+    let argument := mkNatLit index
+    let homed := passed < homes.size && homes[passed]!.1 == index
+    -- A window per fact, so a long signature's facts do not exhaust the command's.
+    withCurrHeartbeats do
+      let (access, proof) ← if homed then do
+          let (_, key, kind) := homes[passed]!
+          let (placed, next) := placedHome passed
+          let found := mkAppN (mkConst ``CIL.Extraction.findIdx?_of_keysAscend)
+            #[localKind, homeList, next.appArg!, mkNatLit 0, mkNatLit passed, key, kind,
+              ascending, placed]
+          let shifted := mkLambda `count .default (mkConst ``Nat)
+            (mkNatAdd (mkBVar 0) (mkNatLit passed))
+          let slot := mkNatLit (signature.localCount + passed)
+          pure (mkApp (mkConst ``CIL.ArgumentAccess.home) slot,
+            mkAppN (mkConst ``CIL.Method.argumentAccess_home)
+              #[method, argument, mkNatLit passed, slot, found,
+                ← mkCongrArg shifted localCount])
+        else do
+          let unhomed ← if homes.isEmpty then pure (natOptionRefl none)
+            else if passed = 0 then do
+              let raised := mkAppN (mkConst ``CIL.Extraction.keysAscend_raise)
+                #[localKind, homeList, mkNatLit 0, mkNatLit (index + 1), ascending, boolTrue]
+              pure <| mkAppN (mkConst ``CIL.Extraction.findIdx?_none_of_keysAscend)
+                #[localKind, homeList, mkNatLit (index + 1), argument, raised,
+                  mkApp (mkConst ``Nat.lt_add_one) argument]
+            else do
+              let (_, key, kind) := homes[passed - 1]!
+              let (placed, next) := placedHome (passed - 1)
+              let below ← mkDecideProof (← mkLt key argument)
+              pure <| mkAppN (mkConst ``CIL.Extraction.findIdx?_none_after)
+                #[localKind, homeList, next.appArg!, mkNatLit 0, mkNatLit (passed - 1), key,
+                  argument, kind, ascending, placed, below, boolTrue]
+          let thisReceiver := if index = 0 then signature.receiver else none
+          if let some receiver := thisReceiver then
+            let this := mkApp3 (mkConst ``CIL.DeclaredSignature.argumentType_this) declared
+              receiver (← mkEqRefl (← mkAppM ``Option.some #[receiver]))
+            let narrowNone := mkApp (mkConst ``Option.none [.zero]) (mkConst ``CIL.NarrowKind)
+            pure (mkApp (mkConst ``CIL.ArgumentAccess.value) narrowNone,
+              mkAppN (mkConst ``CIL.Method.argumentAccess_undeclared)
+                #[method, argument, unhomed, this])
+          else
+            let parameter := index - shift
+            let type := signature.parameters[parameter]!
+            let found ← foundAt body "_parameterSuffix" typeExpr parameterList
+              signature.parameters parameter
+            let typed ← match signature.receiver with
+              | none => do
+                let static ←
+                  mkEqRefl (mkApp (mkConst ``Option.none [.zero]) (mkConst ``CIL.Receiver))
+                pure (mkAppN (mkConst ``CIL.DeclaredSignature.argumentType_static)
+                  #[declared, mkNatLit parameter, type, static, found])
+              | some receiver => do
+                let instanceMethod ← mkEqRefl (← mkAppM ``Option.some #[receiver])
+                pure (mkAppN (mkConst ``CIL.DeclaredSignature.argumentType_instance)
+                  #[declared, mkNatLit parameter, receiver, type, instanceMethod, found])
+            let some narrowed ← declaredProof? (layoutsOf method) type
+              | throwError "cil_resolution_facts: the narrowing of argument {index} of \
+                  {body.name} is unresolved"
+            let some (_, _, result) := (← inferType narrowed).eq?
+              | throwError "cil_resolution_facts: expected an argument narrowing equality"
+            let result ← withDefault <| whnf result
+            pure (mkApp (mkConst ``CIL.ArgumentAccess.value) result,
+              mkAppN (mkConst ``CIL.Method.argumentAccess_value)
+                #[method, argument, type, result, unhomed, typed, narrowed])
+      body.prove s!"_argumentAccess{index}" s!"How `{body.name}` reads argument {index}."
+        (← mkEq (mkApp2 (mkConst ``CIL.Method.argumentAccess) method argument) access) proof
+      addSimpTheorem simpSet (body.name.appendAfter s!"_argumentAccess{index}") (post := false)
+        (inv := false) .global (eval_prio default)
+    if homed then passed := passed + 1
+
+/-- Declares a method's kernel-checked return narrowing from its named signature facts, and
+    how it reads each declared argument. -/
 syntax "cil_resolution_facts " ident : command
 
 elab_rules : command
@@ -96,7 +338,7 @@ elab_rules : command
     forallTelescope info.type fun parameters result => do
       unless ← isDefEq result (mkConst ``CIL.Method) do
         throwError "cil_resolution_facts: {name} does not define a CIL.Method"
-      let body : CIL.InstructionEquations.Body :=
+      let body : Body :=
         { name, levelParams := info.levelParams, parameters, syntaxRef := methodSyntax }
       let method := body.constant ""
       let some proof ← returnProof? method (body.constant "_returnsValue")
@@ -109,5 +351,6 @@ elab_rules : command
         (← mkEq (mkApp (mkConst ``CIL.Method.returnNarrow) method) result) proof
       addSimpTheorem simpSet (name.appendAfter "_returnNarrow") (post := false)
         (inv := false) .global (eval_prio default)
+      declareArgumentFacts body simpSet
 
 end CIL.Safety.ResolutionFacts
