@@ -427,10 +427,11 @@ These regressions cover joint replay:
 
 ### Fold discovery
 
-Fold discovery counts decoded local references once. `foldRoles_eq_filter` proves exact equality
-to the filter-based specification, including malformed operands and out-of-range local indexes.
-Methods without locals skip count construction. The positional lookup of local types is linear,
-so fold discovery as a whole is not linear.
+Fold discovery counts decoded local references once and reads local types and receiver fold
+candidates from `FlowIndex`es built once per body. `foldRoles_eq_filter` proves exact equality to
+the specification that reads the locals list and filters the whole body at every site, including
+malformed operands and out-of-range local indexes. Methods without locals skip count
+construction.
 
 Exception folds inspect at most three message loads, since admitted constructors accept at most
 two. `throwFold_eq_takeWhile` proves equality to the unrestricted prefix scan. A long rejected
