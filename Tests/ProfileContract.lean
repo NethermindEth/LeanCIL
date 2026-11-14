@@ -22,9 +22,10 @@ def avx512Profile : FeatureProfile :=
 /-- x86-64-v3 with 256-bit vectors disabled: agrees on AVX2, differs in acceleration. -/
 def narrowProfile : FeatureProfile := { avx2Profile with vector256Accelerated := false }
 
-/-- The x86-64 baseline: AVX2 is off, so the feature test answers differently. -/
+/-- The x86-64-v2 baseline: AVX2 is off, so the feature test answers differently. -/
 def baselineProfile : FeatureProfile :=
-  { architecture := .x64, x86Base64 := true, sse2 := true, vector128Accelerated := true }
+  { architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true,
+    sse42 := true, vector128Accelerated := true }
 
 /-- Every profile the contract is carried between is a supported runtime configuration. -/
 theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowProfile.Valid ∧

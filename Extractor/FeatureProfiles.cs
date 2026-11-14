@@ -25,6 +25,9 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
 {
     internal static FeatureProfile Scalar { get; } = new("scalar", "scalar", 64, true);
 
+    // .NET 11 x64 refuses to start without SSE through SSE4.2 and reports them all under X86Base.
+    private static readonly Feature[] X86Baseline = [Feature.Sse2, Feature.Ssse3, Feature.Sse41, Feature.Sse42];
+
     internal bool Get(Feature feature) => feature switch
     {
         Feature.AdvSimd => AdvSimd, Feature.Sse2 => Sse2, Feature.Ssse3 => Ssse3,
@@ -40,6 +43,10 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
 
     internal void Validate()
     {
+        var missingBaseline = X86Base64 ? X86Baseline.Where(feature => !Get(feature)).ToArray() : [];
+        if (missingBaseline.Length != 0)
+            throw new InvalidDataException($"Invalid execution profile: {Name}: below the .NET 11 x64 baseline " +
+                $"(x86-64-v2); missing {string.Join(", ", missingBaseline)}");
         if (string.IsNullOrWhiteSpace(Name) || NativeWidth != 64 || !LittleEndian || Architecture is not ("scalar" or "arm64" or "x64") ||
             ((AdvSimd || ArmBase64) && Architecture != "arm64") ||
             (X86Base64 && Architecture != "x64") ||
@@ -58,7 +65,7 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         if ((Sse2 || Ssse3 || Sse42 || Avx || Avx2 || Avx512F || Avx512FVL || Bmi1 || Sse41 || Avx512DQ || Avx512DQVL ||
                 Bmi2 || Avx512Vbmi || Aes) && !X86Base64)
             throw new InvalidDataException($"Invalid execution profile: {Name}: x86 ISA flags require x86Base64");
-        if (Sse2 != X86Base64 || Ssse3 != Sse41 || Sse41 != Sse42 ||
+        if (Sse2 != X86Base64 ||
             Avx2 != Bmi1 || Avx2 != Bmi2 ||
             Avx512F != Avx512FVL || Avx512F != Avx512DQ || Avx512F != Avx512DQVL ||
             AdvSimd != ArmBase64 || Vector128Accelerated != (Sse2 || AdvSimd) ||
@@ -90,7 +97,6 @@ internal sealed record FeatureProfile(string Name, string Architecture, int Nati
         {
             "scalar" => Scalar,
             "arm64-advsimd" => new(name, "arm64", 64, true, AdvSimd: true, ArmBase64: true, Vector128Accelerated: true),
-            "x64-sse2" => new(name, "x64", 64, true, Sse2: true, X86Base64: true, Vector128Accelerated: true),
             "x64-sse42" => new(name, "x64", 64, true, Sse2: true, Ssse3: true, Sse41: true, Sse42: true, X86Base64: true, Vector128Accelerated: true),
             // .NET 10 enables x86-64-v3 (AVX2 with BMI1/BMI2) and v4 (AVX-512 F/DQ/VL) only as whole groups.
             // x86-64-v4 excludes VBMI, so x64-v4 covers only deployments where Avx512Vbmi is unsupported.

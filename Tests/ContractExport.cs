@@ -379,9 +379,9 @@ string customProfile = Path.Combine(root, "custom-profile.json");
 // A realizable x64 group still cannot masquerade as the built-in scalar profile.
 JsonObject profile = JsonNode.Parse(JsonSerializer.Serialize(new
 {
-    name = "scalar", architecture = "x64", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = true, ssse3 = false,
-    sse42 = false, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false, sse41 = false, avx512DQ = false,
-    avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false, x86Base64 = true,
+    name = "scalar", architecture = "x64", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = true,
+    ssse3 = true, sse42 = true, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false, sse41 = true,
+    avx512DQ = false, avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false, x86Base64 = true,
     vector128Accelerated = true, avx512Vbmi = false, aes = false, armAes = false
 }))!.AsObject();
 File.WriteAllText(customProfile, profile.ToJsonString());

@@ -78,6 +78,10 @@ that omit or split `aesX64` or `armAes64` are rejected. `BitConverter.IsLittleEn
 big-endian branch on those profiles; forged owners and values are rejected by both certificates,
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
 
+The runtime profile cases include an x64 set with `x86Base64` and `sse2` on and SSSE3, SSE4.1 and
+SSE4.2 off, which no .NET 11 process reports: the extractor rejects it with a message naming the
+three missing sets, and a generated kernel-checked theorem proves it is not `FeatureProfile.Valid`.
+
 ### Exact intrinsics
 
 `Tests/ExactIntrinsics.cs` compares each intrinsic below with the host CPU, except where the row
