@@ -10,7 +10,8 @@ public static class GenericOwners
 
     public static uint Nested(uint value) => OwnerOuter<ulong>.Inner<uint>.Identity(value);
 
-    /// <summary>A non-generic class nested in a generic one: its owner is `OwnerOuter`1/Helper<!0>`.</summary>
+    /// <summary>A non-generic class nested in a generic one:
+    /// its owner is <c>OwnerOuter`1/Helper&lt;!0&gt;</c>.</summary>
     public static uint NestedHelper(uint value) => OwnerOuter<ulong>.Helper.Identity(value);
 
     public static uint Repeated(uint value) =>
@@ -35,7 +36,7 @@ public static class GenericOwners
         OwnerOuter<uint>.Inner<ulong>.First(values);
 }
 
-/// <summary>Method-generic span members: the call owner is `ReadOnlySpan<!!0>`.</summary>
+/// <summary>Method-generic span members: the call owner is <c>ReadOnlySpan&lt;!!0&gt;</c>.</summary>
 public static class SpanHelpers
 {
     public static T First<T>(in ReadOnlySpan<T> values) where T : unmanaged => values[0];
