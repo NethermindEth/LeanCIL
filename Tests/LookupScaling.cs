@@ -6,6 +6,8 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
+Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
+
 // `cil_instruction_equations` proves each equation from the code suffix that starts its block. Proved
 // against the whole code list instead, it walks one cell per preceding instruction and a method's equations
 // cost quadratic time, which this fixture reports as a per-instruction cost that grows with the method.
