@@ -651,7 +651,7 @@ def gatherLoopFactGroups (facts : Array Term) (evidenceOnly : Bool := false) :
       let memory := #[frameMemory]
       let subject := variables #[slots]
       let numeral (index : Nat) : Term := ⟨Syntax.mkNumLit (toString index)⟩
-      -- Each byte home forms, so `localAddr` of it steps.
+      -- Each byte home forms, so `ldloca` of it steps.
       for (index, slot) in ← listEntries slots do
         if (← whnf slot).isAppOfArity ``LocalSlot.bytes 2 then
           candidates := candidates.push (`homeForm,

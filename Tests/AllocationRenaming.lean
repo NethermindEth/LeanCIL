@@ -110,14 +110,14 @@ def sourceBody : CIL.Method := {
   returnsValue := true
   locals := [.unmodeled]
   localKinds := [.word64]
-  code := [.local 0, .ret] }
+  code := [.ldloc 0, .ret] }
 
 /-- Dead numeric declarations occur both before and after the retained local. -/
 def targetBody : CIL.Method := {
   returnsValue := true
   locals := [.unmodeled, .unmodeled, .unmodeled]
   localKinds := [.word32, .word64, .word32]
-  code := [.local 1, .ret] }
+  code := [.ldloc 1, .ret] }
 
 /-- The first source operand relocates past the preceding dead numeric local. -/
 def indices : LocalIndexMap := .skip (.keep (.skip .nil))

@@ -60,7 +60,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
-  | .ldc_i4 _ | .ldc_i8 _ | .arg .. | .local .. => some (0, 1)
+  | .ldc_i4 _ | .ldc_i8 _ | .arg .. | .ldloc .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
@@ -86,7 +86,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
-  | .localAddr _ | .setLocal .. | .initializeSpanLocal ..
+  | .ldloca _ | .stloc .. | .initializeSpanLocal ..
   | .feature _ | .ret _ | .throw _ | .unsupported _ | .br _ | .switch _ | .brfalse _
   | .brtrue _ | .bgt _ | .ble _ | .ble_un _ | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _
   | .blt _ | .beq _ | .bne_un _ => none

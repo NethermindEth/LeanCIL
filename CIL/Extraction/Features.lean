@@ -497,21 +497,21 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
   if instruction.opcode ∈ [6, 7, 8, 9, 17, 65036, 10, 11, 12, 13, 19, 65038] then
     let some index := localIndex instruction | return false
     return match emitted with
-      | .local actual => instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index
-      | .setLocal actual => instruction.opcode ∈ [10, 11, 12, 13, 19, 65038] && actual == index
+      | .ldloc actual => instruction.opcode ∈ [6, 7, 8, 9, 17, 65036] && actual == index
+      | .stloc actual => instruction.opcode ∈ [10, 11, 12, 13, 19, 65038] && actual == index
       | _ => false
   if instruction.opcode ∈ [18, 65037] then
     return match localIndex instruction, emitted with
-      | some index, .localAddr actual => index == actual
+      | some index, .ldloca actual => index == actual
       | _, _ => false
   -- Argument homes are appended after all raw locals. Their precise mapping is
   -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
   if instruction.opcode ∈ [15, 65034] then
     return match emitted with
-      | .localAddr index => raw.locals.length <= index
+      | .ldloca index => raw.locals.length <= index
       | _ => false
   if instruction.opcode ∈ [16, 65035] then
-    return match emitted with | .setLocal index => raw.locals.length <= index | _ => false
+    return match emitted with | .stloc index => raw.locals.length <= index | _ => false
   -- A span address on the stack is already the view it names, so copying the span emits nothing.
   if instruction.opcode == 113 then
     if let .type type := instruction.operand then

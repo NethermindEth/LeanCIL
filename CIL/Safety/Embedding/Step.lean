@@ -335,15 +335,15 @@ theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
   plain_cases
   cases narrow <;> dsimp only at h ⊢ <;> lookup_lockstep
 
-theorem step_relabel_local (index : Nat) : StepRelabel (.local index) := by
+theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases
   lookup_lockstep
 
-theorem step_relabel_localAddr (index : Nat) : StepRelabel (.localAddr index) := by
+theorem step_relabel_ldloca (index : Nat) : StepRelabel (.ldloca index) := by
   plain_cases
   lookup_lockstep
 
-theorem step_relabel_setLocal (index : Nat) : StepRelabel (.setLocal index) := by
+theorem step_relabel_stloc (index : Nat) : StepRelabel (.stloc index) := by
   stack_cases =>
     first | fallback_vacuous | lookup_lockstep
 
@@ -699,11 +699,11 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case conv_ovf target => exact step_relabel_conv_ovf target
   case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case arg index narrow => exact step_relabel_arg index narrow
-  case «local» index => exact step_relabel_local index
+  case ldloc index => exact step_relabel_ldloc index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
-  case localAddr index => exact step_relabel_localAddr index
-  case setLocal index => exact step_relabel_setLocal index
+  case ldloca index => exact step_relabel_ldloca index
+  case stloc index => exact step_relabel_stloc index
   case call method argc => exact step_relabel_call method argc
   case callInstance method argc => exact step_relabel_callInstance method argc
   case callVirtual targets argc => exact step_relabel_callVirtual targets argc
@@ -1254,10 +1254,10 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case arg index narrow =>
     plain_cases
     cases narrow <;> dsimp only at h ⊢ <;> lookup_raise
-  case «local» | localAddr =>
+  case ldloc | ldloca =>
     plain_cases
     lookup_raise
-  case setLocal =>
+  case stloc =>
     stack_cases =>
       first | fallback_raise_vacuous | lookup_raise
   case initializeSpanLocal =>

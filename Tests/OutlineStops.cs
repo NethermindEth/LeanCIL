@@ -125,7 +125,7 @@ var straight = Outline("NarrowStraight", "System.Int32 Examples.NativeIntegers::
     code.Add(Instruction.Create(OpCodes.Ldloc_0));
     code.Add(Instruction.Create(OpCodes.Ret));
 });
-if (straight.Code != 0 || !straight.Proof.Contains("not outlined: `.setLocal 0` at IL_0001", StringComparison.Ordinal))
+if (straight.Code != 0 || !straight.Proof.Contains("not outlined: `.stloc 0` at IL_0001", StringComparison.Ordinal))
     throw new Exception("A store to a byte local was stepped by the straight-line outline:\n" +
         straight.Output + straight.Proof);
 Console.WriteLine("PASS a store to a byte local is a hole in the straight-line outline");

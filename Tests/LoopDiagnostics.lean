@@ -20,9 +20,9 @@ theorem layout_valid : layout.Valid := by decide +kernel
 /-- `for (t = default; t.count != value; t.count++) t.sum = addTwo(t.sum); return t.sum;` -/
 @[cil_code] def tally : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 8 0)], localKinds := [.aggregate 8]
-  code := [.localAddr 0, .initAggregate 8, .br 14, .localAddr 0, .local 0, .fieldAt 4 4,
-    .call 1 1, .setFieldAt 4 4, .localAddr 0, .local 0, .fieldAt 0 4, .ldc_i4 1, .add,
-    .setFieldAt 0 4, .local 0, .fieldAt 0 4, .arg 0, .bne_un 3, .local 0, .fieldAt 4 4, .ret] }
+  code := [.ldloca 0, .initAggregate 8, .br 14, .ldloca 0, .ldloc 0, .fieldAt 4 4,
+    .call 1 1, .setFieldAt 4 4, .ldloca 0, .ldloc 0, .fieldAt 0 4, .ldc_i4 1, .add,
+    .setFieldAt 0 4, .ldloc 0, .fieldAt 0 4, .arg 0, .bne_un 3, .ldloc 0, .fieldAt 4 4, .ret] }
 
 /-- `return x + 2;` -/
 @[cil_code] def addTwo : CIL.Method := {
@@ -165,7 +165,7 @@ example (memory : Memory) (value sum : W32) (home : Reference) (final : Memory)
   cil_loop_recurse recurse (0, sum + 2)
 
 -- A contract applied before the loop reaches its call names the instruction it is at.
-/-- error: cil_loop_call: pc 3 is CIL.Instruction.localAddr 0, not a call; step to the call first with
+/-- error: cil_loop_call: pc 3 is CIL.Instruction.ldloca 0, not a call; step to the call first with
 `cil_loop_advance` -/
 #guard_msgs (whitespace := lax) in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
@@ -247,8 +247,8 @@ example : mixed.zeros = [.i32 0, .i32 0, .i32 0, .aggregate (List.replicate 8 0)
     the signed `count` through the struct's address. -/
 @[cil_code] def flagged : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.localAddr 0, .initAggregate 16, .br 6, .localAddr 0, .ldc_i4 1, .setFieldAt 0 1,
-    .local 0, .fieldAt 0 1, .brfalse 3, .localAddr 0, .fieldAt 2 2 true, .ret] }
+  code := [.ldloca 0, .initAggregate 16, .br 6, .ldloca 0, .ldc_i4 1, .setFieldAt 0 1,
+    .ldloc 0, .fieldAt 0 1, .brfalse 3, .ldloca 0, .fieldAt 2 2 true, .ret] }
 
 /-- The program of `flagged` alone. -/
 @[cil_code] def flaggedProgram : CIL.Program := [flagged]
@@ -265,7 +265,7 @@ abbrev Flagged (memory : Memory) (home : Reference) :=
 
 /-- The loop test, with nothing on the stack. -/
 bind_cutpoint flaggedHeader (memory : Memory) (home : Reference) (state : Flagged memory home) :=
-  flagged matching (fun op => op matches .local _) with flaggedEntry.frame memory home, [],
+  flagged matching (fun op => op matches .ldloc _) with flaggedEntry.frame memory home, [],
     state.memory
 
 /-- `cil_loop_recurse` zeroes a struct with 1-, 2- and 4-byte and nested fields through its
@@ -332,9 +332,9 @@ example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memo
     flag byte on the exit path. -/
 @[cil_code] def marked : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
-  code := [.localAddr 0, .initAggregate 16, .br 9, .localAddr 0, .local 0, .fieldAt 4 4,
-    .ldc_i4 1, .add, .setFieldAt 4 4, .local 0, .fieldAt 4 4, .arg 0, .bne_un 3, .localAddr 0,
-    .ldc_i4 1, .setFieldAt 0 1, .local 0, .fieldAt 0 1, .ret] }
+  code := [.ldloca 0, .initAggregate 16, .br 9, .ldloca 0, .ldloc 0, .fieldAt 4 4,
+    .ldc_i4 1, .add, .setFieldAt 4 4, .ldloc 0, .fieldAt 4 4, .arg 0, .bne_un 3, .ldloca 0,
+    .ldc_i4 1, .setFieldAt 0 1, .ldloc 0, .fieldAt 0 1, .ret] }
 
 /-- The program of `marked` alone. -/
 @[cil_code] def markedProgram : CIL.Program := [marked]
@@ -430,9 +430,9 @@ open Lean in
 /-- `for (i = 0; i != n; i++) stamp(Unsafe.Add(ref p, i), i); return i;`, with `i` an int local. -/
 @[cil_code] def stamps : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.ldc_i4 0, .setLocal 0, .br 12, .arg 1, .local 0, .memory (.add 4 true),
-    .local 0, .call 1 2, .local 0, .ldc_i4 1, .add, .setLocal 0, .local 0, .arg 0, .bne_un 3,
-    .local 0, .ret] }
+  code := [.ldc_i4 0, .stloc 0, .br 12, .arg 1, .ldloc 0, .memory (.add 4 true),
+    .ldloc 0, .call 1 2, .ldloc 0, .ldc_i4 1, .add, .stloc 0, .ldloc 0, .arg 0, .bne_un 3,
+    .ldloc 0, .ret] }
 
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
@@ -571,7 +571,7 @@ open Lean Meta in
 /-- `i = (byte) 0x1FF; return i;`: the byte local keeps the low byte of the stored word. -/
 @[cil_code] def narrowed : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.narrow .unsigned8]
-  code := [.ldc_i4 0x1FF, .setLocal 0, .local 0, .ret] }
+  code := [.ldc_i4 0x1FF, .stloc 0, .ldloc 0, .ret] }
 
 /-- The program of `narrowed` alone. -/
 @[cil_code] def narrowedProgram : CIL.Program := [narrowed]
@@ -806,7 +806,9 @@ example (memory : Memory) (value : W32) (frame : Frame) :
 
 -- A call tactic applied before the walk reaches a call records the instruction it is at and
 -- that the call site is missing.
-/-- "instruction":"CIL.Instruction.localAddr 0","method":0,"missing":"callSite","obligation":null,"pc":3 -/
+/--
+"instruction":"CIL.Instruction.ldloca 0","method":0,"missing":"callSite","obligation":null,"pc":3
+-/
 #guard_msgs (substring := true) in
 set_option cil.diagnostics true in
 example (memory : Memory) (value count sum : W32) (home : Reference) (current : Memory)
@@ -957,8 +959,8 @@ theorem localReferenceClassification
     let unknownTail ← Term.elabTerm (mkIdent `_tail) none
     let makeList (slots : List Expr) := mkListLit slotType slots
     let makeStep (locals : Expr) (position : Nat) (load := false) := do
-      let instruction := mkApp (mkConst (if load then ``CIL.Instruction.local
-        else ``CIL.Instruction.localAddr)) (mkNatLit position)
+      let instruction := mkApp (mkConst (if load then ``CIL.Instruction.ldloc
+        else ``CIL.Instruction.ldloca)) (mkNatLit position)
       let frame ← mkAppM ``Frame.mk #[mkNatLit 0, locals,
         ← mkListLit (mkConst ``AllocationId) [], mkNatLit 0]
       let values ← mkListLit (mkConst ``Value) []

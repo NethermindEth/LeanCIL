@@ -9,7 +9,8 @@ private def zeros : List (BitVec 8) := [0, 0]
 
 /-- Returns its zero-initialized two-byte aggregate local. -/
 private def initializer : Method := {
-  code := [.local 0, .ret none], locals := [.aggregate zeros], localKinds := [.aggregate 2], returnsValue := true }
+  code := [.ldloc 0, .ret none], locals := [.aggregate zeros], localKinds := [.aggregate 2],
+  returnsValue := true }
 
 private def descriptor (bytes : List (BitVec 8)) (init : Option StaticInitializer) : StaticDescriptor :=
   { identity := 0, fieldName := "Fixture::Zero", bytes, initializer := init }

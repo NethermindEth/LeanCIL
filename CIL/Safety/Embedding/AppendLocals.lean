@@ -472,8 +472,8 @@ theorem step_appendLocals_arg (index : Nat) (narrow : Option NarrowKind) :
 
 #print axioms step_appendLocals_arg
 
-/-- `local` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_local (index : Nat) : StepAppendLocals (.local index) := by
+/-- `ldloc` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldloc (index : Nat) : StepAppendLocals (.ldloc index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   cases found : frame.locals[index]? with
@@ -486,11 +486,11 @@ theorem step_appendLocals_local (index : Nat) : StepAppendLocals (.local index) 
     cases stack <;> simp only [step, found] <;> repeat' split
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
-#print axioms step_appendLocals_local
+#print axioms step_appendLocals_ldloc
 
-/-- `localAddr` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_localAddr (index : Nat) :
-    StepAppendLocals (.localAddr index) := by
+/-- `ldloca` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldloca (index : Nat) :
+    StepAppendLocals (.ldloca index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   cases found : frame.locals[index]? with
@@ -503,10 +503,10 @@ theorem step_appendLocals_localAddr (index : Nat) :
     cases stack <;> simp only [step, found] <;> repeat' split
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
-#print axioms step_appendLocals_localAddr
+#print axioms step_appendLocals_ldloca
 
-/-- `setLocal` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_setLocal (index : Nat) : StepAppendLocals (.setLocal index) := by
+/-- `stloc` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_stloc (index : Nat) : StepAppendLocals (.stloc index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   cases found : frame.locals[index]? with
@@ -520,7 +520,7 @@ theorem step_appendLocals_setLocal (index : Nat) : StepAppendLocals (.setLocal i
     cases stack <;> simp only [step, found] <;> repeat' split
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
-#print axioms step_appendLocals_setLocal
+#print axioms step_appendLocals_stloc
 
 /-- Span construction updates only its existing typed local slot. -/
 theorem step_appendLocals_initializeSpanLocal (index : Nat) (constructor : CIL.SpanConstructor) :
@@ -1278,14 +1278,14 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_setAggregateFieldAt offset size
     case arg index narrow =>
       exact step_appendLocals_arg index narrow
-    case «local» index =>
-      exact step_appendLocals_local index
+    case ldloc index =>
+      exact step_appendLocals_ldloc index
     case initializeSpanLocal index constructor =>
       exact step_appendLocals_initializeSpanLocal index constructor
-    case localAddr index =>
-      exact step_appendLocals_localAddr index
-    case setLocal index =>
-      exact step_appendLocals_setLocal index
+    case ldloca index =>
+      exact step_appendLocals_ldloca index
+    case stloc index =>
+      exact step_appendLocals_stloc index
     case ldc_i4 value =>
       exact step_appendLocals_ldc_i4 value
     case ldc_i8 value =>

@@ -128,7 +128,7 @@ foreach (var (name, signature, arguments, expected) in new[]
             #print axioms constructor_fault_keeps_call_pc
 
             theorem uninitialized_span_local_rejected :
-                CIL.Safety.step Extracted.method0 (.local 0) 0 []
+                CIL.Safety.step Extracted.method0 (.ldloc 0) 0 []
                   ⟨0, [.span 4 false none], [], 0⟩ [] spanMemory = .error .invalidState := rfl
             #print axioms uninitialized_span_local_rejected
 

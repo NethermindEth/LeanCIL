@@ -103,7 +103,7 @@ local pushes, or `none`.
 
 | Need | Use |
 | --- | --- |
-| Step a `.local` load | `snapshots.load value specified`, a step fact the stepping tactics take |
+| Step a `.ldloc` load | `snapshots.load value specified`, a step fact the stepping tactics take |
 | Step a numeric store and get the updated snapshots | `LocalSnapshots.store` |
 | Keep snapshots across a call confined apart from the homes | `LocalSnapshots.after_confined` |
 | Keep snapshots across a write, or memory that keeps old allocations | `after_write_apart`, `after_below` |
@@ -152,7 +152,7 @@ The two forms differ:
 
 | | Checked form | Contract form |
 | --- | --- | --- |
-| Instructions other than `.local` and `.setLocal` | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
+| Instructions other than `.ldloc` and `.stloc` | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
 | Finds each store's home | From the premises in context | From a homes hypothesis ([required context](#required-context)) |
 | Restates context facts after a store | `access` equations only; byte-value facts stay at the old memory | `access` equations and the [caller facts](#facts-the-contract-form-carries) |
 | Prepares step facts again after a store | No | Yes |

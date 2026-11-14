@@ -182,18 +182,18 @@ internal sealed record Arg(int Index, Narrowing? Narrow) : Operation
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
 internal sealed record Local(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".local {Index}";
+    internal override string Render(Func<int, string> calleeName) => $".ldloc {Index}";
 }
 
 /// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
 internal sealed record SetLocal(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".setLocal {Index}";
+    internal override string Render(Func<int, string> calleeName) => $".stloc {Index}";
 }
 
 internal sealed record LocalAddress(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".localAddr {Index}";
+    internal override string Render(Func<int, string> calleeName) => $".ldloca {Index}";
 }
 
 /// <summary>
