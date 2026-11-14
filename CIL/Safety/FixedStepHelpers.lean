@@ -24,7 +24,8 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
         if stack.length < argc then .error .invalidState else
           let values ← CIL.Safety.scalars (stack.take argc)
           let some (.next destination result _) :=
-            CIL.step operation false none pc [] values (fun _ => none) profile |
+            CIL.step operation false none pc [] (CIL.widenMixed operation values)
+              (fun _ => none) profile |
               .error .invalidState
           let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
           return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -38,7 +39,8 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if stack.length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars (stack.take argc)
             let some (.next destination result _) :=
-              CIL.step operation false none pc [] values (fun _ => none) profile |
+              CIL.step operation false none pc [] (CIL.widenMixed operation values)
+                (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
             return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -51,7 +53,8 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if (stack.map mapping.value).length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars ((stack.map mapping.value).take argc)
             let some (.next destination result _) :=
-              CIL.step operation false none pc [] values (fun _ => none) profile |
+              CIL.step operation false none pc [] (CIL.widenMixed operation values)
+                (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue target)
             return FrameAction.next destination (result ++ (stack.map mapping.value).drop argc)
