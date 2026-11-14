@@ -1,4 +1,5 @@
-import Lean
+import Lean.Elab.Frontend
+import Lean.Util.NumObjs
 
 /-!
 Measuring frontend for `scripts/ProofCost.cs`.
@@ -9,7 +10,7 @@ heartbeats, the kernel's share of them for the theorems it declared, the allocat
 proof terms, source lines and elapsed time. With an olean path it also writes the compiled
 module, so a later module can import it and its size on disk can be measured.
 
-The file imports only `Lean`, so it measures any revision of the library, including one that
+The file imports only Lean tooling, so it measures any revision of the library, including one that
 predates it. It checks nothing: a proof is accepted by the verification suites, not here.
 -/
 
