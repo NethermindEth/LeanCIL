@@ -151,6 +151,7 @@ example : featureOpMatches #[] booleanRaw (i 6) (.local 0) = true := by decide +
 example : featureOpMatches #[] booleanRaw (i 10) (.setLocal 0) = true := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 6) (.local 1) = false := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 10) (.local 0) = false := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 6) (.setLocal 0) = false := by decide +kernel
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/
