@@ -351,6 +351,9 @@ void CheckPlatform()
     var synthetic = Selected(noCore).TypeSystem.CoreLibrary as AssemblyNameReference ??
         throw new InvalidOperationException("Expected a synthetic core reference.");
     ExpectOutside(() => ((IAssemblyResolver)noCore).Resolve(synthetic));
+    var signatures = pinnedType.GetProperty("Signatures", Internal)!.GetValue(noCore)!;
+    var signatureOf = signatures.GetType().GetMethod("Type", Internal)!;
+    ExpectOutside(() => signatureOf.Invoke(signatures, [Selected(noCore).TypeSystem.Int32]));
 }
 
 void CheckOwnership()

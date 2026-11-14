@@ -1,5 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:property AssemblyName=LeanCIL.IdentityTests
+#:project ../Extractor/Extractor.csproj
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BindingAudit.cs
@@ -7,8 +9,8 @@
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
-#:include ../Extractor/Identities.cs
-#:include ../Extractor/MetadataImage.cs
+
+extern alias IdentityExtractor;
 
 using System.Diagnostics;
 using System.Globalization;
@@ -18,7 +20,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
-using Nethermind.LeanCIL;
+using IdentityExtractor::Nethermind.LeanCIL;
 using Srm = System.Reflection.Metadata;
 
 // Every identity of the corpus is rendered with ToLean(), elaborated by Lean, and shown by CIL/Identity.lean's

@@ -280,6 +280,8 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
     internal Primitive[] Prepare(ModuleDefinition module, MetadataImage image, AssemblyNameReference[] scopes)
     {
         var system = module.TypeSystem;
+        // Core-library types have definition rows and need no implicit primitive registration.
+        if (ReferenceEquals(system.CoreLibrary, module)) return [];
         (TypeReference Type, string Name)[] entries = [(system.Void, "Void"), (system.Boolean, "Boolean"),
             (system.Char, "Char"), (system.SByte, "SByte"), (system.Byte, "Byte"), (system.Int16, "Int16"),
             (system.UInt16, "UInt16"), (system.Int32, "Int32"), (system.UInt32, "UInt32"),
@@ -289,6 +291,9 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
         var result = new List<Primitive>();
         var scopeTokens = new Dictionary<AssemblyNameReference, uint>(ReferenceEqualityComparer.Instance);
         foreach (var scope in scopes) scopeTokens.Add(scope, scope.MetadataToken.ToUInt32());
+        if (system.CoreLibrary is AssemblyNameReference { MetadataToken.RID: 0 } synthetic &&
+            !scopeTokens.ContainsKey(synthetic))
+            module.AssemblyReferences.Remove(synthetic);
         foreach (var (type, name) in entries)
         {
             if (primitives.ContainsKey(type) || !ReferenceEquals(type.Module, module))
@@ -303,6 +308,10 @@ internal sealed class StructuralSignatures(PinnedAssemblies owner)
                 else if (type.Scope is AssemblyNameReference reference &&
                     scopeTokens.TryGetValue(reference, out var row))
                     assembly = row;
+                // Cecil synthesizes a core scope for images with no core-library reference.
+                else if (ReferenceEquals(type.Scope, system.CoreLibrary) &&
+                    type.Scope is AssemblyNameReference { MetadataToken.RID: 0 })
+                    continue;
                 else throw new InvalidDataException("TypeSystem scope lacks image provenance");
                 if (image.AssemblyColumns(assembly) is null)
                     throw new InvalidDataException("Invalid TypeSystem scope");
