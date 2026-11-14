@@ -46,6 +46,9 @@ const int ManyAddresses = 512;
 const int FewLocals = 128;
 const int MoreLocals = 256;
 const int ManyLocals = 512;
+// Four times the locals may cost at most this much more per instruction; the closed argument storage reads a set
+// of pointer locals whose lookups cost the logarithm of the locals.
+const double AllowedLocalGrowth = 1.25;
 
 var directory = At("artifacts/LookupScaling");
 Directory.CreateDirectory(directory);
@@ -806,9 +809,9 @@ foreach (var (slots, storage, label) in localChecks)
         .ToArray();
     var localsMeasured = string.Join("; ", perInstruction.Select(run => string.Create(CultureInfo.InvariantCulture,
         $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
-    if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedGrowth))
+    if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedLocalGrowth))
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Checking {label} costs {localsMeasured}; the limit is {AllowedGrowth} " +
+            $"Checking {label} costs {localsMeasured}; the limit is {AllowedLocalGrowth} " +
             $"times the cost per instruction at {FewLocals} locals."));
     Console.WriteLine($"PASS checking {label} costs {localsMeasured}");
 }
