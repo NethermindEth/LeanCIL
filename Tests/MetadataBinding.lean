@@ -335,6 +335,80 @@ theorem rejects_a_field_access_that_disagrees_with_the_field_row :
 
 /-! ## The method definition -/
 
+/-- A method whose receiver kind follows its declaring type's metadata. -/
+private def receiverWorld (baseName : String) (interfaceType hasThis generic : Bool) :
+    Step Nat := do
+  let runtime ← string "System.Runtime"
+  let system ← string "System"
+  let parentName ← string baseName
+  let program ← string "Program"
+  let methodName ← string "Run"
+  let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtime, 0, 0]
+  modify fun builder => { builder with corlib := 1 }
+  let parent ← row Table.typeRef [6, parentName, system]
+  let owner ← row Table.typeDef
+    [if interfaceType then 0x21 else 1, program, 0, (parent - 0x01000000) * 4 + 1, 1, 1]
+  if baseName == "Enum" then
+    let valueName ← string "value__"
+    let fieldSignature ← blob [0x06, 0x08]
+    let field ← row Table.field [0x606, valueName, fieldSignature]
+    link linkDeclaring field 0 owner
+  if generic then
+    let parameterName ← string "T"
+    let parameter ← row Table.genericParam [0, 0, (owner - 0x02000000) * 2, parameterName]
+    link linkGenericParams owner 0 parameter
+  let signature ← blob [if hasThis then 0x20 else 0, 0, 1]
+  let method ← row Table.methodDef
+    [0, 0, if hasThis then 0x86 else 0x96, methodName, signature, 1]
+  link linkDeclaring method 0 owner
+  pure method
+
+/-- The complete receiver binding result for a metadata owner and a claimed receiver bit. -/
+private def receiverIdentity (baseName : String) (interfaceType hasThis objectReceiver : Bool)
+    (generic : Bool := false) : Except MetadataError MethodNames := do
+  let fixture := build (receiverWorld baseName interfaceType hasThis generic)
+    (bytesOf "T") ownIdentity
+  let method : RawMethod :=
+    { token := fixture.2, owner := ownIdentity ++ "::Program", hasThis := hasThis,
+      explicitThis := false, callingConvention := 0, attributes := if hasThis then 0x86 else 0x96,
+      implementation := 0, returnType := .void, parameters := [], locals := [],
+      initLocals := false, maxStack := 8, genericParameters := [], code := [],
+      ownerParameters := if generic then [{ flags := 0, types := [] }] else [],
+      objectReceiver := objectReceiver }
+  let env : MetadataEnv := { slices := [← fixture.1.index] }
+  methodIdentityValid env method (if generic then [.primitive 8] else [])
+    (if generic then [int32] else [])
+
+/-- Class receivers are objects; value and enum receivers are managed references. -/
+theorem accepts_matching_receivers :
+    (receiverIdentity "Object" false true true).isOk = true ∧
+    (receiverIdentity "ValueType" false true false).isOk = true ∧
+    (receiverIdentity "Enum" false true false).isOk = true ∧
+    (receiverIdentity "ValueType" false true false true).isOk = true ∧
+    (receiverIdentity "Object" false false false).isOk = true := by decide +kernel
+/-- info: 'Tests.MetadataBinding.accepts_matching_receivers' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms accepts_matching_receivers
+
+/-- A rejected receiver reports the method token whose claim is inconsistent. -/
+private def receiverMismatch (result : Except MetadataError MethodNames) : Bool :=
+  match result with
+  | .error error => error == .methodMismatch 0x06000001
+  | .ok _ => false
+
+/-- A receiver claim cannot reinterpret a class instance as a managed reference. -/
+theorem rejects_mismatched_receivers :
+    receiverMismatch (receiverIdentity "Object" false true false) = true ∧
+    receiverMismatch (receiverIdentity "ValueType" false true true) = true ∧
+    receiverMismatch (receiverIdentity "Enum" false true true) = true ∧
+    receiverMismatch (receiverIdentity "Object" true true false) = true ∧
+    receiverMismatch (receiverIdentity "Object" true true true) = true ∧
+    receiverMismatch (receiverIdentity "Object" false false true) = true := by decide +kernel
+/-- info: 'Tests.MetadataBinding.rejects_mismatched_receivers' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms rejects_mismatched_receivers
+
 /-- `T.Program.Main`, a public static method with no parameters. -/
 private def mainMethod : RawMethod :=
   { token := tokens.main, owner := ownIdentity ++ "::Program", hasThis := false,

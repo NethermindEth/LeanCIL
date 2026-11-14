@@ -625,8 +625,15 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
       signature.genericArity instantiation returned parameters
     | throw (.methodMismatch method.token)
   let ownerName := owner.scope ++ [58, 58] ++ owner.name
+  let receiverMatches :=
+    if method.hasThis then
+      match owner.kind with
+      | .classType => method.objectReceiver
+      | .valueType | .enumType _ => !method.objectReceiver
+      | .interfaceType | .external _ => false
+    else !method.objectReceiver
+  if !receiverMatches then throw (.methodMismatch method.token)
   if method.objectReceiver then
-    if !method.hasThis || owner.kind != .classType then throw (.methodMismatch method.token)
     let chain ← env.classChain resolveFuel 0 ownerToken
     let some own := index.instanceTotal.find? ownerToken | throw (.missingRow ownerToken)
     let bases ← chain.mapM fun (position, token) => typeDefNamed env position resolveFuel token
