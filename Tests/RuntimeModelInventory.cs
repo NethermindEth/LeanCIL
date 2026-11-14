@@ -3,14 +3,17 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include CompilerToolchain.cs
+#:include PinnedMetadata.cs
 using System.Reflection;
 using System.Text.Json;
 using Mono.Cecil;
+using Mono.Cecil.Cil;
 
 if (args is not ([] or ["--update"])) throw new ArgumentException("Usage: RuntimeModelInventory.cs [--update]");
 var extractor = Assembly.LoadFrom(ExtractorPath);
 var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 var translate = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("Translate", flags)!;
+var identityImage = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("IdentityImage", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;
 // No built-in declares AES, so each architecture's widest built-in is also probed with its AES flag.
 object Declaring(string name, string flag)
@@ -27,24 +30,36 @@ object Declaring(string name, string flag)
 var profiles = new[] { "scalar", "x64-v4", "arm64-advsimd" }.Select(name => select.Invoke(null, [name]))
     .Append(Declaring("x64-v4", "aes")).Append(Declaring("arm64-advsimd", "armAes")).ToArray();
 var toolchain = RestoreCompilerToolchain();
-using var probe = ModuleDefinition.CreateModule("RuntimeModelInventory", ModuleKind.Dll);
 var admitted = new SortedDictionary<string, SortedSet<string>>(StringComparer.Ordinal);
 var instances = new SortedSet<string>(StringComparer.Ordinal);
+var primitiveNames = new[] { "Byte", "SByte", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
+    "IntPtr", "UIntPtr", "Boolean", "Char", "Single", "Double" };
+const int batchSize = 512;
+bool checkedMissingContext = false;
+int unsupported = 0;
 foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runtime.Intrinsics" })
 {
     using var reference = ModuleDefinition.ReadModule(Path.Combine(toolchain.References, assembly + ".dll"));
-    var runtime = AssemblyNameReference.Parse(
-        "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
-    var elements = new[] { "Byte", "SByte", "Int16", "UInt16", "Int32", "UInt32", "Int64", "UInt64",
-        "IntPtr", "UIntPtr", "Boolean", "Char", "Single", "Double" }
-        .Select(name => new TypeReference("System", name, probe, runtime, true)).ToArray();
-    foreach (var type in reference.GetTypes())
-    foreach (var definition in type.Methods.Where(method => method.IsPublic && method.GenericParameters.Count <= 2))
+    var candidates = from type in reference.GetTypes()
+        where type.GenericParameters.Count <= 1
+        from definition in type.Methods
+        where definition.IsPublic && definition.GenericParameters.Count <= 2
+        from owner in Arguments(type.HasGenericParameters, primitiveNames)
+        from first in Arguments(definition.HasGenericParameters, primitiveNames)
+        from second in Arguments(definition.GenericParameters.Count == 2, primitiveNames)
+        select (type, definition, owner, first, second);
+    foreach (var batch in candidates.Chunk(batchSize))
     {
-        if (type.GenericParameters.Count > 1) continue;
-        foreach (var owner in Arguments(type.HasGenericParameters, elements))
-        foreach (var first in Arguments(definition.HasGenericParameters, elements))
-        foreach (var second in Arguments(definition.GenericParameters.Count == 2, elements))
+        using var probe = ModuleDefinition.CreateModule("RuntimeModelInventory", ModuleKind.Dll);
+        var runtime = AssemblyNameReference.Parse(
+            "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
+        probe.AssemblyReferences.Add(runtime);
+        var carrier = new MethodDefinition("References", Mono.Cecil.MethodAttributes.Static, probe.TypeSystem.Void);
+        probe.Types[0].Methods.Add(carrier);
+        var elements = primitiveNames.ToDictionary(name => name,
+            name => new TypeReference("System", name, probe, runtime, true), StringComparer.Ordinal);
+        var labels = new List<(string Family, string Definition, string Instance)>(batch.Length);
+        foreach (var (type, definition, owner, first, second) in batch)
         {
             MethodReference method = probe.ImportReference(definition);
             foreach (var parameter in method.GenericParameters) parameter.Name = "!!" + parameter.Position;
@@ -52,32 +67,59 @@ foreach (var assembly in new[] { "System.Runtime", "System.Memory", "System.Runt
             if (owner is not null)
             {
                 var closed = new GenericInstanceType(method.DeclaringType);
-                closed.GenericArguments.Add(owner);
+                closed.GenericArguments.Add(elements[owner]);
                 method.DeclaringType = closed;
             }
             if (first is not null)
             {
                 var generic = new GenericInstanceMethod(method);
-                generic.GenericArguments.Add(first);
-                if (second is not null) generic.GenericArguments.Add(second);
+                generic.GenericArguments.Add(elements[first]);
+                if (second is not null) generic.GenericArguments.Add(elements[second]);
                 method = generic;
             }
-            foreach (var profile in profiles)
+            carrier.Body.Instructions.Add(Instruction.Create(OpCodes.Ldtoken, method));
+            carrier.Body.Instructions.Add(Instruction.Create(OpCodes.Pop));
+            labels.Add((type.FullName, assembly + "::" + definition.FullName, assembly + "::" + method.FullName));
+        }
+        carrier.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        var probePath = At("artifacts/RuntimeModelInventory/Probe.dll");
+        probe.Write(probePath);
+        MethodReference contextProbe;
+        using (var pinned = new PinnedMetadata(extractor, probePath))
+        {
+            var instructions = pinned.Module.Types[0].Methods.Single().Body.Instructions;
+            contextProbe = (MethodReference)instructions[0].Operand;
+            for (int index = 0; index < labels.Count; index++)
             {
-                object? operation;
-                try { operation = translate.Invoke(null, [method, profile]); }
-                catch (TargetInvocationException exception) when (exception.InnerException is
-                    InvalidDataException or NotSupportedException or AssemblyResolutionException) { continue; }
-                if (operation is null) continue;
-                if (!admitted.TryGetValue(type.FullName, out var definitions))
-                    admitted.Add(type.FullName, definitions = new(StringComparer.Ordinal));
-                definitions.Add(assembly + "::" + definition.FullName);
-                instances.Add(assembly + "::" + method.FullName);
+                var method = (MethodReference)instructions[index * 2].Operand;
+                var label = labels[index];
+                foreach (var profile in profiles)
+                {
+                    var operation = TranslatePinned(method, profile);
+                    if (operation is null) continue;
+                    if (!admitted.TryGetValue(label.Family, out var definitions))
+                        admitted.Add(label.Family, definitions = new(StringComparer.Ordinal));
+                    definitions.Add(label.Definition);
+                    instances.Add(label.Instance);
+                }
             }
+        }
+        if (!checkedMissingContext)
+        {
+            try
+            {
+                TranslatePinned(contextProbe, profiles[0]);
+                throw new InvalidOperationException(
+                    "A missing metadata context was recorded as an unsupported method.");
+            }
+            catch (TargetInvocationException exception) when (exception.InnerException is InvalidDataException
+                { Message: "Type identity without a pinned module image" }) { checkedMissingContext = true; }
         }
     }
 }
 var entries = admitted.Values.SelectMany(values => values).Order(StringComparer.Ordinal).ToArray();
+if (entries.Length == 0 || instances.Count == 0 || unsupported == 0 || !checkedMissingContext)
+    throw new InvalidOperationException("The runtime inventory must exercise admission and unsupported methods.");
 var baseline = At("Tests/RuntimeModelInventory.txt");
 var output = At("artifacts/RuntimeModelInventory");
 Directory.CreateDirectory(output);
@@ -96,5 +138,21 @@ foreach (var (family, definitions) in admitted) Console.WriteLine($"{family}: {d
 Console.WriteLine($"PASS runtime dispatcher catalog: {entries.Length} definitions, {admitted.Count} API families, " +
     $"{instances.Count} admitted closed instances in the fixed primitive domain");
 
-static IEnumerable<TypeReference?> Arguments(bool generic, TypeReference[] elements) =>
-    generic ? elements : [null];
+object? TranslatePinned(MethodReference method, object? profile)
+{
+    identityImage.Invoke(null, [method.DeclaringType]);
+    try { return translate.Invoke(null, [method, profile]); }
+    catch (TargetInvocationException exception) when (exception.InnerException is
+        InvalidDataException or NotSupportedException or AssemblyResolutionException)
+    {
+        unsupported++;
+        return null;
+    }
+    catch (TargetInvocationException exception)
+    {
+        throw new InvalidOperationException("Inventory candidate: " + method.FullName, exception);
+    }
+}
+
+static IEnumerable<string?> Arguments(bool generic, string[] elements) =>
+    generic ? elements : new string?[] { null };

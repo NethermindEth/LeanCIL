@@ -4,6 +4,7 @@
 #:include ../scripts/Verification.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -103,8 +104,9 @@ string app = Path.Combine(appRoot, "bin", "TypedFixture.App.dll");
 Type methodMetadata = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.ContractMethodMetadata", throwOnError: true)!;
 MethodInfo selectMethod = methodMetadata.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
 List<(string Selector, string Definition, string Closed, string Identity)> overloads = [];
-using (ModuleDefinition module = ModuleDefinition.ReadModule(lib))
+using (var pinned = new PinnedMetadata(methodMetadata.Assembly, lib))
 {
+    var module = pinned.Module;
     foreach (string selector in new[] { "TypedFixture.Library::Overload(T)", "TypedFixture.Library::Overload(ulong)" })
     {
         object selection = selectMethod.Invoke(null, [module, selector, new[] { "System.UInt64" }, "scalar"])!;

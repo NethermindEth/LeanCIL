@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -30,8 +31,9 @@ MethodDefinition Method(TypeDefinition type, string name, params Instruction[] c
     type.Methods.Add(method);
     return method;
 }
-using (var module = ModuleDefinition.ReadModule(assembly))
+using (var pinned = new PinnedMetadata(extractor, assembly))
 {
+    var module = pinned.Module;
     var context = Context(module);
     foreach (var field in module.GetType("Examples.StaticScalars").Fields)
     {
@@ -53,7 +55,8 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 foreach (var scenario in new[] { "twice", "flow", "branch", "switch", "foreign", "outside", "address", "fresh" })
 {
-    using var module = ModuleDefinition.ReadModule(assembly);
+    using var pinned = new PinnedMetadata(extractor, assembly);
+    var module = pinned.Module;
     var type = module.GetType("Examples.StaticScalars");
     var field = type.Fields.Single(field => field.Name == "Byte");
     var constructor = type.Methods.Single(method => method.IsConstructor);
@@ -105,7 +108,8 @@ foreach (var scenario in new[] { "twice", "flow", "branch", "switch", "foreign",
 Console.WriteLine("PASS scalar copies, control flow, switch/foreign targets, outside writes and fresh contexts");
 foreach (var errorFirst in new[] { false, true })
 {
-    using var module = ModuleDefinition.ReadModule(assembly);
+    using var pinned = new PinnedMetadata(extractor, assembly);
+    var module = pinned.Module;
     var type = module.GetType("Examples.StaticScalars");
     var field = type.Fields.Single(field => field.Name == "Byte");
     var absent = new AssemblyNameReference("MissingStaticIndexAssembly", new Version(1, 0));
