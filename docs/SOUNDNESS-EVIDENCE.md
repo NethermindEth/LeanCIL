@@ -194,10 +194,13 @@ copy cannot be detected without the whole stream; every row must still have the 
 widths give, every blob its length prefix and every string one terminating zero), the PE container
 where a body sits in the image and the mapping of its address to its bytes, definitions in platform assemblies (so whether a
 platform type is an enum, the field order of `ValueTuple`, and that `System.Object` declares no
-instance fields), public key tokens (the hash of a key is not computed in the kernel), imported
-implementation definitions, raw layout content, dispatch catalog completeness, static data
-bytes and generic parameter constraints. `check` hashes each assembly and regenerates the
-extraction, so the rows are a deterministic function of hashed inputs.
+instance fields), public key tokens (the hash of a key is not computed in the kernel), the
+implementation, interface and closure digests that a generic import identity carries (no check
+recomputes them from the library image), imported implementation definitions, raw layout
+content, dispatch catalog completeness, static data bytes and generic parameter constraints.
+[Deep verification](CLI.md#deep-verification) does not reconfirm public key tokens or import
+identities either: it reports both as not covered. `check` hashes each assembly and regenerates
+the extraction, so the rows are a deterministic function of hashed inputs.
 ### Folded instruction patterns
 
 A fold applies only to its recognized raw sequence with checked entry edges. Different compiler
