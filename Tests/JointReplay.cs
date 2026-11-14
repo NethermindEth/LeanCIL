@@ -110,6 +110,8 @@ void CheckSeparateReplayResults()
     double previousMilliseconds = 0;
     // Each sample parses the same number of records, so the larger sizes stay well under a second.
     const int recordsPerSample = 65536;
+    // A parse that allocates a line array, line strings or field-name strings exceeds this per record.
+    const int maxBytesPerRecord = 256;
     foreach (int count in new[] { 256, 1024, 4096, 16384 })
     {
         var targets = Enumerable.Range(0, count).Select(index => "Module" + index).ToArray();
@@ -127,6 +129,9 @@ void CheckSeparateReplayResults()
             for (int repeat = 0; repeat < repetitions; repeat++) ParseSeparateReplayResults(targets, 0, output);
             milliseconds = Math.Min(milliseconds, timer.Elapsed.TotalMilliseconds / repetitions);
         }
+        if (bytes > (long)maxBytesPerRecord * count)
+            throw new InvalidOperationException(
+                $"Separate replay parsing allocated {bytes} bytes for {count} records, over {maxBytesPerRecord} per record");
         if (previousBytes != 0 && (bytes > previousBytes * 6 || milliseconds > previousMilliseconds * 6 + 1))
             throw new InvalidOperationException(
                 $"Separate replay parsing exceeded its growth bound at {count}: {bytes} allocated bytes and " +
