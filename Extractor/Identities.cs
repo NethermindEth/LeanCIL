@@ -744,10 +744,14 @@ internal static class IdentityText
 
     /// <summary>The raw structure of a code, <c>rawCodeDisplay</c>.</summary>
     internal static string RawCode(BigInteger code) =>
-        "{ code := " + Decimal(code) + " }";
+        "{ code := 0x" + Hex(code) + " }";
 
-    /// <summary>The exact unsigned decimal digits used by Lean's raw identity display.</summary>
-    internal static string Decimal(BigInteger code) => code.ToString(CultureInfo.InvariantCulture);
+    /// <summary>The minimal lowercase unsigned hexadecimal digits of a natural code.</summary>
+    internal static string Hex(BigInteger code)
+    {
+        string digits = Convert.ToHexStringLower(code.ToByteArray(isUnsigned: true, isBigEndian: true));
+        return digits[0] == '0' && digits.Length > 1 ? digits[1..] : digits;
+    }
 
     /// <summary>The number of characters Lean counts in <paramref name="text"/>: its Unicode scalar values.
     /// </summary>
