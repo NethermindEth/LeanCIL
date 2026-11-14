@@ -22,6 +22,17 @@ internal sealed class MetadataImage
 
     internal MetadataReader Reader { get; }
 
+    readonly Dictionary<uint, AssemblyName?> assemblyIdentities = [];
+
+    /// <summary>The immutable identity of an assembly row in this image, including invalid null results.</summary>
+    internal AssemblyName? AssemblyIdentity(uint token)
+    {
+        if (assemblyIdentities.TryGetValue(token, out var identity)) return identity;
+        identity = AssemblyName.Read(this, token);
+        assemblyIdentities.Add(token, identity);
+        return identity;
+    }
+
     internal int Count(int table) => Reader.GetTableRowCount((TableIndex)table);
 
     Dictionary<int, uint>? nesting;
