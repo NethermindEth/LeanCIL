@@ -58,6 +58,29 @@ partial class Program
             Reject(Path.Combine(session, "cycle"));
             Link(Path.Combine(physicalSession, "dangling"), Path.Combine(physical, "missing"));
             Reject(Path.Combine(session, "dangling"));
+            var module = Path.Combine(physicalSession, "Proof.olean");
+            File.WriteAllText(module, "artifact");
+            AuditedOleans audited = new(new() { ["Proof"] = module }, [], []);
+            RequireAuditedModule(audited, "Proof", Path.Combine(session, "Proof.olean"));
+            RequireAuditedModule(audited, "Proof", Path.Combine(session, "inside", "..", "Proof.olean"));
+            void RejectArtifact(string expected)
+            {
+                try { RequireAuditedModule(audited, "Proof", expected); }
+                catch (InvalidDataException) { return; }
+                throw new InvalidOperationException("Accepted different audited artifact: " + expected);
+            }
+            var siblingModule = Path.Combine(physical, "session-sibling", "Proof.olean");
+            File.WriteAllText(siblingModule, "artifact");
+            RejectArtifact(siblingModule);
+            var renamedModule = Path.Combine(physicalSession, "Other.olean");
+            File.WriteAllText(renamedModule, "artifact");
+            RejectArtifact(renamedModule);
+            try
+            {
+                RequireAuditedModule(audited, "Missing", module);
+                throw new InvalidOperationException("Accepted missing audited module.");
+            }
+            catch (KeyNotFoundException) { }
             Console.WriteLine("PASS consumer import directory aliases and containment");
         }
         finally
