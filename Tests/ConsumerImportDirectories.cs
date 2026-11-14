@@ -23,7 +23,8 @@ partial class Program
         {
             Link(alias, "physical");
             string[] Validate(params string[] paths) =>
-                ValidatedConsumerImportDirectories(session, trusted, certified, string.Join(Path.PathSeparator, paths));
+                ValidatedConsumerImportDirectories(
+                    session, trusted, certified, string.Join(Path.PathSeparator, paths));
             void Require(string[] actual, params string[] expected)
             {
                 if (!actual.SequenceEqual(expected))
@@ -61,7 +62,11 @@ partial class Program
         }
         finally
         {
-            foreach (var link in links.AsEnumerable().Reverse()) Directory.Delete(link);
+            foreach (var link in links.AsEnumerable().Reverse())
+            {
+                if (OperatingSystem.IsWindows()) Directory.Delete(link);
+                else File.Delete(link);
+            }
             Directory.Delete(root, true);
         }
     }
