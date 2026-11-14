@@ -137,6 +137,8 @@ Test("test entry points", () =>
             "Binding and public-surface fixtures must select core without unrelated suites: " + path);
     }
     Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
+    foreach (var path in new[] { "Tests/ProofCostFrontend.cs", "Tests/ProofCostDiscovery.lean" })
+        Equal(VerificationSelection.Select([path]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
         Equal(VerificationSelection.Select([$"Tests/{module}.lean"]), ["core"]);
