@@ -20,15 +20,24 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/GenericLayouts");
 Directory.CreateDirectory(root);
 var extractor = Assembly.LoadFrom(ExtractorPath);
-using (var pinned = new PinnedMetadata(extractor, assembly))
+// Identities are read from metadata rows, so the same-named definition is written into an image.
+var shadowImage = Path.Combine(root, "Shadowed.dll");
+using (var source = ModuleDefinition.ReadModule(assembly))
+{
+    var shadow = new TypeDefinition("System", "UInt64", Mono.Cecil.TypeAttributes.Public |
+        Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout,
+        source.GetType("Examples.GenericPair`1").BaseType);
+    shadow.Fields.Add(new FieldDefinition("First", Mono.Cecil.FieldAttributes.Public, source.TypeSystem.UInt64));
+    shadow.Fields.Add(new FieldDefinition("Second", Mono.Cecil.FieldAttributes.Public, source.TypeSystem.UInt64));
+    source.Types.Add(shadow);
+    source.Write(shadowImage);
+}
+using (var pinned = new PinnedMetadata(extractor, shadowImage))
 {
     var module = pinned.Module;
     var owner = module.GetType("Examples.GenericPair`1");
-    var shadow = new TypeDefinition("System", "UInt64", Mono.Cecil.TypeAttributes.Public |
-        Mono.Cecil.TypeAttributes.Sealed | Mono.Cecil.TypeAttributes.SequentialLayout, owner.BaseType);
-    shadow.Fields.Add(new FieldDefinition("First", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
-    shadow.Fields.Add(new FieldDefinition("Second", Mono.Cecil.FieldAttributes.Public, module.TypeSystem.UInt64));
-    module.Types.Add(shadow);
+    var shadow = module.GetType("System.UInt64") ??
+        throw new InvalidOperationException("Missing same-named definition in the written image");
     var genuine = new GenericInstanceType(owner);
     genuine.GenericArguments.Add(module.TypeSystem.UInt64);
     var shadowed = new GenericInstanceType(owner);
