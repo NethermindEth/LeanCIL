@@ -45,7 +45,7 @@ theorem named_call_continuation (program : CIL.Program) (memory : Memory) (value
 /-- The vector control is an ordinary literal in the emitted instructions. -/
 @[cil_code] def reverseVector : CIL.Method :=
   { profile := { architecture := .x64, avx2 := true }, locals := [], returnsValue := true,
-    code := [.const32 27, .intrinsic (.avx2 .permute4x64) 2, .ret] }
+    code := [.ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2, .ret] }
 
 /-- A rewrite stated with a literal still matches the vector value left by stepping. -/
 theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reversed : BitVec 256)
@@ -143,7 +143,7 @@ theorem mixed_local_snapshot {caller current final : Memory} {word vector : Refe
 #print axioms mixed_local_snapshot
 
 /-- One reusable arithmetic prefix adds one to the top word. -/
-def incrementCode : List CIL.Instruction := [.const32 1, .add]
+def incrementCode : List CIL.Instruction := [.ldc_i4 1, .add]
 
 /-- A placed segment computes its stack value through the shared checked stepper. -/
 theorem increment_segment {program : CIL.Program} {method start : Nat} {body : CIL.Method}
@@ -169,7 +169,7 @@ theorem repeated_segment {program : CIL.Program} {method : Nat} {body : CIL.Meth
 /-- A countdown body has one return and one continuing edge. -/
 @[cil_code] def countdown : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.dup, .brzero 5, .const32 1, .sub, .branch 0, .ret] }
+    code := [.dup, .brfalse 5, .ldc_i4 1, .sub, .br 0, .ret] }
 
 /-- The checked continuing path retains the exact stack expression at the loop head. -/
 theorem loop_cutpoint (memory : Memory) (frame : Frame) (value : CIL.W32)

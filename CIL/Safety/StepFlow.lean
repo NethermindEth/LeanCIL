@@ -18,6 +18,15 @@ def Instruction.callees : Instruction → List Nat
   | .newObject method .. => [method]
   | _ => []
 
+/-- The link an instruction implies enters exactly the methods the instruction names. -/
+theorem Instruction.link?_callees (op : Instruction) :
+    (op.link?.map Link.callees).getD [] = op.callees := by
+  cases op <;> simp [Instruction.link?, Link.callees, Instruction.callees]
+  case managed operation =>
+    cases operation <;> simp [Link.callees]
+
+#print axioms Instruction.link?_callees
+
 end CIL
 
 namespace CIL.Safety
@@ -122,7 +131,8 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
   have same : op.relabel r = op := op.relabel_eq_self r fun t member =>
     ite_eq_right fun e => outside (.inr (by rw [← e]; exact member))
   have moved := step_relabel op body body r pc pc args frame stack m _
-    ⟨rfl, rfl, rfl, fun continues => ite_eq_right fun e => outside (.inl ⟨continues, e.symm⟩)⟩ h
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl,
+      fun continues => ite_eq_right fun e => outside (.inl ⟨continues, e.symm⟩)⟩ h
   rw [same, h] at moved
   simp only [FrameAction.relabel, Except.ok.injEq, FrameAction.next.injEq] at moved
   have : r target = target + 1 := ite_eq_left rfl

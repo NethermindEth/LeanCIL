@@ -86,16 +86,16 @@ def checkedValue (m : Memory) : Value → ExecutionResult Value
 /-- Only the value-only instruction whitelist may use the original pure
     arithmetic semantics. No memory/reference operation can enter this path. -/
 def pureArity : CIL.Instruction → Option Nat
-  | .convI1 | .convI2 | .convU2 => some 1
+  | .conv_i1 | .conv_i2 | .conv_u2 => some 1
   | .nop => some 0
   | .neg => some 1
-  | .gt | .bgt _ | .ble _ | .bleu _ => some 2
-  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .bnot => some 1
-  | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
-    | .lt | .ltu | .gtu | .eq => some 2
-  | .brzero _ | .brnonzero _ | .switch _ => some 1
-  | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => some 2
-  | .branch _ | .feature _ => some 0
+  | .cgt | .bgt _ | .ble _ | .ble_un _ => some 2
+  | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .not => some 1
+  | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
+    | .clt | .clt_un | .cgt_un | .ceq => some 2
+  | .brfalse _ | .brtrue _ | .switch _ => some 1
+  | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => some 2
+  | .br _ | .feature _ => some 0
   | .intrinsic _ argc => some argc
   | _ => none
 
@@ -206,55 +206,55 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .sub, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let result ← referenceDifference m left right
     return .next (pc + 1) (.scalar (.i64 result) :: rest) frame m
-  | .ltu, .reference right :: .reference left :: rest
-  | .ltu, .reference right :: .readOnlyReference left :: rest
-  | .ltu, .readOnlyReference right :: .reference left :: rest
-  | .ltu, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .clt_un, .reference right :: .reference left :: rest
+  | .clt_un, .reference right :: .readOnlyReference left :: rest
+  | .clt_un, .readOnlyReference right :: .reference left :: rest
+  | .clt_un, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m left right
     return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
-  | .gtu, .reference right :: .reference left :: rest
-  | .gtu, .reference right :: .readOnlyReference left :: rest
-  | .gtu, .readOnlyReference right :: .reference left :: rest
-  | .gtu, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .cgt_un, .reference right :: .reference left :: rest
+  | .cgt_un, .reference right :: .readOnlyReference left :: rest
+  | .cgt_un, .readOnlyReference right :: .reference left :: rest
+  | .cgt_un, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m right left
     return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
-  | .bltu target, .reference right :: .reference left :: rest
-  | .bltu target, .reference right :: .readOnlyReference left :: rest
-  | .bltu target, .readOnlyReference right :: .reference left :: rest
-  | .bltu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .blt_un target, .reference right :: .reference left :: rest
+  | .blt_un target, .reference right :: .readOnlyReference left :: rest
+  | .blt_un target, .readOnlyReference right :: .reference left :: rest
+  | .blt_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m left right
     return .next (if less then target else pc + 1) rest frame m
-  | .bgeu target, .reference right :: .reference left :: rest
-  | .bgeu target, .reference right :: .readOnlyReference left :: rest
-  | .bgeu target, .readOnlyReference right :: .reference left :: rest
-  | .bgeu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .bge_un target, .reference right :: .reference left :: rest
+  | .bge_un target, .reference right :: .readOnlyReference left :: rest
+  | .bge_un target, .readOnlyReference right :: .reference left :: rest
+  | .bge_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m left right
     return .next (if less then pc + 1 else target) rest frame m
-  | .bgtu target, .reference right :: .reference left :: rest
-  | .bgtu target, .reference right :: .readOnlyReference left :: rest
-  | .bgtu target, .readOnlyReference right :: .reference left :: rest
-  | .bgtu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .bgt_un target, .reference right :: .reference left :: rest
+  | .bgt_un target, .reference right :: .readOnlyReference left :: rest
+  | .bgt_un target, .readOnlyReference right :: .reference left :: rest
+  | .bgt_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m right left
     return .next (if less then target else pc + 1) rest frame m
-  | .bleu target, .reference right :: .reference left :: rest
-  | .bleu target, .reference right :: .readOnlyReference left :: rest
-  | .bleu target, .readOnlyReference right :: .reference left :: rest
-  | .bleu target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .ble_un target, .reference right :: .reference left :: rest
+  | .ble_un target, .reference right :: .readOnlyReference left :: rest
+  | .ble_un target, .readOnlyReference right :: .reference left :: rest
+  | .ble_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let less ← referenceLess m right left
     return .next (if less then pc + 1 else target) rest frame m
   -- Reference observations preserve memory and do not grant byte access authority.
-  | .brzero target, .reference value :: rest
-  | .brzero target, .readOnlyReference value :: rest =>
+  | .brfalse target, .reference value :: rest
+  | .brfalse target, .readOnlyReference value :: rest =>
     let present ← referenceNonNull m value
     return .next (if present then pc + 1 else target) rest frame m
-  | .brnonzero target, .reference value :: rest
-  | .brnonzero target, .readOnlyReference value :: rest =>
+  | .brtrue target, .reference value :: rest
+  | .brtrue target, .readOnlyReference value :: rest =>
     let present ← referenceNonNull m value
     return .next (if present then target else pc + 1) rest frame m
-  | .eq, .reference right :: .reference left :: rest
-  | .eq, .reference right :: .readOnlyReference left :: rest
-  | .eq, .readOnlyReference right :: .reference left :: rest
-  | .eq, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .ceq, .reference right :: .reference left :: rest
+  | .ceq, .reference right :: .readOnlyReference left :: rest
+  | .ceq, .readOnlyReference right :: .reference left :: rest
+  | .ceq, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
   | .beq target, .reference right :: .reference left :: rest
@@ -263,29 +263,29 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .beq target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then target else pc + 1) rest frame m
-  | .bne target, .reference right :: .reference left :: rest
-  | .bne target, .reference right :: .readOnlyReference left :: rest
-  | .bne target, .readOnlyReference right :: .reference left :: rest
-  | .bne target, .readOnlyReference right :: .readOnlyReference left :: rest =>
+  | .bne_un target, .reference right :: .reference left :: rest
+  | .bne_un target, .reference right :: .readOnlyReference left :: rest
+  | .bne_un target, .readOnlyReference right :: .reference left :: rest
+  | .bne_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
   -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
-  | .eq, .object right :: .object left :: rest =>
+  | .ceq, .object right :: .object left :: rest =>
     let equal ← objectEqual m left right
     return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
   | .beq target, .object right :: .object left :: rest =>
     let equal ← objectEqual m left right
     return .next (if equal then target else pc + 1) rest frame m
-  | .bne target, .object right :: .object left :: rest =>
+  | .bne_un target, .object right :: .object left :: rest =>
     let equal ← objectEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
-  | .gtu, .object right :: .object left :: rest =>
+  | .cgt_un, .object right :: .object left :: rest =>
     let present ← objectAboveNull m left right
     return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
-  | .brzero target, .object value :: rest =>
+  | .brfalse target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then pc + 1 else target) rest frame m
-  | .brnonzero target, .object value :: rest =>
+  | .brtrue target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then target else pc + 1) rest frame m
   | .objectTest type throwing, .object value :: rest =>

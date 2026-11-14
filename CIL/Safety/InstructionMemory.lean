@@ -79,13 +79,13 @@ def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
 def observerCount : CIL.Instruction → Nat
   -- Arithmetic and comparisons
   | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
-  | .checkedConvert .. | .neg | .bnot | .convI1 | .convI2 | .convU2
-  | .convI8 | .convI4 | .convU1 | .convU4 | .convU8 | .convU | .stackAlloc _ | .newArray _
+  | .checkedConvert .. | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2
+  | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .stackAlloc _ | .newArray _
   | .newReferenceArray _ => 1
-  | .add | .sub | .mul | .band | .bor | .bxor | .shl | .shr | .shrUn
-  | .lt | .ltu | .gt | .gtu | .eq | .bgt _ | .ble _ | .bleu _
-  | .bltu _ | .bgeu _ | .bgtu _ | .bge _ | .blt _ | .beq _ | .bne _ => 2
-  | .brzero _ | .brnonzero _ | .switch _ | .objectTest .. => 1
+  | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
+  | .clt | .clt_un | .cgt | .cgt_un | .ceq | .bgt _ | .ble _ | .ble_un _
+  | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => 2
+  | .brfalse _ | .brtrue _ | .switch _ | .objectTest .. => 1
   -- Memory and fields
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
   | .load64 | .skipInit | .initAggregate _ => 1
@@ -102,8 +102,8 @@ def observerCount : CIL.Instruction → Nat
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
-  | .nop | .arg .. | .local .. | .localAddr _ | .setLocal .. | .const32 _ | .const64 _
-  | .dup | .pop | .branch _ | .feature _ | .intrinsic ..
+  | .nop | .arg .. | .local .. | .localAddr _ | .setLocal .. | .ldc_i4 _ | .ldc_i8 _
+  | .dup | .pop | .br _ | .feature _ | .intrinsic ..
   | .throw _ | .unsupported _ => 0
 
 /-- A memory check as an execution result; a fault is attributed to `reference` and `width`. -/
@@ -1244,8 +1244,8 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
     .error (.memory .nullDereference .null 0)
   -- Memory operations, constants and 64-bit words
   | .memory operation, _ => memoryInstruction operation stack m
-  | .const32 bits, _ => return (m, .scalar (.i32 bits) :: stack)
-  | .const64 bits, _ => return (m, .scalar (.i64 bits) :: stack)
+  | .ldc_i4 bits, _ => return (m, .scalar (.i32 bits) :: stack)
+  | .ldc_i8 bits, _ => return (m, .scalar (.i64 bits) :: stack)
   | .load64, .reference r :: rest | .load64, .readOnlyReference r :: rest =>
     return (m, .scalar (← loadValue m r 8) :: rest)
   | .store64, .scalar (.i64 bits) :: .reference r :: rest =>

@@ -212,7 +212,8 @@ example : Safety.bitcastValue .vector128 .vector128 (.v128Low64 7) =
     .error (.unsupported "Bitcast observes unspecified vector bits") := rfl
 example (memory : Safety.Memory) : Safety.storeLocal memory (.opaque128 none) (.scalar (.v128Low64 7)) =
     .ok (.opaque128 (some (.low64 7)), memory) := rfl
-example (memory : Safety.Memory) : Safety.instruction .eq [.scalar (.v128Low64 7), .scalar (.v128Low64 7)] memory =
+example (memory : Safety.Memory) :
+    Safety.instruction .ceq [.scalar (.v128Low64 7), .scalar (.v128Low64 7)] memory =
     .error (.unsupported "Instruction observes unspecified vector bits") := rfl
 
 theorem unspecified_return (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :

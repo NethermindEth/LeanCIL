@@ -8,6 +8,8 @@ import CIL.Extraction.ImportLayouts
 import CIL.Extraction.Constrained
 import CIL.Extraction.Assemblies
 import CIL.Extraction.BodyDecoding
+import CIL.EntryIndex
+import CIL.Extraction.LinkIndex
 import Std.Data.TreeMap.Lemmas
 
 /-!
@@ -93,26 +95,6 @@ private def staticScalarType : TypeExpr → Option (Nat × Bool)
     | _ => none
   | _ => none
 
-/-- Index static sites with the same first-match behavior as the metadata list. -/
-private def staticSiteIndex : List (Nat × StaticDescriptor) → Std.TreeMap Nat StaticDescriptor
-  | [] => ∅
-  | (pc, descriptor) :: sites => (staticSiteIndex sites).insert pc descriptor
-
-/-- Duplicate sites retain the first descriptor, including malformed evidence. -/
-private theorem staticSiteIndex_get (sites : List (Nat × StaticDescriptor)) (pc : Nat) :
-    (staticSiteIndex sites)[pc]? = (sites.find? (fun site => site.1 == pc)).map Prod.snd := by
-  induction sites with
-  | nil => simp [staticSiteIndex]
-  | cons site sites ih =>
-    rcases site with ⟨index, descriptor⟩
-    simp only [staticSiteIndex, Std.TreeMap.getElem?_insert, List.find?_cons]
-    by_cases same : index = pc
-    · subst index; simp
-    · have different : (index == pc) = false := beq_eq_false_iff_ne.mpr same
-      simp [same, ih, different]
-
-#print axioms staticSiteIndex_get
-
 /-- A readonly scalar load has exactly the width and extension of its raw field type. -/
 private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstruction)
     (descriptor : Option StaticDescriptor) : Bool :=
@@ -131,7 +113,7 @@ private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstructio
 def methodShapeInstructions (layouts : List RawLayout) (closed : RawMethod)
     (method : Method) : Bool :=
   let raw := FlowIndex.ofList closed.code
-  let sites := staticSiteIndex method.staticSites
+  let sites := firstEntryIndex method.staticSites
   method.code.zipIdx.all fun (op, pc) => match op with
     | .ret narrow => narrow == returnNarrow layouts closed.returnType
     | .memory (.staticValue _) => staticLoadMatches 126 (raw.get? pc) sites[pc]?
@@ -153,19 +135,40 @@ theorem methodShapeInstructions_eq_scan (layouts : List RawLayout) (closed : Raw
         if (descriptor.bind (·.initializer)).isSome then
           staticLoadMatches 127 closed.code[pc]? descriptor else true
       | _ => true) := by
-  simp only [methodShapeInstructions, FlowIndex.get?_ofList, staticSiteIndex_get]
+  simp only [methodShapeInstructions, FlowIndex.get?_ofList, firstEntryIndex_get]
 
 #print axioms methodShapeInstructions_eq_scan
+/-- The declared signature a closed raw method implies: its receiver kind, parameter types and
+    return type. -/
+def _root_.CIL.DeclaredSignature.ofRaw (closed : RawMethod) : DeclaredSignature where
+  receiver :=
+    if closed.hasThis then some (if closed.objectReceiver then .object else .reference) else none
+  parameters := closed.parameters
+  returnType := closed.returnType
+
 /-- Bind non-instruction method fields that affect frame setup and return behavior. -/
 def MethodShapeValid (layouts : List RawLayout) (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
+  method.declared = DeclaredSignature.ofRaw closed ∧
   method.locals = method.localKinds.map (fun kind =>
     if closed.initLocals then initialLocal kind else .unmodeled) ∧
   methodShapeInstructions layouts closed method = true
 
 instance (layouts : List RawLayout) (closed : RawMethod) (method : Method) :
     Decidable (MethodShapeValid layouts closed method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
+
+/-- The method's environment is the program's layout tables, so every method of one extraction
+    shares it. -/
+def MethodEnvironmentValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
+    (method : Method) : Prop :=
+  method.environment = { rawLayouts := rawLayouts, layouts := layouts }
+
+-- Generated proofs use `rfl`, which unfolds the two shared constants; deciding this instance
+-- compares the layout tables element by element, once per method.
+instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout) (method : Method) :
+    Decidable (MethodEnvironmentValid rawLayouts layouts method) :=
+  inferInstanceAs (Decidable (_ = _))
 
 /-- One emitted method against its evidence record: every per-method validator, in the
     order generated modules supply their proofs. -/
@@ -188,13 +191,14 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
-  BodyDecodes item.body item.original
+  BodyDecodes item.body item.original ∧
+  MethodEnvironmentValid rawLayouts layouts method
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (all : List MethodEvidence) (imports : List ImportSlot) (item : MethodEvidence)
     (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)

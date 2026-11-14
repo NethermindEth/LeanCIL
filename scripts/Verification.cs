@@ -1546,17 +1546,17 @@ partial class Program : IDisposable
     /// <summary>Reads a package's lakefile for a pass; tests replace it with a slow or blocking reader.</summary>
     internal static Func<string, string> packageReader = ReadSmallFile;
 
+    static readonly DateTime PassClockOrigin = DateTime.UtcNow;
+    static readonly Stopwatch PassClockRun = Stopwatch.StartNew();
+
     /// <summary>
     /// The clock a pass takes its time limit from. It counts from when the process first read it, so a change
     /// of the system clock moves it neither forward nor back; tests replace it to jump past the limit.
     /// </summary>
     internal static Func<DateTime> passClock = () => PassClockOrigin + PassClockRun.Elapsed;
 
-    static readonly DateTime PassClockOrigin = DateTime.UtcNow;
-    static readonly Stopwatch PassClockRun = Stopwatch.StartNew();
-
     /// <summary>Called with a pin's path just before a pass retires it; tests renew the pin here.</summary>
-    internal static Action<string>? beforePinRetired;
+    internal static Action<string> beforePinRetired = static _ => { };
 
     /// <summary>The largest lakefile a pass reads; the one a workspace writes is a few hundred bytes.</summary>
     const int MaxLakefileBytes = 64 * 1024;
@@ -1669,7 +1669,7 @@ partial class Program : IDisposable
     /// </summary>
     static bool RetirePin(FileInfo pin, string key, TimeSpan retention, DateTime deadline, PassReport? report)
     {
-        beforePinRetired?.Invoke(pin.FullName);
+        beforePinRetired(pin.FullName);
         var aside = pin.FullName + ".dead-" + Guid.NewGuid().ToString("N");
         try { File.Move(pin.FullName, aside); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return false; }

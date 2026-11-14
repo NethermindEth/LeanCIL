@@ -65,9 +65,18 @@ var methods = new Dictionary<MethodDefinition, int> { [caller] = 0, [callee] = 1
 string Lean(object operation) => (string)operation.GetType()
     .GetMethod("ToLean", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, Type.EmptyTypes)!
     .Invoke(operation, null)!;
-string Translate(Instruction instruction) => Lean(translate.Invoke(null,
-    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!);
+object Operation(Instruction instruction) => translate.Invoke(null,
+    [instruction, caller, methods, 0, Index(caller), null, null, null, null, null, null])!;
+string Translate(Instruction instruction) => Lean(Operation(instruction));
+string? Link(Instruction instruction)
+{
+    var operation = Operation(instruction);
+    return (string?)operation.GetType().GetMethod("Link", BindingFlags.Instance | BindingFlags.NonPublic |
+        BindingFlags.Public)!.Invoke(operation, [(Func<int, string>)(index => $"{index}")]);
+}
 if (Translate(call) != ".call 1 0") throw new Exception("Incorrect call index");
+// The link is read from the same operation as the instruction, so the two cannot name different callees.
+if (Link(call) != ".direct 1") throw new Exception("Incorrect call link");
 methods.Remove(callee);
 try
 {
@@ -84,6 +93,7 @@ caller.Body.Instructions.Add(Instruction.Create(OpCodes.Ldc_I4_0));
 caller.Body.Instructions.Add(choose);
 caller.Body.Instructions.Add(destination);
 if (Translate(choose) != ".switch [2, 2]") throw new Exception("Switch target order or duplicates changed");
+if (Link(choose) is not null) throw new Exception("A branch carries a call link");
 Console.WriteLine("PASS translated method indexes reject missing callees and preserve switch target order");
 var runtimeScope = AssemblyNameReference.Parse(
     "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");

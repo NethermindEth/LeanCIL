@@ -38,9 +38,9 @@ def method8Signature : String :=
 def method9Signature : String :=
   "System.Boolean Consequence.Calls::IsZeroIgnoring(System.UInt64,System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .const32 1, .convI8, .add, .ret] }
+  [.arg 0, .call 1 1, .ldc_i4 1, .conv_i8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 (BitVec.ofInt 32 100), .convI8, .bleu 7, .nop, .nop,
+  [.arg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
     .throw "System.ArgumentOutOfRangeException", .arg 0, .ret] }
 @[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
   [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ret] }
@@ -55,13 +55,13 @@ def method9Signature : String :=
     [.arg 0, .arg 1, .localAddr 0, .call 8 3, .ret (some .unsigned8)] }
 /-- `IsZero`: a comparison returned as a narrowed boolean. -/
 @[cil_code] def method6 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .const32 0, .convI8, .eq, .ret (some .unsigned8)] }
+  [.arg 0, .ldc_i4 0, .conv_i8, .ceq, .ret (some .unsigned8)] }
 /-- `IsZeroForward`: re-narrows `IsZero`'s boolean through its own `ret`. -/
 @[cil_code] def method7 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .call 6 1, .ret (some .unsigned8)] }
 /-- `AddFlag`: `AddTo`'s store followed by a constant `true`. -/
 @[cil_code] def method8 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .const32 1,
+  [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ldc_i4 1,
     .ret (some .unsigned8)] }
 /-- `IsZeroIgnoring`: forwards its first argument and never loads its second. -/
 @[cil_code] def method9 : Method := { returnsValue := true, locals := [], code :=

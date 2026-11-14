@@ -13,7 +13,7 @@ def method0Signature : String := "System.UInt64 Constructs.Calls::Root(System.UI
 def method1Signature : String := "System.Void Constructs.Word::.ctor(System.UInt64,System.UInt64,System.UInt64,System.UInt64)"
 def method2Signature : String := "System.Void Constructs.Pair::.ctor(System.UInt64,System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .arg 1, .newAggregate 2 2 16, .fieldAt 8 8, .arg 1, .const32 1, .convI8, .const32 2, .convI8, .arg 0,
+  [.arg 0, .arg 1, .newAggregate 2 2 16, .fieldAt 8 8, .arg 1, .ldc_i4 1, .conv_i8, .ldc_i4 2, .conv_i8, .arg 0,
     .newAggregate 1 4 32, .fieldAt 24 8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := false, locals := [], code :=
   [.arg 0, .arg 1, .setFieldAt 0 8, .arg 0, .arg 2, .setFieldAt 8 8, .arg 0, .arg 3, .setFieldAt 16 8,
@@ -322,7 +322,7 @@ theorem missing_authority_rejected : ¬ unguardedContract.Holds Extracted.progra
 
 /-- `Logged(ref ulong log, ulong value) { log = 1; Value = value; }` -/
 @[cil_code] def logged : CIL.Method := { returnsValue := false, locals := [], code :=
-  [.arg 1, .const64 1, .store64, .arg 0, .arg 2, .setFieldAt 0 8, .ret] }
+  [.arg 1, .ldc_i8 1, .store64, .arg 0, .arg 2, .setFieldAt 0 8, .ret] }
 @[cil_code] def loggedProgram : CIL.Program := [logged]
 
 structure LoggedInput where
@@ -381,8 +381,8 @@ set_option pp.mvars false in
 /--
 error: Tactic `rfl` failed: The left-hand side
   [CIL.Instruction.arg 0, CIL.Instruction.arg 1, CIL.Instruction.newAggregate 2 2 16, CIL.Instruction.fieldAt 8 8,
-      CIL.Instruction.arg 1, CIL.Instruction.const32 1, CIL.Instruction.convI8, CIL.Instruction.const32 2,
-      CIL.Instruction.convI8, CIL.Instruction.arg 0, CIL.Instruction.newAggregate 1 4 32, CIL.Instruction.fieldAt 24 8,
+      CIL.Instruction.arg 1, CIL.Instruction.ldc_i4 1, CIL.Instruction.conv_i8, CIL.Instruction.ldc_i4 2,
+      CIL.Instruction.conv_i8, CIL.Instruction.arg 0, CIL.Instruction.newAggregate 1 4 32, CIL.Instruction.fieldAt 24 8,
       CIL.Instruction.add, CIL.Instruction.ret][2]?
 is not definitionally equal to the right-hand side
   some (CIL.Instruction.newAggregate 2 ?_ 8)

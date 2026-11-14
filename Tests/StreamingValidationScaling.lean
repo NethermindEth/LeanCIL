@@ -27,7 +27,7 @@ def indexedConstrained (raw : RawMethod) (reachable : List Bool) (emitted : Meth
     (List.range raw.code.length).all (constrainedSiteCheck [] (FlowIndex.ofList []).get?
       (FlowIndex.ofList raw.code).get? (FlowIndex.ofList reachable).get?
       (FlowIndex.ofList emitted.code).get?
-      (Std.TreeSet.ofList (constrainedBranchTargets raw.code)).contains) = true
+      (Std.TreeSet.ofList (branchTargets raw.code)).contains) = true
 
 /-- Eligible vector-local metadata. -/
 def vector : TypeExpr := .apply

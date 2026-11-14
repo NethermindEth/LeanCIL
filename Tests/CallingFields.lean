@@ -80,10 +80,10 @@ theorem writes_after_reads (memory : Memory) (left right output : Reference)
 /-- Four writes followed by a read exercise argument evidence at each new memory. -/
 @[cil_code] def repeatedWriter : CIL.Method :=
   { locals := [], returnsValue := true, code := [
-    .arg 2, .const64 1, .storeScalar 8,
-    .arg 2, .const64 2, .setFieldAt 8 8,
-    .arg 2, .const64 3, .setFieldAt 16 8,
-    .arg 2, .const64 4, .setFieldAt 24 8,
+    .arg 2, .ldc_i8 1, .storeScalar 8,
+    .arg 2, .ldc_i8 2, .setFieldAt 8 8,
+    .arg 2, .ldc_i8 3, .setFieldAt 16 8,
+    .arg 2, .ldc_i8 4, .setFieldAt 24 8,
     .arg 0, .fieldAt 0 8, .ret] }
 
 /-- Later loads observe the current memory, even when output aliases either input. -/

@@ -5,16 +5,16 @@
     "template": "Binding.lean.in",
     "rows": [
       { "case": "WrongWidth", "method": "Equal(uint,uint)", "name": "Equal", "managed": "System.UInt64",
-        "returnType": "System.Boolean", "width": "64", "body": "equalityBody Extracted.profile true",
+        "returnType": "System.Boolean", "width": "64", "body": "equalityBody Extracted.profile Extracted.environment declared true",
         "value": ".i32 (if left = right then 1 else 0)", "fuel": "5", "shared": "equal32" },
       { "case": "WrongSignedness", "method": "Equal(uint,uint)", "name": "Equal", "managed": "System.Int32",
-        "returnType": "System.Boolean", "width": "32", "body": "equalityBody Extracted.profile true",
+        "returnType": "System.Boolean", "width": "32", "body": "equalityBody Extracted.profile Extracted.environment declared true",
         "value": ".i32 (if left = right then 1 else 0)", "fuel": "5", "shared": "equal32" },
       { "case": "WrongPolarity", "method": "Equal(uint,uint)", "name": "Equal", "managed": "System.UInt32",
-        "returnType": "System.Boolean", "width": "32", "body": "equalityBody Extracted.profile false",
+        "returnType": "System.Boolean", "width": "32", "body": "equalityBody Extracted.profile Extracted.environment declared false",
         "value": ".i32 (if left ≠ right then 1 else 0)", "fuel": "7", "shared": "equal32" },
       { "case": "ChangedBody", "method": "Xor(ulong,ulong)", "name": "Xor", "managed": "System.UInt64",
-        "returnType": "System.UInt64", "width": "64", "body": "bitwiseBody Extracted.profile .bxor",
+        "returnType": "System.UInt64", "width": "64", "body": "bitwiseBody Extracted.profile Extracted.environment declared .xor",
         "value": ".i64 (left ^^^ right)", "fuel": "5", "shared": "xor64" }
     ],
     "gate": {

@@ -33,9 +33,9 @@ Four suites fail when cost grows faster than the size of the input. Run one with
 
 | Suite | Fails when |
 | --- | --- |
-| `lookups` | Heartbeats per instruction grow more than 1.25 times from about 500 to about 2,000 instructions; see [instruction lookups](InstructionLookups.md) |
+| `lookups` | Heartbeats per instruction grow more than 1.25 times from about 500 to about 2,000 instructions, kernel heartbeats per array element address grow more than 1.25 times from 128 to 512 addresses, or the kernel heartbeats per call of an embedding grow more than 1.15 times at four times the calls; see [instruction lookups](InstructionLookups.md) |
 | `stepping` | Checked stepping exceeds its per-instruction growth budgets; see [validation](../VALIDATION.md#proof-cost) |
-| `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit |
+| `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit, kernel heartbeats per layout of the header struct layout check over nested or over generic structs, or of a method's layout check over nested structs, grow more than 1.5 times from 64 to 512 structs, or 512 structs of either kind do not check within 8 GiB |
 | `excluded` | Certificates with hundreds of excluded and live sites exceed the default heartbeat limit |
 
 ## Suite times

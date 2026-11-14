@@ -10,14 +10,15 @@ open CIL.Safety
 /-- `*sum = a + b + c; *carry = (a + b + c < a) ? 1 : 0`. -/
 @[cil_code] def carryMethod : CIL.Method := {
   code := [.arg 3, .arg 0, .arg 1, .add, .arg 2, .add, .store64,
-    .arg 4, .arg 0, .arg 1, .add, .arg 2, .add, .arg 0, .ltu, .convU8, .store64, .ret]
+    .arg 4, .arg 0, .arg 1, .add, .arg 2, .add, .arg 0, .clt_un, .conv_u8, .store64, .ret]
   locals := [], returnsValue := false }
 @[cil_code] def carryProgram : CIL.Program := [carryMethod]
 
 /-- `*difference = a - b - c; *borrow = (a < b) | (c & (a == b))`, with sign-extended flags. -/
 @[cil_code] def borrowMethod : CIL.Method := {
   code := [.arg 3, .arg 0, .arg 1, .sub, .arg 2, .sub, .store64,
-    .arg 4, .arg 0, .arg 1, .ltu, .convI8, .arg 2, .arg 0, .arg 1, .eq, .convI8, .band, .bor, .store64, .ret]
+    .arg 4, .arg 0, .arg 1, .clt_un, .conv_i8, .arg 2, .arg 0, .arg 1, .ceq, .conv_i8, .and, .or,
+    .store64, .ret]
   locals := [], returnsValue := false }
 @[cil_code] def borrowProgram : CIL.Program := [borrowMethod]
 
@@ -184,7 +185,7 @@ theorem indexed_fields (memory : Memory) (left : Reference) (words : Fin 4 → C
   cil_checked_steps [formed, limbs]
 
 @[cil_code] def literalBranch : CIL.Method :=
-  { code := [.arg 0, .fieldAt 8 8, .brzero 5, .const32 9, .ret, .const32 0, .ret],
+  { code := [.arg 0, .fieldAt 8 8, .brfalse 5, .ldc_i4 9, .ret, .ldc_i4 0, .ret],
     locals := [], returnsValue := true }
 
 @[cil_code] def literalBranchProgram : CIL.Program := [literalBranch]

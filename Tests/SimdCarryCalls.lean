@@ -53,11 +53,11 @@ def cascade (subtract : Bool) (left right : V256) : W32 :=
   { profile, locals := [], returnsValue := true,
     code :=
       (if subtract then [.arg 0, .arg 1] else
-        laneCode false ++ [.const64 (~~~0), .intrinsic (.vector (.create64 256)) 1]) ++
+        laneCode false ++ [.ldc_i8 (~~~0), .intrinsic (.vector (.create64 256)) 1]) ++
       [.intrinsic (.avx2 .eq64) 2, .intrinsic (.avx512DQ .moveMask64) 1, .dup] ++
       (if subtract then [.arg 0, .arg 1] else laneCode false ++ [.arg 0]) ++
       [.intrinsic (.avx512 .ltu64) 2, .intrinsic (.avx512DQ .moveMask64) 1,
-        .const32 1, .shl, .add, .bxor, .ret] }
+        .ldc_i4 1, .shl, .add, .xor, .ret] }
 
 /-- The mask helper returns the exact cascade and leaves every caller byte unchanged. -/
 def maskContract (subtract : Bool) : MethodContract (V256 × V256) W32 where
@@ -107,14 +107,14 @@ theorem flag_lanes (flags : W32) :
 
 /-- The CIL scalar extraction uses an unsigned shift, masks one bit and widens it. -/
 @[cil_code] def flagCode (index : W32) : List Instruction :=
-  [.arg 0, .const32 index, .shrUn, .const32 1, .band, .convU8]
+  [.arg 0, .ldc_i4 index, .shr_un, .ldc_i4 1, .and, .conv_u8]
 
 /-- The repair helper adds or subtracts all three incoming flags in their own lanes. -/
 @[cil_code] def repairBody (subtract : Bool) : Method :=
   { profile, locals := [], returnsValue := true,
     code := [.arg 1, .arg 2,
       .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2,
-      .const64 0] ++ flagCode 1 ++ flagCode 2 ++ flagCode 3 ++
+      .ldc_i8 0] ++ flagCode 1 ++ flagCode 2 ++ flagCode 3 ++
       [.intrinsic (.vector (.create64 256)) 4,
         .intrinsic (if subtract then .vector (.sub64 256) else .avx2 .add64) 2, .ret] }
 
@@ -271,12 +271,12 @@ private def carrying : V256 := pack256 (~~~0) (~~~0) 5 0
   { maskBody subtract with
     code := (if subtract then [.arg 0, .arg 1] else laneCode false ++ [.arg 0]) ++ [
       .intrinsic (.avx512 .ltu64) 2, .intrinsic (.avx512DQ .moveMask64) 1,
-      .const32 1, .shl, .ret] }
+      .ldc_i4 1, .shl, .ret] }
 
 /-- This incorrect helper repairs lane two from lane one's incoming flag. -/
 @[cil_code] private def wrongLaneBody : Method :=
   { repairBody false with
-    code := [.arg 1, .arg 2, .intrinsic (.avx2 .add64) 2, .const64 0] ++
+    code := [.arg 1, .arg 2, .intrinsic (.avx2 .add64) 2, .ldc_i8 0] ++
       flagCode 1 ++ flagCode 1 ++ flagCode 3 ++
       [.intrinsic (.vector (.create64 256)) 4, .intrinsic (.avx2 .add64) 2, .ret] }
 
@@ -354,7 +354,7 @@ private def overlapArguments : List CIL.Safety.Value :=
 
 /-- This incorrect caller overwrites the first input before taking its snapshot. -/
 @[cil_code] private def earlyStoreBody : Method :=
-  { storedBody with code := [.arg 0, .const64 0, .intrinsic (.vector (.create64 256)) 1,
+  { storedBody with code := [.arg 0, .ldc_i8 0, .intrinsic (.vector (.create64 256)) 1,
       .memory .store256] ++ storedBody.code }
 
 /-- Observe the output bytes only after the real checked invocation returns. -/

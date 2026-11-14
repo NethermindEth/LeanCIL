@@ -1,3 +1,4 @@
+import CIL.CallSite
 import CIL.Extraction.Parameters
 import CIL.Extraction.FlowIndex
 import CIL.Imports
@@ -189,28 +190,6 @@ def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
     else if name = "System.Runtime.Intrinsics.Vector256`1" then some .vector256
     else if name = "System.Runtime.Intrinsics.Vector512`1" then some .vector512 else none
   | _ => none
-
-/-- A call target: a method of this module by metadata token, or another assembly's
-    method by its `scope::signature` identity. -/
-inductive MethodId where
-  | managed (token : Nat)
-  | external (identity : String)
-  deriving DecidableEq, Repr
-
-/-- The metadata of a `call` or `newobj` operand, as declared at the call site. -/
-structure CallSite where
-  declaringType : TypeExpr := .void
-  name : String := ""
-  target : MethodId
-  typeArguments : List TypeExpr
-  parameterCount : Nat
-  hasThis : Bool
-  returnsValue : Bool
-  returnType : TypeExpr := .void
-  parameterTypes : List TypeExpr := []
-  /-- The suffix of `typeArguments` belonging to the declaring type, not the method. -/
-  ownerArgumentCount : Nat := 0
-  deriving DecidableEq, Repr
 
 /-- A decoded instruction operand. A field operand names its owner type and the field's
     index in the owner's raw layout. -/
@@ -430,6 +409,37 @@ def argumentOperation (instruction : RawInstruction) : Option ArgumentOp :=
   -- An argument opcode with a malformed operand is rejected, not treated as `other`.
   | opcode, _ =>
     if opcode ∈ [2, 3, 4, 5, 14, 15, 16, 65033, 65034, 65035] then none else some .other
+
+/-- Whether `instruction` names `pc` as a branch destination or switch arm. -/
+def branchesTo (pc : Nat) (instruction : RawInstruction) : Bool :=
+  match instruction.operand with
+  | .target target => target == pc
+  | .targets targets => targets.contains pc
+  | _ => false
+
+/-- All decoded branch destinations, including switch arms and unreachable instructions. -/
+def branchTargets (raw : List RawInstruction) : List Nat :=
+  raw.flatMap fun instruction => match instruction.operand with
+    | .target target => [target]
+    | .targets targets => targets
+    | _ => []
+
+/-- Collecting branch destinations once answers, for every pc, whether some instruction
+    branches to it. -/
+theorem branchTargets_contains (raw : List RawInstruction) (pc : Nat) :
+    (branchTargets raw).contains pc = raw.any (branchesTo pc) := by
+  induction raw with
+  | nil => rfl
+  | cons instruction rest ih =>
+    cases instruction with
+    | mk offset opcode operand =>
+      change _ = (branchesTo pc ⟨offset, opcode, operand⟩ || rest.any (branchesTo pc))
+      simp only [branchTargets, List.flatMap_cons, List.contains_append]
+      change (_ || (branchTargets rest).contains pc) = _
+      rw [ih]
+      cases operand <;> simp [branchesTo, BEq.beq, eq_comm]
+
+#print axioms branchTargets_contains
 
 /-- The unique raw managed indirect signature and native locals directly consumed as targets. -/
 structure NativeDispatchContext where
@@ -696,11 +706,13 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
     (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
 
-/-- Every call emitted at a live call site of `raw` binds to the method table or an import
-    slot, and no other instruction emits a call. An external site may instead emit a
-    non-call translation, which other validators check. -/
+/-- The emitted link table is the one the emitted code implies. Every call emitted at a live
+    call site of `raw` binds to the method table or an import slot, and no other instruction
+    emits a call. An external site may instead emit a non-call translation, which other
+    validators check. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
+  emitted.links = linksOfCode emitted.code ∧
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
   all3 (validateManagedCallWith methods.length (FlowIndex.ofList methods).get?
     (FlowIndex.ofList imports).get?) raw.code reachable emitted.code = true
@@ -709,6 +721,7 @@ def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportS
 theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
     (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
     ManagedCallsValid methods imports raw reachable emitted ↔
+      emitted.links = linksOfCode emitted.code ∧
       raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
         all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true := by
   have index {α : Type} (values : List α) :
@@ -724,14 +737,15 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
 instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) :
     Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
 
 /-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
     Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
 macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
   `(tactic| first
     | (apply (ManagedCallsValid_iff_original _ _ _ _ _).mpr
-       refine ⟨?_, ?_, ?_⟩
+       refine ⟨?_, ?_, ?_, ?_⟩
+       · decide +kernel
        · rfl
        · rfl
        · simp [all3, validateManagedCall, validateManagedCallWith, managedCallTarget,
@@ -746,10 +760,10 @@ theorem validated_managed_call {methods : List SpecializedMethod} {imports : Lis
     validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
       (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
   have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
-  have live : pc.val < reachable.length := valid.1 ▸ pc.isLt
-  have present : pc.val < emitted.code.length := valid.2.1 ▸ pc.isLt
+  have live : pc.val < reachable.length := valid.2.1 ▸ pc.isLt
+  have present : pc.val < emitted.code.length := valid.2.2.1 ▸ pc.isLt
   rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
-  exact all3_at valid.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
+  exact all3_at valid.2.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
     (List.getElem?_eq_getElem present)
 
 /-- An accepted live `call` past every extracted method is an external site calling a slot

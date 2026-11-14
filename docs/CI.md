@@ -9,7 +9,7 @@ the workflow, the selection scripts or a documentation marker.
 
 ## Jobs
 
-All jobs run on `ubuntu-24.04`. A newer run on the same ref cancels the one in progress. Uploaded
+All jobs run on `ubuntu-26.04`. A newer run on the same ref cancels the one in progress. Uploaded
 artifacts are kept for 14 days.
 
 | Job | Name | Limit | Does |
@@ -366,6 +366,11 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
   `.txt`, `.tsv` or `.csv` holds a byte below 0x20 other than tab, line feed and carriage return;
   the failure names the file, line and byte. A shell that expands a backtick escape writes such a
   byte into a docstring, and git then treats the file as binary.
+- No such file holds a character above ASCII that shows nothing, shows as a space or reorders the
+  text around it: a format character such as a zero-width space, a byte order mark or a
+  bidirectional override, a line or paragraph separator, a space other than U+0020, or a control
+  character. The failure names the file, line and code point. A diff does not show such a
+  character, so source spells it as an escape such as `\u200B`.
 
 ### Lean blocks
 

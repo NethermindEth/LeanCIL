@@ -192,23 +192,23 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
   [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.local,
-    ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.const32,
-    ``CIL.Instruction.const64, ``CIL.Instruction.branch, ``CIL.Instruction.skipInit,
+    ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.ldc_i4,
+    ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.skipInit,
     ``CIL.Instruction.initAggregate, ``CIL.Instruction.fieldAddress]
 
 /-- Instructions that read no reference: they compare or compute on scalars, or move a value
     that `loopReadsReferences` shows is a scalar. -/
 def loopScalarOnly : List Lean.Name :=
   [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.local,
-    ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.const32,
-    ``CIL.Instruction.const64, ``CIL.Instruction.branch, ``CIL.Instruction.nativeBinary,
+    ``CIL.Instruction.localAddr, ``CIL.Instruction.setLocal, ``CIL.Instruction.ldc_i4,
+    ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.nativeBinary,
     ``CIL.Instruction.divide, ``CIL.Instruction.checkedArithmetic,
-    ``CIL.Instruction.checkedConvert, ``CIL.Instruction.convU2, ``CIL.Instruction.bxor,
-    ``CIL.Instruction.pop, ``CIL.Instruction.gt, ``CIL.Instruction.bgt, ``CIL.Instruction.ble,
-    ``CIL.Instruction.bleu, ``CIL.Instruction.switch, ``CIL.Instruction.brzero,
-    ``CIL.Instruction.brnonzero, ``CIL.Instruction.bltu, ``CIL.Instruction.bgeu,
-    ``CIL.Instruction.bgtu, ``CIL.Instruction.bge, ``CIL.Instruction.blt,
-    ``CIL.Instruction.beq, ``CIL.Instruction.bne]
+    ``CIL.Instruction.checkedConvert, ``CIL.Instruction.conv_u2, ``CIL.Instruction.xor,
+    ``CIL.Instruction.pop, ``CIL.Instruction.cgt, ``CIL.Instruction.bgt, ``CIL.Instruction.ble,
+    ``CIL.Instruction.ble_un, ``CIL.Instruction.switch, ``CIL.Instruction.brfalse,
+    ``CIL.Instruction.brtrue, ``CIL.Instruction.blt_un, ``CIL.Instruction.bge_un,
+    ``CIL.Instruction.bgt_un, ``CIL.Instruction.bge, ``CIL.Instruction.blt,
+    ``CIL.Instruction.beq, ``CIL.Instruction.bne_un]
 
 open Lean Meta in
 /-- Whether the step obligation `step` of the fetched `op` can check a reference or span: any

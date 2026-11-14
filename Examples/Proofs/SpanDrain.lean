@@ -24,7 +24,7 @@ private def State (memory : Memory) :=
 
 -- The loop guard observes the current span length.
 bind_cutpoint header (memory : Memory) (state : State memory) := Extracted.method0
-  at loop.latch matching (· matches .brnonzero _)
+  at loop.latch matching (· matches .brtrue _)
   with entry.frame memory state.val, [.scalar (.i32 (BitVec.ofNat 32 state.val.length))], memory
 
 /-- Every valid readonly integer span is consumed without changing any caller memory. -/

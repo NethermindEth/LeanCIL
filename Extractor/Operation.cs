@@ -25,13 +25,19 @@ internal abstract record Operation
     /// <summary>This operation with every method index replaced by <paramref name="map"/> of it.</summary>
     internal virtual Operation Renumber(Func<int, int> map) => this;
 
+    /// <summary>
+    /// The Lean `Link` term the interpreter follows from this instruction, with each callee written as
+    /// <paramref name="calleeName"/> of it; null for an instruction that enters no method.
+    /// </summary>
+    internal virtual string? Link(Func<int, string> calleeName) => null;
+
     internal abstract string Render(Func<int, string> calleeName);
 }
 
 /// <summary>An instruction that only moves the evaluation stack or does scalar arithmetic.</summary>
 internal enum StackOpcode
 {
-    Nop, Pop, Dup, Add, Sub, Mul, Band, Bor, Bxor, Bnot, Neg, Shl, Shr, ShrUn, Eq, Lt, Gt, Ltu, Gtu,
+    Nop, Pop, Dup, Add, Sub, Mul, And, Or, Xor, Not, Neg, Shl, Shr, ShrUn, Ceq, Clt, Cgt, CltUn, CgtUn,
     ConvI1, ConvI2, ConvU2, ConvI4, ConvI8, ConvU, ConvU1, ConvU4, ConvU8, Load64, Store64, SkipInit
 }
 
@@ -39,13 +45,13 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
 {
     /// <summary>The operation is word addition, subtraction, multiplication or a bitwise combination.</summary>
     internal bool IsArithmetic => Kind is StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or
-        StackOpcode.Band or StackOpcode.Bor or StackOpcode.Bxor;
+        StackOpcode.And or StackOpcode.Or or StackOpcode.Xor;
 
     /// <summary>The infix operator that Lean's bit-vector arithmetic writes for an arithmetic operation.</summary>
     internal string Symbol => Kind switch
     {
-        StackOpcode.Add => "+", StackOpcode.Sub => "-", StackOpcode.Mul => "*", StackOpcode.Band => "&&&",
-        StackOpcode.Bor => "|||", StackOpcode.Bxor => "^^^",
+        StackOpcode.Add => "+", StackOpcode.Sub => "-", StackOpcode.Mul => "*", StackOpcode.And => "&&&",
+        StackOpcode.Or => "|||", StackOpcode.Xor => "^^^",
         _ => throw new InvalidOperationException("Not an arithmetic operation: " + Kind)
     };
 
@@ -57,28 +63,28 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
         StackOpcode.Add => ".add",
         StackOpcode.Sub => ".sub",
         StackOpcode.Mul => ".mul",
-        StackOpcode.Band => ".band",
-        StackOpcode.Bor => ".bor",
-        StackOpcode.Bxor => ".bxor",
-        StackOpcode.Bnot => ".bnot",
+        StackOpcode.And => ".and",
+        StackOpcode.Or => ".or",
+        StackOpcode.Xor => ".xor",
+        StackOpcode.Not => ".not",
         StackOpcode.Neg => ".neg",
         StackOpcode.Shl => ".shl",
         StackOpcode.Shr => ".shr",
-        StackOpcode.ShrUn => ".shrUn",
-        StackOpcode.Eq => ".eq",
-        StackOpcode.Lt => ".lt",
-        StackOpcode.Gt => ".gt",
-        StackOpcode.Ltu => ".ltu",
-        StackOpcode.Gtu => ".gtu",
-        StackOpcode.ConvI1 => ".convI1",
-        StackOpcode.ConvI2 => ".convI2",
-        StackOpcode.ConvU2 => ".convU2",
-        StackOpcode.ConvI4 => ".convI4",
-        StackOpcode.ConvI8 => ".convI8",
-        StackOpcode.ConvU => ".convU",
-        StackOpcode.ConvU1 => ".convU1",
-        StackOpcode.ConvU4 => ".convU4",
-        StackOpcode.ConvU8 => ".convU8",
+        StackOpcode.ShrUn => ".shr_un",
+        StackOpcode.Ceq => ".ceq",
+        StackOpcode.Clt => ".clt",
+        StackOpcode.Cgt => ".cgt",
+        StackOpcode.CltUn => ".clt_un",
+        StackOpcode.CgtUn => ".cgt_un",
+        StackOpcode.ConvI1 => ".conv_i1",
+        StackOpcode.ConvI2 => ".conv_i2",
+        StackOpcode.ConvU2 => ".conv_u2",
+        StackOpcode.ConvI4 => ".conv_i4",
+        StackOpcode.ConvI8 => ".conv_i8",
+        StackOpcode.ConvU => ".conv_u",
+        StackOpcode.ConvU1 => ".conv_u1",
+        StackOpcode.ConvU4 => ".conv_u4",
+        StackOpcode.ConvU8 => ".conv_u8",
         StackOpcode.Load64 => ".load64",
         StackOpcode.Store64 => ".store64",
         StackOpcode.SkipInit => ".skipInit",
@@ -122,11 +128,11 @@ internal sealed record Jump(JumpKind Kind, int Target) : Operation
 
     string Name => Kind switch
     {
-        JumpKind.Always => ".branch", JumpKind.IfZero => ".brzero", JumpKind.IfNonzero => ".brnonzero",
-        JumpKind.Equal => ".beq", JumpKind.NotEqual => ".bne", JumpKind.Less => ".blt",
+        JumpKind.Always => ".br", JumpKind.IfZero => ".brfalse", JumpKind.IfNonzero => ".brtrue",
+        JumpKind.Equal => ".beq", JumpKind.NotEqual => ".bne_un", JumpKind.Less => ".blt",
         JumpKind.LessOrEqual => ".ble", JumpKind.Greater => ".bgt", JumpKind.GreaterOrEqual => ".bge",
-        JumpKind.LessUnsigned => ".bltu", JumpKind.LessOrEqualUnsigned => ".bleu",
-        JumpKind.GreaterUnsigned => ".bgtu", JumpKind.GreaterOrEqualUnsigned => ".bgeu",
+        JumpKind.LessUnsigned => ".blt_un", JumpKind.LessOrEqualUnsigned => ".ble_un",
+        JumpKind.GreaterUnsigned => ".bgt_un", JumpKind.GreaterOrEqualUnsigned => ".bge_un",
         _ => throw new ArgumentOutOfRangeException(nameof(Kind))
     };
 }
@@ -221,8 +227,16 @@ internal sealed record Constant : Operation
     static ArgumentOutOfRangeException NegativeNumeral(string name) =>
         new(name, "A numeral constant is not negative.");
 
+    /// <summary>The Lean constructor name, without its dot: `ldc_i4` for 32 bits and `ldc_i8` for 64.</summary>
+    string Mnemonic => Width switch
+    {
+        32 => "ldc_i4",
+        64 => "ldc_i8",
+        _ => throw new InvalidOperationException($"No integer constant instruction has width {Width}.")
+    };
+
     internal override string Render(Func<int, string> calleeName) => Numeral
-        ? $".const{Width} {Value}" : $".const{Width} (BitVec.ofInt {Width} ({Value}))";
+        ? $".{Mnemonic} {Value}" : $".{Mnemonic} (BitVec.ofInt {Width} ({Value}))";
 }
 
 internal enum CallKind { Static, Instance, Tail }
@@ -233,6 +247,8 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operatio
     internal override IEnumerable<int> Methods => [Method];
 
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
+
+    internal override string? Link(Func<int, string> calleeName) => $".direct {calleeName(Method)}";
 
     internal override string Render(Func<int, string> calleeName) => $"{Name} {calleeName(Method)} {Arguments}";
 
@@ -249,6 +265,8 @@ internal sealed record NewAggregate(int Method, int Arguments, int Size) : Opera
 
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
 
+    internal override string? Link(Func<int, string> calleeName) => $".aggregate {calleeName(Method)} {Size}";
+
     internal override string Render(Func<int, string> calleeName) =>
         $".newAggregate {calleeName(Method)} {Arguments} {Size}";
 }
@@ -260,6 +278,9 @@ internal sealed record NewObject(int Method, int Arguments, string Type, ValueLi
     internal override IEnumerable<int> Methods => [Method];
 
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
+
+    internal override string? Link(Func<int, string> calleeName) =>
+        $".object {calleeName(Method)} {LeanText.ClassList(Bases)} {Size}";
 
     internal override string Render(Func<int, string> calleeName) =>
         $".newObject {calleeName(Method)} {Arguments} ({Type}) {LeanText.ClassList(Bases)} {Size}";
@@ -273,11 +294,13 @@ internal sealed record CallVirtual(ValueList<(string Class, int Method)> Targets
     internal override Operation Renumber(Func<int, int> map) =>
         this with { Targets = [.. Targets.Select(target => (target.Class, map(target.Method)))] };
 
-    internal override string Render(Func<int, string> calleeName)
-    {
-        var targets = Targets.Select(target => $"({target.Class}, {calleeName(target.Method)})");
-        return $".callVirtual [{string.Join(", ", targets)}] {Arguments}";
-    }
+    internal override string? Link(Func<int, string> calleeName) => $".virtual {Table(calleeName)}";
+
+    internal override string Render(Func<int, string> calleeName) =>
+        $".callVirtual {Table(calleeName)} {Arguments}";
+
+    string Table(Func<int, string> calleeName) => "[" + string.Join(", ",
+        Targets.Select(target => $"({target.Class}, {calleeName(target.Method)})")) + "]";
 }
 
 /// <summary>A boolean read of a runtime feature of the selected profile.</summary>
@@ -462,11 +485,13 @@ internal sealed record IndirectCall(string Signature, ValueList<ManagedTarget> C
     internal override Operation Renumber(Func<int, int> map) =>
         this with { Catalog = [.. Catalog.Select(target => target with { Method = map(target.Method) })] };
 
-    protected override string Body(Func<int, string> calleeName)
-    {
-        var targets = string.Join(", ", Catalog.Select(target => target.Lean(calleeName)));
-        return $"(.call {Signature} [{targets}] {LeanText.Bool(Tail)})";
-    }
+    internal override string? Link(Func<int, string> calleeName) => $".indirect {Targets(calleeName)}";
+
+    protected override string Body(Func<int, string> calleeName) =>
+        $"(.call {Signature} {Targets(calleeName)} {LeanText.Bool(Tail)})";
+
+    string Targets(Func<int, string> calleeName) =>
+        "[" + string.Join(", ", Catalog.Select(target => target.Lean(calleeName))) + "]";
 }
 
 /// <summary>The address of the managed method <paramref name="Target"/> of the given signature.</summary>

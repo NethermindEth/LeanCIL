@@ -27,8 +27,8 @@ string[] Ops(string source, int method) => ExtractedInstructions(source)
 
 // A fold is exactly four emitted no-ops followed by the decided word.
 List<(int Pc, string Word)> Folds(string[] ops) => Enumerable.Range(4, Math.Max(0, ops.Length - 4))
-    .Where(pc => ops[(pc - 4)..pc].All(op => op == ".nop") && ops[pc].StartsWith(".const32 ", StringComparison.Ordinal))
-    .Select(pc => (pc, ops[pc][".const32 ".Length..])).ToList();
+    .Where(pc => ops[(pc - 4)..pc].All(op => op == ".nop") && ops[pc].StartsWith(".ldc_i4 ", StringComparison.Ordinal))
+    .Select(pc => (pc, ops[pc][".ldc_i4 ".Length..])).ToList();
 
 void QueueRuntime(string name, string folder)
 {
@@ -56,8 +56,8 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
     var folds = Folds(ops);
     if (!folds.Select(fold => fold.Word).SequenceEqual(expected) ||
         !ops.Any(op => op.StartsWith(".unsupported", StringComparison.Ordinal)) ||
-        ops.Where((op, pc) => folds.All(fold => fold.Pc != pc)).Count(op => op.StartsWith(".const32", StringComparison.Ordinal)) != 1 ||
-        !ops.Contains($".const32 {offset}"))
+        ops.Where((op, pc) => folds.All(fold => fold.Pc != pc)).Count(op => op.StartsWith(".ldc_i4", StringComparison.Ordinal)) != 1 ||
+        !ops.Contains($".ldc_i4 {offset}"))
         throw new InvalidOperationException($"Unexpected folded body for {name}: {string.Join(" | ", ops)}");
     Console.WriteLine($"PASS {name}: folded {string.Join(", ", expected)}, dead branches pruned and certificate checked");
 
@@ -67,11 +67,11 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
     var pc = folds[0].Pc;
     var lines = source.Split('\n');
     var start = Array.FindIndex(lines, line => line.StartsWith("def method1 : Method :=", StringComparison.Ordinal));
-    var forged = expected[0] == "1" ? ".const32 0" : ".const32 1";
+    var forged = expected[0] == "1" ? ".ldc_i4 0" : ".ldc_i4 1";
     var site = start + 1 + pc;
-    if (lines[site].Trim().TrimEnd(',') != $".const32 {expected[0]}")
+    if (lines[site].Trim().TrimEnd(',') != $".ldc_i4 {expected[0]}")
         throw new InvalidOperationException("Could not locate the folded site in " + name);
-    lines[site] = lines[site].Replace($".const32 {expected[0]}", forged);
+    lines[site] = lines[site].Replace($".ldc_i4 {expected[0]}", forged);
     var mutated = Path.Combine(root, name + "-forged.lean");
     const string obligation = "method1_features_validated";
     var control = Path.Combine(root, name + "-control.lean");
@@ -91,7 +91,7 @@ if (referenceOps.Any(ops => ops.Length == 0) ||
     !referenceOps.SelectMany(ops => Folds(ops).Select(fold => fold.Word)).Order().SequenceEqual(["0", "0", "1"]) ||
     referenceOps.Sum(ops => Enumerable.Range(4, ops.Length - 4).Count(pc =>
         ops[(pc - 4)..pc].All(op => op == ".nop") &&
-        ops[pc].StartsWith(".branch ", StringComparison.Ordinal))) != 3)
+        ops[pc].StartsWith(".br ", StringComparison.Ordinal))) != 3)
     throw new InvalidOperationException("Missing exact typeof result or branch folds");
 QueueRuntime("ReferenceCases", referenceFolder);
 queue.Flush();

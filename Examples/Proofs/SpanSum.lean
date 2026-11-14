@@ -28,7 +28,7 @@ private abbrev State (memory : Memory) (home : Reference) :=
 
 -- The loop guard observes the remaining span length.
 bind_cutpoint header (memory : Memory) (home : Reference) (state : State memory home) :=
-  Extracted.method0 at loop.latch matching (· matches .brnonzero _)
+  Extracted.method0 at loop.latch matching (· matches .brtrue _)
   with entry.frame memory state.values.1.view home,
     [.scalar (.i32 (BitVec.ofNat 32 state.values.1.view.length))], state.memory
 

@@ -37,6 +37,9 @@ name = "Tests.BodyDecoding"
 name = "Tests.LiteralDisplay"
 
 [[lean_lib]]
+name = "Tests.Identity"
+
+[[lean_lib]]
 name = "Tests.Automation"
 
 [[lean_lib]]

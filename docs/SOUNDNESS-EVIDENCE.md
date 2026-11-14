@@ -18,6 +18,9 @@ cannot substitute for it.
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
 | Managed/imported calls | Target slot, scoped identity, full signature, argument count, receiver and result | An import slot does not prove its implementation contract |
+| Call links | The emitted link table is the one the emitted instructions imply, entry by entry | The interpreter does not read the link table, so a link adds no behavioral claim beyond its instruction |
+| Declared signature | The method's receiver kind, parameter types and return type equal those of its closed raw method | Faithful raw metadata |
+| Environment | Every method's environment is the program's raw and computed layout tables, which `LayoutsValid` recomputes | Layout correspondence, as for Layouts |
 | Constrained calls | Resolve serialized interface/override declarations to the emitted closed direct target | Complete metadata serialization; no general vtable/boxing model |
 | Static values | Checked execution yields emitted bytes without circular reads of the values being justified; unknown values have no initializer and are read only from the caller's binding | Initializer recognition and deployment initialization/immutability |
 

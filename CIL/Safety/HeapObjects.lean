@@ -7,7 +7,7 @@ Class instances on the checked heap. An object reference is null or offset 0 of 
 allocation whose kind records the object's runtime type (`formObject`). It carries no byte
 position, so code can neither observe nor forge one, and since allocation identities are never
 reused, reference equality compares identities alone. `CIL/Safety/Execution.lean` uses these
-observations for `ceq`, `beq`, `bne`, `brtrue`, `brfalse` and `cgt.un` against null, and
+observations for `ceq`, `beq`, `bne.un`, `brtrue`, `brfalse` and `cgt.un` against null, and
 `allocateObject` for `newobj`, which charges each instance to `Memory.heapBudget`.
 -/
 

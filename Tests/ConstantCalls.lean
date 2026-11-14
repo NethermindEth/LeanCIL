@@ -55,7 +55,7 @@ private def andBody := raw [i 40 (.call slot), i 44 (.target 4), i 40 (.call slo
 private def andStates : FeatureCertificate :=
   [state [], state [some 1], state [], state [some 1], none, none]
 private def andCode : List Instruction :=
-  [.call 1 0, .brzero 4, .call 1 0, .ret none, .unsupported "pruned", .unsupported "pruned"]
+  [.call 1 0, .brfalse 4, .call 1 0, .ret none, .unsupported "pruned", .unsupported "pruned"]
 
 /-- Bodies that never fold: a static read, an `Int32` constant, a parameterized constant, two
     `ret`s with different words, a `ret`-free body, and a Boolean slot returning 2. -/
@@ -82,14 +82,14 @@ private def callerOff : FeatureCertificate :=
   [state [], state [some 0], none, none, state [], state [some 1]]
 
 private def callerOffCode (index : Nat) : List Instruction :=
-  [.call index 0, .brzero 4, .unsupported "pruned", .unsupported "pruned", .const32 1, .ret none]
+  [.call index 0, .brfalse 4, .unsupported "pruned", .unsupported "pruned", .ldc_i4 1, .ret none]
 
 /-- The certificate that prunes the block a false flag would run. -/
 private def callerOn : FeatureCertificate :=
   [state [], state [some 1], state [], state [some 7], none, none]
 
 private def callerOnCode (index : Nat) : List Instruction :=
-  [.call index 0, .brzero 4, .const32 7, .ret none, .unsupported "pruned", .unsupported "pruned"]
+  [.call index 0, .brfalse 4, .ldc_i4 7, .ret none, .unsupported "pruned", .unsupported "pruned"]
 
 /-- The table reads the off, on and computed getters, and nothing else, including any index past
     the program, where a contract import would be. -/
@@ -144,9 +144,9 @@ theorem forged_constant_rejected :
     FeatureFlowValid #[] (evidenceConstants forged) caller .scalar callerOn
       (callerOn.map Option.isSome) (callerOnCode 0) ∧
     ¬ FeatureFlowValid #[] (evidenceConstants forged) offBody .scalar onStates
-      (onStates.map Option.isSome) [.const32 1, .ret none] ∧
+      (onStates.map Option.isSome) [.ldc_i4 1, .ret none] ∧
     ¬ FeatureFlowValid #[] (evidenceConstants forged) offBody .scalar onStates
-      (onStates.map Option.isSome) [.const32 0, .ret none] := by decide
+      (onStates.map Option.isSome) [.ldc_i4 0, .ret none] := by decide
 
 #print axioms forged_constant_rejected
 
@@ -164,7 +164,7 @@ theorem constant_unknown_keeps_both :
     FeatureFlowValid #[] (evidenceConstants program) caller .scalar
       [state [], state [none], state [], state [some 7], state [], state [some 1]]
       (List.replicate 6 true)
-      [.call 3 0, .brzero 4, .const32 7, .ret none, .const32 1, .ret none] := by decide
+      [.call 3 0, .brfalse 4, .ldc_i4 7, .ret none, .ldc_i4 1, .ret none] := by decide
 
 #print axioms constant_unknown_keeps_both
 

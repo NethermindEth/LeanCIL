@@ -37,7 +37,7 @@ private abbrev State (remaining counted : Reference) :=
 
 /-- The loop test, with the remaining count on the stack. -/
 bind_cutpoint header (remaining counted : Reference) (state : State remaining counted) :=
-  countBody at loop.latch matching (· matches .brnonzero _)
+  countBody at loop.latch matching (· matches .brtrue _)
   with entry.frame remaining counted, [.scalar (.i32 state.values.1)], state.memory
 
 /-- `count + remaining` is the input. -/
