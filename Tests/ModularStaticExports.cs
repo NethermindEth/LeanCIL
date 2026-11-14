@@ -9,6 +9,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../Extractor/StaticIdentity.cs
 #:include ImportReviewRegressions.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using System.Text.Json;
