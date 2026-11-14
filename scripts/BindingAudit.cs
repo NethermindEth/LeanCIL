@@ -781,7 +781,8 @@ partial class Program
     {
         var lines = output.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0).ToArray();
         var first = Math.Max(0,
-            Array.FindIndex(lines, line => line.Contains("error", StringComparison.OrdinalIgnoreCase)));
+            Array.FindIndex(lines, line => line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+                line.Contains("while replaying declaration", StringComparison.Ordinal)));
         var text = string.Join(" ", lines.Skip(first).Take(3));
         return text.Length > 300 ? text[..300] + "..." : text;
     }
