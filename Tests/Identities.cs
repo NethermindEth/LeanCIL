@@ -19,6 +19,16 @@ using Srm = System.Reflection.Metadata;
 // Every identity of the corpus is rendered with ToLean(), elaborated by Lean, and shown by CIL/Identity.lean's
 // display; that text must equal ToDisplay(). Each record is first checked against the raw metadata rows it reads.
 var clock = Stopwatch.StartNew();
+if (args.Contains("--assembly-cache-only", StringComparer.Ordinal))
+{
+    CheckAssemblyCache();
+    return;
+}
+if (args.Contains("--heap-bounds-only", StringComparer.Ordinal))
+{
+    CheckHeapBounds();
+    return;
+}
 if (args.Contains("--raw-names-only", StringComparer.Ordinal))
 {
     CheckRawNames(At("artifacts/Identities/Unusual.dll"));
@@ -32,6 +42,8 @@ if (args.Contains("--code-cost", StringComparer.Ordinal))
 CheckScaling();
 CheckCodeCost();
 if (args.Contains("--scaling-only", StringComparer.Ordinal)) return;
+CheckHeapBounds();
+CheckAssemblyCache();
 var directory = At("artifacts/Identities");
 Directory.CreateDirectory(directory);
 var examplesPath = At("Examples/Assembly/bin/Examples.dll");
@@ -430,6 +442,139 @@ static void CheckEquality(string path, ReaderParameters parameters, IdentityCorp
     if (!types.All(first.Contains) || again.GetTypes().Count() != types.Count)
         throw new InvalidOperationException("A second reading of Examples.dll gives other type identities");
     Console.WriteLine($"PASS {types.Count} type identities of a second reading equal the first");
+}
+
+static void CheckAssemblyCache()
+{
+    byte[] Create(int keyBytes, string name)
+    {
+        using var assembly = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition(name, new Version(1, 0)), name, ModuleKind.Dll);
+        foreach (string referenceName in new[] { "First", "Second" })
+            assembly.MainModule.AssemblyReferences.Add(new AssemblyNameReference(referenceName, new Version(1, 0))
+                { PublicKey = new byte[keyBytes] });
+        assembly.MainModule.AssemblyReferences.Add(new AssemblyNameReference("Invalid", new Version(1, 0))
+            { PublicKeyToken = [1, 2, 3] });
+        using var stream = new MemoryStream();
+        assembly.Write(stream);
+        return stream.ToArray();
+    }
+
+    foreach (int keyBytes in new[] { 4096, 32768, 262144 })
+    {
+        byte[] bytes = Create(keyBytes, "Cache");
+        using var pe = new PEReader(new MemoryStream(bytes));
+        using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes));
+        var image = new MetadataImage(pe);
+        var references = module.AssemblyReferences;
+        var rawReference = image.Reader.GetAssemblyReference(MetadataTokens.AssemblyReferenceHandle(1));
+        if ((rawReference.Flags & System.Reflection.AssemblyFlags.PublicKey) == 0 ||
+            image.Reader.GetBlobBytes(rawReference.PublicKeyOrToken).Length != keyBytes)
+            throw new InvalidOperationException("Fixture did not preserve its full public key");
+        var first = AssemblyName.Of(references[0], image);
+        var second = AssemblyName.Of(references[1], image);
+        if (first is null || second is null || first == second)
+            throw new InvalidOperationException("Distinct assembly rows aliased");
+        if (AssemblyName.Of(references[2], image) is not null)
+            throw new InvalidOperationException("Invalid token was admitted");
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var watch = Stopwatch.StartNew();
+        for (int repeat = 0; repeat < 4096; repeat++)
+        {
+            if (!ReferenceEquals(first, AssemblyName.Of(references[0], image)) ||
+                !ReferenceEquals(second, AssemblyName.Of(references[1], image)) ||
+                AssemblyName.Of(references[2], image) is not null)
+                throw new InvalidOperationException("Assembly row result was not retained by its image");
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        if (allocated > 4096)
+            throw new InvalidOperationException($"Repeated assembly rows allocated {allocated} bytes");
+        Console.WriteLine($"PASS assembly key {keyBytes} bytes: 12288 lookups, {allocated} bytes, " +
+            $"{watch.Elapsed.TotalMilliseconds:F3} ms");
+        byte[] otherBytes = Create(keyBytes, "Other");
+        using var otherPe = new PEReader(new MemoryStream(otherBytes));
+        using var otherModule = ModuleDefinition.ReadModule(new MemoryStream(otherBytes));
+        var otherImage = new MetadataImage(otherPe);
+        if (AssemblyName.Of(module.Assembly.Name, image) == AssemblyName.Of(otherModule.Assembly.Name, otherImage) ||
+            ReferenceEquals(first, AssemblyName.Of(otherModule.AssemblyReferences[0], otherImage)))
+            throw new InvalidOperationException("Distinct metadata images shared a cached assembly row");
+    }
+}
+
+static void CheckHeapBounds()
+{
+    using var assembly = AssemblyDefinition.CreateAssembly(
+        new AssemblyNameDefinition("HeapBounds", new Version(1, 0)) { PublicKey = new byte[32768] },
+        "HeapBounds", ModuleKind.Dll);
+    var module = assembly.MainModule;
+    var holder = new TypeDefinition("", "Holder", TypeAttributes.Public);
+    module.Types.Add(holder);
+    var method = new MethodDefinition("Literal", MethodAttributes.Public | MethodAttributes.Static,
+        module.TypeSystem.Void);
+    holder.Methods.Add(method);
+    method.Body.Instructions.Add(Instruction.Create(OpCodes.Ldstr, new string('x', 32768)));
+    method.Body.Instructions.Add(Instruction.Create(OpCodes.Pop));
+    method.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+    using var stream = new MemoryStream();
+    assembly.Write(stream);
+    byte[] original = stream.ToArray();
+    using var pe = new PEReader(new MemoryStream(original));
+    var metadata = new MetadataImage(pe);
+
+    void Reject(Action action, string label)
+    {
+        try { action(); }
+        catch (BadImageFormatException) { return; }
+        throw new InvalidOperationException($"Accepted invalid heap entry: {label}");
+    }
+
+    void Check(HeapIndex heap, byte[] entry, bool valid)
+    {
+        int size = metadata.Reader.GetHeapSize(heap);
+        int offset = size - entry.Length;
+        if (heap == HeapIndex.String && !valid)
+        {
+            // SRM excludes trailing zero padding from the string heap's reported size.
+            int physicalEnd = metadata.Reader.GetHeapMetadataOffset(HeapIndex.UserString) -
+                metadata.Reader.GetHeapMetadataOffset(heap);
+            entry = Enumerable.Repeat((byte)0xFF, physicalEnd - offset).ToArray();
+        }
+        byte[] changed = (byte[])original.Clone();
+        int start = pe.PEHeaders.MetadataStartOffset + metadata.Reader.GetHeapMetadataOffset(heap) + offset;
+        entry.CopyTo(changed, start);
+        using var changedPe = new PEReader(new MemoryStream(changed));
+        var changedMetadata = new MetadataImage(changedPe);
+        byte[] Read() => heap == HeapIndex.String
+            ? changedMetadata.StringEntry(offset) : changedMetadata.SizedEntry(heap, offset);
+        if (valid)
+        {
+            if (!Read().AsSpan().SequenceEqual(entry))
+                throw new InvalidOperationException($"Changed exact heap bytes: {heap}/{entry.Length}");
+        }
+        else Reject(() => Read(), $"{heap}/{Convert.ToHexString(entry)}");
+    }
+
+    Check(HeapIndex.String, [0], true);
+    Check(HeapIndex.String, [0xFF], false);
+    Reject(() => metadata.StringEntry(-1), "negative string offset");
+    Reject(() => metadata.StringEntry(metadata.Reader.GetHeapSize(HeapIndex.String)), "string heap end");
+    foreach (var heap in new[] { HeapIndex.Blob, HeapIndex.UserString })
+    {
+        Reject(() => metadata.SizedEntry(heap, -1), "negative sized offset");
+        Reject(() => metadata.SizedEntry(heap, metadata.Reader.GetHeapSize(heap)), "sized heap end");
+        foreach (byte[] entry in new byte[][]
+            { [0x80], [0xC0], [0xC0, 0], [0xC0, 0, 0], [1], [0x80, 1], [0xC0, 0, 0, 1], [0xE0], [0xFF] })
+            Check(heap, entry, false);
+        foreach (int length in new[] { 0, 1, 127, 128, 16383, 16384 })
+        {
+            byte[] header = length < 128 ? [(byte)length] : length < 16384
+                ? [(byte)(0x80 | (length >> 8)), (byte)length]
+                : [(byte)(0xC0 | (length >> 24)), (byte)(length >> 16), (byte)(length >> 8), (byte)length];
+            Check(heap, [.. header, .. new byte[length]], true);
+        }
+    }
+    Reject(() => metadata.SizedEntry(HeapIndex.String, 0), "wrong sized heap");
+    Console.WriteLine("PASS exact heap boundaries, malformed entries, and 1/2/4-byte lengths");
 }
 
 // The rows of an assembly hold what no example does: a culture, a zero token, names whose display falls back

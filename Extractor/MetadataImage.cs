@@ -22,6 +22,17 @@ internal sealed class MetadataImage
 
     internal MetadataReader Reader { get; }
 
+    readonly Dictionary<uint, AssemblyName?> assemblyIdentities = [];
+
+    /// <summary>The immutable identity of an assembly row in this image, including invalid null results.</summary>
+    internal AssemblyName? AssemblyIdentity(uint token)
+    {
+        if (assemblyIdentities.TryGetValue(token, out var identity)) return identity;
+        identity = AssemblyName.Read(this, token);
+        assemblyIdentities.Add(token, identity);
+        return identity;
+    }
+
     internal int Count(int table) => Reader.GetTableRowCount((TableIndex)table);
 
     Dictionary<int, uint>? nesting;
@@ -69,23 +80,39 @@ internal sealed class MetadataImage
     /// <summary>A <c>#Strings</c> entry through its terminating zero.</summary>
     internal byte[] StringEntry(int offset)
     {
+        var size = Reader.GetHeapSize(HeapIndex.String);
+        if ((uint)offset >= (uint)size) throw new BadImageFormatException("String offset outside its heap");
         var start = Reader.GetHeapMetadataOffset(HeapIndex.String) + offset;
-        var end = start;
-        while (bytes[end] != 0) end++;
-        return bytes.AsSpan(start, end - start + 1).ToArray();
+        var length = bytes.AsSpan(start, size - offset).IndexOf((byte)0);
+        if (length < 0) throw new BadImageFormatException("String entry without a terminator in its heap");
+        return bytes.AsSpan(start, length + 1).ToArray();
     }
 
     /// <summary>A <c>#Blob</c> or <c>#US</c> entry with its compressed length.</summary>
     internal byte[] SizedEntry(HeapIndex heap, int offset)
     {
+        if (heap is not (HeapIndex.Blob or HeapIndex.UserString))
+            throw new BadImageFormatException("Sized entry requires a blob or user-string heap");
+        var size = Reader.GetHeapSize(heap);
+        if ((uint)offset >= (uint)size) throw new BadImageFormatException("Sized offset outside its heap");
         var start = Reader.GetHeapMetadataOffset(heap) + offset;
         var first = bytes[start];
-        var (header, length) = first switch
+        var header = first switch
         {
-            < 0x80 => (1, (int)first),
-            < 0xC0 => (2, ((first & 0x3F) << 8) | bytes[start + 1]),
-            _ => (4, ((first & 0x1F) << 24) | (bytes[start + 1] << 16) | (bytes[start + 2] << 8) | bytes[start + 3])
+            < 0x80 => 1,
+            < 0xC0 => 2,
+            < 0xE0 => 4,
+            _ => throw new BadImageFormatException("Invalid compressed length prefix")
         };
+        var remaining = size - offset;
+        if (header > remaining) throw new BadImageFormatException("Compressed length crosses its heap boundary");
+        var length = header switch
+        {
+            1 => first,
+            2 => ((first & 0x3F) << 8) | bytes[start + 1],
+            _ => ((first & 0x1F) << 24) | (bytes[start + 1] << 16) | (bytes[start + 2] << 8) | bytes[start + 3]
+        };
+        if (length > remaining - header) throw new BadImageFormatException("Sized entry crosses its heap boundary");
         return bytes.AsSpan(start, header + length).ToArray();
     }
 

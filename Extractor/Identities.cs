@@ -170,16 +170,25 @@ internal sealed record AssemblyName(MetadataName Name, AssemblyVersion Version, 
     /// <summary>The identity of an assembly row, preserving the exact name and culture heap bytes.</summary>
     internal static AssemblyName? Of(AssemblyNameReference row, MetadataImage image)
     {
+        if (row is AssemblyNameDefinition) return image.AssemblyIdentity(0x20000001);
+        if (row.MetadataToken.TokenType != TokenType.AssemblyRef || row.MetadataToken.RID == 0)
+            throw new InvalidDataException("Assembly reference without an image row");
+        return image.AssemblyIdentity(row.MetadataToken.ToUInt32());
+    }
+
+    /// <summary>The exact assembly columns of a definition or reference row in its owning image.</summary>
+    internal static AssemblyName? Read(MetadataImage image, uint token)
+    {
         var reader = image.Reader;
-        if (row is AssemblyNameDefinition)
+        if (token == 0x20000001)
         {
             var definition = reader.GetAssemblyDefinition();
             return FromRow(definition.Name, definition.Version, definition.Culture, definition.PublicKey,
                 (definition.Flags & System.Reflection.AssemblyFlags.PublicKey) != 0);
         }
-        if (row.MetadataToken.TokenType != TokenType.AssemblyRef || row.MetadataToken.RID == 0)
+        if ((token >> 24) != 0x23 || (token & 0xFFFFFF) == 0)
             throw new InvalidDataException("Assembly reference without an image row");
-        var handle = MetadataTokens.AssemblyReferenceHandle((int)row.MetadataToken.RID);
+        var handle = MetadataTokens.AssemblyReferenceHandle((int)(token & 0xFFFFFF));
         var reference = reader.GetAssemblyReference(handle);
         return FromRow(reference.Name, reference.Version, reference.Culture, reference.PublicKeyOrToken,
             (reference.Flags & System.Reflection.AssemblyFlags.PublicKey) != 0);

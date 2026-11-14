@@ -145,8 +145,8 @@ internal static class RuntimeModels
                  "CopyTo" or "TryCopyTo" or "get_IsEmpty" or "GetPinnableReference")) ||
             (reference.Name == ".ctor" && !reference.HasThis)) return null;
         string scope = reference.DeclaringType.Scope.Name;
-        if (PlatformAssemblies.Claimed(
-                AssemblyName.OfScope(reference.DeclaringType, IdentityImage(reference.DeclaringType))) is { } platform &&
+        if (PlatformAssemblies.Claimed(AssemblyName.OfScope(
+                reference.DeclaringType, IdentityImage(reference.DeclaringType))) is { } platform &&
             !ExactScope(reference.DeclaringType, platform))
             throw new InvalidDataException(
                 $"Unsupported runtime assembly scope: {reference.FullName} [{reference.DeclaringType.Scope}]");
