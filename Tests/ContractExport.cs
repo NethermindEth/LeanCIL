@@ -285,7 +285,7 @@ completed.CompleteCase("core.publication");
 CallerVerify();
 JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")));
 if (initialCaller.GetProperty("schema").GetInt32() != 5)
-    throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
+    throw new InvalidOperationException("Imported contract verification did not produce the schema-5 trust report.");
 completed.CompleteCase("core.caller");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
 
