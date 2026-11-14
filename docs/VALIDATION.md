@@ -186,13 +186,14 @@ lemma body by `cil_checked_steps` with a universe-polymorphic lemma among its fa
 bodies store a reference into each of eight locals of a literal frame per cycle. The depth bodies
 push 8, 32 and 128 values and add them all. The hypotheses bodies are 62-instruction accumulate,
 contract and loop bodies proved with 16, 64 and 256 hypotheses in scope, and a contract body with
-as many instruction-lookup equations in scope. The snapshot bodies store
-into eight numeric locals and then update one local per store from its remembered value, with 10,
-20, 40 and 80 stores, proved by `cil_contract_steps (snapshots := ..)` with caller memory facts in
-the context; the value a store writes grows with the number of updates to its local, so the cost
-per instruction rises slowly with the stores. The suite uses the proof-cost measuring frontend,
-with three sequential proof compilations and a header-only baseline per scalar, memory, accumulate
-and locals body up to 256 instructions, and one compilation for every other body.
+as many instruction-lookup equations in scope. The snapshot bodies store into eight numeric locals
+and then update one local per store from its remembered value, with 10, 20, 40 and 80 stores,
+proved by `cil_contract_steps (snapshots := ..)` with caller memory facts in the context. Each
+store clears the facts it supersedes, so the hypotheses in scope stay level, while the value a
+store writes grows with the number of updates to its local; the cost per instruction rises slowly
+with the stores. The suite uses the proof-cost measuring frontend, with three sequential proof
+compilations and a header-only baseline per scalar, memory, accumulate and locals body up to 256
+instructions, and one compilation for every other body.
 
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. For the bodies with three compilations, compiled proof bytes per instruction may

@@ -425,6 +425,7 @@ private def introWitness (scope : SnapshotScope) (located witness : Ident)
   withMainContext do
     if let some source := (← getLCtx).findFromUserName? located.getId then
       scope.superseded.modify (·.push source.fvarId)
+
 /-- Close a home's kind lookup `kinds[index]? = some _` with a supplied fact that states it, or
     that states the numeric spec at that index. -/
 syntax "cil_snapshot_kind" "[" term,* "]" : tactic

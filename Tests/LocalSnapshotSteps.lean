@@ -727,9 +727,16 @@ theorem entry_facts_stay (memory : Memory) (slots : List LocalSlot) (boundary : 
           `localFormed_1, `localBelow_1, `localAccess_1, `localWrite_1] do
         unless ((← getLCtx).findFromUserName? name).isSome do
           throwError "a store's own hypothesis {name} is missing"
+      -- The evidence a store unpacks into its named hypotheses is cleared with it.
+      for declaration in ← getLCtx do
+        let base := declaration.userName.eraseMacroScopes
+        if [`snapshotLocated, `snapshotStored, `snapshotRest].contains base then
+          throwError "a store's unpacked evidence {declaration.userName} is still in scope"
   -- The entry memory's facts are still there for a proof that states them.
   have _ : ValidCall memory inputs outputs := by assumption
   have _ : CompleteWritableHomes memory boundary twoStores.localKinds slots := by assumption
+  have _ : MemoryBelow boundary memory memory := by assumption
+  have _ : AccessBelow memory.nextIdentity memory memory := by assumption
   trivial
 
 #print axioms entry_facts_stay
