@@ -993,6 +993,31 @@ partial class Program : IDisposable
     static bool Same(SortedDictionary<string, string> left, SortedDictionary<string, string> right) =>
         left.Count == right.Count && left.All(p => right.TryGetValue(p.Key, out var value) && value == p.Value);
 
+    /// <summary>
+    /// Names the first file present on one side only, or the first file whose bytes differ and the offset of the first
+    /// differing byte, between two directory trees; null when every file matches.
+    /// </summary>
+    static string? FirstDifference(string left, string right)
+    {
+        string[] Files(string root) => [.. Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+            .Select(path => Path.GetRelativePath(root, path)).Order(StringComparer.Ordinal)];
+        var (leftFiles, rightFiles) = (Files(left), Files(right));
+        foreach (var name in leftFiles.Except(rightFiles, StringComparer.Ordinal).Take(1))
+            return $"{name} exists only in {left}";
+        foreach (var name in rightFiles.Except(leftFiles, StringComparer.Ordinal).Take(1))
+            return $"{name} exists only in {right}";
+        foreach (var name in leftFiles)
+        {
+            var (leftBytes, rightBytes) = (File.ReadAllBytes(Path.Combine(left, name)),
+                File.ReadAllBytes(Path.Combine(right, name)));
+            var offset = leftBytes.AsSpan().CommonPrefixLength(rightBytes);
+            if (offset != leftBytes.Length || offset != rightBytes.Length)
+                return $"{name} differs at byte {offset} ({leftBytes.Length} and {rightBytes.Length} bytes) " +
+                    $"between {left} and {right}";
+        }
+        return null;
+    }
+
     bool freshLibrary { get; init; }
     /// <summary>An editor's library is no certificate input, so it is cached where certification never is.</summary>
     bool editorLibrary { get; init; }

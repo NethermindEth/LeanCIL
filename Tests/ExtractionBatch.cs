@@ -3,6 +3,8 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BatchVerification.cs
+#:include ../scripts/ConsumerVerification.cs
+#:include ../scripts/LeanDiagnostics.cs
 
 using System.Text.Json;
 using Mono.Cecil;
@@ -48,6 +50,49 @@ Batch("extract", [requests[^1]]);
 Require(File.Exists(Path.Combine(requests[0].Output, "Symbols.lean")), "Expected matching PDB symbols");
 Require(!File.Exists(Path.Combine(requests[1].Output, "Symbols.lean")), "Symbols leaked into another DLL");
 Console.WriteLine("PASS mixed DLLs, profiles, repeated generic specialization and symbol identities match direct extraction");
+
+// Two extractions of one input, in separate processes and separate directories, write the same bytes in every file.
+// A batch in the opposite request order and a reversed --assume-initialized list must not change any file either.
+var determinism = Path.Combine(root, "Determinism");
+Request[] repeated =
+[
+    .. requests,
+    new(assembly, "Examples", "GenericLayouts::Create(ulong,ulong)", "", "scalar"),
+    new(assembly, "Examples", "GenericLayouts::Nested(uint,uint)", "", "x64-v3"),
+    requests[^1] with { InitializedTypes = ["Examples.Word256", "Examples.InitializedTypes"] }
+];
+if (Directory.Exists(determinism)) Directory.Delete(determinism, recursive: true);
+Request[] RunOf(string name, Func<Request, string[]?> initialized) => [.. repeated.Select((request, index) =>
+    request with { Output = Path.Combine(determinism, name + "-" + index), InitializedTypes = initialized(request) })];
+var firstRun = RunOf("first", request => request.InitializedTypes);
+var secondRun = RunOf("second", request =>
+    request.InitializedTypes is { } types ? [.. Enumerable.Reverse(types)] : null);
+var batchRun = RunOf("batch", request => request.InitializedTypes);
+foreach (var request in firstRun.Concat(secondRun))
+    Run([.. Extract("extract", request.Assembly, request.Identity, request.Entry, request.Output, request.Profile),
+        .. (request.InitializedTypes ?? []).SelectMany(type => new[] { "--assume-initialized", type })]);
+Batch("extract", [.. Enumerable.Reverse(batchRun)]);
+string[] writtenFiles = ["Extracted.lean", "Symbols.lean", "identity.json"];
+for (var index = 0; index < repeated.Length; index++)
+{
+    var context = repeated[index].Entry + " (" + repeated[index].Profile + ")";
+    var (first, second, batched) = (firstRun[index].Output, secondRun[index].Output, batchRun[index].Output);
+    Require(FirstDifference(first, second) is null,
+        "Two extractions of " + context + " differ: " + FirstDifference(first, second));
+    Require(FirstDifference(first, batched) is null,
+        "A reversed batch of " + context + " differs: " + FirstDifference(first, batched));
+    var files = Directory.GetFiles(first).Select(path => Path.GetFileName(path)).ToArray();
+    Require(files.Contains("Extracted.lean") && files.Contains("identity.json") && files.All(writtenFiles.Contains),
+        "An extraction of " + context + " wrote unexpected files: " + string.Join(", ", files));
+    // The consumer path splits Extracted.lean into content-addressed components, so equal text must split alike.
+    var (left, right) = (SplitExtractionComponents(File.ReadAllText(Path.Combine(first, "Extracted.lean"))),
+        SplitExtractionComponents(File.ReadAllText(Path.Combine(second, "Extracted.lean"))));
+    Require(left.Aggregate == right.Aggregate && left.Sources.Count == right.Sources.Count &&
+        left.Sources.All(pair => right.Sources.TryGetValue(pair.Key, out var text) && text == pair.Value),
+        "Components of " + context + " differ between two extractions");
+}
+Console.WriteLine("PASS repeated, reversed-batch and reordered-assumption extractions write identical " +
+    "files and components");
 
 var generated = Path.Combine(requests[0].Output, "Extracted.lean");
 var source = File.ReadAllText(generated);
