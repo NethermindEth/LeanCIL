@@ -1792,7 +1792,7 @@ example (entries : List Nat) (stated : ∀ position : Nat, entries[position]? = 
 open Lean Elab Tactic Meta in
 -- A hypothesis whose left side holds a metavariable that is assigned after a step indexed it
 -- still states the lookup at the next step.
-example (entries : List Nat) : True := by
+example (entries : List Nat) : entries = entries := by
   run_tac withMainContext do
     let list ← elabTerm (mkIdent `entries) none
     let position ← mkFreshExprSyntheticOpaqueMVar (mkConst ``Nat)
@@ -1808,7 +1808,7 @@ example (entries : List Nat) : True := by
       withNormalNodes #[] (evalTactic (← `(tactic| cil_lookup_assumption)))
     unless (← getGoals).isEmpty do throwError "the lookup was not closed"
     setGoals saved
-  trivial
+  rfl
 
 /-- A running sum of fifteen additions, long enough for the stepping record to be used. -/
 @[cil_code] def runningSum : CIL.Method := {
