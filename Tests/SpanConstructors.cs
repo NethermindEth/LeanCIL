@@ -137,16 +137,22 @@ foreach (var name in new[] { "ReadOnlyEmpty", "ReadOnlyDefaultReset" })
 }
 rejected.Check();
 
-foreach (var mutation in new[] { "reset-scope", "reset-interior" })
+foreach (var mutation in new[] { "reset-scope", "reset-unscoped", "reset-interior" })
 {
     using var altered = ModuleDefinition.ReadModule(assembly);
     var method = altered.GetType("Examples.SpanConstructors").Methods.Single(method => method.Name == "DefaultReset");
     var reset = method.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Initobj);
-    if (mutation == "reset-scope")
+    if (mutation is "reset-scope" or "reset-unscoped")
     {
         var original = (GenericInstanceType)reset.Operand;
-        var owner = new TypeReference("System", "Span`1", altered,
-            new AssemblyNameReference("System.Runtime", new Version(9, 0, 0, 0)), true);
+        // The forged scope is written as an AssemblyRef row; a null scope needs an ExportedType row the image lacks.
+        AssemblyNameReference? scope = null;
+        if (mutation == "reset-scope")
+        {
+            scope = new AssemblyNameReference("System.Runtime", new Version(9, 0, 0, 0));
+            altered.AssemblyReferences.Add(scope);
+        }
+        var owner = new TypeReference("System", "Span`1", altered, scope, true);
         var changed = new GenericInstanceType(owner);
         changed.GenericArguments.Add(original.GenericArguments[0]);
         reset.Operand = changed;
@@ -159,8 +165,12 @@ foreach (var mutation in new[] { "reset-scope", "reset-interior" })
     var path = Path.Combine(root, mutation + ".dll");
     altered.Write(path);
     var result = Execute(Extract("extract", path, null, method.FullName, Path.Combine(root, mutation)));
-    var expected = mutation == "reset-interior" ? "Branch into a folded span receiver" :
-        "Span default type does not match its local";
+    var expected = mutation switch
+    {
+        "reset-interior" => "Branch into a folded span receiver",
+        "reset-unscoped" => "Type reference has no scope",
+        _ => "Span default type does not match its local"
+    };
     if (result.Code == 0 || !result.Output.Contains(expected, StringComparison.Ordinal))
         throw new InvalidOperationException("Wrong empty span rejection: " + result.Output);
     Console.WriteLine("PASS empty span extraction rejection: " + mutation);
