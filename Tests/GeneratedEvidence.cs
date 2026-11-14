@@ -22,6 +22,9 @@ partial class Program
     [GeneratedRegex(@"(?m)^([0-9]+)\r?$")]
     private static partial Regex HeartbeatCount();
 
+    [GeneratedRegex(@"(?m)^cil_resolution_facts [A-Za-z_][A-Za-z0-9_]*\r?\n")]
+    private static partial Regex ResolutionFactsCommand();
+
     /// <summary>One instruction of an extracted method, as its definition in `Extracted.lean` writes it.</summary>
     sealed record ExtractedInstruction(int Method, int Pc, string Op);
 
@@ -70,6 +73,7 @@ partial class Program
                 return match.Value;
             });
         if (found != 1) throw new InvalidOperationException("Missing unique evidence obligation: " + theorem);
+        result = ResolutionFactsCommand().Replace(result, "");
         return Regex.Replace(result, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
     }
 
