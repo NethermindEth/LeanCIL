@@ -68,6 +68,8 @@ void CheckSeparateReplayResults()
     if (ParseSeparateReplayResults(["A"], 0,
         """{"milliseconds":18446744073709551615,"module":"A"}""").Count != 0)
         throw new InvalidOperationException("Maximum elapsed value was rejected");
+    if (ParseSeparateReplayResults(["A"], 0, """{"mo\u0064ule":"A","milliseconds":1}""").Count != 0)
+        throw new InvalidOperationException("Escaped field name was not read as its unescaped name");
     Reject(["A"], 0, success + "\n" + success);
     Reject(["A"], 1, failure + "\n" + failure);
     Reject(["A"], 1, success + "\n" + failure);
@@ -91,6 +93,7 @@ void CheckSeparateReplayResults()
         """{"module":"A"}""", """{"module":null,"milliseconds":0}""",
         """{"module":"","milliseconds":0}""", """{"module":" ","milliseconds":0}""",
         """{"module":"A","module":"A","milliseconds":0}""",
+        """{"module":"A","mo\u0064ule":"A","milliseconds":0}""",
         """{"module":"A","milliseconds":0,"milliseconds":1}""",
         """{"module":"A","error":"one","error":"two"}""",
         """{"module":"A","milliseconds":0,"extra":true}""",
@@ -105,7 +108,11 @@ void CheckSeparateReplayResults()
 
     long previousBytes = 0;
     double previousMilliseconds = 0;
-    foreach (int count in new[] { 256, 1024, 4096 })
+    // Each sample parses the same number of records, so the larger sizes stay well under a second.
+    const int recordsPerSample = 65536;
+    // A parse that allocates a line array, line strings or field-name strings exceeds this per record.
+    const int maxBytesPerRecord = 256;
+    foreach (int count in new[] { 256, 1024, 4096, 16384 })
     {
         var targets = Enumerable.Range(0, count).Select(index => "Module" + index).ToArray();
         var output = string.Join('\n', targets.Select(module => JsonSerializer.Serialize(new { module, milliseconds = 1 })));
@@ -113,18 +120,23 @@ void CheckSeparateReplayResults()
         long before = GC.GetAllocatedBytesForCurrentThread();
         ParseSeparateReplayResults(targets, 0, output);
         long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
-        const int repetitions = 16;
-        var samples = new double[9];
-        for (int sample = 0; sample < samples.Length; sample++)
+        int repetitions = recordsPerSample / count;
+        // The fastest sample is the parse itself; slower samples add scheduler and collector delays.
+        double milliseconds = double.MaxValue;
+        for (int sample = 0; sample < 9; sample++)
         {
             var timer = Stopwatch.StartNew();
             for (int repeat = 0; repeat < repetitions; repeat++) ParseSeparateReplayResults(targets, 0, output);
-            samples[sample] = timer.Elapsed.TotalMilliseconds / repetitions;
+            milliseconds = Math.Min(milliseconds, timer.Elapsed.TotalMilliseconds / repetitions);
         }
-        Array.Sort(samples);
-        double milliseconds = samples[samples.Length / 2];
+        if (bytes > (long)maxBytesPerRecord * count)
+            throw new InvalidOperationException(
+                $"Separate replay parsing allocated {bytes} bytes for {count} records, " +
+                $"over {maxBytesPerRecord} per record");
         if (previousBytes != 0 && (bytes > previousBytes * 6 || milliseconds > previousMilliseconds * 6 + 1))
-            throw new InvalidOperationException("Separate replay parsing exceeded its growth bound");
+            throw new InvalidOperationException(
+                $"Separate replay parsing exceeded its growth bound at {count}: {bytes} allocated bytes and " +
+                $"{milliseconds:F3} ms against {previousBytes} bytes and {previousMilliseconds:F3} ms");
         Console.WriteLine($"PASS replay parsing {count}: {bytes} allocated bytes, {milliseconds:F3} ms");
         previousBytes = bytes;
         previousMilliseconds = milliseconds;
