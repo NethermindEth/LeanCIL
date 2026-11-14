@@ -23,6 +23,75 @@ if (args is ["--request-scaling"])
 }
 
 using Program verification = new();
+var replayDeclaration = "BindingAudit.I" + new string('a', 64) + ".hash0._proof_1_1";
+var replayDiagnostic = BindingDiagnostic($"""
+    Command failed (1): C:/{new string('p', 320)}/leanchecker.exe BindingAudit.I{new string('a', 64)}
+    leanchecker found a problem in BindingAudit.I{new string('a', 64)}
+    uncaught exception: while replaying declaration '{replayDeclaration}':
+    (kernel) application type mismatch
+      id (Eq.refl Bool.true)
+    """);
+if (!replayDiagnostic.Contains(replayDeclaration, StringComparison.Ordinal) ||
+    !replayDiagnostic.Contains("(kernel) application type mismatch", StringComparison.Ordinal) ||
+    replayDiagnostic.Length > 303)
+    throw new InvalidOperationException("Binding diagnostic lost the rejected replay declaration or its error");
+Console.WriteLine("PASS replay diagnostics retain the declaration and kernel rejection after a long command");
+SortedDictionary<string, string> certifiedArtifacts = new(StringComparer.Ordinal)
+{
+    ["CIL.olean"] = "main",
+    ["CIL.olean.private"] = "private"
+};
+SortedDictionary<string, string> builtArtifacts = new(certifiedArtifacts, StringComparer.Ordinal)
+{
+    ["StrictBinding.olean"] = "binding",
+    ["StrictBinding.olean.private"] = "binding-private"
+};
+if (!BindingArtifactsPreserved(certifiedArtifacts, builtArtifacts))
+    throw new InvalidOperationException("Binding preparation rejected an additional module family");
+builtArtifacts["CIL.olean.private"] = "changed";
+if (BindingArtifactsPreserved(certifiedArtifacts, builtArtifacts))
+    throw new InvalidOperationException("Binding preparation accepted a changed certified companion");
+builtArtifacts.Remove("CIL.olean.private");
+if (BindingArtifactsPreserved(certifiedArtifacts, builtArtifacts))
+    throw new InvalidOperationException("Binding preparation accepted a removed certified companion");
+builtArtifacts["CIL.olean.private"] = "private";
+builtArtifacts["CIL.olean.injected"] = "injected";
+if (BindingArtifactsPreserved(certifiedArtifacts, builtArtifacts))
+    throw new InvalidOperationException("Binding preparation accepted an added certified companion");
+SortedDictionary<string, string> sessionArtifacts = new(StringComparer.Ordinal)
+{
+    ["CIL.olean.injected"] = "injected"
+};
+SortedDictionary<string, string> combinedArtifacts = new(certifiedArtifacts, StringComparer.Ordinal);
+foreach (var (name, hash) in sessionArtifacts) combinedArtifacts[name] = hash;
+if (!BindingArtifactsPreserved(new(StringComparer.Ordinal), sessionArtifacts) ||
+    BindingArtifactsPreserved(certifiedArtifacts, combinedArtifacts))
+    throw new InvalidOperationException("Binding preparation accepted a session companion for a base-only family");
+Console.WriteLine("PASS binding builds preserve complete certified module families");
+double previousInventoryMilliseconds = 0;
+foreach (var count in new[] { 64, 512, 4096 })
+{
+    SortedDictionary<string, string> before = new(StringComparer.Ordinal);
+    for (var index = 0; index < count; index++) before[$"M{index:D5}.olean"] = "bytes";
+    SortedDictionary<string, string> after = new(before, StringComparer.Ordinal)
+    {
+        ["StrictBinding.olean"] = "binding"
+    };
+    const int repetitions = 64;
+    var elapsed = System.Diagnostics.Stopwatch.StartNew();
+    for (var repetition = 0; repetition < repetitions; repetition++)
+    {
+        after["StrictBinding.olean"] = repetition.ToString();
+        if (!BindingArtifactsPreserved(before, after))
+            throw new InvalidOperationException("Binding inventory scaling rejected an additional family");
+    }
+    var milliseconds = elapsed.Elapsed.TotalMilliseconds;
+    if (previousInventoryMilliseconds > 0 && milliseconds > previousInventoryMilliseconds * 20 + 20)
+        throw new InvalidOperationException("Binding inventory validation grew faster than n log n");
+    previousInventoryMilliseconds = milliseconds;
+    Console.WriteLine($"PASS {count} binding artifacts validated {repetitions} times in {milliseconds:F1} ms");
+}
+if (args is ["--artifact-inventory"]) return;
 MultiAssemblyFixture fixture = new("DeepSession");
 var artifactDirectory = Path.Combine(fixture.Root, "directory.olean.test");
 Directory.CreateDirectory(artifactDirectory);
@@ -43,7 +112,7 @@ var digest = Sha(image);
 var digestFile = Path.Combine(fixture.Root, "inputs.sha256");
 File.WriteAllText(digestFile, digest + "  " + Path.GetRelativePath(fixture.Root, image) + "\n");
 var inputs = DeepCheckInputs.Read(digestFile);
-var package = verification.BindingSession();
+var package = verification.Library(Inputs(At("CIL.lean")), writes: true);
 var session = Path.Combine(fixture.Root, "session");
 Directory.CreateDirectory(session);
 var search = session + Path.PathSeparator + verification.SessionLeanPath(package);
@@ -52,6 +121,40 @@ var extractedOlean = Path.ChangeExtension(extractedSource, ".olean");
 File.Copy(Path.Combine(extraction, "Extracted.lean"), extractedSource);
 Compile(extractedSource);
 File.Delete(extractedSource);
+var retainedExtraction = BindingArtifactHashes([extractedOlean]);
+var baseArtifact = Path.Combine(verification.library!, ".lake/build/lib/lean/CIL.olean");
+var baseBytes = File.ReadAllBytes(baseArtifact);
+File.WriteAllBytes(baseArtifact, [0]);
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+File.WriteAllBytes(baseArtifact, baseBytes);
+verification.PrepareBindingLibrary(package);
+var preparedArtifacts = verification.SessionModules(package);
+verification.PrepareBindingLibrary(package);
+verification.bindingPreparation = null;
+verification.PrepareBindingLibrary(package);
+if (!Same(preparedArtifacts, verification.SessionModules(package)) ||
+    !Same(retainedExtraction, BindingArtifactHashes([extractedOlean])))
+    throw new InvalidOperationException("Repeated binding preparation changed compiled artifacts");
+ExpectFailure(() => verification.PrepareBindingLibrary(session), "selected certified library session");
+var bindingArtifact = Path.Combine(package, ".lake/build/lib/lean/StrictBinding.olean");
+var bindingBytes = File.ReadAllBytes(bindingArtifact);
+File.WriteAllBytes(bindingArtifact, [0]);
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+File.WriteAllBytes(bindingArtifact, bindingBytes);
+var addedCompanion = bindingArtifact + ".unexpected";
+File.WriteAllBytes(addedCompanion, [0]);
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+File.Delete(addedCompanion);
+File.Delete(bindingArtifact);
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+File.WriteAllBytes(bindingArtifact, bindingBytes);
+var bindingSource = Path.Combine(package, "StrictBinding.lean");
+var bindingSourceText = File.ReadAllText(bindingSource);
+File.AppendAllText(bindingSource, "\n");
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
+File.WriteAllText(bindingSource, bindingSourceText);
+verification.PrepareBindingLibrary(package);
+Console.WriteLine("PASS binding preparation reuses the selected library and rejects artifact and source mutations");
 var proofSource = Path.Combine(session, "Proof.lean");
 File.WriteAllText(proofSource, """
     import Extracted
