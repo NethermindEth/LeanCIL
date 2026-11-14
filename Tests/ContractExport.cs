@@ -380,9 +380,9 @@ string customProfile = Path.Combine(root, "custom-profile.json");
 JsonObject profile = JsonNode.Parse(JsonSerializer.Serialize(new
 {
     name = "scalar", architecture = "x64", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = true,
-    ssse3 = true, sse42 = true, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false, sse41 = true,
-    avx512DQ = false, avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false, x86Base64 = true,
-    vector128Accelerated = true, avx512Vbmi = false, aes = false, armAes = false
+    ssse3 = true, sse42 = true, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false,
+    sse41 = true, avx512DQ = false, avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false,
+    x86Base64 = true, vector128Accelerated = true, avx512Vbmi = false, aes = false, armAes = false
 }))!.AsObject();
 File.WriteAllText(customProfile, profile.ToJsonString());
 RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",
