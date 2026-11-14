@@ -499,6 +499,58 @@ theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.
     · simpa [BitVec.add_assoc] using invariant
     · decide
 
+/-- `sum` as the extractor emits it: `span[0]`, `span.Slice(1)` and `span.Length` take the span
+    parameter's address with `ldarga`, which pushes the view its home holds. -/
+@[cil_code] def sumByAddress : CIL.Method := {
+  locals := [.i64 0], localKinds := [.word64], returnsValue := true
+  parameterHomes := [(0, .span 8 false)]
+  code := [.ldc_i4 0, .conv_i8, .setLocal 0, .br 15, .local 0, .localAddr 1, .ldc_i4 0,
+    .memory (.spanItem 8), .load64, .add, .setLocal 0, .localAddr 1, .ldc_i4 1,
+    .memory (.spanSlice false), .setLocal 1, .localAddr 1, .memory .spanLength, .brtrue 4,
+    .local 0, .ret] }
+
+/-- The program holding only `sumByAddress`. -/
+@[cil_code] def addressProgram : CIL.Program := [sumByAddress]
+
+bind_entry addressEntry (memory : Memory) (view : SpanView) (wellFormed : memory.WellFormed)
+    (valid : view.validate memory = .ok ()) (width : view.width = 8)
+    (readOnly : view.writable = false) := sumByAddress
+  with [.bufferSpan view] from memory allocating wellFormed
+  simplifying [valid, width, readOnly]
+
+-- The guard sees the remaining length.
+bind_cutpoint addressHeader (memory : Memory) (home : Reference) (state : State memory home) :=
+  sumByAddress at 17 matching (· matches .brtrue _)
+  with addressEntry.frame memory state.values.1.view home,
+    [.scalar (.i32 (BitVec.ofNat 32 state.values.1.view.length))], state.memory
+
+/-- Taking the span home's address checks the view it holds, so the loop tactics give that step
+    the span's facts, including those of a slice an earlier iteration stored. -/
+theorem sum_by_address_returns (memory : Memory) (view : SpanView) (values : List CIL.W64)
+    (wellFormed : memory.WellFormed) (span : CheckedSpan memory view 8 false values) :
+    ∃ fuel final, invoke addressProgram fuel 0 [.bufferSpan view] memory =
+      .ok (final, [.scalar (.i64 values.sum)]) ∧ MemoryBelow memory.nextIdentity memory final := by
+  obtain ⟨home, entered, enter⟩ :=
+    addressEntry.checked memory view wellFormed span.valid span.elementWidth span.mode
+  obtain ⟨started, stored, frame, -⟩ := (enter.frame []).store 0 (.i64 0) rfl
+  refine invoke_loop_results (by rfl) (by simp [cil_checked, span.valid]) enter.setup
+    (addressHeader memory home)
+    (fun state => state.values.2 + state.values.1.values.sum = values.sum)
+    (·.values.1.values.length) ⟨(⟨view, values, span⟩, 0), started, frame⟩
+    (by cil_loop_steps) (by simp) ?_
+  rintro ⟨⟨⟨view, remaining, span⟩, total⟩, current, frame⟩ invariant
+  cases remaining with
+  | nil => exact .inl (by cil_loop_finish [invariant.symm])
+  | cons value remaining =>
+    obtain ⟨item, -, found, element⟩ := (span.within wellFormed frame).head (by decide)
+    obtain ⟨updated, stored, nextFrame, -⟩ := frame.store 0 (.i64 (total + value)) rfl
+    obtain ⟨sliced, slicedOK, next, -⟩ := span.tail_below wellFormed nextFrame.kept
+    cil_loop_continue ⟨(⟨sliced, remaining, next⟩, total + value), updated,
+      nextFrame.set_local 1 (.span 8 false (some sliced))⟩
+    · simpa [BitVec.add_assoc] using invariant
+    · simp
+#print axioms sum_by_address_returns
+
 /-- `return span.Length;` read straight from the argument, with no parameter home. -/
 @[cil_code] def length : CIL.Method :=
   { locals := [], returnsValue := true, code := [.arg 0, .memory .spanLength, .ret] }
