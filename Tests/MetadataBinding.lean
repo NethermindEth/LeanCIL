@@ -627,7 +627,7 @@ private def nestedLibWorld : Step Unit := do
   let innerName ← string "Inner"
   let first ← string "A"
   let second ← string "B"
-  let _ ← row Table.assemblyRef [10, 0, 0, 0, 0, 0, runtimeName, 0, 0]
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, 0, runtimeName, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let objectRef ← row Table.typeRef [1 * 4 + 2, objectName, systemName]
   let base := (objectRef - 0x01000000) * 4 + 1
@@ -655,7 +655,7 @@ private def nestedOwnWorld (leaf inner : Nat) : Step (Nat × Nat) := do
   let midName ← string "Mid"
   let innerName ← string "Inner"
   let first ← string "A"
-  let _ ← row Table.assemblyRef [10, 0, 0, 0, 0, 0, runtimeName, 0, 0]
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, 0, runtimeName, 0, 0]
   let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, libName, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let outerRef ← row Table.typeRef [2 * 4 + 2, outerName, libName]

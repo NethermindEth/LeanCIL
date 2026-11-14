@@ -18,7 +18,7 @@ string Build(string name, string method, string body)
     if (Directory.Exists(source)) Directory.Delete(source, true);
     Directory.CreateDirectory(source);
     File.WriteAllText(Path.Combine(source, "Incremental.csproj"), """
-        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework>
+        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
         <Optimize>true</Optimize></PropertyGroup></Project>
         """);
     File.WriteAllText(Path.Combine(source, "Arith.cs"), $$"""

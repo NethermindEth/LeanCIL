@@ -25,7 +25,7 @@ def libWorld : Step Unit := do
   let valueName ← string "value"
   let getName ← string "Get"
   let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
-  let _ ← row Table.assemblyRef [10, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let _ ← row Table.typeRef [1 * 4 + 2, objectName, systemName]
   let _ ← row Table.typeDef [0, moduleName, 0, 0, 1, 1]
@@ -106,7 +106,7 @@ def ownWorld : Step OwnTokens := do
   let idName ← string "Id"
   let secondName ← string "second"
   let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
-  let _ ← row Table.assemblyRef [10, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtimeName, 0, 0]
   let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, libName, 0, 0]
   modify fun builder => { builder with corlib := 1 }
   let objectRef ← row Table.typeRef [1 * 4 + 2, objectName, systemName]
