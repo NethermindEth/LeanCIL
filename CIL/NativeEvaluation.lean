@@ -42,7 +42,7 @@ def nativeBinaryValues (op : Instruction) (pc : Nat) (x y : Value) :
     return (pc + 1, [← checkedValues kind signed x y])
   | none, none =>
     if nativePureBinary op then
-      match step op false pc [] 0 [y, x] (fun _ => none) with
+      match step op false pc [] [y, x] (fun _ => none) with
       | some (.next target values _) => .ok (target, values)
       | _ => .error .invalidOperands
     else .error .invalidOperands

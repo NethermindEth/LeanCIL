@@ -29,25 +29,6 @@ and loop tactics, the automation tests and downstream proofs all build on these;
 
 namespace CIL.Safety
 
-/-- Checked local loads use the slot's kind; the opcode annotation adds no second conversion. -/
-theorem step_local_annotation (body : CIL.Method) (index : Nat)
-    (narrow : Option CIL.NarrowKind) (pc : Nat) (args : List Value) (frame : Frame)
-    (stack : List Value) (memory : Memory) :
-    step body (.local index narrow) pc args frame stack memory =
-      step body (.local index) pc args frame stack memory := rfl
-
-#print axioms step_local_annotation
-
-/-- Checked local stores use the slot's kind independently of the opcode annotation. -/
-theorem step_setLocal_annotation (body : CIL.Method) (index : Nat)
-    (narrow : Option CIL.NarrowKind) (pc : Nat) (args : List Value) (frame : Frame)
-    (stack : List Value) (memory : Memory) :
-    step body (.setLocal index narrow) pc args frame stack memory =
-      step body (.setLocal index) pc args frame stack memory := by
-  cases stack <;> rfl
-
-#print axioms step_setLocal_annotation
-
 open Lean Elab Tactic Conv in
 /-- Replaces the focused term by its full reduction; stepping applies it to the goal's fuel. -/
 elab "cil_reduce_fuel" : conv => do
@@ -924,14 +905,7 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
     | _, _ => pure ()
     if openParameters then return true
     -- A named body may need its generated equation unfolded before application.
-    let mut arguments := factLhs.getAppArgs |>.set! 0 body
-    let operation ← whnfR factOpcode
-    if operation.isAppOfArity ``CIL.Instruction.local 2 ||
-        operation.isAppOfArity ``CIL.Instruction.setLocal 2 then
-      let some index := argument? operation 0 | return false
-      arguments := arguments.set! 1
-        (mkApp2 operation.getAppFn index
-          (mkApp (mkConst ``Option.none [Level.zero]) (mkConst ``CIL.NarrowKind)))
+    let arguments := factLhs.getAppArgs |>.set! 0 body
     withTransparency .instances <| isDefEq (mkAppN factLhs.getAppFn arguments) lhs
   let mut matching := #[]
   for fact in facts do
@@ -946,14 +920,14 @@ def stepFacts (target : Expr) (facts : Array Term) : TacticM (Array Term) := do
   return matching
 
 open Lean Elab Tactic Meta in
-/-- Close the goal with `fact` after normalizing named bodies and local annotations in its type.
+/-- Close the goal with `fact` after unfolding the named bodies in its type.
     Fails when the supplied normalization does not change the type. -/
 def applyUnfoldedStepFact (unfold : Simp.Context) (simprocs : Simp.SimprocsArray) (fact : Term) :
     TacticM Unit := withMainContext do
   let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm fact none
   let type ← instantiateMVars (← inferType proof)
   let (result, _) ← simp type unfold simprocs
-  if result.expr == type then throwError "The step fact needs no body or annotation normalization"
+  if result.expr == type then throwError "The step fact names no body to unfold"
   let proof ← match result.proof? with
     | some eq => mkEqMP eq proof
     | none => mkExpectedTypeHint proof result.expr
@@ -1005,22 +979,11 @@ open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_checked_step_normalized [$facts:term,*]) => withMainContext do
     let initial := (← instantiateMVars (← getMainTarget)).consumeMData
-    let mut localOperation := false
     if let some (_, step, _) := initial.eq? then
       if step.isAppOfArity ``CIL.Safety.step 7 &&
           (argument? step 1).any (·.isConstOf ``CIL.Instruction.nop) then
         evalTactic (← `(tactic| exact step_nop_eq ..))
         return
-      if let some #[_, opcode, _, _, _, _, _] := argumentsOf? step ``CIL.Safety.step 7 then
-        let operation ← whnfR opcode
-        localOperation := operation.isAppOfArity ``CIL.Instruction.local 2 ||
-          operation.isAppOfArity ``CIL.Instruction.setLocal 2
-        if localOperation then
-          let narrow ← lastArgument "cil_checked_step_normalized" operation
-          unless (← whnfR narrow).isAppOf ``Option.none do
-            evalTactic (← `(tactic|
-              cil_simp_only [step_local_annotation, step_setLocal_annotation]))
-            if (← getGoals).isEmpty then return
     -- A body reached through a lookup hypothesis stays named; one reached by unfolding a
     -- `cil_code` program is already a literal, so a fact on the named body needs its own
     -- `cil_code` unfolded to match it.
@@ -1032,9 +995,7 @@ elab_rules : tactic
         return
       catch _ => saved.restore
     if !candidates.isEmpty then
-      let normalize ← if localOperation then
-          `(tactic| simp only [cil_code, step_local_annotation, step_setLocal_annotation])
-        else `(tactic| simp only [cil_code])
+      let normalize ← `(tactic| simp only [cil_code])
       let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
       for fact in candidates do
         let saved ← saveState

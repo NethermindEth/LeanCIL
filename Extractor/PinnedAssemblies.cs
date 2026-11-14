@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -18,6 +19,13 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>A referenced assembly on disk with the hash it must still have, if one was recorded.</summary>
     internal sealed record Source(string Path, string? ExpectedSha256 = null);
 
+    /// <summary>An assembly's identity: its simple name, version, culture and public key token.</summary>
+    readonly record struct Identity(string Name, Version Version, string Culture, ulong PublicKeyToken)
+    {
+        internal static Identity Of(AssemblyNameReference name) => new(name.Name, name.Version, name.Culture ?? "",
+            name.PublicKeyToken is { Length: 8 } token ? BinaryPrimitives.ReadUInt64BigEndian(token) : 0);
+    }
+
     // Platform keys: only the extractor's trusted platform assemblies can answer these names.
     static readonly string[] PlatformKeyTokens =
         ["b03f5f7f11d50a3a", "cc7b13ffcd2ddd51", "7cec85d7bea7798e", "b77a5c561934e089"];
@@ -28,7 +36,8 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly PinnedAssemblies? previous;
     readonly DefaultAssemblyResolver platform = new();
     readonly Dictionary<string, ModuleDefinition> modules = new(StringComparer.Ordinal);
-    readonly Dictionary<TypeDefinition, TypeDefinition?> baseClasses = [];
+    // One platform assembly per identity, so two references to one platform type resolve to one definition.
+    readonly Dictionary<Identity, AssemblyDefinition> platformAssemblies = [];
     readonly Dictionary<ModuleDefinition, ModuleDefinition> originals = [];
     readonly Dictionary<ModuleDefinition, byte[]> images = [];
     readonly Dictionary<byte[], PEReader> readers = [];
@@ -48,7 +57,10 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>Every pinned module, the selected assembly first, in the order of <see cref="Pins"/>.</summary>
     internal IEnumerable<ModuleDefinition> Modules => [Selected, .. references.Select(reference => reference.Module)];
 
-    internal PinnedAssemblies(byte[] selected, string selectedHash, IEnumerable<Source> sources)
+    /// <summary>Pins <paramref name="selected"/> and each source; <paramref name="readReference"/> reads a
+    /// referenced assembly's bytes and hash, so a batch of extractions reads each reference once.</summary>
+    internal PinnedAssemblies(byte[] selected, string selectedHash, IEnumerable<Source> sources,
+        Func<string, Program.ExtractionBatch.AssemblySnapshot>? readReference = null)
     {
         previous = active;
         // Only the runtime's trusted platform list may answer; no directory is searched.
@@ -59,8 +71,10 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         AddOriginal(Selected, selected);
         foreach (Source source in sources)
         {
-            byte[] bytes = File.ReadAllBytes(source.Path);
-            string hash = Convert.ToHexStringLower(SHA256.HashData(bytes));
+            byte[] bytes;
+            string hash;
+            if (readReference?.Invoke(source.Path) is { } image) (bytes, hash) = (image.Bytes, image.Hash);
+            else hash = Convert.ToHexStringLower(SHA256.HashData(bytes = File.ReadAllBytes(source.Path)));
             if (source.ExpectedSha256 is { } expected && !string.Equals(expected, hash, StringComparison.Ordinal))
                 throw new InvalidDataException($"Referenced assembly hash mismatch: {CliPaths.Display(source.Path)}\n" +
                     $"  Expected SHA-256: {expected}\n  Actual SHA-256: {hash}");
@@ -87,17 +101,6 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         originals.Add(module, original);
         images.Add(module, image);
         images.Add(original, image);
-    }
-
-    /// <summary>
-    /// The class a type derives from, or null for a root or an unresolved base. Each type's base is resolved once per
-    /// extraction, since resolving a platform base reads its assembly from disk.
-    /// </summary>
-    internal TypeDefinition? BaseClass(TypeDefinition type)
-    {
-        if (!baseClasses.TryGetValue(type, out TypeDefinition? baseClass))
-            baseClasses.Add(type, baseClass = type.BaseType?.Resolve());
-        return baseClass;
     }
 
     /// <summary>The pinned set of the current extraction, or none outside one.</summary>
@@ -182,7 +185,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     public AssemblyDefinition Resolve(AssemblyNameReference name, ReaderParameters parameters)
     {
         if (modules.TryGetValue(name.FullName, out var module)) return module.Assembly;
-        if (Platform(name)) return platform.Resolve(name, parameters);
+        if (Platform(name)) return PlatformAssembly(name);
         var named = modules.Values.FirstOrDefault(candidate => candidate.Assembly.Name.Name == name.Name);
         throw new InvalidDataException(named is null
             ? $"Unpinned assembly reference: {name.FullName}\n" +
@@ -191,10 +194,29 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
                 $"  Pinned: {named.Assembly.Name.FullName}");
     }
 
+    // Keyed by the requested identity and by the identity of the assembly read, since the runtime can answer a
+    // reference of another version with an assembly already read.
+    AssemblyDefinition PlatformAssembly(AssemblyNameReference name)
+    {
+        Identity requested = Identity.Of(name);
+        if (platformAssemblies.TryGetValue(requested, out AssemblyDefinition? assembly)) return assembly;
+        // The platform's own references resolve here too, so every platform module is read once.
+        assembly = platform.Resolve(name, new ReaderParameters { AssemblyResolver = this });
+        if (platformAssemblies.TryGetValue(Identity.Of(assembly.Name), out AssemblyDefinition? read))
+        {
+            assembly.Dispose();
+            assembly = read;
+        }
+        else platformAssemblies.Add(Identity.Of(assembly.Name), assembly);
+        platformAssemblies.TryAdd(requested, assembly);
+        return assembly;
+    }
+
     public void Dispose()
     {
         active = previous;
         platform.Dispose();
+        foreach (AssemblyDefinition assembly in platformAssemblies.Values.Distinct()) assembly.Dispose();
         foreach (PEReader reader in readers.Values) reader.Dispose();
         foreach (ModuleDefinition module in modules.Values.Concat(originals.Values)) module.Dispose();
     }

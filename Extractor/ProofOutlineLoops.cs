@@ -293,7 +293,7 @@ internal static partial class ProofOutline
         {
             var ops = body.Operations;
             var stores = Enumerable.Range(1, ops.Length - 1).Where(pc =>
-                ops[pc] is SetLocal { Narrow: null } store && store.Index == local &&
+                ops[pc] is SetLocal store && store.Index == local &&
                 ops[pc - 1] is not Memory { Operation: SpanSlice { Counted: false } }).ToArray();
             var refused = Unsupported($"span local `{name}` is not assigned once from a span argument or from the " +
                 "whole of an array argument");
@@ -1400,14 +1400,14 @@ internal static partial class ProofOutline
                 stopReason = reason;
                 return Event.Stop;
             }
-            if (op is Local { Narrow: null, Index: var loaded })
+            if (op is Local { Index: var loaded })
             {
                 var slot = slots[loaded];
                 var first = components.IndexOf(slot.Components[0]);
                 stack.Add(slot.Components[0].Part is Part.Word or Part.Object ? (Value)state.State[first]
                     : new LocalValue(slot.Index));
             }
-            else if (op is SetLocal { Narrow: null, Index: var assigned })
+            else if (op is SetLocal { Index: var assigned })
             {
                 var slot = slots[assigned];
                 var first = components.IndexOf(slot.Components[0]);

@@ -12,6 +12,7 @@ import CIL.Extraction.BodyDiagnostics
 import CIL.EntryIndex
 import CIL.Extraction.LinkIndex
 import Std.Data.TreeMap.Lemmas
+import CIL.Resolution
 
 /-!
 # Translation validity
@@ -75,16 +76,6 @@ private def initialLocal : LocalKind → Value
   | .vector512 => .v512 0
   | .aggregate size => .aggregate (List.replicate size.val 0)
 
-/-- Narrow return conversion is part of the closed metadata signature. -/
-def returnNarrow (layouts : List RawLayout) (type : TypeExpr) : Option NarrowKind := do
-  let .field field ← typeStorage layouts type | none
-  match field with
-  | .signed8 => some .signed8
-  | .unsigned8 | .boolean => some .unsigned8
-  | .signed16 => some .signed16
-  | .unsigned16 | .character => some .unsigned16
-  | _ => none
-
 /-- Integer static-field storage and its narrow-load signedness. -/
 private def staticScalarType : TypeExpr → Option (Nat × Bool)
   | .enum _ underlying => staticScalarType underlying
@@ -120,7 +111,7 @@ def methodShapeInstructions (layouts : List RawLayout) (closed : RawMethod)
   let raw := FlowIndex.ofList closed.code
   let sites := firstEntryIndex method.staticSites
   method.code.zipIdx.all fun (op, pc) => match op with
-    | .ret narrow => narrow == returnNarrow layouts closed.returnType
+    | .ret narrow => narrow == declaredNarrow layouts closed.returnType
     | .memory (.staticValue _) => staticLoadMatches 126 (raw.get? pc) sites[pc]?
     | .memory (.staticAddress _) =>
       if (sites[pc]?.bind (·.initializer)).isSome then
@@ -132,7 +123,7 @@ theorem methodShapeInstructions_eq_scan (layouts : List RawLayout) (closed : Raw
     (method : Method) :
     methodShapeInstructions layouts closed method = method.code.zipIdx.all (fun (op, pc) =>
       match op with
-      | .ret narrow => narrow == returnNarrow layouts closed.returnType
+      | .ret narrow => narrow == declaredNarrow layouts closed.returnType
       | .memory (.staticValue _) => staticLoadMatches 126 closed.code[pc]?
           ((method.staticSites.find? (fun site => site.1 == pc)).map Prod.snd)
       | .memory (.staticAddress _) =>

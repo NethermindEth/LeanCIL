@@ -425,4 +425,96 @@ var manyClassesSeconds = VirtualDispatchSeconds(ManyClasses);
 Require(manyClassesSeconds <= fewClassesSeconds * AllowedClassGrowth,
     $"{VirtualCallers} virtual calls took {fewClassesSeconds:F1} s with {FewClasses} classes and " +
     $"{manyClassesSeconds:F1} s with {ManyClasses}; the limit is {AllowedClassGrowth} times as long.");
+// A regex runner reads fields of its platform base class. Each reference to that class must resolve to one
+// definition, so the body is blocked by its unsupported constructs rather than by an internal error.
+var regexDirectory = Path.Combine(directory, "Regex");
+Directory.CreateDirectory(regexDirectory);
+File.WriteAllText(Path.Combine(regexDirectory, "Regex.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+</Project>
+""");
+File.WriteAllText(Path.Combine(regexDirectory, "Patterns.cs"), """
+using System.Text.RegularExpressions;
+
+public static partial class Patterns
+{
+    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_']*\z")]
+    public static partial Regex Identifier();
+}
+""");
+Run(["dotnet", "build", Path.Combine(regexDirectory, "Regex.csproj"), "-c", "Release"]);
+var regexAssembly = Path.Combine(regexDirectory, "bin/Regex.dll");
+// The generated runner's type name carries a hash of the pattern, so it is read from the built assembly.
+var runner = Run(["dotnet", ExtractorPath, "list", regexAssembly]).Split('\n').Select(line => line.Trim())
+    .Single(line => line.EndsWith("/RunnerFactory/Runner::TryFindNextPossibleStartingPosition(" +
+        "System.ReadOnlySpan`1<System.Char>)", StringComparison.Ordinal));
+var runnerType = runner[(runner.IndexOf(' ', StringComparison.Ordinal) + 1)..
+    runner.IndexOf("::", StringComparison.Ordinal)];
+var regexManifest = Path.Combine(regexDirectory, "manifest.json");
+File.WriteAllText(regexManifest, JsonSerializer.Serialize(new
+{
+    entries = new[] { new { signature = runner, profile = "scalar" } }
+}));
+var regexReport = Path.Combine(regexDirectory, "blockers.json");
+Run(["dotnet", ExtractorPath, "blockers", regexAssembly, "--manifest", regexManifest, "--output", regexReport]);
+var regexConstructs = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(regexReport)).GetProperty("blockers")
+    .EnumerateArray().Select(blocker => blocker.GetProperty("construct").GetString()!).Order(StringComparer.Ordinal)
+    .ToArray();
+Require(regexConstructs.SequenceEqual([
+        "Unsupported aggregate layout: System.Text.RegularExpressions.RegexRunner",
+        "Unsupported class instance type: " + runnerType]),
+    "The regex runner is not blocked by its own constructs: " + string.Join("; ", regexConstructs));
+
+// Each admitted entry is extracted again. Reading and hashing the whole image per entry makes that linear in the
+// image, so doubling the methods of an image that grows with them would make admission four times as long.
+const int FewAdmitted = 100;
+const int ManyAdmitted = 200;
+// A resource stands for the rest of an assembly, so the image grows with the methods without adding analysis.
+const int PaddingPerMethod = 512 * 1024;
+const double AllowedPerMethodGrowth = 1.25;
+// One wall-clock run on a loaded machine varied by 1.6 times; the fastest of three tracks the work.
+const int AdmissionRuns = 3;
+double AdmissionSeconds(int methods)
+{
+    var fixtureDirectory = Path.Combine(directory, "Admission" + methods);
+    Directory.CreateDirectory(fixtureDirectory);
+    File.WriteAllText(Path.Combine(fixtureDirectory, "Admission.csproj"), """
+    <Project Sdk="Microsoft.NET.Sdk">
+      <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+      <ItemGroup><EmbeddedResource Include="padding.bin" /></ItemGroup>
+    </Project>
+    """);
+    File.WriteAllBytes(Path.Combine(fixtureDirectory, "padding.bin"), new byte[methods * PaddingPerMethod]);
+    File.WriteAllText(Path.Combine(fixtureDirectory, "Admission.cs"), string.Join('\n',
+        ["public static class Admitted {",
+         .. Enumerable.Range(0, methods).Select(index =>
+             $"    public static ulong Add{index}(ulong x) => x + {index}UL;"),
+         "}"]));
+    Run(["dotnet", "build", Path.Combine(fixtureDirectory, "Admission.csproj"), "-c", "Release"]);
+    var admissionManifest = Path.Combine(fixtureDirectory, "manifest.json");
+    File.WriteAllText(admissionManifest, JsonSerializer.Serialize(new
+    {
+        entries = Enumerable.Range(0, methods).Select(index =>
+            new { signature = $"Admitted::Add{index}(ulong)", profile = "scalar" })
+    }));
+    var admissionReport = Path.Combine(fixtureDirectory, "blockers.json");
+    var seconds = double.MaxValue;
+    for (var run = 0; run < AdmissionRuns; run++)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Admission.dll"),
+            "--manifest", admissionManifest, "--output", admissionReport]);
+        seconds = Math.Min(seconds, timer.Elapsed.TotalSeconds);
+    }
+    var admitted = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(admissionReport)).GetProperty("counts")
+        .GetProperty("admitted").GetInt32();
+    Require(admitted == methods, $"{admitted} of {methods} padded fixture methods admitted");
+    return seconds;
+}
+var fewAdmittedSeconds = AdmissionSeconds(FewAdmitted);
+var manyAdmittedSeconds = AdmissionSeconds(ManyAdmitted);
+Require(manyAdmittedSeconds <= fewAdmittedSeconds * 2 * AllowedPerMethodGrowth,
+    $"Admitting {FewAdmitted} methods took {fewAdmittedSeconds:F1} s and {ManyAdmitted} took " +
+    $"{manyAdmittedSeconds:F1} s; the limit is {2 * AllowedPerMethodGrowth} times as long.");
 Console.WriteLine($"PASS {checks} admission report checks");

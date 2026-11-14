@@ -238,7 +238,7 @@ RejectedExtract("pinned type without definition", "Unresolved class: MultiFixtur
     var sources = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(sourceType))!;
     sources.Add(Activator.CreateInstance(sourceType, gone, null)!);
     var pinned = Activator.CreateInstance(pinnedType, Internal, null,
-        [File.ReadAllBytes(app), Sha(app), sources], null)!;
+        [File.ReadAllBytes(app), Sha(app), sources, null], null)!;
     var slices = Activator.CreateInstance(extractor.GetType("Nethermind.LeanCIL.MetadataSlices", throwOnError: true)!,
         pinned)!;
     var selected = (Mono.Cecil.ModuleDefinition)pinnedType.GetProperty("Selected", Internal)!.GetValue(pinned)!;
