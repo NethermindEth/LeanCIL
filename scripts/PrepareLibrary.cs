@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include Verification.cs
 #:include BindingAudit.cs
+#:include FailureReports.cs
 #:include BindingImage.cs
 #:include DeepCheckInputs.cs
 #:include ConsumerVerification.cs

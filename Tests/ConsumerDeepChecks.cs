@@ -2,6 +2,7 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 #:include ../scripts/BindingAudit.cs
+#:include ../scripts/FailureReports.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
@@ -97,6 +98,22 @@ var manifest = Path.Combine(fixture.Root, "images.sha256");
 File.WriteAllText(manifest, Sha(image) + "  " + Path.GetRelativePath(fixture.Root, image) + "\n");
 var inputs = DeepCheckInputs.Read(manifest);
 ConsumerRequest request = new(image, output, proof, "ExampleProof.correctness", null);
+var selectionRun = new DeepCheckRun(inputs);
+var invalidSelection = verification.VerifyConsumerRequests(package,
+    [request with { Proof = Path.Combine(fixture.Root, "Outside.lean") }], null, batch: false,
+    deepChecks: inputs, deepRun: selectionRun)[0];
+if (invalidSelection.Error is null || selectionRun.Attempt is not null)
+    throw new InvalidOperationException("Consumer selection failure began a deep attempt.");
+var libraryRun = new DeepCheckRun(inputs);
+ExpectFailure(() => verification.VerifyConsumer(image, proof, output, "ExampleProof.correctness", package,
+    null, stage =>
+    {
+        if (stage != "Lean library build") return;
+        if (libraryRun.Attempt is null) throw new InvalidOperationException("Missing pre-library attempt.");
+        throw new InvalidOperationException("diagnostic library failure");
+    }, inputs, libraryRun), "diagnostic library failure");
+RequireUnattributed(libraryRun);
+Console.WriteLine("PASS consumer attempts begin after selection and before library work");
 ExpectFailure(() => verification.VerifyConsumerRequests(package, [request], null, batch: true,
     deepChecks: inputs), "one ordinary");
 ExpectFailure(() => verification.VerifyConsumerRequests(package, [request], null, batch: false,
@@ -129,6 +146,44 @@ try
     RequireOrdinaryReceipts();
     Console.WriteLine("PASS consumer joint deep audit preserves ordinary result receipts");
     if (args is ["--positive"]) return;
+    var combinedRun = new DeepCheckRun(inputs);
+    var combinedOriginalProof = File.ReadAllBytes(proof);
+    var combinedToken = Guid.NewGuid().ToString("N");
+    File.AppendAllText(proof, "\n-- " + combinedToken + "\n");
+    bool combinedMutation = false;
+    bool originalMutation = false;
+    SortedDictionary<string, string>? combinedReceipts = null;
+    try
+    {
+        ExpectFailure(() => Verify(verification, stage: stage =>
+        {
+            if (stage == "theorem audit" && !originalMutation)
+            {
+                File.AppendAllText(proof, "\n-- concurrent original proof edit\n");
+                originalMutation = true;
+            }
+            if (stage != "deep-check sources") return;
+            var workspace = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+                .Single(directory => File.Exists(Path.Combine(directory, "LeanCILProof.lean")) &&
+                    File.ReadAllText(Path.Combine(directory, "LeanCILProof.lean"))
+                        .Contains(combinedToken, StringComparison.Ordinal));
+            var generated = Path.Combine(workspace, ".deep-checks/BindingAudit/Bodies.lean");
+            var source = File.ReadAllText(generated);
+            var start = source.IndexOf("theorem bodies :", StringComparison.Ordinal);
+            if (start < 0) throw new InvalidOperationException("Missing generated bodies theorem.");
+            File.WriteAllText(generated, source[..start] + "theorem bodies : True := True.intro\n" +
+                "#print axioms bodies\nend BindingAudit\n");
+            combinedMutation = true;
+            combinedReceipts = Receipts();
+        }, deepRun: combinedRun), "Inputs changed during consumer verification");
+    }
+    finally { File.WriteAllBytes(proof, combinedOriginalProof); }
+    if (!combinedMutation || !originalMutation || combinedReceipts is null)
+        throw new InvalidOperationException("Missing combined consumer mutation.");
+    RequireUnattributed(combinedRun);
+    RequireNoPublication(combinedReceipts);
+    Console.WriteLine("PASS consumer original-input mutation precedes named rejection attribution");
+    if (args is ["--diagnostics"]) return;
     using (Program restored = new())
     {
         var replay = Environment.GetEnvironmentVariable("LEANCIL_PROFILE_CONSUMER_REPLAY");
@@ -331,9 +386,9 @@ finally
     Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", priorDisableCache);
 }
 
-Report Verify(Program program, bool deep = true, Action<string>? stage = null) =>
+Report Verify(Program program, bool deep = true, Action<string>? stage = null, DeepCheckRun? deepRun = null) =>
     program.VerifyConsumer(image, proof, output, "ExampleProof.correctness", package, null, stage,
-        deep ? inputs : null);
+        deep ? inputs : null, deepRun);
 
 void CheckExportMutation(bool originalProofMutation = false)
 {
@@ -426,8 +481,9 @@ void Reject(string name, string diagnostic, string atStage, Action<string> mutat
     var token = Guid.NewGuid().ToString("N");
     File.AppendAllText(proof, "\n-- " + token + "\n");
     bool mutated = false;
+    var run = new DeepCheckRun(inputs);
     SortedDictionary<string, string>? receipts = null;
-    ExpectFailure(() => Verify(verification, stage: stage =>
+    ExpectFailure(() => Verify(verification, deepRun: run, stage: stage =>
     {
         if (stage != atStage || mutated) return;
         var session = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
@@ -439,8 +495,18 @@ void Reject(string name, string diagnostic, string atStage, Action<string> mutat
         mutated = true;
     }), diagnostic);
     if (!mutated || receipts is null) throw new InvalidOperationException("Mutation was not exercised: " + name);
+    RequireUnattributed(run);
     RequireNoPublication(receipts);
     Console.WriteLine("PASS consumer deep " + name + " mutation leaves no receipt or report");
+}
+
+static void RequireUnattributed(DeepCheckRun run)
+{
+    var failure = run.Attempt?.Failure("verification", "rejected")
+        ?? throw new InvalidOperationException("Missing consumer deep attempt.");
+    if (failure.facts.Any(fact => fact.status != FailureReports.BindingFailureStatus.NotCovered) ||
+        failure.images.Any(item => item.status != FailureReports.BindingFailureStatus.NotCovered))
+        throw new InvalidOperationException("An unclassified consumer failure marked a rejected subject.");
 }
 
 static void ExpectFailure(Action action, string diagnostic)

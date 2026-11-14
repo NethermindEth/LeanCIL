@@ -2,11 +2,14 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 #:include ../scripts/BindingAudit.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include MultiAssemblyFixture.cs
 
 using Program verification = new();
+bool focusedDiagnostics = args is ["--diagnostics"] or ["--diagnostic", _];
 Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
 SortedDictionary<string, string> retained = new(StringComparer.Ordinal) { ["Extracted.olean"] = "original" };
 SortedDictionary<string, string> extended = new(retained, StringComparer.Ordinal)
@@ -62,7 +65,7 @@ File.WriteAllText(manifest, Sha(image) + "  " + Path.GetRelativePath(fixture.Roo
 var inputs = DeepCheckInputs.Read(manifest);
 var output = fixture.Artifact("Verified");
 const string selector = "Input::Value(System.UInt64)";
-if (args is not ["--support-restore"])
+if (args is not ["--support-restore"] && !focusedDiagnostics)
 using (Program attacked = new())
 {
     attacked.Library(Inputs(proof));
@@ -85,7 +88,7 @@ using (Program attacked = new())
     }
     finally { Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", originalCache); }
 }
-if (args is not ["--support-restore"])
+if (args is not ["--support-restore"] && !focusedDiagnostics)
     Console.WriteLine("PASS support replay mutation preserves no successful receipt or deep report");
 if (args is ["--support-mutation"]) return;
 var report = verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs);
@@ -99,6 +102,8 @@ if (report.binding.mode != BindingMode.Deep ||
     CertificateProblem(File.ReadAllText(Path.Combine(output, "verified.json")), BindingMode.Deep) is not null)
     throw new InvalidOperationException("Deep verification reported facts beyond its joint audit");
 Console.WriteLine("PASS standalone verification reports exactly the deep facts it audited");
+CheckFailureDiagnostics();
+if (focusedDiagnostics) return;
 using (Program restoredSupport = new())
 {
     bool audited = false;
@@ -291,7 +296,9 @@ foreach (var name in new[] { "source", "toolchain" })
 void Reject(string name, string marker, string callback, Action<string> mutate)
 {
     bool changed = false;
+    var run = new DeepCheckRun(inputs);
     ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
+        deepRun: run,
         stage: stage =>
         {
             if (changed || stage != callback) return;
@@ -301,8 +308,163 @@ void Reject(string name, string marker, string callback, Action<string> mutate)
             changed = true;
         }), marker);
     if (!changed) throw new InvalidOperationException("Mutation callback did not execute: " + name);
+    RequireUnattributed(run, callback);
     RequireNoReport();
     Console.WriteLine("PASS " + name + " prevents deep report publication");
+}
+
+void RequireUnattributed(DeepCheckRun run, string stage)
+{
+    var failed = run.Attempt?.Failure(stage, "rejected")
+        ?? throw new InvalidOperationException("Missing begun deep attempt");
+    if (failed.facts.Any(fact => fact.status != FailureReports.BindingFailureStatus.NotCovered) ||
+        failed.images.Any(item => item.status != FailureReports.BindingFailureStatus.NotCovered))
+        throw new InvalidOperationException("Unclassified failure attributed a binding rejection");
+}
+
+void CheckFailureDiagnostics()
+{
+    using Program privateChecker = new();
+    privateChecker.Library(Inputs(proof), writes: true);
+    if (!privateChecker.ownsLibrary || privateChecker.libraryStamps is not null)
+        throw new InvalidOperationException("Expected an owned private library for the integrity regression");
+    var priorCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(fixture.Root, "DiagnosticsCache"));
+    try
+    {
+        if (args is not ["--diagnostic", _])
+        {
+            var selected = new DeepCheckRun(inputs);
+            ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, output,
+                theorem: "bad theorem", deepChecks: inputs, deepRun: selected), "Invalid theorem name");
+            if (selected.Attempt is not null)
+                throw new InvalidOperationException("Selection failure began an attempt");
+            foreach (var early in new[] { "Lean library build", "proof checking", "kernel replay" })
+            {
+                File.AppendAllText(proof, "\n-- diagnostics " + Guid.NewGuid().ToString("N") + "\n");
+                var run = new DeepCheckRun(inputs);
+                ExpectFailure(() => verification.Verify(image, "DeepFixture", selector, proof, output,
+                    deepChecks: inputs, deepRun: run, stage: stage =>
+                {
+                    if (stage == early)
+                    {
+                        if (run.Attempt is null) throw new InvalidOperationException("Missing early attempt");
+                        throw new InvalidOperationException("diagnostic resource failure");
+                    }
+                }), "diagnostic resource failure");
+                RequireUnattributed(run, early);
+                RequireNoReport();
+            }
+            Console.WriteLine("PASS selection leaves no attempt and library/proof/replay failures stay not covered");
+        }
+
+        foreach (var target in new[] { "body-type", "body-axiom", "digest-type", "images-type",
+            "original-proof", "original-identity", "original-library", "original-assembly" })
+        {
+            if (args is ["--diagnostic", var only] && target != only &&
+                !(only == "originals" && target.StartsWith("original-", StringComparison.Ordinal))) continue;
+            var checker = target == "original-library" ? privateChecker : verification;
+            var originalPath = target switch
+            {
+                "original-proof" => proof,
+                "original-identity" => Path.Combine(output, "identity.json"),
+                "original-library" => Path.Combine(checker.library!, "CIL.lean"),
+                "original-assembly" => image,
+                _ => null
+            };
+            var originalBytes = originalPath is null ? null : File.ReadAllBytes(originalPath);
+            var originalTime = originalPath is null ? default : File.GetLastWriteTimeUtc(originalPath);
+            var run = new DeepCheckRun(inputs);
+            bool changed = false;
+            bool originalChanged = false;
+            string lastStage = "";
+            string[]? before = null;
+            var diagnostic = target switch
+            {
+                "body-axiom" => "Unapproved proof axioms",
+                "original-proof" => "Proof inputs changed",
+                "original-identity" => "extraction identity changed",
+                "original-library" => "certified library contents changed",
+                "original-assembly" => "assembly has changed since extraction",
+                _ => "Theorem statement mismatch"
+            };
+            try
+            {
+                ExpectFailure(() => checker.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
+                    deepRun: run, stage: stage =>
+                {
+                    lastStage = stage;
+                    if (stage == "theorem audit" && originalPath is not null && !originalChanged)
+                    {
+                        var bytes = (byte[])originalBytes!.Clone();
+                        const int dosStubOffset = 0x50;
+                        var offset = target == "original-assembly" ? dosStubOffset : 0;
+                        if (target == "original-assembly" &&
+                            (bytes.Length <= dosStubOffset || BitConverter.ToInt32(bytes, 0x3c) <= dosStubOffset))
+                            throw new InvalidOperationException("Fixture has no DOS stub byte before the PE header");
+                        bytes[offset] ^= 1;
+                        File.WriteAllBytes(originalPath, bytes);
+                        File.SetLastWriteTimeUtc(originalPath, originalTime);
+                        originalChanged = true;
+                    }
+                    if (stage != "deep-check sources") return;
+                    var fresh = Directory.EnumerateDirectories(output, "proof-*").Single();
+                    var module = target == "digest-type" ? "I" + Sha(image)
+                        : target == "images-type" ? "Images" : "Bodies";
+                    var path = Path.Combine(fresh, "BindingAudit", module + ".lean");
+                    var source = File.ReadAllText(path);
+                    var theorem = target == "digest-type" ? "digest"
+                        : target == "images-type" ? "images_eq" : "bodies";
+                    var start = source.IndexOf("theorem " + theorem + " :", StringComparison.Ordinal);
+                    if (start < 0) throw new InvalidOperationException("Missing generated theorem");
+                    var ns = target == "digest-type" ? "BindingAudit." + module : "BindingAudit";
+                    string replacement = target == "body-axiom"
+                        ? "axiom cheat : StrictBinding.BodiesBound images Extracted.methodEvidence\n" +
+                            "theorem bodies : StrictBinding.BodiesBound images Extracted.methodEvidence := cheat\n"
+                        : "theorem " + theorem + " : True := True.intro\n";
+                    File.WriteAllText(path, source[..start] + replacement + "#print axioms " + theorem +
+                        "\nend " + ns + "\n");
+                    changed = true;
+                    before = Receipts();
+                }), diagnostic);
+            }
+            finally
+            {
+                if (originalPath is not null)
+                {
+                    File.WriteAllBytes(originalPath, originalBytes!);
+                    File.SetLastWriteTimeUtc(originalPath, originalTime);
+                }
+            }
+            var failed = run.Attempt!.Failure("theorem audit", diagnostic);
+            var failedFacts = failed.facts
+                .Where(fact => fact.status == FailureReports.BindingFailureStatus.Failed)
+                .Select(fact => fact.id).ToArray();
+            var failedImages = failed.images.Where(item => item.status == FailureReports.BindingFailureStatus.Failed)
+                .Select(item => item.sha256).ToArray();
+            string[] expectedFacts = target.StartsWith("body-", StringComparison.Ordinal) ? ["body-bytes"] : [];
+            if (!changed || before is null || !before.SequenceEqual(Receipts()) ||
+                !failedFacts.SequenceEqual(expectedFacts) ||
+                !failedImages.SequenceEqual(target == "digest-type" ? [Sha(image)] : []))
+                throw new InvalidOperationException("Wrong named deep rejection attribution: " + target +
+                    "; changed=" + changed + "; facts=" + string.Join(",", failedFacts) +
+                    "; images=" + string.Join(",", failedImages) + "; receipts added=" +
+                    string.Join(",", Receipts().Except(before ?? [])) + "; receipts removed=" +
+                    string.Join(",", (before ?? []).Except(Receipts())));
+            if (originalPath is not null)
+            {
+                if (!originalChanged) throw new InvalidOperationException("Original input mutation did not run");
+                RequireUnattributed(run, lastStage);
+            }
+            else if (lastStage != "theorem audit")
+                throw new InvalidOperationException("Named rejection lost the theorem audit stage: " + lastStage);
+            RequireNoReport();
+            Console.WriteLine(originalPath is null
+                ? "PASS named " + target + " rejection marks exactly its subject without publication"
+                : "PASS " + target + " integrity failure leaves all subjects not covered without publication");
+        }
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", priorCache); }
 }
 
 void RequireNoReport()

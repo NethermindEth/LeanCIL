@@ -3,6 +3,8 @@
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
 #:include ../scripts/BindingAudit.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
@@ -116,5 +118,4 @@ partial class Program
         catch (OverflowException) { }
     }
 }
-
 

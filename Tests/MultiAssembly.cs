@@ -7,6 +7,8 @@
 #:include MultiAssemblyGenerics.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/BindingAudit.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include StrictBindingFacts.cs
 #:include StrictBindingDecoding.cs
@@ -26,6 +28,7 @@ const string unsigned = ", Culture=neutral, PublicKeyToken=null";
 Run(["dotnet", "run", "--file", At("Tests/DeepCheckInputs.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/DeepSession.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/DeepVerify.cs")]);
+Run(["dotnet", "run", "--file", At("Tests/DeepDiagnostics.cs")]);
 Run(["dotnet", "run", "--file", At("Tests/ConsumerDeepChecks.cs")]);
 const string libraryText = """
 namespace MultiFixture;
