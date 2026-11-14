@@ -119,14 +119,14 @@ internal static class InstructionTranslation
         Operation JumpTo(JumpKind kind) => new Jump(kind, instructions.Position((Instruction)i.Operand));
         int LocalIndex() => ((VariableDefinition)i.Operand).Index;
         Narrowing? NarrowOf(TypeReference type) => LeanEmitter.Narrow(type);
-        Operation LoadLocal(int index) => new Local(index, NarrowOf(m.Body.Variables[index].VariableType));
-        Operation StoreLocal(int index) => new SetLocal(index, NarrowOf(m.Body.Variables[index].VariableType));
+        Operation LoadLocal(int index) => new Local(index);
+        Operation StoreLocal(int index) => new SetLocal(index);
         Operation AddressLocal(int index) => new LocalAddress(index);
         Operation LoadArgument(int index)
         {
             var home = parameterHomes.GetValueOrDefault(index, -1);
             return home < 0 ? new Arg(index, NarrowOf(MethodArguments.Type(m, index))) :
-                new Local(m.Body.Variables.Count + home, null);
+                new Local(m.Body.Variables.Count + home);
         }
         Operation Parameter(Func<int, Operation> operation)
         {
@@ -212,7 +212,7 @@ internal static class InstructionTranslation
             Code.Localloc => new StackAlloc(m.Body.InitLocals),
             Code.Cpblk => MemoryOperation.Other($"(.copyBlock {MemoryPrefixes.BlockAlignment(i)})"),
             Code.Initblk => MemoryOperation.Other($"(.initBlock {MemoryPrefixes.BlockAlignment(i)})"),
-            Code.Starg or Code.Starg_S => Parameter(index => new SetLocal(index, null)),
+            Code.Starg or Code.Starg_S => Parameter(index => new SetLocal(index)),
             Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
                 ObjectTypes.Candidate(m.DeclaringType) =>
                 throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
@@ -220,7 +220,7 @@ internal static class InstructionTranslation
                 throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S => Parameter(
                 !Spans.Is(((ParameterDefinition)i.Operand).ParameterType)
-                    ? index => new LocalAddress(index) : index => new Local(index, null)),
+                    ? index => new LocalAddress(index) : index => new Local(index)),
             Code.Conv_I => new StackOperation(StackOpcode.ConvI),
             Code.Ldind_I => new StackOperation(StackOpcode.Load64),
             Code.Stind_I => new StackOperation(StackOpcode.Store64),

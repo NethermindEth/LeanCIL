@@ -31,6 +31,10 @@ example : validateParameterHomes #[] raw reachable
 example : validateParameterHomes #[] raw [true, true, true] method = false := by decide
 example : validateArgumentOp raw reachable .other true (.local 2) = false := by decide
 example : validateArgumentOp raw reachable .other true (.arg 0) = false := by decide
+-- A local operand must name one of the declared locals: two locals admit index 1 and reject 2.
+def twoLocals : RawArguments := { raw with locals := [.field .unsigned64, .field .unsigned64] }
+example : validateArgumentOpIn twoLocals [] .other true (.local 1) = true := by decide
+example : validateArgumentOpIn twoLocals [] .other true (.local 2) = false := by decide
 example : validateParameterHomes #[] { raw with code := [.load 0, .store 9, .address 1, .load 3] }
     reachable method = false := by decide
 

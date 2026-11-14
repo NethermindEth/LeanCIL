@@ -10,11 +10,11 @@ import CIL.NativeEvaluation
 /-!
 # Checked interpreter
 
-The interpreter that safety proofs reason about. It runs the same instructions as
-`CIL.step`, but over allocation-aware memory and checked values, and it reports why it
-stopped: every fault is an `ExecutionFault` located at a method and pc instead of `none`.
-Value-only instructions are delegated to `CIL.step` through `pureArity`, so the two
-interpreters cannot disagree on arithmetic.
+The interpreter that safety proofs reason about. It runs over allocation-aware memory and
+checked values, and it reports why it stopped: every fault is an `ExecutionFault` located at a
+method and pc instead of `none`. Value-only instructions are delegated to `CIL.step` through
+`pureArity`, so the two interpreters cannot disagree on arithmetic. Locals have only the meaning
+given here, through the kinds of their slots.
 -/
 
 namespace CIL.Safety
@@ -362,13 +362,13 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .arg i (some kind), _ =>
     let some (.scalar (.i32 bits)) := args[i]? | .error .invalidState
     return .next (pc + 1) ((← checkedValue m (.scalar (.i32 (kind.extend bits)))) :: stack) frame m
-  | .local i _, _ =>
+  | .local i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← loadLocal m slot) :: stack) frame m
   | .localAddr i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← localAddress m slot) :: stack) frame m
-  | .setLocal i _, value :: rest =>
+  | .setLocal i, value :: rest =>
     let some slot := frame.locals[i]? | .error .invalidState
     let (slot, memory) ← storeLocal m slot value
     return .next (pc + 1) rest { frame with locals := frame.locals.set i slot } memory
@@ -440,7 +440,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       if stack.length < argc then .error .invalidState else
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false pc [] 0 values (fun _ => none) body.profile | .error .invalidState
+          CIL.step op false pc [] values (fun _ => none) body.profile | .error .invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue m)
         return .next target (result ++ stack.drop argc) frame m
     | none =>
