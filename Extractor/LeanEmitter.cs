@@ -185,6 +185,7 @@ internal static class LeanEmitter
             import CIL.SymbolicExecution
             import CIL.InstructionEquations
             import CIL.Safety.Execution
+            import CIL.Safety.ResolutionFacts
 
             namespace Extracted
             open CIL
