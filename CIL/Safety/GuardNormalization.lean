@@ -65,12 +65,44 @@ namespace CIL.Safety
 -- How many stack operands each instruction observes.
 @[cil_guard] theorem guard_nativeBinary (op : CIL.Instruction) :
     observerCount (.nativeBinary op) = 2 := rfl
-@[cil_guard] theorem guard_checkedConvert (width : Nat) (signed unsigned : Bool) :
-    observerCount (.checkedConvert width signed unsigned) = 1 := rfl
-@[cil_guard] theorem guard_checkedArithmetic (kind : CIL.CheckedBinaryKind) (signed : Bool) :
-    observerCount (.checkedArithmetic kind signed) = 2 := rfl
-@[cil_guard] theorem guard_divide (signed remainder : Bool) :
-    observerCount (.divide signed remainder) = 2 := rfl
+/-- A signed division observes both of its operands. -/
+@[cil_guard] theorem guard_div : observerCount .div = 2 := rfl
+#print axioms guard_div
+/-- An unsigned division observes both of its operands. -/
+@[cil_guard] theorem guard_div_un : observerCount .div_un = 2 := rfl
+#print axioms guard_div_un
+/-- A signed remainder observes both of its operands. -/
+@[cil_guard] theorem guard_rem : observerCount .rem = 2 := rfl
+#print axioms guard_rem
+/-- An unsigned remainder observes both of its operands. -/
+@[cil_guard] theorem guard_rem_un : observerCount .rem_un = 2 := rfl
+#print axioms guard_rem_un
+/-- A signed checked addition observes both of its operands. -/
+@[cil_guard] theorem guard_add_ovf : observerCount .add_ovf = 2 := rfl
+#print axioms guard_add_ovf
+/-- An unsigned checked addition observes both of its operands. -/
+@[cil_guard] theorem guard_add_ovf_un : observerCount .add_ovf_un = 2 := rfl
+#print axioms guard_add_ovf_un
+/-- A signed checked subtraction observes both of its operands. -/
+@[cil_guard] theorem guard_sub_ovf : observerCount .sub_ovf = 2 := rfl
+#print axioms guard_sub_ovf
+/-- An unsigned checked subtraction observes both of its operands. -/
+@[cil_guard] theorem guard_sub_ovf_un : observerCount .sub_ovf_un = 2 := rfl
+#print axioms guard_sub_ovf_un
+/-- A signed checked multiplication observes both of its operands. -/
+@[cil_guard] theorem guard_mul_ovf : observerCount .mul_ovf = 2 := rfl
+#print axioms guard_mul_ovf
+/-- An unsigned checked multiplication observes both of its operands. -/
+@[cil_guard] theorem guard_mul_ovf_un : observerCount .mul_ovf_un = 2 := rfl
+#print axioms guard_mul_ovf_un
+/-- A checked conversion of a signed operand observes its one operand. -/
+@[cil_guard] theorem guard_conv_ovf (target : CIL.ConvTarget) :
+    observerCount (.conv_ovf target) = 1 := rfl
+#print axioms guard_conv_ovf
+/-- A checked conversion of an unsigned operand observes its one operand. -/
+@[cil_guard] theorem guard_conv_ovf_un (target : CIL.ConvTarget) :
+    observerCount (.conv_ovf_un target) = 1 := rfl
+#print axioms guard_conv_ovf_un
 @[cil_guard] theorem guard_arg (index : Nat) (narrow : Option CIL.NarrowKind) :
     observerCount (.arg index narrow) = 0 := rfl
 @[cil_guard] theorem guard_call (callee argc : Nat) :

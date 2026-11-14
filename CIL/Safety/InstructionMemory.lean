@@ -78,10 +78,11 @@ def unspecifiedOperands (count : Nat) (stack : List Value) : Bool :=
     any of them has unspecified bits. -/
 def observerCount : CIL.Instruction → Nat
   -- Arithmetic and comparisons
-  | .nativeBinary _ | .divide .. | .checkedArithmetic .. => 2
-  | .checkedConvert .. | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2
-  | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .stackAlloc _ | .newArray _
-  | .newReferenceArray _ => 1
+  | .nativeBinary _ | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf
+  | .sub_ovf_un | .mul_ovf | .mul_ovf_un => 2
+  | .conv_ovf _ | .conv_ovf_un _ | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2
+  | .conv_i8 | .conv_i4 | .conv_u1 | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .stackAlloc _
+  | .newArray _ | .newReferenceArray _ => 1
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .bgt _ | .ble _ | .ble_un _
   | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => 2
