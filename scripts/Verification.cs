@@ -573,7 +573,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// <summary>Every replay target is a nonempty unique exact module name.</summary>
     static HashSet<string> SeparateReplayTargets(string[] targets)
     {
-        var expected = new HashSet<string>(StringComparer.Ordinal);
+        // Growing the set one entry at a time would discard large-object arrays and force full collections.
+        var expected = new HashSet<string>(targets.Length, StringComparer.Ordinal);
         foreach (var target in targets)
             if (string.IsNullOrWhiteSpace(target) || !expected.Add(target))
                 throw new InvalidDataException("Replay targets must have unique nonempty names");
@@ -586,12 +587,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     static Dictionary<string, string> ParseExpectedReplayResults(HashSet<string> expected, int exitCode, string stdout)
     {
-        var reported = new HashSet<string>(StringComparer.Ordinal);
+        var reported = new HashSet<string>(expected.Count, StringComparer.Ordinal);
         var failures = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var line in stdout.Split('\n',
-            StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        // Reading lines in place avoids a line array and a string per line, about 110 bytes per record.
+        foreach (var range in stdout.AsSpan().Split('\n'))
         {
-            if (!line.StartsWith('{')) continue;
+            var line = stdout.AsMemory(range).Trim();
+            if (line.IsEmpty || line.Span[0] != '{') continue;
             var (module, error) = SeparateReplayRecord(line);
             if (!expected.Contains(module) || !reported.Add(module))
                 throw new InvalidDataException("Unexpected or duplicate replay result");
@@ -603,7 +605,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>A result has one module and exactly one typed success or failure field.</summary>
-    static (string Module, string? Error) SeparateReplayRecord(string line)
+    static (string Module, string? Error) SeparateReplayRecord(ReadOnlyMemory<char> line)
     {
         JsonDocument document;
         try { document = JsonDocument.Parse(line); }
@@ -615,13 +617,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             JsonElement module = default, elapsed = default, error = default;
             foreach (var property in document.RootElement.EnumerateObject())
             {
-                int field = property.Name switch
-                {
-                    "module" => moduleField,
-                    "milliseconds" => elapsedField,
-                    "error" => errorField,
-                    _ => throw new InvalidDataException("Unknown replay result field")
-                };
+                int field = property.NameEquals("module") ? moduleField
+                    : property.NameEquals("milliseconds") ? elapsedField
+                    : property.NameEquals("error") ? errorField
+                    : throw new InvalidDataException("Unknown replay result field");
                 if ((fields & field) != 0) throw new InvalidDataException("Duplicate replay result field");
                 fields |= field;
                 switch (field)
@@ -631,18 +630,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     case errorField: error = property.Value; break;
                 }
             }
+            var name = module.ValueKind == JsonValueKind.String ? module.GetString() : null;
             if (fields != (moduleField | elapsedField) && fields != (moduleField | errorField) ||
-                module.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(module.GetString()))
+                string.IsNullOrWhiteSpace(name))
                 throw new InvalidDataException("Invalid replay result shape");
             if ((fields & elapsedField) != 0)
             {
                 if (elapsed.ValueKind != JsonValueKind.Number || !elapsed.TryGetUInt64(out _))
                     throw new InvalidDataException("Invalid replay elapsed time");
-                return (module.GetString()!, null);
+                return (name, null);
             }
-            if (error.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(error.GetString()))
-                throw new InvalidDataException("Invalid replay error");
-            return (module.GetString()!, error.GetString());
+            var message = error.ValueKind == JsonValueKind.String ? error.GetString() : null;
+            if (string.IsNullOrEmpty(message)) throw new InvalidDataException("Invalid replay error");
+            return (name, message);
         }
     }
 
