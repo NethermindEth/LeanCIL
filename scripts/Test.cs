@@ -3,7 +3,7 @@
 #:property EnforceCodeStyleInBuild=true
 #:property GenerateDocumentationFile=true
 #:include Verification.cs
-#:include BindingAudit.cs
+#:include DeepChecks.cs
 #:include FailureReports.cs
 #:include LeanDiagnostics.cs
 #:include BindingImage.cs

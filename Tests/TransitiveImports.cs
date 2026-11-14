@@ -3,7 +3,7 @@
 #:include ConsumerTraceDirectory.cs
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs

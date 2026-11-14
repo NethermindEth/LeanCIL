@@ -3,7 +3,7 @@
 #:include ProofCostReport.cs
 #:include CertificateCases.cs
 #:include Verification.cs
-#:include BindingAudit.cs
+#:include DeepChecks.cs
 #:include FailureReports.cs
 #:include LeanDiagnostics.cs
 #:include BindingImage.cs

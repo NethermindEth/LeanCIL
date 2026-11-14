@@ -6,14 +6,14 @@
 #:include MultiAssemblyFixture.cs
 #:include MultiAssemblyGenerics.cs
 #:include ../scripts/BindingImage.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include StrictBindingFacts.cs
 #:include StrictBindingDecoding.cs
 #:include StrictBindingScaling.cs
-#:include StrictBindingAudit.cs
+#:include DeepBinding.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -463,4 +463,4 @@ Run(["lake", "build", "StrictBinding", "Tests.StrictBinding"], FixturePackage(),
 Console.WriteLine("PASS strict binding library: SHA-256, SHA-1, container and table decoding tests");
 CheckBindingDecoding(Path.Combine(root, "binding"));
 CheckBindingScaling(Path.Combine(root, "binding-scaling"));
-CheckBindingAudit(root, cli, Artifact("Direct"), app, lib, libName, Verify(Artifact("Direct")));
+CheckDeepBinding(root, cli, Artifact("Direct"), app, lib, libName, Verify(Artifact("Direct")));
