@@ -26,10 +26,6 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
             name.PublicKeyToken is { Length: 8 } token ? BinaryPrimitives.ReadUInt64BigEndian(token) : 0);
     }
 
-    // Platform keys: only the extractor's trusted platform assemblies can answer these names.
-    static readonly string[] PlatformKeyTokens =
-        ["b03f5f7f11d50a3a", "cc7b13ffcd2ddd51", "7cec85d7bea7798e", "b77a5c561934e089"];
-
     [ThreadStatic]
     static PinnedAssemblies? active;
 
@@ -39,8 +35,12 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     // One platform assembly per identity, so two references to one platform type resolve to one definition.
     readonly Dictionary<Identity, AssemblyDefinition> platformAssemblies = [];
     readonly Dictionary<ModuleDefinition, ModuleDefinition> originals = [];
+    readonly Dictionary<ModuleDefinition, ModuleDefinition> working = [];
+    readonly Dictionary<ModuleDefinition, int> indices = [];
+    readonly Dictionary<string, ModuleDefinition> byName = new(StringComparer.Ordinal);
     readonly Dictionary<ModuleDefinition, byte[]> images = [];
     readonly Dictionary<byte[], PEReader> readers = [];
+    readonly Dictionary<PEReader, MetadataImage> metadata = [];
     readonly List<(Pin Pin, string Path, ModuleDefinition Module)> references = [];
 
     internal ModuleDefinition Selected { get; }
@@ -53,6 +53,9 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>Every pin, the selected assembly first; certificate assembly indices refer to this order.</summary>
     internal IEnumerable<Pin> Pins => [SelectedPin, .. references.Select(reference => reference.Pin)];
 
+    /// <summary>Every pinned module, the selected assembly first, in the order of <see cref="Pins"/>.</summary>
+    internal IEnumerable<ModuleDefinition> Modules => [Selected, .. references.Select(reference => reference.Module)];
+
     /// <summary>Pins <paramref name="selected"/> and each source; <paramref name="readReference"/> reads a
     /// referenced assembly's bytes and hash, so a batch of extractions reads each reference once.</summary>
     internal PinnedAssemblies(byte[] selected, string selectedHash, IEnumerable<Source> sources,
@@ -64,6 +67,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         Selected = Read(selected);
         SelectedPin = new(Selected.Assembly.Name.FullName, Selected.Mvid, selectedHash);
         modules.Add(SelectedPin.Identity, Selected);
+        byName.TryAdd(Selected.Assembly.Name.Name, Selected);
         AddOriginal(Selected, selected);
         foreach (Source source in sources)
         {
@@ -82,6 +86,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
                 throw new InvalidDataException("Platform assemblies are runtime models, not references: " + identity);
             if (!modules.TryAdd(identity, module))
                 throw new InvalidDataException("Duplicate pinned assembly identity: " + identity);
+            byName.TryAdd(module.Assembly.Name.Name, module);
             AddOriginal(module, bytes);
             references.Add((new(identity, module.Mvid, hash), Path.GetFullPath(source.Path), module));
         }
@@ -95,6 +100,8 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     {
         ModuleDefinition original = StaticData.ReadModule(image, this);
         originals.Add(module, original);
+        working.Add(original, module);
+        indices.Add(module, indices.Count);
         images.Add(module, image);
         images.Add(original, image);
     }
@@ -102,8 +109,9 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>The pinned set of the current extraction, or none outside one.</summary>
     internal static PinnedAssemblies? Active => active;
 
+    // Platform keys: only the extractor's trusted platform assemblies can answer these names.
     static bool Platform(AssemblyNameReference name) => name.PublicKeyToken is { Length: 8 } token &&
-        PlatformKeyTokens.Contains(Convert.ToHexStringLower(token));
+        PlatformAssemblies.KeyTokens.Contains(BinaryPrimitives.ReadUInt64BigEndian(token));
 
     /// <summary>Whether <paramref name="module"/> is one of the pinned modules.</summary>
     internal bool Contains(ModuleDefinition module) =>
@@ -125,7 +133,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>The untouched copy of a pinned module; extraction rewrites call operands in the
     /// working one. An untouched copy maps to itself.</summary>
     internal ModuleDefinition Original(ModuleDefinition module) => originals.TryGetValue(module, out var original)
-        ? original : originals.ContainsValue(module) ? module : throw Outside(module);
+        ? original : working.ContainsKey(module) ? module : throw Outside(module);
 
     static InvalidDataException Outside(ModuleDefinition module) =>
         new("Method body outside the pinned assemblies: " + module.Assembly.Name.FullName);
@@ -133,23 +141,41 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     /// <summary>The header and code bytes of a method's body, read from the image of its module.</summary>
     internal MethodBodyBytes.Body Body(MethodDefinition method)
     {
-        if (!images.TryGetValue(method.Module, out byte[]? image)) throw Outside(method.Module);
         if (!method.HasBody || method.RVA == 0)
             throw new InvalidDataException("Method has no body in its image: " + method.FullName);
+        return MethodBodyBytes.Read(Image(method.Module), (int)method.RVA);
+    }
+
+    PEReader Image(ModuleDefinition module)
+    {
+        if (!images.TryGetValue(module, out byte[]? image)) throw Outside(module);
         if (!readers.TryGetValue(image, out PEReader? reader))
             readers.Add(image, reader = new(ImmutableCollectionsMarshal.AsImmutableArray(image)));
-        return MethodBodyBytes.Read(reader, (int)method.RVA);
+        return reader;
     }
+
+    /// <summary>The metadata tables and heaps of a pinned module's image, read once per image.</summary>
+    internal MetadataImage Metadata(ModuleDefinition module)
+    {
+        var reader = Image(module);
+        if (!metadata.TryGetValue(reader, out MetadataImage? image)) metadata.Add(reader, image = new(reader));
+        return image;
+    }
+
+    /// <summary>
+    /// The working module that <paramref name="module"/> is the untouched copy of, or the module itself.
+    /// </summary>
+    internal ModuleDefinition Working(ModuleDefinition module) =>
+        working.GetValueOrDefault(module, module);
     /// <summary>The index of a pinned module in <see cref="Pins"/>.</summary>
-    internal int Index(ModuleDefinition module) => module == Selected ? 0 :
-        references.FindIndex(reference => reference.Module == module) is >= 0 and var index ? index + 1 :
-            throw Outside(module);
+    internal int Index(ModuleDefinition module) => indices.TryGetValue(module, out var index)
+        ? index : throw Outside(module);
 
     /// <summary>Rejects a reference whose simple name is pinned under another identity, so a version
     /// mismatch never falls back to the typed-import path.</summary>
     internal void RejectMismatch(AssemblyNameReference name)
     {
-        if (!modules.ContainsKey(name.FullName) && modules.Values.Any(pinned => pinned.Assembly.Name.Name == name.Name))
+        if (!modules.ContainsKey(name.FullName) && byName.ContainsKey(name.Name))
             Resolve(name);
     }
 
@@ -163,7 +189,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     {
         if (modules.TryGetValue(name.FullName, out var module)) return module.Assembly;
         if (Platform(name)) return PlatformAssembly(name);
-        var named = modules.Values.FirstOrDefault(candidate => candidate.Assembly.Name.Name == name.Name);
+        var named = byName.GetValueOrDefault(name.Name);
         throw new InvalidDataException(named is null
             ? $"Unpinned assembly reference: {name.FullName}\n" +
                 $"  Pass --reference <path to {name.Name}.dll> to extract from it."

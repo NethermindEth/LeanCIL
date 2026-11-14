@@ -35,15 +35,19 @@ void Audit(string name, string source, bool accepted, bool emitted = true)
 
 Audit("valid", baseline, true);
 // Definitionally equal, so elaboration accepts it, but not the statement the extractor emits.
-Audit("wrapped-statement", baseline.Replace("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by",
-    "theorem translation_valid : id (Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program) := by"), true, emitted: false);
+Audit("wrapped-statement", baseline.Replace(
+    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
+    "methodEvidence imports program := by",
+    "theorem translation_valid : id (Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
+    "methodEvidence imports program) := by"), true, emitted: false);
 Audit("missing-certificate", declaration.Replace(baseline, ""), false);
 Audit("unrelated-true", declaration.Replace(baseline, "theorem translation_valid : True := True.intro"), false);
 Audit("definition-instead-of-theorem", baseline.Replace("theorem translation_valid", "def translation_valid"), false);
 // A certificate over another import table does not certify the emitted `Extracted.imports`.
 Audit("other-import-table", declaration.Replace(baseline,
-    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence [{ identity := \"forged\", closureDigest := \"\", parameterCount := 0, hasThis := false, returnsValue := false }] program := " +
-    "by decide +kernel\n"), false);
+    "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies methodEvidence " +
+    "[{ identity := \"forged\", closureDigest := \"\", parameterCount := 0, hasThis := false, " +
+    "returnsValue := false }] program := by decide +kernel\n"), false);
 
 string Wrapper(int index) => ExtractionAuditSource.Replace("import Extracted\n", "", StringComparison.Ordinal)
     .Replace("Extracted.translation_valid", $"AuditCase{index}.Extracted.translation_valid", StringComparison.Ordinal)

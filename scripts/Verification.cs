@@ -2933,7 +2933,7 @@ partial class Program : IDisposable
           | some (.thmInfo _) => pure ()
           | _ => throwError "Expected extraction certificate theorem"
         theorem ExtractionAudit.valid :
-            CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
+            CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts Extracted.assemblies
               Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
         #print Extracted.imports
         """;
@@ -2988,7 +2988,8 @@ partial class Program : IDisposable
     // The certificate must prove the validator for exactly the emitted tables and program.
     static AuditRequest ExtractionCertificate(string theorem, string prefix = "") => new(theorem,
         new { app = new[] { AuditConstant("CIL.Extraction.TranslationValid") }.Concat(
-            new[] { "rawLayouts", "computedLayouts", "methodEvidence", "imports", "program" }.Select(name => AuditConstant(prefix + "Extracted." + name))) },
+            new[] { "rawLayouts", "computedLayouts", "assemblies", "methodEvidence", "imports", "program" }
+                .Select(name => AuditConstant(prefix + "Extracted." + name))) },
         ApprovedAxioms);
 
     static AuditRequest ProofTheorem(string theorem) => new(theorem, axioms: ApprovedAxioms, statement: true, refutation: true);
@@ -3043,11 +3044,54 @@ partial class Program : IDisposable
         finally { File.Delete(request); File.Delete(result); }
     }
 
+    /// <summary>Resolves directory aliases, including ancestors of build directories not yet created.</summary>
+    static string PhysicalImportDirectory(string path)
+    {
+        const int maximumLinks = 64;
+        var remainingLinks = maximumLinks;
+        string Resolve(string absolute)
+        {
+            var root = Path.GetPathRoot(absolute)
+                ?? throw new InvalidDataException("Import directory must be absolute: " + absolute);
+            var current = root;
+            foreach (var component in absolute[root.Length..].Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (component == ".") continue;
+                if (component == "..")
+                {
+                    current = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(current)) ?? root;
+                    continue;
+                }
+                var candidate = Path.Combine(current, component);
+                var directory = new DirectoryInfo(candidate);
+                if (directory.LinkTarget is { } target)
+                {
+                    if (--remainingLinks < 0)
+                        throw new InvalidDataException("Import directory has too many symbolic links: " + path);
+                    current = Resolve(Path.IsPathFullyQualified(target) ? target : Path.Combine(current, target));
+                    if (!Directory.Exists(current))
+                        throw new InvalidDataException(
+                            "Import directory has an unresolved symbolic link: " + candidate);
+                }
+                else current = candidate;
+            }
+            return Path.TrimEndingDirectorySeparator(current);
+        }
+        return Resolve(path);
+    }
+
     // The audited module must be the artifact that was hashed and replayed, not a shadow on the search path.
     static void RequireAuditedModule(AuditedOleans audited, string module, string path)
     {
+        static string PhysicalArtifact(string artifact)
+        {
+            var absolute = Path.IsPathFullyQualified(artifact) ? artifact :
+                Path.Combine(Environment.CurrentDirectory, artifact);
+            return Path.Combine(PhysicalImportDirectory(Path.GetDirectoryName(absolute)!), Path.GetFileName(absolute));
+        }
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!Path.GetFullPath(audited.modules[module]).Equals(Path.GetFullPath(path), comparison))
+        if (!PhysicalArtifact(audited.modules[module]).Equals(PhysicalArtifact(path), comparison))
             throw new InvalidDataException($"Audited module {module} resolved to {audited.modules[module]}, not {path}");
     }
 

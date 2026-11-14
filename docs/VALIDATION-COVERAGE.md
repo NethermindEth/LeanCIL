@@ -134,7 +134,29 @@ workflow.
   switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
   body separately with its specific error, and compares the operand table with a static list
   generated once from the opcodes of Mono.Cecil.
-  `Tests/BodyEncoding.lean` writes bytes for the hand-built methods of other Lean fixtures.
+  `Tests/BodyEncoding.lean` writes bytes and the metadata slice for the hand-built methods of
+  other Lean fixtures.
+  `Tests/MetadataDecoding.lean` decodes rows, headers, heap entries, signature blobs and
+  assembly names copied from `Examples.dll` (two-byte columns) and from the runtime's
+  `System.Private.CoreLib.dll` (four-byte columns) and compares them with the values
+  System.Reflection.Metadata and Mono.Cecil read from the same positions, and rejects malformed
+  rows, headers, heaps and signatures with their specific errors.
+  `Tests/MetadataBinding.lean` checks every operand form, the locals and a method definition
+  against a hand-built pair of pinned assemblies, and changes one row byte, blob byte, heap
+  offset, scope, instantiation, field index, local or link at a time, each with its exact error.
+  `Tests/MetadataDifferential.cs` writes every reference, type definition, type specification and
+  method specification row of `Examples.dll`, with the links that locate nested types and the
+  definitions of its own methods and Cecil's full name for each method reference, and Lean must
+  spell the same names from the bytes and refuse every reference that names a general array. The
+  kernel decides 128 references per theorem, one theorem at a time, so the memory of a run does
+  not grow with the assembly, and the cost per added reference must stay within 1.25 times from
+  64 to 128 references.
+  Tests/BodyLiteral.lean writes the evidence of one method as literals, proves its body check with
+  the kernel, rejects a changed byte, and requires the elaborator's decide to refuse the check
+  within a small heartbeat budget. Tests/ScalarEvidence.lean does the same for the whole
+  certificate, and reduces the fixture encoder in the elaborator at two method sizes.
+  Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
+  string and field tokens and for 25 and 100 call tokens.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one
@@ -321,9 +343,14 @@ performance fixture is never supplied to a verifier as a certified library.
 - CLI regressions cover unchecked-theorem and transitive-helper rejection, stale-report removal
   and changed-code proof failure.
 - `Tests/TranslationScaling.cs` checks the extraction prefix once, then imports it into the
-  compositional certificate and a deliberately failing monolithic certificate. `--measure` also
+  compositional certificate and a monolithic certificate that the elaborator's decide refuses at once,
+  since only the kernel may evaluate the body and metadata check. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
-  The consumer verifies the original extraction. The fixture then checks the emitted
+  The kernel decides the monolithic certificate of call graphs of 2, 4 and 8 methods, and the
+  heartbeats and peak memory of a method added from 4 to 8 may be at most 1.2 times those of one
+  added from 2 to 4. The consumer verifies the original extraction, the extraction checks at the
+  default heartbeat budget with the kernel counted on the elaborating thread, and the same file
+  fails at 100 heartbeats with a deterministic timeout. The fixture then checks the emitted
   `Extracted.layouts_validated` theorem over a chain of nested structs, each holding the one
   before it, and over a chain of generic structs, each holding the previous distinct closed
   generic owner, and the emitted `Extracted.method0_layouts_validated` theorem over the nested

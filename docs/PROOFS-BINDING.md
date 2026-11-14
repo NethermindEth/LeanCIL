@@ -353,7 +353,7 @@ import CIL.StructuralLabels
 bind_loop reduce := rootBody [1]     -- the second loop head in pc order
 bind_call after := step from rootBody [1]
 
-theorem body : (rootBody.code.drop reduce).take 4 = [.local 0, .ldc_i4 3, .sub, .setLocal 0] := rfl
+theorem body : (rootBody.code.drop reduce).take 4 = [.ldloc 0, .ldc_i4 3, .sub, .stloc 0] := rfl
 ```
 
 A loop head is the target of a branch at the same or a later pc. `bind_loop` defines `reduce` and
@@ -381,7 +381,7 @@ proof that imports it can name locals by their C# names, resolved in the scope t
 import ExtractedSymbols
 
 theorem stores :
-    sumBody.code[atWide + 1]? = some (.setLocal (local_named sum "carry" at (atWide + 1))) := rfl
+    sumBody.code[atWide + 1]? = some (.stloc (local_named sum "carry" at (atWide + 1))) := rfl
 ```
 
 A name used for one slot needs no `at`; a name the PDB gives two slots, such as `carry` declared in
@@ -491,7 +491,7 @@ open CIL
 
 /-- Reads its one local, a null reference, then returns argument 0. -/
 @[cil_code] def stored : Method := {
-  code := [.local 0, .pop, .arg 0, .ret]
+  code := [.ldloc 0, .pop, .arg 0, .ret]
   locals := [.nullRef], localKinds := [.reference], returnsValue := true }
 
 /-- `stored` with two unused reference locals after its own, as a profile can extract it. -/

@@ -52,7 +52,7 @@ def method9Signature : String :=
 /-- `SumDiscard`: passes its local's address as `AddFlag`'s `res` and returns the flag. -/
 @[cil_code] def method5 : Method :=
   { returnsValue := true, locals := [.unmodeled], localKinds := [.word64], code :=
-    [.arg 0, .arg 1, .localAddr 0, .call 8 3, .ret (some .unsigned8)] }
+    [.arg 0, .arg 1, .ldloca 0, .call 8 3, .ret (some .unsigned8)] }
 /-- `IsZero`: a comparison returned as a narrowed boolean. -/
 @[cil_code] def method6 : Method := { returnsValue := true, locals := [], code :=
   [.arg 0, .ldc_i4 0, .conv_i8, .ceq, .ret (some .unsigned8)] }
@@ -86,7 +86,7 @@ def method14Signature : String :=
 /-- `CopyTo`: passes its zero-initialized local's address as `AddFrom`'s `a`. -/
 @[cil_code] def method11 : Method :=
   { returnsValue := false, locals := [.i64 0], localKinds := [.word64], code :=
-    [.arg 0, .arg 1, .localAddr 0, .call 10 3, .ret] }
+    [.arg 0, .arg 1, .ldloca 0, .call 10 3, .ret] }
 /-- `IsZeroSecond`: forwards its second argument and never loads its first. -/
 @[cil_code] def method12 : Method := { returnsValue := true, locals := [], code :=
   [.arg 1, .call 6 1, .ret (some .unsigned8)] }

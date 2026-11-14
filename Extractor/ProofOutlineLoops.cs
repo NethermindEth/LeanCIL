@@ -1471,8 +1471,10 @@ internal static partial class ProofOutline
                 stack.Add(value is Number { Literal: true, Width: 4 } literal ? literal with { Width = 8 }
                     : new Unknown("a widened value"));
             }
+            // A span local's address pushes the view it holds, as loading the local does.
             else if (op is LocalAddress addressed)
-                stack.Add(new LocalAddressValue(addressed.Index));
+                stack.Add(slots[addressed.Index].Components[0].Part == Part.Span
+                    ? new LocalValue(addressed.Index) : new LocalAddressValue(addressed.Index));
             else if (op is AggregateTransfer { Access: AggregateAccess.Initialize })
             {
                 if (Pop() is not LocalAddressValue address) return Stop("zeroing storage other than a struct local");

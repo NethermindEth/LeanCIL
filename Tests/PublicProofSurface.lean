@@ -139,7 +139,7 @@ theorem mixed_local_snapshot {caller current final : Memory} {word vector : Refe
     (confined : Confined [(word, 8)] current final) (formed : final.WellFormed)
     (loaded : read final word 8 1 = .ok (numberBytes value.toNat 8))
     (body : CIL.Method) (pc : Nat) (arguments stack : List Value) :
-    step body (.local 1) pc arguments
+    step body (.ldloc 1) pc arguments
       { activation := 0, locals := [.bytes .word64 word, .bytes .vector256 vector], owned := [] }
       stack final = .ok (.next (pc + 1) (.scalar (.v256 saved) :: stack)
         { activation := 0, locals := [.bytes .word64 word, .bytes .vector256 vector], owned := [] }

@@ -1,4 +1,5 @@
 import CIL.Identity
+import Std.Data.TreeMap
 
 /-!
 # Typed identity tests
@@ -237,7 +238,7 @@ info: { assembly := spelledNeutral, typeNamespace := name!"N", name := name!"A" 
 #check ({ assembly := spelledNeutral, typeNamespace := name!"N", name := name!"A" } :
   TypeIdentity)
 
-/-- info: { assembly := examples, typeNamespace := { code := 511 }, name := name!"A" } :
+/-- info: { assembly := examples, typeNamespace := { code := 0x1ff }, name := name!"A" } :
   TypeIdentity -/
 #guard_msgs (whitespace := lax) in
 #check ({ assembly := examples, typeNamespace := ⟨511⟩, name := name!"A" } : TypeIdentity)
@@ -247,7 +248,7 @@ info: { assembly := spelledNeutral, typeNamespace := name!"N", name := name!"A" 
 trace: space : MetadataName
 type : TypeIdentity
 free : type = { assembly := examples, typeNamespace := space, name := name!"P" }
-malformed : type = { assembly := examples, typeNamespace := name!"N", name := { code := 767 } }
+malformed : type = { assembly := examples, typeNamespace := name!"N", name := { code := 0x2ff } }
 ⊢ True
 -/
 #guard_msgs in
@@ -260,43 +261,43 @@ example (space : MetadataName) (type : TypeIdentity)
   trivial
 
 -- A code that spells no text prints as its raw structure, never as a name.
-/-- info: { code := 767 } : MetadataName -/
+/-- info: { code := 0x2ff } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 767
 
-/-- info: { code := 0 } : MetadataName -/
+/-- info: { code := 0x0 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 0
 
-/-- info: "{ code := 767 }" -/
+/-- info: "{ code := 0x2ff }" -/
 #guard_msgs in
 #eval (MetadataName.mk 767).display
 
 -- 511 is the byte 0xFF after the leading 1: a well-formed code whose byte is not UTF-8.
-/-- info: { code := 511 } : MetadataName -/
+/-- info: { code := 0x1ff } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 511
 
 -- 120832 is the code unit 0xD800 after the leading 1: an unpaired high surrogate.
-/-- info: { code := 120832 } : UserString -/
+/-- info: { code := 0x1d800 } : UserString -/
 #guard_msgs in
 #check UserString.mk 120832
 
-/-- info: "{ code := 120832 }" -/
+/-- info: "{ code := 0x1d800 }" -/
 #guard_msgs in
 #eval (UserString.mk 120832).display
 
 -- The compiled UTF-8 decision refuses an overlong form (C0 80) and an encoded surrogate
 -- (ED A0 80), and a lone low surrogate (DC00) is no UTF-16 text.
-/-- info: { code := 114816 } : MetadataName -/
+/-- info: { code := 0x1c080 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 114816
 
-/-- info: { code := 32350336 } : MetadataName -/
+/-- info: { code := 0x1eda080 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 32350336
 
-/-- info: { code := 121856 } : UserString -/
+/-- info: { code := 0x1dc00 } : UserString -/
 #guard_msgs in
 #check UserString.mk 121856
 
@@ -337,14 +338,14 @@ example : [PrimitiveType.boolean, .char, .sbyte, .byte, .int16, .uint16, .int32,
 #guard_msgs in
 #check name!"a\x00"
 
-/-- info: { code := 256 } : MetadataName -/
+/-- info: { code := 0x100 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 256
 
 -- A malformed code and a name whose text spells its raw structure display differently.
-#guard (MetadataName.mk 767).display == "{ code := 767 }"
-#guard (name!"{ code := 767 }").display == "\\{ code := 767 }"
-#guard (UserString.mk 120832).display != (str!"{ code := 120832 }").display
+#guard (MetadataName.mk 767).display == "{ code := 0x2ff }"
+#guard (name!"{ code := 0x2ff }").display == "\\{ code := 0x2ff }"
+#guard (UserString.mk 120832).display != (str!"{ code := 0x1d800 }").display
 
 -- Escapes in printed text: a backslash, and control, format, separator and non-ASCII space
 -- characters, each of which would otherwise print as nothing or as a space.
@@ -373,11 +374,11 @@ example : [PrimitiveType.boolean, .char, .sbyte, .byte, .int16, .uint16, .int32,
 #guard MetadataName.ofBytes? [0xF3, 0xA0, 0x81, 0x81] == some ⟨8382349697⟩
 #guard (MetadataName.mk 8382349697).text?.isSome
 
-/-- info: { code := 8382349697 } : MetadataName -/
+/-- info: { code := 0x1f3a08181 } : MetadataName -/
 #guard_msgs in
 #check MetadataName.mk 8382349697
 
-#guard (MetadataName.mk 8382349697).display == "{ code := 8382349697 }"
+#guard (MetadataName.mk 8382349697).display == "{ code := 0x1f3a08181 }"
 
 -- `type!` is display only.
 /-- error: type!"..." is display only; write the TypeIdentity structure -/
@@ -528,5 +529,171 @@ example : innerType ≠ { innerType with typeNamespace := name!"N" } := by decid
 #guard_msgs in
 #check ({ assembly := examples, typeNamespace := name!"N", enclosing := [⟨name!"N", name!"Outer"⟩],
           name := name!"Inner" } : TypeIdentity)
+
+/-- Boundary codes and payload digits agree with the mathematical radix specification. -/
+def checkIdentityCodec : IO Unit := do
+  for bits in [8, 16] do
+    let base := 2^bits
+    for code in List.range 1024 ++
+        [base - 1, base, base + 1, 2 * base - 1, 2 * base, base^2 - 1,
+          base^2, base^2 + 1, 2 * base^2 - 1, 2 * base^2] do
+      unless bitDigits? bits code == radixDigits? base code code [] do
+        throw (IO.userError s!"decoder admission differs: width {bits}, code {code}")
+    for digits in [[], [0], [0, 0], [base - 1], [0, base - 1, 0],
+        [base - 1, 0, base - 1], [base], [0, base], [base + 1, 0]] do
+      unless bitCode? bits digits == radixCode? base digits 1 do
+        throw (IO.userError s!"encoder differs: width {bits}, digits {digits}")
+      if let some code := bitCode? bits digits then
+        unless bitDigits? bits code == some digits do
+          throw (IO.userError s!"payload digits differ: width {bits}, digits {digits}")
+  for seed in [0, 1, 0x0123456789abcdef] do
+    for code in [0, 1, 2^64 - 1, 2^64, 2^64 + 1, 2^128 - 1,
+        2^128, 2^128 + 1, 2^192 + 2^64 + 7] do
+      unless mixCodeLimbs seed code == mixCodeLimbsSpec seed code do
+        throw (IO.userError s!"hash limbs differ: seed {seed}, code {code}")
+
+#eval checkIdentityCodec
+
+/-- Separate runtime measurements cover encoding, decoding and hashing of growing payloads. -/
+def checkIdentityCodecCost : IO Unit := do
+  for bits in [8, 16] do
+    let mut previous : Array Nat := #[0, 0, 0]
+    for size in [8192, 65536, 524288] do
+      let mut best : Array Nat := #[1000000000000, 1000000000000, 1000000000000]
+      let mut checksum : UInt64 := 0
+      for sample in [:3] do
+        let digits := (List.range (size * 8 / bits)).map
+          (fun index => (index + sample) % (2^bits))
+        let started ← IO.monoNanosNow
+        let some code := bitCode? bits digits | throw (IO.userError "bounded encoder rejected")
+        let encoded ← IO.monoNanosNow
+        let decoded := bitDigits? bits code
+        let finished ← IO.monoNanosNow
+        let hashed := mixCodeLimbs (UInt64.ofNat sample) code
+        let ended ← IO.monoNanosNow
+        unless decoded == some digits do
+          throw (IO.userError "growing payload did not round trip")
+        checksum := checksum ^^^ hashed
+        let times := #[encoded - started, finished - encoded, ended - finished]
+        for index in [:3] do best := best.set! index (min best[index]! times[index]!)
+      for index in [:3] do
+        if previous[index]! > 0 && best[index]! > previous[index]! * 16 + 2000000 then
+          throw (IO.userError (s!"codec cost grew too quickly: width {bits}, size {size}, " ++
+            s!"operation {index}, {previous[index]!} -> {best[index]!} ns"))
+      IO.println (s!"PASS codec width {bits}, bytes {size}: " ++
+        s!"encode/decode/hash ns {best}, {checksum}")
+      previous := best
+
+#eval checkIdentityCodecCost
+
+/-- Every component takes precedence over all following components. -/
+def checkAssemblyComponentOrder : IO Unit := do
+  let lower : AssemblyName := ⟨⟨1⟩, ⟨1, 1, 1, 1⟩, ⟨1⟩, none⟩
+  let upper : AssemblyName := ⟨⟨2⟩, ⟨2, 2, 2, 2⟩, ⟨2⟩, some 0⟩
+  let pairs : Array (AssemblyName × AssemblyName) := #[
+    ({ upper with name := lower.name }, { lower with name := upper.name }),
+    ({ upper with name := lower.name, version := ⟨1, 2, 2, 2⟩ },
+      { lower with version := ⟨2, 1, 1, 1⟩ }),
+    (⟨⟨1⟩, ⟨1, 1, 2, 2⟩, ⟨2⟩, some 0⟩, { lower with version := ⟨1, 2, 1, 1⟩ }),
+    (⟨⟨1⟩, ⟨1, 1, 1, 2⟩, ⟨2⟩, some 0⟩, { lower with version := ⟨1, 1, 2, 1⟩ }),
+    ({ lower with culture := upper.culture, publicKeyToken := upper.publicKeyToken },
+      { lower with version := ⟨1, 1, 1, 2⟩ }),
+    ({ lower with publicKeyToken := upper.publicKeyToken },
+      { lower with culture := upper.culture }),
+    (lower, { lower with publicKeyToken := some 0 }),
+    ({ lower with publicKeyToken := some 0 }, { lower with publicKeyToken := some 1 })]
+  for (left, right) in pairs do
+    unless compare left right == .lt && compare right left == .gt do
+      throw (IO.userError "assembly component precedence changed")
+
+#eval checkAssemblyComponentOrder
+
+/-- Text delimiters, invalid UTF-8, culture and null-token distinctions survive ordered lookup. -/
+def assemblyMapKeys : Array AssemblyName := #[examples,
+  { examples with publicKeyToken := some 0 },
+  { examples with culture := name!"neutral" },
+  { examples with name := name!"A, Version=1.0.0.0" },
+  { examples with name := name!"A", culture := name!"Version=1.0.0.0" },
+  { examples with name := ⟨0x1ff⟩ }, { examples with name := ⟨0x1fe⟩ }]
+
+/-- All distinct assembly components remain separate map entries with their original values. -/
+def checkAssemblyMap : IO Unit := do
+  let mut entries : Std.TreeMap AssemblyName Nat := ∅
+  for bound : index in [:assemblyMapKeys.size] do
+    entries := entries.insert assemblyMapKeys[index] index
+  unless entries.size == assemblyMapKeys.size do
+    throw (IO.userError "distinct assembly keys collapsed")
+  for bound : index in [:assemblyMapKeys.size] do
+    unless entries[assemblyMapKeys[index]]? == some index do
+      throw (IO.userError "assembly lookup returned another identity")
+  unless entries[{ examples with version := ⟨9, 0, 0, 0⟩ }]? == none do
+    throw (IO.userError "absent assembly key was found")
+  entries := entries.insert examples 99
+  unless entries.size == assemblyMapKeys.size && entries[examples]? == some 99 do
+    throw (IO.userError "equal assembly key did not replace its value")
+
+#eval checkAssemblyMap
+
+/-- Equal comparison implies exact identity, including optional tokens and undecodable names. -/
+theorem assemblyMapComparison (left right : AssemblyName) :
+    compare left right = .eq ↔ left = right :=
+  AssemblyName.compare_eq_iff left right
+
+/-- info: 'Tests.Identity.assemblyMapComparison' depends on axioms:
+[propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms assemblyMapComparison
+
+/-- Ordered lookup uses transitive raw component comparisons. -/
+theorem assemblyComparisonTransitive (first second third : AssemblyName)
+    (firstBefore : compare first second = .lt) (secondBefore : compare second third = .lt) :
+    compare first third = .lt :=
+  Std.TransCmp.lt_trans firstBefore secondBefore
+
+/-- info: 'Tests.Identity.assemblyComparisonTransitive' depends on axioms:
+[propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms assemblyComparisonTransitive
+
+/-- Prebuilt names share a byte prefix and differ only in their two final nonzero bytes. -/
+def assemblyCostKeys (count prefixBytes : Nat) : Array AssemblyName := Id.run do
+  let prefixCode := (bitCode? 8 (List.replicate prefixBytes 97)).getD 1
+  return (Array.range count).map fun index =>
+    { examples with name := ⟨(prefixCode <<< 16) + (index / 255 + 1) * 256 + index % 255 + 1⟩ }
+
+/-- Times map construction and successful lookup without timing identity construction. -/
+def measureAssemblyMap (keys : Array AssemblyName) : IO Nat := do
+  let mut best := 1000000000000
+  for _ in [:3] do
+    let started ← IO.monoNanosNow
+    for _ in [:16] do
+      let mut entries : Std.TreeMap AssemblyName Nat := ∅
+      for bound : index in [:keys.size] do entries := entries.insert keys[index] index
+      unless entries.size == keys.size do throw (IO.userError "growing map lost keys")
+      for bound : index in [:keys.size] do
+        unless entries[keys[index]]? == some index do
+          throw (IO.userError "growing map lookup failed")
+    best := min best ((← IO.monoNanosNow) - started)
+  return best
+
+/-- Map cost grows with key count and comparison bit length, with no text decoding. -/
+def checkAssemblyMapCost : IO Unit := do
+  for prefixBytes in [4, 4096] do
+    let mut previous := 0
+    for count in [64, 512, 4096] do
+      let elapsed ← measureAssemblyMap (assemblyCostKeys count prefixBytes)
+      if previous > 0 && elapsed > previous * 20 + 2000000 then
+        throw (IO.userError s!"assembly count cost grew too quickly: {previous} -> {elapsed}")
+      IO.println s!"PASS assembly count {count}, prefix bytes {prefixBytes}: {elapsed} ns"
+      previous := elapsed
+  let mut previous := 0
+  for prefixBytes in [4096, 32768, 262144] do
+    let elapsed ← measureAssemblyMap (assemblyCostKeys 64 prefixBytes)
+    if previous > 0 && elapsed > previous * 20 + 2000000 then
+      throw (IO.userError s!"assembly bit cost grew too quickly: {previous} -> {elapsed}")
+    IO.println s!"PASS assembly count 64, prefix bytes {prefixBytes}: {elapsed} ns"
+    previous := elapsed
+
+#eval checkAssemblyMapCost
 
 end Tests.Identity

@@ -88,9 +88,9 @@ string Proof(string name, string[] slots, string imports = "  import ExtractedSy
 
     -- Each block stores its call's result in its own `carry`, and the second block reads its own back.
     theorem correctness :
-        sumBody.code[atMix + 1]? = some (.setLocal {{slots[0]}}) ∧
-        sumBody.code[atWide + 1]? = some (.setLocal {{slots[1]}}) ∧
-        sumBody.code[atWide + 2]? = some (.local {{slots[2]}}) :=
+        sumBody.code[atMix + 1]? = some (.stloc {{slots[0]}}) ∧
+        sumBody.code[atWide + 1]? = some (.stloc {{slots[1]}}) ∧
+        sumBody.code[atWide + 2]? = some (.ldloc {{slots[2]}}) :=
       ⟨rfl, rfl, rfl⟩
 
     end ExampleProof

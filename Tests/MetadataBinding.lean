@@ -1,0 +1,886 @@
+import Tests.MetadataWorld
+
+/-!
+# Metadata binding tests
+
+A hand-built world of two pinned assemblies: `T`, which carries the operands under test, and
+`Lib`, which defines the class `Lib.Box` that `T` calls into. Every operand of `T` that the
+extractor can state is checked against its metadata and must pass. Each rejection then changes
+one fact of the metadata or of the operand and asserts the exact error.
+-/
+
+namespace Tests.MetadataBinding
+
+open CIL CIL.Extraction Tests.MetadataBuilder Tests.MetadataWorld
+
+
+/-- Whether checking an operand against a pair of slices gives these facts. -/
+private def passes (ownSlice libSlice : MetadataSlice) (token : Nat) (operand : RawOperand)
+    (arity : Nat := 0) : Bool :=
+  match (do
+    let env := MetadataEnv.ofSlices [← ownSlice.index, ← libSlice.index]
+    checkEntry env arity token operand) with
+  | .ok _ => true
+  | .error _ => false
+
+/-- Whether checking an operand fails with exactly this error. -/
+private def rejects (ownSlice libSlice : MetadataSlice) (token : Nat) (operand : RawOperand)
+    (error : MetadataError) (arity : Nat := 0) : Bool :=
+  match (do
+    let env := MetadataEnv.ofSlices [← ownSlice.index, ← libSlice.index]
+    checkEntry env arity token operand) with
+  | .error found => found == error
+  | .ok _ => false
+
+/-- Replace the bytes of a row of a slice. -/
+private def mutateRow (slice : MetadataSlice) (token : Nat) (change : List Nat → List Nat) :
+    MetadataSlice :=
+  { slice with rows := slice.rows.map fun (key, bytes) =>
+      if key == token then (key, change bytes) else (key, bytes) }
+
+/-- Replace the bytes of a blob of a slice. -/
+private def mutateBlob (slice : MetadataSlice) (offset : Nat) (change : List Nat → List Nat) :
+    MetadataSlice :=
+  { slice with blobs := slice.blobs.map fun (key, bytes) =>
+      if key == offset then (key, change bytes) else (key, bytes) }
+
+/-! ## Operands that match their metadata -/
+
+theorem accepts_type_operand :
+    passes own.1 lib tokens.objectRef (.type (.atom runtimeScope "System.Object")) = true := by
+  decide +kernel
+theorem accepts_external_call :
+    passes own.1 lib tokens.writeLine (.call writeLineSite) = true := by decide +kernel
+theorem accepts_managed_call :
+    passes own.1 lib tokens.getRef (.call getSite) = true := by decide +kernel
+theorem accepts_generic_call :
+    passes own.1 lib tokens.idSpec (.call idSite) = true := by decide +kernel
+theorem accepts_string :
+    passes own.1 lib tokens.hello (.text "hi") = true := by decide +kernel
+theorem accepts_indirect :
+    passes own.1 lib tokens.indirect (.indirectCall .void [int32] false false 0) = true := by
+  decide +kernel
+theorem accepts_fields :
+    passes own.1 lib tokens.totalField
+      (.field (.atom "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Program")
+        1 int32 true) = true ∧
+    passes own.1 lib tokens.countField countOperand = true := by decide +kernel
+/-! ## Operands whose metadata or claim changed -/
+
+/-- The bytes of a row of a slice. -/
+private def rowOf (slice : MetadataSlice) (token : Nat) : List Nat :=
+  (slice.rows.lookup token).getD []
+
+/-- The offset of the blob entry with a payload, assuming a one-byte length prefix. -/
+private def blobOffset (slice : MetadataSlice) (payload : List Nat) : Nat :=
+  match slice.blobs.find? (fun entry => entry.2.drop 1 == payload) with
+  | some (offset, _) => offset
+  | none => 0
+
+/-- A row whose two bytes at `position` are copied from another row of the slice. -/
+private def borrow (slice : MetadataSlice) (token source position : Nat) : MetadataSlice :=
+  mutateRow slice token fun bytes =>
+    bytes.take position ++ ((rowOf slice source).drop position).take 2 ++ bytes.drop (position + 2)
+
+/-- A type token whose name column names another string that is present: `Console` becomes
+    `Object`. -/
+private def renamedConsole : MetadataSlice := borrow own.1 tokens.consoleRef tokens.objectRef 2
+
+/-- A type token whose name offset has no entry. -/
+private def dangling : MetadataSlice :=
+  mutateRow own.1 tokens.consoleRef fun bytes => bytes.take 2 ++ [0xFF, 0x7F] ++ bytes.drop 4
+
+theorem rejects_a_row_byte_that_names_another_string :
+    rejects renamedConsole lib tokens.consoleRef (.type (.atom runtimeScope "System.Console"))
+      (.operandMismatch tokens.consoleRef) = true := by decide +kernel
+#print axioms rejects_a_row_byte_that_names_another_string
+
+theorem rejects_a_signature_byte_that_changes_a_parameter :
+    rejects (mutateBlob own.1 (blobOffset own.1 [0x00, 0x01, 0x01, 0x08]) fun bytes =>
+        bytes.set 4 0x0A) lib tokens.writeLine (.call writeLineSite)
+      (.operandMismatch tokens.writeLine) = true := by decide +kernel
+#print axioms rejects_a_signature_byte_that_changes_a_parameter
+
+theorem rejects_a_heap_offset_with_no_entry :
+    rejects dangling lib tokens.consoleRef (.type (.atom runtimeScope "System.Console"))
+      (.missingHeap 0 0x7FFF) = true := by decide +kernel
+#print axioms rejects_a_heap_offset_with_no_entry
+
+theorem rejects_a_generic_argument_that_differs_from_the_specification :
+    rejects own.1 lib tokens.idSpec (.call { idSite with typeArguments := [uint64] })
+      (.genericMismatch tokens.idSpec) = true := by decide +kernel
+#print axioms rejects_a_generic_argument_that_differs_from_the_specification
+
+/-- `System.Console` as an assembly of version 9 would define it. -/
+private def olderConsole : TypeExpr :=
+  .atom "System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+    "System.Console"
+
+theorem rejects_an_owner_scope_with_another_version :
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with declaringType := olderConsole })
+      (.scopeMismatch tokens.writeLine) = true := by decide +kernel
+#print axioms rejects_an_owner_scope_with_another_version
+
+theorem rejects_a_field_index_the_metadata_does_not_give :
+    rejects own.1 lib tokens.countField
+      (.field (.atom ownIdentity "Program") 1 int32 false)
+      (.fieldIndexMismatch tokens.countField 1 0) = true := by decide +kernel
+#print axioms rejects_a_field_index_the_metadata_does_not_give
+
+theorem rejects_a_static_field_claimed_as_an_instance_field :
+    rejects own.1 lib tokens.totalField
+      (.field (.atom ownIdentity "Program") 1 int32 false)
+      (.operandMismatch tokens.totalField) = true := by decide +kernel
+#print axioms rejects_a_static_field_claimed_as_an_instance_field
+
+/-- The local variable types of the signature at `tokens.localsSignature`. -/
+private def localsFail (slice : MetadataSlice) (locals : List TypeExpr) (error : MetadataError) :
+    Bool :=
+  match (do
+    let env := MetadataEnv.ofSlices [← slice.index, ← lib.index]
+    checkLocals env 0 tokens.localsSignature locals) with
+  | .error found => found == error
+  | .ok _ => false
+
+theorem accepts_the_locals_the_signature_names :
+    (match (do
+      let env := MetadataEnv.ofSlices [← own.1.index, ← lib.index]
+      checkLocals env 0 tokens.localsSignature [uint64]) with
+    | .ok _ => true
+    | .error _ => false) = true := by decide +kernel
+#print axioms accepts_the_locals_the_signature_names
+
+theorem rejects_a_local_of_another_type :
+    localsFail own.1 [uint32] (.localMismatch 0) = true ∧
+    localsFail own.1 [uint64, uint64] (.localMismatch 1) = true ∧
+    localsFail own.1 [] (.localMismatch 0) = true := by decide +kernel
+#print axioms rejects_a_local_of_another_type
+
+theorem rejects_a_pinned_local :
+    localsFail (mutateBlob own.1 (blobOffset own.1 [0x07, 0x01, 0x0B]) fun _ =>
+      [4, 0x07, 0x01, 0x45, 0x0B]) [uint64] (.unsupportedSignature 2 0x45) = true := by
+  decide +kernel
+#print axioms rejects_a_pinned_local
+
+/-! ## Rows and heap entries the decoder refuses -/
+
+theorem rejects_a_row_of_the_wrong_length :
+    rejects (mutateRow own.1 tokens.consoleRef fun bytes => bytes.take 5) lib tokens.consoleRef
+      (.type (.atom runtimeScope "System.Console")) (.rowLength tokens.consoleRef 6 5) = true := by
+  decide +kernel
+#print axioms rejects_a_row_of_the_wrong_length
+
+theorem rejects_row_zero :
+    rejects own.1 lib 0x01000000 (.type (.atom runtimeScope "System.Console"))
+      (.tokenOutOfScope 0x01000000) = true := by decide +kernel
+#print axioms rejects_row_zero
+
+theorem rejects_a_duplicate_token :
+    (match { own.1 with rows := own.1.rows ++ own.1.rows.take 1 }.index with
+      | .error found => found == .duplicateEntry (own.1.rows.headD (0, [])).1
+      | .ok _ => false) = true := by decide +kernel
+#print axioms rejects_a_duplicate_token
+
+theorem rejects_a_wrong_user_string_terminal_byte :
+    rejects { own.1 with userStrings := own.1.userStrings.map fun (offset, bytes) =>
+        (offset, bytes.set (bytes.length - 1) 1) } lib tokens.hello (.text "hi")
+      (.malformedUserString (tokens.hello - 0x70000000)) = true := by decide +kernel
+#print axioms rejects_a_wrong_user_string_terminal_byte
+
+theorem rejects_another_string_than_the_user_string :
+    rejects own.1 lib tokens.hello (.text "ho") (.operandMismatch tokens.hello) = true := by
+  decide +kernel
+#print axioms rejects_another_string_than_the_user_string
+
+/-! ## Calls into a pinned assembly -/
+
+theorem rejects_a_pinned_callee_with_another_name :
+    rejects (borrow own.1 tokens.getRef tokens.writeLine 2) lib
+      tokens.getRef (.call { getSite with name := "WriteLine" })
+      (.unresolvedMember tokens.getRef) = true := by decide +kernel
+#print axioms rejects_a_pinned_callee_with_another_name
+
+theorem rejects_a_pinned_callee_with_no_link :
+    rejects { own.1 with links := own.1.links.filter (·.source != tokens.getRef) } lib
+      tokens.getRef (.call getSite) (.unresolvedMember tokens.getRef) = true := by decide +kernel
+#print axioms rejects_a_pinned_callee_with_no_link
+
+theorem rejects_a_managed_target_other_than_the_definition :
+    rejects own.1 lib tokens.getRef (.call { getSite with target := .managed 0x06000002 })
+      (.operandMismatch tokens.getRef) = true := by decide +kernel
+#print axioms rejects_a_managed_target_other_than_the_definition
+
+/-- The identity of `WriteLine(long)`, which the `WriteLine(int)` token does not name. -/
+private def longWriteLine : MethodId :=
+  .external (runtimeScope ++ "::System.Void System.Console::WriteLine(System.Int64)")
+
+theorem rejects_an_external_identity_other_than_the_member :
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with target := longWriteLine })
+      (.operandMismatch tokens.writeLine) = true := by decide +kernel
+#print axioms rejects_an_external_identity_other_than_the_member
+
+/-- `Lib.Box` defined with namespace `Lib` and name `Box`, as the reference spells it, and the
+    same type defined with an empty namespace and the name `Lib.Box`: both join to `Lib.Box`. -/
+private def libWithJoinedName : MetadataSlice :=
+  let joined : ByteEntry := (0x4000, bytesOf "Lib.Box" ++ [0])
+  { mutateRow lib (tokenOf Table.typeDef 2) (fun bytes =>
+      bytes.take 4 ++ [0x00, 0x40, 0x00, 0x00] ++ bytes.drop 8) with
+    strings := lib.strings ++ [joined] }
+
+theorem rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference :
+    rejects own.1 libWithJoinedName tokens.getRef (.call getSite)
+      (.operandMismatch tokens.boxRef) = true := by decide +kernel
+#print axioms rejects_a_definition_whose_namespace_and_name_only_join_to_the_reference
+
+/-- Whether checking an operand against the own slice alone fails with exactly this error, when
+    `Lib` is pinned: its slice is not carried. -/
+private def rejectsWithoutLibSlice (token : Nat) (operand : RawOperand) (error : MetadataError) :
+    Bool :=
+  match (do
+    let env := MetadataEnv.ofSlices [← own.1.index]
+      (({} : AssemblyPrefixes).insert (bytesOf libScope))
+    checkEntry env 0 token operand) with
+  | .error found => found == error
+  | .ok _ => false
+
+/-- A reference into a pinned assembly whose slice is left out is refused, not read as a platform
+    type or call. -/
+theorem rejects_a_pinned_assembly_whose_slice_is_missing :
+    rejectsWithoutLibSlice tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.missingSlice tokens.boxRef) = true ∧
+    rejectsWithoutLibSlice tokens.getRef (.call getSite) (.missingSlice tokens.boxRef) = true := by
+  decide +kernel
+#print axioms rejects_a_pinned_assembly_whose_slice_is_missing
+
+/-- The `Lib` slice with a wrong number for its core-library reference. -/
+private def libWithoutCorlib : MetadataSlice := { lib with corlib := 0 }
+
+/-- The struct is a value type from its base reference alone, whatever `corlib` says, so a claim
+    that it is a class is refused with or without the number. -/
+theorem decides_a_struct_without_the_corlib_number :
+    passes own.1 lib tokens.pairRef (.type (.atom libScope "Lib.Pair")) = true ∧
+    passes own.1 libWithoutCorlib tokens.pairRef (.type (.atom libScope "Lib.Pair")) = true ∧
+    rejects own.1 lib tokens.pairRef (.type (.object libScope "Lib.Pair"))
+      (.operandMismatch tokens.pairRef) = true ∧
+    rejects own.1 libWithoutCorlib tokens.pairRef (.type (.object libScope "Lib.Pair"))
+      (.operandMismatch tokens.pairRef) = true := by decide +kernel
+#print axioms decides_a_struct_without_the_corlib_number
+
+/-- A field of a struct in a pinned assembly is read from that assembly's slice: without the
+    slice it is refused, not taken for a platform field. -/
+theorem rejects_a_pinned_struct_field_whose_slice_is_missing :
+    passes own.1 lib tokens.firstRef (.field (.atom libScope "Lib.Pair") 0 int32 false) = true ∧
+    rejectsWithoutLibSlice tokens.firstRef (.field (.atom libScope "Lib.Pair") 0 int32 false)
+      (.missingSlice tokens.pairRef) = true := by decide +kernel
+#print axioms rejects_a_pinned_struct_field_whose_slice_is_missing
+
+/-- A call into a struct of a pinned assembly whose core-library number is wrong: the struct is
+    still a value type, so a call that names it as a class is refused. -/
+theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :
+    passes own.1 lib tokens.sumRef (.call sumSite) = true ∧
+    passes own.1 libWithoutCorlib tokens.sumRef (.call sumSite) = true ∧
+    rejects own.1 libWithoutCorlib tokens.sumRef
+      (.call { sumSite with declaringType := .object libScope "Lib.Pair" })
+      (.operandMismatch tokens.sumRef) = true := by decide +kernel
+#print axioms rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number
+
+/-- `Lib.Holder<!!0>` and `System.Lazy<!!0>` as a method with one type parameter names them. -/
+private def holderOfMethodParameter : TypeExpr :=
+  .apply (.constructor libScope "Lib.Holder`1") (.parameter 0)
+private def lazyOfMethodParameter : TypeExpr :=
+  .apply (.constructor runtimeScope "System.Lazy`1") (.parameter 0)
+
+/-- A field typed `!0` holds the declaring instance's first argument, here the method's own type
+    parameter `!!0`, not the reading method's owner parameter: for a static field of a pinned
+    generic class and for a field of an external generic class. -/
+theorem reads_a_field_parameter_against_the_declaring_instance :
+    passes own.1 lib tokens.holderValueRef
+      (.field holderOfMethodParameter 0 (.parameter 0) true) (arity := 1) = true ∧
+    rejects own.1 lib tokens.holderValueRef
+      (.field holderOfMethodParameter 0 (.parameter 1) true)
+      (.operandMismatch tokens.holderValueRef) (arity := 1) = true ∧
+    passes own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 0 (.parameter 0) false) (arity := 1) = true ∧
+    rejects own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 0 (.parameter 1) false)
+      (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
+#print axioms reads_a_field_parameter_against_the_declaring_instance
+
+/-- The own slice without the row of the static field between the first and the second instance
+    field of `Program`: the carried rows of the type leave a gap. -/
+private def ownWithGappedFields : MetadataSlice :=
+  { own.1 with rows := own.1.rows.filter (·.1 != tokens.totalField) }
+
+/-- The second instance field is index 1 when every field row before it is carried. A prefix of
+    the type's fields with a missing row cannot give the count of instance fields before it, so
+    the token is refused, not read as the first instance field. -/
+theorem rejects_a_field_after_a_gap_in_the_carried_field_rows :
+    passes own.1 lib tokens.secondField (.field (.atom ownIdentity "Program") 1 int32 false) =
+      true ∧
+    rejects ownWithGappedFields lib tokens.secondField
+      (.field (.atom ownIdentity "Program") 1 int32 false)
+      (.unresolvedMember tokens.secondField) = true := by decide +kernel
+#print axioms rejects_a_field_after_a_gap_in_the_carried_field_rows
+
+/-! ## The use of a token -/
+
+theorem rejects_a_field_access_that_disagrees_with_the_field_row :
+    checkSite 0x7E { staticField := some false } countOperand = false ∧
+    checkSite 0x7B { staticField := some true } countOperand = false ∧
+    checkSite 0x7B { staticField := some false } countOperand = true ∧
+    checkSite 0x7B { staticField := some false }
+      (.field (.atom ownIdentity "Program") 0 int32 false) = true ∧
+    checkSite 0x7E { staticField := some true }
+      (.field (.atom ownIdentity "Program") 1 int32 true) = true := by decide +kernel
+#print axioms rejects_a_field_access_that_disagrees_with_the_field_row
+
+/-! ## The method definition -/
+
+/-- A method whose receiver kind follows its declaring type's metadata. -/
+private def receiverWorld (baseName : String) (interfaceType hasThis generic : Bool) :
+    Step Nat := do
+  let runtime ← string "System.Runtime"
+  let system ← string "System"
+  let parentName ← string baseName
+  let program ← string "Program"
+  let methodName ← string "Run"
+  let publicKeyToken ← blob [0xB0, 0x3F, 0x5F, 0x7F, 0x11, 0xD5, 0x0A, 0x3A]
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, publicKeyToken, runtime, 0, 0]
+  modify fun builder => { builder with corlib := 1 }
+  let parent ← row Table.typeRef [6, parentName, system]
+  let owner ← row Table.typeDef
+    [if interfaceType then 0x21 else 1, program, 0, (parent - 0x01000000) * 4 + 1, 1, 1]
+  if baseName == "Enum" then
+    let valueName ← string "value__"
+    let fieldSignature ← blob [0x06, 0x08]
+    let field ← row Table.field [0x606, valueName, fieldSignature]
+    link linkDeclaring field 0 owner
+  if generic then
+    let parameterName ← string "T"
+    let parameter ← row Table.genericParam [0, 0, (owner - 0x02000000) * 2, parameterName]
+    link linkGenericParams owner 0 parameter
+  let signature ← blob [if hasThis then 0x20 else 0, 0, 1]
+  let method ← row Table.methodDef
+    [0, 0, if hasThis then 0x86 else 0x96, methodName, signature, 1]
+  link linkDeclaring method 0 owner
+  pure method
+
+/-- The complete receiver binding result for a metadata owner and a claimed receiver bit. -/
+private def receiverIdentity (baseName : String) (interfaceType hasThis objectReceiver : Bool)
+    (generic : Bool := false) (omitLink omitParameters : Bool := false) :
+    Except MetadataError MethodNames := do
+  let fixture := build (receiverWorld baseName interfaceType hasThis generic)
+    (bytesOf "T") ownIdentity
+  let method : RawMethod :=
+    { token := fixture.2, owner := ownIdentity ++ "::Program", hasThis := hasThis,
+      explicitThis := false, callingConvention := 0, attributes := if hasThis then 0x86 else 0x96,
+      implementation := 0, returnType := .void, parameters := [], locals := [],
+      initLocals := false, maxStack := 8, genericParameters := [], code := [],
+      ownerParameters := if generic && !omitParameters then [{ flags := 0, types := [] }] else [],
+      objectReceiver := objectReceiver }
+  let metadata := if omitLink then
+      { fixture.1 with links := fixture.1.links.filter (·.kind != linkGenericParams) }
+    else fixture.1
+  let env := MetadataEnv.ofSlices [← metadata.index]
+  methodIdentityValid env method (if generic && !omitParameters then [.primitive 8] else [])
+    (if generic && !omitParameters then [int32] else [])
+
+/-- Carried owner parameters remain binding when their optional link is absent. -/
+theorem binds_generic_owner_without_link :
+    (receiverIdentity "Object" false false false true true false).isOk = true ∧
+    (receiverIdentity "Object" false false false true true true).isOk = false := by
+  decide +kernel
+/-- info: 'Tests.MetadataBinding.binds_generic_owner_without_link' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms binds_generic_owner_without_link
+
+/-- A parameter table whose entries give a parameter number and its coded owner. -/
+private def parameterWorld (parameters : List (Nat × Nat)) : MetadataSlice :=
+  (build (parameters.mapM fun (number, owner) =>
+    row Table.genericParam [number, 0, owner, 0]) (bytesOf "T") ownIdentity).1
+
+/-- Read the first type's parameters after changing the carried rows or their optional link. -/
+private def parameterResult (parameters : List (Nat × Nat))
+    (linkTarget : Option (Nat × Nat) := none) (omitted : List Nat := []) :
+    Except MetadataError (List GenericParamRow) := do
+  let metadata := parameterWorld parameters
+  let metadata := { metadata with
+    rows := metadata.rows.filter fun (token, _) => !omitted.contains (tokenRow token)
+    links := match linkTarget with
+      | none => []
+      | some (position, target) => [⟨linkGenericParams, 0x02000001, position, target⟩] }
+  let index ← metadata.indexWith (← metadata.tables) []
+  index.genericParameters 0 0x02000001
+
+/-- Generic owners accept complete zero-based runs and reject conflicting or incomplete rows. -/
+theorem checks_all_carried_generic_parameters :
+    (parameterResult []).isOk = true ∧
+    (parameterResult [(0, 2), (1, 2), (0, 4)]).isOk = true ∧
+    (parameterResult [(0, 3), (0, 2)]).isOk = true ∧
+    (parameterResult [(0, 2)] (some (0, 0x2A000001))).isOk = true ∧
+    (parameterResult [(0, 2)] (some (1, 0x2A000001))).isOk = false ∧
+    (parameterResult [(0, 2), (0, 4)] (some (0, 0x2A000002))).isOk = false ∧
+    (parameterResult [(0, 4)] (some (0, 0x2A000001))).isOk = false ∧
+    (parameterResult [(0, 2), (1, 2)] (some (0, 0x2A000002))).isOk = false ∧
+    (parameterResult [(0, 2), (1, 2)] none [1]).isOk = false ∧
+    (parameterResult [(0, 2), (1, 2)] none [2]).isOk = false ∧
+    (parameterResult [(0, 2), (0, 4), (1, 2)]).isOk = false ∧
+    (parameterResult [(0, 2), (2, 2)]).isOk = false := by decide +kernel
+/-- info: 'Tests.MetadataBinding.checks_all_carried_generic_parameters' depends on axioms:
+[propext] -/
+#guard_msgs in
+#print axioms checks_all_carried_generic_parameters
+
+/-- Class receivers are objects; value and enum receivers are managed references. -/
+theorem accepts_matching_receivers :
+    (receiverIdentity "Object" false true true).isOk = true ∧
+    (receiverIdentity "ValueType" false true false).isOk = true ∧
+    (receiverIdentity "Enum" false true false).isOk = true ∧
+    (receiverIdentity "ValueType" false true false true).isOk = true ∧
+    (receiverIdentity "Object" false false false).isOk = true := by decide +kernel
+/-- info: 'Tests.MetadataBinding.accepts_matching_receivers' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms accepts_matching_receivers
+
+/-- A rejected receiver reports the method token whose claim is inconsistent. -/
+private def receiverMismatch (result : Except MetadataError MethodNames) : Bool :=
+  match result with
+  | .error error => error == .methodMismatch 0x06000001
+  | .ok _ => false
+
+/-- A receiver claim cannot reinterpret a class instance as a managed reference. -/
+theorem rejects_mismatched_receivers :
+    receiverMismatch (receiverIdentity "Object" false true false) = true ∧
+    receiverMismatch (receiverIdentity "ValueType" false true true) = true ∧
+    receiverMismatch (receiverIdentity "Enum" false true true) = true ∧
+    receiverMismatch (receiverIdentity "Object" true true false) = true ∧
+    receiverMismatch (receiverIdentity "Object" true true true) = true ∧
+    receiverMismatch (receiverIdentity "Object" false false true) = true := by decide +kernel
+/-- info: 'Tests.MetadataBinding.rejects_mismatched_receivers' depends on axioms: [propext] -/
+#guard_msgs in
+#print axioms rejects_mismatched_receivers
+
+/-- `T.Program.Main`, a public static method with no parameters. -/
+private def mainMethod : RawMethod :=
+  { token := tokens.main, owner := ownIdentity ++ "::Program", hasThis := false,
+    explicitThis := false, callingConvention := 0, attributes := 0x96, implementation := 0,
+    returnType := .void, parameters := [], locals := [], initLocals := false, maxStack := 8,
+    genericParameters := [], code := [] }
+
+/-- Whether the method definition is accepted, or refused with this error. -/
+private def identity (slice : MetadataSlice) (method : RawMethod) :
+    Except MetadataError MethodNames := do
+  let env := MetadataEnv.ofSlices [← slice.index, ← lib.index]
+  methodIdentityValid env method [] []
+
+private def identityFails (slice : MetadataSlice) (method : RawMethod) (error : MetadataError) :
+    Bool :=
+  match identity slice method with
+  | .error found => found == error
+  | .ok _ => false
+
+theorem accepts_the_method_definition_its_row_gives :
+    (match identity own.1 mainMethod with
+      | .ok _ => true
+      | .error _ => false) = true := by decide +kernel
+#print axioms accepts_the_method_definition_its_row_gives
+
+theorem rejects_a_method_definition_that_differs_from_its_row :
+    identityFails own.1 { mainMethod with attributes := 0x97 }
+      (.methodMismatch tokens.main) = true ∧
+    identityFails own.1 { mainMethod with implementation := 1 }
+      (.methodMismatch tokens.main) = true ∧
+    identityFails own.1 { mainMethod with hasThis := true }
+      (.methodMismatch tokens.main) = true ∧
+    identityFails own.1 { mainMethod with returnType := int32 }
+      (.methodMismatch tokens.main) = true ∧
+    identityFails own.1 { mainMethod with parameters := [int32] }
+      (.methodMismatch tokens.main) = true ∧
+    identityFails own.1 { mainMethod with genericParameters := [{ flags := 0, types := [] }] }
+      (.methodMismatch tokens.main) = true := by decide +kernel
+#print axioms rejects_a_method_definition_that_differs_from_its_row
+
+/-- The names the row gives spell the owner the method states, and not another owner. -/
+theorem names_spell_the_owner_the_method_states :
+    (match identity own.1 mainMethod with
+      | .ok names => decide (names.Spell mainMethod) &&
+          !decide (names.Spell { mainMethod with owner := libScope ++ "::Program" })
+      | .error _ => false) = true := by decide +kernel
+#print axioms names_spell_the_owner_the_method_states
+
+/-- A method row whose address differs from the one the body was read at is accepted: where a body
+    sits in the image is not part of the default check. -/
+theorem ignores_the_body_address :
+    (match identity { own.1 with rows := own.1.rows.map fun (token, bytes) =>
+        (token, if token == tokens.main then 7 :: bytes.drop 1 else bytes) } mainMethod with
+      | .ok _ => true
+      | .error _ => false) = true := by decide +kernel
+#print axioms ignores_the_body_address
+
+/-- A method's own full name spells a function pointer as Cecil does, so a method that takes a
+    table of them can be selected by its signature; an external call identity still spells none,
+    since the spelling leaves out the calling convention. -/
+theorem spells_a_function_pointer_in_the_own_signature_only :
+    instanceSignature (bytesOf "Examples.Kinds") (bytesOf "Indirect") false 0 [] (.primitive 9)
+        [.szarray (.functionPointer 0 (.primitive 9) (.cons (.primitive 9) .nil)), .primitive 8,
+          .primitive 9] =
+      some (bytesOf ("System.UInt32 Examples.Kinds::Indirect(method System.UInt32 " ++
+        "*(System.UInt32)[],System.Int32,System.UInt32)")) ∧
+    cecilName false resolveFuel (.functionPointer 0 (.primitive 9) .nil) = none := by
+  decide +kernel
+#print axioms spells_a_function_pointer_in_the_own_signature_only
+
+/-- `Main`'s row and the method with the flags and implementation flags changed together. -/
+private def withFlags (flags implementation : Nat) : MetadataSlice × RawMethod :=
+  (mutateRow own.1 tokens.main fun bytes =>
+      (bytes.set 4 (implementation % 256)).set 5 (implementation / 256)
+        |>.set 6 (flags % 256) |>.set 7 (flags / 256),
+    { mainMethod with attributes := flags, implementation := implementation })
+
+/-- A row whose flags say it has no IL body is refused, so no body bytes are taken for it: an
+    abstract method, a platform invoke and an internal call. -/
+theorem rejects_body_bytes_for_a_row_without_a_body :
+    identityFails (withFlags 0x0496 0).1 (withFlags 0x0496 0).2
+      (.bodyLocation tokens.main) = true ∧
+    identityFails (withFlags 0x2096 0).1 (withFlags 0x2096 0).2
+      (.bodyLocation tokens.main) = true ∧
+    identityFails (withFlags 0x0096 0x1000).1 (withFlags 0x0096 0x1000).2
+      (.bodyLocation tokens.main) = true := by decide +kernel
+#print axioms rejects_body_bytes_for_a_row_without_a_body
+
+/-- A runtime-async row is refused: its body returns the result its signature states as a task. -/
+theorem rejects_a_runtime_async_row :
+    identityFails (withFlags 0x0096 0x2000).1 (withFlags 0x0096 0x2000).2
+      (.runtimeAsync tokens.main) = true := by decide +kernel
+#print axioms rejects_a_runtime_async_row
+
+/-- The same rewrite of the row with `Main`'s own flags is accepted, so the refusals above come
+    from the flags and not from the rewrite. -/
+theorem accepts_the_row_rewritten_with_its_own_flags :
+    (match identity (withFlags 0x0096 0).1 (withFlags 0x0096 0).2 with
+      | .ok _ => true
+      | .error _ => false) = true := by decide +kernel
+#print axioms accepts_the_row_rewritten_with_its_own_flags
+
+/-! ## Which extractor types name a resolved type -/
+
+/-- A frame whose primitive assembly is `C`, whose modified types are anchored at `A`, and whose
+    method and owner have one generic parameter each. -/
+private def pairFrame : Frame :=
+  { corlib := some (bytesOf "C"), anchor := bytesOf "A", arity := 1, ownerArity := 1 }
+
+/-- The type `name` of scope `scope` with the given kind. -/
+private def namedIn (scope name : String) (kind : TypeKind) (pinned := false) : NamedType :=
+  { scope := bytesOf scope, name := bytesOf name, parts := [], kind := kind, pinned := pinned }
+
+/-- `System.Int32` of the primitive assembly. -/
+private def int32Atom : TypeExpr := .atom "C" "System.Int32"
+
+/-- `L.G<int>`, with `L.G` of the given kind and pinning. -/
+private def instanceOf (kind : TypeKind) (pinned := false) : ResolvedType :=
+  .genericInst (namedIn "L" "G`1" kind pinned) (.cons (.primitive 8) .nil)
+
+/-- One pairing for each way `typeAdmits` accepts, by resolved and extractor constructor. -/
+private def acceptedPairings : List (ResolvedType × TypeExpr) := [
+  -- Primitives: `void`, an atom of the primitive assembly, and a string as an object.
+  (.primitive 1, .void), (.primitive 8, int32Atom),
+  (.primitive 0x0E, .atom "C" "System.String"), (.primitive 0x1C, .atom "C" "System.Object"),
+  (.primitive 0x0E, .object "C" "System.String"),
+  -- Named types: an atom unless a carried enum, an object if class-like, an aggregate if
+  -- value-like, and an enum over the carried underlying type or, outside, any integer atom.
+  (.named (namedIn "L" "N" .valueType), .atom "L" "N"),
+  (.named (namedIn "L" "N" .classType), .atom "L" "N"),
+  (.named (namedIn "L" "N" (.external none)), .atom "L" "N"),
+  (.named (namedIn "L" "N" .classType), .object "L" "N"),
+  (.named (namedIn "L" "N" .interfaceType), .object "L" "N"),
+  (.named (namedIn "L" "N" (.external (some false))), .object "L" "N"),
+  (.named (namedIn "L" "N" (.external none)), .object "L" "N"),
+  (.named (namedIn "L" "N" .valueType), .aggregate "L::N" 0),
+  (.named (namedIn "L" "N" (.external (some true))), .aggregate "L::N" 0),
+  (.named (namedIn "L" "N" (.external none)), .aggregate "L::N" 0),
+  (.named (namedIn "L" "E" (.enumType 8)), .enum "L::E" int32Atom),
+  (.named (namedIn "L" "E" (.external none)), .enum "L::E" (.atom "C" "System.Byte")),
+  (.named (namedIn "L" "E" (.external none)), .enum "L::E" int32Atom),
+  -- Generic parameters: the method's first, then the owner's.
+  (.mvar 0, .parameter 0), (.var 0, .parameter 1),
+  -- Element types, element by element.
+  (.byref (.primitive 8), .byref int32Atom), (.pointer (.primitive 8), .pointer int32Atom),
+  (.szarray (.primitive 8), .array int32Atom),
+  -- Instances: a value-like one as an aggregate, its arguments scoped when the head is
+  -- carried, and any instance as an `apply` chain.
+  (instanceOf .valueType, .aggregate "L::G`1<System.Int32>" 0),
+  (instanceOf .valueType true, .aggregate "L::G`1<C::System.Int32>" 0),
+  (instanceOf .classType, .apply (.constructor "L" "G`1") int32Atom),
+  (instanceOf .valueType, .apply (.constructor "L" "G`1") int32Atom),
+  -- Function pointers, with the calling convention and receiver flags.
+  (.functionPointer 0 (.primitive 8) (.cons (.primitive 8) .nil),
+    .functionPointer int32Atom (.signatureParameter int32Atom .void) 0 false false),
+  (.functionPointer 0x20 (.primitive 8) .nil, .functionPointer int32Atom .void 0 true false),
+  -- A modified type as an atom of the anchor, spelled with its modifier.
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .atom "A" "System.Int32 modreq(Mod)"),
+  (.modified false (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .atom "A" "System.Int32 modopt(Mod)")]
+
+/-- For each accepting arm, a pairing that changes the scope, the name, the kind, the index, the
+    element, the convention or the constructor; and pairings of constructors no arm relates. -/
+private def refusedPairings : List (ResolvedType × TypeExpr) := [
+  -- Primitives.
+  (.primitive 8, .void), (.primitive 1, .atom "C" "System.Void"),
+  (.primitive 8, .atom "D" "System.Int32"), (.primitive 8, .atom "C" "System.UInt32"),
+  (.primitive 0x0E, .object "C" "System.Object"), (.primitive 0x1C, .object "C" "System.Object"),
+  (.primitive 8, .object "C" "System.Int32"), (.primitive 8, .enum "C::System.Int32" int32Atom),
+  -- Named types.
+  (.named (namedIn "L" "N" .valueType), .atom "L" "M"),
+  (.named (namedIn "L" "N" .valueType), .atom "K" "N"),
+  (.named (namedIn "L" "N" (.enumType 8)), .atom "L" "N"),
+  (.named (namedIn "L" "N" .valueType), .object "L" "N"),
+  (.named (namedIn "L" "N" (.external (some true))), .object "L" "N"),
+  (.named (namedIn "L" "N" .classType), .aggregate "L::N" 0),
+  (.named (namedIn "L" "N" (.external (some false))), .aggregate "L::N" 0),
+  (.named (namedIn "L" "N" .valueType), .aggregate "L::M" 0),
+  (.named (namedIn "L" "E" (.enumType 8)), .enum "L::E" (.atom "C" "System.Int64")),
+  (.named (namedIn "L" "E" (.external none)), .enum "L::E" (.atom "C" "System.Single")),
+  (.named (namedIn "L" "E" .classType), .enum "L::E" int32Atom),
+  (.named (namedIn "L" "E" (.external (some false))), .enum "L::E" int32Atom),
+  (.named (namedIn "L" "N" .valueType), .constructor "L" "N"),
+  (.named (namedIn "L" "N" .valueType), .parameter 0),
+  -- Generic parameters.
+  (.var 0, .parameter 0), (.mvar 0, .parameter 1), (.primitive 8, .parameter 0),
+  (.var 0, int32Atom),
+  -- Element types.
+  (.byref (.primitive 8), .pointer int32Atom), (.byref (.primitive 8), .array int32Atom),
+  (.pointer (.primitive 8), .byref int32Atom), (.szarray (.primitive 8), .pointer int32Atom),
+  (.byref (.primitive 9), .byref int32Atom),
+  -- Instances.
+  (instanceOf .valueType true, .aggregate "L::G`1<System.Int32>" 0),
+  (instanceOf .classType, .aggregate "L::G`1<System.Int32>" 0),
+  (instanceOf .classType, .apply (.constructor "L" "G`1") (.atom "C" "System.UInt32")),
+  (instanceOf .classType, .apply (.constructor "K" "G`1") int32Atom),
+  (instanceOf .classType, .constructor "L" "G`1"),
+  (instanceOf .classType, .atom "L" "G`1<System.Int32>"),
+  -- Function pointers.
+  (.functionPointer 0 (.primitive 8) (.cons (.primitive 8) .nil),
+    .functionPointer int32Atom (.signatureParameter int32Atom .void) 1 false false),
+  (.functionPointer 0x20 (.primitive 8) .nil, .functionPointer int32Atom .void 0 false false),
+  (.functionPointer 0 (.primitive 8) .nil, int32Atom),
+  -- Modified types.
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .atom "B" "System.Int32 modreq(Mod)"),
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .atom "A" "System.Int32 modopt(Mod)"),
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 9),
+    .atom "A" "System.Int32 modreq(Mod)"),
+  (.modified true (namedIn "M" "Mod" (.external none)) (.primitive 8),
+    .object "A" "System.Int32 modreq(Mod)")]
+
+/-- Every listed pairing is accepted. -/
+theorem admits_each_accepted_pairing :
+    acceptedPairings.all (fun (type, expr) => pairFrame.admits type expr) = true := by
+  decide +kernel
+#print axioms admits_each_accepted_pairing
+
+/-- Every listed pairing is refused. -/
+theorem refuses_each_refused_pairing :
+    refusedPairings.all (fun (type, expr) => !pairFrame.admits type expr) = true := by
+  decide +kernel
+#print axioms refuses_each_refused_pairing
+
+/-- A method parameter past the method's arity is refused, so it cannot be read as the owner
+    parameter whose extractor index it shares. -/
+theorem refuses_a_method_parameter_past_the_arity :
+    !pairFrame.admits (.mvar 1) (.parameter 1) && pairFrame.admits (.var 0) (.parameter 1) &&
+      pairFrame.admits (.mvar 0) (.parameter 0) := by
+  decide +kernel
+#print axioms refuses_a_method_parameter_past_the_arity
+
+/-! ## Facts read from a type's own reference -/
+
+/-- `T` with `System.ValueTuple<Lib.Pair, Lib.Pair>` and its fields `Item1 : !0` and
+    `Item2 : !1`, as a method that names no primitive type reads them. -/
+private def tupleWorld : Step (Nat × Nat) := do
+  let tokens ← ownWorld
+  let tupleName ← string "ValueTuple`2"
+  let systemName ← string "System"
+  let firstName ← string "Item1"
+  let secondName ← string "Item2"
+  let tupleRef ← row Table.typeRef [1 * 4 + 2, tupleName, systemName]
+  let pair := (tokens.pairRef - 0x01000000) * 4 + 1
+  let tupleBlob ← blob [0x15, 0x11, (tupleRef - 0x01000000) * 4 + 1, 2, 0x11, pair, 0x11, pair]
+  let tupleSpec ← row Table.typeSpec [tupleBlob]
+  let firstSignature ← blob [0x06, 0x13, 0x00]
+  let secondSignature ← blob [0x06, 0x13, 0x01]
+  let parent := (tupleSpec - 0x1B000000) * 8 + 4
+  let firstRef ← row Table.memberRef [parent, firstName, firstSignature]
+  let secondRef ← row Table.memberRef [parent, secondName, secondSignature]
+  pure (firstRef, secondRef)
+
+/-- The tuple world's slice with the given core-library number, and its field tokens. -/
+private def tupleSlice (corlib : Nat) : MetadataSlice × Nat × Nat :=
+  let (slice, fields) := build tupleWorld (bytesOf "T") ownIdentity
+  ({ slice with corlib := corlib }, fields)
+
+/-- The pair as the extractor names it, and its element. -/
+private def pairTuple : TypeExpr :=
+  .aggregate (runtimeScope ++ "::System.ValueTuple`2<Lib.Pair,Lib.Pair>") 0
+private def pairAtom : TypeExpr := .atom libScope "Lib.Pair"
+
+/-- `Item2` of the pair is its second field whatever the slice's core-library number says: the
+    pair is known from its own reference to `System.Runtime`, so `Item2` claimed at index 0 is
+    refused with the number right, missing or naming no reference. -/
+theorem reads_the_pair_from_its_own_reference :
+    passes (tupleSlice 1).1 lib (tupleSlice 1).2.2 (.field pairTuple 1 pairAtom false) = true ∧
+    passes (tupleSlice 0).1 lib (tupleSlice 0).2.2 (.field pairTuple 1 pairAtom false) = true ∧
+    passes (tupleSlice 0).1 lib (tupleSlice 0).2.1 (.field pairTuple 0 pairAtom false) = true ∧
+    rejects (tupleSlice 1).1 lib (tupleSlice 1).2.2 (.field pairTuple 0 pairAtom false)
+      (.fieldIndexMismatch (tupleSlice 1).2.2 0 1) = true ∧
+    rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (.field pairTuple 0 pairAtom false)
+      (.fieldIndexMismatch (tupleSlice 0).2.2 0 1) = true := by decide +kernel
+#print axioms reads_the_pair_from_its_own_reference
+
+/-- A `Lib` whose class `Lib.Outer` encloses `Leaf` twice, with namespace columns `A` and `B`,
+    and `Mid` twice, with columns `A` and `B`, each enclosing an `Inner` of its own. -/
+private def nestedLibWorld : Step Unit := do
+  let runtimeName ← string "System.Runtime"
+  let objectName ← string "Object"
+  let systemName ← string "System"
+  let moduleName ← string "<Module>"
+  let libName ← string "Lib"
+  let outerName ← string "Outer"
+  let leafName ← string "Leaf"
+  let midName ← string "Mid"
+  let innerName ← string "Inner"
+  let first ← string "A"
+  let second ← string "B"
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, 0, runtimeName, 0, 0]
+  modify fun builder => { builder with corlib := 1 }
+  let objectRef ← row Table.typeRef [1 * 4 + 2, objectName, systemName]
+  let base := (objectRef - 0x01000000) * 4 + 1
+  let _ ← row Table.typeDef [0, moduleName, 0, 0, 1, 1]
+  let outer ← row Table.typeDef [1, outerName, libName, base, 1, 1]
+  -- Nested public types: `Leaf` and `Mid` in `Outer`, then an `Inner` in each `Mid`.
+  let types := [(leafName, first, outer), (leafName, second, outer), (midName, first, outer),
+    (midName, second, outer), (innerName, 0, 0x02000005), (innerName, 0, 0x02000006)]
+  for (name, namespace_, enclosing) in types do
+    let nested ← row Table.typeDef [2, name, namespace_, base, 1, 1]
+    let nesting ← row Table.nestedClass [nested - 0x02000000, enclosing - 0x02000000]
+    link linkNesting nested 1 nesting
+
+/-- The nested `Lib` slice. -/
+private def nestedLib : MetadataSlice :=
+  (build nestedLibWorld (bytesOf "Lib") libScope).1
+
+/-- `T` with references to `Outer/Leaf` and `Outer/Mid/Inner` through namespace `A` at each
+    nested level, linked to the definitions at the given `TypeDef` rows of `Lib`. -/
+private def nestedOwnWorld (leaf inner : Nat) : Step (Nat × Nat) := do
+  let runtimeName ← string "System.Runtime"
+  let libName ← string "Lib"
+  let outerName ← string "Outer"
+  let leafName ← string "Leaf"
+  let midName ← string "Mid"
+  let innerName ← string "Inner"
+  let first ← string "A"
+  let _ ← row Table.assemblyRef [11, 0, 0, 0, 0, 0, runtimeName, 0, 0]
+  let _ ← row Table.assemblyRef [1, 0, 0, 0, 0, 0, libName, 0, 0]
+  modify fun builder => { builder with corlib := 1 }
+  let outerRef ← row Table.typeRef [2 * 4 + 2, outerName, libName]
+  let enclosedBy (reference : Nat) := (reference - 0x01000000) * 4 + 3
+  let leafRef ← row Table.typeRef [enclosedBy outerRef, leafName, first]
+  let midRef ← row Table.typeRef [enclosedBy outerRef, midName, first]
+  let innerRef ← row Table.typeRef [enclosedBy midRef, innerName, 0]
+  link linkDefinition leafRef 1 (tokenOf Table.typeDef leaf)
+  link linkDefinition innerRef 1 (tokenOf Table.typeDef inner)
+  pure (leafRef, innerRef)
+
+/-- The nested own slice with the given links, and its two reference tokens. -/
+private def nestedOwn (leaf inner : Nat) : MetadataSlice × Nat × Nat :=
+  build (nestedOwnWorld leaf inner) (bytesOf "T") ownIdentity
+
+/-- A nested type is the type of its namespace column at every level: a reference through `A`
+    resolves to the definitions through `A`, and a link to the type that differs only in its own
+    column, or only in an enclosing type's, is refused though both spell `Lib.Outer/Leaf` or
+    `Lib.Outer/Mid/Inner`. -/
+theorem tells_nested_types_apart_by_their_namespace_columns :
+    passes (nestedOwn 3 7).1 nestedLib (nestedOwn 3 7).2.1
+      (.type (.object libScope "Lib.Outer/Leaf")) = true ∧
+    passes (nestedOwn 3 7).1 nestedLib (nestedOwn 3 7).2.2
+      (.type (.object libScope "Lib.Outer/Mid/Inner")) = true ∧
+    rejects (nestedOwn 4 7).1 nestedLib (nestedOwn 4 7).2.1
+      (.type (.object libScope "Lib.Outer/Leaf")) (.operandMismatch (nestedOwn 4 7).2.1) = true ∧
+    rejects (nestedOwn 3 8).1 nestedLib (nestedOwn 3 8).2.2
+      (.type (.object libScope "Lib.Outer/Mid/Inner"))
+      (.operandMismatch (nestedOwn 3 8).2.2) = true := by decide +kernel
+#print axioms tells_nested_types_apart_by_their_namespace_columns
+
+/-! ## Kinds against the extractor's constructors -/
+
+/-- `System.Int32` of the runtime scope as a type of the given kind. -/
+private def runtimeInt32 (kind : TypeKind) : ResolvedType :=
+  .named (namedIn runtimeScope "System.Int32" kind)
+
+/-- A type that cannot be a value type is never admitted as the runtime's primitive atom, which
+    would give it value storage; a type that may be one still is, and a class keeps its atom. -/
+theorem refuses_a_class_named_as_a_primitive :
+    !pairFrame.admits (runtimeInt32 (.external (some false))) int32 &&
+      !pairFrame.admits (runtimeInt32 .classType) int32 &&
+      !pairFrame.admits (runtimeInt32 .interfaceType) int32 &&
+      pairFrame.admits (runtimeInt32 (.external none)) int32 &&
+      pairFrame.admits (runtimeInt32 (.external (some true))) int32 &&
+      pairFrame.admits (.named (namedIn runtimeScope "System.Console" .classType))
+        (.atom runtimeScope "System.Console") := by
+  decide +kernel
+#print axioms refuses_a_class_named_as_a_primitive
+
+/-- An owner parameter past the owner's arity is refused, even where its extractor index would
+    follow the method's parameters. -/
+theorem refuses_an_owner_parameter_past_the_owner_arity :
+    !pairFrame.admits (.var 1) (.parameter 2) && pairFrame.admits (.var 0) (.parameter 1) := by
+  decide +kernel
+#print axioms refuses_an_owner_parameter_past_the_owner_arity
+
+/-! ## Each reason a reference or type is refused -/
+
+/-- A type reference scoped by a module reference, which the checker does not read. -/
+private def consoleInModuleReference : MetadataSlice :=
+  mutateRow own.1 tokens.consoleRef fun bytes => [5, 0] ++ bytes.drop 2
+
+theorem refuses_a_type_reference_scoped_by_a_module_reference :
+    rejects consoleInModuleReference lib tokens.consoleRef
+      (.type (.atom runtimeScope "System.Console")) (.unsupportedScope tokens.consoleRef) =
+      true := by decide +kernel
+#print axioms refuses_a_type_reference_scoped_by_a_module_reference
+
+/-- The links of `T` with the one from `Lib.Box`'s reference removed, or aimed at `T` itself. -/
+private def ownWithoutBoxLink : MetadataSlice :=
+  { own.1 with links := own.1.links.filter fun link => link.kind != linkDefinition ||
+      link.source != tokens.boxRef }
+
+private def ownWithBoxLinkIntoItself : MetadataSlice :=
+  { own.1 with links := own.1.links.map fun link =>
+      if link.kind == linkDefinition && link.source == tokens.boxRef then
+        { link with slice := 0 } else link }
+
+theorem refuses_a_reference_into_a_pinned_slice_without_its_definition_link :
+    rejects ownWithoutBoxLink lib tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.unresolvedType tokens.boxRef) = true ∧
+    rejects ownWithBoxLinkIntoItself lib tokens.boxRef (.type (.atom libScope "Lib.Box"))
+      (.unresolvedType tokens.boxRef) = true := by decide +kernel
+#print axioms refuses_a_reference_into_a_pinned_slice_without_its_definition_link
+
+/-- `Program` extending a type specification, and extending `Console` instead of `Object`: the
+    chain of base classes ends only at `System.Object`. -/
+private def programExtends (coded : Nat) : MetadataSlice :=
+  mutateRow own.1 (tokenOf Table.typeDef 2) fun bytes =>
+    bytes.take 8 ++ [coded, 0] ++ bytes.drop 10
+
+private def objectFieldOperand : RawOperand :=
+  .field (.object ownIdentity "Program") 0 int32 false
+
+theorem refuses_a_base_class_chain_that_does_not_end_at_object :
+    passes own.1 lib tokens.countField objectFieldOperand = true ∧
+    rejects (programExtends 6) lib tokens.countField objectFieldOperand
+      (.unsupportedBase (tokenOf Table.typeDef 2)) = true ∧
+    rejects (programExtends 9) lib tokens.countField objectFieldOperand
+      (.unsupportedBase (tokenOf Table.typeDef 2)) = true := by decide +kernel
+#print axioms refuses_a_base_class_chain_that_does_not_end_at_object
+end Tests.MetadataBinding

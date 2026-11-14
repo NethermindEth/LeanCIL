@@ -81,7 +81,7 @@ theorem invalid_dead_initializers_rejected :
 #print axioms invalid_dead_initializers_rejected
 
 /-- The child reads seven from its retained initializer after allocating its numeric homes. -/
-def childCode : List CIL.Instruction := [.local 0, .ret]
+def childCode : List CIL.Instruction := [.ldloc 0, .ret]
 
 /-- The inserted nonzero initializer really writes the fresh private home during frame entry. -/
 theorem private_initializer_readback :
@@ -91,10 +91,10 @@ theorem private_initializer_readback :
 
 /-- A returned child value is stored before later dynamic allocation changes fresh identities. -/
 def allocationPrefix : List CIL.Instruction :=
-  [.ldc_i4 9, .setLocal 0, .call 1 0, .setLocal 1, .ldc_i4 4, .stackAlloc false, .pop]
+  [.ldc_i4 9, .stloc 0, .call 1 0, .stloc 1, .ldc_i4 4, .stackAlloc false, .pop]
 
 /-- The resumed caller reads both retained homes after its child and dynamic allocation. -/
-def returningCode : List CIL.Instruction := allocationPrefix ++ [.local 0, .local 1, .add, .ret]
+def returningCode : List CIL.Instruction := allocationPrefix ++ [.ldloc 0, .ldloc 1, .add, .ret]
 
 /-- The exceptional fixture raises after both the nested call and dynamic allocation finish. -/
 def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw "AfterNestedAllocation"]
@@ -225,7 +225,7 @@ theorem zero_quota_rejected :
 
 /-- Leaving the first local operand unrelocated violates the exact instruction equation. -/
 theorem unchanged_operand_rejected :
-    ([.local 0] : List CIL.Instruction) ≠ [.local 0].map indices.operation := by
+    ([.ldloc 0] : List CIL.Instruction) ≠ [.ldloc 0].map indices.operation := by
   intro equal; cases equal
 #print axioms unchanged_operand_rejected
 

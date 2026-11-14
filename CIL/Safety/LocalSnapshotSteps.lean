@@ -82,7 +82,7 @@ theorem LocalSnapshots.store_at {body : CIL.Method} {pc index target : Nat}
     (fits : localNumber kind value = .ok number)
     (slot : frame.locals[index]? = some (.bytes kind home))
     (ready : access memory home (localWidth kind) 1 true = .ok ())
-    (stored : step body (.setLocal index) pc args frame (.scalar value :: stack) memory =
+    (stored : step body (.stloc index) pc args frame (.scalar value :: stack) memory =
       .ok (.next target values nextFrame after)) :
     LocalSnapshots after frame.locals (rememberLocal known index (localResult kind value)) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧
@@ -569,12 +569,12 @@ elab_rules : tactic
           let updated ← withNormalNodes prepared <| withMainContext do
             let (methodFound, instructionFound, operation) ←
               cilFetchedOp ``run_next (fun target => target.find? (·.isAppOf ``run)) 3 prepared
-            if operation == ``CIL.Instruction.setLocal then
+            if operation == ``CIL.Instruction.stloc then
               let stored ← snapshotStore snapshot methodFound instructionFound prepared
               evalTactic (← `(tactic| cil_strict rw
                 [run_next $methodFound $instructionFound $(stored.stepped)]))
               pure stored.snapshots
-            else if operation == ``CIL.Instruction.local then
+            else if operation == ``CIL.Instruction.ldloc then
               let loaded ← snapshotLoad snapshot methodFound instructionFound prepared
               evalTactic (← `(tactic| cil_strict rw
                 [run_next $methodFound $instructionFound $loaded]))
@@ -675,11 +675,11 @@ private def snapshotContractWalkSteps (initial : Term) (facts : Array Term)
       withNormalNodes stepFacts <| withMainContext do
         let (found, instruction, operation) ←
           cilFetchedOp ``run_next_exists some 4 stepFacts
-        let (updated, checked, stored) ← if operation == ``CIL.Instruction.setLocal then do
+        let (updated, checked, stored) ← if operation == ``CIL.Instruction.stloc then do
             let stored ← snapshotStore snapshot found instruction stepFacts true supplied
             pure (stored.snapshots, stored.stepped, some stored)
           else if supplied then throwError "The instruction is not a numeric store"
-          else if operation == ``CIL.Instruction.local then do
+          else if operation == ``CIL.Instruction.ldloc then do
             pure (snapshot, ← snapshotLoad snapshot found instruction stepFacts, none)
           else throwError "The instruction is not a numeric local"
         evalTactic (← `(tactic| (

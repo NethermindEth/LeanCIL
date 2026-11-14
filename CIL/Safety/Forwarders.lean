@@ -312,7 +312,7 @@ theorem MethodContract.Holds.forward {Input Output : Type}
 def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
     (narrow : Option CIL.NarrowKind) : List CIL.Instruction :=
   loads.map (fun load => .arg load.1 load.2) ++
-    [.localAddr 0, .call callee (loads.length + 1), .ret narrow]
+    [.ldloca 0, .call callee (loads.length + 1), .ret narrow]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
     `calleeBody`, with the address of its only local, a byte home of `kind` created from
@@ -498,7 +498,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     rfl
   rw [Nat.zero_add, List.append_nil]
   let frame : Frame := ⟨memory.nextIdentity, [.bytes kind home], [home.allocation], 0⟩
-  have addressed : step body (.localAddr 0) loads.length (outer.args input) frame
+  have addressed : step body (.ldloca 0) loads.length (outer.args input) frame
       loaded.reverse entered =
         .ok (.next (loads.length + 1) (.reference (.address home) :: loaded.reverse) frame
           entered) := by
