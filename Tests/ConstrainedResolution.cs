@@ -109,7 +109,8 @@ foreach (bool forged in new[] { false, true })
     if ((bool)exactScope.Invoke(null, [parent, platform])! == forged)
         throw new Exception("Imported identity did not match its raw assembly row.");
     if ((bool)pinnedType.GetMethod("Contains", Internal)!.Invoke(pinned, [imported])! ||
-        pinnedType.GetMethod("ModuleOf", Internal)!.Invoke(pinned, [imported.GetType("Examples.CounterValue")]) is not null)
+        pinnedType.GetMethod("ModuleOf", Internal)!
+            .Invoke(pinned, [imported.GetType("Examples.CounterValue")]) is not null)
         throw new Exception("Metadata-only image became an executable pin.");
     var method = imported.GetType("Examples.CounterValue").Methods.Single(member => member.Name == "Read");
     ExpectRejected(() => pinnedType.GetMethod("Body", Internal)!.Invoke(pinned, [method]));

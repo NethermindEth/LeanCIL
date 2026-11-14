@@ -108,8 +108,9 @@ internal sealed class ImportResolution : IDisposable
                     if (simpleNames.Contains(module.Assembly.Name.Name))
                         throw new InvalidDataException("Ambiguous import assembly simple name: " + module.Assembly.Name.Name);
                     var library = new Library(source, contract, ContractInterface.Hash(sidecar), module);
-                    (PinnedAssemblies.Active ?? throw new InvalidDataException(
-                        "Import identity without a pinned module context")).RegisterIdentityImage(module, implementation);
+                    var pinned = PinnedAssemblies.Active ?? throw new InvalidDataException(
+                        "Import identity without a pinned module context");
+                    pinned.RegisterIdentityImage(module, implementation);
                     libraries.Add(library);
                     librariesByIdentity.Add(contract.AssemblyIdentity, library);
                     simpleNames.Add(module.Assembly.Name.Name);

@@ -5,6 +5,7 @@
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -15,8 +16,9 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/GenericOwners");
 Directory.CreateDirectory(root);
 // Foreign owners cannot be serialized as distinct CLI slots; check the in-memory metadata boundary.
-using (var module = ModuleDefinition.ReadModule(assembly))
+using (var pinned = new PinnedMetadata(Assembly.LoadFrom(ExtractorPath), assembly))
 {
+    var module = pinned.Module;
     var caller = module.Types.Single(type => type.Name == "GenericOwners").Methods
         .Single(method => method.Name == "Identity");
     var target = (MethodReference)caller.Body.Instructions.Single(instruction =>
