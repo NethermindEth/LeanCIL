@@ -1063,7 +1063,7 @@ theorem intrinsic_without_facts (a b c d : CIL.W64) (destination : Reference) (m
 #guard_msgs in #print axioms intrinsic_without_facts
 
 @[cil_code] def checkedAdd64Method : CIL.Method := {
-  code := [.arg 0, .arg 1, .checkedArithmetic .add false, .ret]
+  code := [.arg 0, .arg 1, .add_ovf_un, .ret]
   locals := [], returnsValue := true }
 @[cil_code] def checkedAdd64Program : CIL.Program := [checkedAdd64Method]
 

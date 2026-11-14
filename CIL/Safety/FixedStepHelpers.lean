@@ -98,8 +98,8 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
-  | .intrinsic .. | .nativeBinary _ | .checkedConvert .. | .checkedArithmetic ..
-  | .divide .. => .numeric
+  | .intrinsic .. | .nativeBinary _ | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
+  | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
   | .managed _ | .arg .. | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
   | .tailCall ..
   | .throw _ | .ret _ => .boundary
@@ -208,6 +208,16 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     cases observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
+    -- Past the faulting-arithmetic arms, the dispatcher's catch-all holds every other arm. Its
+    -- exclusions are cleared so the arms' own names stay the newest inaccessible ones.
+    all_goals try (
+      rename_i addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
+        convOvf convOvfUn
+      guard_hyp div : ∀ (y x : CIL.Value) (rest : List Value), operation = .div →
+        stack = Value.scalar y :: Value.scalar x :: rest → False
+      clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
+        convOvfUn
+      split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,
       metadata.returnsValue]
