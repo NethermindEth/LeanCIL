@@ -4589,7 +4589,9 @@ partial class Program : IDisposable
     static string StandaloneProofKey(string extraction, string suffix) =>
         ContentKey("theorem-audit-v3\n" + extraction + suffix);
 
-    /// <summary>Reuses authenticated successes only across a byte-identical extension of their module families.</summary>
+    /// <summary>
+    /// Reuses authenticated successes only across a byte-identical extension of their module families.
+    /// </summary>
     void PromoteStandaloneCache(StandaloneCachePromotion promotion, string completeKey,
         SortedDictionary<string, string> completeModules, Action requireStable)
     {

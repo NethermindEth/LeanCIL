@@ -98,7 +98,8 @@ try
     CheckPromotion("changed-artifact", false,
         mutateEntry: entry => File.AppendAllText(Path.Combine(entry, "files", "Proof.olean"), "corruption"));
     CheckPromotion("changed-complete-library", false, unstable: true);
-    Console.WriteLine("PASS complete-library promotion preserves exact families, identity and authenticated artifacts");
+    Console.WriteLine("PASS complete-library promotion preserves exact families, identity and " +
+        "authenticated artifacts");
     long previousAllocation = 0;
     foreach (var count in new[] { 256, 1024, 4096 })
     {
