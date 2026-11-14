@@ -383,4 +383,46 @@ foreach (var (selector, method) in new[] { ("Access::Read(Flag)", "System.Int32 
         refused.Output.Contains("Stage: metadata and CIL validation", StringComparison.Ordinal),
         "A volatile access was not refused with the unsupported-instruction message:\n" + refused.Output);
 }
+// A virtual call scans the classes of the image for subclasses of its slot. Resolving every class's base from
+// disk makes that scan cost milliseconds per class, so four times the classes would cost four times as long.
+const int FewClasses = 125;
+const int ManyClasses = 500;
+const int VirtualCallers = 100;
+const double AllowedClassGrowth = 2.5;
+double VirtualDispatchSeconds(int classes)
+{
+    var fixtureDirectory = Path.Combine(directory, "Dispatch" + classes);
+    Directory.CreateDirectory(fixtureDirectory);
+    File.WriteAllText(Path.Combine(fixtureDirectory, "Dispatch.csproj"), """
+    <Project Sdk="Microsoft.NET.Sdk">
+      <PropertyGroup><TargetFramework>net10.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+    </Project>
+    """);
+    // Each caller is blocked after its virtual call, so no extraction runs and the dispatch scan is the cost.
+    File.WriteAllText(Path.Combine(fixtureDirectory, "Dispatch.cs"), string.Join('\n',
+        ["public abstract class Shape { public abstract int Speak(); }",
+         "public sealed class Circle : Shape { public override int Speak() => 1; }",
+         .. Enumerable.Range(0, classes).Select(index =>
+             $"public sealed class Bystander{index} {{ public int Value; }}"),
+         "public static class Callers {",
+         .. Enumerable.Range(0, VirtualCallers).Select(index =>
+             $"    public static int Call{index}(Shape shape, int size) => shape.Speak() + new decimal[size].Length;"),
+         "}"]));
+    Run(["dotnet", "build", Path.Combine(fixtureDirectory, "Dispatch.csproj"), "-c", "Release"]);
+    var callers = Path.Combine(fixtureDirectory, "callers.json");
+    File.WriteAllText(callers, JsonSerializer.Serialize(new
+    {
+        entries = Enumerable.Range(0, VirtualCallers).Select(index =>
+            new { signature = $"Callers::Call{index}(Shape,int)", profile = "scalar" })
+    }));
+    var timer = System.Diagnostics.Stopwatch.StartNew();
+    Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Dispatch.dll"),
+        "--manifest", callers, "--output", Path.Combine(fixtureDirectory, "blockers.json")]);
+    return timer.Elapsed.TotalSeconds;
+}
+var fewClassesSeconds = VirtualDispatchSeconds(FewClasses);
+var manyClassesSeconds = VirtualDispatchSeconds(ManyClasses);
+Require(manyClassesSeconds <= fewClassesSeconds * AllowedClassGrowth,
+    $"{VirtualCallers} virtual calls took {fewClassesSeconds:F1} s with {FewClasses} classes and " +
+    $"{manyClassesSeconds:F1} s with {ManyClasses}; the limit is {AllowedClassGrowth} times as long.");
 Console.WriteLine($"PASS {checks} admission report checks");
