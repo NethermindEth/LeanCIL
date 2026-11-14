@@ -60,11 +60,11 @@ var monolithic = Execute(["lake", "env", "lean", "-DElab.async=false", old], cwd
 RequireElaboratorRefusal(monolithic.Code, monolithic.Output);
 Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the monolithic certificate");
 
-// The kernel decides the monolithic certificate. Its time and the memory it adds to the import floor, per method of
-// the call graph, may not grow with the number of methods: superlinear growth would make the check unusable on large
-// extractions even though only the kernel may run it.
+// The kernel decides the monolithic certificate. Its heartbeats and peak memory per added method of the call graph
+// may not grow with the number of methods: superlinear growth would make the check unusable on large extractions
+// even though only the kernel may run it.
 const double AllowedKernelGrowth = 1.5;
-(double Seconds, double Gigabytes) KernelCost(int methodCount)
+(long Heartbeats, double Gigabytes) KernelCost(int methodCount)
 {
     var work = Path.Combine(directory, "Kernel" + methodCount);
     var kernelSource = Path.Combine(work, "Assembly");
@@ -89,36 +89,44 @@ const double AllowedKernelGrowth = 1.5;
     var kernelFile = Path.Combine(work, "Monolithic.lean");
     File.WriteAllText(kernelFile, NarrowEvidence(full[..from] +
         "theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts assemblies " +
-        "methodEvidence imports program := by decide +kernel\n" + full[to..], "translation_valid"));
-    var start = System.Diagnostics.Stopwatch.StartNew();
-    var peak = MeasurePeakGigabytes(["lake", "env", "lean", kernelFile], FixturePackage());
-    return (start.Elapsed.TotalSeconds, peak);
+        "methodEvidence imports program := by decide +kernel\n" + full[to..], "translation_valid") +
+        "\n#eval show IO Nat from IO.getNumHeartbeats\n");
+    var (peak, output) = MeasurePeakGigabytes(["lake", "env", "lean", "-DElab.async=false", kernelFile],
+        FixturePackage());
+    var count = HeartbeatCount().Match(output);
+    if (!count.Success) throw new InvalidOperationException("Missing heartbeat count:\n" + output);
+    return (long.Parse(count.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), peak);
 }
-var floorMemory = MeasurePeakGigabytes(["lake", "env", "lean", Path.Combine(directory, "Imports.lean")],
-    FixturePackage(),
-    "import CIL.Extraction.Translation\n");
 int[] workloads = [2, 4, 8];
 var costs = workloads.Select(count => (Count: count, Cost: KernelCost(count))).ToArray();
 foreach (var (count, cost) in costs)
     Console.WriteLine(FormattableString.Invariant(
-        $"kernel decide of the {count}-method certificate: {cost.Seconds:F1} s, peak {cost.Gigabytes:F2} GB") +
-        FormattableString.Invariant($" (import floor {floorMemory:F2} GB)"));
-var (smallCount, small) = costs[0];
-var (largeCount, large) = costs[^1];
-var timeGrowth = (large.Seconds / largeCount) / (small.Seconds / smallCount);
-var memoryGrowth = Math.Max(large.Gigabytes - floorMemory,
-    0.05) / largeCount / (Math.Max(small.Gigabytes - floorMemory, 0.05) / smallCount);
-if (timeGrowth > AllowedKernelGrowth || memoryGrowth > AllowedKernelGrowth)
+        $"kernel decide of the {count}-method certificate: {cost.Heartbeats} heartbeats, ") +
+        FormattableString.Invariant($"peak {cost.Gigabytes:F2} GB"));
+// The cost of a method added from the middle to the largest workload against one added from the smallest to the
+// middle; the imports and the fixed part of the certificate cancel. An increment below `floor` counts as `floor`.
+double IncrementRatio(Func<(long Heartbeats, double Gigabytes), double> measure, double floor)
+{
+    double Increment(int from) => Math.Max(measure(costs[from + 1].Cost) - measure(costs[from].Cost), floor) /
+        (costs[from + 1].Count - costs[from].Count);
+    return Increment(1) / Increment(0);
+}
+var beatGrowth = IncrementRatio(cost => cost.Heartbeats, 1);
+// Peak memory moves by tens of megabytes between runs of one file.
+var memoryGrowth = IncrementRatio(cost => cost.Gigabytes, 0.05);
+if (beatGrowth > AllowedKernelGrowth || memoryGrowth > AllowedKernelGrowth)
     throw new InvalidOperationException(string.Create(System.Globalization.CultureInfo.InvariantCulture,
-        $"The kernel check of {largeCount} methods costs {timeGrowth:F2} times the time and " +
-        $"{memoryGrowth:F2} times the memory per method of {smallCount}; the limit is {AllowedKernelGrowth}."));
+        $"A method added to {workloads[1]} methods costs {beatGrowth:F2} times the heartbeats and " +
+        $"{memoryGrowth:F2} times the memory of one added to {workloads[0]}; the limit is {AllowedKernelGrowth}."));
 Console.WriteLine(FormattableString.Invariant(
-    $"PASS the kernel check grows {timeGrowth:F2} times in time and {memoryGrowth:F2} times in memory ") +
-    FormattableString.Invariant($"per method from {smallCount} to {largeCount} methods"));
+    $"PASS the kernel check per added method grows {beatGrowth:F2} times in heartbeats and {memoryGrowth:F2} ") +
+    FormattableString.Invariant(
+        $"times in memory from {workloads[0]}-{workloads[1]} to {workloads[1]}-{workloads[2]} methods"));
 
-// Peak working set of `lean` on a file in gigabytes. Lean runs directly, in the environment `lake env` prints,
-// so the measured process is the one that holds the memory on every platform.
-static double MeasurePeakGigabytes(string[] command, string cwd, string? sourceText = null)
+// Peak working set of `lean` on a file in gigabytes, and its output. Lean runs directly with the options between
+// `lean` and the file, in the environment `lake env` prints, so the measured process holds the memory everywhere.
+static (double Gigabytes, string Output) MeasurePeakGigabytes(string[] command, string cwd,
+    string? sourceText = null)
 {
     var path = command[^1];
     if (sourceText is not null) File.WriteAllText(path, sourceText);
@@ -129,7 +137,7 @@ static double MeasurePeakGigabytes(string[] command, string cwd, string? sourceT
     var info = new System.Diagnostics.ProcessStartInfo(lean) { WorkingDirectory = cwd, UseShellExecute = false,
         RedirectStandardOutput = true, RedirectStandardError = true };
     foreach (var (name, value) in environment) info.Environment[name] = value;
-    info.ArgumentList.Add(path);
+    foreach (var argument in command[3..]) info.ArgumentList.Add(argument);
     using var process = System.Diagnostics.Process.Start(info)!;
     var output = process.StandardOutput.ReadToEndAsync();
     var errors = process.StandardError.ReadToEndAsync();
@@ -142,7 +150,7 @@ static double MeasurePeakGigabytes(string[] command, string cwd, string? sourceT
     if (process.ExitCode != 0 || output.Result.Contains("sorryAx", StringComparison.Ordinal))
         throw new InvalidOperationException(
             $"{lean} {path} failed ({process.ExitCode}):\n{output.Result}\n{errors.Result}");
-    return peak / (1024.0 * 1024 * 1024);
+    return (peak / (1024.0 * 1024 * 1024), output.Result);
 }
 var consumer = Path.Combine(directory, "Consumer");
 Directory.CreateDirectory(consumer);
