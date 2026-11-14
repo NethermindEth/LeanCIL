@@ -74,7 +74,8 @@ void CheckMarkers(bool initialization)
         owner.NestedTypes.Add(nested);
         Field("NestedDef", nested);
         Field("WrongShape", genuine, module.TypeSystem.Int32);
-        owner.Fields.Add(new("Optional", Mono.Cecil.FieldAttributes.Public, new OptionalModifierType(genuine, element)));
+        owner.Fields.Add(new("Optional", Mono.Cecil.FieldAttributes.Public,
+            new OptionalModifierType(genuine, element)));
         if (!initialization)
             Field("InnerModifier", genuine,
                 new ByReferenceType(new OptionalModifierType(genuine, module.TypeSystem.Int32)));
@@ -83,7 +84,8 @@ void CheckMarkers(bool initialization)
     TypeReference escaped;
     using (var pinned = new PinnedMetadata(extractor, path))
     {
-        bool Accepted(TypeReference type) => initialization ? initUnwrap(type) is not null : inUnwrap(type) is not null;
+        bool Accepted(TypeReference type) =>
+            initialization ? initUnwrap(type) is not null : inUnwrap(type) is not null;
         var fields = pinned.Module.GetType("Fixture.Owner").Fields;
         foreach (var field in fields)
         {

@@ -34,7 +34,8 @@ internal sealed class MetadataImage
         return identity;
     }
 
-    /// <summary>A top-level type's raw name columns and resolution scope; definitions have no reference scope.</summary>
+    /// <summary>A top-level type's raw name columns and resolution scope.
+    /// Definitions have no reference scope.</summary>
     internal sealed record TypeNameRow(TypeLevel Level, uint ResolutionScope);
 
     readonly Dictionary<uint, TypeNameRow?> typeNames = [];
