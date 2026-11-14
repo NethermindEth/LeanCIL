@@ -19,7 +19,7 @@ unsafe def checkDiscovery (previous current : PHashMap Name ConstantInfo) (known
   unless actual == expected do
     throw <| IO.userError s!"constant discovery differs: {actual} != {expected}"
 
-/-- Discovery remains exact across trie promotions, unchanged commands and restored environments. -/
+/-- Discovery is exact across trie promotions, unchanged commands and restored environments. -/
 unsafe def discoveryCases : IO Unit := do
   let mut current : PHashMap Name ConstantInfo := {}
   let mut known : NameSet := {}
