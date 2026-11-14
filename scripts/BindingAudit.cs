@@ -374,6 +374,12 @@ partial class Program
             !string.Equals(Path.GetFullPath(package), Path.GetFullPath(session), comparison))
             throw new InvalidOperationException("StrictBinding requires the selected certified library session");
         RequireUnchangedLibrary();
+        if (bindingPreparation is not null)
+        {
+            if (!Same(RequirePreparedBindingLibrary(), certifiedModules))
+                throw new InvalidOperationException("The certified library changed before preparing StrictBinding");
+            return;
+        }
         var beforeBase = ModuleArtifacts(library);
         var beforeSession = ModuleArtifacts(session);
         var current = new SortedDictionary<string, string>(beforeBase, StringComparer.Ordinal);
@@ -382,16 +388,6 @@ partial class Program
             baseModules!.Any(pair => !beforeBase.TryGetValue(pair.Key, out var hash) || hash != pair.Value))
             throw new InvalidOperationException("The certified library changed before preparing StrictBinding");
         var toolchain = BindingToolchainKey(session);
-        if (bindingPreparation is { } prepared)
-        {
-            if (bindingSession != session || prepared.Library != library || prepared.LibraryKey != libraryKey ||
-                prepared.Toolchain != toolchain || bindingSourcesKey != BindingSourcesKey(session) ||
-                !Same(prepared.BaseArtifacts, beforeBase) ||
-                !ModuleArtifactsPreserved(prepared.SessionArtifacts, beforeSession) ||
-                !ModuleArtifactsPreserved(prepared.CertifiedArtifacts, current))
-                throw new InvalidOperationException("The prepared StrictBinding library changed");
-            return;
-        }
         CopyBindingSources(session);
         var sourcesKey = BindingSourcesKey(session);
         var leanVersion = Run([LeanExecutable, "--version"]).Trim();
@@ -419,6 +415,27 @@ partial class Program
         bindingLeanVersion = leanVersion;
         bindingPreparation = new(library, libraryKey, toolchain, afterBase, afterSession,
             new(current, StringComparer.Ordinal));
+    }
+
+    /// <summary>The prepared library retains its sources, toolchain and every original artifact family.</summary>
+    SortedDictionary<string, string> RequirePreparedBindingLibrary()
+    {
+        var prepared = bindingPreparation ??
+            throw new InvalidOperationException("StrictBinding has not been prepared");
+        RequireUnchangedLibrary();
+        if (session is null || bindingSession != session || prepared.Library != library ||
+            prepared.LibraryKey != libraryKey || prepared.Toolchain != BindingToolchainKey(session) ||
+            bindingSourcesKey != BindingSourcesKey(session))
+            throw new InvalidOperationException("The prepared StrictBinding library changed");
+        var baseArtifacts = ModuleArtifacts(library!);
+        var sessionArtifacts = ModuleArtifacts(session);
+        var current = new SortedDictionary<string, string>(baseArtifacts, StringComparer.Ordinal);
+        foreach (var (name, hash) in sessionArtifacts) current[name] = hash;
+        if (!Same(prepared.BaseArtifacts, baseArtifacts) ||
+            !ModuleArtifactsPreserved(prepared.SessionArtifacts, sessionArtifacts) ||
+            !ModuleArtifactsPreserved(prepared.CertifiedArtifacts, current))
+            throw new InvalidOperationException("The prepared StrictBinding library changed");
+        return current;
     }
 
     /// <summary>Existing module families retain exactly their artifacts; additional families are permitted.</summary>

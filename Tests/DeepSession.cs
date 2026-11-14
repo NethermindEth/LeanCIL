@@ -46,17 +46,17 @@ SortedDictionary<string, string> builtArtifacts = new(certifiedArtifacts, String
     ["StrictBinding.olean"] = "binding",
     ["StrictBinding.olean.private"] = "binding-private"
 };
-if (!BindingArtifactsPreserved(certifiedArtifacts, builtArtifacts))
+if (!ModuleArtifactsPreserved(certifiedArtifacts, builtArtifacts))
     throw new InvalidOperationException("Binding preparation rejected an additional module family");
 builtArtifacts["CIL.olean.private"] = "changed";
-if (BindingArtifactsPreserved(certifiedArtifacts, builtArtifacts))
+if (ModuleArtifactsPreserved(certifiedArtifacts, builtArtifacts))
     throw new InvalidOperationException("Binding preparation accepted a changed certified companion");
 builtArtifacts.Remove("CIL.olean.private");
-if (BindingArtifactsPreserved(certifiedArtifacts, builtArtifacts))
+if (ModuleArtifactsPreserved(certifiedArtifacts, builtArtifacts))
     throw new InvalidOperationException("Binding preparation accepted a removed certified companion");
 builtArtifacts["CIL.olean.private"] = "private";
 builtArtifacts["CIL.olean.injected"] = "injected";
-if (BindingArtifactsPreserved(certifiedArtifacts, builtArtifacts))
+if (ModuleArtifactsPreserved(certifiedArtifacts, builtArtifacts))
     throw new InvalidOperationException("Binding preparation accepted an added certified companion");
 SortedDictionary<string, string> sessionArtifacts = new(StringComparer.Ordinal)
 {
@@ -64,8 +64,8 @@ SortedDictionary<string, string> sessionArtifacts = new(StringComparer.Ordinal)
 };
 SortedDictionary<string, string> combinedArtifacts = new(certifiedArtifacts, StringComparer.Ordinal);
 foreach (var (name, hash) in sessionArtifacts) combinedArtifacts[name] = hash;
-if (!BindingArtifactsPreserved(new(StringComparer.Ordinal), sessionArtifacts) ||
-    BindingArtifactsPreserved(certifiedArtifacts, combinedArtifacts))
+if (!ModuleArtifactsPreserved(new(StringComparer.Ordinal), sessionArtifacts) ||
+    ModuleArtifactsPreserved(certifiedArtifacts, combinedArtifacts))
     throw new InvalidOperationException("Binding preparation accepted a session companion for a base-only family");
 Console.WriteLine("PASS binding builds preserve complete certified module families");
 double previousInventoryMilliseconds = 0;
@@ -82,7 +82,7 @@ foreach (var count in new[] { 64, 512, 4096 })
     for (var repetition = 0; repetition < repetitions; repetition++)
     {
         after["StrictBinding.olean"] = repetition.ToString();
-        if (!BindingArtifactsPreserved(before, after))
+        if (!ModuleArtifactsPreserved(before, after))
             throw new InvalidOperationException("Binding inventory scaling rejected an additional family");
     }
     var milliseconds = elapsed.Elapsed.TotalMilliseconds;
@@ -139,14 +139,14 @@ ExpectFailure(() => verification.PrepareBindingLibrary(session), "selected certi
 var bindingArtifact = Path.Combine(package, ".lake/build/lib/lean/StrictBinding.olean");
 var bindingBytes = File.ReadAllBytes(bindingArtifact);
 File.WriteAllBytes(bindingArtifact, [0]);
-ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
 File.WriteAllBytes(bindingArtifact, bindingBytes);
 var addedCompanion = bindingArtifact + ".unexpected";
 File.WriteAllBytes(addedCompanion, [0]);
-ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
 File.Delete(addedCompanion);
 File.Delete(bindingArtifact);
-ExpectFailure(() => verification.PrepareBindingLibrary(package), "certified library changed");
+ExpectFailure(() => verification.PrepareBindingLibrary(package), "prepared StrictBinding library changed");
 File.WriteAllBytes(bindingArtifact, bindingBytes);
 var bindingSource = Path.Combine(package, "StrictBinding.lean");
 var bindingSourceText = File.ReadAllText(bindingSource);

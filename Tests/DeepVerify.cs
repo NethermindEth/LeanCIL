@@ -62,6 +62,32 @@ File.WriteAllText(manifest, Sha(image) + "  " + Path.GetRelativePath(fixture.Roo
 var inputs = DeepCheckInputs.Read(manifest);
 var output = fixture.Artifact("Verified");
 const string selector = "Input::Value(System.UInt64)";
+if (args is not ["--support-restore"])
+using (Program attacked = new())
+{
+    attacked.Library(Inputs(proof));
+    var originalCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
+    try
+    {
+        Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(fixture.Root, "SupportMutationCache"));
+        string[]? receipts = null;
+        ExpectFailure(() => attacked.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
+            stage: stage =>
+            {
+                if (stage != "kernel replay" || receipts is not null) return;
+                receipts = Receipts();
+                var artifact = Path.Combine(attacked.session!, ".lake/build/lib/lean/StrictBinding.olean.unexpected");
+                File.WriteAllBytes(artifact, [0]);
+            }), "prepared StrictBinding library changed");
+        if (receipts is null || !receipts.SequenceEqual(Receipts()))
+            throw new InvalidOperationException("Rejected support mutation published a successful receipt");
+        RequireNoReport();
+    }
+    finally { Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", originalCache); }
+}
+if (args is not ["--support-restore"])
+    Console.WriteLine("PASS support replay mutation preserves no successful receipt or deep report");
+if (args is ["--support-mutation"]) return;
 var report = verification.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs);
 if (report.binding.mode != BindingMode.Deep ||
     report.binding.facts.Single(fact => fact.id == BindingFact.BodyBytes).status != BindingStatus.Reconfirmed ||
@@ -73,6 +99,22 @@ if (report.binding.mode != BindingMode.Deep ||
     CertificateProblem(File.ReadAllText(Path.Combine(output, "verified.json")), BindingMode.Deep) is not null)
     throw new InvalidOperationException("Deep verification reported facts beyond its joint audit");
 Console.WriteLine("PASS standalone verification reports exactly the deep facts it audited");
+using (Program restoredSupport = new())
+{
+    bool audited = false;
+    var restoredReport = restoredSupport.Verify(image, "DeepFixture", selector, proof, output, deepChecks: inputs,
+        stage: stage => audited |= stage == "theorem audit");
+    var original = restoredSupport.bindingPreparation!;
+    if (restoredSupport.supportCacheHits == 0 || !audited || restoredReport.binding.mode != BindingMode.Deep ||
+        !Same(original.BaseArtifacts, ModuleArtifacts(restoredSupport.library!)) ||
+        !ModuleArtifactsPreserved(original.SessionArtifacts, ModuleArtifacts(restoredSupport.session!)) ||
+        !ModuleArtifactsPreserved(original.CertifiedArtifacts,
+            restoredSupport.SessionModules(restoredSupport.session!)))
+        throw new InvalidOperationException(
+            "Authenticated support reuse changed the prepared library or skipped audit");
+}
+Console.WriteLine("PASS authenticated support restoration preserves prepared families and runs a deep audit");
+if (args is ["--support-restore"]) return;
 
 var untrusted = Path.Combine(verification.session!, ".lake/build/lib/lean/Unexpected.olean");
 File.WriteAllBytes(untrusted, [0]);
