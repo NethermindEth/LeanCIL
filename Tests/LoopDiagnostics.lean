@@ -1018,4 +1018,74 @@ theorem localReferenceClassification
 
 #print axioms localReferenceClassification
 
+open Lean Meta Elab Tactic in
+/-- Fact-list traversal preserves positions, raw heads and incomplete prefixes in linear work. -/
+theorem factListTraversal (_tail : List (Option Nat)) : True := by
+  run_tac withMainContext do
+    let itemType := mkApp (mkConst ``Option [Level.zero]) (mkConst ``Nat)
+    let unknownTail ← Term.elabTerm (mkIdent `_tail) none
+    let absent := mkApp (mkConst ``Option.none [Level.zero]) (mkConst ``Nat)
+    let present := mkApp2 (mkConst ``Option.some [Level.zero]) (mkConst ``Nat) (mkNatLit 7)
+    withLetDecl `entry itemType present fun entry => do
+      let heads := #[entry, absent, present]
+      let mut list := unknownTail
+      for head in heads.reverse do
+        list := mkApp3 (mkConst ``List.cons [Level.zero]) itemType head list
+      let entries ← listEntries list 4
+      unless entries == #[(4, entry), (5, absent), (6, present)] do
+        throwError "fact entries lost positions, raw heads or an incomplete prefix"
+      unless (← rememberedIndices list 4) == #[4, 6] do
+        throwError "remembered positions lost a reducible head or an incomplete prefix"
+      unless (← listEntries unknownTail 4).isEmpty &&
+          (← rememberedIndices unknownTail 4).isEmpty do
+        throwError "an unknown list has no visible entries"
+    let measure (count : Nat) := do
+      let list ← mkListLit itemType (List.replicate count present)
+      let start ← IO.getNumHeartbeats
+      let entries ← listEntries list 3
+      let entriesCost := (← IO.getNumHeartbeats) - start
+      unless entries.size == count && entries.back?.map Prod.fst == some (count + 2) do
+        throwError "fact traversal lost the last entry"
+      let start ← IO.getNumHeartbeats
+      let indices ← rememberedIndices list 3
+      let indicesCost := (← IO.getNumHeartbeats) - start
+      unless indices.size == count && indices.back? == some (count + 2) do
+        throwError "remembered traversal lost the last position"
+      return (entriesCost, indicesCost)
+    let small ← measure 128
+    let medium ← measure 512
+    let large ← measure 2048
+    logInfo m!"fact-list heartbeats: {small}, {medium}, {large}"
+    unless medium.1 < small.1 * 6 && large.1 < medium.1 * 6 &&
+        medium.2 < small.2 * 6 && large.2 < medium.2 * 6 do
+      throwError "fact-list traversal costs grew too quickly"
+    let measureCopies (count : Nat) := do
+      let mut list := mkApp (mkConst ``List.nil [Level.zero]) itemType
+      for _ in [:count] do
+        list := mkApp3 (mkConst ``List.cons [Level.zero]) itemType present list
+      let _ ← listEntries list
+      let _ ← rememberedIndices list
+      let mut entriesTimes := #[]
+      let mut indicesTimes := #[]
+      for _ in [:3] do
+        let start ← IO.monoMsNow
+        let entries ← listEntries list
+        let middle ← IO.monoMsNow
+        let indices ← rememberedIndices list
+        let stop ← IO.monoMsNow
+        unless entries.size == count && indices.size == count do
+          throwError "fact-list traversal lost entries in a deep list"
+        entriesTimes := entriesTimes.push (middle - start)
+        indicesTimes := indicesTimes.push (stop - middle)
+      return ((entriesTimes.qsort (· < ·))[1]!, (indicesTimes.qsort (· < ·))[1]!)
+    let shorter ← measureCopies 16384
+    let longer ← measureCopies 65536
+    logInfo m!"fact-list median milliseconds: {shorter}, {longer}"
+    -- Heartbeats count small allocations; array copying also needs an elapsed-time check.
+    unless longer.1 < shorter.1 * 8 + 20 && longer.2 < shorter.2 * 8 + 20 do
+      throwError "fact-list copying costs grew too quickly"
+  trivial
+
+#print axioms factListTraversal
+
 end Tests.LoopDiagnostics
