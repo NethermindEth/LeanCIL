@@ -20,9 +20,14 @@ foreach (string directory in new[] { libRoot, appRoot, package, callerPackage })
 string[] cli = ["dotnet", ExtractorPath];
 string libProject = Path.Combine(libRoot, "Lib.csproj");
 string appProject = Path.Combine(appRoot, "App.csproj");
-const string libProjectText = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>TypedFixture.Lib</AssemblyName><Optimize>true</Optimize></PropertyGroup></Project>";
+const string libProjectText = "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
+    "<TargetFramework>net11.0</TargetFramework><AssemblyName>TypedFixture.Lib</AssemblyName>" +
+    "<Optimize>true</Optimize></PropertyGroup></Project>";
 File.WriteAllText(libProject, libProjectText);
-File.WriteAllText(appProject, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>TypedFixture.App</AssemblyName><Optimize>true</Optimize></PropertyGroup><ItemGroup><ProjectReference Include=\"../Lib/Lib.csproj\" /></ItemGroup></Project>");
+File.WriteAllText(appProject, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>" +
+    "<TargetFramework>net11.0</TargetFramework><AssemblyName>TypedFixture.App</AssemblyName>" +
+    "<Optimize>true</Optimize></PropertyGroup>" +
+    "<ItemGroup><ProjectReference Include=\"../Lib/Lib.csproj\" /></ItemGroup></Project>");
 string libSource = Path.Combine(libRoot, "Library.cs");
 const string libSourceText = """
 using System;

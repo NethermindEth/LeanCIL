@@ -6,12 +6,17 @@ namespace Tests.FeatureEvidence
 open CIL CIL.Extraction
 
 private def intType : TypeExpr := .atom
-  "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" "System.Int32"
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+  "System.Int32"
 private def getter : CallSite := {
-  target := .external "System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()"
+  target := .external "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
+    PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean \
+    System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()"
   typeArguments := [], parameterCount := 0, hasThis := false, returnsValue := true }
 private def intrinsic (member : String) : CallSite :=
-  { getter with target := .external ("System.Runtime.Intrinsics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean System.Runtime.Intrinsics." ++ member ++ "()") }
+  { getter with target := .external ("System.Runtime.Intrinsics, Version=11.0.0.0, \
+    Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean \
+    System.Runtime.Intrinsics." ++ member ++ "()") }
 
 -- Each getter binds to its own flag; Vector128 has no IsSupported.
 example : featureGetter (intrinsic "X86.X86Base/X64::get_IsSupported") = some .x86Base64 := by decide
