@@ -1,4 +1,5 @@
 import StrictBinding.Dump
+import StrictBinding.Sha256
 
 /-!
 # Strict binding fixture

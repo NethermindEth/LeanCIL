@@ -1,4 +1,5 @@
 import StrictBinding.Error
+import CIL.Crypto.Words
 
 /-!
 # Image bytes and reads
@@ -17,6 +18,8 @@ bytes costs `n log n` rather than `n ^ 2`.
 -/
 
 namespace StrictBinding
+
+open CIL.Crypto (joinValues bytesValue littleEndian chunkValues)
 
 /-- The bits in one 64-byte chunk. -/
 def chunkBits : Nat := 512
@@ -42,26 +45,6 @@ def ImageBytes.wellFormed (image : ImageBytes) : Bool :=
     image.pages.all (fun page => !page.isEmpty && page.length <= pageChunks) &&
     chunks.all (· < 2 ^ chunkBits) &&
     chunks.getLastD 0 % 2 ^ (8 * (64 * chunks.length - image.length)) == 0
-
-/-- Values with their bit widths, adjacent pairs joined into one value of the summed width. -/
-def joinPairs : List (Nat × Nat) → List (Nat × Nat)
-  | (high, highWidth) :: (low, lowWidth) :: rest =>
-    (high * 2 ^ lowWidth + low, highWidth + lowWidth) :: joinPairs rest
-  | items => items
-
-/-- The big-endian concatenation of values and the sum of their widths, joined level by level;
-    the fuel is the item count, which halves at every level. -/
-def joinValues : Nat → List (Nat × Nat) → Nat × Nat
-  | 0, items => items.headD (0, 0)
-  | fuel + 1, items =>
-    match items with
-    | [] => (0, 0)
-    | [single] => single
-    | _ => joinValues fuel (joinPairs items)
-
-/-- The big-endian value of a byte list. -/
-def bytesValue (bytes : List Nat) : Nat :=
-  (joinValues bytes.length (bytes.map fun byte => (byte, 8))).1
 
 /-- The chunks of an image in a balanced tree, each node knowing how many chunks it holds. -/
 inductive ChunkTree where
@@ -123,11 +106,6 @@ def ImageView.slice (view : ImageView) (offset count : Nat) : Except AuditError 
   | none =>
     if count == 0 && offset <= view.length then .ok 0 else .error (.outsideImage offset count)
 
-/-- Reverses the order of the `count` bytes of a big-endian value. -/
-def littleEndian : Nat → Nat → Nat
-  | 0, _ => 0
-  | count + 1, value => (value % 256) * 256 ^ count + littleEndian count (value / 256)
-
 /-- The little-endian unsigned integer of `count` bytes at `offset`, as PE and metadata store
     integers. -/
 def ImageView.u (view : ImageView) (offset count : Nat) : Except AuditError Nat :=
@@ -141,16 +119,6 @@ def ImageView.hasBytesAt (view : ImageView) (offset : Nat) (bytes : List Nat) :
 /-- The `count` bytes at `offset` as a byte list. -/
 def ImageView.bytes (view : ImageView) (offset count : Nat) : Except AuditError (List Nat) :=
   (List.range count).mapM fun index => view.slice (offset + index) 1
-
-/-- Big-endian chunks of a byte list, zero-padded to whole chunks. -/
-def chunkValues : Nat → List Nat → List Nat
-  | 0, _ => []
-  | fuel + 1, bytes =>
-    if bytes.isEmpty then []
-    else
-      let block := bytes.take 64
-      let chunk := bytesValue (block ++ List.replicate (64 - block.length) 0)
-      chunk :: chunkValues fuel (bytes.drop 64)
 
 /-- Splits a list into pages of at most `pageChunks` items. -/
 def paginate : Nat → List Nat → List (List Nat)

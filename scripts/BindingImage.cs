@@ -108,7 +108,7 @@ static class BindingImage
 
     /// <summary>The page as hashed: every page but the last as it is, and the last with its padding.</summary>
     static string PageTerm(int page, int pages, int length) =>
-        page + 1 < pages ? "page" + page : $"(StrictBinding.Sha256.padded page{page} {length})";
+        page + 1 < pages ? "page" + page : $"(CIL.Crypto.padded page{page} {length})";
 
     static string ChunkLiteral(byte[] file, int offset)
     {
