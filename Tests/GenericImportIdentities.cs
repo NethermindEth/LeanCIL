@@ -9,6 +9,38 @@ partial class Program
     static void CheckGenericImportIdentities(string library, string output, Type metadata)
     {
         Run(["lake", "build", "CIL.Extraction.MetadataBinding"]);
+        long previousNames = 0;
+        foreach (int size in new[] { 64, 256, 1024 })
+        {
+            string path = Path.Combine(output, "ClosedNameScaling" + size + ".lean");
+            File.WriteAllText(path, $$"""
+                import CIL.Extraction.MetadataBinding
+                open CIL CIL.Extraction
+                set_option maxRecDepth 100000
+                set_option maxHeartbeats 10000000
+                /-- Closed arguments share the independently expected UInt32 spelling. -/
+                def arguments : List ResolvedType := List.replicate {{size}} (.primitive 9)
+                /-- Closed argument names are indexed once for the signature. -/
+                def argumentNames : SearchTree (List Nat) := SearchTree.ofSorted
+                  (((arguments.mapM (cecilName false resolveFuel)).getD []).zipIdx.map
+                    fun (name, index) => (index, name))
+                /-- Open parameters select every argument in declaration order. -/
+                def parameters : List ResolvedType := (List.range {{size}}).map .mvar
+                /-- Parameter rendering preserves each selected argument's name. -/
+                theorem closed_names :
+                    parameters.mapM (contractClosedName argumentNames resolveFuel) =
+                        some (List.replicate {{size}} (bytesOf "System.UInt32")) := by decide +kernel
+                #print axioms closed_names
+                #eval show IO Nat from IO.getNumHeartbeats
+                """);
+            string result = Compile(path);
+            long heartbeats = long.Parse(result.Split('\n', StringSplitOptions.TrimEntries |
+                StringSplitOptions.RemoveEmptyEntries).Last(), CultureInfo.InvariantCulture);
+            Console.WriteLine($"PASS closed names {size} arguments and parameters: {heartbeats} heartbeats");
+            if (previousNames != 0 && heartbeats > previousNames * 6)
+                throw new InvalidOperationException("Closed name indexing exceeded linear growth: " + result);
+            previousNames = heartbeats;
+        }
         using var pinned = new PinnedMetadata(metadata.Assembly, library);
         MethodInfo instantiate = metadata.GetMethod("Instantiate", BindingFlags.Static | BindingFlags.NonPublic)!;
         ModuleDefinition module = pinned.Module;
@@ -39,10 +71,35 @@ partial class Program
             previous = heartbeats;
         }
 
+        previous = 0;
+        foreach (int size in new[] { 16, 64, 256 })
+        {
+            MethodDefinition counted = new("Counted", Mono.Cecil.MethodAttributes.Public |
+                Mono.Cecil.MethodAttributes.Static,
+                module.TypeSystem.Void) {
+                    DeclaringType = identity.DeclaringType,
+                    CallingConvention = MethodCallingConvention.Generic };
+            for (int index = 0; index < size; index++)
+                counted.GenericParameters.Add(new GenericParameter("T" + index, counted));
+            counted.ReturnType = counted.GenericParameters[^1];
+            for (int index = 0; index < size; index++)
+                counted.Parameters.Add(new ParameterDefinition(counted.GenericParameters[^1]));
+            string path = Path.Combine(output, "IdentityCountScaling" + size + ".lean");
+            File.WriteAllText(path, Source(counted, Selected(counted)) +
+                "\n#eval show IO Nat from IO.getNumHeartbeats\n");
+            string result = Compile(path);
+            long heartbeats = long.Parse(result.Split('\n', StringSplitOptions.TrimEntries |
+                StringSplitOptions.RemoveEmptyEntries).Last(), CultureInfo.InvariantCulture);
+            Console.WriteLine($"PASS generic identity {size} arguments and parameters: {heartbeats} heartbeats");
+            if (previous != 0 && heartbeats > previous * 6)
+                throw new InvalidOperationException("Generic argument indexing exceeded linear growth: " + result);
+            previous = heartbeats;
+        }
+
         string Selected(MethodDefinition method)
         {
-            TypeReference[] arguments = method.GenericParameters.Count == 1
-                ? [module.TypeSystem.UInt64] : [module.TypeSystem.UInt64, module.TypeSystem.UInt32];
+            TypeReference[] arguments = method.GenericParameters.Select((_, index) =>
+                index == 0 ? module.TypeSystem.UInt64 : module.TypeSystem.UInt32).ToArray();
             object selection = instantiate.Invoke(null, [method, arguments, "scalar", true])!;
             return (string)selection.GetType().GetProperty("Identity")!.GetValue(selection)!;
         }
@@ -134,7 +191,8 @@ partial class Program
         static string Type(TypeReference type) => type is GenericParameter parameter
             ? ".mvar " + parameter.Position : ".primitive " + (int)type.MetadataType;
         string scope = method.Module.Assembly.Name.FullName;
-        string arguments = method.GenericParameters.Count == 1 ? ".primitive 11" : ".primitive 11, .primitive 9";
+        string arguments = string.Join(",", method.GenericParameters.Select((_, index) =>
+            index == 0 ? ".primitive 11" : ".primitive 9"));
         string parameters = string.Join(",", method.Parameters.Select(parameter => Type(parameter.ParameterType)));
         ExternalIdentityEvidence evidence = new();
         string identityReference = evidence.Reference(identity, reachable: true);

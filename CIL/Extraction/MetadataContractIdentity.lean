@@ -44,6 +44,17 @@ def contractTypeKey (frame : Frame) : Nat → ResolvedType → Option (List Nat)
     pure (bytesOf "byref:" ++ contractPart (← contractTypeKey frame fuel element))
   | _, _ => none
 
+/-- The closed name of a supported contract type, with indexed method argument names. -/
+def contractClosedName (argumentNames : SearchTree (List Nat)) :
+    Nat → ResolvedType → Option (List Nat)
+  | 0, _ => none
+  | fuel + 1, type@(.primitive _) | fuel + 1, type@(.named _) =>
+    cecilName false (fuel + 1) type
+  | _ + 1, .mvar index => argumentNames.find? index
+  | fuel + 1, .byref element =>
+    (· ++ [38]) <$> contractClosedName argumentNames fuel element
+  | _, _ => none
+
 /-- The primitive integer codes admitted as closed imported method arguments. -/
 def contractInteger (type : ResolvedType) : Bool :=
   match type with

@@ -364,11 +364,10 @@ def MethodSite.contractName (site : MethodSite) (frame : Frame) : Option (List N
     let definition ← site.contractDefinitionKey frame
     let keys ← arguments.mapM (contractTypeKey frame resolveFuel)
     let argumentNames ← arguments.mapM (cecilName false resolveFuel)
-    let returned ← substituteResolved (some arguments) (some []) resolveFuel site.result
-    let result ← cecilName false resolveFuel returned
-    let parameters ← site.parameters.mapM fun type => do
-      let substituted ← substituteResolved (some arguments) (some []) resolveFuel type
-      cecilName false resolveFuel substituted
+    let indexedNames := SearchTree.ofSorted
+      (argumentNames.zipIdx.map fun (name, index) => (index, name))
+    let result ← contractClosedName indexedNames resolveFuel site.result
+    let parameters ← site.parameters.mapM (contractClosedName indexedNames resolveFuel)
     let name := site.name ++ [60] ++ (argumentNames.intersperse [44]).flatten ++ [62] ++
       bytesOf "|definition|" ++ contractHex definition ++ bytesOf "|arguments|" ++
       (keys.map contractPart).flatten
