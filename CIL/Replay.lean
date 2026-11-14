@@ -379,7 +379,7 @@ def RejectionKind.protocolName : RejectionKind → String
   | .recursorMismatch => "recursorMismatch"
 
 /-- Requires every complete declaration and mutual member to belong uniquely to this module. -/
-def diagnosticConstants (complete : Lean.ModuleData) (env : Lean.Environment) :
+unsafe def diagnosticConstants (complete : Lean.ModuleData) (env : Lean.Environment) :
     IO (Std.HashMap Lean.Name Lean.ConstantInfo) := do
   unless complete.constNames.size == complete.constants.size do
     throw <| IO.userError "Mismatched declaration inventory"
@@ -394,11 +394,17 @@ def diagnosticConstants (complete : Lean.ModuleData) (env : Lean.Environment) :
     if extra.contains name || (env.find? name).isSome then
       throw <| IO.userError s!"Ambiguous auxiliary ownership: {name}"
     extra := extra.insert name
-  -- Each stored mutual list is checked once; its entries must all be locally owned.
+  -- Shared physical tails retain their validated ownership for this module inventory.
+  let mut checked : Lean.PtrSet (List Lean.Name) := Lean.mkPtrSet
   for (_, info) in constants do
-    for member in info.all do
+    let mut members := info.all
+    while !members.isEmpty do
+      if checked.contains members then break
+      let member := members.head!
       unless constants.contains member do
         throw <| IO.userError s!"Unowned mutual declaration: {member}"
+      checked := checked.insert members
+      members := members.tail!
     if let .inductInfo inductiveInfo := info then
       for ctor in inductiveInfo.ctors do
         unless constants.contains ctor do

@@ -146,7 +146,7 @@ def postponedChecks : IO Unit := do
 #eval postponedChecks
 
 /-- Ownership rejects duplicate names, missing mutual members and imported declarations. -/
-def ownership : IO Unit := do
+unsafe def ownership : IO Unit := do
   let env ← Lean.mkEmptyEnvironment
   let info : Lean.ConstantInfo := .axiomInfo
     { name := `Owned, levelParams := [], type := Lean.mkSort .zero, isUnsafe := false }
@@ -175,7 +175,7 @@ def ownership : IO Unit := do
 #eval ownership
 
 /-- The owner index grows with the declaration inventory, without per-declaration rescans. -/
-def ownershipScaling : IO Unit := do
+unsafe def ownershipScaling : IO Unit := do
   let env ← Lean.mkEmptyEnvironment
   let mut previous := 0
   for count in [64, 256, 1024] do
@@ -195,3 +195,46 @@ def ownershipScaling : IO Unit := do
     previous := used
 
 #eval ownershipScaling
+
+/-- Shared complete mutual lists require work proportional to their distinct physical cells. -/
+unsafe def mutualOwnershipScaling : IO Unit := do
+  let env ← Lean.mkEmptyEnvironment
+  let mut previous := 0
+  for count in [64, 256, 1024] do
+    let names := (List.range count).map (Lean.Name.num `Mutual)
+    let constants := names.toArray.map fun name =>
+      Lean.ConstantInfo.thmInfo {
+        name, levelParams := [], type := Lean.mkSort .zero,
+        value := Lean.mkSort .zero, all := names }
+    let data : Lean.ModuleData := { (default : Lean.ModuleData) with
+      constNames := names.toArray, constants }
+    discard <| diagnosticConstants data env
+    let before ← IO.getNumHeartbeats
+    discard <| diagnosticConstants data env
+    let used := (← IO.getNumHeartbeats) - before
+    if previous > 0 && used > previous * 6 then
+      throw <| IO.userError "Shared mutual inventory grew faster than its linear bound"
+    IO.println s!"Shared mutual inventory {count}: {used} heartbeats"
+    previous := used
+
+#eval mutualOwnershipScaling
+
+/-- Equal heads with physically divergent tails do not share ownership validation. -/
+unsafe def divergentOwnership : IO Unit := do
+  let env ← Lean.mkEmptyEnvironment
+  for reverse in [false, true] do
+    let owned : Lean.ConstantInfo := .thmInfo {
+      name := `Owned, levelParams := [], type := Lean.mkSort .zero,
+      value := Lean.mkSort .zero, all := [`Owned, `Other] }
+    let divergent : Lean.ConstantInfo := .thmInfo {
+      name := `Other, levelParams := [], type := Lean.mkSort .zero,
+      value := Lean.mkSort .zero, all := [`Owned, `Unowned] }
+    let constants := if reverse then #[divergent, owned] else #[owned, divergent]
+    let data : Lean.ModuleData := { (default : Lean.ModuleData) with
+      constNames := constants.map (·.name), constants }
+    let mut failed := false
+    try discard <| diagnosticConstants data env
+    catch _ => failed := true
+    unless failed do throw <| IO.userError "Divergent unowned mutual tail accepted"
+
+#eval divergentOwnership
