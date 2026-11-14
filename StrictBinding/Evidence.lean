@@ -21,10 +21,10 @@ def bodyClaims (evidence : List CIL.Extraction.MethodEvidence) : List BodyClaim 
     gives, in the pinned image of the assembly the evidence names. -/
 def BodiesBound (images : List PinnedImage) (evidence : List CIL.Extraction.MethodEvidence) :
     Prop :=
-  ClaimedBodiesBound images (bodyClaims evidence)
+  ClaimsHold bodyClaimBound images (bodyClaims evidence)
 
 instance (images : List PinnedImage) (evidence : List CIL.Extraction.MethodEvidence) :
     Decidable (BodiesBound images evidence) :=
-  inferInstanceAs (Decidable (ClaimedBodiesBound _ _))
+  inferInstanceAs (Decidable (ClaimsHold _ _ _))
 
 end StrictBinding

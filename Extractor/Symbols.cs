@@ -11,8 +11,22 @@ namespace Nethermind.LeanCIL;
 // Extracted.lean depends on them, and a missing or mismatched PDB leaves extraction unchanged.
 internal static class Symbols
 {
-    // `module` gains debug information when a matching PDB is read; returns where it came from.
-    internal static string? Read(ModuleDefinition module, string assemblyPath, out string? notice)
+    /// <summary>A portable PDB's bytes and their SHA-256.</summary>
+    internal sealed record PdbFile(byte[] Bytes, string Sha256)
+    {
+        /// <summary>The PDB at <paramref name="path"/>, or null when there is none.</summary>
+        internal static PdbFile? Load(string path)
+        {
+            if (!File.Exists(path)) return null;
+            var bytes = File.ReadAllBytes(path);
+            return new(bytes, Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
+        }
+    }
+
+    // `module` gains debug information when a matching PDB is read; returns where it came from. `pdbFile` reads the
+    // PDB beside the assembly, so a batch of extractions can read and hash it once.
+    internal static string? Read(ModuleDefinition module, string assemblyPath, out string? notice,
+        Func<string, PdbFile?>? pdbFile = null)
     {
         notice = null;
         if (!module.HasDebugHeader) return null;
@@ -24,11 +38,12 @@ internal static class Symbols
                 module.ReadSymbols(new EmbeddedPortablePdbReaderProvider().GetSymbolReader(module, assemblyPath), true);
                 return "embedded";
             }
-            var pdb = Path.ChangeExtension(assemblyPath, ".pdb");
-            if (!entries.Any(e => e.Directory.Type == ImageDebugType.CodeView) || !File.Exists(pdb)) return null;
-            var bytes = File.ReadAllBytes(pdb);
-            module.ReadSymbols(new PortablePdbReaderProvider().GetSymbolReader(module, new MemoryStream(bytes)), true);
-            return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            if (!entries.Any(e => e.Directory.Type == ImageDebugType.CodeView) ||
+                (pdbFile ?? PdbFile.Load)(Path.ChangeExtension(assemblyPath, ".pdb")) is not { } pdb)
+                return null;
+            module.ReadSymbols(new PortablePdbReaderProvider().GetSymbolReader(module,
+                new MemoryStream(pdb.Bytes, writable: false)), true);
+            return pdb.Sha256;
         }
         catch (Exception error) when (error is SymbolsNotMatchingException or BadImageFormatException or InvalidOperationException)
         {

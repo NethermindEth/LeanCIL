@@ -87,9 +87,7 @@ internal static class VirtualDispatch
 
     static bool Derives(TypeDefinition candidate, TypeDefinition declaring)
     {
-        var pins = PinnedAssemblies.Active;
-        for (TypeDefinition? current = candidate; current is not null;
-            current = pins is null ? current.BaseType?.Resolve() : pins.BaseClass(current))
+        for (TypeDefinition? current = candidate; current is not null; current = current.BaseType?.Resolve())
             if (current == declaring) return true;
         return false;
     }
