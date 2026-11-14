@@ -37,6 +37,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
       values.any Value.hasUnspecified = false := by
   unfold step at executed
   dsimp only at executed
+  generalize narrowing : body.returnNarrow = narrow at executed
   repeat' first
     | unfold returnFrom at executed
     | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ executed)

@@ -66,18 +66,18 @@ def body (sites : List (Nat × StaticDescriptor)) : Method := {
 
 /-- Duplicate static sites use the first descriptor, rather than overwriting it. -/
 theorem first_static_wins :
-    methodShapeInstructions [] { raw with code := [load] }
+    methodShapeInstructions { raw with code := [load] }
       (body [(0, descriptor), (0, { descriptor with scalar := some true })]) = true ∧
-    methodShapeInstructions [] { raw with code := [load] }
+    methodShapeInstructions { raw with code := [load] }
       (body [(0, { descriptor with scalar := some true }), (0, descriptor)]) = false := by
   decide +kernel
 #print axioms first_static_wins
 
 /-- Missing raw instructions, absent descriptors and wrong raw opcodes cannot pass. -/
 theorem missing_static_rejects :
-    methodShapeInstructions [] raw (body [(0, descriptor)]) = false ∧
-    methodShapeInstructions [] { raw with code := [load] } (body []) = false ∧
-    methodShapeInstructions [] { raw with code := [{ load with opcode := 0 }] }
+    methodShapeInstructions raw (body [(0, descriptor)]) = false ∧
+    methodShapeInstructions { raw with code := [load] } (body []) = false ∧
+    methodShapeInstructions { raw with code := [{ load with opcode := 0 }] }
       (body [(0, descriptor)]) = false := by decide +kernel
 #print axioms missing_static_rejects
 

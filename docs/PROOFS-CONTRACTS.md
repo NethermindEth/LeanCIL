@@ -1011,13 +1011,13 @@ body. Given `add_holds : addContract.Holds Extracted.program addTo`:
 ```lean extracted
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
   add_holds.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 ```
 
-`Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee narrow`
-with no locals or parameter homes, so frame entry and exit leave memory
+`Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee`
+with `body.returnNarrow = narrow` and no locals or parameter homes, so frame entry and exit leave memory
 unchanged and the callee's precondition, footprint and postcondition carry over verbatim. The loads
 are data: each is an argument index and the narrowing the extractor attaches to `bool`, `byte`,
 `sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones). The lemma has these premises:
@@ -1027,7 +1027,7 @@ are data: each is an argument index and the narrowing the extractor attaches to 
 - Every forwarder argument reaches the callee or is valid under the precondition, since the
   forwarder's own invocation checks them all.
 - The call exposes no unspecified vector bits.
-- A narrowed `ret (some kind)` does not change the callee's result (`ReturnsUnchanged`), which
+- A return with declared narrowing `some kind` does not change the callee's result (`ReturnsUnchanged`), which
   holds for a boolean.
 
 Aggregate results retain their complete byte list. Use `Holds.weaken` afterwards to export a

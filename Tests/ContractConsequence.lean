@@ -51,21 +51,31 @@ def method9Signature : String :=
   [.arg 1, .arg 0, .arg 2, .call 2 3, .ret] }
 /-- `SumDiscard`: passes its local's address as `AddFlag`'s `res` and returns the flag. -/
 @[cil_code] def method5 : Method :=
-  { returnsValue := true, locals := [.unmodeled], localKinds := [.word64], code :=
-    [.arg 0, .arg 1, .ldloca 0, .call 8 3, .ret (some .unsigned8)] }
+  {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [.unmodeled], localKinds := [.word64], code :=
+    [.arg 0, .arg 1, .ldloca 0, .call 8 3, .ret] }
 /-- `IsZero`: a comparison returned as a narrowed boolean. -/
-@[cil_code] def method6 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 0, .conv_i8, .ceq, .ret (some .unsigned8)] }
+@[cil_code] def method6 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.arg 0, .ldc_i4 0, .conv_i8, .ceq, .ret] }
 /-- `IsZeroForward`: re-narrows `IsZero`'s boolean through its own `ret`. -/
-@[cil_code] def method7 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 6 1, .ret (some .unsigned8)] }
+@[cil_code] def method7 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.arg 0, .call 6 1, .ret] }
 /-- `AddFlag`: `AddTo`'s store followed by a constant `true`. -/
-@[cil_code] def method8 : Method := { returnsValue := true, locals := [], code :=
+@[cil_code] def method8 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
   [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ldc_i4 1,
-    .ret (some .unsigned8)] }
+    .ret] }
 /-- `IsZeroIgnoring`: forwards its first argument and never loads its second. -/
-@[cil_code] def method9 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 6 1, .ret (some .unsigned8)] }
+@[cil_code] def method9 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.arg 0, .call 6 1, .ret] }
 /-- `AddFrom(out res, in b, in a) => AddTo(in a, in b, out res)`. -/
 def method10Signature : String :=
   "System.Void Consequence.Calls::AddFrom(System.UInt64&,System.UInt64&,System.UInt64&)"
@@ -88,14 +98,20 @@ def method14Signature : String :=
   { returnsValue := false, locals := [.i64 0], localKinds := [.word64], code :=
     [.arg 0, .arg 1, .ldloca 0, .call 10 3, .ret] }
 /-- `IsZeroSecond`: forwards its second argument and never loads its first. -/
-@[cil_code] def method12 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 1, .call 6 1, .ret (some .unsigned8)] }
+@[cil_code] def method12 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.arg 1, .call 6 1, .ret] }
 /-- `IsSet`: a boolean parameter, loaded narrowed, returned narrowed. -/
-@[cil_code] def method13 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0 (some .unsigned8), .ret (some .unsigned8)] }
+@[cil_code] def method13 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.arg 0 (some .unsigned8), .ret] }
 /-- `IsSetForward`: passes its boolean parameter through a narrowed load. -/
-@[cil_code] def method14 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0 (some .unsigned8), .call 13 1, .ret (some .unsigned8)] }
+@[cil_code] def method14 : Method := {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code :=
+  [.arg 0 (some .unsigned8), .call 13 1, .ret] }
 @[cil_code] def program : Program :=
   [method0, method1, method2, method3, method4, method5, method6, method7, method8, method9,
     method10, method11, method12, method13, method14]
@@ -321,7 +337,7 @@ theorem sum_correct : sumContract.Holds Extracted.program sum := sum_holds add_p
 /-- `Sum` passes its arguments through in order, so it meets `addPublic` itself. -/
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
   add_public.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 
@@ -336,7 +352,7 @@ def swappedArgs (input : AddInput) : List Value :=
     about `a` follows from `AddTo`'s footprint although `a` is now the second argument. -/
 theorem swapped_forwards : (addPublic.withArgs swappedArgs).Holds Extracted.program swapped :=
   add_public.forward (loads := plainLoads [1, 0, 2]) (narrow := none) (forwarded := swappedArgs)
-    swapped.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    swapped.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ _ member => .inl (by
       simp only [swappedArgs, addPublic, addArgs, List.mem_cons, List.not_mem_nil, or_false]
@@ -415,7 +431,7 @@ theorem discard_forwards : discardContract.Holds Extracted.program discard :=
     (fun input home => ⟨input.a, input.b, home, home, input.x, input.y⟩)
     discard.found addFlag.found
     ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
-      fun _ => nofun, nofun, .inl rfl, rfl, rfl, rfl⟩
+      fun _ => nofun, nofun, .inl rfl, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readA, readB⟩ => ⟨formed, fun value member => by
       simp only [discardContract, List.mem_cons, List.not_mem_nil, or_false] at member
@@ -458,7 +474,7 @@ def fromArgs (input : AddInput) : List Value :=
 /-- `AddFrom` meets `addPublic` over its own argument order. -/
 theorem add_from_forwards : (addPublic.withArgs fromArgs).Holds Extracted.program addFrom :=
   add_public.forward (loads := plainLoads [2, 1, 0]) (narrow := none) (forwarded := fromArgs)
-    addFrom.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    addFrom.found addTo.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ _ member => .inl (by
       simp only [fromArgs, addPublic, addArgs, List.mem_cons, List.not_mem_nil, or_false]
@@ -493,7 +509,7 @@ theorem copy_forwards : copyContract.Holds Extracted.program copyTo :=
     (fun input home => ⟨home, input.b, input.res, input.region, 0, input.y⟩)
     copyTo.found addFrom.found
     ⟨rfl, rfl, rfl, nofun, fun _ _ => nofun, fun _ => nofun, fun _ => nofun,
-      fun _ => nofun, nofun, .inr trivial, rfl, rfl, rfl⟩
+      fun _ => nofun, nofun, .inr trivial, rfl, rfl, rfl, rfl⟩
     (fun _ _ => rfl)
     (fun _ _ ⟨formed, readB, writable, _⟩ => ⟨formed, fun value member => by
       simp only [copyContract, List.mem_cons, List.not_mem_nil, or_false] at member
@@ -544,7 +560,7 @@ theorem is_zero_holds : isZeroContract.Holds Extracted.program isZero := by
 theorem is_zero_forwards :
     (isZeroContract.withArgs isZeroContract.args).Holds Extracted.program isZeroForward :=
   is_zero_holds.forward (loads := plainLoads [0]) (narrow := some .unsigned8)
-    isZeroForward.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    isZeroForward.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ zero _ => ⟨_, rfl, by cases zero <;> decide⟩)
@@ -559,7 +575,7 @@ def ignoringArgs (v : CIL.W64) : List Value := [.scalar (.i64 v), .scalar (.i64 
 theorem is_zero_ignoring_forwards :
     (isZeroContract.withArgs ignoringArgs).Holds Extracted.program isZeroIgnoring :=
   is_zero_holds.forward (loads := plainLoads [0]) (narrow := some .unsigned8)
-    isZeroIgnoring.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    isZeroIgnoring.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ value member => by
       simp only [ignoringArgs, List.mem_cons, List.not_mem_nil, or_false] at member
@@ -592,7 +608,7 @@ def pairArgs (pair : CIL.W64 × CIL.W64) : List Value :=
 theorem is_zero_second_forwards :
     (secondZero.withArgs pairArgs).Holds Extracted.program isZeroSecond :=
   second_zero_holds.forward (loads := plainLoads [1]) (narrow := some .unsigned8)
-    isZeroSecond.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    isZeroSecond.found isZero.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged _ _)
     (fun _ _ _ value member => by
       simp only [pairArgs, List.mem_cons, List.not_mem_nil, or_false] at member
@@ -624,7 +640,7 @@ theorem is_set_holds : isSetContract.Holds Extracted.program isSet := by
 theorem is_set_forwards :
     (isSetContract.withArgs isSetContract.args).Holds Extracted.program isSetForward :=
   is_set_holds.forward (loads := [(0, some .unsigned8)]) (narrow := some .unsigned8)
-    isSetForward.found isSet.found ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
+    isSetForward.found isSet.found ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
     (fun flag _ _ pair member => by
       simp only [isSetContract, List.zip_cons_cons, List.zip_nil_left,
         List.mem_singleton] at member

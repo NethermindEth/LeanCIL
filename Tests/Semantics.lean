@@ -14,7 +14,7 @@ theorem vector_lane_add :
       some (.v128 (CIL.Vector.pack128 4 6)) := rfl
 
 theorem disabled_intrinsic :
-    (CIL.step (.intrinsic (.avx2 .add64) 2) false 0 []
+    (CIL.step (.intrinsic (.avx2 .add64) 2) false none 0 []
       [.v256 1, .v256 2] (fun _ => none)).isSome = false := rfl
 
 /-- A memory whose every address holds an initialized word, so only the instruction can fail. -/
@@ -22,13 +22,13 @@ private def initializedMemory : CIL.Memory := fun _ => some (.i32 1)
 
 -- Locals have no meaning in `CIL.step`: only the checked step reads and writes their slots.
 theorem local_unstepped :
-    (CIL.step (.ldloc 0) false 0 [] [] initializedMemory).isSome = false := rfl
+    (CIL.step (.ldloc 0) false none 0 [] [] initializedMemory).isSome = false := rfl
 #print axioms local_unstepped
 theorem stloc_unstepped :
-    (CIL.step (.stloc 0) false 0 [] [.i32 1] initializedMemory).isSome = false := rfl
+    (CIL.step (.stloc 0) false none 0 [] [.i32 1] initializedMemory).isSome = false := rfl
 #print axioms stloc_unstepped
 theorem ldloca_unstepped :
-    (CIL.step (.ldloca 0) false 0 [] [] initializedMemory).isSome = false := rfl
+    (CIL.step (.ldloca 0) false none 0 [] [] initializedMemory).isSome = false := rfl
 #print axioms ldloca_unstepped
 
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl

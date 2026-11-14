@@ -15,7 +15,7 @@ private def budgeted : CIL.Safety.Memory := { Memory.empty with heapBudget := 32
 
 private def creator : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.ldc_i4 3, .newReferenceArray node, .ret none] }
+    code := [.ldc_i4 3, .newReferenceArray node, .ret] }
 
 /-- Three references take the next identity, three slots of budget, and every slot is null. -/
 theorem allocation_charges_budget :
@@ -62,18 +62,18 @@ private def runs (code : List CIL.Instruction) (arguments : List CIL.Safety.Valu
 
 /-- `ldlen` reads the length back from the allocation's size. -/
 theorem length_of_fresh :
-    (runs [.ldc_i4 3, .newReferenceArray node, .memory .referenceArrayLength, .ret none] []
+    (runs [.ldc_i4 3, .newReferenceArray node, .memory .referenceArrayLength, .ret] []
       budgeted).map Prod.snd = .ok [.scalar (.i64 3)] := rfl
 #print axioms length_of_fresh
 
 /-- `ldlen`, `ldelem.ref` and `stelem.ref` of a null array throw `NullReferenceException`. -/
 theorem null_array_throws :
-    runs [.memory .nullObject, .memory .referenceArrayLength, .ret none] [] budgeted =
+    runs [.memory .nullObject, .memory .referenceArrayLength, .ret] [] budgeted =
       .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ ∧
-    runs [.memory .nullObject, .ldc_i4 0, .memory .referenceArrayLoad, .ret none] [] budgeted =
+    runs [.memory .nullObject, .ldc_i4 0, .memory .referenceArrayLoad, .ret] [] budgeted =
       .error ⟨0, 2, .thrown "System.NullReferenceException"⟩ ∧
     runs [.memory .nullObject, .ldc_i4 0, .memory .nullObject, .memory .referenceArrayStore,
-      .ldc_i4 0, .ret none] [] budgeted =
+      .ldc_i4 0, .ret] [] budgeted =
       .error ⟨0, 3, .thrown "System.NullReferenceException"⟩ := ⟨rfl, rfl, rfl⟩
 #print axioms null_array_throws
 
@@ -81,25 +81,25 @@ theorem null_array_throws :
     before a stored value's class is checked. -/
 theorem index_out_of_range :
     runs [.ldc_i4 2, .newReferenceArray node, .ldc_i4 2, .memory .referenceArrayLoad,
-      .ret none] [] budgeted = .error ⟨0, 3, .thrown "System.IndexOutOfRangeException"⟩ ∧
+      .ret] [] budgeted = .error ⟨0, 3, .thrown "System.IndexOutOfRangeException"⟩ ∧
     runs [.ldc_i4 2, .newReferenceArray circle, .ldc_i4 (-1), .arg 0 none,
-      .memory .referenceArrayStore, .ldc_i4 0, .ret none] [squareObject] holdingSquare =
+      .memory .referenceArrayStore, .ldc_i4 0, .ret] [squareObject] holdingSquare =
       .error ⟨0, 4, .thrown "System.IndexOutOfRangeException"⟩ := ⟨rfl, rfl⟩
 #print axioms index_out_of_range
 
 /-- A fresh element is null, and null is storable into any array of class references. -/
 theorem null_elements :
     (runs [.ldc_i4 1, .newReferenceArray node, .ldc_i4 0, .memory .referenceArrayLoad,
-      .ret none] [] budgeted).map Prod.snd = .ok [.object .null] ∧
+      .ret] [] budgeted).map Prod.snd = .ok [.object .null] ∧
     (runs [.ldc_i4 1, .newReferenceArray circle, .dup, .ldc_i4 0, .memory .nullObject,
-      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret none] []
+      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret] []
       budgeted).map Prod.snd = .ok [.object .null] := ⟨rfl, rfl⟩
 #print axioms null_elements
 
 /-- A `Square` is storable into an array of `Shape` and loads back as itself. -/
 theorem covariant_store :
     (runs [.ldc_i4 1, .newReferenceArray shape, .dup, .ldc_i4 0, .arg 0 none,
-      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret none]
+      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret]
       [squareObject] holdingSquare).map Prod.snd = .ok [squareObject] := rfl
 #print axioms covariant_store
 
@@ -107,7 +107,7 @@ theorem covariant_store :
     element keeps what it held. -/
 theorem mismatched_store :
     runs [.ldc_i4 1, .newReferenceArray circle, .ldc_i4 0, .arg 0 none,
-      .memory .referenceArrayStore, .ldc_i4 0, .ret none] [squareObject] holdingSquare =
+      .memory .referenceArrayStore, .ldc_i4 0, .ret] [squareObject] holdingSquare =
       .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ := rfl
 #print axioms mismatched_store
 
@@ -115,7 +115,7 @@ theorem mismatched_store :
     exception the CLR might not throw. -/
 theorem array_store_unsupported :
     runs [.ldc_i4 1, .newReferenceArray shape, .dup, .ldc_i4 0, .ldc_i4 1,
-      .newReferenceArray shape, .memory .referenceArrayStore, .ldc_i4 0, .ret none] []
+      .newReferenceArray shape, .memory .referenceArrayStore, .ldc_i4 0, .ret] []
       budgeted = .error ⟨0, 6, .unsupported "Array store outside the admitted classes"⟩ := rfl
 #print axioms array_store_unsupported
 
@@ -130,7 +130,7 @@ private def holdingText : CIL.Safety.Memory :=
     the string's own class. -/
 theorem opaque_store :
     (runs [.ldc_i4 1, .newReferenceArray text, .dup, .ldc_i4 0, .arg 0 none,
-      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret none]
+      .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret]
       [.object (.address ⟨0, 0⟩)] holdingText).map Prod.snd =
       .ok [.object (.address ⟨0, 0⟩)] := rfl
 #print axioms opaque_store
@@ -139,10 +139,10 @@ theorem opaque_store :
     stored into an array of `Shape` does too: neither class derives from the other. -/
 theorem opaque_mismatch :
     runs [.ldc_i4 1, .newReferenceArray text, .ldc_i4 0, .arg 0 none,
-      .memory .referenceArrayStore, .ldc_i4 0, .ret none] [.object (.address ⟨1, 0⟩)]
+      .memory .referenceArrayStore, .ldc_i4 0, .ret] [.object (.address ⟨1, 0⟩)]
       holdingText = .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ ∧
     runs [.ldc_i4 1, .newReferenceArray shape, .ldc_i4 0, .arg 0 none,
-      .memory .referenceArrayStore, .ldc_i4 0, .ret none] [.object (.address ⟨0, 0⟩)]
+      .memory .referenceArrayStore, .ldc_i4 0, .ret] [.object (.address ⟨0, 0⟩)]
       holdingText = .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ := ⟨rfl, rfl⟩
 #print axioms opaque_mismatch
 

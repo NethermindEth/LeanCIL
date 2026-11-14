@@ -15,7 +15,7 @@ open CIL CIL.Safety
     (declared : DeclaredSignature) (positive : Bool) : Method := {
   profile, environment, declared, locals := [], returnsValue := true,
   code := [.arg 0, .arg 1, .ceq] ++
-    (if positive then [] else [.ldc_i4 0, .ceq]) ++ [.ret (some .unsigned8)] }
+    (if positive then [] else [.ldc_i4 0, .ceq]) ++ [.ret] }
 
 /-- The fixed body of one binary bitwise method. -/
 @[cil_code] def bitwiseBody (profile : FeatureProfile) (environment : LayoutEnvironment)
@@ -27,10 +27,13 @@ open CIL CIL.Safety
 theorem equal32 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
+    (returned : declared.returnType = .atom Extraction.runtimeScope "System.Boolean")
     (found : program[0]? = some (equalityBody profile environment declared true))
     (left right : W32) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (if left = right then 1 else 0))]) := by
+  rcases declared with ⟨receiver, parameters, returnType⟩
+  cases returned
   cil_checked_steps [found]
 #print axioms equal32
 
@@ -38,10 +41,13 @@ theorem equal32 (program : Program) (profile : FeatureProfile)
 theorem different64 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
+    (returned : declared.returnType = .atom Extraction.runtimeScope "System.Boolean")
     (found : program[0]? = some (equalityBody profile environment declared false))
     (left right : W64) (memory : Safety.Memory) :
     invoke program 7 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i32 (if left ≠ right then 1 else 0))]) := by
+  rcases declared with ⟨receiver, parameters, returnType⟩
+  cases returned
   cil_checked_steps [found]
   all_goals (by_cases same : left = right <;> simp [same])
 #print axioms different64
@@ -50,10 +56,13 @@ theorem different64 (program : Program) (profile : FeatureProfile)
 theorem and32 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
+    (returned : declared.returnType = .atom Extraction.runtimeScope "System.Int32")
     (found : program[0]? = some (bitwiseBody profile environment declared .and))
     (left right : W32) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (left &&& right))]) := by
+  rcases declared with ⟨receiver, parameters, returnType⟩
+  cases returned
   cil_checked_steps [found]
 #print axioms and32
 
@@ -61,11 +70,22 @@ theorem and32 (program : Program) (profile : FeatureProfile)
 theorem xor64 (program : Program) (profile : FeatureProfile)
     (environment : LayoutEnvironment)
     (declared : DeclaredSignature)
+    (returned : declared.returnType = .atom Extraction.runtimeScope "System.UInt64")
     (found : program[0]? = some (bitwiseBody profile environment declared .xor))
     (left right : W64) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 (left ^^^ right))]) := by
+  rcases declared with ⟨receiver, parameters, returnType⟩
+  cases returned
   cil_checked_steps [found]
 #print axioms xor64
+
+/-- A byte-declared bitwise body truncates the result that the full-width helper preserves. -/
+theorem byte_bitwise_truncates (memory : Safety.Memory) :
+    invoke [bitwiseBody .scalar {}
+      { returnType := .atom Extraction.runtimeScope "System.Byte" } .and]
+      5 0 [.scalar (.i32 300), .scalar (.i32 511)] memory =
+        .ok (memory, [.scalar (.i32 44)]) := rfl
+#print axioms byte_bitwise_truncates
 
 end BindingSupport

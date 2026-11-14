@@ -143,9 +143,9 @@ theorem step_throw {body : CIL.Method} {exception : String} {pc : Nat} {args : L
   cases h
 
 /-- A successful `.ret` step always returns. -/
-theorem step_ret_returns {body : CIL.Method} {narrow : Option NarrowKind} {pc : Nat}
+theorem step_ret_returns {body : CIL.Method} {pc : Nat}
     {args : List Value} {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.ret narrow) pc args frame stack m = .ok action) :
+    (h : step body .ret pc args frame stack m = .ok action) :
     ∃ values m', action = .returned values m' := by
   unfold step at h
   simp only [observerCount, Bool.or_false] at h
@@ -173,7 +173,7 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc :
     change Except.ok (.next target stack frame m) = .ok action at h
     cases h
     exact resumes.elim
-  case ret narrow =>
+  case ret =>
     obtain ⟨_, _, rfl⟩ := step_ret_returns h
     exact resumes.elim
   case tailCall callee argc =>

@@ -21,9 +21,11 @@ theorem run_negation_return (program : CIL.Program) (method pc : Nat) (body : CI
       .ok (leaveFrame frame memory, [.scalar (.i32 (if flag = 0 then 1 else 0))]) := by
   rw [run_next lookup constant (by rfl), run_next lookup equality (by rfl)]
   apply run_return lookup returned
-  · change (if 1 = (if body.returnsValue then 1 else 0) then _ else _) = _
-    rw [returns]
-    rfl
+  · cases narrow : body.returnNarrow <;>
+      simp [step_ret_eq, narrow, returnFrom, returns, unspecifiedOperands,
+        Value.hasUnspecified, CIL.Value.hasUnspecified,
+        CIL.NarrowKind.extend_ite_ofNat_one_zero,
+        checkedValue, numericValue, Pure.pure, Except.pure, Bind.bind, Except.bind]
   · rfl
 #print axioms run_negation_return
 end CIL.Safety

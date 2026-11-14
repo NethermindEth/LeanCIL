@@ -16,14 +16,29 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Nethermind.LeanCIL;
 
-if (args is not ([] or ["--external-identities"] or ["--measure"]))
-    throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities|--measure]");
+if (args is not ([] or ["--external-identities"] or ["--measure"] or ["--return-only"]))
+    throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities|--measure|--return-only]");
 var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
 var rejected = new RejectedEvidence(output);
 var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
 var controls = new Dictionary<int, List<string>>();
 var controlSources = new HashSet<string>(StringComparer.Ordinal);
+if (args is ["--return-only"])
+{
+    RequireLeanFixtures("CIL.Extraction.Translation");
+    var directory = Path.Combine(output, "9");
+    Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples",
+        "GenericMethods::EnumIdentity(Examples.Signed8)", directory));
+    ReturnMutations();
+    var baseline = File.ReadAllText(Path.Combine(directory, "Extracted.lean"));
+    var positive = Path.Combine(output, "ReturnControl.lean");
+    File.WriteAllText(positive, baseline + "\n" + string.Join("\n", controls[9]));
+    evidence.Add(positive, "PASS declared return shape control");
+    evidence.Check();
+    rejected.Check();
+    return;
+}
 CheckExternalIdentities();
 if (args is ["--external-identities"])
 {
@@ -250,9 +265,20 @@ Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1",
         .Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"), "method1_shape_validated");
 Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32 1]"), "method1_shape_validated");
 Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"), "method1_shape_validated");
-Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"), "method1_shape_validated");
-Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"),
-    "method1_shape_validated");
+ReturnMutations();
+
+void ReturnMutations()
+{
+    foreach (var (name, replacement) in new[]
+        { ("missing-return-narrowing", "System.Int32"), ("wrong-return-signedness", "System.Byte") })
+        Reject(9, name, source => ChangeDefinition(source, "method1", line =>
+        {
+            var returned = line.IndexOf("returnType :=", StringComparison.Ordinal);
+            var atom = returned < 0 ? -1 : line.IndexOf("System.SByte", returned, StringComparison.Ordinal);
+            if (atom < 0) throw new InvalidOperationException("Missing declared SByte return");
+            return line[..atom] + replacement + line[(atom + "System.SByte".Length)..];
+        }), "method1_shape_validated", "proved that the proposition");
+}
 
 // The declared signature, call links and layout environment are each checked against their own evidence.
 const string word = "Extraction.runtimeScope \"System.UInt64\"";

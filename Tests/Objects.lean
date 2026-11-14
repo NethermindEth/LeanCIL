@@ -131,9 +131,9 @@ theorem allocation_over_budget :
     which then also waits on the caller's stack. -/
 private def creator : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.newObject 1 0 account.identity [] 8, .ret none] }
+    code := [.newObject 1 0 account.identity [] 8, .ret] }
 private def constructor : CIL.Method :=
-  { returnsValue := false, locals := [], code := [.ret none] }
+  { returnsValue := false, locals := [], code := [.ret] }
 
 /-- The constructed instance is returned to the caller and outlives the constructor's frame. -/
 theorem construction_returns_instance :
@@ -434,10 +434,14 @@ theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
 
 /-- A receiver check selects a Boolean-returning instance call or an explicit exception. -/
 @[cil_code] private def checkedReceiverProgram : CIL.Program := [
-  { returnsValue := true, locals := [], code := [
+  {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code := [
     .arg 0, .brtrue 3, .throw "MissingReceiver", .arg 0, .ldc_i4 1,
-    .callInstance 1 2, .ret (some .unsigned8)] },
-  { returnsValue := true, locals := [], code := [.arg 1, .ret (some .unsigned8)] }]
+    .callInstance 1 2, .ret] },
+  {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code := [.arg 1, .ret] }]
 
 /-- A symbolic live receiver decides the branch and passes the call's closed argument guard. -/
 theorem checked_receiver_call (memory : CIL.Safety.Memory) (receiver : Reference)

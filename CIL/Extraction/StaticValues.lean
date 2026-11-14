@@ -49,7 +49,7 @@ def constructorYields (program : Program) (descriptor : StaticDescriptor)
     let wrapper : Method := {
       profile := body.profile
       code := (List.range init.arguments.length).map (fun index => .arg index) ++
-        [.newAggregate init.method init.arguments.length ⟨descriptor.bytes.length, size⟩, .ret none]
+        [.newAggregate init.method init.arguments.length ⟨descriptor.bytes.length, size⟩, .ret]
       locals := []
       returnsValue := true }
     match Safety.invoke (program ++ [wrapper]) initializerFuel program.length

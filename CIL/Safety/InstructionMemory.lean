@@ -93,7 +93,7 @@ def observerCount : CIL.Instruction → Nat
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
   | .store64 | .copyObject _ => 2
   -- Method boundaries
-  | .ret _ => 1
+  | .ret => 1
   | .call _ argc | .callInstance _ argc | .callVirtual _ argc | .tailCall _ argc
   | .newAggregate _ argc _ | .newObject _ argc .. => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1

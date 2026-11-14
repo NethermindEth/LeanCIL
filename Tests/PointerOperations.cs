@@ -15,6 +15,9 @@
 using System.Reflection;
 using Mono.Cecil;
 
+var returnOnly = args is ["--return-only"];
+if (args.Length != 0 && !returnOnly)
+    throw new ArgumentException("Usage: PointerOperations.cs [--return-only]");
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/PointerOperations");
 Directory.CreateDirectory(root);
@@ -26,6 +29,7 @@ var storageBytes = new byte[16];
 foreach (var name in new[]
     { "Subtract", "SubtractNative", "Difference", "Less", "Greater", "LessEqual", "GreaterEqual" })
 {
+    if (returnOnly) break;
     var subtraction = name.StartsWith("Subtract", StringComparison.Ordinal);
     var native = name == "SubtractNative";
     var signature = subtraction ? "System.Byte*," + (native ? "System.IntPtr" : "System.Int32") :
@@ -80,6 +84,7 @@ foreach (var (name, parameters) in new[]
     ("WriteEnum", "Examples.Unsigned64*,System.UInt64")
 })
 {
+    if (returnOnly && name != "ReadEnum") continue;
     var output = Path.Combine(root, name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"PointerOperations::{name}({parameters})", output]);
     var write = name == "WriteEnum";
@@ -145,14 +150,22 @@ foreach (var (name, parameters) in new[]
         var returnEvidence = NarrowEvidence(source, "method0_shape_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, returnEvidence,
             ["method0_shape_validated"], 1));
-        foreach (var replacement in new[] { ".ret (some .signed8)", ".ret (some .unsigned16)" })
+        foreach (var replacement in new[] { "System.Int32", "System.UInt16" })
         {
-            const string target = ".ret (some .signed16)";
-            if (!returnEvidence.Contains(target, StringComparison.Ordinal))
-                throw new InvalidOperationException("Missing enum return narrowing");
-            var widthChanged = replacement.Contains("signed8", StringComparison.Ordinal);
+            const string target = "System.Int16";
+            var lines = returnEvidence.Split('\n');
+            var definition = Array.FindIndex(lines, line =>
+                line.StartsWith("def method0 ", StringComparison.Ordinal));
+            if (definition < 0 || !lines[definition].Contains(target, StringComparison.Ordinal))
+                throw new InvalidOperationException("Missing enum return declaration");
+            var returned = lines[definition].IndexOf("returnType :=", StringComparison.Ordinal);
+            var atom = returned < 0 ? -1 : lines[definition].IndexOf(target, returned, StringComparison.Ordinal);
+            if (atom < 0) throw new InvalidOperationException("Missing declared enum return storage");
+            lines[definition] = lines[definition][..atom] + replacement +
+                lines[definition][(atom + target.Length)..];
+            var widthChanged = replacement == "System.Int32";
             var forged = Path.Combine(output, "ForgedReturn" + widthChanged + ".lean");
-            File.WriteAllText(forged, returnEvidence.Replace(target, replacement, StringComparison.Ordinal));
+            File.WriteAllText(forged, string.Join('\n', lines));
             rejected.Add(forged, "PASS independent enum return width/signedness rejection", "MethodShapeValid");
         }
     }
@@ -161,6 +174,7 @@ foreach (var (name, parameters) in new[]
 
 foreach (var mutation in new[] { "float", "nested", "reference-field", "enum-storage", "enum-identity", "enum-scope" })
 {
+    if (returnOnly) break;
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
     var dll = Path.Combine(output, "Examples.dll");

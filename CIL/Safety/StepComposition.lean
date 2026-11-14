@@ -55,11 +55,11 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 #print axioms step_argument_narrow_eq
 
 /-- Expose return validation without expanding the instruction dispatcher. -/
-@[cil_step] theorem step_ret_eq (narrow : Option CIL.NarrowKind) (stack : List Value) :
-    step body (.ret narrow) pc args frame stack memory =
+@[cil_step] theorem step_ret_eq (stack : List Value) :
+    step body .ret pc args frame stack memory =
       if unspecifiedOperands 1 stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else returnFrom narrow body.returnsValue stack memory := by
+      else returnFrom body.returnNarrow body.returnsValue stack memory := by
   simp only [step, observerCount, Bool.or_false]
 
 #print axioms step_ret_eq

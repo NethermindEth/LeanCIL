@@ -81,7 +81,7 @@ example : declaredNarrow [] (.atom examplesScope "System.Byte") = none := by rfl
 
 /-- A method that returns a byte. -/
 def byteReturn : Method :=
-  { code := [.ldc_i4 7, .ret (some .unsigned8)], locals := [], returnsValue := true,
+  { code := [.ldc_i4 7, .ret], locals := [], returnsValue := true,
     declared := { returnType := .atom runtimeScope "System.Byte" } }
 
 /-- A method whose return value narrows to a byte. -/
@@ -98,7 +98,7 @@ example : byteReturn.returnsValue = true :=
 
 /-- A method returning an enum over `System.Int16`. -/
 def enumReturn : Method :=
-  { code := [.ldc_i4 7, .ret (some .signed16)], locals := [], returnsValue := true,
+  { code := [.ldc_i4 7, .ret], locals := [], returnsValue := true,
     declared := { returnType := .enum "Examples.Small" (.atom runtimeScope "System.Int16") } }
 
 /-- A method whose return value narrows as its enum's underlying type. -/
@@ -280,7 +280,7 @@ theorem differing_narrowing_rejected : ¬ CIL.Safety.StepMetadata primitive enum
 /-- Signature and environment evidence suffice without an instruction-shaped hypothesis. -/
 theorem shape_narrowing {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {closed : RawMethod} {method : Method}
-    (shape : MethodShapeValid rawLayouts closed method)
+    (shape : MethodShapeValid closed method)
     (environment : MethodEnvironmentValid rawLayouts layouts method) :
     method.returnNarrow = declaredNarrow rawLayouts closed.returnType :=
   returnNarrow_of_shape shape environment

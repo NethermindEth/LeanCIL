@@ -238,7 +238,9 @@ def forwardedResults (values : List Value) : List Value := values
 
 /-- Narrowed return equations accept a stack hidden behind a named result projection. -/
 theorem projected_return (memory : Memory) (frame : Frame) :
-    step { code := [], locals := [], returnsValue := true } (.ret (some .unsigned8))
+    step
+      { code := [], locals := [], returnsValue := true,
+        declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Byte" } } .ret
       1 [] frame (forwardedResults [.scalar (.i32 1)] ++ []) memory =
       .ok (.returned [.scalar (.i32 1)] memory) := by
   cil_checked_step []

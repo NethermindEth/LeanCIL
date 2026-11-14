@@ -368,7 +368,7 @@ internal static class InstructionTranslation
             Code.Blt or Code.Blt_S => JumpTo(JumpKind.Less),
             Code.Beq or Code.Beq_S => JumpTo(JumpKind.Equal),
             Code.Bne_Un or Code.Bne_Un_S => JumpTo(JumpKind.NotEqual),
-            Code.Ret => new Return(NarrowOf(m.ReturnType)),
+            Code.Ret => new Return(),
             _ => throw new InvalidDataException($"Unsupported instruction: {i}")
         };
     }
