@@ -96,7 +96,8 @@ var original = (ModuleDefinition)pinnedType.GetMethod("Original", Internal)!.Inv
 var run = original.GetType("Fixture.Entry").Methods.Single();
 var cells = original.GetType("Fixture.Cells").Fields.Select(field => field.MetadataToken.ToUInt32()).ToArray();
 var baseField = original.GetType("Fixture.Base").Fields.Single().MetadataToken.ToUInt32();
-var derivedFields = original.GetType("Fixture.Derived").Fields.Select(field => field.MetadataToken.ToUInt32()).ToArray();
+var derivedFields = original.GetType("Fixture.Derived").Fields
+    .Select(field => field.MetadataToken.ToUInt32()).ToArray();
 var choice = original.GetType("Fixture.Choice");
 var sliceType = extractor.GetType("Nethermind.LeanCIL.MetadataSlices", throwOnError: true)!;
 var collector = Activator.CreateInstance(sliceType, pinned)!;
@@ -144,7 +145,8 @@ Require(FieldRows(enumEvidence.Metadata).SequenceEqual(choice.Fields.Select(fiel
     "Enum evidence omits field rows.");
 Require(enumEvidence.Metadata.Contains("[2, 6, 8]", StringComparison.Ordinal) &&
     enumEvidence.Metadata.Contains(Bytes([3, 6, 17, (byte)(choice.MetadataToken.RID << 2)]),
-        StringComparison.Ordinal) && !HasName(enumEvidence.Metadata, "value__") && !HasName(enumEvidence.Metadata, "Item"),
+        StringComparison.Ordinal) && !HasName(enumEvidence.Metadata, "value__") &&
+    !HasName(enumEvidence.Metadata, "Item"),
     "Enum field coverage must carry signatures without unrequested names.");
 Console.WriteLine("PASS partial prefixes, repeated fields, inheritance, enums and order-independent evidence");
 var evidence = string.Join("\n", new[] { partial, repeated, forward, reverse, inherited,
