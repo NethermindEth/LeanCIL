@@ -5,6 +5,7 @@
 #:include Verification.cs
 #:include BatchVerification.cs
 #:include CoreExamples.cs
+#:include CertificateCases.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationSuites.cs
 
@@ -115,7 +116,7 @@ if (suite is "all" or "evidence")
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
-        "Tests/TranslationAudit.cs"]);
+        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs", "Tests/Identities.cs"]);
 if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
@@ -229,6 +230,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
     "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
+    "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
     "Tests.ResolutionFacts"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
@@ -365,25 +367,38 @@ var reportPath = Path.Combine(addOutput, "verified.json");
 var savedReport = File.ReadAllText(reportPath);
 try
 {
-    var legacy = JsonSerializer.Deserialize<Report>(savedReport)! with { schema = 2 };
-    File.WriteAllText(reportPath, JsonSerializer.Serialize(legacy, Json));
-    failed = false;
-    try
+    foreach (var (name, text) in CertificateCases.Refused(savedReport))
     {
-        verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
+        File.WriteAllText(reportPath, text);
+        failed = false;
+        try
+        {
+            verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput,
+                check: true);
+        }
+        // Only the certificate rule words its refusal this way; a later input check would not.
+        catch (InvalidOperationException error) when (error.Message.StartsWith("Stale verification report: ",
+            StringComparison.Ordinal))
+        {
+            failed = true;
+        }
+        if (!failed)
+            throw new InvalidOperationException("Certificate with " + name + " accepted");
     }
-    catch (InvalidOperationException error) when (error.Message.Contains("Stale verification report"))
-    {
-        failed = true;
-    }
-    if (!failed)
-        throw new InvalidOperationException("Legacy report without extraction certificate audit accepted");
 }
 finally
 {
     File.WriteAllText(reportPath, savedReport);
 }
-Passed("legacy report without extraction certificate audit rejected");
+verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
+// A default certificate serves only a default run, and a well-formed deep one only a deep run.
+if (CertificateProblem(savedReport, BindingMode.Default) is { } defaultProblem)
+    throw new InvalidOperationException("Default certificate refused: " + defaultProblem);
+if (CertificateProblem(savedReport, BindingMode.Deep) is null)
+    throw new InvalidOperationException("Default certificate accepted where a deep one is required");
+if (CertificateProblem(CertificateCases.Deep(savedReport), BindingMode.Deep) is { } deepProblem)
+    throw new InvalidOperationException("Deep certificate refused where a deep one is required: " + deepProblem);
+Passed("certificates of another schema, mode or binding fact list rejected");
 
 Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-v3"), "Stale or mismatched");
 Passed("different feature profile rejected");

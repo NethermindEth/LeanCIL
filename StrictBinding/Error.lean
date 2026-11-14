@@ -48,6 +48,8 @@ inductive TableError where
   | outsideHeap (key : Nat)
   /-- A string heap entry is not well-formed UTF-8. -/
   | invalidUtf8
+  /-- An unflagged public key token has a nonzero width other than eight bytes. -/
+  | invalidPublicKeyToken (length : Nat)
   deriving DecidableEq, Repr
 
 /-- Why a binding fact does not hold. -/

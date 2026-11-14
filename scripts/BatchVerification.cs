@@ -178,9 +178,9 @@ partial class Program
                 var extraction = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(request.Output, "identity.json")));
                 var initializedTypes = extraction.TryGetProperty("initializedTypes", out var assumptions)
                     ? assumptions.Deserialize<string[]>() : [];
-                reports[i] = new Report(4, Sha(request.Assembly!), hashes[i], request.Theorem, axioms, AuditText(audited.theorems[2 * i]), before[i],
-                    libraryKey, libraryBuild, AuditText(audited.theorems[2 * i + 1]), initializedTypes,
-                    Sha(sources[shardOf[i]]), theorem,
+                reports[i] = new Report(CertificateSchema, Sha(request.Assembly!), hashes[i], request.Theorem, axioms,
+                    AuditText(audited.theorems[2 * i]), before[i], BindingSection.Default, libraryKey, libraryBuild,
+                    AuditText(audited.theorems[2 * i + 1]), initializedTypes, Sha(sources[shardOf[i]]), theorem,
                     staticValues: StaticValueAssumptions(extraction),
                     opaqueStaticValues: OpaqueStaticValues(extraction),
                     imports: PublishedImports(extraction),

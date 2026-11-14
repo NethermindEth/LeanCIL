@@ -763,6 +763,24 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static string CertifiedModuleDirectory(string certified) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(certified, ".lake/build/lib/lean")));
 
+    /// <summary>Accepts only the toolchain, certified base and physical descendants of the session.</summary>
+    static string[] ValidatedConsumerImportDirectories(
+        string session, string trusted, string? certified, string leanPath)
+    {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var physicalSession = PhysicalImportDirectory(session);
+        var physicalTrusted = PhysicalImportDirectory(trusted);
+        var physicalCertified = certified is null ? null : PhysicalImportDirectory(certified);
+        return leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => PhysicalImportDirectory(
+                Path.IsPathFullyQualified(path) ? path : Path.Combine(session, path)))
+            .Where(path => !path.Equals(physicalTrusted, comparison))
+            .Select(path => path.Equals(physicalCertified, comparison) ? certified! :
+                Within(session, Path.GetRelativePath(physicalSession, Within(physicalSession, path))))
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .ToArray();
+    }
+
     (string[] Directories, string LeanPath) ConsumerImportDirectories(string session)
     {
         // Ask the same Lake environment used by the checker. Package buildDir and
@@ -771,15 +789,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .Where(line => line.StartsWith("LEAN_PATH=", StringComparison.Ordinal)).ToArray();
         if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean import paths.");
         var leanPath = lines[0]["LEAN_PATH=".Length..];
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var trusted = Path.GetFullPath(Path.Combine(Toolchain, "lib/lean"));
         var certified = library is null ? null : CertifiedModuleDirectory(library);
-        return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path, session)))
-            .Where(path => !path.Equals(trusted, comparison))
-            // Keep the certified base in place; map other imports into the session.
-            .Select(path => path.Equals(certified, comparison) ? path : Within(session, Path.GetRelativePath(session, path)))
-            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray(), leanPath);
+        return (ValidatedConsumerImportDirectories(session, trusted, certified, leanPath), leanPath);
     }
 
     // Variables read by Lean, Lake and elan, plus any a consumer's elaborators read
@@ -1166,6 +1178,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static string[] ConsumerSupportCandidates(IEnumerable<string> proofs, string[] sourceDirectories,
         IEnumerable<string> generatedModules, string toolchainModules)
     {
+        // Directory aliases name the same source; distinct roots can still contain ambiguous modules.
+        sourceDirectories = sourceDirectories.Select(PhysicalImportDirectory).Distinct().ToArray();
         var excluded = generatedModules.Concat(["Extracted", "ExtractedSymbols", "ExtractionAudit"])
             .ToHashSet(StringComparer.Ordinal);
         var imports = new Dictionary<string, string[]>(StringComparer.Ordinal);
@@ -1618,8 +1632,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 try
                 {
                     if (!RestoreSuccess(proofKeys[i], receipt)) continue;
-                    var report = JsonSerializer.Deserialize<Report>(File.ReadAllText(Path.Combine(receipt, "report.json")))!;
-                    if (report.schema != 4) continue;
+                    // A receipt whose certificate this run does not accept is a miss, never a failure.
+                    if (ReadCertificate(File.ReadAllText(Path.Combine(receipt, "report.json")), BindingMode.Default,
+                        out _) is not { } report) continue;
                     var cachedMessages = Path.Combine(receipt, ProofMessagesFile);
                     outcomes[i].Messages = File.Exists(cachedMessages)
                         ? JsonSerializer.Deserialize<ProofMessage[]>(File.ReadAllText(cachedMessages)) : null;
@@ -1641,7 +1656,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 JsonElement current = extractions[i].Root;
                 var report = JsonSerializer.Deserialize<Report>(outcomes[i].Detail!)! with
                 {
-                    schema = 4, identitySha256 = identities[i],
+                    identitySha256 = identities[i],
                     assemblySha256 = Sha(requests[i].Assembly), inputs = before[i], imports = PublishedImports(current),
                     contractImports = ContractImportAssumptions(current), contractDependencies = DeploymentDependencies(current)
                 };
@@ -2350,8 +2365,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     ? assumptions.Deserialize<string[]>() : [];
                 RequireImplementationImports(extractions[i]);
                 fullResults.TryGetValue(i, out FullImportResult? fullResult);
-                var report = new Report(4, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
-                    audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
+                var report = new Report(CertificateSchema, Sha(requests[i].Assembly), identities[i],
+                    requests[i].Theorem, audits[i].Axioms, audits[i].Audit, before[i], BindingSection.Default,
+                    libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
                     staticValues: StaticValueAssumptions(extraction),

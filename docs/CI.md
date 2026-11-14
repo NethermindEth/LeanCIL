@@ -239,7 +239,8 @@ A source is measured on each tree by the run that verifies it:
   reported as unmeasured. Each extracted method's instruction equations are one row, named for
   its `cil_instruction_equations` command. A directory is measured only while it holds the report
   of an accepted proof, so a suite that also checks rejected proofs against an extraction verifies
-  the accepted one last.
+  the accepted one last. A report that is not a certificate a default `verify` accepts, by its
+  schema and binding section, leaves its directory unmeasured.
 
 ### Row measurement
 

@@ -14,7 +14,7 @@ internal static class ReferenceQueries
     {
         if (reference.Name != "IsReferenceOrContainsReferences" ||
             reference.DeclaringType.FullName != "System.Runtime.CompilerServices.RuntimeHelpers") return null;
-        if (!RuntimeModels.ExactScope(reference.DeclaringType.Scope, "System.Runtime") ||
+        if (!RuntimeModels.ExactScope(reference.DeclaringType, PlatformAssemblies.SystemRuntime) ||
             reference is not GenericInstanceMethod { GenericArguments.Count: 1 } generic ||
             generic.ElementMethod.GenericParameters.Count != 1 || reference.HasThis || reference.ExplicitThis ||
             (generic.ElementMethod.CallingConvention & ~MethodCallingConvention.Generic) !=

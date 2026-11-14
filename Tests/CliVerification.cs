@@ -57,8 +57,32 @@ void Verified(params string[] options)
         throw new InvalidOperationException(
             "CLI verification did not print the readable statement, subject and messages: " + result.Output);
 
+    // A default run checks no binding fact: its stages name no deep-check module, and its certificate lists
+    // every fact as trusted, once each, in this order.
+    if (result.Output.Contains("BindingAudit", StringComparison.Ordinal) ||
+        result.Output.Contains("StrictBinding", StringComparison.Ordinal))
+        throw new InvalidOperationException("A default verification ran a deep check: " + result.Output);
     var report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-    if (report.GetProperty("schema").GetInt32() != 4 ||
+    string[] bindingFacts =
+    [
+        "body-bytes", "metadata-rows", "platform-type-kinds", "enum-underlying-types", "value-tuple-field-order",
+        "object-fields", "layout-content", "dispatch-catalogs", "static-data", "generic-constraints",
+        "public-key-tokens", "import-identities"
+    ];
+    var binding = report.GetProperty("binding");
+    var facts = binding.GetProperty("facts").EnumerateArray().ToArray();
+    if (binding.GetProperty("mode").GetString() != "default" ||
+        binding.GetProperty("digests").ValueKind != JsonValueKind.Null ||
+        binding.GetProperty("sources").ValueKind != JsonValueKind.Null ||
+        binding.GetProperty("images").GetArrayLength() != 0 ||
+        !facts.Select(fact => fact.GetProperty("id").GetString()).SequenceEqual(bindingFacts) ||
+        facts.Any(fact => fact.GetProperty("status").GetString() != "trusted" ||
+            fact.GetProperty("theorem").ValueKind != JsonValueKind.Null ||
+            fact.GetProperty("reason").ValueKind != JsonValueKind.Null))
+        throw new InvalidOperationException("The certificate does not list the 12 binding facts as trusted: " +
+            binding.GetRawText());
+
+    if (report.GetProperty("schema").GetInt32() != 5 ||
         !report.GetProperty("extractionAudit").GetString()!.Contains("Extracted.translation_valid"))
         throw new InvalidOperationException("Missing mandatory extraction certificate audit in report.");
 
@@ -100,6 +124,20 @@ var settings = File.ReadAllText(settingsPath);
 if (Path.IsPathRooted(JsonSerializer.Deserialize<JsonElement>(settings).GetProperty("proof").GetString()!))
     throw new InvalidOperationException("Expected a relative proof path in verification settings.");
 Console.WriteLine("PASS CLI proof selection, persistent settings and theorem statement");
+
+// Without settings or --proof, verify looks for Proof.lean beside the extraction and never reads the proof
+// from an earlier certificate.
+File.Delete(settingsPath);
+try
+{
+    var unselected = Exited(Execute([.. cli, "verify", output]), 1);
+    if (!unselected.Output.Contains("Proof file not found") ||
+        !unselected.Output.Contains("Proof.lean", StringComparison.Ordinal) ||
+        File.Exists(Path.Combine(output, "verified.json")))
+        throw new InvalidOperationException("verify took its proof from an earlier certificate: " + unselected.Output);
+}
+finally { File.WriteAllText(settingsPath, settings); }
+Console.WriteLine("PASS CLI verify reads no proof selection from an earlier certificate");
 
 // The prepared library serves a verification whose cache holds nothing: no notice on stderr, and no
 // library built into the cache.
@@ -146,6 +184,25 @@ foreach (var transitive in new[] { false, true })
         throw new InvalidOperationException("Unchecked theorem bypassed kernel replay: " + invalid.Output);
 }
 Console.WriteLine("PASS CLI kernel replay rejects unchecked theorems and transitive helpers");
+
+// A false body check names the method and the part that differs: the same tactic the extraction's certificate
+// uses, stated for a body whose method claims a maximum stack depth its bytes do not give.
+var falseBody = Path.Combine(auditOutput, "FalseBody.lean");
+File.WriteAllText(falseBody, """
+    import Extracted
+    theorem ExampleProof.falseBody : CIL.Extraction.bodyMatches Extracted.method0Body
+        { Extracted.method0Original with maxStack := 99 } [] = true := by
+      cil_body_decodes
+    """.ReplaceLineEndings("\n") + "\n");
+var falseCertificate = Execute([.. cli, "verify", auditOutput, "--proof", falseBody, "--theorem",
+    "ExampleProof.falseBody"]);
+var falseText = falseCertificate.Stderr.ReplaceLineEndings("\n");
+if (falseCertificate.Code != 1 || falseCertificate.Stdout.Length != 0 || !falseText.Contains("Lean errors (") ||
+    !falseText.Contains("Method System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64): " +
+        "the decoded method does not match its body bytes or metadata: the maximum stack depth differ"))
+    throw new InvalidOperationException("verify did not name the method and the false body check: " +
+        falseCertificate.Output);
+Console.WriteLine("PASS CLI verify names the method and the part of a false body check");
 
 // The unchanged addition contract must fail after changing + to - and rebuilding.
 var methodsPath = Path.Combine(fixture, "Methods.cs");
@@ -519,7 +576,11 @@ if (batch.Code != 0 || WithoutStageProgress(batch.Stderr).Length != 0 || batchRe
     batchRequests[1]!["status"]!.GetValue<string>() != "rejected" ||
     batchRequests[1]!["report"]!["result"]!.GetValue<string>() != "failed" ||
     batchRequests[1]!["report"]!["failures"]?[0]?["source"]?["file"]?.GetValue<string>() !=
-        Path.GetFullPath(unfinishedProof))
+        Path.GetFullPath(unfinishedProof) ||
+    // The verified request's report carries its certificate's binding section; the rejected one issued none.
+    batchRequests[0]!["report"]!["binding"]?["facts"] is not JsonArray { Count: 12 } batchFacts ||
+    batchFacts.Any(fact => fact!["status"]!.GetValue<string>() != "trusted") ||
+    batchRequests[1]!["report"]!["binding"] is not null)
     throw new InvalidOperationException("verify-batch --format json --trace did not print one report per request: " +
         batch.Output);
 var batchText = Execute([.. cli, "verify-batch", batchManifest, "--trace"]);
@@ -658,7 +719,7 @@ static void RequireReport((int Code, string Output, string Stdout, string Stderr
     params (string Path, string Name)[] paths)
 {
     var report = JsonNode.Parse(run.Stdout) as JsonObject;
-    if (run.Code != code || WithoutStageProgress(run.Stderr).Length != 0 || report?["schema"]?.GetValue<int>() != 1)
+    if (run.Code != code || WithoutStageProgress(run.Stderr).Length != 0 || report?["schema"]?.GetValue<int>() != 2)
         throw new InvalidOperationException($"verify --format json did not exit {code} with one report: " + run.Output);
     var actual = Normalized(report, paths)!.ToJsonString(new JsonSerializerOptions
     {
