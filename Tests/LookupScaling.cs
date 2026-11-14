@@ -1,9 +1,12 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include GeneratedEvidence.cs
 
 using System.Globalization;
 using System.Text.RegularExpressions;
+
+Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 
 // `cil_instruction_equations` proves each equation from the code suffix that starts its block. Proved
 // against the whole code list instead, it walks one cell per preceding instruction and a method's equations
@@ -11,7 +14,7 @@ using System.Text.RegularExpressions;
 const int ShortStatements = 125;
 const int LongStatements = 500;
 // Compiling four times the instructions may cost at most this much more per instruction.
-const double AllowedGrowth = 1.25;
+const double AllowedGrowth = 1.15;
 const int FewCalls = 100;
 const int ManyCalls = 400;
 // Link reads whose cost grows with the square of the calls make the recheck of an embedding cost 1.29 times as
@@ -49,6 +52,9 @@ const int ManyLocalAccesses = 4096;
 const int FewLocals = 128;
 const int MoreLocals = 256;
 const int ManyLocals = 512;
+// Four times the locals may cost at most this much more per instruction; the closed argument storage reads a set
+// of pointer locals whose lookups cost the logarithm of the locals.
+const double AllowedLocalGrowth = 1.25;
 
 var directory = At("artifacts/LookupScaling");
 Directory.CreateDirectory(directory);
@@ -135,22 +141,14 @@ File.WriteAllText(Path.Combine(source, "Lookups.cs"), "public static class Looku
 Run(["dotnet", "build", Path.Combine(source, "Lookups.csproj"), "-c", "Release"]);
 var assembly = Path.Combine(source, "bin/Lookups.dll");
 
-const string Report = "\n#eval show IO Nat from IO.getNumHeartbeats\n";
-
-// Heartbeats count the elaborator's and the kernel's work on one thread, so they repeat exactly
-// where compile time varies with the machine's load.
+// The heartbeats `text` costs, imports included.
 long Heartbeats(string path, string text, bool equations = true)
 {
-    File.WriteAllText(path, text + Report);
-    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    if (output.Contains("sorryAx", StringComparison.Ordinal))
-        throw new InvalidOperationException("Untrusted lookup equations: " + path);
-    var count = Regex.Match(output, @"(?m)^([0-9]+)\r?$");
-    if (!count.Success) throw new InvalidOperationException("Missing heartbeat count:\n" + output);
+    var (count, output) = CountHeartbeats(path, text);
     // Each file reports the last equation's axioms once; a report per equation would walk the body each time.
     if (equations && Regex.Matches(output, @"_instruction[0-9]+' depends on axioms: \[propext\]").Count != 1)
         throw new InvalidOperationException("Instruction equations must depend on propext alone:\n" + output);
-    return long.Parse(count.Groups[1].Value, CultureInfo.InvariantCulture);
+    return count;
 }
 
 // The last pc is the farthest from the head of the code list. Its equation must keep the statement
@@ -419,6 +417,266 @@ Console.WriteLine(FormattableString.Invariant(
 if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
     throw new Exception("Computed lookup cost per case grows with the segment count.");
 
+// Each distinct metadata token of a body adds a row lookup and a decode to the kernel's metadata check, so the cost
+// per token may not grow with the number of tokens, whichever table the token names: user strings, instance fields
+// of a class, and methods (whose count also grows the number of methods of the extraction and so the metadata
+// carried).
+const int FewTokens = 125;
+const int ManyTokens = 500;
+// Each called method is an extracted method with a certificate of its own, and composing the certificate of an
+// extraction of about 500 methods exceeds the default heartbeat budget, so the call counts stay below that.
+const int FewCalledMethods = 25;
+const int ManyCalledMethods = 100;
+var tokenSource = Path.Combine(directory, "TokenAssembly");
+Directory.CreateDirectory(tokenSource);
+File.WriteAllText(Path.Combine(tokenSource, "Tokens.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+</Project>
+""");
+string Join(int count, Func<int, string> piece) => string.Concat(Enumerable.Range(0, count).Select(piece));
+string StringMethod(int count, string name) =>
+    $"public static ulong {name}(ulong x) {{ " + Join(count, index => $"Use(\"{name}{index}\"); ") + "return x; } ";
+string FieldMethod(int count, string name) =>
+    $"public static ulong {name}(Wide{count} w) {{ return 0UL" + Join(count, index => $" + w.F{index}") + "; } " +
+    $"public sealed class Wide{count} {{ " + Join(count, index => $"public ulong F{index}; ") + "} ";
+string CallMethod(int count, string name) =>
+    $"public static ulong {name}(ulong x) {{ " + Join(count, index => $"x = {name}{index}(x); ") + "return x; } " +
+    Join(count, index => $"static ulong {name}{index}(ulong x) => x + {index + 1}UL; ");
+File.WriteAllText(Path.Combine(tokenSource, "Tokens.cs"),
+    "public static class Tokens { public static void Use(string text) { } " +
+    StringMethod(FewTokens, "StringsFew") + StringMethod(ManyTokens, "StringsMany") +
+    FieldMethod(FewTokens, "FieldsFew") + FieldMethod(ManyTokens, "FieldsMany") +
+    CallMethod(FewCalledMethods, "CallsFew") + CallMethod(ManyCalledMethods, "CallsMany") + "}");
+Run(["dotnet", "build", Path.Combine(tokenSource, "Tokens.csproj"), "-c", "Release"]);
+var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
+double TokenCost(string name, string selector, int count, string distinctPattern)
+{
+    var output = Path.Combine(directory, "Tokens" + name);
+    Run(Extract("extract", tokenAssembly, "Tokens", selector, output));
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var distinct = Regex.Matches(extracted, distinctPattern).Count;
+    if (distinct < count)
+        throw new InvalidOperationException($"Expected {count} distinct tokens in {name}; found {distinct}.");
+    return (double)(Heartbeats(Path.Combine(output, "Measured.lean"), extracted, equations: false) - floor) / count;
+}
+foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
+{
+    ("Strings", "Tokens::StringsFew(ulong)", "Tokens::StringsMany(ulong)",
+        @"\(\d+, \.text ""[^""]*""\)", FewTokens, ManyTokens),
+    ("Fields", $"Tokens::FieldsFew(Tokens/Wide{FewTokens})", $"Tokens::FieldsMany(Tokens/Wide{ManyTokens})",
+        @"\(\d+, \.field ", FewTokens, ManyTokens),
+    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", @"\(\d+, \.call ", FewCalledMethods,
+        ManyCalledMethods)
+})
+{
+    var tokenGrowth = TokenCost(kind + "Many", many, manyCount, pattern) /
+        TokenCost(kind + "Few", few, fewCount, pattern);
+    Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+        $"PASS metadata check of {fewCount} and {manyCount} distinct {kind.ToLowerInvariant()} tokens: " +
+        $"{tokenGrowth:F2} times the cost per token"));
+    if (tokenGrowth > AllowedGrowth)
+        throw new Exception(string.Create(CultureInfo.InvariantCulture,
+            $"Checking {manyCount} {kind.ToLowerInvariant()} tokens costs {tokenGrowth:F2} times as much per token " +
+            $"as {fewCount}; the limit is {AllowedGrowth}."));
+}
+
+// One method's body check reads the literal lookup tables of its own metadata slice by name, so its kernel cost is its
+// own slice and tokens times a logarithm: independent of the number of methods in the extraction and of the rows
+// that other methods carry.
+const double AllowedBodyGrowth = 1.1;
+int[] chainLengths = [8, 32, 128];
+int[] bulkSizes = [125, 500];
+int[] fieldCounts = [10, 100, 200];
+var bodySource = Path.Combine(directory, "BodyAssembly");
+Directory.CreateDirectory(bodySource);
+File.WriteAllText(Path.Combine(bodySource, "Bodies.csproj"),
+    File.ReadAllText(Path.Combine(tokenSource, "Tokens.csproj")));
+string Chain(int count) =>
+    $"public static ulong Chain{count}(ulong x) {{ " +
+    Join(count, index => $"x = Chain{count}_{index}(x); ") + "return x; } " +
+    Join(count, index => $"static ulong Chain{count}_{index}(ulong x) => x + {index + 1}UL; ");
+string Rows(int count) =>
+    $"public static ulong Rows{count}(ulong x) {{ x = Small{count}(x); return Bulk{count}(x); }} " +
+    $"static ulong Small{count}(ulong x) => x + 1UL; " +
+    $"static ulong Bulk{count}(ulong x) {{ " + Join(count, index => $"Use(\"r{count}_{index}\"); ") + "return x; } ";
+// A method that reads one field of a class with `count` fields carries that class's field rows.
+string Fields(int count) =>
+    $"public sealed class Wide{count} {{ " + Join(count, index => $"public ulong F{index}; ") + "} " +
+    $"public static ulong Read{count}(Wide{count} w) => w.F{count / 2}; ";
+File.WriteAllText(Path.Combine(bodySource, "Bodies.cs"),
+    "public static class Bodies { public static void Use(string text) { } " +
+    string.Concat(chainLengths.Select(Chain)) + string.Concat(bulkSizes.Select(Rows)) +
+    string.Concat(fieldCounts.Select(Fields)) + "}");
+Run(["dotnet", "build", Path.Combine(bodySource, "Bodies.csproj"), "-c", "Release"]);
+var bodyAssembly = Path.Combine(bodySource, "bin/Bodies.dll");
+// The index of a method in an extraction, found by the name in its signature.
+string MethodNumber(string extracted, string method, string name)
+{
+    var number = Regex.Match(extracted, @"def method(\d+)Signature : String := ""[^""]*Bodies::" +
+        Regex.Escape(method) + @"\(").Groups[1].Value;
+    return number.Length == 0
+        ? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.")
+        : number;
+}
+// Heartbeats of the method's `method{n}_body_validated`, less the same file with its proof left open.
+long BodyCheck(string name, string entry, string method)
+{
+    var output = Path.Combine(directory, "Body" + name);
+    Run(Extract("extract", bodyAssembly, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var number = MethodNumber(extracted, method, name);
+    var theorem = $"method{number}_body_validated";
+    var narrowed = NarrowEvidence(extracted, theorem);
+    var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := ⟨[^\r\n]*⟩\r?$").Value;
+    if (proof.Length == 0) throw new InvalidOperationException("Missing body obligation " + theorem);
+    var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := ⟨", StringComparison.Ordinal)] + " := sorry");
+    return Heartbeats(Path.Combine(output, "BodyChecked.lean"), narrowed, equations: false) -
+        Heartbeats(Path.Combine(output, "BodyOpen.lean"), open, equations: false);
+}
+var chainCosts = chainLengths.Select(count => (double)BodyCheck("Chain" + count, "Chain" + count,
+    $"Chain{count}_{count - 1}")).ToArray();
+var rowCosts = bulkSizes.Select(count => (double)BodyCheck("Rows" + count, "Rows" + count, $"Small{count}")).ToArray();
+for (var step = 1; step < chainCosts.Length; step++)
+{
+    var growth = chainCosts[step] / chainCosts[step - 1];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS body check of one method in {chainLengths[step - 1]} and {chainLengths[step]} methods: ") +
+        FormattableString.Invariant($"{chainCosts[step - 1]:F0} and {chainCosts[step]:F0} heartbeats, ") +
+        FormattableString.Invariant($"{growth:F2} times"));
+    if (growth > AllowedBodyGrowth)
+        throw new Exception(FormattableString.Invariant(
+            $"One body check costs {growth:F2} times as much at {chainLengths[step]} methods ") +
+            FormattableString.Invariant($"as at {chainLengths[step - 1]}; the limit is {AllowedBodyGrowth}."));
+}
+var rowGrowth = rowCosts[1] / rowCosts[0];
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of one method against {bulkSizes[0]} and {bulkSizes[1]} metadata rows: {rowGrowth:F2} times"));
+if (rowGrowth > AllowedBodyGrowth)
+    throw new Exception(FormattableString.Invariant(
+        $"One body check costs {rowGrowth:F2} times as much against {bulkSizes[1]} rows ") +
+        FormattableString.Invariant($"as against {bulkSizes[0]}; the limit is {AllowedBodyGrowth}."));
+// The kernel's decision that a method's literal tables are the decoder's costs the rows that method carries, times a
+// logarithm, and is made once per method.
+long TablesCheck(string name, string method)
+{
+    var output = Path.Combine(directory, "Body" + name);
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var theorem = $"method{MethodNumber(extracted, method, name)}_tables_valid";
+    var narrowed = NarrowEvidence(extracted, theorem);
+    var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := by decide \+kernel\r?$").Value;
+    if (proof.Length == 0) throw new InvalidOperationException("Missing tables obligation in " + name);
+    var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := by", StringComparison.Ordinal)] + " := sorry");
+    return Heartbeats(Path.Combine(output, "TablesChecked.lean"), narrowed, equations: false) -
+        Heartbeats(Path.Combine(output, "TablesOpen.lean"), open, equations: false);
+}
+var tablesFew = TablesCheck("Rows" + bulkSizes[0], "Bulk" + bulkSizes[0]);
+var tablesMany = TablesCheck("Rows" + bulkSizes[1], "Bulk" + bulkSizes[1]);
+var tablesGrowth = tablesMany / (double)tablesFew;
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS tables check of a method carrying {bulkSizes[0]} and {bulkSizes[1]} user string rows: ") +
+    FormattableString.Invariant($"{tablesFew} and {tablesMany} heartbeats, ") +
+    FormattableString.Invariant($"{tablesGrowth / (bulkSizes[1] / (double)bulkSizes[0]):F2} times the cost per row"));
+if (tablesGrowth > AllowedBodyGrowth * bulkSizes[1] / bulkSizes[0])
+    throw new Exception(FormattableString.Invariant(
+        $"The tables check costs {tablesGrowth:F2} times as much for {bulkSizes[1]} rows ") +
+        FormattableString.Invariant($"as for {bulkSizes[0]}."));
+
+// A method reading one field of a class with 10, 100 and 200 fields carries those field rows. Its body check does one
+// lookup of the field's index, so it stays flat. Its tables check is a fixed part plus a part linear in the rows
+// carried: the increment from 100 to 200 fields is 100/90 of the increment from 10 to 100, and a quadratic walk of the
+// rows makes it more than three times as large.
+const double AllowedFieldIncrementRatio = 1.5;
+var fieldBody = fieldCounts.Select(count => (double)BodyCheck("Fields" + count,
+    $"Bodies::Read{count}(Bodies/Wide{count})", $"Read{count}")).ToArray();
+var fieldTables = fieldCounts.Select(count => (double)TablesCheck("Fields" + count, $"Read{count}")).ToArray();
+var fieldBodyGrowth = fieldBody[^1] / fieldBody[0];
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
+    FormattableString.Invariant($"{fieldBody[0]:F0}, {fieldBody[1]:F0} and {fieldBody[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"{fieldBodyGrowth:F2} times"));
+if (fieldBodyGrowth > AllowedBodyGrowth)
+    throw new Exception(FormattableString.Invariant(
+        $"The body check costs {fieldBodyGrowth:F2} times as much with {fieldCounts[2]} fields ") +
+        FormattableString.Invariant($"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth}."));
+var fieldIncrementRatio = (fieldTables[2] - fieldTables[1]) / (fieldTables[1] - fieldTables[0]);
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS tables check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
+    FormattableString.Invariant($"{fieldTables[0]:F0}, {fieldTables[1]:F0} and {fieldTables[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"increments in the ratio {fieldIncrementRatio:F2}"));
+if (fieldIncrementRatio > AllowedFieldIncrementRatio)
+    throw new Exception(FormattableString.Invariant(
+        $"The tables check grows by {fieldIncrementRatio:F2} times as much from {fieldCounts[1]} to ") +
+        FormattableString.Invariant(
+            $"{fieldCounts[2]} fields as from {fieldCounts[0]} to {fieldCounts[1]}; ") +
+        FormattableString.Invariant($"the limit is {AllowedFieldIncrementRatio}."));
+
+// `spelled?` reads a name's bytes in one pass, and `cil_kernel_rfl` equates the result with the name's literal:
+// the cost grows with the length of the name and no faster. Each file is measured against the same file with
+// the proof left open, so the statement's own elaboration is not counted.
+const double AllowedSpellingGrowth = 1.1;
+var spellingLengths = new[] { 20, 80, 320 };
+long SpellingCheck(int length)
+{
+    var name = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
+    var bytes = string.Join(", ", name.Select(character => (int)character));
+    var statement = $"theorem spells : CIL.Extraction.spelled? [{bytes}] = some \"{name}\"";
+    var header = "import CIL.Extraction.KernelEquation\n";
+    return Heartbeats(Path.Combine(directory, $"Spelling{length}Checked.lean"),
+            $"{header}{statement} := by cil_kernel_rfl\n", equations: false) -
+        Heartbeats(Path.Combine(directory, $"Spelling{length}Open.lean"),
+            $"{header}{statement} := sorry\n", equations: false);
+}
+var spellingCosts = spellingLengths.Select(length => (double)SpellingCheck(length)).ToArray();
+for (var step = 1; step < spellingLengths.Length; step++)
+{
+    var lengthRatio = spellingLengths[step] / (double)spellingLengths[step - 1];
+    var growth = spellingCosts[step] / spellingCosts[step - 1];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS spelling a name of {spellingLengths[step - 1]} and {spellingLengths[step]} bytes: ") +
+        FormattableString.Invariant($"{spellingCosts[step - 1]:F0} and {spellingCosts[step]:F0} heartbeats, ") +
+        FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
+    if (growth > AllowedSpellingGrowth * lengthRatio)
+        throw new Exception(FormattableString.Invariant(
+            $"Spelling {spellingLengths[step]} bytes costs {growth:F2} times as much as ") +
+            FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
+            FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+}
+
+// A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
+// its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from
+// depth 8 to 16 is twice the increment from 4 to 8; a quadratic walk makes it four times.
+const double AllowedChainIncrementRatio = 2.5;
+int[] baseDepths = [4, 8, 16];
+var deepSource = Path.Combine(directory, "DeepAssembly");
+Directory.CreateDirectory(deepSource);
+File.WriteAllText(Path.Combine(deepSource, "Deep.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize>
+    <AssemblyName>Bodies</AssemblyName></PropertyGroup>
+</Project>
+""");
+string Deep(int depth) =>
+    $"public class Deep{depth}_0 {{ public ulong F; }} " +
+    Join(depth, index => $"public class Deep{depth}_{index + 1} : Deep{depth}_{index} {{ }} ") +
+    $"public static ulong ReadDeep{depth}(Deep{depth}_{depth} o) => o.F; ";
+File.WriteAllText(Path.Combine(deepSource, "Deep.cs"),
+    "public static class Bodies { " + string.Concat(baseDepths.Select(Deep)) + "}");
+Run(["dotnet", "build", Path.Combine(deepSource, "Deep.csproj"), "-c", "Release"]);
+bodyAssembly = Path.Combine(deepSource, "bin/Bodies.dll");
+var depthCosts = baseDepths.Select(depth => (double)BodyCheck("Deep" + depth,
+    $"Bodies::ReadDeep{depth}(Bodies/Deep{depth}_{depth})", $"ReadDeep{depth}")).ToArray();
+var incrementRatio = (depthCosts[2] - depthCosts[1]) / (depthCosts[1] - depthCosts[0]);
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of a field read through {baseDepths[0]}, {baseDepths[1]} and {baseDepths[2]} base classes: ") +
+    FormattableString.Invariant($"{depthCosts[0]:F0}, {depthCosts[1]:F0} and {depthCosts[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"increments in the ratio {incrementRatio:F2} (linear 2, quadratic 4)"));
+if (incrementRatio > AllowedChainIncrementRatio)
+    throw new Exception(FormattableString.Invariant(
+        $"The body check grows by {incrementRatio:F2} times as much from depth {baseDepths[1]} to {baseDepths[2]} ") +
+        FormattableString.Invariant(
+            $"as from {baseDepths[0]} to {baseDepths[1]}; the limit is {AllowedChainIncrementRatio}."));
+
 // The kernel heartbeats of the scalar certificate of a body whose segments each address an array element, with
 // or without a `readonly.` prefix, and branch to the next segment, less those of stating the same certificate.
 long ArrayAddressCost(bool prefixed, int sites)
@@ -606,9 +864,9 @@ foreach (var (slots, storage, label) in localChecks)
         .ToArray();
     var localsMeasured = string.Join("; ", perInstruction.Select(run => string.Create(CultureInfo.InvariantCulture,
         $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
-    if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedGrowth))
+    if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedLocalGrowth))
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Checking {label} costs {localsMeasured}; the limit is {AllowedGrowth} " +
+            $"Checking {label} costs {localsMeasured}; the limit is {AllowedLocalGrowth} " +
             $"times the cost per instruction at {FewLocals} locals."));
     Console.WriteLine($"PASS checking {label} costs {localsMeasured}");
 }

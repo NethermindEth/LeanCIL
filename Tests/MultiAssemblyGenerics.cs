@@ -150,7 +150,7 @@ partial class Program
             string artifact = fixture.Artifact(name);
             Run([.. cli, "extract", app, selector, artifact, .. Reference(lib), .. extra]);
             string extracted = File.ReadAllText(Path.Combine(artifact, "Extracted.lean"));
-            if (extracted.Contains("assembly := assembly1", StringComparison.Ordinal) != referencedBody)
+            if (extracted.Contains("assembly := assembly1, signature", StringComparison.Ordinal) != referencedBody)
                 throw new InvalidOperationException("Certificate misattributes the referenced bodies: " + name);
             return extracted;
         }

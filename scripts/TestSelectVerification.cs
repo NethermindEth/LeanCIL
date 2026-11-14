@@ -137,6 +137,8 @@ Test("test entry points", () =>
             "Binding and public-surface fixtures must select core without unrelated suites: " + path);
     }
     Equal(VerificationSelection.Select(["Tests/Loops.cs"]), ["loops"]);
+    foreach (var path in new[] { "Tests/ProofCostFrontend.cs", "Tests/ProofCostDiscovery.lean" })
+        Equal(VerificationSelection.Select([path]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/SteppingScaling.cs"]), ["stepping"]);
     foreach (var module in new[] { "OperationFacts", "VectorLocalCalls", "SimdCarryCalls" })
         Equal(VerificationSelection.Select([$"Tests/{module}.lean"]), ["core"]);
@@ -152,9 +154,10 @@ Test("test entry points", () =>
     foreach (var name in new[] { "BatchVerification", "VerificationCache", "VerificationReuse" })
         Equal(VerificationSelection.Select([$"Tests/{name}.cs"]), ["core"]);
     Equal(VerificationSelection.Select(["Tests/StaticScalarValues.cs"]), ["evidence"]);
+    Equal(VerificationSelection.Select(["Tests/MetadataDifferential.cs"]), ["evidence"]);
     Equal(VerificationSelection.Select(["Tests/GeneratedEvidence.cs"]),
-        ["assemblies", "blocks", "dispatch", "enums", "evidence", "excluded", "generics", "intrinsics", "scaling",
-            "unsafe"]);
+        ["assemblies", "blocks", "dispatch", "enums", "evidence", "excluded", "generics", "intrinsics", "lookups",
+            "scaling", "unsafe"]);
     Equal(VerificationSelection.Select(["Tests/GenericOwners.cs"]), ["generics"]);
     Equal(VerificationSelection.Select(["Tests/MultiAssemblyGenerics.cs"]), ["assemblies"]);
     Equal(VerificationSelection.Select(["Tests/MultiAssemblyFixture.cs"]), ["assemblies"]);

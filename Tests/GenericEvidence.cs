@@ -165,8 +165,22 @@ Console.WriteLine("PASS original-metadata generic substitution, complete managed
 // Each mutation changes one fact of the first sample's body evidence, so only the decoding check can reject it;
 // the unmutated obligation is checked as the positive control.
 const string bodyTheorem = "method0_body_validated";
-void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change) =>
-    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, decisionFailed);
+// The tactic that proves a body obligation names the method and the failure when the kernel refutes it; a mutation
+// that only breaks parsing prints other text, and the unmutated obligation is the positive control.
+const string bodyDecisionFailed = "the decoded method does not match its body bytes or metadata";
+// A mutated body obligation must fail to elaborate and its negation must be proved by the kernel: the second file
+// keeps the mutated definitions and replaces the obligation by `bodyMatches ... = false`.
+void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change)
+{
+    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, bodyDecisionFailed);
+    var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")),
+        definition, change);
+    var refutation = theorem[..^"_body_validated".Length] + "_body_refuted";
+    var refuted = KernelRefutation(mutated, theorem, refutation);
+    var path = Path.Combine(output, "Refuted-" + name + ".lean");
+    File.WriteAllText(path, NarrowEvidence(refuted, refutation));
+    evidence.Add(path, "PASS the kernel proves the mutated body obligation false: " + name, refutation);
+}
 // The metadata rows of a body shift with the assembly, so each byte is found by its position in the emitted list.
 string ChangeByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
     match => match.Groups[1].Value + (int.Parse(match.Groups[2].Value) + change) + match.Groups[3].Value);
@@ -183,6 +197,30 @@ RejectBody(0, "altered-instruction-offset", bodyTheorem, "method0Original",
     line => line.Replace("offset := 1, opcode := 40", "offset := 2, opcode := 40"));
 RejectBody(0, "altered-max-stack", bodyTheorem, "method0Original",
     line => line.Replace("maxStack := 8", "maxStack := 9"));
+// The module's lookup tables are decided once against its metadata; a changed row, heap entry or table is
+// refuted there.
+void RejectTables(string name, string definition, Func<string, string> change)
+{
+    const string theorem = "method0_tables_valid";
+    Reject(0, name, source => ChangeDefinition(source, definition, change), theorem);
+    var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, "0", "Extracted.lean")), definition, change);
+    var refuted = KernelRefutation(mutated, theorem, "method0_tables_refuted");
+    var path = Path.Combine(output, "RefutedTables-" + name + ".lean");
+    File.WriteAllText(path, NarrowEvidence(refuted, "method0_tables_refuted"));
+    evidence.Add(path, "PASS the kernel proves the mutated tables obligation false: " + name,
+        "method0_tables_refuted");
+}
+RejectTables("altered-metadata-row", "method0Metadata",
+    line => ChangeByte(line, @"(rows := \[\(\d+, \[)(\d+)(,)", 1));
+RejectTables("altered-metadata-string", "method0Metadata",
+    line => ChangeByte(line, @"(strings := \[\(0, \[0\]\), \(\d+, \[)(\d+)(,)", 1));
+RejectTables("altered-lookup-row", "method0Tables", line => ChangeByte(line, @"(rows := .*?\[)(\d+)(,)", 1));
+// A leaf entry of the rows tree removed, and one added before another.
+RejectTables("missing-lookup-row", "method0Tables",
+    line => new Regex(@"\(\.node \.leaf \d+ \[[^\]]*\] \.leaf\)").Replace(line, ".leaf", 1));
+RejectTables("extra-lookup-row", "method0Tables",
+    line => new Regex(@"\(\.node \.leaf (\d+) (\[[^\]]*\]) \.leaf\)").Replace(line,
+        "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
 RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",
     line => line.Replace("operand := .target 4", "operand := .target 3"));
 Console.WriteLine("PASS body bytes, token table and original definition reject changed bytes and operands");
@@ -190,6 +228,18 @@ Reject(0, "omitted-method-evidence", source => ChangeDefinition(source, "methodE
     _ => "def methodEvidence : List Extraction.MethodEvidence := []"), null);
 Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "methodEvidence",
     line => line.Replace("method0", "swapped").Replace("method1", "method0").Replace("swapped", "method1")), null);
+// Identity64(ulong) and its callee Identity<UInt64>(ulong) have the same shape; with their signature strings swapped,
+// each body check refutes the string a proof would select the method by.
+string SwapSignatures(string source)
+{
+    string Value(string name) => Regex.Match(source, "(?m)^def " + name + " : String := (.*)$").Groups[1].Value;
+    var (first, second) = (Value("method0Signature"), Value("method1Signature"));
+    return ChangeDefinition(ChangeDefinition(source, "method0Signature", line => line.Replace(first, second)),
+        "method1Signature", line => line.Replace(second, first));
+}
+const string equationRefused = "cil_kernel_rfl: the kernel does not accept the two sides as equal";
+Reject(0, "swapped-signature-of-a-method", SwapSignatures, bodyTheorem, equationRefused);
+Reject(0, "swapped-signature-of-an-instance", SwapSignatures, "method1_body_validated", equationRefused);
 Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1",
     line => line.Replace("returnsValue := true", "returnsValue := false"))
         .Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"), "method1_shape_validated");

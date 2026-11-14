@@ -54,7 +54,8 @@ partial class Program
         namespace ExampleProof
         /-- Every method and connection in this extraction satisfies the translation validator. -/
         theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-            Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
+            Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+          Extracted.translation_valid
         #print axioms correctness
         end ExampleProof
         """);
