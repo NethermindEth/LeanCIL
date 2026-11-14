@@ -4254,7 +4254,8 @@ partial class Program : IDisposable
                     extraction, matchedPins!);
                 var next = OleanHashes(fresh, session);
                 RequireOnlyAdded(bound, next,
-                    [.. deep.Modules.Where(module => module != "Extracted").Select(module => module.Replace('.', '/'))]);
+                    [.. deep.Modules.Where(module => module != "Extracted")
+                        .Select(module => module.Replace('.', '/'))]);
                 bound = next;
             }
             // Interfaces, symbols and the proof each run code when built: each build may add only its own oleans.
@@ -4392,7 +4393,8 @@ partial class Program : IDisposable
             if (deep is not null)
             {
                 if (deep.Requests.Any(request => request.Audit.name == theorem))
-                    throw new InvalidOperationException("Proof theorem collides with a deep-check request: " + theorem);
+                    throw new InvalidOperationException(
+                        "Proof theorem collides with a deep-check request: " + theorem);
                 replay = [.. replay.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
                 auditModules = [.. auditModules.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
                 proofAudits = [proofAudits[0], .. deep.Requests.Select(request => request.Audit)];
