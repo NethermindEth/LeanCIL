@@ -521,10 +521,16 @@ private def equationCandidates (goal : Expr) : TacticM (Array FVarId) := do
   let some wanted := equationHead? goal | return #[]
   let wantedUnfolds ← headUnfolds wanted
   let mut found := #[]
+  -- Hypotheses in a row often share a head, so the last head's verdict is kept.
+  let mut seen := wanted
+  let mut seenMeets := true
   for declaration in context do
     if declaration.isImplementationDetail then continue
     let some head ← instantiatedEquationHead? declaration.type | continue
-    if ← headsMayMeet wanted wantedUnfolds head then found := found.push declaration.fvarId
+    unless head == seen do
+      seen := head
+      seenMeets ← headsMayMeet wanted wantedUnfolds head
+    if seenMeets then found := found.push declaration.fvarId
   return found
 
 open Lean Elab Tactic Meta in

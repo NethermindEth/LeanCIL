@@ -112,6 +112,7 @@ def equationHead? (type : Expr) : Option Expr :=
 /-- `equationHead?` of `type` with its metavariables instantiated, instantiating only those on
     the way to the head, so a lookup that reads every hypothesis does not rebuild their types. -/
 partial def instantiatedEquationHead? (type : Expr) : MetaM (Option Expr) := do
+  if !type.hasMVar then return equationHead? type
   match type with
   | .forallE _ _ body _ | .mdata _ body => instantiatedEquationHead? body
   | _ =>
