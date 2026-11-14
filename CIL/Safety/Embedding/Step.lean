@@ -335,8 +335,7 @@ theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
   plain_cases
   cases narrow <;> dsimp only at h ⊢ <;> lookup_lockstep
 
-theorem step_relabel_local (index : Nat) (narrow : Option NarrowKind) :
-    StepRelabel (.local index narrow) := by
+theorem step_relabel_local (index : Nat) : StepRelabel (.local index) := by
   plain_cases
   lookup_lockstep
 
@@ -344,8 +343,7 @@ theorem step_relabel_localAddr (index : Nat) : StepRelabel (.localAddr index) :=
   plain_cases
   lookup_lockstep
 
-theorem step_relabel_setLocal (index : Nat) (narrow : Option NarrowKind) :
-    StepRelabel (.setLocal index narrow) := by
+theorem step_relabel_setLocal (index : Nat) : StepRelabel (.setLocal index) := by
   stack_cases =>
     first | fallback_vacuous | lookup_lockstep
 
@@ -701,11 +699,11 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case conv_ovf target => exact step_relabel_conv_ovf target
   case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case arg index narrow => exact step_relabel_arg index narrow
-  case «local» index narrow => exact step_relabel_local index narrow
+  case «local» index => exact step_relabel_local index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
   case localAddr index => exact step_relabel_localAddr index
-  case setLocal index narrow => exact step_relabel_setLocal index narrow
+  case setLocal index => exact step_relabel_setLocal index
   case call method argc => exact step_relabel_call method argc
   case callInstance method argc => exact step_relabel_callInstance method argc
   case callVirtual targets argc => exact step_relabel_callVirtual targets argc

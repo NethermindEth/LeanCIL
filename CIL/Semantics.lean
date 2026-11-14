@@ -159,13 +159,11 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value) (fra
     let value ← args[i]?
     let value ← narrowValue narrow value
     if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
-  | .local i narrow, _ =>
+  | .local i, _ =>
     let value ← memory (.local frame i)
-    let value ← narrowValue narrow value
     if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
   | .localAddr i, _ => return .next (pc + 1) (.ref (.local frame i) :: stack) memory
-  | .setLocal i narrow, v :: rest =>
-    return .next (pc + 1) rest (write memory (.local frame i) (← narrowValue narrow v))
+  | .setLocal i, v :: rest => return .next (pc + 1) rest (write memory (.local frame i) v)
   -- Arithmetic, through `unary` and `binary`.
   | .neg, v :: rest | .not, v :: rest
   | .conv_ovf _, v :: rest | .conv_ovf_un _, v :: rest

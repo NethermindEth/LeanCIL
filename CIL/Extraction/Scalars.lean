@@ -981,7 +981,7 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
     let value :: _ := stack | none
     return scalarType type == .word32 && value ∈ [.word64, .native] &&
       match emitted with
-      | .setLocal actual _ => actual == index
+      | .setLocal actual => actual == index
       | _ => false) : Option Bool).getD false
 
 /-- Whether the immediately preceding raw instruction is a readonly prefix. -/
