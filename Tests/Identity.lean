@@ -414,10 +414,9 @@ info: 'CIL.MetadataName.bytes?_ofBytes?' depends on axioms: [propext, Classical.
 #print axioms MetadataName.bytes?_ofBytes?
 
 /--
-info: 'CIL.MetadataName.ofBytes?_bytes?' depends on axioms:
-  [propext, Classical.choice, Quot.sound]
+info: 'CIL.MetadataName.ofBytes?_bytes?' depends on axioms: [propext, Quot.sound]
 -/
-#guard_msgs (whitespace := lax) in
+#guard_msgs in
 #print axioms MetadataName.ofBytes?_bytes?
 
 /--
@@ -434,10 +433,9 @@ info: 'CIL.UserString.units?_ofUnits?' depends on axioms: [propext, Classical.ch
 #print axioms UserString.units?_ofUnits?
 
 /--
-info: 'CIL.UserString.ofUnits?_units?' depends on axioms:
-  [propext, Classical.choice, Quot.sound]
+info: 'CIL.UserString.ofUnits?_units?' depends on axioms: [propext, Quot.sound]
 -/
-#guard_msgs (whitespace := lax) in
+#guard_msgs in
 #print axioms UserString.ofUnits?_units?
 
 /-- info: name!"é" : MetadataName -/

@@ -193,8 +193,9 @@ def fixedDigits (bits count code : Nat) (tail : List Nat) : List Nat :=
     let lowCount := (count + 2) / 2
     let highCount := count + 2 - lowCount
     let lowBits := bits * lowCount
-    fixedDigits bits highCount (code >>> lowBits)
-      (fixedDigits bits lowCount (code &&& ((1 <<< lowBits) - 1)) tail)
+    let upper := code >>> lowBits
+    fixedDigits bits highCount upper
+      (fixedDigits bits lowCount (code - (upper <<< lowBits)) tail)
 termination_by count
 decreasing_by all_goals omega
 
@@ -238,9 +239,10 @@ theorem fixedDigits_spec (bits count code : Nat) (bounded : code < (2^bits)^coun
       rw [fixedDigits]
       change radixCode? (2^bits)
         (fixedDigits bits high (code >>> (bits*low))
-          (fixedDigits bits low (code &&& ((1 <<< (bits*low)) - 1)) tail)) start = _
-      simp only [Nat.shiftRight_eq_div_pow, Nat.shiftLeft_eq, Nat.one_mul]
-      rw [Nat.and_two_pow_sub_one_eq_mod, power]
+          (fixedDigits bits low (code - ((code >>> (bits*low)) <<< (bits*low))) tail))
+        start = _
+      simp only [Nat.shiftRight_eq_div_pow, Nat.shiftLeft_eq]
+      rw [← Nat.mod_eq_sub_div_mul, power]
       rw [ih high highSmall _ upper, ih low lowSmall _ lower]
       congr 1
       rw [Nat.add_mul, Nat.mul_assoc, ← Nat.pow_add, splitCount]
@@ -314,7 +316,18 @@ theorem encodeRange_spec (bits : Nat) (digits : Array Nat) (offset count : Nat)
       have splitList : (digits.toList.drop offset).take (count + 2) =
           (digits.toList.drop offset).take high ++
             (digits.toList.drop (offset + high)).take low := by
-        rw [← splitCount, List.take_add, List.drop_drop]
+        have splitTake (entries : List Nat) (first second : Nat) :
+            entries.take (first + second) =
+              entries.take first ++ (entries.drop first).take second := by
+          induction first generalizing entries with
+          | zero => simp only [Nat.zero_add, List.take_zero, List.drop_zero, List.nil_append]
+          | succ first ih =>
+            cases entries with
+            | nil => simp only [List.take_nil, List.drop_nil, List.nil_append]
+            | cons head rest =>
+              simp only [Nat.succ_add, List.take_succ_cons, List.drop_succ_cons,
+                List.cons_append, ih]
+        rw [← splitCount, splitTake, List.drop_drop]
       rw [splitList, radixCode?_append, ih high highSmall offset (by omega) start]
       simp only [Option.bind_some]
       rw [ih low lowSmall (offset + high) (by omega)]
@@ -382,11 +395,11 @@ def bitDigits? (bits code : Nat) : Option (List Nat) :=
   else
     let top := code.log2
     if top % bits = 0 then
-      some (fixedDigits bits (top / bits) (code &&& ((1 <<< top) - 1)) [])
+      some (fixedDigits bits (top / bits) (code - (1 <<< top)) [])
     else none
 
 /-- Every accepted digit list encodes the exact positive input code. -/
-theorem bitDigits?_sound (bits code : Nat) (width : 0 < bits) (digits : List Nat)
+theorem bitDigits?_sound (bits code : Nat) (_width : 0 < bits) (digits : List Nat)
     (read : bitDigits? bits code = some digits) :
     radixCode? (2^bits) digits 1 = some code := by
   unfold bitDigits? at read
@@ -408,7 +421,9 @@ theorem bitDigits?_sound (bits code : Nat) (width : 0 < bits) (digits : List Nat
       have quotient : code / 2^code.log2 = 1 := by
         apply Nat.div_eq_of_lt_le (by simpa using lower)
         simpa [Nat.mul_comm] using upper
-      simp only [Nat.shiftLeft_eq, Nat.one_mul, Nat.and_two_pow_sub_one_eq_mod]
+      have remainder : code - 2^code.log2 = code % 2^code.log2 := by
+        rw [Nat.mod_eq_sub_div_mul, quotient, Nat.one_mul]
+      simp only [Nat.shiftLeft_eq, Nat.one_mul, remainder]
       rw [fixedDigits_spec bits (code.log2 / bits) _
         (by rw [power]; exact Nat.mod_lt _ (Nat.pow_pos (by decide)))]
       simp only [radixCode?, Nat.one_mul, power]
