@@ -218,7 +218,7 @@ var prefix = $$"""
       match slice.index with
       | .error _ => [0]
       | .ok index =>
-        let env : MetadataEnv := { slices := [index] }
+        let env := MetadataEnv.ofSlices [index]
         entries.filterMap fun (token, name) =>
           match env.methodSite token, name with
           | .ok site, some name => if site.externalName == some name then none else some token
