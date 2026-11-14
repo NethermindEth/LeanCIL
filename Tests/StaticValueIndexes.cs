@@ -106,13 +106,20 @@ foreach (var scenario in new[] { "twice", "flow", "branch", "switch", "foreign",
     Reject(() => Resolve(context, field), marker);
 }
 Console.WriteLine("PASS scalar copies, control flow, switch/foreign targets, outside writes and fresh contexts");
+var missingReferenceImage = At("artifacts/StaticValueIndexes/missing-reference.dll");
+Directory.CreateDirectory(Path.GetDirectoryName(missingReferenceImage)!);
+using (var source = ModuleDefinition.ReadModule(assembly))
+{
+    source.AssemblyReferences.Add(new("MissingStaticIndexAssembly", new Version(1, 0)));
+    source.Write(missingReferenceImage);
+}
 foreach (var errorFirst in new[] { false, true })
 {
-    using var pinned = new PinnedMetadata(extractor, assembly);
+    using var pinned = new PinnedMetadata(extractor, missingReferenceImage);
     var module = pinned.Module;
     var type = module.GetType("Examples.StaticScalars");
     var field = type.Fields.Single(field => field.Name == "Byte");
-    var absent = new AssemblyNameReference("MissingStaticIndexAssembly", new Version(1, 0));
+    var absent = module.AssemblyReferences.Single(reference => reference.Name == "MissingStaticIndexAssembly");
     var unknown = new FieldReference("Unknown", module.TypeSystem.Int32,
         new TypeReference("Missing", "Owner", module, absent));
     var broken = Method(type, "BrokenWriter", Instruction.Create(OpCodes.Stsfld, unknown),
