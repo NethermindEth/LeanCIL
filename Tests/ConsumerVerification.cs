@@ -36,7 +36,8 @@ if (args is ["--check", var check, .. var options])
 }
 // Compile the harness once; separate processes retain private environment and verifier state.
 foreach (var name in checks.Keys)
-    Run(["dotnet", typeof(Program).Assembly.Location, "--check", name], streamOutput: name == "compile-check");
+    Run(["dotnet", typeof(Program).Assembly.Location, "--check", name],
+        streamOutput: name is "compile-check" or "package-paths");
 
 var cli = new[] { "dotnet", args.Length == 0 ? ExtractorPath : Path.GetFullPath(args[0]) };
 var root = Path.GetFullPath(At("artifacts/ConsumerPackage"));

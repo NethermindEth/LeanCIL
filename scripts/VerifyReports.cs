@@ -135,9 +135,8 @@ internal static partial class VerifyReports
     internal static IEnumerable<JsonObject> Failures(FailureReports.Diagnostic diagnostic, string proof,
         ManifestMethod[] methods, ILookup<(int Line, int Column), JsonObject> records)
     {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var own = diagnostic is { file: { } file, line: { } line, column: { } column } &&
-            string.Equals(Path.GetFullPath(file), Path.GetFullPath(proof), comparison)
+            Program.LocationComparer.Equals(Path.GetFullPath(file), Path.GetFullPath(proof))
             ? records[(line, column)].ToArray() : [];
         return own.Length == 0 ? [Failure(diagnostic, methods, null)]
             : own.Select(record => Failure(diagnostic, methods, record));

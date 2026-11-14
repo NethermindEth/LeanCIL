@@ -275,11 +275,9 @@ partial class Program
 
     static string? SnapshotSource(SortedDictionary<string, string> snapshot, string path)
     {
-        StringComparison comparison =
-            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         path = Path.GetFullPath(path);
         return snapshot.Where(pair => pair.Key.StartsWith(ConsumerKey, StringComparison.Ordinal) &&
-                Path.GetFullPath(pair.Key[ConsumerKey.Length..]).Equals(path, comparison))
+                LocationComparer.Equals(Path.GetFullPath(pair.Key[ConsumerKey.Length..]), path))
             .Select(pair => pair.Value).FirstOrDefault();
     }
 

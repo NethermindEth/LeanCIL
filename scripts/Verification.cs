@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -94,7 +95,6 @@ partial class Program : IDisposable
         }
         Add(At(script));
         var root = Path.TrimEndingDirectorySeparator(Root);
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         for (var directory = Path.GetDirectoryName(Path.GetFullPath(script, Root)); directory is not null;
              directory = Path.GetDirectoryName(directory))
         {
@@ -102,7 +102,7 @@ partial class Program : IDisposable
                   if (Path.GetExtension(path).ToLowerInvariant() is ".props" or ".targets" ||
                       Path.GetFileName(path).ToLowerInvariant() is "global.json" or "nuget.config" or ".editorconfig")
                     Add(path);
-            if (directory.Equals(root, comparison)) break;
+            if (LocationComparer.Equals(directory, root)) break;
         }
         return supported ? inputs : null;
     }
@@ -500,25 +500,126 @@ partial class Program : IDisposable
     internal static string? ResolvedRelativePath(string root, string path) =>
         RelativeBelow(ResolvedPath(root), ResolvedPath(path));
 
-    /// <summary>`path` relative to `root`, or null when it lies outside; both are taken as already resolved.</summary>
-    internal static string? RelativeBelow(string root, string path)
-    {
-        var relative = Path.GetRelativePath(root, path);
-        return Path.IsPathRooted(relative) || relative == ".." ||
-            relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? null : relative;
-    }
+    /// <summary>
+    /// `path` relative to `root`, or null when it lies outside; both are taken as already resolved. Two names
+    /// differing only in case are one entry exactly where the volume holding their directory says so.
+    /// </summary>
+    internal static string? RelativeBelow(string root, string path) => RelativeBelow(root, path, NameCaseIn);
 
     /// <summary>
-    /// Whether `path` is `root` or lies below it once links in both are followed, with the platform's case rule.
+    /// `path` relative to `root` (`.` when they are equal), or null when it lies outside; both are full paths
+    /// without `.` or `..` components. `nameCaseIn` gives the rule by which a directory matches entry names.
+    /// </summary>
+    internal static string? RelativeBelow(string root, string path, Func<string, NameCase> nameCaseIn)
+    {
+        var rootPrefix = Path.GetPathRoot(root) ?? "";
+        // Drive letters and server names match ignoring case on every volume.
+        if (!string.Equals(rootPrefix, Path.GetPathRoot(path), StringComparison.OrdinalIgnoreCase)) return null;
+        var rootNames = PathNames(root[rootPrefix.Length..]);
+        var pathNames = PathNames(path[rootPrefix.Length..]);
+        if (pathNames.Length < rootNames.Length) return null;
+        var directory = rootPrefix;
+        for (var index = 0; index < rootNames.Length; index++)
+        {
+            var (expected, actual) = (rootNames[index], pathNames[index]);
+            if (expected != actual && !(string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase) &&
+                    nameCaseIn(directory) == NameCase.Insensitive))
+                return null;
+            directory = Path.Join(directory, expected);
+        }
+        return pathNames.Length == rootNames.Length ? "."
+            : string.Join(Path.DirectorySeparatorChar, pathNames[rootNames.Length..]);
+    }
+
+    /// <summary>The names of the directories and file below a path's root, in order.</summary>
+    static string[] PathNames(string belowRoot) => belowRoot.Split(
+        [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>
+    /// Whether `path` is `root` or lies below it once links in both are followed, under the case rule of the
+    /// volumes that hold them.
     /// </summary>
     internal static bool Inside(string root, string path) => ResolvedRelativePath(root, path) is not null;
 
-    /// <summary>Whether two paths name one location once links are followed, with the platform's case rule.</summary>
+    /// <summary>
+    /// Whether two paths name one location once links are followed, under the case rule of the volumes that hold
+    /// them.
+    /// </summary>
     internal static bool SameLocation(string first, string second) => ResolvedRelativePath(first, second) == ".";
 
-    /// <summary>Equality of resolved paths under the case rule `Path.GetRelativePath` applies here.</summary>
-    internal static readonly StringComparer LocationComparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
-        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    /// <summary>How a directory matches the names of its entries: telling case apart or ignoring it.</summary>
+    internal enum NameCase { Sensitive, Insensitive }
+
+    static readonly ConcurrentDictionary<string, NameCase> nameCases = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The rule by which the volume holding `directory` matches entry names, probed once per directory. A directory
+    /// that does not exist yet takes the rule of its nearest existing ancestor, where it would be created.
+    /// </summary>
+    internal static NameCase NameCaseIn(string directory) =>
+        nameCases.GetOrAdd(Path.GetFullPath(directory), ProbeNameCase);
+
+    /// <summary>
+    /// Reads the rule from the first entry of the nearest existing directory whose name has an ASCII letter: its
+    /// case-flipped name finds it only on a volume that ignores case, unless another entry has that exact name.
+    /// Throws when no ancestor has such an entry, so no caller decides on a guess.
+    /// </summary>
+    static NameCase ProbeNameCase(string directory)
+    {
+        for (var current = directory; current is not null; current = Path.GetDirectoryName(current))
+        {
+            if (!Directory.Exists(current)) continue;
+            // Links are skipped: whether a flipped name exists must not depend on where a link points.
+            string[] names;
+            try
+            {
+                names = new DirectoryInfo(current).EnumerateFileSystemInfos()
+                    .Where(entry => (entry.Attributes & FileAttributes.ReparsePoint) == 0)
+                    .Select(entry => entry.Name).ToArray();
+            }
+            catch (UnauthorizedAccessException) { continue; }
+            var spelled = new HashSet<string>(names, StringComparer.Ordinal);
+            foreach (var name in names)
+            {
+                var flipped = FlippedAsciiCase(name);
+                if (flipped == name || spelled.Contains(flipped)) continue;
+                var probe = Path.Join(current, flipped);
+                return File.Exists(probe) || Directory.Exists(probe) ? NameCase.Insensitive : NameCase.Sensitive;
+            }
+        }
+        throw new IOException(
+            "No directory holding " + directory + " has an entry that shows the case rule of its volume.");
+    }
+
+    /// <summary>`name` with each ASCII letter in the other case.</summary>
+    static string FlippedAsciiCase(string name) => string.Create(name.Length, name, (flipped, source) =>
+    {
+        for (var index = 0; index < source.Length; index++)
+            flipped[index] = char.IsAsciiLetterLower(source[index]) ? char.ToUpperInvariant(source[index])
+                : char.IsAsciiLetterUpper(source[index]) ? char.ToLowerInvariant(source[index]) : source[index];
+    });
+
+    /// <summary>
+    /// Equality of full paths without `.` or `..` components under the case rule of the volumes that hold them:
+    /// equal hash codes for every spelling that differs only in case, so hashed sets and groupings stay exact.
+    /// </summary>
+    internal sealed class LocationEquality(Func<string, NameCase> nameCaseIn) : IEqualityComparer<string>
+    {
+        public bool Equals(string? first, string? second) => first is null || second is null ? first == second
+            : RelativeBelow(first, second, nameCaseIn) == ".";
+
+        public int GetHashCode(string path)
+        {
+            var hash = new HashCode();
+            hash.Add(Path.GetPathRoot(path) ?? "", StringComparer.OrdinalIgnoreCase);
+            foreach (var name in PathNames(path[(Path.GetPathRoot(path) ?? "").Length..]))
+                hash.Add(name, StringComparer.OrdinalIgnoreCase);
+            return hash.ToHashCode();
+        }
+    }
+
+    /// <summary>Equality of resolved paths under the case rule of the volumes that hold them.</summary>
+    internal static readonly LocationEquality LocationComparer = new(NameCaseIn);
 
     /// <summary>Deletes a tree that may hold git objects, which git marks read-only and Windows refuses to delete.</summary>
     static void DeleteTree(string directory)
@@ -1547,11 +1648,8 @@ partial class Program : IDisposable
     /// segments and separators only, so it is for paths this process derived from one setting, never for
     /// paths another process wrote.
     /// </summary>
-    static bool SamePath(string first, string second) => string.Equals(
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
-        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal);
+    static bool SamePath(string first, string second) =>
+        LocationComparer.Equals(Path.GetFullPath(first), Path.GetFullPath(second));
 
     /// <summary>Whether `entry` holds the manifest and receipt that only a library publisher writes.</summary>
     static bool HoldsReceipt(DirectoryInfo entry) =>
@@ -3107,8 +3205,7 @@ partial class Program : IDisposable
     // Lean reports the file with links followed, so both sides are compared that way.
     static void RequireAuditedModule(AuditedOleans audited, string module, string path)
     {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!ResolvedPath(audited.modules[module]).Equals(ResolvedPath(path), comparison))
+        if (!LocationComparer.Equals(ResolvedPath(audited.modules[module]), ResolvedPath(path)))
             throw new InvalidDataException($"Audited module {module} resolved to {audited.modules[module]}, not {path}");
     }
 
@@ -3565,7 +3662,6 @@ partial class Program : IDisposable
     {
         var text = new StringBuilder();
         var messages = new List<ProofMessage>();
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var line in output.ReplaceLineEndings("\n").Split('\n'))
         {
             JsonElement message;
@@ -3590,7 +3686,7 @@ partial class Program : IDisposable
             text.Append($"{file}:{row}:{column}: {label}{name}: {data}");
             if (!data.EndsWith('\n')) text.Append('\n');
             if (label != "error" && file.Length > 0 &&
-                Path.GetFullPath(file, Path.GetDirectoryName(source)!).Equals(source, comparison))
+                LocationComparer.Equals(Path.GetFullPath(file, Path.GetDirectoryName(source)!), source))
                 messages.Add(new(label, row, column, data.TrimEnd('\n')));
         }
         return (text.ToString(), [.. messages]);
@@ -3621,14 +3717,13 @@ partial class Program : IDisposable
     static ProofMessage[] SourceMessages(IEnumerable<(string Level, string Message)> entries, string package,
         string source)
     {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var messages = new List<ProofMessage>();
         foreach (var (level, text) in entries)
         {
             var label = level switch { "info" => "info", "warning" => "warning", _ => null };
             var located = LocatedMessage().Match(text);
             if (label is null || !located.Success ||
-                !Path.GetFullPath(located.Groups["file"].Value, package).Equals(source, comparison))
+                !LocationComparer.Equals(Path.GetFullPath(located.Groups["file"].Value, package), source))
                 continue;
             messages.Add(new(label, int.Parse(located.Groups["line"].Value),
                 int.Parse(located.Groups["column"].Value), located.Groups["text"].Value.TrimEnd('\n')));
@@ -4455,12 +4550,10 @@ internal sealed partial class SourceCopies(string directory)
     /// <summary>Exception.Data key holding the session's copies when verification fails.</summary>
     internal const string Key = "LeanCIL.SourceCopies";
 
-    static readonly StringComparer PathComparer =
-        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-    readonly Dictionary<string, string> originals = new(PathComparer);
+    readonly Dictionary<string, string> originals = new(Program.LocationComparer);
     readonly Dictionary<string, string> modules = new(StringComparer.Ordinal);
     // An observed copy's line holding the inserted import, by the copy's path.
-    readonly Dictionary<string, int> observedLines = new(PathComparer);
+    readonly Dictionary<string, int> observedLines = new(Program.LocationComparer);
 
     [GeneratedRegex(@"\A(?<file>.+?\.lean):(?<line>\d+):(?<column>\d+)\z")]
     private static partial Regex Location();
@@ -4531,7 +4624,7 @@ internal sealed partial class SourceCopies(string directory)
     internal Program.ProofMessage[]? Relocate(string original, Program.ProofMessage[]? messages)
     {
         var full = Path.GetFullPath(original);
-        var copy = observedLines.Keys.FirstOrDefault(key => PathComparer.Equals(originals[key], full));
+        var copy = observedLines.Keys.FirstOrDefault(key => Program.LocationComparer.Equals(originals[key], full));
         if (messages is null || copy is null) return messages;
         int Column(int line, int column) => Position(copy, line, column).Column;
         return [.. messages.Select(message => message with

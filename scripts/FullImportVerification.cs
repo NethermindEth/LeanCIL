@@ -33,9 +33,6 @@ partial class Program
         "DLL decoding and runtime/model correspondence remain trusted, " +
         "and an untrusted source bundle must be checked in an isolated environment.";
 
-    static StringComparer PathComparer =>
-        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-
     static int BindingSlot(JsonElement binding) => binding.GetProperty("slot").GetInt32();
 
     static string BundleName(string path) => Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
@@ -173,7 +170,7 @@ partial class Program
     string CallerLeanPath(string leanPath, string session) => string.Join(Path.PathSeparator,
         leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(path => Path.GetFullPath(path, session)).Append(Path.Combine(Toolchain, "lib/lean"))
-            .Distinct(PathComparer));
+            .Distinct(LocationComparer));
 
     FullImportResult VerifyFullImports(string output, string callerSession, string callerModule, string callerTheorem,
         string callerLeanPath, IReadOnlyDictionary<string, string> overrides)
@@ -240,7 +237,7 @@ partial class Program
         List<FullBundle> regenerated =
             RegenerateFullClosure(output, bindings, overrides, usedOverrides, original, bundles, graph, staging);
         var stagedInputs = regenerated.ToDictionary(bundle => bundle.Staging,
-            bundle => FullStagingFiles(bundle.Staging), PathComparer);
+            bundle => FullStagingFiles(bundle.Staging), LocationComparer);
         // Preflight already required a bundle for every reachable node, so an override naming one is used.
         usedOverrides.UnionWith(ReachableGraph(ExtractionIdentity.Read(output)).Select(node =>
             AssemblyNameReference.Parse(node.GetProperty("assemblyIdentity").GetString()!).Name));
@@ -402,8 +399,8 @@ partial class Program
             Path.GetFullPath(ExtractionIdentity.Resolve(callerOutput, node.GetProperty(field).GetString()!));
         bool selectedNode = node.GetProperty("implementationSha256").GetString() == selection.ImplementationSha256 &&
             node.GetProperty("interfaceDigest").GetString() == contract.InterfaceDigest &&
-            PathComparer.Equals(NodePath("implementationPath"), Path.GetFullPath(selection.Implementation)) &&
-            PathComparer.Equals(NodePath("sidecarPath"), Path.GetFullPath(selection.Sidecar));
+            LocationComparer.Equals(NodePath("implementationPath"), Path.GetFullPath(selection.Implementation)) &&
+            LocationComparer.Equals(NodePath("sidecarPath"), Path.GetFullPath(selection.Sidecar));
         if (!selectedNode)
             throw new InvalidDataException(
                 "Full-verification dependency differs from the caller's selected graph node: " +
@@ -433,7 +430,7 @@ partial class Program
         string staging)
     {
         Dictionary<string, int> exportIds = new(StringComparer.Ordinal);
-        Dictionary<string, FullBundle> staged = new(PathComparer);
+        Dictionary<string, FullBundle> staged = new(LocationComparer);
         List<FullBundle> ordered = [];
         Queue<FullImport> pending = new();
         foreach (JsonElement binding in bindings)
@@ -904,7 +901,7 @@ run_cmd do
     {
         SortedDictionary<string, string> modules = new(StringComparer.Ordinal);
         foreach (string root in leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(Path.GetFullPath).Distinct(PathComparer))
+            .Select(Path.GetFullPath).Distinct(LocationComparer))
         {
             if (!Directory.Exists(root)) continue;
             foreach (string path in Directory.EnumerateFiles(root, "*.olean", SearchOption.AllDirectories))
@@ -912,7 +909,7 @@ run_cmd do
                 string name = RelativeModuleName(root, path);
                 if (!ContractInterface.Constant(name)) continue;
                 string absolute = Path.GetFullPath(path);
-                if (modules.TryGetValue(name, out string? previous) && !PathComparer.Equals(previous, absolute))
+                if (modules.TryGetValue(name, out string? previous) && !LocationComparer.Equals(previous, absolute))
                     throw new InvalidDataException("Ambiguous full-verification module: " + name);
                 modules[name] = absolute;
             }

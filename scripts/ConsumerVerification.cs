@@ -589,7 +589,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     static IEnumerable<string> ConsumerSources(string root, string? excludedDirectory = null)
     {
-        if (excludedDirectory is not null && Path.GetFullPath(root) == Path.GetFullPath(excludedDirectory)) yield break;
+        if (excludedDirectory is not null &&
+            LocationComparer.Equals(Path.GetFullPath(root), Path.GetFullPath(excludedDirectory))) yield break;
         foreach (var path in Directory.EnumerateFileSystemEntries(root).Order(StringComparer.Ordinal))
         {
             if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
@@ -774,7 +775,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .Where(line => line.StartsWith("LEAN_PATH=", StringComparison.Ordinal)).ToArray();
         if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean import paths.");
         var leanPath = lines[0]["LEAN_PATH=".Length..];
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         // Lake reports directories with links followed, so each is compared after following links too.
         var trusted = ResolvedPath(Path.Combine(Toolchain, "lib/lean"));
         var certified = library is null ? null : CertifiedModuleDirectory(library);
@@ -782,11 +782,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
             .Select(path => Path.GetFullPath(path, session))
             .Select(path => (Spelled: path, Resolved: ResolvedPath(path)))
-            .Where(path => !path.Resolved.Equals(trusted, comparison))
+            .Where(path => !LocationComparer.Equals(path.Resolved, trusted))
             // Keep the certified base in place; map other imports into the session, spelled as the session is.
-            .Select(path => path.Resolved.Equals(resolvedCertified, comparison)
+            .Select(path => LocationComparer.Equals(path.Resolved, resolvedCertified)
                 ? certified! : Within(session, path.Spelled))
-            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray(), leanPath);
+            .Distinct(LocationComparer).ToArray(), leanPath);
     }
 
     // Variables read by Lean, Lake and elan, plus any a consumer's elaborators read
@@ -1495,7 +1495,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             try { proofs[i] = Within(root, Path.GetRelativePath(root, Path.GetFullPath(requests[i].Proof))); }
             catch (Exception error) { Fail([i], error); }
         // Only the last request for an output may leave a certificate, as in sequential runs. Two spellings of one
-        // output, such as one through a link, are one output; a case-sensitive volume can only lose a certificate.
+        // output, such as one through a link or one named in another case where the volume ignores case, are one.
         var locations = outputs.Select(ResolvedPath).ToArray();
         var last = all.GroupBy(i => locations[i], comparer)
             .ToDictionary(group => group.Key, group => group.Max(), comparer);
@@ -1505,8 +1505,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         void CheckExtractions(int[] members)
         {
             Stage(members, "extraction integrity");
-            // Grouped by exact location, so a case-sensitive volume checks every directory.
-            Parallel.ForEach(Pending(members).GroupBy(i => locations[i], StringComparer.Ordinal), parallel, group =>
+            // Grouped by location, so each output directory is checked once whatever its spelling.
+            Parallel.ForEach(Pending(members).GroupBy(i => locations[i], comparer), parallel, group =>
             {
                 try { RunExtractor(["dotnet", ExtractorPath, "check", outputs[group.First()]]); }
                 catch (Exception error) { Fail(group, error); }
@@ -2069,13 +2069,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var supportUnchanged = restoredArtifacts.Count > 0 && restoredArtifacts.Where(pair =>
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal)).All(pair =>
                 File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             var frameworkModules = CertifiedModuleDirectory(certifiedLibrary);
             var generatedModules = Path.GetFullPath(Path.Combine(generatedPackage, ".lake/build/lib/lean"));
             // No external commands run between this snapshot and the replay manifest.
             // Recorded base modules take their hashes from the producer's manifest; unrecorded ones are replayed.
             SortedDictionary<string, string> DirectoryArtifacts(string directory) =>
-                directory.Equals(frameworkModules, comparison) ? BaseModuleArtifacts() : ConsumerArtifactSnapshot(directory);
+                LocationComparer.Equals(directory, frameworkModules) ? BaseModuleArtifacts()
+                    : ConsumerArtifactSnapshot(directory);
             var artifactSnapshots = importDirectories.Where(Directory.Exists)
                 .Select(directory => (Directory: directory, Artifacts: DirectoryArtifacts(directory))).ToArray();
             // The module parts on the import path now, in the shape of the replay manifest.
@@ -2090,7 +2090,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     });
                 })
                 .OrderBy(pair => pair.Name, StringComparer.Ordinal).ToDictionary(pair => pair.Name, pair => pair.Parts);
-            var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison));
+            var baseUnchanged = importDirectories.Any(path => LocationComparer.Equals(path, frameworkModules));
             var moduleNames = new HashSet<string>(StringComparer.Ordinal);
             var discovered = new List<(string Name, bool Certified)>();
             foreach (var (directory, artifacts) in artifactSnapshots)
@@ -2100,7 +2100,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     if (!moduleNames.Add(module.Key)) throw new InvalidDataException("Ambiguous consumer module: " + module.Key);
                     if (File.Exists(Path.Combine(Toolchain, "lib/lean", module.Key.Replace('.', '/') + ".olean")))
                         throw new InvalidDataException("Consumer module shadows the trusted Lean toolchain: " + module.Key);
-                    var unchanged = directory.Equals(frameworkModules, comparison) &&
+                    var unchanged = LocationComparer.Equals(directory, frameworkModules) &&
                         module.Count() == certifiedBase.Count(pair => ModuleName(pair.Key) == module.Key) &&
                         module.All(pair => certifiedBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
                     if (!unchanged && (module.Key == "CIL" || module.Key.StartsWith("CIL.", StringComparison.Ordinal)))
@@ -2110,7 +2110,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         var relative = Path.GetRelativePath(session, Path.Combine(directory, pair.Key));
                         return restoredArtifacts.TryGetValue(relative.Replace('\\', '/'), out var hash) && hash == pair.Value;
                     });
-                    bool publishedInterface = directory.Equals(generatedModules, comparison) && interfaceModuleNames.Contains(module.Key);
+                    bool publishedInterface = LocationComparer.Equals(directory, generatedModules) && interfaceModuleNames.Contains(module.Key);
                     if (publishedInterface && (module.Count() != acceptedInterfaceArtifacts.Count(pair => ModuleName(pair.Key) == module.Key) ||
                         module.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value)))
                         throw new InvalidDataException("Published contract interface artifacts changed after their closure audit: " + module.Key);

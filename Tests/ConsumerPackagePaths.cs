@@ -31,26 +31,30 @@ partial class Program
                 Within(package, ".") == package, "A path inside its package was not returned as spelled under it.");
             Console.WriteLine("PASS a package path that leaves through .. or an absolute path is rejected");
 
-            // A case variant is one location only where the file system says so.
+            // A case variant is one location only where the file system says so; no sibling exists to confuse it.
             var variant = Path.Combine(real, "PACKAGE");
             var sameUnderCase = Directory.Exists(variant);
-            if (sameUnderCase || LocationComparer == StringComparer.Ordinal)
-            {
-                Require(SameLocation(package, variant) == sameUnderCase &&
-                    Inside(package, Path.Combine(variant, ".lake")) == sameUnderCase &&
-                    new[] { package, variant }.Select(ResolvedPath).Distinct(LocationComparer).Count() ==
-                        (sameUnderCase ? 1 : 2),
-                    $"A case variant of a directory was judged {(sameUnderCase ? "another" : "the same")} location.");
-                Console.WriteLine("PASS a case variant of a directory is " +
-                    (sameUnderCase ? "the same location" : "another location"));
-            }
-            else Console.WriteLine("SKIP case variants: this volume tells case apart, but .NET compares paths here " +
-                "ignoring case");
+            Require(SameLocation(package, variant) == sameUnderCase &&
+                Inside(package, Path.Combine(variant, ".lake")) == sameUnderCase &&
+                new[] { package, variant }.Select(ResolvedPath).Distinct(LocationComparer).Count() ==
+                    (sameUnderCase ? 1 : 2),
+                $"A case variant of a directory was judged {(sameUnderCase ? "another" : "the same")} location.");
+            Console.WriteLine("PASS a case variant of a directory is " +
+                (sameUnderCase ? "the same location" : "another location"));
+            Require(NameCaseIn(real) == (sameUnderCase ? NameCase.Insensitive : NameCase.Sensitive) &&
+                NameCaseIn(Path.Combine(real, "missing", "deeper")) == NameCaseIn(real),
+                "The probe read another case rule than the temporary volume follows.");
+            Console.WriteLine("PASS the probe reads the case rule of the temporary volume");
+
+            CheckNameCaseRule(work, Require);
+            CheckCaseSensitiveVolume(Path.Combine(work, "sensitive"), Require, Reject);
 
             // Lake reports its directories with links followed, as macOS reaches /var through /private/var.
             var link = Path.Combine(work, "link");
             if (!TryLinkDirectory(link, real))
             {
+                // Every Unix user can make a symbolic link, so only Windows may lack both kinds of link.
+                if (!OperatingSystem.IsWindows()) throw new Exception("Could not make a directory symbolic link.");
                 Console.WriteLine("SKIP package paths through links: no directory link or junction could be made");
                 return;
             }
@@ -123,5 +127,102 @@ partial class Program
         }
         // A recursive delete removes a link without entering the directory it names.
         finally { Directory.Delete(work, true); }
+    }
+
+    /// <summary>
+    /// Paths compared under a case rule given per directory: a name is matched by the rule of the directory that
+    /// holds it, so a case-sensitive volume mounted inside one that ignores case is judged at each level.
+    /// </summary>
+    static void CheckNameCaseRule(string work, Action<bool, string> require)
+    {
+        var volume = Path.Combine(work, "volume");
+        var package = Path.Combine(volume, "package");
+        var sibling = Path.Combine(volume, "Package", "Module.lean");
+        var asked = new HashSet<string>(StringComparer.Ordinal);
+        Func<string, NameCase> Every(NameCase rule) => directory => { asked.Add(directory); return rule; };
+        require(RelativeBelow(package, sibling, Every(NameCase.Sensitive)) is null &&
+            RelativeBelow(package, sibling, Every(NameCase.Insensitive)) == "Module.lean" &&
+            asked.SetEquals([volume]) && RelativeBelow(package, package, Every(NameCase.Sensitive)) == ".",
+            "A name differing only in case was not decided by the rule of the directory holding it.");
+        // `work` ignores case and `volume` tells it apart, as a disk image mounted in a temporary directory.
+        Func<string, NameCase> mounted = directory => directory == work ? NameCase.Insensitive : NameCase.Sensitive;
+        var respelled = Path.Combine(work, "VOLUME", "package", "Module.lean");
+        require(RelativeBelow(package, respelled, mounted) == "Module.lean" &&
+            RelativeBelow(package, sibling, mounted) is null,
+            "A path crossing volumes with different case rules was judged by one rule.");
+        LocationEquality sensitive = new(Every(NameCase.Sensitive)), insensitive = new(Every(NameCase.Insensitive));
+        var upper = Path.Combine(volume, "PACKAGE");
+        require(!sensitive.Equals(package, upper) && insensitive.Equals(package, upper) &&
+            insensitive.GetHashCode(package) == insensitive.GetHashCode(upper) &&
+            new HashSet<string>([package, upper], insensitive).Count == 1 &&
+            new HashSet<string>([package, upper], sensitive).Count == 2,
+            "Locations differing only in case were compared against the given rule.");
+        Console.WriteLine("PASS paths are compared under the case rule of each directory that holds a name");
+    }
+
+    /// <summary>
+    /// Containment and identity on a volume that tells case apart, where a sibling whose name differs only in case
+    /// is another directory. The volume is made without privileges: a disk image on macOS, a directory with the
+    /// case-sensitive flag on Windows, and the temporary directory itself on Linux.
+    /// </summary>
+    static void CheckCaseSensitiveVolume(string directory, Action<bool, string> require,
+        Action<string, string, string> reject)
+    {
+        if (CaseSensitiveDirectory(directory) is not { } removeVolume) return;
+        try
+        {
+            var package = Path.Combine(directory, "package");
+            var sibling = Path.Combine(directory, "Package");
+            Directory.CreateDirectory(Path.Combine(package, ".lake"));
+            Directory.CreateDirectory(sibling);
+            File.WriteAllText(Path.Combine(sibling, "Secret.lean"), "-- beside the package\n");
+            require(!Directory.Exists(Path.Combine(directory, "PACKAGE")),
+                "The case-sensitive volume found a directory under a name no entry has.");
+            reject(package, Path.Combine(sibling, "Secret.lean"), "a sibling named in another case");
+            reject(package, "../Package/Secret.lean", "a sibling named in another case");
+            reject(package, Path.Combine(directory, "PACKAGE", "New.lean"),
+                "a missing directory named in another case");
+            require(!SameLocation(package, sibling) && !Inside(package, Path.Combine(sibling, "Secret.lean")) &&
+                Inside(package, Path.Combine(package, ".lake")) &&
+                new[] { package, sibling }.Select(ResolvedPath).Distinct(LocationComparer).Count() == 2,
+                "A sibling whose name differs only in case was judged the package's location.");
+            require(NameCaseIn(directory) == NameCase.Sensitive &&
+                NameCaseIn(Path.Combine(directory, "missing", "deeper")) == NameCase.Sensitive,
+                "The probe read a case-sensitive volume as ignoring case.");
+            Console.WriteLine(
+                "PASS on a case-sensitive volume a sibling named in another case lies outside the package");
+        }
+        finally { removeVolume(); }
+    }
+
+    /// <summary>
+    /// Makes `directory` on a volume that tells case apart and returns how to remove it, or null after printing SKIP
+    /// where Windows refuses the flag or the Linux temporary directory ignores case. macOS always can, so a failure
+    /// there throws.
+    /// </summary>
+    static Action? CaseSensitiveDirectory(string directory)
+    {
+        var parent = Path.GetDirectoryName(directory)!;
+        if (OperatingSystem.IsMacOS())
+        {
+            var image = directory + ".dmg";
+            Run(["hdiutil", "create", "-size", "16m", "-fs", "Case-sensitive APFS", "-volname", "leancil-case",
+                "-type", "UDIF", image], parent);
+            Directory.CreateDirectory(directory);
+            Run(["hdiutil", "attach", "-nobrowse", "-noautoopen", "-mountpoint", directory, image], parent);
+            return () => Run(["hdiutil", "detach", "-force", directory], parent);
+        }
+        Directory.CreateDirectory(directory);
+        if (OperatingSystem.IsWindows())
+        {
+            var flag = Execute(["fsutil.exe", "file", "setCaseSensitiveInfo", directory, "enable"], parent);
+            if (flag.Code == 0) return () => { };
+            Console.WriteLine("SKIP case-sensitive volume: fsutil could not mark a directory: " + flag.Output.Trim());
+            return null;
+        }
+        Directory.CreateDirectory(Path.Combine(directory, "probe"));
+        if (!Directory.Exists(Path.Combine(directory, "PROBE"))) return () => { };
+        Console.WriteLine("SKIP case-sensitive volume: the temporary directory ignores case");
+        return null;
     }
 }

@@ -73,7 +73,7 @@ internal static partial class Program
         var requests = JsonSerializer.Deserialize<ExtractionRequest[]>(File.ReadAllBytes(args[1]),
             new JsonSerializerOptions(JsonSerializerDefaults.Web))
             ?? throw new InvalidDataException("Missing extraction batch requests.");
-        // Outputs differing only in case are distinct on a case-sensitive file system; one reached by a link is not.
+        // Outputs named in different case are distinct where the volume tells case apart; one reached by a link is not.
         var outputs = new HashSet<string>(global::Program.LocationComparer);
         foreach (var request in requests)
         {
