@@ -10,11 +10,11 @@ import CIL.NativeEvaluation
 /-!
 # Checked interpreter
 
-The interpreter that safety proofs reason about. It runs the same instructions as
-`CIL.step`, but over allocation-aware memory and checked values, and it reports why it
-stopped: every fault is an `ExecutionFault` located at a method and pc instead of `none`.
-Value-only instructions are delegated to `CIL.step` through `pureArity`, so the two
-interpreters cannot disagree on arithmetic.
+The interpreter that safety proofs reason about. It runs over allocation-aware memory and
+checked values, and it reports why it stopped: every fault is an `ExecutionFault` located at a
+method and pc instead of `none`. Value-only instructions are delegated to `CIL.step` through
+`pureArity`, so the two interpreters cannot disagree on arithmetic. Locals have only the meaning
+given here, through the kinds of their slots.
 -/
 
 namespace CIL.Safety
