@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup Condition="'$(AssemblyName)' == 'LeanCIL.IdentityTests'">
+    <ProjectReference Update="../Extractor/Extractor.csproj" Aliases="IdentityExtractor" />
+  </ItemGroup>
+</Project>

@@ -2,7 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
@@ -86,11 +86,6 @@ foreach (var method in methods)
             "[.bufferSpan ⟨.address ⟨0, 1⟩, 28, 1, true⟩] readOnlyMemory with " +
             "| .error ⟨_, _, .memory .unwritable _ _⟩ => true | _ => false) = true");
     File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
-        /-- Successful observations identify the checked execution result. -/
-        private theorem result_of_toOption {error value : Type} {result : Except error value}
-            {expected : value} (observed : result.toOption = some expected) : result = .ok expected := by
-          cases result <;> simp_all [Except.toOption]
-        #print axioms result_of_toOption
         /-- Misaligned caller storage exposes signed high bits and neighboring sentinel bytes. -/
         def memory : CIL.Safety.Memory := { CIL.Safety.Memory.empty with
           allocations := fun identity => if identity == 0 then
@@ -106,7 +101,8 @@ foreach (var method in methods)
           views := [⟨0, 0, 48, true, false⟩] }
         /-- All admitted integer overloads agree with runtime results, including short try operations. -/
         """ + "\ntheorem correctness :\n" + string.Join(" ∧\n", claims) +
-        " := by\n  repeat constructor\n  all_goals first | (apply result_of_toOption; decide +kernel) | decide +kernel\n#print axioms correctness\nend ExampleProof\n");
+        " := by\n  repeat' apply And.intro\n  all_goals cil_kernel_rfl\n" +
+        "#print axioms correctness\nend ExampleProof\n");
     foreach (var pc in sites.Where(site => site.Name == name).Select(site => site.Pc).Distinct())
     {
         // The real method's certificate proves this exact raw/emitted pair is reachable and checked.

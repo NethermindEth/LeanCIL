@@ -12,6 +12,7 @@ import CIL.Interface.Headers
 module parts with only persisted linter diagnostics removed. Neither mode loads extensions.
 `--replay INPUT` kernel-checks an exact JSON array of target modules against shared imports.
 `--replay-separately INPUT` reports isolated toolchain replay results for each target.
+`--diagnose-replay INPUT` reports typed isolated checking failures without accepting a proof.
 An audit request with `replayTargets` checks those modules first and reuses their checked kernel
 environment when declaration names are unique and the audit needs no target module metadata.
 
@@ -631,6 +632,9 @@ unsafe def main (args : List String) : IO UInt32 := do
   | ["--replay-separately", input] =>
     let targets ← IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
     return ← CIL.Replay.replayModulesSeparately targets
+  | ["--diagnose-replay", input] =>
+    let targets ← IO.ofExcept <| (Json.parse (← IO.FS.readFile input)).bind fromJson?
+    return ← CIL.Replay.diagnoseModules targets
   | ["--headers", input] => CIL.Interface.writeSourceHeaders input; return 0
   | ["--imports", input, output] => writeImports input output; return 0
   | ["--fingerprints", input] => writeFingerprints input; return 0

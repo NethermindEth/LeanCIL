@@ -1,7 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include Verification.cs
-#:include BindingAudit.cs
+#:include DeepChecks.cs
 #:include FailureReports.cs
 #:include LeanDiagnostics.cs
 #:include BindingImage.cs

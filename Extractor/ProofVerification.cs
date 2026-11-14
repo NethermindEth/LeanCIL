@@ -19,7 +19,7 @@ partial class Program
 
     const string VerifyUsage = "Usage: leancil verify output-directory [--proof proof.lean] [--theorem name] " +
         "[--fresh] [--rebuild-library] [--proof-root package-directory] [--force-full-verify] " +
-        "[--full-artifact Lib=directory] [--format text|json] [--trace] [--goals]";
+        "[--full-artifact Lib=directory] [--deep-checks digests.sha256] [--format text|json] [--trace] [--goals]";
 
     /// <summary>
     /// The tool version, the LeanCIL revision and Lean toolchain its framework comes from, and the
@@ -320,6 +320,27 @@ partial class Program
         }
     }
 
+    /// <summary>The binding facts and inputs recorded by the completed verification.</summary>
+    static IEnumerable<string> BindingLines(BindingSection binding)
+    {
+        static string Name<T>(T value) => JsonSerializer.SerializeToElement(value).GetString()!;
+        yield return "Binding: " + Name(binding.mode);
+        if (binding.digests is { } digests)
+            yield return "Digests: " + CliPaths.Display(digests.path) + " (SHA-256 " + digests.sha256 + ")";
+        foreach (var fact in binding.facts)
+            yield return Name(fact.id) + ": " + Name(fact.status) +
+                (fact.theorem is { } theorem ? " (" + theorem + ")"
+                    : fact.reason is { } reason ? " (" + reason + ")" : "");
+        foreach (var image in binding.images)
+            yield return "Image " + image.identity + ": SHA-256 " + image.sha256 + ", " + Name(image.role) +
+                ", " + Name(image.status) + " (" + (image.theorem ?? image.reason) + ")";
+        if (binding.sources is { } sources)
+        {
+            yield return "StrictBinding sources: " + sources.strictBinding;
+            yield return "Lean toolchain: " + sources.leanToolchain + " (ran " + sources.lean + ")";
+        }
+    }
+
     internal static void VerifyArtifacts(string[] args)
     {
         if (args.Length == 0 || args[0].StartsWith("--", StringComparison.Ordinal))
@@ -337,6 +358,8 @@ partial class Program
         var rebuildLibrary = false;
         string? proofRoot = null;
         bool forceFull = false;
+        string? digestFile = null;
+        DeepCheckRun? deepRun = null;
         Dictionary<string, string> fullArtifacts = new(StringComparer.Ordinal);
 
         for (var index = 1; index < args.Length; index++)
@@ -381,6 +404,9 @@ partial class Program
                     if (artifact.Length != 2 || string.IsNullOrWhiteSpace(artifact[0]) || string.IsNullOrWhiteSpace(artifact[1]) ||
                         !fullArtifacts.TryAdd(artifact[0], Path.GetFullPath(artifact[1])))
                         throw Rejected(new ArgumentException("--full-artifact requires unique Lib=directory values."));
+                    break;
+                case "--deep-checks" when digestFile is null:
+                    digestFile = args[index];
                     break;
                 case "--proof-root" when proofRoot is null:
                     proofRoot = Path.GetFullPath(args[index]);
@@ -466,6 +492,13 @@ partial class Program
             var identity = manifest.GetProperty("assemblyIdentity").GetString()!;
             var entry = manifest.GetProperty("entry").GetString()!;
 
+            if (digestFile is not null)
+            {
+                stage = "arguments";
+                deepRun = new(DeepCheckInputs.Read(digestFile));
+                stage = "extraction integrity";
+            }
+
             verification = new()
             {
                 freshProofs = fresh || forceFull,
@@ -488,8 +521,10 @@ partial class Program
             if (forceFull) verification.PreflightFullImports(output, fullArtifacts);
             var report = proofRoot is null
                 ? verification.Verify(assembly, identity, entry, proof, output,
-                    theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: Advance)
-                : verification.VerifyConsumer(assembly, proof, output, theorem, proofRoot, settingsPath, Advance);
+                    theorem: theorem, existingArtifacts: true, settings: settingsPath, stage: Advance,
+                    deepChecks: deepRun?.Inputs, deepRun: deepRun)
+                : verification.VerifyConsumer(assembly, proof, output, theorem, proofRoot, settingsPath, Advance,
+                    deepChecks: deepRun?.Inputs, deepRun: deepRun);
             RequireNoOpenGoals();
 
             var view = verification.VerifiedStatement;
@@ -539,6 +574,7 @@ partial class Program
                 Console.WriteLine("  Independently composed theorem: " + report.compositionTheorem);
             Console.WriteLine($"  Proof: {CliPaths.Display(proof)}");
             Console.WriteLine($"  Axioms: {(report.axioms.Length == 0 ? "none" : string.Join(", ", report.axioms))}");
+            foreach (var line in BindingLines(report.binding)) Console.WriteLine("  " + line);
             var refuted = FailureReports.Refuted(report.theoremAudit, theorem, proof, output, proofRoot);
             if (refuted is not null)
             {
@@ -567,6 +603,7 @@ partial class Program
                 (stage, error) = (OpenGoalsStage, OpenGoals(open));
             var failed = FailureReports.Failed(stage, error, theorem ?? "ExampleProof.correctness",
                 proof ?? Path.Combine(output, "Proof.lean"), output, proofRoot);
+            failed = failed with { binding = deepRun?.Attempt?.Failure(stage, error.Message) };
             FailureReports.Write(output, failed);
             var (proofMessages, steps, openGoals) = Observed(verification?.ProofMessages, trace, goals);
             // With --goals the terminal shows the goals alone; the proof's messages stay in their file.

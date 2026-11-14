@@ -3,7 +3,7 @@
 #:property EnforceCodeStyleInBuild=true
 #:property GenerateDocumentationFile=true
 #:include Verification.cs
-#:include BindingAudit.cs
+#:include DeepChecks.cs
 #:include FailureReports.cs
 #:include LeanDiagnostics.cs
 #:include BindingImage.cs
@@ -135,7 +135,8 @@ foreach (var (name, entry) in independentSuites)
         projects.Add(entry.Script);
 foreach (ExportSuite entry in ExportVerificationSuites.Plan())
     if (suite == "all" || suite == entry.Name)
-        projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal)));
+        projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal) &&
+            File.ReadLines(At(path)).FirstOrDefault() == "#!/usr/bin/env dotnet"));
 
 foreach (string project in projects.Distinct(StringComparer.Ordinal))
 {

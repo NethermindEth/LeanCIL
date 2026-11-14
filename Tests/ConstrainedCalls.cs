@@ -2,7 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
@@ -37,6 +37,7 @@ static string Narrowed(string source, out string control)
     var declarations = Regex.Replace(source,
         @"(?m)^(?:@\[[^\r\n]*\] )?theorem [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", "");
     declarations = Regex.Replace(declarations, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+    declarations = ResolutionFactsCommand().Replace(declarations, "");
     var names = obligations.Select(match => Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value).ToArray();
     var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Zip(names).Select(pair =>
         pair.First.Value + "\n#print axioms " + pair.Second)) + "\nend Extracted", StringComparison.Ordinal);

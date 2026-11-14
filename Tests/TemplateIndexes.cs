@@ -1,7 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
@@ -40,7 +40,7 @@ object Operation(object operation) => operation is not string text ? operation :
 {
     ".feature .avx2" => Create("FeatureTest", Enum.Parse(Model("Feature"), "Avx2")),
     ".nop" => Create("StackOperation", Enum.Parse(Model("StackOpcode"), "Nop")),
-    ".ret" => Create("Return", [null]),
+    ".ret" => Create("Return"),
     ".call 0 0" => Create("Call", Enum.Parse(Model("CallKind"), "Static"), 0, 0),
     ".tailCall 0 0" => Create("Call", Enum.Parse(Model("CallKind"), "Tail"), 0, 0),
     ".tailCall 1 0" => Create("Call", Enum.Parse(Model("CallKind"), "Tail"), 1, 0),

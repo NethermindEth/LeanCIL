@@ -1,16 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/LibraryAudit.cs
-#:include ../scripts/BindingImage.cs
-#:include ../scripts/BindingAudit.cs
-#:include ../scripts/DeepCheckInputs.cs
 
 using System.Text.Json;
 
@@ -255,9 +252,9 @@ int Depth(JsonElement element) => element.ValueKind switch
 foreach (var count in new[] { 16, 128, 1024 })
 {
     BindingImagePin[] pins = [.. Enumerable.Range(0, count).Select(index =>
-        new BindingImagePin("Identity" + index, "", (index % 2).ToString("x16") + new string('0', 48),
-            "stated", []))];
-    BindingPlan plan = new("", "", "", "", pins, 0);
+        new BindingImagePin("Identity" + index, (index % 2).ToString("x16") + new string('0', 48),
+            []))];
+    BindingPlan plan = new("", pins, 0);
     foreach (var pin in pins.DistinctBy(pin => pin.Module))
         Compile(pin.Module, "def " + pin.Module + ".image : Nat := 0\n");
     Compile(ImagesModule, ImagesModuleSource(plan));

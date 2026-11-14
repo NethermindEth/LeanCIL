@@ -9,7 +9,7 @@ modes. For one complete verification, read the [getting-started guide](GETTING-S
 | `leancil extract` | Validate a method and its reachable calls and translate them to Lean | [Extract](#extract) |
 | `leancil blockers` | Report everything that stops `extract` for a list of methods | [Report extraction blockers](#report-extraction-blockers) |
 | `leancil check` | Compare extraction artifacts with their assembly and settings | [Check](#check) |
-| `leancil audit-binding` | Reconfirm in the kernel that an extraction's method bodies are the bytes of assembly files with stated digests | [Strict binding audit](#strict-binding-audit) |
+| `leancil verify --deep-checks` | Reconfirm in the kernel that an extraction's method bodies are the bytes of assembly files with stated digests | [Deep verification](#deep-verification) |
 | `leancil new-proof` | Write a starting proof with marked holes | [Start a proof](#start-a-proof) |
 | `leancil verify` | Check, kernel-replay and audit one theorem | [Verify](#verify) |
 | `leancil verify-batch` | Verify many requests in one session | [Batch verification](CONSUMERS.md#batch-verification) |
@@ -27,7 +27,7 @@ modes. For one complete verification, read the [getting-started guide](GETTING-S
 `leancil --help`, `leancil -h` and `leancil` with no arguments print the usage of every command. A
 failing command exits with `1` and prints on standard error a summary line starting `Invalid:` or
 `Error:`, a `Stage:` line naming the failed step and a `Next:` line with the fix to try. `check`,
-`verify`, `audit-library` and `audit-binding` start the summary with `Invalid:`, as does each failed request of
+`verify` and `audit-library` start the summary with `Invalid:`, as does each failed request of
 `verify-batch` and `gates`. Every other failure starts it with `Error:`. An unknown option is
 an error, as is repeating an option that takes one value.
 
@@ -307,108 +307,47 @@ or extractor, or a saved file that differs from the regenerated one, fails at th
 `extraction integrity` stage; run `leancil extract` again. A manifest whose `schema` is not `3` is
 rejected the same way.
 
-## Strict binding audit
+## Deep verification
 
-`verify` trusts that the bytes in `Extracted.lean` for each method body are the bytes of the
-MethodDef row that the method's token names in the assembly file, and that the PE container and
-metadata tables locate them. `leancil audit-binding` reconfirms that in the kernel for the assembly
-files whose SHA-256 digests you state. Whether that row is the method the proof names stays
-trusted. The audit is opt-in and changes neither `Extracted.lean` nor the certified library.
-
-```text
-leancil audit-binding extraction-directory --sha256 hex [--assembly-path assembly.dll]
-    [--reference-sha256 Lib=hex]... [--require item,...] [--output directory]
-    [--format text|json] [--results results.json]
-```
-
-| Option | Meaning |
-| --- | --- |
-| `--sha256 hex` | Required. The SHA-256 digest of the selected assembly, as 64 hexadecimal digits. It is compared with the file before any Lean runs and proved in the kernel as the digest of the image the audit decodes. |
-| `--assembly-path path/to/Examples.dll` | Use a DLL that moved, as for `check`. |
-| `--reference-sha256 Lib=hex` | The digest of a pinned reference, named by its simple name. Without it the digest recorded in `identity.json` is audited, the image line says `recorded, not stated`, and the digest and body items read `matches the pinned digest`. A name the extraction did not pin is an error, and so are two pinned assemblies with one simple name. |
-| `--require item,...` | Fail unless each listed item is reconfirmed; an item that only matches the pinned digest fails. The items are `digests`, `body-locations` and the identifiers of the not covered items below; `all` lists them all. |
-| `--output directory` | Where the generated Lean modules go; by default `<extraction-directory>.binding-audit`, beside the extraction and never inside it. The directory is replaced on each run, so it must not exist, be empty, or hold an earlier audit. |
-| `--format text\|json` | The report on standard output; the default is text. |
-| `--results results.json` | Also write the JSON report to a file. |
-
-The audit runs `check` first, compares each stated digest with its file, and stops with `SHA-256 of
-<dll> is <actual>; the stated digest is <stated>` when they differ. Evidence comes from the Lean
-modules it then generates in the output directory:
-
-- `BindingAudit/I<digest>.lean` for each assembly file holds the file as an image constant, the
-  file zero-padded to 64-byte chunks in pages, and the theorem `BindingAudit.I<digest>.digest`
-  that the SHA-256 of that constant is the stated digest. Each page of the hash is its own lemma,
-  so one kernel evaluation holds the hashing of one page (4 KB of the file), and the memory of
-  those evaluations does not grow with the file.
-- `BindingAudit/Images.lean` pins each identity from `identity.json` to its image constant.
-- `BindingAudit/Bodies.lean` states `StrictBinding.BodiesBound` for `Extracted.methodEvidence`,
-  proved in about 250 methods per page up to 8 pages and in 8 pages of `methods / 8` beyond
-  (one empty page for no methods), each its own kernel evaluation, and composed by a kernel-checked
-  theorem that requires the pages to cover every method once and in order. Lean decodes the PE
-  headers, the section table, the CLI header, the metadata root and the `#~` table stream from the same image constant, checks that the Assembly
-  row spells the pinned identity, and requires every method body to equal the bytes at the file
-  offset that the section table gives for the RVA in the MethodDef row of the method's own token.
-
-The audit builds the `StrictBinding` library on the certified library, builds each generated
-module, kernel-replays each one, and then audits the theorems with `leancil-audit` together with
-`Extracted.translation_valid`, so the bodies it checks are the ones the certificate covers. The
-metadata decoder accepts files whose tables are numbered up to `0x2C` and include no pointer or
-edit-and-continue table, whose heap size flags are known and whose metadata root has only the
-`#~`, `#Strings`, `#US`, `#GUID` and `#Blob` streams; any other file is a failed item with the
-decoding error.
-
-The report has one line per image and one per item:
+`leancil verify extraction-directory --deep-checks digests.sha256` jointly checks the proof,
+extraction certificate and image binding theorems in one audited environment. The option also
+works with `--proof-root`. Supply a sha256sum file containing the selected assembly and every
+reference pinned by the extraction:
 
 ```text
-Valid: strict binding audit of /work/artifacts/Add
-  Certificate: Extracted.translation_valid audited with the binding theorems; generatedSha256 ceba1286...4924
-  Image Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: SHA-256 a9351b77...abe4 stated
-  SHA-256 digest of Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null: reconfirmed (BindingAudit.Ia9351b77...abe4.digest)
-  PE container and method body locations: reconfirmed (BindingAudit.bodies)
-  Copied metadata rows and heap entries: not covered (no checked theorem binds the carried metadata rows and heap entries to the pinned images)
-  Initial values of static data: not covered (no check reads static data from the image)
-  Type layouts: not covered (no check reads field offsets, sizes or attributes from the image)
-  Public key tokens of referenced assemblies: not covered (no check compares a reference's token with the key of its image)
-  Definitions in platform assemblies: not covered (no platform assembly is read)
-  Completeness of dispatch catalogs: not covered (no check reads the types of an image)
-  Generic import definitions: not covered (no check recomputes an import identity from its image)
-  Generic parameter constraints: not covered (no check reads constraints from the image)
-  Axioms: Classical.choice, Quot.sound, propext
-  Statements defined by: StrictBinding sources 1f2e3d4c...9a8b, Lean leanprover/lean4:v4.35.0 (ran Lean (version 4.35.0, x86_64-w64-windows-gnu, commit eb6cafb7290e8bd5f2937522d8d804f58f02bafc, Release))
+<64 hexadecimal digits>  path/to/App.dll
+<64 hexadecimal digits>  path/to/Library.dll
 ```
 
-The last line states what defines the audited statements: the SHA-256 key of the `StrictBinding`
-sources the tool built and the Lean toolchain, pinned and as run. Compare both with a reviewed copy,
-since a theorem named `StrictBinding.BodiesBound` means whatever those sources define. The key is the
-SHA-256 of the lines `relative/path=sha256-of-file` for `StrictBinding.lean` and every `.lean` file
-below `StrictBinding`, sorted ordinally and joined by `\n`. Each item has one of four statuses:
+Paths are relative to the digest file. Each supplied file is read and checked against its stated
+digest before Lean preparation. Missing pins, malformed records and mismatching digests fail as
+arguments. The verifier retains the checked bytes and matches pins after any required extraction
+rebuild. Each request must explicitly supply the option; saved verification settings contain no
+deep-check input. Batch verification, gates, watch and workspace reject the option.
 
-- `reconfirmed` names the theorem. Its module built and was kernel-replayed, and its type and
-  axioms matched what leancil derives from your options and `identity.json`, never from the
-  module text.
-- `matches the pinned digest` is a digest item whose image has the digest that `identity.json`
-  recorded, because you did not state one, or the body item when any pinned image is so matched.
-  The kernel proved it, but the digest did not come from you, so `--require digests` and
-  `--require body-locations` fail for it; pass `--reference-sha256` to reconfirm it.
-- `failed` names the stage, `build`, `replay` or `audit`, and the first Lean diagnostic. A failed
-  body check also prints the error that the interpreter finds, labelled `diagnostic, not
-  evidence`. The body item is not reconfirmed while a digest or the identity pinning is failed.
-- `not covered` names a fact that stays trusted: the audit has no check for it.
+The report lists twelve binding facts. Default verification lists them as `trusted` and performs
+no image binding work. Deep verification reconfirms `body-bytes` and the digests of pinned images;
+the other eleven facts remain `not covered`, with a reason for each. Supplied images that no pin
+or checked claim uses are listed as unused and not covered. Successful reports include the digest
+file hash, StrictBinding source key and Lean toolchain. Unchecked facts remain assumptions.
 
-The command exits `0` when no item failed and every `--require` item is reconfirmed. Otherwise it
-prints the report, then the `Invalid:` summary on standard error, and exits `1`. If the
-extraction's own module does not build, replay or pass its certificate, the audit stops with that
-error instead of reporting items.
+Generated image modules hold checked SHA-256 theorems. The image association theorem ties each
+pinned identity to its image, and `StrictBinding.BodiesBound` relates the method evidence to the
+bytes at the offsets decoded from the PE container and MethodDef rows. Bodies are checked in
+pages of about 250 methods, capped at eight pages. These theorems join the extraction certificate
+and the selected proof for kernel replay, expected-type checks and axiom checks. Source, artifact,
+identity and toolchain guards run before successful publication.
 
-The kernel hashes about 1.3 KB per second: a 98 KB assembly takes about 80 seconds of replay, and
-a 6 KB reference a few seconds. The memory of a digest page does not grow with the file. A page of
-bodies holds about 250 bodies up to 8 pages and `methods / 8` bodies beyond, so the work of a page
-grows with the number of methods there. Replay checks pages concurrently, so the peak is the sum of
-the pages running together. One page of 1,346 bodies, the page of 10,767 bodies, peaks at 2.5 GB and
-takes 22 seconds above the preparation. The body check costs a time linear in the image once, to check
-and arrange it, and then per body a time linear in its bytes and logarithmic in the image. Each page
-of bodies prepares every pinned image again, so the images are prepared at most nine times.
-`verify` and `check` never run or read the audit.
+A failed request produces no successful certificate. Once selection and pin matching succeed,
+its failure report includes all facts and matched images. A named rejected binding theorem marks
+only its own subject `failed`; this means the check was rejected. Unclassified build/replay,
+resource and integrity failures leave subjects `not covered` with the failure stage and diagnostic.
+Selection, digest parsing, pin matching and full-import preflight failures precede the attempt
+and have no binding payload. A failed attempt never reports a fact as trusted or reconfirmed.
+
+The image decoder supports metadata tables through `0x2C`, without pointer or edit-and-continue
+tables, and the `#~`, `#Strings`, `#US`, `#GUID` and `#Blob` streams. Unsupported image structure
+rejects the request. Deep verification repeats its binding work on each request.
 
 ## Start a proof
 
@@ -817,6 +756,7 @@ Lean and Lake must be installed.
 | `--proof` | The proof file. The default is the saved setting, else `Proof.lean` in the output directory. |
 | `--theorem` | The theorem to check. The default is the saved setting, else `ExampleProof.correctness`. |
 | `--proof-root` | The Lake package holding the proof's own modules; see [consumer proof packages](CONSUMERS.md#consumer-proof-packages). |
+| `--deep-checks digests.sha256` | Joint image binding checks using consumer-stated digests; see [deep verification](#deep-verification). |
 | `--fresh` | Bypass proof and support reuse; the source-bound library cache is kept. |
 | `--rebuild-library` | Rebuild the library as well. CI bypasses the local library cache automatically. |
 | `--goals` | Print the goal at each hole; see [goals of an unfinished proof](#goals-of-an-unfinished-proof). |

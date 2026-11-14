@@ -2,7 +2,7 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
-#:include ../scripts/BindingAudit.cs
+#:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/BindingImage.cs
@@ -113,7 +113,8 @@ foreach (var (name, result) in methods)
     Directory.CreateDirectory(output);
     var proof = Path.Combine(output, "BoundaryProof.lean");
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\nnamespace ExampleProof\n" +
-        string.Join("", claims.Select((claim, index) => $"theorem case{index} : {claim} := by rfl\n")) +
+        string.Join("", claims.Select((claim, index) =>
+            $"theorem case{index} : {claim} := by cil_kernel_rfl\n#print axioms case{index}\n")) +
         "theorem correctness :\n" + Balanced(claims, false) + " :=\n" +
         Balanced(Enumerable.Range(0, claims.Count).Select(index => "case" + index).ToArray(), true) + "\nend ExampleProof\n");
     requests.Add(new GeneratedVerification(Selector(name), proof, output));
