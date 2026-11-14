@@ -19,6 +19,11 @@ using Srm = System.Reflection.Metadata;
 // Every identity of the corpus is rendered with ToLean(), elaborated by Lean, and shown by CIL/Identity.lean's
 // display; that text must equal ToDisplay(). Each record is first checked against the raw metadata rows it reads.
 var clock = Stopwatch.StartNew();
+if (args.Contains("--assembly-cache-only", StringComparer.Ordinal))
+{
+    CheckAssemblyCache();
+    return;
+}
 if (args.Contains("--heap-bounds-only", StringComparer.Ordinal))
 {
     CheckHeapBounds();
@@ -37,6 +42,7 @@ if (args.Contains("--code-cost", StringComparer.Ordinal))
 CheckScaling();
 if (args.Contains("--scaling-only", StringComparer.Ordinal)) return;
 CheckHeapBounds();
+CheckAssemblyCache();
 var directory = At("artifacts/Identities");
 Directory.CreateDirectory(directory);
 var examplesPath = At("Examples/Assembly/bin/Examples.dll");
@@ -407,6 +413,59 @@ static void CheckEquality(string path, ReaderParameters parameters, IdentityCorp
     if (!types.All(first.Contains) || again.GetTypes().Count() != types.Count)
         throw new InvalidOperationException("A second reading of Examples.dll gives other type identities");
     Console.WriteLine($"PASS {types.Count} type identities of a second reading equal the first");
+}
+
+static void CheckAssemblyCache()
+{
+    byte[] Create(int keyBytes, string name)
+    {
+        using var assembly = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition(name, new Version(1, 0)), name, ModuleKind.Dll);
+        foreach (string referenceName in new[] { "First", "Second" })
+            assembly.MainModule.AssemblyReferences.Add(new AssemblyNameReference(referenceName, new Version(1, 0))
+                { PublicKey = new byte[keyBytes] });
+        assembly.MainModule.AssemblyReferences.Add(new AssemblyNameReference("Invalid", new Version(1, 0))
+            { PublicKeyToken = [1, 2, 3] });
+        using var stream = new MemoryStream();
+        assembly.Write(stream);
+        return stream.ToArray();
+    }
+
+    foreach (int keyBytes in new[] { 4096, 32768, 262144 })
+    {
+        byte[] bytes = Create(keyBytes, "Cache");
+        using var pe = new PEReader(new MemoryStream(bytes));
+        using var module = ModuleDefinition.ReadModule(new MemoryStream(bytes));
+        var image = new MetadataImage(pe);
+        var references = module.AssemblyReferences;
+        var first = AssemblyName.Of(references[0], image);
+        var second = AssemblyName.Of(references[1], image);
+        if (first is null || second is null || first == second)
+            throw new InvalidOperationException("Distinct assembly rows aliased");
+        if (AssemblyName.Of(references[2], image) is not null)
+            throw new InvalidOperationException("Invalid token was admitted");
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var watch = Stopwatch.StartNew();
+        for (int repeat = 0; repeat < 4096; repeat++)
+        {
+            if (!ReferenceEquals(first, AssemblyName.Of(references[0], image)) ||
+                !ReferenceEquals(second, AssemblyName.Of(references[1], image)) ||
+                AssemblyName.Of(references[2], image) is not null)
+                throw new InvalidOperationException("Assembly row result was not retained by its image");
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        if (allocated > 4096)
+            throw new InvalidOperationException($"Repeated assembly rows allocated {allocated} bytes");
+        Console.WriteLine($"PASS assembly key {keyBytes} bytes: 12288 lookups, {allocated} bytes, " +
+            $"{watch.Elapsed.TotalMilliseconds:F3} ms");
+        byte[] otherBytes = Create(keyBytes, "Other");
+        using var otherPe = new PEReader(new MemoryStream(otherBytes));
+        using var otherModule = ModuleDefinition.ReadModule(new MemoryStream(otherBytes));
+        var otherImage = new MetadataImage(otherPe);
+        if (AssemblyName.Of(module.Assembly.Name, image) == AssemblyName.Of(otherModule.Assembly.Name, otherImage) ||
+            ReferenceEquals(first, AssemblyName.Of(otherModule.AssemblyReferences[0], otherImage)))
+            throw new InvalidOperationException("Distinct metadata images shared a cached assembly row");
+    }
 }
 
 static void CheckHeapBounds()
