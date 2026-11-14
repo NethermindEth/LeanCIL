@@ -34,8 +34,7 @@ internal static class IdentityRows
 
     internal static MetadataName Name(MetadataImage image, Srm.StringHandle handle)
     {
-        byte[] entry = image.StringEntry(MetadataTokens.GetHeapOffset(handle));
-        return MetadataName.FromBytes(entry.AsSpan(0, entry.Length - 1));
+        return image.Name(MetadataTokens.GetHeapOffset(handle));
     }
 
     internal static TypeLevel Level(MetadataImage image, MetadataToken token)
@@ -191,6 +190,32 @@ internal sealed record AssemblyName(MetadataName Name, AssemblyVersion Version, 
     /// <summary>The exact assembly columns of a definition or reference row in its owning image.</summary>
     internal static AssemblyName? Read(MetadataImage image, uint token)
     {
+        var columns = image.AssemblyColumns(token);
+        return columns is null ? null : new(image.Name(columns.Name), columns.Version,
+            image.Name(columns.Culture), columns.PublicKeyToken);
+    }
+
+    /// <summary>Raw name offsets and decoded fixed-width columns, without expanding string suffixes.</summary>
+    internal sealed record Columns(int Name, AssemblyVersion Version, int Culture, ulong? PublicKeyToken);
+
+    /// <summary>A normalized signing column; an invalid width is distinct from an absent token.</summary>
+    internal sealed record KeyColumns(bool Valid, ulong? Token);
+
+    internal static KeyColumns ReadKey(MetadataImage image, Srm.BlobHandle handle, bool fullKey)
+    {
+        byte[] bytes = image.Reader.GetBlobBytes(handle);
+        image.RecordSigningBytes(bytes.Length);
+        if (fullKey && bytes.Length != 0) bytes = SHA1.HashData(bytes)[^TokenBytes..].Reverse().ToArray();
+        return bytes.Length switch
+        {
+            0 => new(true, null),
+            TokenBytes => new(true, BinaryPrimitives.ReadUInt64BigEndian(bytes)),
+            _ => new(false, null)
+        };
+    }
+
+    internal static Columns? ReadColumns(MetadataImage image, uint token)
+    {
         var reader = image.Reader;
         if (token == 0x20000001)
         {
@@ -205,14 +230,13 @@ internal sealed record AssemblyName(MetadataName Name, AssemblyVersion Version, 
         return FromRow(reference.Name, reference.Version, reference.Culture, reference.PublicKeyOrToken,
             (reference.Flags & System.Reflection.AssemblyFlags.PublicKey) != 0);
 
-        AssemblyName? FromRow(Srm.StringHandle name, Version version, Srm.StringHandle culture,
+        Columns? FromRow(Srm.StringHandle name, Version version, Srm.StringHandle culture,
             Srm.BlobHandle key, bool fullKey)
         {
-            byte[] token = reader.GetBlobBytes(key);
-            if (fullKey && token.Length != 0) token = SHA1.HashData(token)[^TokenBytes..].Reverse().ToArray();
-            if (token.Length is not (0 or TokenBytes) || AssemblyVersion.Of(version) is not { } columns) return null;
-            return new(IdentityRows.Name(image, name), columns, IdentityRows.Name(image, culture),
-                token.Length == TokenBytes ? BinaryPrimitives.ReadUInt64BigEndian(token) : null);
+            var token = image.SigningKey(key, fullKey);
+            if (!token.Valid || AssemblyVersion.Of(version) is not { } columns) return null;
+            return new(MetadataTokens.GetHeapOffset(name), columns, MetadataTokens.GetHeapOffset(culture),
+                token.Token);
         }
     }
 
@@ -310,8 +334,15 @@ internal sealed record TypeIdentity(AssemblyName Assembly, MetadataName Namespac
             throw new InvalidDataException("Assembly row without a version or an eight-byte public key token: " +
                 definition.Module.Assembly.Name.FullName);
         var enclosing = ImmutableArray.CreateBuilder<TypeLevel>();
-        for (TypeDefinition? outer = definition.DeclaringType; outer is not null; outer = outer.DeclaringType)
-            enclosing.Add(TypeLevel.Of(outer, image));
+        var visited = new HashSet<uint>();
+        uint parent = image.NamedType(definition.MetadataToken.ToUInt32()).Parent;
+        while (parent != 0)
+        {
+            if (!visited.Add(parent)) throw new InvalidDataException("Cyclic nested type identity");
+            var row = image.NamedType(parent);
+            enclosing.Add(new(image.Name(row.Namespace), image.Name(row.Name)));
+            parent = row.Parent;
+        }
         enclosing.Reverse();
         TypeLevel level = TypeLevel.Of(definition, image);
         return new(assembly, level.Namespace, enclosing.ToImmutable(), level.Name);

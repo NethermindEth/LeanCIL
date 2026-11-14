@@ -112,7 +112,7 @@ internal static class Spans
     {
         if (address.Next is { OpCode.Code: Code.Initobj, Operand: TypeReference initialized } reset)
         {
-            if (MethodSpecialization.SignatureType(initialized) != MethodSpecialization.SignatureType(localType))
+            if (StructuralSignatures.Current.Type(initialized) != StructuralSignatures.Current.Type(localType))
                 throw new InvalidDataException("Span default type does not match its local");
             return Width(localType, profile.Architecture) is int width
                 ? (reset, new SpanEmpty(width, Writable(localType))) : null;

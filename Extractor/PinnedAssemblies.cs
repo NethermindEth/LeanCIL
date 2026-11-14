@@ -50,7 +50,8 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly Dictionary<MetadataName, string> platformPaths = PlatformPaths();
     readonly Dictionary<AssemblyNameReference, IdentityRow> identityRows = new(ReferenceEqualityComparer.Instance);
     readonly Dictionary<MetadataImage, Dictionary<uint, IdentityRow>> rowsByImage = [];
-    readonly Dictionary<ModuleDefinition, AssemblyNameReference[]> registrations = [];
+    sealed record Registration(AssemblyNameReference[] Names, StructuralSignatures.Primitive[] Primitives);
+    readonly Dictionary<ModuleDefinition, Registration> registrations = [];
     readonly Dictionary<ModuleDefinition, MemoryStream> ownedModules = [];
     bool disposed;
     readonly Dictionary<ModuleDefinition, ModuleDefinition> originals = [];
@@ -64,6 +65,8 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     readonly List<(Pin Pin, string Path, ModuleDefinition Module)> references = [];
 
     internal ModuleDefinition Selected { get; }
+
+    internal StructuralSignatures Signatures { get; }
 
     internal Pin SelectedPin { get; }
 
@@ -81,6 +84,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
     internal PinnedAssemblies(byte[] selected, string selectedHash, IEnumerable<Source> sources,
         Func<string, Program.ExtractionBatch.AssemblySnapshot>? readReference = null)
     {
+        Signatures = new(this);
         previous = active;
         try
         {
@@ -237,7 +241,19 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
 
     /// <summary>The raw identity rows of an executable pin or a verified contract import.</summary>
     internal MetadataImage IdentityMetadata(ModuleDefinition module) =>
-        identityImages.TryGetValue(module, out var image) ? image.Metadata : Metadata(module);
+        RegisteredMetadata(module);
+
+    internal void RequireRegistered(ModuleDefinition module)
+    {
+        if (disposed || !registrations.ContainsKey(module))
+            throw new InvalidDataException("Module identity is not registered in this session");
+    }
+
+    MetadataImage RegisteredMetadata(ModuleDefinition module)
+    {
+        RequireRegistered(module);
+        return identityImages.TryGetValue(module, out var image) ? image.Metadata : Metadata(module);
+    }
 
     /// <summary>
     /// The working module that <paramref name="module"/> is the untouched copy of, or the module itself.
@@ -349,20 +365,39 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
         if (!rows.TryGetValue(0x20000001, out var definition))
             rows.Add(0x20000001, definition = new(image, 0x20000001));
         definition.Read();
-        if (!knownImage) rowsByImage.Add(image, rows);
-        foreach (AssemblyNameReference name in names)
+        var primitiveEntries = Signatures.Prepare(module, image, names);
+        int added = 0;
+        bool published = false;
+        try
         {
-            uint token = name.MetadataToken.ToUInt32();
-            if (!rows.TryGetValue(token, out var row)) rows.Add(token, row = new(image, token));
-            identityRows.Add(name, row);
+            if (!knownImage) rowsByImage.Add(image, rows);
+            foreach (AssemblyNameReference name in names)
+            {
+                uint token = name.MetadataToken.ToUInt32();
+                if (!rows.TryGetValue(token, out var row)) rows.Add(token, row = new(image, token));
+                identityRows.Add(name, row);
+                added++;
+            }
+            Signatures.Publish(primitiveEntries);
+            published = true;
+            registrations.Add(module, new(names, primitiveEntries));
         }
-        registrations.Add(module, names);
+        catch
+        {
+            if (published) Signatures.Remove(primitiveEntries);
+            for (int index = 0; index < added; index++) identityRows.Remove(names[index]);
+            if (!knownImage) rowsByImage.Remove(image);
+            throw;
+        }
     }
 
     void UnregisterRows(ModuleDefinition module)
     {
-        if (registrations.Remove(module, out var names))
-            foreach (AssemblyNameReference name in names) identityRows.Remove(name);
+        if (registrations.Remove(module, out var registration))
+        {
+            foreach (AssemblyNameReference name in registration.Names) identityRows.Remove(name);
+            Signatures.Remove(registration.Primitives);
+        }
     }
 
     void ReleaseModule(ModuleDefinition module)
@@ -386,6 +421,7 @@ internal sealed class PinnedAssemblies : IAssemblyResolver
             stream.Dispose();
         }
         identityRows.Clear();
+        Signatures.Dispose();
         rowsByImage.Clear();
         registrations.Clear();
         ownedModules.Clear();
