@@ -14,6 +14,18 @@ namespace Nethermind.LeanCIL;
 /// <summary>Identity columns read directly from the module image named by a metadata token.</summary>
 internal static class IdentityRows
 {
+    /// <summary>Whether a raw top-level type row has the required name and, when supplied, assembly scope.</summary>
+    internal static bool TopLevelMatches(TypeReference type, TypeLevel expected, AssemblyName? assembly = null)
+    {
+        MetadataImage image = (PinnedAssemblies.Active ??
+            throw new InvalidDataException("Modifier identity without a pinned module image"))
+            .IdentityMetadata(type.Module);
+        RequireModule(image, type.Module);
+        var row = image.TopLevelTypeName(type.MetadataToken.ToUInt32());
+        return row is not null && row.Level == expected && (assembly is null ||
+            row.ResolutionScope >> 24 == 0x23 && image.AssemblyIdentity(row.ResolutionScope) == assembly);
+    }
+
     internal static void RequireModule(MetadataImage image, ModuleDefinition module)
     {
         if (image.Reader.GetGuid(image.Reader.GetModuleDefinition().Mvid) != module.Mvid)
