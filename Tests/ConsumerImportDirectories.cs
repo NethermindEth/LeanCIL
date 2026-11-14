@@ -42,6 +42,16 @@ partial class Program
                 Path.Combine(session, build));
             Require(Validate(trusted, Path.Combine(physical, "toolchain"), certified,
                 Path.Combine(physical, "certified")), certified);
+            var supportSource = Path.Combine(physicalSession, "Support.lean");
+            var proofSource = Path.Combine(physicalSession, "Proof.lean");
+            File.WriteAllText(supportSource, "theorem support : True := True.intro\n");
+            File.WriteAllText(proofSource, "import Support\n");
+            Require(ConsumerSupportCandidates([proofSource], [session, physicalSession], [], trusted),
+                "Support");
+            var otherSource = Path.Combine(physical, "session-sibling", "Support.lean");
+            File.WriteAllText(otherSource, "theorem other : True := True.intro\n");
+            Require(ConsumerSupportCandidates([proofSource],
+                [session, physicalSession, Path.GetDirectoryName(otherSource)!], [], trusted));
             var nested = Path.Combine(physicalSession, "nested");
             Directory.CreateDirectory(nested);
             Link(Path.Combine(physicalSession, "inside"), nested);

@@ -1178,6 +1178,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static string[] ConsumerSupportCandidates(IEnumerable<string> proofs, string[] sourceDirectories,
         IEnumerable<string> generatedModules, string toolchainModules)
     {
+        // Directory aliases name the same source; distinct roots can still contain ambiguous modules.
+        sourceDirectories = sourceDirectories.Select(PhysicalImportDirectory).Distinct().ToArray();
         var excluded = generatedModules.Concat(["Extracted", "ExtractedSymbols", "ExtractionAudit"])
             .ToHashSet(StringComparer.Ordinal);
         var imports = new Dictionary<string, string[]>(StringComparer.Ordinal);
