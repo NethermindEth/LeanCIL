@@ -342,7 +342,11 @@ performance fixture is never supplied to a verifier as a certified library.
   compositional certificate and a monolithic certificate that the elaborator's decide refuses at once,
   since only the kernel may evaluate the body and metadata check. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
-  The consumer verifies the original extraction. The fixture then checks the emitted
+  The kernel decides the monolithic certificate of call graphs of 2, 4 and 8 methods, and the
+  heartbeats and peak memory of a method added from 4 to 8 may be at most 1.2 times those of one
+  added from 2 to 4. The consumer verifies the original extraction, the extraction checks at the
+  default heartbeat budget with the kernel counted on the elaborating thread, and the same file
+  fails at 100 heartbeats with a deterministic timeout. The fixture then checks the emitted
   `Extracted.layouts_validated` theorem over a chain of nested structs, each holding the one
   before it, and over a chain of generic structs, each holding the previous distinct closed
   generic owner, and the emitted `Extracted.method0_layouts_validated` theorem over the nested
