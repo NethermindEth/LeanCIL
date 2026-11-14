@@ -127,6 +127,63 @@ Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", At("artifacts/ConsumerDe
 Environment.SetEnvironmentVariable("LEANCIL_DISABLE_SUCCESS_CACHE", null);
 try
 {
+    if (args is ["--replay-diagnostics"])
+    {
+        foreach (bool mutateOriginal in new[] { false, true })
+        {
+            var token = Guid.NewGuid().ToString("N");
+            File.AppendAllText(proof, "\n-- " + token + "\n");
+            var original = File.ReadAllText(proof);
+            var run = new DeepCheckRun(inputs);
+            SortedDictionary<string, string>? before = null;
+            bool diagnosed = false;
+            try
+            {
+                ExpectFailure(() => Verify(verification, deepRun: run, stage: stage =>
+                {
+                    if (stage == "replay diagnostics")
+                    {
+                        diagnosed = true;
+                        if (mutateOriginal) File.AppendAllText(proof, "\n-- changed during replay\n");
+                    }
+                    if (stage != "deep-check sources") return;
+                    var workspace = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+                        .Single(directory => File.Exists(Path.Combine(directory, "LeanCILProof.lean")) &&
+                            File.ReadAllText(Path.Combine(directory, "LeanCILProof.lean"))
+                                .Contains(token, StringComparison.Ordinal));
+                    var generated = Path.Combine(workspace, ".deep-checks/BindingAudit/Bodies.lean");
+                    var source = File.ReadAllText(generated);
+                    var theorem = source.IndexOf("theorem bodies :", StringComparison.Ordinal);
+                    var start = source.LastIndexOf("/--", theorem, StringComparison.Ordinal);
+                    File.WriteAllText(generated, source[..start] + """
+                        set_option debug.skipKernelTC true in
+                        run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+                          name := `BindingAudit.bodies
+                          levelParams := []
+                          type := Lean.mkConst ``False
+                          value := Lean.mkConst ``True.intro
+                        })
+                        end BindingAudit
+                        """);
+                    before = Receipts();
+                }), mutateOriginal ? "Inputs changed during consumer verification" : "Kernel replay rejected");
+            }
+            finally { File.WriteAllText(proof, original); }
+            if (!diagnosed || before is null) throw new Exception("Consumer diagnostics were not reached");
+            if (mutateOriginal) RequireUnattributed(run);
+            else
+            {
+                var failed = run.Attempt!.Failure("kernel replay", "rejected");
+                if (failed.facts.Where(fact => fact.status == FailureReports.BindingFailureStatus.Failed)
+                    .Select(fact => fact.id).Single() != "body-bytes" ||
+                    failed.images.Any(image => image.status == FailureReports.BindingFailureStatus.Failed))
+                    throw new Exception("Consumer replay attribution changed");
+            }
+            RequireNoPublication(before);
+            Console.WriteLine("PASS consumer typed replay rejection; original mutation=" + mutateOriginal);
+        }
+        return;
+    }
     if (args is ["--export-support"])
     {
         CheckExportMutation();

@@ -402,6 +402,240 @@ partial class Program : IDisposable
     }
 
     // Joint replay shares imported dependencies; rejected target sets retain the toolchain fallback.
+    Dictionary<string, string> ReplayConsumerModulesSeparately(string session, string[] targets,
+        string leanPath, bool profile)
+    {
+        var expected = SeparateReplayTargets(targets);
+        var configuredThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
+        var threads = string.IsNullOrWhiteSpace(configuredThreads) ? "2" : configuredThreads;
+        if (!uint.TryParse(threads, out var count) || count == 0)
+            throw new InvalidDataException("LEAN_NUM_THREADS must be a positive integer.");
+        var runner = Path.Combine(Path.GetTempPath(), "leancil-replay-" + Guid.NewGuid().ToString("N") + ".lean");
+        var targetsPath = Path.ChangeExtension(runner, ".json");
+        var native = !profile && auditExecutable is not null;
+        try
+        {
+            // A literal target list exceeds Lean's recursion limit for large module sets.
+            File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
+            // Use the pinned toolchain's checker, not a consumer implementation
+            // of kernel replay. Explicit targets avoid repeated search-path scans.
+            if (!native) File.WriteAllText(runner, """
+import LeanChecker
+unsafe def replayConsumerModule (name : String) : IO Nat := do
+  let started ← IO.monoMsNow
+  replayFromImports name.toName
+  return (← IO.monoMsNow) - started
+def reportConsumerModule (name : String) (elapsed : Nat) : IO Unit :=
+  IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("milliseconds", Lean.toJson elapsed)]).compress
+def reportConsumerFailure (name : String) (error : IO.Error) : IO Unit :=
+  IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("error", Lean.toJson (toString error))]).compress
+unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit := do
+  Lean.initSearchPath (← Lean.findSysroot)
+  let mut failed := false
+  if profile then
+    for name in args do
+      try
+        reportConsumerModule name (← replayConsumerModule name)
+      catch error =>
+        reportConsumerFailure name error
+        failed := true
+  else
+    let tasks ← args.toArray.mapM fun name => do
+      return (name, ← IO.asTask (replayConsumerModule name))
+    for (name, task) in tasks do
+      match task.get with
+      | .ok elapsed => reportConsumerModule name elapsed
+      | .error error =>
+        reportConsumerFailure name error
+        failed := true
+  if failed then
+    throw (IO.userError "Kernel replay rejected at least one consumer module")
+""" + "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
+                string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
+                "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n" +
+                "  replayConsumerModules args " +
+                profile.ToString().ToLowerInvariant() + "\n");
+            // Unlike leanchecker, the lean frontend defaults to hardware
+            // concurrency rather than honoring LEAN_NUM_THREADS itself.
+            string[] command = native ? [CheckedAuditExecutable(), "--replay-separately", targetsPath]
+                : [LeanExecutable, "-j" + threads, runner];
+            var environment = new Dictionary<string, string>(LeanEnvironment) { ["LEAN_NUM_THREADS"] = threads };
+            var result = Execute(command, session, leanPath, progress: profile
+                ? "Profiled kernel replay of consumer modules" : "Kernel replay of consumer proof and dependencies",
+                environment: environment);
+            if (native) CheckedAuditExecutable();
+            try { return ParseExpectedReplayResults(expected, result.Code, result.Stdout); }
+            catch (InvalidDataException)
+            {
+                throw new InvalidOperationException(
+                    $"Command failed ({result.Code}): {string.Join(' ', command)}\n{result.Output}");
+            }
+        }
+        finally { File.Delete(runner); File.Delete(targetsPath); }
+    }
+
+    enum ReplayRejectionKind
+    {
+        unknownConstant, alreadyDeclared, declTypeMismatch, declHasMVars, declHasFVars,
+        funExpected, typeExpected, letTypeMismatch, exprTypeMismatch, appTypeMismatch,
+        invalidProj, thmTypeIsNotProp, constructorMismatch, recursorMismatch
+    }
+
+    sealed record ReplayRejection(string Declaration, ReplayRejectionKind Kind);
+
+    /// <summary>Only a complete exact diagnostic stream can attribute a kernel rejection.</summary>
+    static Dictionary<string, ReplayRejection> ParseReplayDiagnostics(string[] targets, int exitCode, string stdout)
+    {
+        var expected = SeparateReplayTargets(targets);
+        HashSet<string> reported = new(StringComparer.Ordinal);
+        Dictionary<string, ReplayRejection> rejections = new(StringComparer.Ordinal);
+        bool completed = false;
+        if (exitCode != 0) throw new InvalidDataException("Replay diagnostics did not complete.");
+        foreach (var line in stdout.Split('\n',
+            StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!line.StartsWith('{')) continue;
+            if (completed) throw new InvalidDataException("Record after replay diagnostic completion.");
+            JsonDocument document;
+            try { document = JsonDocument.Parse(line); }
+            catch (JsonException error) { throw new InvalidDataException("Malformed replay diagnostic.", error); }
+            using (document)
+            {
+                Dictionary<string, JsonElement> fields = new(StringComparer.Ordinal);
+                foreach (var field in document.RootElement.EnumerateObject())
+                    if (!fields.TryAdd(field.Name, field.Value))
+                        throw new InvalidDataException("Duplicate replay diagnostic property.");
+                if (fields.TryGetValue("complete", out var complete))
+                {
+                    if (fields.Count != 1 || complete.ValueKind != JsonValueKind.True)
+                        throw new InvalidDataException("Invalid replay diagnostic completion.");
+                    completed = true;
+                    continue;
+                }
+                string Text(string key) => fields.TryGetValue(key, out var value) &&
+                    value.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(value.GetString())
+                    ? value.GetString()! : throw new InvalidDataException("Missing replay diagnostic " + key);
+                var module = Text("module");
+                if (!expected.Contains(module) || !reported.Add(module))
+                    throw new InvalidDataException("Unexpected or duplicate replay diagnostic module.");
+                var outcome = Text("outcome");
+                switch (outcome)
+                {
+                    case "accepted" when fields.Count == 2: break;
+                    case "unavailable" when fields.Count == 3:
+                        _ = Text("error");
+                        break;
+                    case "rejected" when fields.Count == 4:
+                        var declaration = Text("declaration");
+                        var kindText = Text("kind");
+                        if (!Enum.TryParse<ReplayRejectionKind>(kindText, out var kind) ||
+                            !Enum.IsDefined(kind) || kind.ToString() != kindText)
+                            throw new InvalidDataException("Unknown replay rejection kind.");
+                        rejections.Add(module, new(declaration, kind));
+                        break;
+                    default: throw new InvalidDataException("Invalid replay diagnostic outcome.");
+                }
+            }
+        }
+        if (!completed || reported.Count != expected.Count)
+            throw new InvalidDataException("Incomplete replay diagnostic stream.");
+        return rejections;
+    }
+
+    /// <summary>Diagnostic execution cannot replace the caller's terminal replay failure.</summary>
+    Dictionary<string, ReplayRejection> DiagnoseReplayFailures(string session, string[] targets, string leanPath)
+    {
+        _ = SeparateReplayTargets(targets);
+        if (targets.Length == 0 || auditExecutable is null) return new(StringComparer.Ordinal);
+        var input = Path.Combine(Path.GetTempPath(), "leancil-diagnose-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(input, JsonSerializer.Serialize(targets));
+            var result = Execute([CheckedAuditExecutable(), "--diagnose-replay", input], session, leanPath,
+                progress: "Diagnosing rejected kernel replay", environment: LeanEnvironment);
+            CheckedAuditExecutable();
+            return ParseReplayDiagnostics(targets, result.Code, result.Stdout);
+        }
+        finally { File.Delete(input); }
+    }
+
+    /// <summary>Every replay target is a nonempty unique exact module name.</summary>
+    static HashSet<string> SeparateReplayTargets(string[] targets)
+    {
+        var expected = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var target in targets)
+            if (string.IsNullOrWhiteSpace(target) || !expected.Add(target))
+                throw new InvalidDataException("Replay targets must have unique nonempty names");
+        return expected;
+    }
+
+    /// <summary>Exactly one valid result is required for each requested module.</summary>
+    static Dictionary<string, string> ParseSeparateReplayResults(string[] targets, int exitCode, string stdout)
+        => ParseExpectedReplayResults(SeparateReplayTargets(targets), exitCode, stdout);
+
+    static Dictionary<string, string> ParseExpectedReplayResults(HashSet<string> expected, int exitCode, string stdout)
+    {
+        var reported = new HashSet<string>(StringComparer.Ordinal);
+        var failures = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in stdout.Split('\n',
+            StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!line.StartsWith('{')) continue;
+            var (module, error) = SeparateReplayRecord(line);
+            if (!expected.Contains(module) || !reported.Add(module))
+                throw new InvalidDataException("Unexpected or duplicate replay result");
+            if (error is not null) failures.Add(module, error);
+        }
+        if (reported.Count != expected.Count || (exitCode == 0) != (failures.Count == 0))
+            throw new InvalidDataException("Incomplete replay results");
+        return failures;
+    }
+
+    /// <summary>A result has one module and exactly one typed success or failure field.</summary>
+    static (string Module, string? Error) SeparateReplayRecord(string line)
+    {
+        JsonDocument document;
+        try { document = JsonDocument.Parse(line); }
+        catch (JsonException error) { throw new InvalidDataException("Malformed replay result", error); }
+        using (document)
+        {
+            const int moduleField = 1, elapsedField = 2, errorField = 4;
+            int fields = 0;
+            JsonElement module = default, elapsed = default, error = default;
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                int field = property.Name switch
+                {
+                    "module" => moduleField,
+                    "milliseconds" => elapsedField,
+                    "error" => errorField,
+                    _ => throw new InvalidDataException("Unknown replay result field")
+                };
+                if ((fields & field) != 0) throw new InvalidDataException("Duplicate replay result field");
+                fields |= field;
+                switch (field)
+                {
+                    case moduleField: module = property.Value; break;
+                    case elapsedField: elapsed = property.Value; break;
+                    case errorField: error = property.Value; break;
+                }
+            }
+            if (fields != (moduleField | elapsedField) && fields != (moduleField | errorField) ||
+                module.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(module.GetString()))
+                throw new InvalidDataException("Invalid replay result shape");
+            if ((fields & elapsedField) != 0)
+            {
+                if (elapsed.ValueKind != JsonValueKind.Number || !elapsed.TryGetUInt64(out _))
+                    throw new InvalidDataException("Invalid replay elapsed time");
+                return (module.GetString()!, null);
+            }
+            if (error.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(error.GetString()))
+                throw new InvalidDataException("Invalid replay error");
+            return (module.GetString()!, error.GetString());
+        }
+    }
+
+
     void ReplayCheckedModules(string[] targets, string leanPath, string progress)
     {
         if ((targets.Length > 1 || (targets.Length == 1 && auditExecutable is not null)) &&
@@ -4400,6 +4634,18 @@ partial class Program : IDisposable
                 RequireDeepBindingStable();
                 RequireStagedProofSources();
             }
+            void RequireReplayDiagnosticInputs()
+            {
+                if (auditExecutable is not null) CheckedAuditExecutable();
+                deepRun?.Attempt?.RequireIdentity(extraction);
+                RequireOriginalProofSources();
+                if (!Same(before, Inputs(proof, settings)))
+                    throw new InvalidOperationException("Inputs changed during verification");
+                RunExtractor(existingArtifacts ? ["dotnet", ExtractorPath, "check", output]
+                    : Extract("check", assembly, identity, entry, output, profile));
+                RequireCertifiedLibraryContents();
+                RequireDeepStable();
+            }
             RequireContractInterfaceArtifacts(fresh, importModules, acceptedInterfaceArtifacts);
             RequireOnlyAdded(bound, built, "Proof");
             RequireReplayedImports(fresh, session);
@@ -4455,8 +4701,40 @@ partial class Program : IDisposable
                     }
                     // A rejected combined replay retains the original checker diagnostics.
                     if (audited is null)
-                        ReplayCheckedModules(replay, leanPath,
-                            (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                    {
+                        if (deep is not null) RequireReplayDiagnosticInputs();
+                        try
+                        {
+                            ReplayCheckedModules(replay, leanPath,
+                                (proofRestored ? "Kernel replay of extraction: " : "Kernel replay: ") + entry);
+                        }
+                        catch (InvalidOperationException) when (deep is not null)
+                        {
+                            RequireReplayDiagnosticInputs();
+                            Dictionary<string, ReplayRejection>? rejections = null;
+                            Dictionary<string, string>? isolatedFailures = null;
+                            try
+                            {
+                                isolatedFailures = ReplayConsumerModulesSeparately(fresh, replay, leanPath, false);
+                            }
+                            catch (Exception) { }
+                            RequireReplayDiagnosticInputs();
+                            if (isolatedFailures is not null)
+                            {
+                                stage?.Invoke("replay diagnostics");
+                                RequireReplayDiagnosticInputs();
+                                try
+                                {
+                                    rejections = DiagnoseReplayFailures(fresh,
+                                        deep.OwnedFailures(isolatedFailures.Keys), leanPath);
+                                }
+                                catch (Exception) { }
+                                RequireReplayDiagnosticInputs();
+                            }
+                            if (rejections is not null) deep.RejectReplay(rejections, deepRun?.Attempt);
+                            throw;
+                        }
+                    }
                     stage?.Invoke("theorem audit");
                 }
                 // The audit reads the replayed bytes; all source and artifact guards still follow it.

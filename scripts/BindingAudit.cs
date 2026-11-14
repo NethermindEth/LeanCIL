@@ -133,6 +133,26 @@ partial class Program
     {
         internal BindingRequest[] Requests => Targets.Requests;
 
+        internal string[] OwnedFailures(IEnumerable<string> failures) => failures.Where(module =>
+            Targets.Modules.TryGetValue(module, out var subject) && subject is not null).ToArray();
+
+        /// <summary>Only trusted generated module ownership selects a rejected binding subject.</summary>
+        internal void RejectReplay(IReadOnlyDictionary<string, ReplayRejection> rejections,
+            DeepCheckAttempt? attempt)
+        {
+            if (attempt is null) return;
+            foreach (var (module, rejection) in rejections)
+            {
+                if (!Targets.Modules.TryGetValue(module, out var subject)) continue;
+                var reason = $"Kernel rejected {rejection.Declaration}: {rejection.Kind}";
+                switch (subject)
+                {
+                    case BindingSubject.Fact fact: attempt.RejectFact(fact.Value, reason); break;
+                    case BindingSubject.Image image: attempt.RejectImage(image.Digest, reason); break;
+                }
+            }
+        }
+
         /// <summary>Attributes only complete named audit rejections after physical guards have passed.</summary>
         internal void RequireTheorems(AuditedOleans audited, IReadOnlyList<AuditRequest> expected,
             DeepCheckAttempt? attempt)

@@ -86,6 +86,29 @@ def sequentialChecks : IO Unit := do
 
 #eval sequentialChecks
 
+/-- A malformed sequential block keeps deferred semantic failures unavailable. -/
+def sequentialUnavailable : IO Unit := do
+  let environment ← Lean.mkEmptyEnvironment
+  let badProof : Lean.TheoremVal := {
+    name := `Dependency, levelParams := [], type := Lean.mkSort .zero, value := Lean.mkSort .zero }
+  let cancel ← IO.CancelToken.new
+  match ← checkDeclaration environment.toKernelEnv (.thmDecl badProof) cancel with
+  | .rejected _ (some _) => pure ()
+  | _ => throw <| IO.userError "Expected a semantic deferred failure"
+  let malformed : Lean.InductiveVal := { (default : Lean.InductiveVal) with
+    name := `Block, type := Lean.mkConst `Dependency, all := [`Missing] }
+  let constants : Std.HashMap Lean.Name Lean.ConstantInfo :=
+    ({} : Std.HashMap Lean.Name Lean.ConstantInfo)
+      |>.insert `Block (.inductInfo malformed) |>.insert `Dependency (.thmInfo badProof)
+  let rejection ← IO.mkRef none
+  let mut failed := false
+  try discard <| replay constants environment.toKernelEnv (some rejection)
+  catch _ => failed := true
+  unless failed && (← rejection.get).isNone do
+    throw <| IO.userError "Sequential unavailability was overwritten by a deferred rejection"
+
+#eval sequentialUnavailable
+
 /-- Constructor and recursor mismatches require both records with the expected kind. -/
 def postponedChecks : IO Unit := do
   let env ← Lean.mkEmptyEnvironment
@@ -133,8 +156,9 @@ def ownership : IO Unit := do
   let mutualInfo : Lean.ConstantInfo := .thmInfo {
     name := `Owned, levelParams := [], type := Lean.mkSort .zero,
     value := Lean.mkSort .zero, all := [`Unowned] }
-  let imported ← match env.addDeclCore 0 0 (.axiomDecl
-      { name := `Owned, levelParams := [], type := Lean.mkSort .zero, isUnsafe := false }) none with
+  let ownedDeclaration := Lean.Declaration.axiomDecl
+    { name := `Owned, levelParams := [], type := Lean.mkSort .zero, isUnsafe := false }
+  let imported ← match env.addDeclCore 0 0 ownedDeclaration none with
     | .ok imported => pure imported
     | .error error => throw <| IO.userError (← kernelMessage error)
   for (data, environment) in #[(base, imported),

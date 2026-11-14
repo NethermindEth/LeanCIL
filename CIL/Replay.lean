@@ -385,7 +385,8 @@ def diagnosticConstants (complete : Lean.ModuleData) (env : Lean.Environment) :
     throw <| IO.userError "Mismatched declaration inventory"
   let mut constants : Std.HashMap Lean.Name Lean.ConstantInfo := {}
   for name in complete.constNames, info in complete.constants do
-    if name.isAnonymous || name != info.name || constants.contains name || (env.find? name).isSome then
+    if name.isAnonymous || name != info.name || constants.contains name ||
+        (env.find? name).isSome then
       throw <| IO.userError s!"Ambiguous declaration ownership: {name}"
     constants := constants.insert name info
   let mut extra : Std.HashSet Lean.Name := {}

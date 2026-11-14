@@ -325,9 +325,14 @@ void RequireUnattributed(DeepCheckRun run, string stage)
 void CheckFailureDiagnostics()
 {
     using Program privateChecker = new();
-    privateChecker.Library(Inputs(proof), writes: true);
-    if (!privateChecker.ownsLibrary || privateChecker.libraryStamps is not null)
-        throw new InvalidOperationException("Expected an owned private library for the integrity regression");
+    if (args is not ["--diagnostic", var selectedCase] ||
+        selectedCase is "original-library" or "originals" or "replay-library" or "replay-auditor" or
+            "kernel" or "kernel-remaining")
+    {
+        privateChecker.Library(Inputs(proof), writes: true);
+        if (!privateChecker.ownsLibrary || privateChecker.libraryStamps is not null)
+            throw new InvalidOperationException("Expected an owned private library for the integrity regression");
+    }
     var priorCache = Environment.GetEnvironmentVariable("LEANCIL_CACHE_DIR");
     Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", Path.Combine(fixture.Root, "DiagnosticsCache"));
     try
@@ -359,17 +364,26 @@ void CheckFailureDiagnostics()
         }
 
         foreach (var target in new[] { "body-type", "body-axiom", "digest-type", "images-type",
+            "body-kernel", "digest-kernel", "images-kernel",
+            "replay-proof", "replay-identity", "replay-library", "replay-assembly", "replay-auditor",
             "original-proof", "original-identity", "original-library", "original-assembly" })
         {
             if (args is ["--diagnostic", var only] && target != only &&
+                !((only == "kernel" || only == "kernel-remaining" && target != "body-kernel") &&
+                    (target.EndsWith("-kernel", StringComparison.Ordinal) ||
+                        target.StartsWith("replay-", StringComparison.Ordinal))) &&
                 !(only == "originals" && target.StartsWith("original-", StringComparison.Ordinal))) continue;
-            var checker = target == "original-library" ? privateChecker : verification;
+            bool kernelForgery = target.EndsWith("-kernel", StringComparison.Ordinal) ||
+                target.StartsWith("replay-", StringComparison.Ordinal);
+            var checker = target is "original-library" or "replay-library" or "replay-auditor"
+                ? privateChecker : verification;
             var originalPath = target switch
             {
-                "original-proof" => proof,
-                "original-identity" => Path.Combine(output, "identity.json"),
-                "original-library" => Path.Combine(checker.library!, "CIL.lean"),
-                "original-assembly" => image,
+                "original-proof" or "replay-proof" => proof,
+                "original-identity" or "replay-identity" => Path.Combine(output, "identity.json"),
+                "original-library" or "replay-library" => Path.Combine(checker.library!, "CIL.lean"),
+                "original-assembly" or "replay-assembly" => image,
+                "replay-auditor" => checker.CheckedAuditExecutable(),
                 _ => null
             };
             var originalBytes = originalPath is null ? null : File.ReadAllBytes(originalPath);
@@ -381,11 +395,12 @@ void CheckFailureDiagnostics()
             string[]? before = null;
             var diagnostic = target switch
             {
+                "body-kernel" or "digest-kernel" or "images-kernel" => "while replaying",
                 "body-axiom" => "Unapproved proof axioms",
-                "original-proof" => "Proof inputs changed",
-                "original-identity" => "extraction identity changed",
-                "original-library" => "certified library contents changed",
-                "original-assembly" => "assembly has changed since extraction",
+                "original-proof" or "replay-proof" => "Proof inputs changed",
+                "original-identity" or "replay-identity" => "extraction identity changed",
+                "original-library" or "replay-library" or "replay-auditor" => "certified library contents changed",
+                "original-assembly" or "replay-assembly" => "assembly has changed since extraction",
                 _ => "Theorem statement mismatch"
             };
             try
@@ -394,12 +409,13 @@ void CheckFailureDiagnostics()
                     deepRun: run, stage: stage =>
                 {
                     lastStage = stage;
-                    if (stage == "theorem audit" && originalPath is not null && !originalChanged)
+                    if (stage == (kernelForgery ? "replay diagnostics" : "theorem audit") &&
+                        originalPath is not null && !originalChanged)
                     {
                         var bytes = (byte[])originalBytes!.Clone();
                         const int dosStubOffset = 0x50;
-                        var offset = target == "original-assembly" ? dosStubOffset : 0;
-                        if (target == "original-assembly" &&
+                        var offset = target is "original-assembly" or "replay-assembly" ? dosStubOffset : 0;
+                        if (target is "original-assembly" or "replay-assembly" &&
                             (bytes.Length <= dosStubOffset || BitConverter.ToInt32(bytes, 0x3c) <= dosStubOffset))
                             throw new InvalidOperationException("Fixture has no DOS stub byte before the PE header");
                         bytes[offset] ^= 1;
@@ -409,20 +425,36 @@ void CheckFailureDiagnostics()
                     }
                     if (stage != "deep-check sources") return;
                     var fresh = Directory.EnumerateDirectories(output, "proof-*").Single();
-                    var module = target == "digest-type" ? "I" + Sha(image)
-                        : target == "images-type" ? "Images" : "Bodies";
+                    var module = target is "digest-type" or "digest-kernel" ? "I" + Sha(image)
+                        : target is "images-type" or "images-kernel" ? "Images" : "Bodies";
                     var path = Path.Combine(fresh, "BindingAudit", module + ".lean");
                     var source = File.ReadAllText(path);
-                    var theorem = target == "digest-type" ? "digest"
-                        : target == "images-type" ? "images_eq" : "bodies";
+                    var theorem = target is "digest-type" or "digest-kernel" ? "digest"
+                        : target is "images-type" or "images-kernel" ? "images_eq" : "bodies";
                     var start = source.IndexOf("theorem " + theorem + " :", StringComparison.Ordinal);
                     if (start < 0) throw new InvalidOperationException("Missing generated theorem");
-                    var ns = target == "digest-type" ? "BindingAudit." + module : "BindingAudit";
+                    var ns = target is "digest-type" or "digest-kernel" ? "BindingAudit." + module : "BindingAudit";
                     string replacement = target == "body-axiom"
                         ? "axiom cheat : StrictBinding.BodiesBound images Extracted.methodEvidence\n" +
                             "theorem bodies : StrictBinding.BodiesBound images Extracted.methodEvidence := cheat\n"
                         : "theorem " + theorem + " : True := True.intro\n";
-                    File.WriteAllText(path, source[..start] + replacement + "#print axioms " + theorem +
+                    if (kernelForgery)
+                    {
+                        var documentation = source.LastIndexOf("/--", start, StringComparison.Ordinal);
+                        if (documentation >= 0) start = documentation;
+                        replacement = $$"""
+                            set_option debug.skipKernelTC true in
+                            run_cmd Lean.Elab.Command.liftCoreM <| Lean.addDecl (.thmDecl {
+                              name := `{{ns}}.{{theorem}}
+                              levelParams := []
+                              type := Lean.mkConst ``False
+                              value := Lean.mkConst ``True.intro
+                            })
+
+                            """;
+                    }
+                    File.WriteAllText(path, (kernelForgery ? "import Lean\n" : "") + source[..start] +
+                        replacement + "#print axioms " + theorem +
                         "\nend " + ns + "\n");
                     changed = true;
                     before = Receipts();
@@ -445,7 +477,7 @@ void CheckFailureDiagnostics()
             string[] expectedFacts = target.StartsWith("body-", StringComparison.Ordinal) ? ["body-bytes"] : [];
             if (!changed || before is null || !before.SequenceEqual(Receipts()) ||
                 !failedFacts.SequenceEqual(expectedFacts) ||
-                !failedImages.SequenceEqual(target == "digest-type" ? [Sha(image)] : []))
+                !failedImages.SequenceEqual(target is "digest-type" or "digest-kernel" ? [Sha(image)] : []))
                 throw new InvalidOperationException("Wrong named deep rejection attribution: " + target +
                     "; changed=" + changed + "; facts=" + string.Join(",", failedFacts) +
                     "; images=" + string.Join(",", failedImages) + "; receipts added=" +
@@ -456,7 +488,8 @@ void CheckFailureDiagnostics()
                 if (!originalChanged) throw new InvalidOperationException("Original input mutation did not run");
                 RequireUnattributed(run, lastStage);
             }
-            else if (lastStage != "theorem audit")
+            else if (lastStage != (target.EndsWith("-kernel", StringComparison.Ordinal)
+                ? "replay diagnostics" : "theorem audit"))
                 throw new InvalidOperationException("Named rejection lost the theorem audit stage: " + lastStage);
             RequireNoReport();
             Console.WriteLine(originalPath is null
