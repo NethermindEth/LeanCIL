@@ -128,7 +128,7 @@ theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value
   | root root => cases h
   | readOnlyRoot _ => cases h
   | opaque128 _ => cases h
-  | span _ _ _ => cases h
+  | span _ _ _ => exact loadLocal_result_valid m _ value h
   | array _ _ => cases h
   | methodPointer _ _ | methodTable _ _ | object _ => cases h
   | bytes kind r => exact formValue_result_valid m (.address r) value h

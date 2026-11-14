@@ -168,6 +168,29 @@ end Guards
 
 end FaultingArithmetic
 
+section LocalAddress
+open CIL CIL.Safety
+
+-- Taking a span local's address pushes the view the local holds, exactly as loading it does.
+example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) (width : Nat) (writable : Bool)
+    (view : Option SpanView)
+    (slot : frame.locals[0]? = some (.span width writable view)) :
+    step body (.localAddr 0) pc args frame stack memory =
+      step body (.local 0) pc args frame stack memory := by
+  simp only [step_localAddr_eq, step_local_eq, slot, localAddress]
+
+-- Taking a byte home's address pushes the formed home reference.
+example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) (kind : CIL.LocalKind)
+    (home : CIL.Safety.Reference) (slot : frame.locals[0]? = some (.bytes kind home)) :
+    step body (.localAddr 0) pc args frame stack memory = do
+      let address ← formValue memory (.address home)
+      return FrameAction.next (pc + 1) (address :: stack) frame memory := by
+  simp only [step_localAddr_eq, slot, localAddress]
+
+end LocalAddress
+
 -- Every generated faulting and `conv.i` equation exists and uses only the allowed axioms. At
 -- equal widths a faulting equation keeps its helper folded with the operand guard decided, the
 -- form the checked bridge reads; an unfolded unsigned bound would expand `2 ^ width`. Mixed

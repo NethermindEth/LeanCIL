@@ -16,7 +16,7 @@ internal static partial class ProofOutline
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
-        if (ops is not [Local { Index: 0 }, Constant { Width: 32, Value: 0, Numeral: true },
+        if (ops is not [LocalAddress { Index: 0 }, Constant { Width: 32, Value: 0, Numeral: true },
                 Memory { Operation: SpanItem item }, Arg { Index: 1, Narrow: null }, var store,
                 Return { Narrow: null }] || item.Width != width)
             return null;

@@ -308,23 +308,31 @@ def confinedToNone (type : Lean.Expr) : Bool :=
     (argument? type 0).any (·.isAppOfArity ``List.nil 1)
 
 open Lean Meta in
-/-- The positions of the `some` entries of `list` up to reduction, reading cons cells until one is
-    not: the locals a `knownLocals` list remembers. -/
-partial def rememberedIndices (list : Lean.Expr) (index : Nat := 0) : MetaM (Array Nat) := do
-  let cell ← whnf list
-  let some #[_, head, tail] := argumentsOf? cell ``List.cons 3 | return #[]
-  let rest ← rememberedIndices tail (index + 1)
-  if (← whnf head).isAppOfArity ``Option.some 2 then return #[index] ++ rest
-  return rest
-
-open Lean Meta in
 /-- The entries of `list` up to reduction with their positions, reading cons cells until one is
     not. -/
-partial def listEntries (list : Lean.Expr) (index : Nat := 0) :
+def listEntries (list : Lean.Expr) (index : Nat := 0) :
     MetaM (Array (Nat × Lean.Expr)) := do
-  let cell ← whnf list
-  let some #[_, head, tail] := argumentsOf? cell ``List.cons 3 | return #[]
-  return #[(index, head)] ++ (← listEntries tail (index + 1))
+  let mut remaining := list
+  let mut position := index
+  let mut entries := #[]
+  repeat
+    let cell ← whnf remaining
+    let some #[_, head, tail] := argumentsOf? cell ``List.cons 3 | return entries
+    entries := entries.push (position, head)
+    remaining := tail
+    position := position + 1
+
+open Lean Meta in
+/-- The positions of the `some` entries of `list` up to reduction, reading cons cells until one is
+    not: the locals a `knownLocals` list remembers. -/
+def rememberedIndices (list : Lean.Expr) (index : Nat := 0) : MetaM (Array Nat) := do
+  let entries ← listEntries list index
+  let mut positions := #[]
+  -- Head reductions follow the complete spine traversal, from last to first.
+  for (position, head) in entries.reverse do
+    if (← whnf head).isAppOfArity ``Option.some 2 then
+      positions := positions.push position
+  return positions.reverse
 
 open Lean Elab Tactic Meta in
 /-- Checked argument facts with their source views, shared by entry gathering and write
