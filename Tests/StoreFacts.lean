@@ -23,6 +23,11 @@ open CIL.Safety
   locals := [], returnsValue := false }
 @[cil_code] def borrowProgram : CIL.Program := [borrowMethod]
 
+/-- `*target = word` through a native-int store. -/
+@[cil_code] def nativeWordMethod : CIL.Method := {
+  code := [.ldarg 1, .ldarg 0, .stind .i, .ret], locals := [], returnsValue := false }
+@[cil_code] def nativeWordProgram : CIL.Program := [nativeWordMethod]
+
 def carryOut (a b c : CIL.W64) : CIL.W64 := (if a + b + c < a then (1 : CIL.W32) else 0).zeroExtend 64
 
 def borrowOut (a b c : CIL.W64) : CIL.W64 :=
@@ -54,6 +59,16 @@ theorem borrow_stores (a b c : CIL.W64) (difference borrow : Reference) (m m1 m2
     formedBorrow1, differenceWrite, borrowWrite]
 
 #print axioms borrow_stores
+
+/-- An eight-byte write fact steps `stind.i` as it steps `stind.i8`. -/
+theorem native_word_stores (word : CIL.W64) (target : Reference) (m m1 : Memory)
+    (formed : form m target = .ok target)
+    (written : write m target (numberBytes word.toNat 8) 1 = .ok m1) :
+    invoke nativeWordProgram (CIL.executionBound nativeWordProgram 0) 0
+      [.scalar (.i64 word), .reference (.address target)] m = .ok (m1, []) := by
+  cil_checked_steps [formed, written]
+
+#print axioms native_word_stores
 
 -- The same facts drive `cil_contract_steps` on an existential run.
 theorem carry_contract_steps (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory)
