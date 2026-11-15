@@ -240,8 +240,8 @@ example : catalog.table.find {} .call { bigMul with owner := runtimeType "System
     none := by decide +kernel
 example : catalog.siteAgrees {} (site (spanLength word)) (.memory .spanLength) = true := by
   decide +kernel
-example : catalog.table.find {} .call { spanLength word with owner := runtimeType "System.String" } =
-    none := by decide +kernel
+example : catalog.table.find {} .call
+    { spanLength word with owner := runtimeType "System.String" } = none := by decide +kernel
 example : catalog.siteAgrees {} (site (spanLength (runtimeType "System.Byte")))
     (.memory .spanLength) = true := by decide +kernel
 example : catalog.siteAgrees {} (site bigMul 115) (.memory (.bigMul64 false)) = false := by
@@ -266,8 +266,10 @@ example : ModelTable :=
   model_table% [ModelEntry.exact .call bigMul (.memory (.bigMul64 false)),
     ModelEntry.exact .call bigMul (.memory (.bigMul64 true))]
 
--- The runtime table is empty, so it models no call.
+-- The runtime table is empty, so it models no call, and a method's calls keep their call.
 example : runtimeModel {} .call bigMul = none := by decide +kernel
+example : RuntimeModelsAgree (method (site bigMul)) [true] { body with code := [.call 7 3] } := by
+  decide +kernel
 
 end Table
 

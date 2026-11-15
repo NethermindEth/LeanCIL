@@ -7,7 +7,7 @@ A runtime model is the meaning the checked interpreter gives a call to a runtime
 whose body is not extracted: an intrinsic, a checked memory helper, a hardware feature test, a
 constant, a reference comparison or subtraction, an unaligned typed transfer, `Unsafe.SkipInit`
 or the `System.Object` constructor. `CIL.Safety.runModel` executes a model, and
-`MemoryOp.callReached` names the memory operations a model may carry.
+`MemoryOp.callReached` names the memory operations no opcode emits.
 -/
 
 namespace CIL
