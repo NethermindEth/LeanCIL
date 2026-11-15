@@ -633,4 +633,11 @@ theorem misplaced_test_rejected :
       [true, true, true] castEmitted := by decide +kernel
 #print axioms misplaced_test_rejected
 
+/-- A cast emitted for a raw `isinst` is rejected: a type test stays in the opcode it lowers. -/
+theorem isinst_emitted_as_cast_rejected :
+    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw⟩]
+      { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 117, .type dogClass⟩, ⟨6, 42, .none⟩] }
+      [true, true, true] castEmitted := by decide +kernel
+#print axioms isinst_emitted_as_cast_rejected
+
 end Tests.ConstrainedEvidence
