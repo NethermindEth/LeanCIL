@@ -894,27 +894,71 @@ where
       if nextOwner == owner then collect owner first (count + 1) rest
       else (owner, (first, count)) :: collect nextOwner token 1 rest
 
-/-- Merge owner/token ordered entries within a bound of their combined lengths. -/
-private def mergeGenericOwners :
-    Nat → List (Nat × Nat) → List (Nat × Nat) → List (Nat × Nat)
+/-- Merge two lists ordered by `before`, within a bound of their combined lengths. -/
+def mergeBy {α : Type} (before : α → α → Bool) : Nat → List α → List α → List α
   | _, [], right => right
   | _, left, [] => left
   | 0, _, _ => []
   | fuel + 1, left :: leftRest, right :: rightRest =>
-    if left.1 < right.1 || (left.1 == right.1 && left.2 ≤ right.2) then
-      left :: mergeGenericOwners fuel leftRest (right :: rightRest)
-    else right :: mergeGenericOwners fuel (left :: leftRest) rightRest
+    if before left right then left :: mergeBy before fuel leftRest (right :: rightRest)
+    else right :: mergeBy before fuel (left :: leftRest) rightRest
 
-/-- Sort parameter entries by owner/token with structurally bounded O(n log n) recursion. -/
-private def sortGenericOwners : Nat → List (Nat × Nat) → List (Nat × Nat)
+/-- The entries ordered by `before` with structurally bounded O(n log n) recursion; given a fuel of
+    at least their length they are sorted, and with any fuel they are a permutation. -/
+def sortBy {α : Type} (before : α → α → Bool) : Nat → List α → List α
   | 0, entries => entries
   | _ + 1, [] => []
   | _ + 1, [entry] => [entry]
   | fuel + 1, entries =>
     let count := entries.length
     let halves := entries.splitAt (count / 2)
-    mergeGenericOwners count (sortGenericOwners fuel halves.1)
-      (sortGenericOwners fuel halves.2)
+    mergeBy before count (sortBy before fuel halves.1) (sortBy before fuel halves.2)
+
+/-- Pairs of numbers in lexicographic order. -/
+def pairBefore (first second : Nat × Nat) : Bool :=
+  first.1 < second.1 || (first.1 == second.1 && first.2 ≤ second.2)
+
+/-- The pairs in lexicographic order, in O(n log n) comparisons. -/
+def sortPairs (pairs : List (Nat × Nat)) : List (Nat × Nat) :=
+  sortBy pairBefore pairs.length pairs
+
+/-- Merging with fuel for both lists keeps exactly their elements. -/
+theorem mergeBy_perm {α : Type} (before : α → α → Bool) :
+    ∀ (fuel : Nat) (left right : List α), left.length + right.length ≤ fuel →
+      (mergeBy before fuel left right).Perm (left ++ right)
+  | _, [], right, _ => by simp [mergeBy]
+  | _, _ :: _, [], _ => by simp [mergeBy]
+  | 0, _ :: _, _ :: _, enough => by simp at enough
+  | fuel + 1, left :: leftRest, right :: rightRest, enough => by
+    simp only [List.length_cons] at enough
+    simp only [mergeBy]
+    split
+    · exact (mergeBy_perm before fuel leftRest (right :: rightRest) (by simp; omega)).cons left
+    · have rest := mergeBy_perm before fuel (left :: leftRest) rightRest (by simp; omega)
+      exact (rest.cons right).trans List.perm_middle.symm
+
+#print axioms mergeBy_perm
+
+/-- Sorting keeps exactly the entries, whatever the fuel. -/
+theorem sortBy_perm {α : Type} (before : α → α → Bool) :
+    ∀ (fuel : Nat) (entries : List α), (sortBy before fuel entries).Perm entries
+  | 0, entries => by simp [sortBy]
+  | _ + 1, [] => by simp [sortBy]
+  | _ + 1, [_] => by simp [sortBy]
+  | fuel + 1, first :: second :: rest => by
+    rw [sortBy.eq_4 _ _ _ (by simp) (by simp)]
+    have left := sortBy_perm before fuel
+      ((first :: second :: rest).splitAt ((first :: second :: rest).length / 2)).1
+    have right := sortBy_perm before fuel
+      ((first :: second :: rest).splitAt ((first :: second :: rest).length / 2)).2
+    refine (mergeBy_perm before _ _ _ ?_).trans ?_
+    · rw [left.length_eq, right.length_eq]
+      simp [List.splitAt_eq]
+      omega
+    · refine (left.append right).trans ?_
+      simp [List.splitAt_eq]
+
+#print axioms sortBy_perm
 
 /-- Index every carried generic parameter by its decoded owner in O(n log n) time. -/
 private def genericOwnerEntries (index : MetadataIndex) :
@@ -923,7 +967,7 @@ private def genericOwnerEntries (index : MetadataIndex) :
     if metadataTableOf token != Table.genericParam then return found
     let parameter ← index.genericParam token
     return (parameter.owner, token) :: found) []
-  let ordered := sortGenericOwners entries.length entries
+  let ordered := sortPairs entries
   SearchTree.ofEntries (genericOwnerGroups ordered)
 
 /-- The lookup structures of a slice, built from its bytes: its entries as trees, and the instance
