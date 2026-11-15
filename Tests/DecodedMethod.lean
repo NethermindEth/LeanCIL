@@ -54,6 +54,19 @@ theorem add_decodes :
   cil_kernel_rfl
 #print axioms add_decodes
 
+/-- An explicit receiver cannot be decoded as an additional implicit argument. -/
+theorem explicit_this_has_no_raw_method :
+    (Method.ofRaw? .scalar {} { addRaw with explicitThis := true } []).isNone = true := by
+  decide +kernel
+#print axioms explicit_this_has_no_raw_method
+
+/-- Matching EXPLICITTHIS metadata is refused even when the body bytes are valid. -/
+theorem explicit_this_has_no_body :
+    ((encodeBody pin { addRaw with explicitThis := true }).map fun body =>
+      (checkBody body { addRaw with explicitThis := true } []).toBool) = some false := by
+  decide +kernel
+#print axioms explicit_this_has_no_body
+
 /-- The method of the sub bytes against the add definition is the sub method: `Method.ofBody?`
     reads no instruction of the definition. -/
 theorem code_read_from_bytes :

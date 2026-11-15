@@ -679,7 +679,8 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
   if row.implFlags / runtimeAsyncFlag % 2 == 1 then throw (.runtimeAsync method.token)
   let signature ← decodeMethodSig (← index.blob row.signature)
   let convention := signature.convention
-  if method.hasThis != (convention / hasThisFlag % 2 == 1) ||
+  -- EXPLICITTHIS puts the receiver in the parameter list, outside the implicit receiver model.
+  if method.explicitThis || method.hasThis != (convention / hasThisFlag % 2 == 1) ||
       method.explicitThis != (convention / explicitThisFlag % 2 == 1) ||
       method.callingConvention != convention % 0x20 then throw (.methodMismatch method.token)
   let ownerToken ← env.declaringType 0 method.token

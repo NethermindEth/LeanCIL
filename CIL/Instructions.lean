@@ -265,7 +265,7 @@ inductive Receiver where
   deriving DecidableEq, Repr
 
 /-- A method's declared signature after its type arguments are closed. Aggregate types refer
-    to `LayoutEnvironment.rawLayouts`. -/
+    to `LayoutEnvironment.rawLayouts`. Only implicit receiver signatures are supported. -/
 structure DeclaredSignature where
   /-- `some` exactly for an instance method. -/
   receiver : Option Receiver := none

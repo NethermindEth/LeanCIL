@@ -204,10 +204,11 @@ def openConstraintValid (layouts : List RawLayout) (arguments : List TypeExpr)
       | none => false
     | _, _ => false
 
-/-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/
+/-- Instantiation preserves instruction encodings, offsets and branch targets exactly.
+    Explicit receiver signatures have no supported instantiation. -/
 def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
     (arguments : List TypeExpr) : Option RawMethod := do
-  if original.ownerArgumentCount != 0 ||
+  if original.explicitThis || original.ownerArgumentCount != 0 ||
       arguments.length != original.genericParameters.length + original.ownerParameters.length ||
       !arguments.all (admittedTypeArgument layouts) ||
       !((original.genericParameters ++ original.ownerParameters).zip arguments).all
