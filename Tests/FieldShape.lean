@@ -8,8 +8,8 @@ Pins `CIL.LayoutEnvironment.fieldShape`, `valueShape` and the facts `cil_field_s
 resolves to the offset and width of its checked layout entry, sign-extended only when it is
 declared as a narrow signed integer; a field whose index or held type does not match the
 declaration is unsupported; a class field resolves to the model slot of its index, a struct array
-element taking its size from the layout; and a method reads the shared facts through the
-`cil_code` simprocs.
+element taking its size from the layout; and a method, defined or known by a hypothesis on its
+environment, reads the shared facts through the `cil_code` simprocs.
 -/
 
 namespace Tests.FieldShape
@@ -81,6 +81,12 @@ theorem body_reads_high : body.fieldShape highField = .value 4 4 false := by
   simp only [cil_code]
 #print axioms body_reads_high
 
+-- A method known only by a hypothesis on its environment reads the fact through that hypothesis.
+theorem hypothesis_reads_low (method : Method) (shared : method.environment = environment) :
+    method.fieldShape lowField = .value 0 2 true := by
+  simp only [cil_code]
+#print axioms hypothesis_reads_low
+
 -- An index whose declared type is not the held type, and an index past the fields, are refused.
 theorem refuses_a_mismatched_index :
     environment.fieldShape { highField with index := 0 } =
@@ -114,6 +120,21 @@ theorem class_struct_array_slot :
         { owner := node, index := 0, type := .array inner, name := name!"items" } =
       .classSlot 0 (.array (.aggregate "T::Inner" 4)) := by decide +kernel
 #print axioms class_struct_array_slot
+
+/-- `Node.lanes`, an array of `Vector128<ulong>`, whose element name the resolver renders. -/
+def lanesField : FieldRef :=
+  { owner := node, index := 1, name := name!"lanes",
+    type := .array (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
+      (.atom runtimeScope "System.UInt64")) }
+
+cil_field_shape environment lanesField
+
+-- A vector array slot names its element as the evaluation stack records it.
+theorem lanes_vector_slot (method : Method) (shared : method.environment = environment) :
+    method.fieldShape lanesField =
+      .classSlot 8 (.array (.vector "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" 16)) :=
+  lanesField_shape shared
+#print axioms lanes_vector_slot
 
 theorem refuses_a_byref_like_array_slot :
     environment.fieldShape

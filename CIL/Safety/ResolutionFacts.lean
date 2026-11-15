@@ -13,7 +13,7 @@ so a method's facts cost time linear in its arguments and homes.
 
 `cil_field_shape` and `cil_value_shape` declare how every method of an extraction resolves one
 distinct field or type operand, against the environment those methods share, so an operand used
-at many sites of many methods costs one kernel evaluation. The `cil_code` simprocs
+at many sites of many methods costs one kernel check. The `cil_code` simprocs
 `reduceFieldShape` and `reduceValueShape` read a method's shape of such an operand from its fact.
 -/
 
@@ -377,28 +377,30 @@ elab_rules : command
 
 /-! ## Field and value shapes -/
 
-/-- The constructor form of `value`: kernel reduction to a constructor, then the same for each
-    of its fields after the type parameters. Fails on a term that is stuck before a constructor
-    or a literal. -/
-partial def kernelValue (value : Expr) : MetaM Expr := do
-  let reduced ← ofExceptKernelException (Kernel.whnf (← getEnv) (← getLCtx) value)
-  if reduced.isLit then return reduced
-  let .const name levels := reduced.getAppFn
-    | throwError "cil_shape_facts: {value} does not reduce to a constructor"
-  let some (.ctorInfo info) := (← getEnv).find? name
-    | throwError "cil_shape_facts: {value} does not reduce to a constructor"
-  let arguments := reduced.getAppArgs
-  let fields ← (arguments.extract info.numParams arguments.size).mapM kernelValue
-  return mkAppN (mkConst name levels) (arguments.extract 0 info.numParams ++ fields)
+deriving instance Lean.ToExpr for CIL.EnumStorage
+deriving instance Lean.ToExpr for CIL.ArrayElement
+deriving instance Lean.ToExpr for CIL.ClassSlot
+deriving instance Lean.ToExpr for CIL.FieldShape
+deriving instance Lean.ToExpr for CIL.ValueShape
+
+/-- The literal shape `resolution` evaluates to under the compiled resolver. The kernel still
+    checks the fact that states it, so a wrong evaluation fails the declaration, never proves it. -/
+unsafe def evaluateShape (α : Type) [ToExpr α] (shapeType : Name) (resolution : Expr) :
+    MetaM Expr :=
+  return toExpr (← evalExpr α (mkConst shapeType) resolution)
+
+/-- The name of the shape fact `cil_field_shape` or `cil_value_shape` declares for `operand`. -/
+def shapeFactName (operand : Name) : Name := operand.appendAfter "_shape"
 
 /-- Declares `{operand}_shape`: every method whose environment is `environment` resolves the
-    operand as the kernel computes, read through `methodResolver` and proved from the
-    environment's `environmentResolver` by `sharedLemma`. -/
+    operand to the shape `evaluate` gives for the environment's `environmentResolver`, read
+    through `methodResolver` and proved by `sharedLemma` once the kernel checks that shape. -/
 def declareShapeFact (environmentName operandName : Name) (methodResolver environmentResolver
-    sharedLemma shapeType : Name) (describe : String) : TermElabM Unit := do
+    sharedLemma shapeType : Name) (describe : String) (evaluate : Expr → MetaM Expr) :
+    TermElabM Unit := do
   let environment := mkConst environmentName
   let operand := mkConst operandName
-  let shape ← kernelValue (mkApp2 (mkConst environmentResolver) environment operand)
+  let shape ← evaluate (mkApp2 (mkConst environmentResolver) environment operand)
   let resolved := mkApp2 (mkConst ``Eq.refl [.one]) (mkConst shapeType) shape
   let (statement, proof) ← withLocalDecl `body .implicit (mkConst ``CIL.Method) fun body => do
     let environmentOf := mkApp (mkConst ``CIL.Method.environment) body
@@ -408,7 +410,7 @@ def declareShapeFact (environmentName operandName : Name) (methodResolver enviro
         resolved]
       return (← mkForallFVars #[body, shared] (← mkEq lhs shape),
         ← mkLambdaFVars #[body, shared] proof)
-  let name := operandName.appendAfter "_shape"
+  let name := shapeFactName operandName
   withCurrHeartbeats do
     addDecl (.thmDecl { name, levelParams := [], type := statement, value := proof })
   addDocStringCore name s!"How every method sharing `{environmentName}` resolves {describe}."
@@ -426,28 +428,32 @@ elab_rules : command
     declareShapeFact (← realizeGlobalConstNoOverloadWithInfo environment)
       (← realizeGlobalConstNoOverloadWithInfo field) ``CIL.Method.fieldShape
       ``CIL.LayoutEnvironment.fieldShape ``CIL.Method.fieldShape_of_environment ``CIL.FieldShape
-      s!"the field operand `{field.getId}`"
+      s!"the field operand `{field.getId}`" (unsafe evaluateShape FieldShape ``CIL.FieldShape)
   | `(cil_value_shape $environment:ident $type:ident) => liftTermElabM do
     declareShapeFact (← realizeGlobalConstNoOverloadWithInfo environment)
       (← realizeGlobalConstNoOverloadWithInfo type) ``CIL.Method.valueShape
       ``CIL.LayoutEnvironment.valueShape ``CIL.Method.valueShape_of_environment ``CIL.ValueShape
-      s!"the type operand `{type.getId}`"
+      s!"the type operand `{type.getId}`" (unsafe evaluateShape ValueShape ``CIL.ValueShape)
 
 /-- The shape of `resolver body operand` from `operand_shape`, when `operand` is a constant with
-    that fact and `body`'s environment unfolds to the fact's environment. The fact's premise is
-    proved by reflexivity, which the kernel checks by unfolding `body` once. -/
+    that fact and a hypothesis states `body`'s environment is the fact's, or `body` unfolds to a
+    method with that environment, which the kernel checks by unfolding `body` once. -/
 def sharedShape? (resolver : Name) (expression : Expr) : MetaM (Option Simp.Step) := do
   let (name, #[body, operand]) := expression.getAppFnArgs | return none
   unless name == resolver do return none
   let .const operandName _ := operand | return none
-  let fact := operandName.appendAfter "_shape"
+  let fact := shapeFactName operandName
   let some info := (← getEnv).find? fact | return none
   let .forallE _ _ (.forallE _ shared _ _) _ := info.type | return none
   let some (_, _, environment) := shared.eq? | return none
   if environment.hasLooseBVars then return none
-  unless ← withDefault (isDefEq (mkApp (mkConst ``CIL.Method.environment) body) environment) do
-    return none
-  let proof := mkApp2 (mkConst fact) body (← mkEqRefl environment)
+  let environmentOf := mkApp (mkConst ``CIL.Method.environment) body
+  let shared ← match ← findLocalDeclWithType? (← mkEq environmentOf environment) with
+    | some hypothesis => pure (mkFVar hypothesis)
+    | none =>
+      unless ← withDefault (isDefEq environmentOf environment) do return none
+      mkEqRefl environment
+  let proof := mkApp2 (mkConst fact) body shared
   let some (_, resolved, shape) := (← inferType proof).eq? | return none
   unless resolved == expression do return none
   return some (.done { expr := shape, proof? := some proof })
