@@ -104,7 +104,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the managed-call check of a body with many call sites at a per-site cost that does not grow with the call sites; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction; the kernel's selection of a calli body at a cost linear in the length of the pointer's owner; and the certificate index, feature getter, layout accumulation and projection, and extraction home index libraries |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
-| `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting and arguments bodies with per-instruction heartbeat, proof-size and latency budgets |
+| `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting, arguments and calls bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal and self-admission |
@@ -174,8 +174,8 @@ dotnet run --file scripts/Test.cs -- --suite stepping
 ```
 
 The `stepping` suite generates explicit scalar, checked-memory, reference, table, accumulate,
-locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting and arguments bodies
-and proves each end to end. The scalar, memory, reference, table, accumulate and locals bodies have 16, 64 and
+locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting, arguments and calls
+bodies and proves each end to end. The scalar, memory, reference, table, accumulate and locals bodies have 16, 64 and
 256 instructions, and the accumulate body also 1,024. The memory bodies repeat an idempotent checked
 store and reload, so the operation facts stay constant as the instruction count grows. The
 reference and table bodies repeatedly `add` a symbolic int32 byte offset to a reference argument
@@ -193,9 +193,12 @@ reference into each of eight locals of a literal frame per cycle. The depth bodi
 `rem`, `add.ovf` and `conv.ovf.i4` over the arguments, each advanced by a supplied fact that the
 operation does not fault. The arguments bodies have 16, 64 and 256 instructions and add 8, 32 and
 128 `int32` arguments of a declared signature, each read once, with the method's
-`cil_resolution_facts` in scope. The suite uses the proof-cost measuring frontend, with three
-sequential proof compilations and a header-only baseline per scalar, memory, reference, table,
-accumulate and locals body up to 256 instructions, and one compilation for every other body.
+`cil_resolution_facts` in scope. The calls bodies have 16, 64 and 256 instructions and pass their
+argument through 14, 62 and 254 calls of a callee that returns it, each call reading its target
+from a link fact that `cil_instruction_equations` states. The suite uses the proof-cost measuring
+frontend, with three sequential proof compilations and a header-only baseline per scalar, memory,
+reference, table, accumulate, locals and calls body up to 256 instructions, and one compilation for
+every other body.
 
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. The arguments bodies read one of a list of arguments that grows with the body, so

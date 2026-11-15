@@ -249,7 +249,9 @@ width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and 
   abstraction directly.
 - The set is separate from `cil_step`: a hand-written `simp only [cil_step, facts]` stops at
   `instructionStep`. A `.call` step has its own `cil_step` equation, so a call checks its
-  arguments without unfolding the dispatcher.
+  arguments without unfolding the dispatcher. Its target is the body's link at the call's pc,
+  which the stepper reads from the generated link fact of a named body or by evaluating the table
+  of a literal one; a body with neither needs the link as a supplied fact.
 
 Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies
@@ -701,8 +703,9 @@ The lemmas of `CIL.Safety.StepFlow` give the possible successors of a successful
 unfolding it.
 `step_next_target` proves that an action that stays in the frame resumes at `pc + 1` of a
 continuing instruction or at one of `op.targets`. Given a successful action and its selected
-callee, `step_callee` proves membership in `Instruction.callees`: a singleton for a direct call or
-construction, or all authenticated targets for an indirect call. Tail transfers enter a callee
+callee, `step_callee` proves that the body links the step's pc and that the callee is among
+`body.calleesAt pc`, the callees of that link: a singleton for a direct call or construction, the
+dispatch table's bodies for a virtual call, or all authenticated targets for an indirect call. Tail transfers enter a callee
 without continuing in the current frame. `step_call_action` and
 `step_newAggregate_action` separate a call from a construction. The module imports only the step
 simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
