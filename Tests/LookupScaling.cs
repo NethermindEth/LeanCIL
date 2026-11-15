@@ -475,51 +475,46 @@ foreach (var outcome in new[] { "equal", "unequal" })
 }
 CallNameCosts();
 
-// The heartbeats `decide +kernel` adds to checking one external call operand against its member row, for method
-// names of 20 and 80 bytes that share all but their last byte. The check reads the row's name once as bytes and once
-// as a metadata name, so a name four times as long may cost at most `AllowedNameGrowth` as much.
+// The heartbeats `decide +kernel` adds to the call check's name clause, which tests that a call's typed method name
+// spells its row's name bytes, for names of 20 and 80 bytes that share all but their last byte. Reading the name back
+// costs about 0.8 times as much per byte at 80 bytes as at 20; encoding the bytes with `MetadataName.ofBytes?`, whose
+// kernel reduction indexes an array literal once per byte, costs about 3 times as much.
 void CallNameCosts()
 {
     var nameDirectory = At("artifacts/LookupScaling/CallNames");
     Directory.CreateDirectory(nameDirectory);
     const string Prefix = "WriteLineToTheConsoleOfTheRuntimeEachValueThatTheCallerPassesAsAnIntegerOfThirtyTwoBits";
-    string Fixture(int length)
+    int[] lengths = [20, 80];
+    string Statement(int length)
     {
         var name = Prefix[..(length - 1)] + "0";
+        var bytes = string.Join(", ", Encoding.UTF8.GetBytes(name));
         return $$"""
-            /-- The fixture's own slice with the `WriteLine` member renamed to a name of {{length}} bytes. -/
-            def slice{{length}} : MetadataSlice := { own.1 with strings := own.1.strings.map fun (offset, bytes) =>
-              (offset, if bytes == bytesOf "WriteLine" ++ [0] then bytesOf "{{name}}" ++ [0] else bytes) }
-            /-- The `WriteLine` call site naming the renamed member. -/
-            def site{{length}} : CallSite := { writeLineSite with
-              name := "{{name}}", method.name := name!"{{name}}",
-              target := .external (runtimeScope ++ "::System.Void System.Console::{{name}}(System.Int32)") }
-            #kernel_cost "call {{length}}" (match (do
-                let env := MetadataEnv.ofSlices [← slice{{length}}.index, ← lib.index]
-                checkEntry env 0 tokens.writeLine (.call site{{length}})) with
-              | .ok _ => true
-              | .error _ => false) = true
+            /-- The {{length}} bytes of a row name. -/
+            def bytes{{length}} : List Nat := [{{bytes}}]
+            #kernel_cost "call name {{length}}" ((name!"{{name}}").spells bytes{{length}} = true)
             """;
     }
     var path = Path.Combine(nameDirectory, "CallNames.lean");
     File.WriteAllText(path, $$"""
-        import Tests.MetadataWorld
-        open CIL CIL.Extraction Tests.MetadataBuilder Tests.MetadataWorld Lean Elab Command
+        import CIL.Identity
+        open CIL Lean Elab Command
         {{KernelCostCommand}}
-        {{Fixture(20)}}
-        {{Fixture(80)}}
+        {{string.Join("\n", lengths.Select(Statement))}}
         """);
-    Run(["lake", "build", "Tests.MetadataWorld"], cwd: FixturePackage());
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var costs = LookupPatterns.CallNameCheck().Matches(output).ToDictionary(
         match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
         match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
-    if (costs.Count != 2) throw new InvalidOperationException("Missing call name check costs:\n" + output);
-    var measured = $"{costs[20]} heartbeats at 20 bytes and {costs[80]} at 80";
-    if (Math.Min(costs[20], costs[80]) < KernelDecisionFloor || costs[80] > costs[20] * AllowedNameGrowth)
+    if (costs.Count != lengths.Length) throw new InvalidOperationException("Missing call name costs:\n" + output);
+    double PerByte(int length) => (double)costs[length] / length;
+    var measured = string.Create(CultureInfo.InvariantCulture,
+        $"{costs[20]} heartbeats at 20 bytes and {costs[80]} at 80");
+    if (Math.Min(costs[20], costs[80]) < KernelDecisionFloor || PerByte(80) > PerByte(20) * AllowedGrowth)
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Checking a call operand costs {measured}; the limit is {AllowedNameGrowth} times as many at 80 bytes."));
-    Console.WriteLine($"PASS checking a call operand by its name costs {measured}");
+            $"The call name clause costs {measured}; the limit is {AllowedGrowth} times as much per byte " +
+            "at 80 bytes."));
+    Console.WriteLine($"PASS the call name clause costs {measured}");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -1460,7 +1455,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex TypeDecision();
 
-    [GeneratedRegex(@"\bcall ([0-9]+) (-?[0-9]+) heartbeats")]
+    [GeneratedRegex(@"\bcall name ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex CallNameCheck();
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
