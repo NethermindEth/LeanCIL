@@ -486,4 +486,128 @@ theorem twoParameters_homesValid :
 example : twoParameters.argumentAccess 1 = .home (1 + 0) :=
   argumentAccess_of_homed twoParameters_homesValid (by decide)
 
+/-- A static method without parameters. A fact for argument 0 would state a read the method
+    never makes, so the facts command declares none. -/
+def noParameters : Method :=
+  { code := [.ret], locals := [], returnsValue := false, declared := {} }
+
+/-- The return fact the facts command also reads. -/
+theorem noParameters_returnsValue : noParameters.returnsValue = false := rfl
+#print axioms noParameters_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem noParameters_declared : noParameters.declared = {} := rfl
+#print axioms noParameters_declared
+
+cil_resolution_facts noParameters
+
+/-- error: Unknown identifier `noParameters_argumentAccess0` -/
+#guard_msgs in #check noParameters_argumentAccess0
+/-- error: Unknown identifier `noParameters_parameterSuffix0` -/
+#guard_msgs in #check noParameters_parameterSuffix0
+
+-- One fact per declared argument and no more: argument 1 is the last of `twoParameters`.
+/-- error: Unknown identifier `twoParameters_argumentAccess2` -/
+#guard_msgs in #check twoParameters_argumentAccess2
+
+/-- A home keyed past the one declared parameter, which the argument check would refuse. The
+    facts cover the declared argument alone, so a stray home cannot add a fact for an argument
+    the signature does not have. -/
+def strayHome : Method :=
+  { code := [.ret], locals := [], parameterHomes := [(3, .word32)], returnsValue := false,
+    declared := { parameters := [.atom runtimeScope "System.Int16"] } }
+
+/-- The return fact the facts command also reads. -/
+theorem strayHome_returnsValue : strayHome.returnsValue = false := rfl
+#print axioms strayHome_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem strayHome_declared : strayHome.declared =
+    { parameters := [.atom runtimeScope "System.Int16"] } := rfl
+#print axioms strayHome_declared
+
+cil_resolution_facts strayHome
+
+example : strayHome.argumentAccess 0 = .value (some .signed16) := strayHome_argumentAccess0
+/-- error: Unknown identifier `strayHome_argumentAccess3` -/
+#guard_msgs in #check strayHome_argumentAccess3
+
+/-- Two homes for one argument. A fact would pick one of the two slots by search order, so the
+    facts command refuses the method as it refuses descending homes. -/
+def duplicateHomes : Method :=
+  { code := [.ret], locals := [], parameterHomes := [(0, .word32), (0, .word32)],
+    returnsValue := false, declared := { parameters := [.atom runtimeScope "System.Int32"] } }
+
+/-- The return fact the facts command also reads. -/
+theorem duplicateHomes_returnsValue : duplicateHomes.returnsValue = false := rfl
+#print axioms duplicateHomes_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem duplicateHomes_declared : duplicateHomes.declared =
+    { parameters := [.atom runtimeScope "System.Int32"] } := rfl
+#print axioms duplicateHomes_declared
+
+/--
+error: cil_resolution_facts: the parameter homes of Tests.ResolutionFacts.duplicateHomes
+do not ascend
+-/
+#guard_msgs (whitespace := lax) in
+cil_resolution_facts duplicateHomes
+
+/-- An array and a pointer parameter. Neither type is a narrowing candidate, so their facts
+    read each argument as it arrives without consulting the layouts. -/
+def referenceParameters : Method :=
+  { code := [.ret], locals := [], returnsValue := false,
+    declared := { parameters := [.array (.atom runtimeScope "System.Byte"),
+      .pointer (.atom runtimeScope "System.Int16")] } }
+
+/-- The return fact the facts command also reads. -/
+theorem referenceParameters_returnsValue : referenceParameters.returnsValue = false := rfl
+#print axioms referenceParameters_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem referenceParameters_declared : referenceParameters.declared =
+    { parameters := [.array (.atom runtimeScope "System.Byte"),
+      .pointer (.atom runtimeScope "System.Int16")] } := rfl
+#print axioms referenceParameters_declared
+
+cil_resolution_facts referenceParameters
+
+example : referenceParameters.argumentAccess 0 = .value none :=
+  referenceParameters_argumentAccess0
+example : referenceParameters.argumentAccess 1 = .value none :=
+  referenceParameters_argumentAccess1
+
+/-- A symbolic argument index leaves the access for a caller's fact: the simproc decides only
+    literal indices, so it cannot rewrite one argument's access into another's. -/
+example (index : Nat) (access : ArgumentAccess)
+    (known : twoParameters.argumentAccess index = access) :
+    twoParameters.argumentAccess index = access := by
+  fail_if_success simp only [cil_step]
+  exact known
+
+/-- Twenty parameters and seventeen homes, so the home suffix crosses a 16-entry block. The
+    facts past the boundary must read the second home block, not the first. -/
+def manyHomes : Method :=
+  { code := [.ret], locals := [.i32 0], localKinds := [.word32], returnsValue := false,
+    parameterHomes := (List.range 17).map (·, .word32),
+    declared := { parameters := List.replicate 20 (.atom runtimeScope "System.Int32") } }
+
+/-- The return fact the facts command also reads. -/
+theorem manyHomes_returnsValue : manyHomes.returnsValue = false := rfl
+#print axioms manyHomes_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem manyHomes_declared : manyHomes.declared =
+    { parameters := List.replicate 20 (.atom runtimeScope "System.Int32") } := rfl
+#print axioms manyHomes_declared
+
+cil_resolution_facts manyHomes
+
+example : manyHomes.argumentAccess 15 = .home 16 := manyHomes_argumentAccess15
+example : manyHomes.argumentAccess 16 = .home 17 := manyHomes_argumentAccess16
+example : manyHomes.argumentAccess 17 = .value none := manyHomes_argumentAccess17
+example : manyHomes.argumentAccess 19 = .value none := manyHomes_argumentAccess19
+example : manyHomes_homeSuffix16 = [(16, .word32)] := rfl
+
 end Tests.ResolutionFacts
