@@ -64,8 +64,8 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
     var classify = module.GetType("Examples.TypeTests").Methods.Single(m => m.Name == "Classify").Body.Instructions;
     var holes = Enumerable.Range(0, ops.Length)
         .Where(pc => ops[pc].StartsWith(".unadmitted ", StringComparison.Ordinal)).ToArray();
-    if (!folds.Select(fold => fold.Word).SequenceEqual(expected) || ops.Length != classify.Count || holes.Length == 0 ||
-        holes.Any(pc => ops[pc] != $".unadmitted {(ushort)classify[pc].OpCode.Value}") ||
+    if (!folds.Select(fold => fold.Word).SequenceEqual(expected) || ops.Length != classify.Count ||
+        holes.Length == 0 || holes.Any(pc => ops[pc] != $".unadmitted {(ushort)classify[pc].OpCode.Value}") ||
         ops.Where((op, pc) => folds.All(fold => fold.Pc != pc)).Count(op => op.StartsWith(".ldc_i4", StringComparison.Ordinal)) != 1 ||
         !ops.Contains($".ldc_i4 {offset}"))
         throw new InvalidOperationException($"Unexpected folded body for {name}: {string.Join(" | ", ops)}");
