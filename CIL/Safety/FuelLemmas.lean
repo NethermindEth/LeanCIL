@@ -1,40 +1,74 @@
 import CIL.Safety.Execution
 
 /-!
-# More fuel never changes a settled outcome
+# More fuel never changes a stable outcome
 
-Fuel only bounds how long the checked interpreter may run. Once a run succeeds or fails with
-any fault other than `fuelExhausted`, giving it more fuel yields the same outcome
-(`run_mono`, `invoke_mono`). Consequently a semantic fault found at one fuel budget refutes
-success at every budget (`invoke_fault_refutes_success`).
+Fuel only bounds how long the checked interpreter may run. Once a run succeeds or fails with any
+fault other than `fuelExhausted`, giving it more fuel yields the same outcome (`run_mono`,
+`invoke_mono`). Consequently a definite fault found at one fuel budget refutes success at every
+budget (`invoke_fault_refutes_success`). Fuel exhaustion and `unsupported` faults are not
+definite: the first stops a run early and the second marks an operation the model does not cover,
+so neither is evidence about the method and no refutation lemma takes one (`Settled`).
 -/
 
 namespace CIL.Safety
 
+/-- Whether a fault is an outcome of the method itself. Running out of fuel and an operation the
+    model does not cover (`unsupported`) are not: a longer or a more complete run could go on. -/
+@[simp] def ExecutionFault.definite : ExecutionFault → Bool
+  | .arithmetic _ => true
+  | .memory .. => true
+  | .invalidState => true
+  | .unsupported .. => false
+  | .thrown _ => true
+  | .fuelExhausted => false
+  | .stackAllocationFailure .. => true
+  | .allocationFailure .. => true
+
 /-- An outcome that more fuel cannot change: a success, or any fault except running out of
-    fuel. -/
-def Settled (outcome : Except LocatedFault α) : Prop :=
+    fuel. An `unsupported` fault is stable but not settled. -/
+def Stable (outcome : Except LocatedFault α) : Prop :=
   match outcome with
   | .ok _ => True
   | .error fault => fault.fault ≠ .fuelExhausted
+
+/-- An outcome that stands as evidence about the method: a success, or a definite fault. Every
+    refutation lemma takes it, so none of them refutes anything from a run that reaches an
+    `unsupported` operation. -/
+def Settled (outcome : Except LocatedFault α) : Prop :=
+  match outcome with
+  | .ok _ => True
+  | .error fault => fault.fault.definite ≠ false
+
+instance (outcome : Except LocatedFault α) : Decidable (Settled outcome) :=
+  match outcome with
+  | .ok _ => isTrue trivial
+  | .error fault => inferInstanceAs (Decidable (fault.fault.definite ≠ false))
+
+/-- A settled outcome is stable: a definite fault is never fuel exhaustion. -/
+theorem Settled.stable {outcome : Except LocatedFault α} (settled : Settled outcome) :
+    Stable outcome := by
+  cases outcome with
+  | ok _ => trivial
+  | error fault => exact fun exhausted => settled (by rw [exhausted]; rfl)
 
 section
 
 -- Every `run` case unfolds through these monad steps.
 attribute [local simp] Bind.bind Except.bind Except.mapError
 
-/-- Adding fuel to a run with a settled outcome gives the same outcome. -/
+/-- Adding fuel to a run with a stable outcome gives the same outcome. -/
 theorem run_mono (program : CIL.Program) (fuel extra method pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
     (outcome : Except LocatedFault (Memory × List Value))
-    (ready : Settled outcome)
+    (ready : Stable outcome)
     (h : run program fuel method pc args frame stack memory = outcome) :
     run program (fuel + extra) method pc args frame stack memory = outcome := by
   induction fuel generalizing method pc args frame stack memory outcome with
   | zero =>
     simp only [run] at h
     subst outcome
-    simp [Settled] at ready
+    simp [Stable] at ready
   | succ fuel ih =>
     cases hb : program[method]? with
     | none => simpa [Nat.succ_add, run, hb] using h
@@ -86,7 +120,7 @@ theorem run_mono (program : CIL.Program) (fuel extra method pc : Nat)
                 | error fault =>
                   simp [run, hb, ho, hs, hc, he, hr] at h
                   have settled :
-                      Settled (.error fault : Except LocatedFault (Memory × List Value)) := by
+                      Stable (.error fault : Except LocatedFault (Memory × List Value)) := by
                     simpa [← h] using ready
                   have more :=
                     ih callee 0 arguments childFrame [] childMemory (.error fault) settled hr
@@ -113,7 +147,7 @@ theorem run_mono (program : CIL.Program) (fuel extra method pc : Nat)
                 | error fault =>
                   simp [run, hb, ho, hs, hc, he, hr] at h
                   have settled :
-                      Settled (.error fault : Except LocatedFault (Memory × List Value)) := by
+                      Stable (.error fault : Except LocatedFault (Memory × List Value)) := by
                     simpa [← h] using ready
                   have more :=
                     ih callee 0 arguments childFrame [] childMemory (.error fault) settled hr
@@ -140,7 +174,7 @@ end
 
 theorem invoke_mono (program : CIL.Program) (fuel extra method : Nat)
     (args : List Value) (memory : Memory) (outcome : Except LocatedFault (Memory × List Value))
-    (ready : Settled outcome) (h : invoke program fuel method args memory = outcome) :
+    (ready : Stable outcome) (h : invoke program fuel method args memory = outcome) :
     invoke program (fuel + extra) method args memory = outcome := by
   cases hb : program[method]? with
   | none => simpa [invoke, hb] using h
@@ -156,22 +190,24 @@ theorem invoke_mono (program : CIL.Program) (fuel extra method : Nat)
         simpa [invoke, hb, ha, he, Bind.bind, Except.bind, Except.mapError] using
           run_mono program fuel extra method 0 arguments frame [] updated outcome ready h
 
-/-- A classified semantic fault refutes successful execution for every fuel,
-    not merely the concrete budget used to exhibit the fault. -/
+/-- A definite fault refutes successful execution for every fuel, not merely the concrete
+    budget used to exhibit the fault. -/
 theorem invoke_fault_refutes_success (program : CIL.Program) (observed method : Nat)
     (args : List Value) (memory : Memory) (fault : LocatedFault)
-    (semantic : fault.fault ≠ .fuelExhausted)
+    (definite : fault.fault.definite ≠ false)
     (witness : invoke program observed method args memory = .error fault)
     (fuel : Nat) (result : Memory × List Value) :
     invoke program fuel method args memory ≠ .ok result := by
   intro success
   have failure :=
-    invoke_mono program observed fuel method args memory (.error fault) semantic witness
+    invoke_mono program observed fuel method args memory (.error fault) (Settled.stable definite)
+      witness
   have returned := invoke_mono program fuel observed method args memory (.ok result) trivial success
   rw [Nat.add_comm] at returned
   rw [failure] at returned
   cases returned
 
+#print axioms Settled.stable
 #print axioms invoke_mono
 #print axioms invoke_fault_refutes_success
 

@@ -11,8 +11,9 @@ override. The call's dispatch table lists both classes with their overrides, and
 each entry against the extraction's catalog. The receiver's runtime class selects the body:
 a `Dog` has four legs and a `Bird` two. A null receiver throws
 `NullReferenceException` at the `callvirt`. An instance of any class the table omits, such as a
-class from an assembly outside the extraction, is the model fault `outsideDispatchTable`: no
-return and no exception is proved for it, so every theorem here names the receiver's class.
+class from an assembly outside the extraction, is the model fault `outsideDispatchTable`, an
+`unsupported` fault: no return and no exception is proved for it, and no refutation lemma takes
+it, so every theorem here names the receiver's class.
 -/
 
 open CIL CIL.Safety
@@ -89,28 +90,14 @@ theorem outside_faults (memory : CIL.Safety.Memory) (animal : Reference)
 
 #print axioms outside_faults
 
-/-- So for such an instance no fuel proves a return or a thrown exception: every outcome is the
-    model fault or running out of fuel. -/
-theorem outside_neither_returns_nor_throws (memory : CIL.Safety.Memory) (animal : Reference)
-    (formed : formObject memory (.address animal) = .ok (.object (.address animal)))
-    (typed : runtimeTypeOf memory animal = .ok plugin) (fuel : Nat) :
-    (∀ result, invoke Extracted.program fuel 0 [.object (.address animal)] memory ≠
-      .ok result) ∧
-    (∀ fault, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
-      .error fault → ∀ exception, fault.fault ≠ .thrown exception) := by
-  obtain ⟨observed, witness⟩ := outside_faults memory animal formed typed
-  have semantic : outsideDispatchTable ≠ .fuelExhausted := by simp [outsideDispatchTable]
-  refine ⟨invoke_fault_refutes_success _ observed 0 _ _ _ semantic witness fuel, ?_⟩
-  intro fault failed exception thrown
-  have settled : Settled
-      (Except.error fault : Except LocatedFault (CIL.Safety.Memory × List CIL.Safety.Value)) := by
-    simp [Settled, thrown]
-  have up := invoke_mono _ fuel observed 0 _ _ _ settled failed
-  have down := invoke_mono _ observed fuel 0 _ _ _ (by exact semantic) witness
-  rw [Nat.add_comm, up] at down
-  cases down
-  simp [outsideDispatchTable] at thrown
+/-- That fault is not a throw, so it is no named exception, and it is not definite: the model
+    does not cover the run, so `invoke_fault_refutes_success` and the contract refutations
+    cannot use it. -/
+theorem outside_not_definite :
+    (∀ exception, outsideDispatchTable ≠ .thrown exception) ∧
+      outsideDispatchTable.definite = false :=
+  ⟨fun _ => by simp [outsideDispatchTable], rfl⟩
 
-#print axioms outside_neither_returns_nor_throws
+#print axioms outside_not_definite
 
 end ExampleProof

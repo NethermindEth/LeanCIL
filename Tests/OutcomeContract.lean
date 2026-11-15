@@ -189,16 +189,15 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
   { returnsValue := false, locals := [], code := [.unadmitted 0] }
 @[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 
-example (m : Memory) : ¬ Raises [stuck] 0 [] m .baseException := by
-  rintro ⟨fuel, fault, ran, thrown⟩
-  cases fuel with
-  | zero =>
-    rw [show invoke [stuck] 0 0 [] m = .error ⟨0, 0, .fuelExhausted⟩ from rfl] at ran
-    cases ran; simp at thrown
-  | succ fuel =>
-    rw [show invoke [stuck] (fuel + 1) 0 [] m =
-      .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ from rfl] at ran
-    cases ran; simp at thrown
+/-- A hole's fault is not a throw, so it is no raised outcome, and it is not settled, so
+    `invoke_unique` refutes no raise from it: the model does not cover a run that reaches a
+    hole. -/
+example (m : Memory) :
+    invoke [stuck] 1 0 [] m = .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ ∧
+      (∀ exception, ExecutionFault.unsupported "Opcode not admitted" ≠ .thrown exception) ∧
+      ¬ Settled (.error ⟨0, 0, .unsupported "Opcode not admitted"⟩ :
+        Except LocatedFault (Memory × List Value)) :=
+  ⟨rfl, fun _ => by simp, by decide⟩
 
 theorem spin_exhausts (m : Memory) (frame : Frame) (fuel : Nat) :
     run [spin] fuel 0 0 [] frame [] m = .error ⟨0, 0, .fuelExhausted⟩ := by
