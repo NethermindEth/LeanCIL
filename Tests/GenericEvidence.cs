@@ -177,6 +177,8 @@ Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed",
     line => line.Replace("operand := .target 4", "operand := .target 3")));
 // A failed kernel decision prints this text; a mutation that only breaks parsing does not.
 const string decisionFailed = "proved that the proposition";
+// A theorem proved by `rfl` prints this text when its two sides differ.
+const string rflRefused = "not definitionally equal";
 // The link moves with the call, so only the binding check can reject the changed target.
 Reject(0, "wrong-managed-target", source => ChangeDefinition(Replaced(source, ".call 1 1", ".call 0 1"),
     "method0Link1", line => Replaced(line, ".direct 1", ".direct 0")), "method0_calls_validated",
@@ -277,25 +279,22 @@ void ReturnMutations()
             var atom = returned < 0 ? -1 : line.IndexOf("System.SByte", returned, StringComparison.Ordinal);
             if (atom < 0) throw new InvalidOperationException("Missing declared SByte return");
             return line[..atom] + replacement + line[(atom + "System.SByte".Length)..];
-        }), "method1_shape_validated", "proved that the proposition");
+        }), "method1_declared_validated", rflRefused);
 }
 
 // The declared signature, call links and layout environment are each checked against their own evidence.
 const string word = "Extraction.runtimeScope \"System.UInt64\"";
 Reject(0, "wrong-declared-parameter", source => ChangeDefinition(source, "method0", line =>
     line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]")),
-    "method0_shape_validated",
-    decisionFailed);
+    "method0_declared_validated", rflRefused);
 Reject(0, "wrong-declared-return", source => ChangeDefinition(source, "method0", line =>
     line.Replace($"returnType := .atom {word} }}", $"returnType := .atom {word.Replace("UInt64", "UInt32")} }}")),
-    "method0_shape_validated",
-    decisionFailed);
+    "method0_declared_validated", rflRefused);
 Reject(14, "missing-declared-receiver", source => ChangeDefinition(source, "method1", line =>
-    line.Replace("receiver := some .reference, ", "")), "method1_shape_validated",
-    decisionFailed);
+    line.Replace("receiver := some .reference, ", "")), "method1_declared_validated", rflRefused);
 Reject(14, "wrong-declared-receiver-kind", source => ChangeDefinition(source, "method1", line =>
-    line.Replace("receiver := some .reference", "receiver := some .object")), "method1_shape_validated",
-    decisionFailed);
+    line.Replace("receiver := some .reference", "receiver := some .object")), "method1_declared_validated",
+    rflRefused);
 Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
     line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
 Reject(0, "dropped-link", source => ChangeDefinition(source, "method0", line =>
@@ -309,7 +308,7 @@ Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1", line
     decisionFailed);
 Reject(0, "wrong-environment", source => ChangeDefinition(source, "environment", line =>
     line.Replace("layouts := computedLayouts", "layouts := #[⟨⟨4, []⟩, 4⟩]")), "method0_environment_validated",
-    "not definitionally equal");
+    rflRefused);
 
 foreach (var (selector, index) in samples.Select((selector, index) => (selector, index)))
 {

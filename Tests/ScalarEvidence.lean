@@ -168,13 +168,31 @@ example : TranslationValid [] #[] [] [addEvidence] [] [addMethod] := by decide +
 example : ¬ TranslationValid [] #[] [] [addEvidence] []
     [{ addMethod with code := addCode.set 2 .sub }] := by decide +kernel
 -- The declared signature and the layout environment are conjuncts of their own.
-example : ¬ MethodShapeValid addRaw { addMethod with declared := {} } := by decide
+example : ¬ DeclaredValid addRaw { addMethod with declared := {} } := by decide
 example : ¬ TranslationValid [] #[] [] [addEvidence] [] [{ addMethod with declared := {} }] := by
   decide +kernel
 example : ¬ MethodEnvironmentValid [] #[]
     { addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } } := by decide
 example : ¬ TranslationValid [] #[] [] [addEvidence] []
     [{ addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } }] := by decide +kernel
+
+/-- `addMethod` declaring `signature` instead of the `wordPair` its metadata implies. -/
+private def declaring (signature : DeclaredSignature) : Method :=
+  { addMethod with declared := signature }
+/-- Only `DeclaredValid` reads the declared signature: the shape check accepts the method, and the
+    evidence check rejects it through that conjunct alone. -/
+private def declaredRejectedAlone (signature : DeclaredSignature) : Prop :=
+  MethodShapeValid addRaw (declaring signature) ∧ ¬ DeclaredValid addRaw (declaring signature) ∧
+    ¬ MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence (declaring signature)
+instance (signature : DeclaredSignature) : Decidable (declaredRejectedAlone signature) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+
+-- One component of the signature differs in each case.
+example : declaredRejectedAlone { wordPair with returnType := intType } := by decide +kernel
+example : declaredRejectedAlone { wordPair with parameters := [word, intType] } := by decide +kernel
+example : declaredRejectedAlone { wordPair with receiver := some .reference } := by decide +kernel
+example : declaredRejectedAlone { wordPair with parameters := [word] } := by decide +kernel
+
 example : ¬ TranslationValid [] #[] []
     [{ addEvidence with scalarStates := addStates.set 2 (some [.native, .word32]) }] []
     [addMethod] := by decide +kernel

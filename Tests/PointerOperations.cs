@@ -147,9 +147,9 @@ foreach (var (name, parameters) in new[]
     }
     if (name == "ReadEnum")
     {
-        var returnEvidence = NarrowEvidence(source, "method0_shape_validated");
+        var returnEvidence = NarrowEvidence(source, "method0_declared_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, returnEvidence,
-            ["method0_shape_validated"], 1));
+            ["method0_declared_validated"], 1));
         foreach (var replacement in new[] { "System.Int32", "System.UInt16" })
         {
             const string target = "System.Int16";
@@ -166,7 +166,7 @@ foreach (var (name, parameters) in new[]
             var widthChanged = replacement == "System.Int32";
             var forged = Path.Combine(output, "ForgedReturn" + widthChanged + ".lean");
             File.WriteAllText(forged, string.Join('\n', lines));
-            rejected.Add(forged, "PASS independent enum return width/signedness rejection", "MethodShapeValid");
+            rejected.Add(forged, "PASS independent enum return width/signedness rejection", "DeclaredValid");
         }
     }
     evidence.Add(proof, "PASS runtime, certificate and checked pointee storage: " + name);
