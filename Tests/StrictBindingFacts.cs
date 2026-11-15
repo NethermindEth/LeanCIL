@@ -251,8 +251,9 @@ static partial class StrictBindingFacts
         var stringWidth = (heapSizes & 1) != 0 ? 4 : 2;
         var blobWidth = (heapSizes & 4) != 0 ? 4 : 2;
         var column = AssemblyHeapColumns;
-        foreach (var (offset, keys, width) in new[]
-                     { (key, blobKeys, blobWidth), (name, stringKeys, stringWidth), (culture, stringKeys, stringWidth) })
+        (int Offset, Dictionary<int, int> Keys, int Width)[] cells =
+            [(key, blobKeys, blobWidth), (name, stringKeys, stringWidth), (culture, stringKeys, stringWidth)];
+        foreach (var (offset, keys, width) in cells)
         {
             Array.Copy(BitConverter.GetBytes(keys[offset]), 0, row, column, width);
             column += width;
@@ -295,8 +296,9 @@ static partial class StrictBindingFacts
     static string Identity(MetadataReader reader, AssemblyDefinition assembly)
     {
         var culture = reader.GetString(assembly.Culture);
+        var token = KeyToken(reader, assembly) ?? "null";
         return $"{reader.GetString(assembly.Name)}, Version={assembly.Version}, " +
-            $"Culture={(culture.Length == 0 ? "neutral" : culture)}, PublicKeyToken={KeyToken(reader, assembly) ?? "null"}";
+            $"Culture={(culture.Length == 0 ? "neutral" : culture)}, PublicKeyToken={token}";
     }
 
     /// <summary>The identity of the assembly an image defines, as Lean spells it.</summary>
