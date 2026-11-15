@@ -255,13 +255,34 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
+/-- Division and remainder step in lockstep with their relabeling. -/
+theorem step_relabel_divide (op : Instruction) (dividing : op.divideKind?.isSome) :
+    StepRelabel op := by
+  cases op <;> simp only [Instruction.divideKind?, Option.isSome_none, Option.isSome_some,
+    Bool.false_eq_true] at dividing
+  all_goals stack_cases =>
+    first | fallback_vacuous | lockstep
+
+#print axioms step_relabel_divide
+
+/-- Overflow-checked arithmetic steps in lockstep with its relabeling. -/
+theorem step_relabel_checked (op : Instruction) (checked : op.checkedKind?.isSome) :
+    StepRelabel op := by
+  cases op <;> simp only [Instruction.checkedKind?, Option.isSome_none, Option.isSome_some,
+    Bool.false_eq_true] at checked
+  all_goals stack_cases =>
+    first | fallback_vacuous | lockstep
+
+#print axioms step_relabel_checked
+
+-- Each family is its own declaration, since both in one exceed the default heartbeat budget.
 /-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
 theorem step_relabel_faulting (op : Instruction)
     (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
-  cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
-    Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
-  all_goals stack_cases =>
-    first | fallback_vacuous | lockstep
+  cases dividing : op.divideKind?.isSome
+  · rw [dividing, Bool.false_or] at faulting
+    exact step_relabel_checked op faulting
+  · exact step_relabel_divide op dividing
 
 #print axioms step_relabel_faulting
 
