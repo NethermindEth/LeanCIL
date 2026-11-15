@@ -36,7 +36,7 @@ elab "cil_reduce_fuel" : conv => do
 
 open Lean Elab Tactic Conv in
 /-- Replaces the focused closed natural number by its literal. A call's continuation resumes at
-    `pc + 1`, so without it the pc would grow by one addition per call and so would every lookup. -/
+    `pc + 1`; without it the pc grows by one addition per call, and so does every lookup. -/
 elab "cil_literal_nat" : conv => do
   let lhs ← instantiateMVars (← getLhs)
   if lhs.hasFVar || lhs.hasMVar then return
