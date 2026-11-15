@@ -151,10 +151,14 @@ workflow.
   kernel decides 128 references per theorem, one theorem at a time, so the memory of a run does
   not grow with the assembly, and the cost per added reference must stay within 1.25 times from
   64 to 128 references.
-  Tests/BodyLiteral.lean writes the evidence of one method as literals, proves its body check with
-  the kernel, rejects a changed byte, and requires the elaborator's decide to refuse the check
-  within a small heartbeat budget. Tests/ScalarEvidence.lean does the same for the whole
-  certificate, and reduces the fixture encoder in the elaborator at two method sizes.
+  Tests/BodyLiteral.lean writes the evidence of one method as the extractor emits it, with
+  `fixedBytes` byte literals, proves in the kernel that each kind of literal equals its list
+  literal, proves its body check with the kernel, rejects a changed byte of the body literal, and
+  requires the elaborator's decide to refuse the check within a small heartbeat budget. Its cost
+  rows elaborate, decode and body-check the literal of a body of 128, 512 and 2048 `nop`s, and each
+  cost must stay within 6 times at 4 times the body. Tests/ScalarEvidence.lean requires the same
+  refusal and kernel decision for a whole certificate, and reduces the fixture encoder in the
+  elaborator at two method sizes.
   Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
   string and field tokens and for 25 and 100 call tokens.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,

@@ -204,11 +204,17 @@ void RejectBody(int sample, string name, string theorem, string definition, Func
 // The metadata rows of a body shift with the assembly, so each byte is found by its position in the emitted list.
 string ChangeByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
     match => match.Groups[1].Value + (int.Parse(match.Groups[2].Value) + change) + match.Groups[3].Value);
+// A byte list is emitted as `(Extraction.fixedBytes <count> 0x<digits>)`; a pattern's second group is one byte.
+const string byteLiteral = @"\(Extraction\.fixedBytes \d+ 0x";
+string ChangeLiteralByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
+    match => match.Groups[1].Value + ((Convert.ToInt32(match.Groups[2].Value, 16) + change) % 256).ToString("X2"));
 // Sample 0 starts `ldarg.0; call <token>` under a tiny header: header, ldarg.0, call, then the token bytes.
-RejectBody(0, "altered-body-byte", bodyTheorem, "method0Bytes", line => ChangeByte(line, @"(\[\d+, )(\d+)(,)", 1));
-RejectBody(0, "altered-body-header", bodyTheorem, "method0Bytes", line => ChangeByte(line, @"(\[)(\d+)(,)", 4));
+RejectBody(0, "altered-body-byte", bodyTheorem, "method0Bytes",
+    line => ChangeLiteralByte(line, $"({byteLiteral}[0-9A-F]{{2}})([0-9A-F]{{2}})", 1));
+RejectBody(0, "altered-body-header", bodyTheorem, "method0Bytes",
+    line => ChangeLiteralByte(line, $"({byteLiteral})([0-9A-F]{{2}})", 4));
 RejectBody(0, "altered-token-operand-byte", bodyTheorem, "method0Bytes",
-    line => ChangeByte(line, @"(\[\d+, 2, 40, )(\d+)(,)", 1));
+    line => ChangeLiteralByte(line, $"({byteLiteral}[0-9A-F]{{2}}0228)([0-9A-F]{{2}})", 1));
 RejectBody(0, "altered-token-table-key", bodyTheorem, "method0Body",
     line => ChangeByte(line, @"(\()(\d+)(, \.call)", 1));
 RejectBody(0, "altered-token-table-operand", bodyTheorem, "method0Body",
@@ -231,15 +237,16 @@ void RejectTables(string name, string definition, Func<string, string> change)
         "method0_tables_refuted");
 }
 RejectTables("altered-metadata-row", "method0Metadata",
-    line => ChangeByte(line, @"(rows := \[\(\d+, \[)(\d+)(,)", 1));
-RejectTables("altered-metadata-string", "method0Metadata",
-    line => ChangeByte(line, @"(strings := \[\(0, \[0\]\), \(\d+, \[)(\d+)(,)", 1));
-RejectTables("altered-lookup-row", "method0Tables", line => ChangeByte(line, @"(rows := .*?\[)(\d+)(,)", 1));
+    line => ChangeLiteralByte(line, $@"(rows := \[\(\d+, {byteLiteral})([0-9A-F]{{2}})", 1));
+RejectTables("altered-metadata-string", "method0Metadata", line => ChangeLiteralByte(line,
+    $@"(strings := \[\(0, \(Extraction\.fixedBytes 1 0x00\)\), \(\d+, {byteLiteral})([0-9A-F]{{2}})", 1));
+RejectTables("altered-lookup-row", "method0Tables",
+    line => ChangeLiteralByte(line, $"(rows := .*?{byteLiteral})([0-9A-F]{{2}})", 1));
 // A leaf entry of the rows tree removed, and one added before another.
 RejectTables("missing-lookup-row", "method0Tables",
-    line => new Regex(@"\(\.node \.leaf \d+ \[[^\]]*\] \.leaf\)").Replace(line, ".leaf", 1));
+    line => new Regex($@"\(\.node \.leaf \d+ {byteLiteral}[0-9A-F]+\) \.leaf\)").Replace(line, ".leaf", 1));
 RejectTables("extra-lookup-row", "method0Tables",
-    line => new Regex(@"\(\.node \.leaf (\d+) (\[[^\]]*\]) \.leaf\)").Replace(line,
+    line => new Regex($@"\(\.node \.leaf (\d+) ({byteLiteral}[0-9A-F]+\)) \.leaf\)").Replace(line,
         "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
 RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",
     line => line.Replace("operand := .target 4", "operand := .target 3"));

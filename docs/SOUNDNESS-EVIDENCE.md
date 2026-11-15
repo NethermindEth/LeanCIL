@@ -100,6 +100,12 @@ the string the block states (`assembly{k}Identity` holds those bytes). A method'
 assembly's identity with its pin, lists the identity of every pinned assembly (`pinned`, equated with
 `Extracted.assemblies`) and names the identity each of its slices spells.
 
+Every byte list of this evidence (body bytes, rows, heap entries, header bytes and UTF-8 names) is written
+as `Extraction.fixedBytes count 0x...` ([ByteLiterals](../CIL/Extraction/ByteLiterals.lean)): its length and
+one hexadecimal numeral holding the bytes big-endian. Elaborating the numeral costs a fixed amount, where a
+list literal costs a numeral and a constructor per byte; the kernel computes the list when a check reads it,
+splitting the numeral in halves down to words of eight bytes, and the checks see the same list values.
+
 ### Names tied to bytes by equations
 
 A name the extraction states is a `String`; Lean reads the same name as heap bytes. A decision that

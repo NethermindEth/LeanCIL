@@ -85,8 +85,15 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         return (metadata, collection.Tables(), collection.Assemblies());
     }
 
-    internal static string Bytes(IEnumerable<byte> bytes) =>
-        "[" + string.Join(", ", bytes.Select(value => value.ToString(CultureInfo.InvariantCulture))) + "]";
+    /// <summary>
+    /// A Lean byte list as <c>Extraction.fixedBytes</c> of its length and one big-endian hexadecimal numeral: the
+    /// elaborator reads one numeral where a list literal costs a numeral and a constructor per byte.
+    /// </summary>
+    internal static string Bytes(IEnumerable<byte> bytes)
+    {
+        var data = bytes.ToArray();
+        return data.Length == 0 ? "[]" : $"(Extraction.fixedBytes {data.Length} 0x{Convert.ToHexString(data)})";
+    }
 
     /// <summary>The reserved offset for a heap entry omitted from the carried evidence.</summary>
     internal static uint OmittedHeapOffset(int width) => width switch
