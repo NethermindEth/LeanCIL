@@ -1192,6 +1192,9 @@ open Lean Elab Tactic Meta in
     byte width selects the existing bridge; quantified facts retain their binders. A numeric
     value test of an opaque value is also stated in its unfolded form (`numericValueFacts`). -/
 def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMainContext do
+  let narrowStores (kind : Name) (written : Expr) : Array (Name × Array Expr) :=
+    #[(``step_storeScalar_of_write, #[written]),
+      (``step_stind_narrow_of_write, #[mkConst kind, written])]
   let operationEquation (operation : Expr) :=
     operation.isAppOfArity ``CIL.Safety.read 4 ||
       operation.isAppOfArity ``CIL.Safety.readSnapshot 4 ||
@@ -1240,18 +1243,22 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
                   candidates := candidates ++ #[(``load_scalar_of_read, #[scalar, applied]),
                     (``load_scalar_signed_of_read, #[scalar, applied])]
                 else
-                  let bridge := match reading, width with
-                    | true, 8 => ``load_word64_of_read
-                    | true, 16 => ``load_vector128_of_read
-                    | true, 32 => ``load_vector256_of_read
-                    | true, 64 => ``load_vector512_of_read
-                    | false, 8 => ``step_store64_of_write
-                    | false, 1 | false, 2 | false, 4 => ``step_storeScalar_of_write
-                    | false, 16 => ``step_store128_of_write
-                    | false, 32 => ``step_store256_of_write
-                    | false, 64 => ``step_store512_of_write
-                    | _, _ => Name.anonymous
-                  unless bridge.isAnonymous do candidates := candidates.push (bridge, #[applied])
+                  let bridges : Array (Name × Array Expr) := match reading, width with
+                    | true, 8 => #[(``load_word64_of_read, #[applied])]
+                    | true, 16 => #[(``load_vector128_of_read, #[applied])]
+                    | true, 32 => #[(``load_vector256_of_read, #[applied])]
+                    | true, 64 => #[(``load_vector512_of_read, #[applied])]
+                    | false, 8 => #[(``step_stind_i8_of_write, #[applied]),
+                        (``step_stind_i_of_write, #[applied])]
+                    -- A narrow write steps a runtime-model store or the one `stind` of its width.
+                    | false, 1 => narrowStores ``CIL.NumericKind.i1 applied
+                    | false, 2 => narrowStores ``CIL.NumericKind.i2 applied
+                    | false, 4 => narrowStores ``CIL.NumericKind.i4 applied
+                    | false, 16 => #[(``step_store128_of_write, #[applied])]
+                    | false, 32 => #[(``step_store256_of_write, #[applied])]
+                    | false, 64 => #[(``step_store512_of_write, #[applied])]
+                    | _, _ => #[]
+                  candidates := candidates ++ bridges
           let mut results := #[]
           for (bridge, arguments) in candidates do
             let before ← getMCtx
@@ -1497,7 +1504,7 @@ open Lean Elab Tactic Meta in
     and a `ValidCall` at its current memory are considered; permissions remain real premises. -/
 def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
     (facts : Array Term) : TacticM (Array Term) := withMainContext do
-  unless [``CIL.Instruction.store64, ``CIL.Instruction.storeScalar,
+  unless [``CIL.Instruction.stind, ``CIL.Instruction.storeScalar,
       ``CIL.Instruction.setFieldAt].contains operation do
     return facts
   unless (← getEnv).contains `CIL.Safety.ValidCall.store_word do return facts
@@ -1522,6 +1529,10 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
   if operation == ``CIL.Instruction.storeScalar then
     let some width := lastArgument? opcode | return facts
     unless ← isDefEq width (mkNatLit 8) do return facts
+  if operation == ``CIL.Instruction.stind then
+    let some kind := lastArgument? opcode | return facts
+    unless (← isDefEq kind (mkConst ``CIL.NumericKind.i8)) ||
+        (← isDefEq kind (mkConst ``CIL.NumericKind.i)) do return facts
   if operation == ``CIL.Instruction.setFieldAt then
     let some width := lastArgument? opcode | return facts
     unless ← isDefEq width (mkNatLit 8) do return facts

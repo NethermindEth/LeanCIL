@@ -380,11 +380,11 @@ theorem null_test_requires_reference :
 
 -- Every load and store through `NullRef` faults as a null dereference.
 theorem null_reference_accesses_fault :
-    instructions [.memory .nullRef, .load64] [] Memory.empty =
+    instructions [.memory .nullRef, .ldind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 8) ∧
     instructions [.memory .nullRef, .loadScalar 4 true] [] Memory.empty =
       .error (.memory .nullDereference .null 4) ∧
-    instructions [.memory .nullRef, .ldc_i8 7, .store64] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i8 7, .stind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .ldc_i4 7, .storeScalar 4] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
@@ -459,7 +459,7 @@ theorem checked_conversion_bad_width :
 
 /-- Memory operations do not widen scalar operands. -/
 theorem native_memory_unchanged :
-    CIL.widenMixed .load64 [.i32 0, .i64 0] = [.i32 0, .i64 0] := rfl
+    CIL.widenMixed (.ldind .i8) [.i32 0, .i64 0] = [.i32 0, .i64 0] := rfl
 #print axioms native_memory_unchanged
 
 /-- Reference operands do not qualify for integer widening. -/

@@ -9,17 +9,17 @@ open CIL.Safety
 
 /-- `*sum = a + b + c; *carry = (a + b + c < a) ? 1 : 0`. -/
 @[cil_code] def carryMethod : CIL.Method := {
-  code := [.ldarg 3, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .store64,
-    .ldarg 4, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .ldarg 0, .clt_un, .conv_u8, .store64,
+  code := [.ldarg 3, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .stind .i8,
+    .ldarg 4, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .ldarg 0, .clt_un, .conv_u8, .stind .i8,
     .ret]
   locals := [], returnsValue := false }
 @[cil_code] def carryProgram : CIL.Program := [carryMethod]
 
 /-- `*difference = a - b - c; *borrow = (a < b) | (c & (a == b))`, with sign-extended flags. -/
 @[cil_code] def borrowMethod : CIL.Method := {
-  code := [.ldarg 3, .ldarg 0, .ldarg 1, .sub, .ldarg 2, .sub, .store64,
+  code := [.ldarg 3, .ldarg 0, .ldarg 1, .sub, .ldarg 2, .sub, .stind .i8,
     .ldarg 4, .ldarg 0, .ldarg 1, .clt_un, .conv_i8, .ldarg 2, .ldarg 0, .ldarg 1, .ceq, .conv_i8,
-    .and, .or, .store64, .ret]
+    .and, .or, .stind .i8, .ret]
   locals := [], returnsValue := false }
 @[cil_code] def borrowProgram : CIL.Program := [borrowMethod]
 

@@ -33,7 +33,7 @@ theorem vector_store {memory after : Memory} {destination : Reference} {bits : B
 theorem word_load {memory : Memory} {source : Reference} {bits : CIL.W64}
     (loaded : read memory source 8 1 = .ok (numberBytes bits.toNat 8))
     (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body .load64 pc args frame (.reference (.address source) :: rest) memory =
+    step body (.ldind .i8) pc args frame (.reference (.address source) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i64 bits) :: rest) frame memory) := by
   cil_checked_step [loaded]
 #print axioms word_load
@@ -42,7 +42,7 @@ theorem word_load {memory : Memory} {source : Reference} {bits : CIL.W64}
 theorem word_store {memory after : Memory} {destination : Reference} {bits : CIL.W64}
     (written : write memory destination (numberBytes bits.toNat 8) 1 = .ok after)
     (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body .store64 pc args frame
+    step body (.stind .i8) pc args frame
         (.scalar (.i64 bits) :: .reference (.address destination) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by
   cil_checked_step [written]

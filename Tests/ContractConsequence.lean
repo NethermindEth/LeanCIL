@@ -43,7 +43,7 @@ def method9Signature : String :=
   [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
     .throw "System.ArgumentOutOfRangeException", .ldarg 0, .ret] }
 @[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 2, .ldarg 0, .load64, .ldarg 1, .load64, .add, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ret] }
 @[cil_code] def method3 : Method := { returnsValue := false, locals := [], code :=
   [.ldarg 0, .ldarg 1, .ldarg 2, .call 2 3, .ret] }
 /-- `SumSwapped`: loads its arguments in the order `AddTo` takes them. -/
@@ -69,7 +69,7 @@ def method9Signature : String :=
 @[cil_code] def method8 : Method := {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
   returnsValue := true, locals := [], code :=
-  [.ldarg 2, .ldarg 0, .load64, .ldarg 1, .load64, .add, .store64, .ldc_i4 1,
+  [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ldc_i4 1,
     .ret] }
 /-- `IsZeroIgnoring`: forwards its first argument and never loads its second. -/
 @[cil_code] def method9 : Method := {

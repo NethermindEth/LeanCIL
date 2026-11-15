@@ -1,13 +1,15 @@
 import CIL.Extraction.UnsafeTransfers
+import CIL.Extraction.ValueDecoding
 
 /-!
 # Indirect accesses
 
-A raw `ldind`, `stind`, `ldobj` or `stobj` decides the width and sign extension of the load or
-store extraction emits for it, and a raw `cpblk` or `initblk` decides the alignment of its block
-operation, which an `unaligned.` prefix lowers. `indirectAccessMatches` gives that one emission
-from the opcode, the operand type and the instruction before it, and reserves the emitted loads,
-stores and block operations for these opcodes and for calls, which `UnsafeCallsValid` binds.
+A raw integer `ldind` or `stind` emits the instruction `Instruction.ofRaw?` decodes from it, a raw
+`ldobj` or `stobj` decides the width and sign extension of the load or store extraction emits for
+it, and a raw `cpblk` or `initblk` decides the alignment of its block operation, which an
+`unaligned.` prefix lowers. `indirectAccessMatches` gives that one emission from the opcode, the
+operand type and the instruction before it, and reserves the emitted loads, stores and block
+operations for these opcodes and for calls, which `UnsafeCallsValid` binds.
 `FeatureFlowValid` and `ScalarFlowValid` apply `indirectSiteWindow` at every reachable pc,
 reading the neighbouring raw instructions through an index of the body built once.
 -/
@@ -30,22 +32,9 @@ def accessAlignment : Option RawInstruction → Option (Option Nat)
   | some ⟨_, 65042, _⟩ | some ⟨_, 65043, _⟩ => none
   | _ => some none
 
-/-- The one instruction extraction emits for an integer `ldind` or `stind`, or for a `cpblk` or
-    `initblk` whose prefix gives `alignment`; `none` for any other opcode, including the floating
-    and reference kinds, which extraction refuses. -/
+/-- The one instruction extraction emits for a `cpblk` or `initblk` whose prefix gives
+    `alignment`; `none` for any other opcode. -/
 def indirectEmission? (alignment : Option Nat) : Nat → Option Instruction
-  -- `ldind.i1` to `ldind.u4` load the width they name; only `i1` and `i2` sign-extend.
-  | 70 => some (.loadScalar 1 true)
-  | 71 => some (.loadScalar 1 false)
-  | 72 => some (.loadScalar 2 true)
-  | 73 => some (.loadScalar 2 false)
-  | 74 | 75 => some (.loadScalar 4 false)
-  -- `ldind.i8` and `ldind.i` load, and `stind.i8` and `stind.i` store, a 64-bit word.
-  | 76 | 77 => some .load64
-  | 85 | 223 => some .store64
-  | 82 => some (.storeScalar 1)
-  | 83 => some (.storeScalar 2)
-  | 84 => some (.storeScalar 4)
   | 65047 => some (.memory (.copyBlock (alignment.getD defaultBlockAlignment)))
   | 65048 => some (.memory (.initBlock (alignment.getD defaultBlockAlignment)))
   | _ => none
@@ -55,7 +44,6 @@ def sameIndirectEmission : Instruction → Instruction → Bool
   | .loadScalar width signed, .loadScalar otherWidth otherSigned =>
     width == otherWidth && signed == otherSigned
   | .storeScalar width, .storeScalar otherWidth => width == otherWidth
-  | .load64, .load64 | .store64, .store64 => true
   | .memory (.copyBlock alignment), .memory (.copyBlock other)
   | .memory (.initBlock alignment), .memory (.initBlock other) => alignment == other
   | _, _ => false
@@ -63,7 +51,7 @@ def sameIndirectEmission : Instruction → Instruction → Bool
 /-- Emitted loads, stores and block operations whose width, sign extension or alignment a raw
     instruction decides; only the opcodes `indirectOpcode` names and calls may emit one. -/
 def indirectEmission : Instruction → Bool
-  | .loadScalar .. | .storeScalar _ | .load64 | .store64 | .loadAggregate _ | .storeAggregate _
+  | .loadScalar .. | .storeScalar _ | .ldind _ | .stind _ | .loadAggregate _ | .storeAggregate _
   | .memory (.copyBlock _) | .memory (.initBlock _)
   | .memory .load128 | .memory .load256 | .memory .load512
   | .memory .store128 | .memory .store256 | .memory .store512 => true
@@ -83,13 +71,13 @@ private def layoutFreeTransfer (type : TypeExpr) : Bool :=
 /-- An indirect access after `previous` emits exactly the instruction its opcode, operand type
     and prefix give; an aggregate `ldobj` or `stobj` emits its aggregate transfer, whose width
     the layout use binds; a span `ldobj` emits `.nop`, and `ldobj` or `stobj` of any other
-    operand type is refused; `ldind.i` may instead load a native table entry, whose signature the
-    scalar check binds. Any other instruction emits none of the forms `indirectEmission` names,
-    except a call, which `UnsafeCallsValid` binds and which never emits a 64-bit word access. -/
+    operand type is refused; an integer `ldind` or `stind` emits its decoded instruction. Any other
+    instruction emits none of the forms `indirectEmission` names, except a call, which
+    `UnsafeCallsValid` binds and which never emits an `ldind` or `stind`. -/
 def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawInstruction)
     (emitted : Instruction) : Bool :=
   if !indirectOpcode instruction.opcode then
-    if instruction.opcode == 40 then !(emitted matches .load64 | .store64)
+    if instruction.opcode == 40 then !(emitted matches .ldind _ | .stind _)
     else !indirectEmission emitted
   else match accessAlignment previous, instruction.opcode, instruction.operand with
     | none, _, _ => false
@@ -101,7 +89,7 @@ def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawI
       -- A span `ldobj` copies nothing; extraction refuses every other operand type.
       else instruction.opcode == 113 && spanLocal type && (emitted matches .nop)
     | some alignment, opcode, _ =>
-      (opcode == 77 && (emitted matches .managed (.tableLoad _))) ||
+      valueEncodingMatches instruction emitted ||
         (indirectEmission? alignment opcode).any (sameIndirectEmission · emitted)
 
 /-- The indirect access rule at `pc`, reading the raw instructions next to it through `rawAt`:

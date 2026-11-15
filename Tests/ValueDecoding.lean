@@ -57,6 +57,12 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 64, .target 64⟩, .bne_un 64), (⟨0, 65, .target 65⟩, .bge_un 65),
   (⟨0, 66, .target 66⟩, .bgt_un 66), (⟨0, 67, .target 67⟩, .ble_un 67),
   (⟨0, 68, .target 68⟩, .blt_un 68), (⟨0, 69, .targets [1, 2]⟩, .switch [1, 2]),
+  -- Integer indirect loads and stores.
+  (⟨0, 70, .none⟩, .ldind .i1), (⟨0, 71, .none⟩, .ldind .u1), (⟨0, 72, .none⟩, .ldind .i2),
+  (⟨0, 73, .none⟩, .ldind .u2), (⟨0, 74, .none⟩, .ldind .i4), (⟨0, 75, .none⟩, .ldind .u4),
+  (⟨0, 76, .none⟩, .ldind .i8), (⟨0, 77, .none⟩, .ldind .i), (⟨0, 82, .none⟩, .stind .i1),
+  (⟨0, 83, .none⟩, .stind .i2), (⟨0, 84, .none⟩, .stind .i4), (⟨0, 85, .none⟩, .stind .i8),
+  (⟨0, 223, .none⟩, .stind .i),
   -- Arithmetic, bitwise operations and shifts.
   (⟨0, 88, .none⟩, .add), (⟨0, 89, .none⟩, .sub), (⟨0, 90, .none⟩, .mul), (⟨0, 91, .none⟩, .div),
   (⟨0, 92, .none⟩, .div_un), (⟨0, 93, .none⟩, .rem), (⟨0, 94, .none⟩, .rem_un),
@@ -94,7 +100,7 @@ def undecoded : List Name := [
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
   ``Instruction.initializeSpanLocal, ``Instruction.tailCall, ``Instruction.managed,
-  ``Instruction.load64, ``Instruction.store64, ``Instruction.call, ``Instruction.callInstance,
+  ``Instruction.call, ``Instruction.callInstance,
   ``Instruction.callVirtual, ``Instruction.newAggregate, ``Instruction.newObject,
   ``Instruction.objectTest, ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.memory, ``Instruction.throw,
@@ -206,7 +212,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 62, undecoded 31 of 93 constructors -/
+/-- info: decoded 64, undecoded 29 of 93 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

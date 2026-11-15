@@ -54,7 +54,7 @@ raw-instruction matching instead. No unrecognized instruction is admitted. -/
 def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat × Nat) :=
   match op with
   | .managed (.address ..) => some (0, 1)
-  | .managed .tableLength | .managed (.tableLoad _) => some (1, 1)
+  | .managed .tableLength => some (1, 1)
   | .managed (.tableElement _) => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
@@ -64,14 +64,14 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .ldc_i4 _ | .ldc_i8 _ | .ldarg _ | .ldloc .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
-  | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
+  | .loadAggregate _ | .loadScalar .. | .ldind _ | .fieldAt .. | .fieldAddress _
   | .aggregateFieldAt .. | .objectTest .. => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
   | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => some (2, 1)
   -- Stores and initialization through a reference, `pop` and `dup`.
-  | .storeAggregate _ | .storeScalar _ | .store64 | .copyObject _
+  | .storeAggregate _ | .storeScalar _ | .stind _ | .copyObject _
   | .setFieldAt .. | .setAggregateFieldAt .. => some (2, 0)
   | .initAggregate _ | .skipInit | .pop => some (1, 0)
   | .dup => some (1, 2)

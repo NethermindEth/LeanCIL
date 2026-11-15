@@ -517,8 +517,8 @@ def pair (reference : Reference) : ArgumentView := ⟨reference, 16⟩
   code := [.ldarg 0, .stloc 0,
     .ldarg 1, .fieldAt 8 8, .stloc 1,
     .ldarg 2, .pop,
-    .ldarg 3, .load64, .stloc 0,
-    .ldarg 4, .load64, .pop,
+    .ldarg 3, .ldind .i8, .stloc 0,
+    .ldarg 4, .ldind .i8, .pop,
     .ldloc 1, .ldloc 0, .add, .ret]
   locals := [.i64 0, .i64 0], localKinds := [.word64, .word64], returnsValue := true }
 

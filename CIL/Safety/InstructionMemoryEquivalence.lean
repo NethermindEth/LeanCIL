@@ -1,4 +1,5 @@
 import CIL.Safety.FrameEquivalence
+import CIL.Safety.NativeMethodTableEquivalence
 
 /-!
 # Equivalent memories run instructions alike
@@ -495,7 +496,7 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
       (instruction operation stack n) := by
   unfold CIL.Safety.instruction
   split <;> try simp only [same.read, same.dereference, same.loadValue, same.loadSnapshot,
-    same.formValue, same.add]
+    same.formValue, same.add, same.loadNativeTable]
   all_goals repeat first
     | exact same.memoryInstruction _ _
     | exact .error _

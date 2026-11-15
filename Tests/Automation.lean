@@ -1210,7 +1210,7 @@ open CIL.Safety in
 theorem inferred_read_load (memory : Memory) (limb : Reference) (word : CIL.W64)
     (loaded : read memory limb 8 1 = .ok (numberBytes word.toNat 8))
     (body : CIL.Method) (frame : Frame) :
-    step body .load64 0 [] frame [.reference (.address limb)] memory =
+    step body (.ldind .i8) 0 [] frame [.reference (.address limb)] memory =
       .ok (.next 1 [.scalar (.i64 word)] frame memory) := by
   have restated := loaded
   clear loaded

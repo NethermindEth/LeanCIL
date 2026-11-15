@@ -115,8 +115,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
-    "memory" => ([], [".ldarg 0", ".ldarg 1", ".store64", ".ldarg 0", ".load64", ".pop"],
-        [".ldarg 0", ".load64", ".ret"]),
+    "memory" => ([], [".ldarg 0", ".ldarg 1", ".stind .i8", ".ldarg 0", ".ldind .i8", ".pop"],
+        [".ldarg 0", ".ldind .i8", ".ret"]),
     "reference" or "table" => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"]),
     "accumulate" or "contract" or "hypotheses" or "lemma" or "outcome" =>
         ([".ldarg 0"], [".ldarg 1", ".add"], [".ret"]),
@@ -211,7 +211,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   .ok (memory, [.scalar (.i64 word)]) := by
               have formed := access_reference_valid _ _ _ _ _ (read_access loaded)
               have loadFact := load_word64_of_read loaded
-              have storeFact := step_store64_of_write written
+              have storeFact := step_stind_i8_of_write written
               cil_checked_steps [formed, loadFact, storeFact]
             """,
         "accumulate" => $$"""

@@ -940,7 +940,7 @@ elab_rules : tactic
           $methodFound $instructionFound
           (by cil_checked_step_normalized [$[$facts:term],*]) ?_
         cil_stack_cleanup)))
-    unless [``CIL.Instruction.store64, ``CIL.Instruction.storeScalar,
+    unless [``CIL.Instruction.stind, ``CIL.Instruction.storeScalar,
         ``CIL.Instruction.setFieldAt].contains operation do
       advance facts
       return

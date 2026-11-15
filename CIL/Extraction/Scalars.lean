@@ -505,7 +505,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if instruction.opcode == 77 && (stack.head?).any
       (fun kind => match kind with | .nativeMethodTable _ => true | _ => false) then
     match stack, emitted with
-    | .nativeMethodTable signature :: _, .managed (.tableLoad actual) => signature == actual
+    | .nativeMethodTable _ :: _, .ldind .i => true
     | _, _ => false
   else if instruction.opcode == 88 && (match stack with
       | .nativeMethodTable _ :: _ | _ :: .nativeMethodTable _ :: _ => true | _ => false) then
@@ -516,8 +516,6 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if let .managed operation := emitted then match operation, stack with
     | .address .., _ => instruction.opcode == 65030
     | .call .., _ => instruction.opcode == 41
-    | .tableLoad signature, .nativeMethodTable actual :: _ =>
-      instruction.opcode == 77 && signature == actual
     | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
     | .tableElement signature, index :: .methodTable actual :: _ =>
       index ∈ [.word32, .native] && signature == actual &&

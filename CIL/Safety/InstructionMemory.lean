@@ -1,6 +1,7 @@
 import CIL.Safety.SnapshotMemory
 import CIL.Safety.SpanViews
 import CIL.Safety.ArrayViews
+import CIL.Safety.NativeMethodTables
 import CIL.Semantics
 
 /-!
@@ -89,16 +90,16 @@ def observerCount : CIL.Instruction → Nat
   | .brfalse _ | .brtrue _ | .switch _ | .objectTest .. => 1
   -- Memory and fields
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
-  | .load64 | .skipInit | .initAggregate _ => 1
+  | .ldind _ | .skipInit | .initAggregate _ => 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
-  | .store64 | .copyObject _ => 2
+  | .stind _ | .copyObject _ => 2
   -- Method boundaries
   | .ret => 1
   | .call _ argc | .callInstance _ argc | .callVirtual _ argc | .tailCall _ argc
   | .newAggregate _ argc _ | .newObject _ argc .. => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1
   | .managed (.tableElement _) => 2
-  | .managed .tableLength | .managed (.tableLoad _) => 1
+  | .managed .tableLength => 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
@@ -1243,15 +1244,27 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | .fieldAt .., .readOnlyReference .null :: _ | .fieldAddress _, .readOnlyReference .null :: _
   | .setFieldAt .., .scalar _ :: .reference .null :: _ =>
     .error (.memory .nullDereference .null 0)
-  -- Memory operations, constants and 64-bit words
+  -- Memory operations and constants
   | .memory operation, _ => memoryInstruction operation stack m
   | .ldc_i4 bits, _ => return (m, .scalar (.i32 bits) :: stack)
   | .ldc_i8 bits, _ => return (m, .scalar (.i64 bits) :: stack)
-  | .load64, .reference r :: rest | .load64, .readOnlyReference r :: rest =>
-    return (m, .scalar (← loadValue m r 8) :: rest)
-  | .store64, .scalar (.i64 bits) :: .reference r :: rest =>
+  -- Indirect integer loads and stores; a native load from a method table reads its entry.
+  | .ldind .i, .methodTable table :: rest =>
+    let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table m)
+    return (m, .methodPointer pointer :: rest)
+  | .ldind kind, .reference r :: rest | .ldind kind, .readOnlyReference r :: rest =>
+    return (m, .scalar (← loadValue m r kind.width kind.signed) :: rest)
+  | .stind .i8, .scalar (.i64 bits) :: .reference r :: rest
+  | .stind .i, .scalar (.i64 bits) :: .reference r :: rest =>
     return (← storeValue m r (.i64 bits), rest)
-  | .store64, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r 8)
+  -- An eight-byte store takes an i64, never the bytes of an i32.
+  | .stind .i8, .scalar (.i32 _) :: .reference _ :: _
+  | .stind .i, .scalar (.i32 _) :: .reference _ :: _ => .error .invalidState
+  | .stind kind, .scalar (.i32 bits) :: .reference r :: rest =>
+    let address ← referenceAt r
+    return (← checkedAt r kind.width
+      (write m address (numberBytes bits.toNat kind.width) ordinaryAccessAlignment), rest)
+  | .stind kind, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r kind.width)
   -- References and stack shuffles
   | .skipInit, .reference r :: rest =>
     let _ ← formValue m r

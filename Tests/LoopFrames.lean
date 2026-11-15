@@ -398,7 +398,7 @@ open CIL (W64)
   returnsValue := true, locals := [.i64 0], localKinds := [.word64],
   parameterHomes := [(0, .span 8 false)]
   code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldloc 1, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldloc 1, .ldc_i4 1,
+    .memory (.spanItem 8), .ldind .i8, .add, .stloc 0, .ldloc 1, .ldc_i4 1,
     .memory (.spanSlice false), .stloc 1, .ldloc 1, .memory .spanLength, .brtrue 4,
     .ldloc 0, .ret] }
 

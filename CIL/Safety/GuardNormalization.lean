@@ -137,8 +137,8 @@ namespace CIL.Safety
     observerCount (.aggregateFieldAt offset size) = 1 := rfl
 @[cil_guard] theorem guard_setAggregateFieldAt (offset size : Nat) :
     observerCount (.setAggregateFieldAt offset size) = 2 := rfl
-@[cil_guard] theorem guard_load64 : observerCount .load64 = 1 := rfl
-@[cil_guard] theorem guard_store64 : observerCount .store64 = 2 := rfl
+@[cil_guard] theorem guard_ldind (kind : CIL.NumericKind) : observerCount (.ldind kind) = 1 := rfl
+@[cil_guard] theorem guard_stind (kind : CIL.NumericKind) : observerCount (.stind kind) = 2 := rfl
 @[cil_guard] theorem guard_skipInit : observerCount .skipInit = 1 := rfl
 
 -- Operand counts of memory instructions, which `observerCount` defers to.

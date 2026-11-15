@@ -109,17 +109,16 @@ var path = Path.Combine(root, "NativeProof.lean");
 File.WriteAllText(path, proof);
 evidence.Add(path, "PASS native supplied-table cycle, exception, scalar local and storage checks");
 var rejected = new RejectedEvidence(root);
-var load = Regex.Match(scalar, @"(?m)^  \.managed \(\.tableLoad [^\r\n]+$").Value;
-if (load.Length == 0) throw new InvalidOperationException("Missing native table load");
+const string tableLoadLine = "\n  .ldind .i,";
+if (!scalar.Contains(tableLoadLine, StringComparison.Ordinal))
+    throw new InvalidOperationException("Missing native table load");
 // The dispatcher's table offset is the decoded add that feeds its table load, and raw add at offset 21 of its
 // original and closed bodies; the handler's own add is left unchanged.
-const string tableLoadLine = "\n  .managed (.tableLoad";
 const string emittedAdd = "  .add," + tableLoadLine;
 const string rawAdd = "{ offset := 21, opcode := 88, operand := .none }";
 foreach (var (name, mutated) in new[]
 {
-    ("signature", scalar.Replace(load, load.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal),
-        StringComparison.Ordinal)),
+    ("load-kind", ReplaceExactly(scalar, tableLoadLine, "\n  .ldind .i8,", 1)),
     ("raw-load", scalar.Replace("opcode := 77, operand := .none", "opcode := 76, operand := .none",
         StringComparison.Ordinal)),
     ("emitted-sub", ReplaceExactly(scalar, emittedAdd, "  .sub," + tableLoadLine, 1)),
@@ -154,10 +153,10 @@ using (var module = ModuleDefinition.ReadModule(dll))
 {
     var dispatch = module.GetType("Examples.NativeManagedDispatch").Methods.Single(method => method.Name == "Dispatch");
     var addition = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Add);
-    var tableLoad = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldarg_0);
+    var tableArgument = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldarg_0);
     var processor = dispatch.Body.GetILProcessor();
-    processor.Remove(tableLoad);
-    processor.InsertBefore(addition, tableLoad);
+    processor.Remove(tableArgument);
+    processor.InsertBefore(addition, tableArgument);
     module.Write(commutedDll);
 }
 var commutedOutput = Path.Combine(root, "Commuted");

@@ -244,16 +244,18 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
 @[cil_step] theorem step_ldc_i8_eq {value} (stack : List Value) :
     step body (.ldc_i8 value) pc args frame stack memory =
       instructionStep (.ldc_i8 value) pc frame stack memory := id rfl
-@[cil_step] theorem step_load64_eq (stack : List Value) :
-    step body .load64 pc args frame stack memory =
-      instructionStep .load64 pc frame stack memory := by
+@[cil_step] theorem step_ldind_eq {kind} (stack : List Value) :
+    step body (.ldind kind) pc args frame stack memory =
+      instructionStep (.ldind kind) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_store64_eq (stack : List Value) :
-    step body .store64 pc args frame stack memory =
-      instructionStep .store64 pc frame stack memory := by
+@[cil_step] theorem step_stind_eq {kind} (stack : List Value) :
+    step body (.stind kind) pc args frame stack memory =
+      instructionStep (.stind kind) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
+-- A stepped `ldind` or `stind` of a known kind shows its width and sign as literals.
+attribute [cil_step, cil_instruction_step] CIL.NumericKind.width CIL.NumericKind.signed
 @[cil_step] theorem step_dup_eq (stack : List Value) :
     step body .dup pc args frame stack memory =
       instructionStep .dup pc frame stack memory := id rfl

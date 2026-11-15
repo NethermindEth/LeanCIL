@@ -13,8 +13,8 @@ open CIL
 def method0Signature : String := "System.Void Contracts.Calls::Root(System.UInt64&,System.UInt64&)"
 def method1Signature : String := "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 0, .ldarg 1, .ldarg 0, .call 2 3, .ldarg 0, .ldarg 0, .load64, .ldarg 1, .load64,
-      .call 1 2, .store64, .ret] }
+  [.ldarg 0, .ldarg 1, .ldarg 0, .call 2 3, .ldarg 0, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8,
+      .call 1 2, .stind .i8, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
   [.ldarg 0, .ldc_i4 3, .conv_i8, .mul, .ldarg 1, .add, .ret] }
 @[cil_code] def program : Program := [method0, method1]
@@ -128,7 +128,7 @@ example : ∀ linked, Links Extracted.program linked → addContract.Holds linke
 /-! One concrete implementation of the import, appended at its slot. -/
 
 @[cil_code] def addBody : CIL.Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 2, .ldarg 0, .load64, .ldarg 1, .load64, .add, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ret] }
 @[cil_code] def linkedProgram : CIL.Program := Extracted.program ++ [addBody]
 
 theorem add_linked : importsAdd linkedProgram := by
