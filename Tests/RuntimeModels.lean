@@ -114,6 +114,20 @@ example : runModel body .objectConstructor 3 frame [] staticMemory =
 example : runModel body .skipInit 3 frame [.scalar (.i32 0)] staticMemory =
     step body .skipInit 3 [] frame [.scalar (.i32 0)] staticMemory := rfl
 
+-- The model, unlike the opcode, takes only references: scalar operands are refused.
+example : runModel body (.referenceCompare .same) 3 frame [.scalar (.i32 1), .scalar (.i32 1)]
+    staticMemory = .error .invalidState := rfl
+example : runModel body .referenceSubtract 3 frame [.scalar (.i32 4), .scalar (.i32 9)]
+    staticMemory = .error .invalidState := rfl
+
+-- Spans outside immutable static data, or with a native length, are refused.
+example : memoryInstruction (.createSpan 4) [start] heapMemory =
+    .error (.unsupported "Typed span outside a whole extracted static field") := rfl
+example : memoryInstruction .spanCreate [.scalar (.i32 4), start] heapMemory =
+    .error (.unsupported "Span pointer constructor outside extracted static data") := rfl
+example : step body (.memory .spanCreate) 3 [] frame [.scalar (.i64 4), start] staticMemory =
+    .error .invalidState := rfl
+
 -- Guarded by its observer count, a model rejects unspecified bits as its instruction does.
 example : observedCall (CIL.RuntimeModel.referenceCompare .same).observerCount
       [.scalar (.v128Low64 0), start]

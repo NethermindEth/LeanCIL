@@ -319,7 +319,8 @@ def skipInitCall (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memor
   | _ => .error (.unsupported "Not a memory instruction")
 
 /-- Executes `model` as the call at `pc` of `body`. The caller applies `observedCall` with
-    `model.observerCount` first. -/
+    `model.observerCount` first. On the stacks a model admits this equals `step` on the
+    instruction emitted for the call, and it refuses every other stack. -/
 def runModel (body : CIL.Method) (model : CIL.RuntimeModel) (pc : Nat) (frame : Frame)
     (stack : List Value) (memory : Memory) : ExecutionResult FrameAction :=
   match model with
