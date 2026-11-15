@@ -366,6 +366,14 @@ theorem reads_a_field_parameter_against_the_declaring_instance :
       (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
 #print axioms reads_a_field_parameter_against_the_declaring_instance
 
+/-- A member reference into an unpinned type gives every field index 0, so the operand's name is
+    what tells `System.Lazy<!!0>.Value` from another field of the type: another name is refused. -/
+theorem rejects_an_unpinned_field_reference_with_another_name :
+    rejects own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 0 (.parameter 0) name!"Other" false)
+      (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
+#print axioms rejects_an_unpinned_field_reference_with_another_name
+
 /-- The own slice without the row of the static field between the first and the second instance
     field of `Program`: the carried rows of the type leave a gap. -/
 private def ownWithGappedFields : MetadataSlice :=
