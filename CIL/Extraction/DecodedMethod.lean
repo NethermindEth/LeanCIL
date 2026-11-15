@@ -18,7 +18,7 @@ namespace CIL.Extraction
 /-- The method a raw definition denotes at `arguments`: each instruction of its code as
     `Instruction.ofRaw?` decodes it, frame and signature from the instantiated definition,
     homes over every pc, and no static sites, opaque vector locals or links. `none` when an
-    instruction, the instantiation or a local type has no decoding. -/
+    instruction, the instantiation or a local type has no decoding, including EXPLICITTHIS. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (source : RawMethod) (arguments : List TypeExpr) : Option Method := do
   let closed ← instantiateMethod environment.rawLayouts source arguments
