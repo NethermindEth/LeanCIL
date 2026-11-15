@@ -69,7 +69,8 @@ elab_rules : command
       ⟨rfl, by decide⟩))
 
 /-- `bind_call site := callee from parent` names the only call from `parent` to the bound
-method `callee`, and `[k]` the `k`-th in pc order; `site.call` states its instruction. -/
+method `callee`, and `[k]` the `k`-th in pc order; `site.call` states its instruction and
+`site.link` its link. -/
 syntax (name := bindCall)
   (docComment)? "bind_call " ident " := " term:max " from " term:max (" [" num "]")? : command
 
@@ -86,5 +87,6 @@ elab_rules : command
     let instruction ← liftMacroM (site.instruction callee)
     elabAtPc site.pc (← `(@[cil_code] theorem $(mkIdent (label.getId ++ `call)) :
       ($parent).code[$label]? = some $instruction := rfl))
+    CIL.MethodIdentity.emitLink (mkIdent (label.getId ++ `link)) parent site.pc callee
 
 end CIL.StructuralLabels
