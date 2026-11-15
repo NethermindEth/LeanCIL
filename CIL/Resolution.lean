@@ -262,7 +262,7 @@ theorem find?_of_keysAscend {α : Type} {entries rest : List (Nat × α)}
     (placed : entries.drop position = (key, value) :: rest) :
     entries.find? (fun entry => entry.1 == key) = some (key, value) := by
   induction entries generalizing lower position with
-  | nil => simp at placed
+  | nil => rw [List.drop_nil] at placed; cases placed
   | cons head tail ih =>
     obtain ⟨first, other⟩ := head
     simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending
@@ -270,15 +270,13 @@ theorem find?_of_keysAscend {α : Type} {entries rest : List (Nat × α)}
     | zero =>
       simp only [List.drop_zero, List.cons.injEq, Prod.mk.injEq] at placed
       obtain ⟨⟨rfl, rfl⟩, -⟩ := placed
-      simp
+      exact List.find?_cons_of_pos (decide_eq_true rfl)
     | succ position =>
       simp only [List.drop_succ_cons] at placed
       have later := keysAscend_bound tail (first + 1) ascending.2 (key, value)
         (List.mem_of_mem_drop (placed ▸ List.mem_cons_self))
-      have skipped : (first == key) = false := by
-        simp only [beq_eq_false_iff_ne, ne_eq]
-        omega
-      rw [List.find?_cons_of_neg (by simpa using skipped), ih ascending.2 placed]
+      exact (List.find?_cons_of_neg (p := fun (entry : Nat × α) => entry.1 == key)
+        fun found => Nat.ne_of_lt later (of_decide_eq_true found)).trans (ih ascending.2 placed)
 
 #print axioms find?_of_keysAscend
 
