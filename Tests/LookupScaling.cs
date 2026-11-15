@@ -37,6 +37,9 @@ if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 CallCheckCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
+BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
+    "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter", "Tests.ExtractionHomeIndexes",
+    "Tests.LayoutAccumulation", "Tests.LayoutProjectionIndexes");
 
 // `cil_instruction_equations` proves each equation from the code suffix that starts its block. Proved
 // against the whole code list instead, it walks one cell per preceding instruction and a method's equations

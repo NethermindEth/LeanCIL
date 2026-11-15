@@ -59,7 +59,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `imports` | implementation-bound contract imports and conditional caller verification |
 | `exceptionlint` | diagnostic XML exception drift without proof claims |
 | `contracts` | universal checked contracts, caller memory preservation and incorrect implementations |
-| `evidence` | independent extraction certificates, malformed evidence rejection, the metadata decoder's method names against Cecil's, strings as opaque references, typed identity display, and the certificate index, feature getter, layout accumulation and projection, extraction home and generic owner index libraries |
+| `evidence` | independent extraction certificates, malformed evidence rejection and the metadata decoder's method names against Cecil's |
 | `dispatch` | constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage |
 | `loops` | cyclic control-flow validation, universal termination, negative contracts and class/word-array composition |
 | `outlines-control` | generated outlines for control flow, arithmetic and value types, completed proofs and rejection checks |
@@ -84,7 +84,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `failures` | failure reports that classify and locate each failed obligation |
 | `integer` | integer opcode encodings, boundary cases and universal negation proofs |
 | `narrow` | narrow integer conversions, storage, method boundaries and rejection proofs |
-| `primitive` | primitive memory, switch, sizeof and rejection proofs |
+| `primitive` | primitive memory, switch, sizeof and rejection proofs, and strings as opaque references |
 | `division` | integer division and remainder runtime comparisons and proofs |
 | `checked` | checked integer arithmetic runtime comparisons and proofs |
 | `conversions` | checked integer conversions runtime comparisons and proofs |
@@ -93,16 +93,16 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `copy` | typed copies, aliases, byte snapshots and rejection proofs |
 | `arguments` | argument assignment, addressing, aliases and lifetime proofs |
 | `native` | native integer storage, arithmetic and runtime comparisons |
-| `identity` | methods bound by signature or call shape that survive renumbering and renaming |
+| `identity` | methods bound by signature or call shape that survive renumbering and renaming, and typed identity display |
 | `labels` | loop-head and call-site labels that survive inserted statements |
 | `names` | PDB local names and source locations that never change extraction |
 | `symbols` | consumer proofs naming PDB locals through helper modules, bound only where imported |
 | `callers` | caller proofs that survive reimplemented helpers through their contracts |
 | `construction` | caller proofs that survive reimplemented constructors through their contracts |
 | `outcomes` | outcome contracts that name exactly when each exception is thrown |
-| `scaling` | compositional certificate for a six-method call graph and its consumer replay, and the header and per-method struct layout checks at a per-layout cost that does not grow with the table |
+| `scaling` | compositional certificate for a six-method call graph and its consumer replay, and the header and per-method struct layout checks at a per-layout cost that does not grow with the table, and the generic owner index library |
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
-| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the managed-call check of a body with many call sites at a per-site cost that does not grow with the call sites; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction |
+| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the managed-call check of a body with many call sites at a per-site cost that does not grow with the call sites; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction; and the certificate index, feature getter, layout accumulation and projection, and extraction home index libraries |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
 | `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses and faulting bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
