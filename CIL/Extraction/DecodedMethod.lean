@@ -5,9 +5,10 @@ import CIL.Extraction.Translation
 # Methods decoded from raw definitions
 
 `Method.ofRaw?` gives the method a raw definition denotes at its type arguments: each
-instruction as `Instruction.ofRaw?` decodes it, and the frame, homes and signature from the
-instantiated definition. `Method.ofBody?` reads the code and init flag from pinned body bytes
-instead of the definition, and `decodedProgram?` applies it to every evidence record.
+instruction of the instantiated definition as `Instruction.ofRaw?` decodes it, so a type test
+names the type argument, and the frame, homes and signature from the same definition.
+`Method.ofBody?` reads the code and init flag from pinned body bytes instead of the definition,
+and `decodedProgram?` applies it to every evidence record.
 `Method.ofBody?_of_decodes` shows that for a definition whose body check passes, the method of
 the bytes is the method of the definition, so a proof about the decoded program needs no
 translator output.
@@ -15,15 +16,15 @@ translator output.
 
 namespace CIL.Extraction
 
-/-- The method a raw definition denotes at `arguments`: each instruction of its code as
-    `Instruction.ofRaw?` decodes it, frame and signature from the instantiated definition,
+/-- The method a raw definition denotes at `arguments`: each instruction of its instantiated
+    code as `Instruction.ofRaw?` decodes it, frame and signature from the same definition,
     homes over every pc, and no static sites, opaque vector locals or links. `none` when an
     instruction, the instantiation or a local type has no decoding. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (source : RawMethod) (arguments : List TypeExpr) : Option Method := do
   let closed ← instantiateMethod environment.rawLayouts source arguments
   let storage ← closedArguments environment.rawLayouts closed
-  let code ← source.code.mapM Instruction.ofRaw?
+  let code ← closed.code.mapM Instruction.ofRaw?
   let localKinds ← storage.locals.mapM (storageKind environment.layouts)
   let parameterHomes ←
     expectedHomes environment.layouts storage (storage.code.map fun _ => true)
