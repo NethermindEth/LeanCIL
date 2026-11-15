@@ -6,10 +6,11 @@ import Tests.MetadataWorld
 # Decoded method tests
 
 Bodies built by `Tests.BodyEncoding.encodeBody` and by hand over `Tests.MetadataWorld` must
-decode through `Method.ofBody?` to the method their bytes denote: the code `Instruction.ofRaw?`
+decode through `Method.ofBody?` to the method their bytes denote: the code `Instruction.ofRaw`
 gives, locals initialized by the flag in the bytes rather than the definition's, and the code of
-the bytes rather than the definition's. A body with an instruction outside the value family
-gives no method, and neither does a program with such a body.
+the bytes rather than the definition's. An instruction outside the value family decodes to a
+hole carrying its opcode, which faults when stepped; a body the check refuses gives no method,
+and neither does a program with such a body.
 -/
 
 namespace Tests.DecodedMethod
@@ -120,12 +121,24 @@ private def newarrBody : BodyEvidence :=
   evidenceOf newarrBytes [(tokens.objectRef, .type objectType)] { own := own.1, others := [lib] }
     newarrRaw
 
-/-- The newarr body passes the body check but has no decoded method. -/
-theorem newarr_has_no_method :
+/-- The newarr body passes the body check and decodes with a hole at pc 1 carrying `newarr`'s
+    opcode 0x8D, since no family admits a type operand yet. -/
+theorem newarr_decodes_to_a_hole :
     (checkBody newarrBody newarrRaw []).toBool = true ∧
-      (Method.ofBody? .scalar {} newarrBody newarrRaw []).isNone = true := by
-  decide +kernel
-#print axioms newarr_has_no_method
+      (Method.ofBody? .scalar {} newarrBody newarrRaw []).map (·.code) =
+        some [.ldc_i4 1, .unadmitted 0x8D, .pop, .ret] := by
+  constructor
+  · decide +kernel
+  · cil_kernel_rfl
+#print axioms newarr_decodes_to_a_hole
+
+/-- The method decoded from the newarr bytes loads its constant and faults at the hole's pc. -/
+theorem decoded_hole_faults :
+    (Method.ofBody? .scalar {} newarrBody newarrRaw []).map (fun method =>
+      Safety.invoke [method] 4 0 [] Safety.Memory.empty) =
+        some (.error ⟨0, 1, .unsupported "Opcode not admitted"⟩) := by
+  cil_kernel_rfl
+#print axioms decoded_hole_faults
 
 /-- An evidence record whose only fields `decodedProgram?` reads are `original`, `body` and
     `arguments`. -/
@@ -134,12 +147,17 @@ private def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :
     parameterInput := ⟨[], [], []⟩, reachable := [], featureStates := [], scalarStates := [],
     layoutUses := [] }
 
-/-- One body without a decoded method leaves the program without one. -/
-theorem program_needs_every_method :
+/-- A body with a hole still gives its method, so the add and newarr program decodes in full,
+    while one refused body leaves the program without one. -/
+theorem program_needs_every_body :
     ((encodeBody pin addRaw).bind fun addBody =>
-      decodedProgram? .scalar {} [item addRaw addBody, item newarrRaw newarrBody]).isNone =
+      (decodedProgram? .scalar {} [item addRaw addBody, item newarrRaw newarrBody]).map
+        List.length) = some 2 ∧
+      ((encodeBody pin addRaw).bind fun addBody =>
+        decodedProgram? .scalar {}
+          [item addRaw addBody, item { addRaw with parameters := [uint64] } addBody]).isNone =
         true := by
-  decide +kernel
-#print axioms program_needs_every_method
+  constructor <;> decide +kernel
+#print axioms program_needs_every_body
 
 end Tests.DecodedMethod

@@ -9,6 +9,8 @@ with every short and macro form folded into its constructor. `valueEncodingMatch
 emitted instruction exactly when it is that decoded instruction, and `Instruction.valueOpcode` is
 the set of opcodes `ofRaw?` decodes for some operand. Instantiation leaves every decoded value
 unchanged (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original.
+`Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw opcode,
+exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
 -/
 
 namespace CIL.Extraction
@@ -95,8 +97,10 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. Any other opcode, an operand kind that
-    instantiation rewrites, or a malformed or out-of-range operand gives `none`. -/
+    instantiation rewrites, or a malformed or out-of-range operand gives `none`. A hole is never
+    a decoding, so `Instruction.ofRaw` can write one where this admits nothing. -/
 def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
+  Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
   match raw.opcode, raw.operand with
   -- Stack shuffling and return.
@@ -184,6 +188,62 @@ theorem Instruction.valueOpcode_of_ofRaw? {raw : RawInstruction} {instruction : 
   · rfl
 
 #print axioms Instruction.valueOpcode_of_ofRaw?
+
+/-- No raw instruction decodes to a hole: a hole is what `Instruction.ofRaw` writes where
+    `ofRaw?` admits nothing. -/
+theorem Instruction.ofRaw?_ne_unadmitted (raw : RawInstruction) (opcode : Nat) :
+    Instruction.ofRaw? raw ≠ some (.unadmitted opcode) := fun decoded =>
+  Bool.false_ne_true (Option.filter_eq_some_iff.mp decoded).2
+
+#print axioms Instruction.ofRaw?_ne_unadmitted
+
+/-- The instruction a raw instruction denotes: its value decoding where `ofRaw?` admits one,
+    and otherwise a hole carrying the raw opcode, which faults when stepped. -/
+def Instruction.ofRaw (raw : RawInstruction) : Instruction :=
+  (Instruction.ofRaw? raw).getD (.unadmitted raw.opcode)
+
+/-- Decoding gives a hole exactly when `ofRaw?` admits nothing, and the hole carries the raw
+    opcode; an instruction `ofRaw?` admits is never a hole. -/
+theorem Instruction.ofRaw_eq_unadmitted_iff (raw : RawInstruction) (opcode : Nat) :
+    Instruction.ofRaw raw = .unadmitted opcode ↔
+      Instruction.ofRaw? raw = none ∧ opcode = raw.opcode := by
+  unfold Instruction.ofRaw
+  cases decoded : Instruction.ofRaw? raw with
+  | none =>
+    simp only [Option.getD_none, Instruction.unadmitted.injEq, true_and]
+    exact eq_comm
+  | some instruction =>
+    simp only [Option.getD_some, reduceCtorEq, false_and, iff_false]
+    intro hole
+    subst hole
+    exact Instruction.ofRaw?_ne_unadmitted raw opcode decoded
+
+#print axioms Instruction.ofRaw_eq_unadmitted_iff
+
+/-- An instruction `ofRaw?` admits decodes to itself. -/
+theorem Instruction.ofRaw_of_ofRaw? {raw : RawInstruction} {instruction : Instruction}
+    (decoded : Instruction.ofRaw? raw = some instruction) :
+    Instruction.ofRaw raw = instruction := by
+  rw [Instruction.ofRaw, decoded, Option.getD_some]
+
+#print axioms Instruction.ofRaw_of_ofRaw?
+
+/-- An opcode outside the value opcodes decodes to a hole carrying it. -/
+theorem Instruction.ofRaw_of_not_valueOpcode {raw : RawInstruction}
+    (outside : Instruction.valueOpcode raw.opcode = false) :
+    Instruction.ofRaw raw = .unadmitted raw.opcode := by
+  cases decoded : Instruction.ofRaw? raw with
+  | none => rw [Instruction.ofRaw, decoded, Option.getD_none]
+  | some _ =>
+    rw [Instruction.valueOpcode_of_ofRaw? decoded] at outside
+    cases outside
+
+#print axioms Instruction.ofRaw_of_not_valueOpcode
+
+/-- The instruction at `pc` of raw code as `Instruction.ofRaw` decodes it; `none` past the end
+    of the code. -/
+def Instruction.ofRawAt (code : List RawInstruction) (pc : Nat) : Option Instruction :=
+  code[pc]?.map Instruction.ofRaw
 
 /-- Whether `emitted` is the instruction `decoded`, operands included. Defined only for the
     value constructors `ofRaw?` produces; every other `decoded` gives `false`. -/
