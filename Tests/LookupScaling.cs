@@ -47,6 +47,11 @@ if (args.Contains("--metadata-name-only", StringComparer.Ordinal))
     MetadataNameCosts();
     return;
 }
+if (args.Contains("--model-table-only", StringComparer.Ordinal))
+{
+    ModelTableCosts();
+    return;
+}
 if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
 {
     IndirectTargetCosts();
@@ -93,6 +98,8 @@ const int SparseLongStatements = 1000;
 const double AllowedCallGrowth = 1.35;
 // Type identities compare one code per name, so a name four times as long may cost at most this much more.
 const double AllowedNameGrowth = 1.05;
+// A model table sixteen times as large may cost a lookup at most this much more.
+const double AllowedModelLookupGrowth = 1.05;
 // The most heartbeats deciding equality or inequality of two type identities may cost at either name length.
 const long TypeDecisionLimit = 9_500;
 // `decide +kernel` costs about 2,000 heartbeats for any statement; less means the decision was not measured.
@@ -688,6 +695,7 @@ foreach (var outcome in new[] { "equal", "unequal" })
     Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
 }
 MetadataNameCosts();
+ModelTableCosts();
 
 // The heartbeats `decide +kernel` adds to the two metadata name computations every call and field operand check
 // reduces: the call check's name clause, which reads a typed name back and compares its bytes with the row's, and
@@ -740,6 +748,89 @@ void MetadataNameCosts()
                 $"{AllowedGrowth} times the cost at the shorter length."));
         Console.WriteLine($"PASS a metadata name {computation} its bytes at {measured} heartbeats");
     }
+}
+
+// `runtimeModel` searches a literal tree of model entries by name code and compares one method reference at the leaf,
+// so a lookup in 256 entries costs the four extra tree levels over 16 and no more. The agreement check runs one
+// lookup per live call site, so its cost per site stays flat over 8, 32 and 128 sites.
+void ModelTableCosts()
+{
+    var tableDirectory = At("artifacts/LookupScaling/ModelTables");
+    Directory.CreateDirectory(tableDirectory);
+    int[] tableSizes = [16, 256];
+    int[] siteCounts = [8, 32, 128];
+    const int Queried = 13;
+    string Entries(int size) => string.Join(",\n  ", Enumerable.Range(0, size).Select(index =>
+        $"ModelEntry.exact .call (method name!\"Model{index:D4}\") (.memory (.divRemOut {index}))"));
+    string Table(int size) => $$"""
+        /-- {{size}} modelled methods. -/
+        def entries{{size}} : List ModelEntry := [
+          {{Entries(size)}}]
+        /-- Their literal table. -/
+        def table{{size}} : ModelTable := model_table% entries{{size}}
+        #kernel_cost "model lookup {{size}}"
+          (table{{size}}.find {} .call (method name!"Model{{Queried:D4}}") = some (.memory (.divRemOut {{Queried}})))
+        """;
+    string Emitted(int index) => $".memory (.divRemOut {index % 16})";
+    string Site(int index) =>
+        $"⟨{index}, 40, .call {{ method := method name!\"Model{index % 16:D4}\", target := .external \"\", " +
+        "typeArguments := [], parameterCount := 0, returnsValue := true }⟩";
+    string Sites(int count) => $$"""
+        /-- {{count}} live calls of the modelled methods, the call at index i to method i mod 16. -/
+        def raw{{count}} : RawMethod := { shell with code := [
+          {{string.Join(",\n  ", Enumerable.Range(0, count).Select(Site))}}] }
+        /-- The model each call emits. -/
+        def code{{count}} : List Instruction :=
+          [{{string.Join(", ", Enumerable.Range(0, count).Select(Emitted))}}]
+        #kernel_cost "model agreement {{count}}"
+          (ModelsAgree catalog {} raw{{count}} (List.replicate {{count}} true) code{{count}})
+        """;
+    var path = Path.Combine(tableDirectory, "ModelTables.lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Extraction.RuntimeModels
+        open CIL CIL.Extraction Lean Elab Command
+        {{KernelCostCommand}}
+        /-- A static method of no parameters named `name`. -/
+        def method (name : MetadataName) : MethodRef :=
+          { owner := .atom "Tests" "Models", name, hasThis := false, genericArity := 0, returnType := .void,
+            parameters := [] }
+        {{string.Join("\n", tableSizes.Select(Table))}}
+        /-- The sixteen-entry table, accounting for every `divRemOut` emission. -/
+        def catalog : ModelCatalog where
+          table := table16
+          lowered
+            | .memory (.divRemOut width) => some (.memory (.divRemOut width))
+            | _ => none
+        /-- A method shell whose code each fixture supplies. -/
+        def shell : RawMethod :=
+          { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
+            attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
+            initLocals := true, maxStack := 1, genericParameters := [], code := [] }
+        {{string.Join("\n", siteCounts.Select(Sites))}}
+        """);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.ModelTableCost().Matches(output).ToDictionary(
+        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
+        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != tableSizes.Length + siteCounts.Length ||
+        costs.Values.Min() < KernelDecisionFloor)
+        throw new InvalidOperationException("Missing model table costs:\n" + output);
+    var lookups = tableSizes.Select(size => costs[("lookup", size)]).ToArray();
+    var lookupMeasure = string.Join(", ", tableSizes.Select(size =>
+        string.Create(CultureInfo.InvariantCulture, $"{costs[("lookup", size)]} at {size} entries")));
+    if (lookups[1] > lookups[0] * AllowedModelLookupGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"A model lookup costs {lookupMeasure} heartbeats; the limit is {AllowedModelLookupGrowth} times " +
+            "the cost in the smaller table."));
+    Console.WriteLine($"PASS a model lookup costs {lookupMeasure} heartbeats");
+    double PerSite(int count) => (double)costs[("agreement", count)] / count;
+    var agreementMeasure = string.Join(", ", siteCounts.Select(count =>
+        string.Create(CultureInfo.InvariantCulture, $"{costs[("agreement", count)]} at {count} sites")));
+    if (!siteCounts.Zip(siteCounts.Skip(1)).All(pair => PerSite(pair.Second) <= PerSite(pair.First) * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"The model agreement check costs {agreementMeasure} heartbeats; per site, the limit is {AllowedGrowth} " +
+            "times the cost at the smaller count."));
+    Console.WriteLine($"PASS the model agreement check costs {agreementMeasure} heartbeats");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -1802,6 +1893,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\bname (spells|encodes) ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex MetadataNameCost();
+
+    [GeneratedRegex(@"\bmodel (lookup|agreement) ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex ModelTableCost();
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex NativeTableStep();
