@@ -83,7 +83,7 @@ divided by its index, does. Run these rows alone with
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
 `calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
 entry holds the same owner, less the same statement closed with `sorry`. The kernel compares
-the owners byte by byte, at about 8,400 heartbeats per byte: 562,000, 2,153,000 and 8,516,000
+the owners byte by byte, at 8,300 to 8,900 heartbeats per byte: 572,000, 2,165,000 and 8,533,000
 heartbeats. The suite fails when the cost grows more than 1.1 times as fast as the length from one
 size to the next. Run this row alone with
 `dotnet run --file Tests/LookupScaling.cs -- --indirect-target-only`.
