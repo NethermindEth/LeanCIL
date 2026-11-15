@@ -195,6 +195,14 @@ with numeric locals is not a closed term; `bind_entry ... allocating` supplies i
 and home facts instead (see [loop
 scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 
+An indirect call through a method pointer, `calli`, steps by `CIL.Safety.step_managed_call_eq`,
+which states the step over `CIL.Safety.indirectTarget`: the catalog body selected for the
+pointer, or `none`, which faults with `invalidState`. Supply the selection as a fact
+`CIL.Safety.indirectTarget signature catalog pointer = some method` proved by `cil_kernel_rfl`, and
+`simp only [cil_step, fact]` steps the call. The kernel compares the pointer's owner string with
+each catalog entry's; `rfl` compares them in the elaborator with recursion as deep as the owner
+is long, and stops at the default recursion limit once owners reach about 128 bytes.
+
 At a fetched `.ret`, narrow returns included, the tactic leaves the equation between the computed
 checked result and the stated result as a goal over the returned values, with no unexecuted `run`.
 The goal closes automatically only when `with_reducible rfl` succeeds after frame cleanup, list

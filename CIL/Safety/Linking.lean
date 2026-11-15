@@ -166,6 +166,24 @@ theorem step_body_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instr
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory) :
     step (body.relocate f) op pc args frame stack m = step body op pc args frame stack m := rfl
 
+/-- Relocating a catalog renames the body an indirect call selects and selects no other. -/
+theorem indirectTarget_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
+    (catalog : List CIL.ManagedTarget) (pointer : CIL.MethodPointer) :
+    indirectTarget signature (catalog.map (CIL.ManagedTarget.relocate f)) pointer =
+      (indirectTarget signature catalog pointer).map f := by
+  unfold indirectTarget
+  cases pointer.signature != signature with
+  | true => rfl
+  | false =>
+    cases pointer.target with
+    | none => rfl
+    | some identity =>
+      simp only [Bool.false_eq_true, ite_false, Option.bind, CIL.ManagedTarget.find?_relocate,
+        Option.map_map]
+      rfl
+
+#print axioms indirectTarget_relocate
+
 /-- Relocating an indirect catalog changes only the body index of its selected action. -/
 private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
     (catalog : List CIL.ManagedTarget) (tail : Bool) (pc : Nat) (frame : Frame)
@@ -179,22 +197,15 @@ private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedS
   | cons value values =>
     cases value <;> try rfl
     rename_i pointer
-    cases target : pointer.target with
-    | none => simp [managedStep, target, Bind.bind, Except.bind, Except.map]
-    | some identity =>
-      cases found : catalog.find? (·.identity == identity) with
-      | none =>
-        simp only [managedStep, target, CIL.ManagedTarget.find?_relocate, found,
-          Bind.bind, Except.bind, Except.map, Option.map_none]
-        split <;> rfl
-      | some selected =>
-        simp only [managedStep, target, CIL.ManagedTarget.find?_relocate, found,
-          Option.map_some]
-        repeat' first
-          | rfl
-          | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-              Except.map, CIL.ManagedTarget.relocate, FrameAction.relocate]
-          | split
+    cases selected : indirectTarget signature catalog pointer with
+    | none => simp only [managedStep, indirectTarget_relocate, selected, Option.map_none]; rfl
+    | some method =>
+      simp only [managedStep, indirectTarget_relocate, selected, Option.map_some]
+      repeat' first
+        | rfl
+        | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map,
+            FrameAction.relocate]
+        | split
 
 #print axioms managedStep_relocate
 
