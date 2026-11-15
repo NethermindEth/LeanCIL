@@ -4,8 +4,8 @@ import CIL.Extraction.Generics
 # Value opcodes decoded from raw instructions
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
-shuffling, return, constants, locals, branches, integer arithmetic, conversions, comparisons and
-dynamic frame storage, with every short and macro form folded into its constructor.
+shuffling, return, constants, arguments, locals, branches, integer arithmetic, conversions,
+comparisons and dynamic frame storage, with every short and macro form folded into its constructor.
 `valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded instruction,
 and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand.
 Instantiation leaves every decoded value unchanged (`Instruction.ofRaw?_substitute`), so a closed
@@ -88,13 +88,12 @@ open Extraction
 
 /-- The opcodes `Instruction.ofRaw?` decodes for some operand. -/
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
-  opcode == 0 || (2 <= opcode && opcode <= 14) || (17 <= opcode && opcode <= 19) ||
+  opcode == 0 || (2 <= opcode && opcode <= 19) ||
     (21 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
     (42 <= opcode && opcode <= 69) || (88 <= opcode && opcode <= 106) ||
     opcode == 109 || opcode == 110 || (130 <= opcode && opcode <= 139) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 224 ||
-    (65025 <= opcode && opcode <= 65029) || opcode == 65033 ||
-    (65036 <= opcode && opcode <= 65039)
+    (65025 <= opcode && opcode <= 65029) || (65033 <= opcode && opcode <= 65039)
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. Any other opcode, an operand kind that
@@ -119,11 +118,15 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
     if -(2^63) <= value && value < 2^63 then some (.ldc_i8 (BitVec.ofInt 64 value)) else none
   | 22, .none | 23, .none | 24, .none | 25, .none | 26, .none | 27, .none | 28, .none
   | 29, .none | 30, .none => some (.ldc_i4 (BitVec.ofNat 32 (raw.opcode - 22)))
-  -- Argument loads; `ldarga` and `starg` (15, 16, 65034, 65035) decode to nothing.
+  -- Argument loads, addresses and stores; an index wider than its form encodes gives `none`.
   | 2, .none => some (.ldarg 0) | 3, .none => some (.ldarg 1)
   | 4, .none => some (.ldarg 2) | 5, .none => some (.ldarg 3)
   | 14, .argument index | 65033, .argument index =>
     if index < operandIndexBound raw.opcode then some (.ldarg index) else none
+  | 15, .argument index | 65034, .argument index =>
+    if index < operandIndexBound raw.opcode then some (.ldarga index) else none
+  | 16, .argument index | 65035, .argument index =>
+    if index < operandIndexBound raw.opcode then some (.starg index) else none
   -- Locals; `encodedLocal` validates the operand of every form and its width.
   | 6, _ | 7, _ | 8, _ | 9, _ | 17, _ | 65036, _ => Instruction.ldloc <$> encodedLocal raw
   | 10, _ | 11, _ | 12, _ | 13, _ | 19, _ | 65038, _ => Instruction.stloc <$> encodedLocal raw
@@ -261,6 +264,8 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
   | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
   | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
+  | .ldarga expected => match emitted with | .ldarga actual => expected == actual | _ => false
+  | .starg expected => match emitted with | .starg actual => expected == actual | _ => false
   | .ldloc expected => match emitted with | .ldloc actual => expected == actual | _ => false
   | .stloc expected => match emitted with | .stloc actual => expected == actual | _ => false
   | .ldloca expected => match emitted with | .ldloca actual => expected == actual | _ => false

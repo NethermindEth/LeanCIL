@@ -19,16 +19,20 @@ namespace CIL.Extraction
 /-- The method a raw definition denotes at `arguments`: each instruction of its code as
     `Instruction.ofRaw` decodes it, frame and signature from the instantiated definition,
     homes over every pc, and no static sites, opaque vector locals or links. Every instruction
-    decodes, so `none` means the instantiation failed (an explicit receiver signature has none)
-    or a parameter, local or homed argument type has no storage or slot kind. -/
+    decodes, so `none` means the instantiation failed (an explicit receiver signature has none),
+    a parameter, local or homed argument type has no storage or slot kind, or the code fails the
+    argument rule of the evidence check, `validateArgumentOpAt`, at some pc. -/
 def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnvironment)
     (source : RawMethod) (arguments : List TypeExpr) : Option Method := do
   let closed ← instantiateMethod environment.rawLayouts source arguments
   let storage ← closedArguments environment.rawLayouts closed
   let code := source.code.map Instruction.ofRaw
   let localKinds ← storage.locals.mapM (storageKind environment.layouts)
-  let parameterHomes ←
-    expectedHomes environment.layouts storage (storage.code.map fun _ => true)
+  let reachable := storage.code.map fun _ => true
+  let parameterHomes ← expectedHomes environment.layouts storage reachable
+  -- An argument instruction outside the declared arguments has no frame slot or incoming value.
+  let homes := requiredHomeIndices storage reachable
+  unless argumentInstructionsValid storage homes reachable code do none
   return {
     profile := profile, code := code, localKinds := localKinds,
     locals := localKinds.map (LocalKind.initialValue source.initLocals),

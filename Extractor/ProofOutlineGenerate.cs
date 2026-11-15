@@ -106,14 +106,14 @@ internal static partial class ProofOutline
         var names = new Names();
         var views = new FieldViews(extraction);
         var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
+        var body = new Body(SlotOperations(emitted));
         var parameters = WrittenArrays(method, receiver.Concat(method.Parameters.Select(parameter =>
-            Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), emitted.Operations,
-            new Body(emitted.Operations).Loops().Count);
+            Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), body.Operations,
+            body.Loops().Count);
         var result = DescribeResult(method, extraction.Architecture);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
             ParameterShape.Span or ParameterShape.Object or ParameterShape.StructReference or
             ParameterShape.Array or ParameterShape.WordArray or ParameterShape.ValueArray);
-        var body = new Body(emitted.Operations);
         var lean = new Writer();
         var loops = body.Loops();
         var spec = new Specification(method, parameters, result, symbolic, extraction.Views.Length > 0);

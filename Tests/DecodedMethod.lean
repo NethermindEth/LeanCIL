@@ -7,9 +7,10 @@ import Tests.BodyDecoding
 Bodies built by `Tests.BodyEncoding.encodeBody` and by hand over `Tests.MetadataWorld` must
 decode through `Method.ofBody?` to the method their bytes denote: the code `Instruction.ofRaw`
 gives, locals initialized by the flag in the bytes rather than the definition's, and the code of
-the bytes rather than the definition's. An instruction outside the value family decodes to a
-hole carrying its opcode, which faults when stepped; a body the check refuses gives no method,
-and neither does a program with such a body.
+the bytes rather than the definition's. A stored argument takes a home. An instruction outside
+the value family decodes to a hole carrying its opcode, which faults when stepped; a body the
+check refuses, or one with an argument instruction naming an undeclared argument, gives no
+method, and neither does a program with such a body.
 -/
 
 namespace Tests.DecodedMethod
@@ -105,6 +106,36 @@ theorem localloc_flag_read_from_the_bytes :
       some ([.ldc_i4 8, .localloc, .pop, .ret], false) := by
   constructor <;> cil_kernel_rfl
 #print axioms localloc_flag_read_from_the_bytes
+
+/-- `ldc.i4.1; starg.s index; ret` over one `uint32` parameter. -/
+private def storeRaw (index : Nat) : RawMethod :=
+  { method 8 false [] [instr 0 0x17, instr 1 0x10 (.argument index), instr 3 0x2A] with
+    parameters := [uint32] }
+
+/-- A stored argument takes a home after the locals, so its `starg` writes a frame slot. -/
+theorem stored_argument_homed :
+    (decoded (encodeBody pin (storeRaw 0)) (storeRaw 0)).map
+        (fun method => (method.code, method.parameterHomes)) =
+      some ([.ldc_i4 1, .starg 0, .ret], [(0, .word32)]) := by
+  cil_kernel_rfl
+#print axioms stored_argument_homed
+
+/-- `opcode index; pop; ret` over one `uint32` parameter, for an argument load or address. -/
+private def argumentRaw (opcode index : Nat) : RawMethod :=
+  { method 8 false [] [instr 0 opcode (.argument index), instr 2 0x26, instr 3 0x2A] with
+    parameters := [uint32] }
+
+/-- An argument load, store or address of the one declared argument decodes, and one naming a
+    second argument gives no method: no frame holds it, and a store or address has no home. -/
+theorem undeclared_argument_has_no_method :
+    (Method.ofRaw? .scalar {} (argumentRaw 0x0E 0) []).isSome = true ∧
+      (Method.ofRaw? .scalar {} (storeRaw 0) []).isSome = true ∧
+      (Method.ofRaw? .scalar {} (argumentRaw 0x0F 0) []).isSome = true ∧
+      (Method.ofRaw? .scalar {} (argumentRaw 0x0E 1) []).isNone = true ∧
+      (Method.ofRaw? .scalar {} (storeRaw 1) []).isNone = true ∧
+      (Method.ofRaw? .scalar {} (argumentRaw 0x0F 1) []).isNone = true := by
+  decide +kernel
+#print axioms undeclared_argument_has_no_method
 
 /-- The add bytes against the add definition with one parameter, and the local body against its
     definition with a `uint64` local, fail the body check, so neither has a method. -/
