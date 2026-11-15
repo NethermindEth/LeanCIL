@@ -211,14 +211,36 @@ def loadArgument (body : CIL.Method) (index : Nat) (args : List Value) (frame : 
     let .scalar (.i32 bits) := value | .error .invalidState
     checkedValue memory (.scalar (.i32 (kind.extend bits)))
 
+/-- The frame and memory after `starg index` stores `value`: a homed argument's frame slot is
+    written as `stloc` of that slot writes it. An argument without a home has no slot to write. -/
+def storeArgument (body : CIL.Method) (index : Nat) (value : Value) (frame : Frame)
+    (memory : Memory) : ExecutionResult (Frame × Memory) :=
+  match body.argumentAccess index with
+  | .home slot => do
+    let some home := frame.locals[slot]? | .error .invalidState
+    let (home, memory) ← storeLocal memory home value
+    return ({ frame with locals := frame.locals.set slot home }, memory)
+  | .value _ => .error (.unsupported "Store to an argument without a home")
+
+/-- The address `ldarga index` pushes: a homed argument's frame slot, as `ldloca` of that slot
+    takes it. An argument without a home has no address. -/
+def addressArgument (body : CIL.Method) (index : Nat) (frame : Frame) (memory : Memory) :
+    ExecutionResult Value :=
+  match body.argumentAccess index with
+  | .home slot => do
+    let some home := frame.locals[slot]? | .error .invalidState
+    localAddress memory home
+  | .value _ => .error (.unsupported "Address of an argument without a home")
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Faulting arithmetic is matched apart from the rest; the native table arms lead this match so
-  -- that the match under its catch-all stays within the 79 alternatives `split` handles.
+  -- Faulting arithmetic and argument homes are matched apart from the rest; the native table arms
+  -- lead this match so that the match under its catch-all stays within the 79 alternatives
+  -- `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -270,6 +292,12 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value ← (CIL.convertInteger target.width target.signed true x).mapError
       ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- An argument's home is written and addressed as the local slot it is.
+  | .starg index, value :: rest =>
+    let (frame, memory) ← storeArgument body index value frame m
+    return .next (pc + 1) rest frame memory
+  | .ldarga index, _ =>
+    return .next (pc + 1) ((← addressArgument body index frame m) :: stack) frame m
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m

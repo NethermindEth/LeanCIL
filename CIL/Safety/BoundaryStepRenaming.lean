@@ -314,7 +314,8 @@ theorem Memory.Renamed.loadArgument {mapping : AllocationRenaming}
         exact related.checkedValue _ trivial
 #print axioms Memory.Renamed.loadArgument
 
-/-- Argument loads, calls and returns preserve their checked values and control flow. -/
+/-- Argument loads, calls and returns preserve their checked values and control flow; argument
+    stores and addresses cannot succeed or throw without a home. -/
 theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
@@ -357,6 +358,15 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
       | exact False.elim (tested ⟨_, _, rfl⟩)
+      -- Both bodies read every argument without a home, so a store or an address faults.
+      | (rename_i position value rest
+         obtain ⟨_, sourceAccess, _⟩ := metadata.arguments position
+         simp [storeArgument, sourceAccess, SuccessOrThrow, Bind.bind, Except.bind] at observable
+         done)
+      | (rename_i position
+         obtain ⟨_, sourceAccess, _⟩ := metadata.arguments position
+         simp [addressArgument, sourceAccess, SuccessOrThrow, Bind.bind, Except.bind] at observable
+         done)
       | (rename_i position
          obtain ⟨_, sourceAccess, targetAccess⟩ := metadata.arguments position
          apply (related.loadArgument sourceAccess targetAccess arguments argumentBounds).bind

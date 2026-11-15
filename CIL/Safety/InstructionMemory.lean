@@ -103,8 +103,8 @@ def observerCount : CIL.Instruction → Nat
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
-  | .nop | .ldarg _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _ | .ldc_i8 _
-  | .dup | .pop | .br _ | .feature _ | .intrinsic ..
+  | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
+  | .ldc_i8 _ | .dup | .pop | .br _ | .feature _ | .intrinsic ..
   | .throw _ | .unsupported _ => 0
 
 /-- A memory check as an execution result; a fault is attributed to `reference` and `width`. -/

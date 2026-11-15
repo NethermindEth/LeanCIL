@@ -286,6 +286,24 @@ theorem step_relabel_ldarg (index : Nat) : StepRelabel (.ldarg index) := by
     simp only [loadArgument, context.arguments]]
   lockstep
 
+/-- An argument store writes the home `Method.argumentAccess` gives, which both methods share. -/
+theorem step_relabel_starg (index : Nat) : StepRelabel (.starg index) := by
+  stack_cases =>
+    first
+    | fallback_vacuous
+    | (rw [show ∀ value, storeArgument actual index value frame m =
+          storeArgument expected index value frame m by
+        intro value
+        simp only [storeArgument, context.arguments]]
+       lockstep)
+
+/-- An argument address is the home `Method.argumentAccess` gives, which both methods share. -/
+theorem step_relabel_ldarga (index : Nat) : StepRelabel (.ldarga index) := by
+  plain_cases
+  rw [show addressArgument actual index frame m = addressArgument expected index frame m by
+    simp only [addressArgument, context.arguments]]
+  lockstep
+
 theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases
   lookup_lockstep
@@ -649,6 +667,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case conv_ovf target => exact step_relabel_conv_ovf target
   case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case ldarg index => exact step_relabel_ldarg index
+  case starg index => exact step_relabel_starg index
+  case ldarga index => exact step_relabel_ldarga index
   case ldloc index => exact step_relabel_ldloc index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
@@ -1183,6 +1203,20 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [show loadArgument actual index args frame m = loadArgument expected index args frame m by
       simp only [loadArgument, context.arguments]]
+    raise_lockstep
+  case starg index =>
+    stack_cases =>
+      first
+      | fallback_raise_vacuous
+      | (rw [show ∀ value, storeArgument actual index value frame m =
+            storeArgument expected index value frame m by
+          intro value
+          simp only [storeArgument, context.arguments]]
+         raise_lockstep)
+  case ldarga index =>
+    plain_cases
+    rw [show addressArgument actual index frame m = addressArgument expected index frame m by
+      simp only [addressArgument, context.arguments]]
     raise_lockstep
   case ldloc | ldloca =>
     plain_cases

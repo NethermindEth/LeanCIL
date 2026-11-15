@@ -220,6 +220,31 @@ theorem Memory.Equivalent.loadArgument {m n : Memory} (same : m.Equivalent n)
   simp only [CIL.Safety.loadArgument, same.checkedValue, same.loadLocal]
 #print axioms Memory.Equivalent.loadArgument
 
+/-- Equivalent memories store every argument into the same home, leaving equivalent memories. -/
+theorem Memory.Equivalent.storeArgument {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (index : Nat) (value : Value) (frame : Frame) :
+    ResultEquivalent MemoryLastEquivalent (storeArgument body index value frame m)
+      (storeArgument body index value frame n) := by
+  unfold CIL.Safety.storeArgument
+  split
+  · split
+    · apply ResultEquivalent.bind (same.storeLocal _ _)
+      intro left right related
+      obtain ⟨home, memory⟩ := left
+      obtain ⟨otherHome, otherMemory⟩ := right
+      obtain ⟨rfl, equivalent⟩ := related
+      exact .ok ⟨rfl, equivalent⟩
+    · exact .error _
+  · exact .error _
+#print axioms Memory.Equivalent.storeArgument
+
+/-- Equivalent memories give every argument the same address. -/
+theorem Memory.Equivalent.addressArgument {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (index : Nat) (frame : Frame) :
+    addressArgument body index frame m = addressArgument body index frame n := by
+  simp only [CIL.Safety.addressArgument, same.localAddress]
+#print axioms Memory.Equivalent.addressArgument
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -228,7 +253,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   unfold CIL.Safety.step
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
-    same.loadArgument,
+    same.loadArgument, same.addressArgument,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
     same.objectAboveNull, same.virtualTarget, same.objectTest]
@@ -271,6 +296,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
        intro left right related
        obtain ⟨slot, memory⟩ := left
        obtain ⟨otherSlot, otherMemory⟩ := right
+       obtain ⟨rfl, equivalent⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.storeArgument _ _ _ _)
+       intro left right related
+       obtain ⟨frame, memory⟩ := left
+       obtain ⟨otherFrame, otherMemory⟩ := right
        obtain ⟨rfl, equivalent⟩ := related
        exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.memoryInstruction _ _)

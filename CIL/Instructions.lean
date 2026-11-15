@@ -152,6 +152,10 @@ inductive Instruction where
   -- Arguments and locals.
   /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/
   | ldarg (index : Nat)
+  /-- Stores the top of the stack into argument `index`'s home, as `storeArgument` says. -/
+  | starg (index : Nat)
+  /-- Pushes the address of argument `index`'s home, as `addressArgument` says. -/
+  | ldarga (index : Nat)
   | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)
