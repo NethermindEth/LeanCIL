@@ -92,6 +92,22 @@ theorem locals_initialized_by_the_bytes :
   constructor <;> cil_kernel_rfl
 #print axioms locals_initialized_by_the_bytes
 
+/-- `ldc.i4.8; localloc; pop; ret` with no locals and the given init flag. -/
+private def allocationRaw (initLocals : Bool) : RawMethod :=
+  method initLocals [] [instr 0 0x1E, instr 1 0xFE0F, instr 3 0x26, instr 4 0x2A]
+
+/-- Bytes without localsinit decode `localloc` under a declared signature whose init flag is
+    false, whichever flag the definition carries, so the allocation is not zeroed. -/
+theorem localloc_flag_read_from_the_bytes :
+    (decoded (encodeBody pin (allocationRaw false)) (allocationRaw false)).map
+        (fun method => (method.code, method.declared.initLocals)) =
+      some ([.ldc_i4 8, .localloc, .pop, .ret], false) ∧
+    (decoded (encodeBody pin (allocationRaw false)) (allocationRaw true)).map
+        (fun method => (method.code, method.declared.initLocals)) =
+      some ([.ldc_i4 8, .localloc, .pop, .ret], false) := by
+  constructor <;> cil_kernel_rfl
+#print axioms localloc_flag_read_from_the_bytes
+
 /-- The add bytes against the add definition with one parameter, and the local body against its
     definition with a `uint64` local, fail the body check, so neither has a method. -/
 theorem refused_body_has_no_method :
