@@ -159,7 +159,7 @@ cil_value_steps (target : Nat) [bgt, ble, ble_un, blt_un, bge_un, bgt_un, bge, b
 cil_value_steps (targets : List Nat) [switch] 1
 cil_value_steps (target : Nat) [br] 0
 cil_value_steps [nop] 0
-cil_value_steps (exception : String) [throw] 0
+cil_value_steps (exception : ExceptionType) [throw] 0
 #print axioms step_throw_eq
 
 cil_value_steps (id : CIL.Feature) [feature] 0

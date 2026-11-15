@@ -144,7 +144,7 @@ private theorem observer_ok {observed : Bool} {result : ExecutionResult FrameAct
 
 /-- A step that throws passed the unspecified-bits guard. -/
 private theorem observer_thrown {observed : Bool} {result : ExecutionResult FrameAction}
-    {exception : String}
+    {exception : ExceptionType}
     (h : (if observed then .error (.unsupported "Instruction observes unspecified vector bits")
       else result) = .error (.thrown exception)) :
     observed = false ∧ result = .error (.thrown exception) := by
@@ -446,7 +446,7 @@ theorem step_relabel_unadmitted (opcode : Nat) : StepRelabel (.unadmitted opcode
   explicit_intro
   cases h
 
-theorem step_relabel_throw (exception : String) : StepRelabel (.throw exception) := by
+theorem step_relabel_throw (exception : ExceptionType) : StepRelabel (.throw exception) := by
   explicit_intro
   cases h
 
@@ -790,7 +790,7 @@ theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_
     renamed pc. -/
 def StepRaise (op : CIL.Instruction) : Prop :=
   ∀ (expected actual : CIL.Method) (r : Nat → Nat) (pc q : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) (m : Memory) (exception : String),
+    (frame : Frame) (stack : List Value) (m : Memory) (exception : ExceptionType),
     StepContext expected actual r op pc q →
     step expected op pc args frame stack m = .error (.thrown exception) →
     step actual (op.relabel r) q args frame stack m = .error (.thrown exception)
@@ -806,13 +806,15 @@ theorem except_bind_error {x : Except ε α} {f : α → Except ε β} {e : ε}
     (Except.error e >>= f) = .error e := rfl
 
 /-- An arithmetic fault is never a thrown exception. -/
-theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α} {exception : String} :
+theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α}
+    {exception : ExceptionType} :
     x.mapError ExecutionFault.arithmetic ≠ .error (.thrown exception) := by
   cases x <;> simp [Except.mapError]
 
 /-- The shared tail of `step` throws only from `instruction`, which both steps share. -/
 theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
-    {stack : List Value} {frame : Frame} {m : Memory} {exception : String} (op : CIL.Instruction)
+    {stack : List Value} {frame : Frame} {m : Memory} {exception : ExceptionType}
+    (op : CIL.Instruction)
     (arity : pureArity (op.relabel r) = pureArity op)
     (base : pureArity op ≠ none → BaseRelabel op)
     (plain : pureArity op = none → instruction op stack m = .error (.thrown exception) →

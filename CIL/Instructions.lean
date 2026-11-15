@@ -1,4 +1,5 @@
 import CIL.Types
+import CIL.ExceptionType
 import CIL.IntegerArithmetic
 import CIL.Features
 import CIL.SIMD.Availability
@@ -229,7 +230,7 @@ inductive Instruction where
   | memory (operation : MemoryOp)
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
-  | throw (exception : String)
+  | throw (exception : ExceptionType)
   /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
       outside the code the extractor reaches under the selected profile. It faults when stepped. -/
   | unadmitted (opcode : Nat)

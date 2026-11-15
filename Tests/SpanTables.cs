@@ -11,6 +11,7 @@
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../scripts/BatchVerification.cs
+#:include ExceptionMembers.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -62,7 +63,8 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
         try { return Claim(assembly, name, input, $".ok [{Scalar(runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!)}]"); }
         catch (TargetInvocationException error) when (site is not null)
         {
-            return Claim(assembly, name, input, $".error ⟨{site.Method}, {site.Pc}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩");
+            string member = ExceptionMember(error.InnerException!);
+            return Claim(assembly, name, input, $".error ⟨{site.Method}, {site.Pc}, .thrown .{member}⟩");
         }
     }).ToList();
     // The RVA descriptor carries the declared packing Roslyn aligned the table to.

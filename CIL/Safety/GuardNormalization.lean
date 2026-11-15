@@ -113,7 +113,8 @@ namespace CIL.Safety
     observerCount (.newAggregate callee argc size) = argc := rfl
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :
     observerCount (.memory op) = op.argumentCount := rfl
-@[cil_guard] theorem guard_throw (exception : String) : observerCount (.throw exception) = 0 := rfl
+@[cil_guard] theorem guard_throw (exception : ExceptionType) :
+    observerCount (.throw exception) = 0 := rfl
 @[cil_guard] theorem guard_unadmitted (opcode : Nat) :
     observerCount (.unadmitted opcode) = 0 := rfl
 /-- Return observes at most the first stack value, regardless of narrowing. -/

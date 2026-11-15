@@ -132,7 +132,7 @@ theorem Memory.Renamed.enterFrameInitialized {mapping : AllocationRenaming}
 
 /-- A sequential computation cannot introduce a throw when neither component can throw. -/
 private theorem bind_not_thrown (first : ExecutionResult α) (next : α → ExecutionResult β)
-    (exception : String) (firstSafe : first ≠ .error (.thrown exception))
+    (exception : ExceptionType) (firstSafe : first ≠ .error (.thrown exception))
     (nextSafe : ∀ value, next value ≠ .error (.thrown exception)) :
     (first >>= next) ≠ .error (.thrown exception) := by
   cases first <;> simp_all [Bind.bind, Except.bind]
@@ -140,14 +140,14 @@ private theorem bind_not_thrown (first : ExecutionResult α) (next : α → Exec
 
 /-- Checked memory operations report memory faults, not named CLR exceptions. -/
 private theorem checkedAt_not_thrown (reference : ManagedReference) (width : Nat)
-    (result : Checked α) (exception : String) :
+    (result : Checked α) (exception : ExceptionType) :
     checkedAt reference width result ≠ .error (.thrown exception) := by
   cases result <;> simp [checkedAt, Except.mapError]
 #print axioms checkedAt_not_thrown
 
 /-- Scalar encoding reports kind mismatches without raising CLR exceptions. -/
 theorem localNumber_not_thrown (kind : CIL.LocalKind) (initial : CIL.Value)
-    (exception : String) : localNumber kind initial ≠ .error (.thrown exception) := by
+    (exception : ExceptionType) : localNumber kind initial ≠ .error (.thrown exception) := by
   intro failed
   unfold localNumber at failed
   repeat' first | (solve | cases failed) | split at failed
@@ -155,7 +155,7 @@ theorem localNumber_not_thrown (kind : CIL.LocalKind) (initial : CIL.Value)
 
 /-- Initializing a byte home cannot raise a named CLR exception. -/
 theorem storeLocal_scalar_not_thrown (memory : Memory) (kind : CIL.LocalKind)
-    (reference : Reference) (initial : CIL.Value) (exception : String) :
+    (reference : Reference) (initial : CIL.Value) (exception : ExceptionType) :
     storeLocal memory (.bytes kind reference) (.scalar initial) ≠ .error (.thrown exception) := by
   dsimp only [storeLocal]
   split
@@ -179,7 +179,7 @@ theorem storeLocal_scalar_not_thrown (memory : Memory) (kind : CIL.LocalKind)
 
 /-- Fresh home allocation reports checked memory faults rather than CLR exceptions. -/
 theorem allocateHome_not_thrown (memory : Memory) (activation width alignment : Nat)
-    (exception : String) :
+    (exception : ExceptionType) :
     allocateHome memory activation width alignment ≠ .error (.thrown exception) := by
   intro failed
   unfold allocateHome checkedAt at failed
@@ -192,7 +192,7 @@ theorem allocateHome_not_thrown (memory : Memory) (activation width alignment : 
 
 /-- Local declaration setup reports model faults, never a named CLR exception. -/
 theorem makeLocal_not_thrown (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value)
-    (memory : Memory) (exception : String) :
+    (memory : Memory) (exception : ExceptionType) :
     makeLocal activation kind initial memory ≠ .error (.thrown exception) := by
   intro failed
   have homes := allocateHome_not_thrown memory activation (localWidth kind)
@@ -210,7 +210,7 @@ theorem makeLocal_not_thrown (activation : Nat) (kind : CIL.LocalKind) (initial 
 
 /-- A list of local initializers cannot synthesize a named CLR exception. -/
 theorem makeLocals_not_thrown (activation : Nat) (kinds : List CIL.LocalKind)
-    (initials : List CIL.Value) (memory : Memory) (exception : String) :
+    (initials : List CIL.Value) (memory : Memory) (exception : ExceptionType) :
     makeLocals activation kinds initials memory ≠ .error (.thrown exception) := by
   induction kinds generalizing initials memory with
   | nil => cases initials <;> simp [makeLocals, Pure.pure, Except.pure]
@@ -234,7 +234,7 @@ theorem makeLocals_not_thrown (activation : Nat) (kinds : List CIL.LocalKind)
 
 /-- Ordinary frame entry cannot manufacture a named CLR exception. -/
 theorem enterFrame_not_thrown (body : CIL.Method) (ready : OrdinaryFrame body)
-    (arguments : List Value) (memory : Memory) (exception : String) :
+    (arguments : List Value) (memory : Memory) (exception : ExceptionType) :
     enterFrame body arguments memory ≠ .error (.thrown exception) := by
   intro failed
   simp only [enterFrame_of_no_opaque _ _ _ ready.noOpaque,

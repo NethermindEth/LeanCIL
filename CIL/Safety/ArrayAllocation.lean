@@ -43,7 +43,7 @@ def newArray (memory : Memory) (element : CIL.ArrayElement) (value : CIL.Value) 
     | .i32 bits => pure bits.toInt
     | .i64 bits => pure bits.toInt
     | _ => .error .invalidState
-  if length < 0 then .error (.thrown "System.OverflowException") else
+  if length < 0 then .error (.thrown .overflow) else
     allocateArray memory element length.toNat
 
 end CIL.Safety

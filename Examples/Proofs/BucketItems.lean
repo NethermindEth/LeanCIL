@@ -45,7 +45,7 @@ theorem null_items (memory : Memory) (bucket : Reference)
     (readable : Bucket.Items.Readable memory bucket)
     (array : Bucket.Items.of memory bucket = .null) :
     ∃ fuel, invoke Extracted.program fuel first [.object (.address bucket)] memory =
-      .error ⟨first, 3, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨first, 3, .thrown .nullReference⟩ := by
   cil_checked_steps [readable.load_null array]
 
 #print axioms null_items
@@ -56,7 +56,7 @@ theorem empty_items (memory : Memory) (bucket items : Reference)
     (array : Bucket.Items.of memory bucket = .address items)
     (live : ReferenceArray.Live memory items nodeType 0) :
     ∃ fuel, invoke Extracted.program fuel first [.object (.address bucket)] memory =
-      .error ⟨first, 3, .thrown "System.IndexOutOfRangeException"⟩ := by
+      .error ⟨first, 3, .thrown .indexOutOfRange⟩ := by
   cil_checked_steps [readable.facts array live.object,
     live.slot_outside (index := 0) (Nat.le_refl _)]
 

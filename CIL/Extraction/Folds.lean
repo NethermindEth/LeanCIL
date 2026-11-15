@@ -1,3 +1,4 @@
+import CIL.ExceptionType
 import CIL.Extraction.ValueDecoding
 import CIL.Extraction.SpanCalls
 
@@ -107,39 +108,78 @@ def typeTestInstruction (instruction : RawInstruction) : Bool :=
 private def messageLoad (instruction : RawInstruction) : Bool :=
   instruction.opcode == 114 || instruction.opcode == 20
 
-/-- Admitted framework exceptions with parameterless/string constructors, plus the three
-    argument exceptions' two-string overloads. Other constructors remain unsupported. -/
-private def stringExceptionConstructor (name : String) (count : Nat) : Bool :=
-  (count ≤ 1 && name ∈ ["System.Exception", "System.SystemException",
-    "System.ApplicationException", "System.ArithmeticException",
-    "System.DivideByZeroException", "System.OverflowException",
-    "System.InvalidOperationException", "System.NotSupportedException",
-    "System.NotImplementedException", "System.ArgumentException",
-    "System.ArgumentNullException", "System.ArgumentOutOfRangeException",
-    "System.IndexOutOfRangeException", "System.NullReferenceException",
-    "System.FormatException"]) ||
-  (count == 2 && name ∈ ["System.ArgumentException", "System.ArgumentNullException",
-    "System.ArgumentOutOfRangeException"])
+/-- The member a constructor's owner spells, the scope compared once; `none` for any other type. -/
+def exceptionOwner? : TypeExpr → Option ExceptionType
+  | .atom scope name =>
+    if scope == runtimeScope then ExceptionType.all.find? (·.ownerName == name) else none
+  | _ => none
 
-/-- Exact framework signatures whose literal/null arguments cannot change the raised type. -/
-def exceptionConstructor (name : String) (parameters : List TypeExpr) : Bool :=
-  let string := TypeExpr.object runtimeScope "System.String"
-  let exception := TypeExpr.atom runtimeScope "System.Exception"
-  (parameters.all (· == string) && stringExceptionConstructor name parameters.length) ||
-    (parameters == [string, exception] && name ∈ ["System.Exception",
-      "System.InvalidOperationException", "System.ArgumentException",
-      "System.ArgumentOutOfRangeException"]) ||
-    (name == "System.ArgumentException" && parameters == [string, string, exception]) ||
-    (name == "System.ArgumentOutOfRangeException" &&
-      parameters == [string, .atom runtimeScope "System.Object", string])
+/-- A constructor owner that names a member is that member's runtime type. -/
+theorem exceptionOwner?_eq_some {type : TypeExpr} {raised : ExceptionType}
+    (found : exceptionOwner? type = some raised) : type = .atom runtimeScope raised.ownerName := by
+  cases type with
+  | atom scope name =>
+    simp only [exceptionOwner?] at found
+    split at found
+    next sameScope =>
+      have named := List.find?_some found
+      simp only [beq_iff_eq] at named sameScope
+      rw [sameScope, named]
+    next => simp at found
+  | _ => simp [exceptionOwner?] at found
+
+#print axioms exceptionOwner?_eq_some
+
+/-- Each member's owner name identifies that member: no member shadows another. -/
+theorem exceptionOwner?_ownerName (raised : ExceptionType) :
+    exceptionOwner? (.atom runtimeScope raised.ownerName) = some raised := by
+  have sameOwner : ∀ other : ExceptionType,
+      (other.ownerName == raised.ownerName) = (other == raised) := by
+    intro other
+    by_cases equal : other = raised
+    · subst equal
+      simp
+    · have names : other.ownerName ≠ raised.ownerName := ExceptionType.ownerName_injective.ne equal
+      simp only [beq_eq_false_iff_ne.mpr names, beq_eq_false_iff_ne.mpr equal]
+  simp only [exceptionOwner?, beq_self_eq_true, ↓reduceIte, sameOwner]
+  cases raised <;> decide
+
+#print axioms exceptionOwner?_ownerName
+
+/-- The `System.String` parameter of an exception constructor: a message or a parameter name. -/
+def messageParameter : TypeExpr := .object runtimeScope "System.String"
+
+/-- The `System.Exception` parameter of an exception constructor: the inner exception. -/
+def innerParameter : TypeExpr := .atom runtimeScope "System.Exception"
+
+/-- The `System.Object` parameter of an exception constructor: the actual argument value. -/
+def actualParameter : TypeExpr := .atom runtimeScope "System.Object"
+
+/-- The parameter lists of the constructors a folded `throw` may call for each member; the
+    members only instructions raise admit none. -/
+def admittedParameters : ExceptionType → List (List TypeExpr)
+  | .baseException | .invalidOperation =>
+    [[], [messageParameter], [messageParameter, innerParameter]]
+  | .systemException | .applicationException | .arithmetic | .divideByZero | .overflow
+  | .notSupported | .notImplemented | .indexOutOfRange | .nullReference | .format =>
+    [[], [messageParameter]]
+  | .argument =>
+    [[], [messageParameter], [messageParameter, messageParameter],
+      [messageParameter, innerParameter], [messageParameter, messageParameter, innerParameter]]
+  | .argumentNull => [[], [messageParameter], [messageParameter, messageParameter]]
+  | .argumentOutOfRange =>
+    [[], [messageParameter], [messageParameter, messageParameter],
+      [messageParameter, innerParameter], [messageParameter, actualParameter, messageParameter]]
+  | .invalidCast | .arrayTypeMismatch => []
 
 /-- An exact allowlisted `System.Runtime` constructor, including its complete signature. -/
 private def raisedType (count : Nat) (arguments : List RawInstruction)
-    (instruction : RawInstruction) : Option String :=
+    (instruction : RawInstruction) : Option ExceptionType :=
   if 3 < count then none else match instruction with
   | ⟨_, 115, .call site⟩ => match site.declaringType, site.target with
-    | .atom scope name, .external signature =>
-      if scope == runtimeScope && exceptionConstructor name site.parameterTypes &&
+    | .atom _ name, .external signature => do
+      let raised ← exceptionOwner? site.declaringType
+      if site.parameterTypes ∈ admittedParameters raised &&
         site.parameterTypes.length == count && arguments.length == count &&
         (arguments.zip site.parameterTypes).all (fun (argument, parameter) =>
           parameter == .object runtimeScope "System.String" || argument.opcode == 20) &&
@@ -148,7 +188,7 @@ private def raisedType (count : Nat) (arguments : List RawInstruction)
             match type with | .atom _ name | .object _ name => name | _ => "") ++ ")" &&
         site.name == ".ctor" && site.hasThis && !site.returnsValue &&
         site.returnType == .void && site.typeArguments.isEmpty &&
-        site.parameterCount == count then some name else none
+        site.parameterCount == count then some raised else none
     | _, _ => none
   | _ => none
 
@@ -156,7 +196,7 @@ private def raisedType (count : Nat) (arguments : List RawInstruction)
 private def throwMessageLimit : Nat := 4
 
 /-- `throw new E(...)` with only string or null arguments: the argument count and raised type. -/
-def throwFold (code : List RawInstruction) : Option (Nat × String) :=
+def throwFold (code : List RawInstruction) : Option (Nat × ExceptionType) :=
   let count := ((code.take throwMessageLimit).takeWhile messageLoad).length
   if count == throwMessageLimit then none else
   match code.drop count with
@@ -205,7 +245,7 @@ inductive FoldRole where
   /-- A reference-equality branch over two closed typeof values takes this decided edge. -/
   | typeBranch (taken : Bool)
   /-- The raw `throw`: raises the type bound by the exact folded operands. -/
-  | raise (exception : String)
+  | raise (exception : ExceptionType)
   /-- An unchanged argument push protected from non-fallthrough entry. -/
   | argument
   /-- A checked constructor initializes the local whose address starts the fold. -/
@@ -250,7 +290,7 @@ private def foldAt (localAt : Nat -> Option TypeExpr)
   spanDefaultFold localAt a tail <|> spanConstructorFold localAt a tail <|>
   (match a, tail with
     | ⟨_, 20, .none⟩, ⟨_, 122, .none⟩ :: _ =>
-      some [some .head, some (.raise "System.NullReferenceException")]
+      some [some .head, some (.raise .nullReference)]
     | ⟨_, 65044, .none⟩, ⟨_, 41, .indirectCall _ _ false false 0⟩ ::
         ⟨_, 42, .none⟩ :: _ => some [some .head, some .tailCall, some .argument]
     | ⟨_, 65044, .none⟩, ⟨_, 40, .call site⟩ :: ⟨_, 42, .none⟩ :: _ =>
@@ -263,8 +303,8 @@ private def foldAt (localAt : Nat -> Option TypeExpr)
         [some .head, some .interior, some .interior, some .interior,
           some (if e.opcode == 40 || e.opcode == 65025 then .result value else .typeBranch value)]
     | _ => none) <|>
-  (throwFold (a :: tail)).map fun (count, name) =>
-    some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
+  (throwFold (a :: tail)).map fun (count, raised) =>
+    some .head :: List.replicate count (some .interior) ++ [some (.raise raised)]
 
 /-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural.
     Local types come from `localAt`. -/

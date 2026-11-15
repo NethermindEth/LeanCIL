@@ -65,7 +65,7 @@ foreach (var method in methods.Where(method => method.IsPublic))
     else
     {
         claims.Add($"({Run(width - 1)}).map Prod.snd = " +
-            $".error ⟨0, {(read ? 1 : 2)}, .thrown \"System.ArgumentOutOfRangeException\"⟩");
+            $".error ⟨0, {(read ? 1 : 2)}, .thrown .argumentOutOfRange⟩");
         proofs.Add("by rfl");
     }
     if (name == "Read")

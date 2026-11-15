@@ -12,6 +12,11 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
+if (args.Contains("--exception-types-only", StringComparer.Ordinal))
+{
+    ExceptionDecisionCosts();
+    return;
+}
 if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
 {
     ArgumentResolutionCosts();
@@ -59,6 +64,7 @@ if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
 }
 NativeTableCosts();
 if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
+ExceptionDecisionCosts();
 CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
@@ -542,6 +548,46 @@ const string KernelCostCommand = """
       let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
       logInfo m!"{label.getString} {cost} heartbeats"
     """;
+
+// Exception decisions compare constructors, so display-name length cannot increase their cost.
+void ExceptionDecisionCosts()
+{
+    var directory = At("artifacts/LookupScaling/ExceptionTypes");
+    Directory.CreateDirectory(directory);
+    string[] members = ["format", "applicationException"];
+    var statements = members.SelectMany(member =>
+    {
+        string fault = $"ExecutionFault.thrown .{member}";
+        return new[]
+        {
+            $"#kernel_cost \"thrownEqual {member}\" {fault} = {fault}",
+            $"#kernel_cost \"thrownUnequal {member}\" Not ({fault} = ExecutionFault.thrown .overflow)",
+            $"#kernel_cost \"clrUnequal {member}\" Not (({fault}).clrException = some .overflow)",
+            $"#kernel_cost \"raisesEqual {member}\" (some .{member} : Option ExceptionType) = some .{member}"
+        };
+    });
+    var path = Path.Combine(directory, "Equality.lean");
+    File.WriteAllText(path, """
+        import CIL.Safety.RuntimeExceptions
+        open CIL CIL.Safety Lean Elab Command
+
+        """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: At("."));
+    var costs = LookupPatterns.ExceptionDecision().Matches(output).ToDictionary(
+        match => match.Groups[1].Value,
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != 8) throw new InvalidOperationException("Missing exception decision costs:\n" + output);
+    foreach (var decision in new[] { "thrownEqual", "thrownUnequal", "clrUnequal", "raisesEqual" })
+    {
+        long shortName = costs[decision + " format"];
+        long longName = costs[decision + " applicationException"];
+        var measured = $"{shortName} heartbeats at format and {longName} at applicationException";
+        if (Math.Min(shortName, longName) < KernelDecisionFloor ||
+            Math.Max(shortName, longName) > TypeDecisionLimit || longName > shortName * AllowedNameGrowth)
+            throw new InvalidOperationException($"Exception decision {decision} exceeds its cost bound: {measured}");
+        Console.WriteLine($"PASS deciding {decision} costs {measured}");
+    }
+}
 
 // Lean definitions of a value-only body of `instructions` instructions: `raw`, its raw instructions, and `code`, the
 // instructions the translator emits for them. Raw instructions carry distinct offsets, so the kernel decodes each one
@@ -1920,6 +1966,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\bname (spells|encodes) ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex MetadataNameCost();
+
+    [GeneratedRegex(@"\b((?:thrownEqual|thrownUnequal|clrUnequal|raisesEqual) [A-Za-z]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex ExceptionDecision();
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex NativeTableStep();
