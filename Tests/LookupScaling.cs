@@ -512,8 +512,7 @@ void CallNameCosts()
         $"{costs[20]} heartbeats at 20 bytes and {costs[80]} at 80");
     if (Math.Min(costs[20], costs[80]) < KernelDecisionFloor || PerByte(80) > PerByte(20) * AllowedGrowth)
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"The call name clause costs {measured}; the limit is {AllowedGrowth} times as much per byte " +
-            "at 80 bytes."));
+            $"The call name clause costs {measured}; per byte, the limit is {AllowedGrowth} times the cost at 20."));
     Console.WriteLine($"PASS the call name clause costs {measured}");
 }
 
