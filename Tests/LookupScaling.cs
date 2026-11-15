@@ -344,6 +344,34 @@ const string KernelCostCommand = """
       logInfo m!"{label.getString} {cost} heartbeats"
     """;
 
+// Lean definitions of a value-only body of `instructions` instructions: `raw`, its raw instructions, and `code`, the
+// instructions the translator emits for them. Raw instructions carry distinct offsets, so the kernel decodes each one
+// instead of reusing a cached decode.
+static string ValueBody(int instructions)
+{
+    const int SegmentLength = 10;
+    return $$"""
+        /-- The raw instructions of one segment: short and long constants, locals, an argument,
+            arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
+        def segment (index : Nat) : List RawInstruction :=
+          let start := {{SegmentLength}} * index
+          [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
+            ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
+            ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+            ⟨start + 7, 58, .target index⟩,
+            ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
+        /-- The instructions the translator emits for one segment. -/
+        def codeSegment (index : Nat) : List Instruction :=
+          [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
+            .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1,
+            .brtrue index, .switch [index, index + 1, index + 2, index + 3], .ret]
+        /-- A body of {{instructions}} raw instructions. -/
+        def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
+        /-- The {{instructions}} emitted instructions of the body. -/
+        def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+        """;
+}
+
 // The heartbeats `decide +kernel` adds to deciding that every instruction of a body of 500, 2000 and 8000
 // instructions is the one its raw value opcode decodes to. Decoding costs the same at every instruction and a
 // `switch` its targets, so four times the instructions may cost at most `AllowedLocalGrowth` more per instruction.
@@ -351,8 +379,6 @@ void DecodeCosts()
 {
     var decodeDirectory = At("artifacts/LookupScaling/ValueDecoding");
     Directory.CreateDirectory(decodeDirectory);
-    // Raw instructions carry distinct offsets, so the kernel decodes each one instead of reusing a cached decode.
-    const int SegmentLength = 10;
     var samples = new List<(int Instructions, long Cost, long Milliseconds)>();
     foreach (var instructions in new[] { 500, 2000, 8000 })
     {
@@ -364,24 +390,7 @@ void DecodeCosts()
             open CIL CIL.Extraction Lean Elab Command
             {{KernelCostCommand}}
             namespace ValueDecodingCost
-            /-- The raw instructions of one segment: short and long constants, locals, an argument,
-                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
-            def segment (index : Nat) : List RawInstruction :=
-              let start := {{SegmentLength}} * index
-              [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
-                ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
-                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
-                ⟨start + 7, 58, .target index⟩,
-                ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
-            /-- The instructions the translator emits for one segment. -/
-            def codeSegment (index : Nat) : List Instruction :=
-              [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
-                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1, .brtrue index,
-                .switch [index, index + 1, index + 2, index + 3], .ret]
-            /-- A body of {{instructions}} raw instructions. -/
-            def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
-            /-- The {{instructions}} emitted instructions of the body. -/
-            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+            {{ValueBody(instructions)}}
             #kernel_cost "decode {{instructions}}"
               (raw.zip code).all (fun pair => valueEncodingMatches pair.1 pair.2) = true
             end ValueDecodingCost
@@ -413,7 +422,6 @@ void MethodDecodeCosts()
 {
     var decodeDirectory = At("artifacts/LookupScaling/DecodedMethod");
     Directory.CreateDirectory(decodeDirectory);
-    const int SegmentLength = 10;
     var samples = new List<(int Instructions, long Cost)>();
     foreach (var instructions in new[] { 500, 2000, 8000 })
     {
@@ -425,22 +433,7 @@ void MethodDecodeCosts()
             open CIL CIL.Extraction Lean Elab Command
             {{KernelCostCommand}}
             namespace DecodedMethodCost
-            /-- The raw instructions of one segment: short and long constants, locals, an argument,
-                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
-            def segment (index : Nat) : List RawInstruction :=
-              let start := {{SegmentLength}} * index
-              [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
-                ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
-                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
-                ⟨start + 7, 58, .target index⟩,
-                ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
-            /-- The instructions the translator emits for one segment. -/
-            def codeSegment (index : Nat) : List Instruction :=
-              [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
-                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1,
-                .brtrue index, .switch [index, index + 1, index + 2, index + 3], .ret]
-            /-- The {{instructions}} emitted instructions of the body. -/
-            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+            {{ValueBody(instructions)}}
             /-- The type of every parameter and local. -/
             def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
             /-- A static method with four parameters, four zero-initialized locals and {{instructions}} raw
@@ -449,8 +442,7 @@ void MethodDecodeCosts()
               { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
                 attributes := 0, implementation := 0, returnType := .void, parameters := List.replicate 4 uint32,
                 locals := List.replicate 4 uint32, initLocals := true,
-                maxStack := 8, genericParameters := [],
-                code := (List.range {{instructions / SegmentLength}}).flatMap segment }
+                maxStack := 8, genericParameters := [], code := raw }
             #kernel_cost "decoded method {{instructions}}"
               (Method.ofRaw? .scalar {} source []).any (fun method =>
                 method.code.length == {{instructions}} &&
