@@ -129,7 +129,7 @@ partial class Program
                     value := Lean.mkConst ``True.intro })
 
                 """ + "\n" + BodiesDocstring, StringComparison.Ordinal), "BindingAudit.page1",
-            rejectedStage: "kernel replay");
+            BindingFact.BodyBytes, rejectedStage: "replay diagnostics");
         Mutation("wrong pinned identity theorem", ImagesModule, source => source.Replace(
             "theorem images_eq : images =",
             "theorem images_eq : images = images := rfl\ntheorem images_unused : images =", StringComparison.Ordinal),

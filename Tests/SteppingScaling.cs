@@ -51,7 +51,7 @@ var rows = new List<SteppingMeasurement>();
 var workloads = new (string Name, int[] Sizes, bool Full)[]
 {
     ("scalar", [16, 64, 256], true), ("memory", [16, 64, 256], true),
-    ("reference", [16, 64, 256], true),
+    ("reference", [16, 64, 256], true), ("table", [16, 64, 256], true),
     ("accumulate", [16, 64, 256], true), ("accumulate", [1024], false),
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
@@ -107,13 +107,14 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // The instructions that open a body, repeat per cycle and end it. The accumulate, contract, lemma,
 // outcome and loop bodies keep one value on the stack that grows by an operand per cycle, and the
 // loop bodies end in a `nop` at the state their path reaches. The locals body stores a reference
-// into each of eight reference locals per cycle. The hypotheses body is an accumulate body of
-// fixed length. The faulting body divides, takes a remainder, adds with an overflow check and
-// converts with one, each from the arguments, so each step reads a fact of constant size.
+// into each of eight reference locals per cycle. The table body offsets a native method table by a
+// symbolic int32 and pops the selected cursor. The hypotheses body is an accumulate body of fixed
+// length. The faulting body divides, takes a remainder, adds with an overflow check and converts
+// with one, each from the arguments, so each step reads a fact of constant size.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".arg 0", ".arg 1", ".store64", ".arg 0", ".load64", ".pop"], [".arg 0", ".load64", ".ret"]),
-    "reference" => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"]),
+    "reference" or "table" => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"]),
     "accumulate" or "contract" or "hypotheses" or "lemma" or "outcome" => ([".arg 0"], [".arg 1", ".add"], [".ret"]),
     "loop" or "loopfacts" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
     "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".arg 0", $".stloc {slot}" })
@@ -169,6 +170,15 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   [.reference (.address target), .scalar (.i32 offset)] memory =
                   .ok (memory, [.reference (.address target)]) := by
               cil_checked_steps [formed, displaced]
+            """,
+        "table" => $$"""
+            /-- Repeated native table offsets need only the checked cursor addition of each step. -/
+            theorem checked (memory : Memory) (table selected : CIL.MethodTable) (offset : CIL.W32)
+                (added : addNativeTable table memory (offset.signExtend 64) = .ok selected) :
+                invoke [body] {{operations.Length + 1}} 0
+                  [.methodTable table, .scalar (.i32 offset)] memory =
+                  .ok (memory, [.methodTable table]) := by
+              cil_checked_steps [added]
             """,
         "memory" => $$"""
             /-- Checked reads and writes advance from reusable operation facts through the full body. -/

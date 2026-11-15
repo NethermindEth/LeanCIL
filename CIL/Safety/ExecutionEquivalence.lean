@@ -92,7 +92,7 @@ theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
     ResultEquivalent FrameActionEquivalent (managedStep operation pc frame stack m)
       (managedStep operation pc frame stack n) := by
   unfold CIL.Safety.managedStep
-  split <;> try simp only [same.checkedValues, same.addNativeTable, same.loadNativeTable]
+  split <;> try simp only [same.checkedValues, same.loadNativeTable]
   all_goals repeat' first
     | exact .error _
     | exact .ok (.next same _ _ _)
@@ -257,6 +257,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     | exact .ok (.call same _ _ _)
     | exact .ok (.tailCall same _ _)
     | exact .ok (.returned same _)
+    | rw [same.addNativeTable]
     | (apply ResultEquivalent.bind_same; intro)
     | (apply ResultEquivalent.bind (same.storeLocal _ _)
        intro left right related

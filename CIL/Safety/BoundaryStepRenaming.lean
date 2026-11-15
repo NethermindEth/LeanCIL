@@ -12,25 +12,6 @@ private theorem managedReference_null_iff (mapping : AllocationRenaming)
   cases reference <;> simp [AllocationRenaming.managedReference]
 #print axioms managedReference_null_iff
 
-/-- Observable execution through a native table requires a successful checked memory step. -/
-private theorem checkedNative_bind {mapping : AllocationRenaming} {relation : β → γ → Prop}
-    (source target : Checked α) (sourceNext : α → ExecutionResult β)
-    (targetNext : α → ExecutionResult γ)
-    (preserved : ∀ value, source = .ok value → target = .ok value)
-    (observable : SuccessOrThrow (checkedAt .null nativeMethodWidth source >>= sourceNext))
-    (next : ∀ value, source = .ok value → SuccessOrThrow (sourceNext value) →
-      ResultRenamed mapping relation (sourceNext value) (targetNext value)) :
-    ResultRenamed mapping relation (checkedAt .null nativeMethodWidth source >>= sourceNext)
-      (checkedAt .null nativeMethodWidth target >>= targetNext) := by
-  cases checked : source with
-  | error fault =>
-    simp [checked, checkedAt, Except.mapError, Bind.bind, Except.bind, SuccessOrThrow] at observable
-  | ok value =>
-    simp only [checked, checkedAt, Except.mapError, Bind.bind, Except.bind] at observable ⊢
-    rw [preserved value checked]
-    exact next value checked observable
-#print axioms checkedNative_bind
-
 /-- Managed metadata identities are stable while checked argument references are renamed. -/
 theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
@@ -56,9 +37,6 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
     | exact .ok (.tailCall related)
     | (simp only [Bool.false_eq_true, Bool.true_eq, ite_false, ite_true] at observable ⊢)
     | contradiction
-    | (apply checkedNative_bind _ _ _ _
-        (fun value proof => related.addNativeTable_success formed _ value _ proof) observable
-       intro value found observable)
     | (apply checkedNative_bind _ _ _ _
         (fun value proof => related.loadNativeTable_success formed _ value proof) observable
        intro value found observable)
