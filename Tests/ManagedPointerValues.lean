@@ -56,8 +56,8 @@ theorem literal_null_table_rejected :
 /-- The selection `indirectTarget` names is the comparison the call arm made in place: a pointer
     of another signature, a null pointer and a target outside the catalog all fault alike. -/
 theorem call_selection_unchanged (signature : ManagedSignature) (catalog : List ManagedTarget)
-    (tail : Bool) (pc : Nat) (frame : Frame) (pointer : MethodPointer) (values : List Value)
-    (memory : Memory) :
+    (tail : Bool) (pc : Nat) (frame : Frame) (pointer : MethodPointer)
+    (values : List CIL.Safety.Value) (memory : CIL.Safety.Memory) :
     managedStep (.call signature catalog tail) pc frame (.methodPointer pointer :: values) memory =
       (do
         if pointer.signature != signature then .error .invalidState else pure ()
@@ -69,13 +69,16 @@ theorem call_selection_unchanged (signature : ManagedSignature) (catalog : List 
         let arguments ← (values.take count).reverse.mapM (checkedValue memory)
         if tail then return FrameAction.tailCall target.method arguments memory
         else return .call target.method arguments (values.drop count) memory) := by
-  unfold managedStep indirectTarget
+  simp only [managedStep, indirectTarget]
   cases pointer.signature != signature with
   | true => rfl
   | false =>
+    simp only [Bool.false_eq_true, ↓reduceIte]
     cases pointer.target with
     | none => rfl
-    | some identity => cases catalog.find? (·.identity == identity) <;> rfl
+    | some identity =>
+      simp only [Option.bind]
+      cases catalog.find? (·.identity == identity) <;> rfl
 #print axioms call_selection_unchanged
 
 /-- An owner of 400 bytes: an assembly-qualified generic type over three assembly-qualified
@@ -106,12 +109,13 @@ private theorem long_selected :
 
 /-- A call through a pointer to the long owner steps by `step_managed_call_eq` and the kernel's
     fact, whatever lies below its argument. -/
-theorem long_owner_call (rest : List Value) :
+theorem long_owner_call (rest : List CIL.Safety.Value) :
     step caller (.managed (.call signature longCatalog false)) 1 [] frame
       (.methodPointer ⟨signature, some longIdentity⟩ :: .scalar (.i32 42) :: rest) memory =
       .ok (.call 1 [.scalar (.i32 42)] rest memory) := by
   simp only [cil_step, long_selected, parameter_count]
-  all_goals simp [cil_checked]
+  simp [unspecifiedOperands, CIL.Safety.Value.hasUnspecified, CIL.Value.hasUnspecified]
+  rfl
 #print axioms long_owner_call
 
 end Tests.ManagedPointerValues
