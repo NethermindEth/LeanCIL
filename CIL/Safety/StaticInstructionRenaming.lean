@@ -41,7 +41,8 @@ theorem Memory.Renamed.staticInstructionResult {mapping : AllocationRenaming}
         (staticInstruction body pc operation stack source)
         (staticInstruction body pc operation (stack.map mapping.value) target) := by
   unfold CIL.Safety.staticInstruction at observable ⊢
-  exact ⟨mapping, .refl mapping, related.memoryInstructionResult _ sourceFormed _ bounds observable⟩
+  exact ⟨mapping, .refl mapping,
+    related.memoryInstructionResult _ sourceFormed _ bounds observable⟩
 
 #print axioms Memory.Renamed.staticInstructionResult
 
