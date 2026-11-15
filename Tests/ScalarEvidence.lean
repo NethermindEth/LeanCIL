@@ -821,9 +821,9 @@ private def IndirectCase.flows (access : IndirectCase) : Bool :=
 private def IndirectCase.window (access : IndirectCase) : Bool :=
   indirectSiteWindow (access.rawMethod.code[·]?) (access.pops + access.prefixes.length)
     access.access access.emitted
-/-- Whether the whole translation check accepts the method. -/
+/-- Whether every check of the method's evidence accepts it. -/
 private def IndirectCase.translates (access : IndirectCase) : Bool :=
-  decide (TranslationValid [] #[] [] [access.evidence] [] [access.method])
+  decide (MethodEvidenceValid [] #[] [] [access.evidence] [] access.evidence access.method)
 
 private def load (opcode : Nat) (emitted : Instruction) (kind : ScalarKind := .word32)
     (prefixes : List RawInstruction := []) (operand : RawOperand := .none) : IndirectCase :=
@@ -881,7 +881,7 @@ private def indirectForged : List IndirectCase := [
   load 80 .load64 .other, store 81 .store64, store 86 (.storeScalar 4),
   store 87 (.storeScalar 8),
   -- Access forms at other opcodes.
-  load 108 (.loadScalar 8 false) .other, load 107 (.storeScalar 4) .other]
+  load 108 (.loadScalar 8 false) .other, load 107 (.loadAggregate 4) .other]
 
 /-- Wrong widths and signs of `ldobj` and `stobj` of primitive types. -/
 private def objectForged : List IndirectCase := [
@@ -893,7 +893,7 @@ private def objectForged : List IndirectCase := [
   store 129 (.storeScalar 8) (operand := .type sbyteType)]
 
 /-- Every emission extraction gives passes the indirect access rule, both flow checks and, where
-    the body has no token, the whole translation check. -/
+    the body has no token, every check of the method's evidence. -/
 private theorem indirect_emissions_accepted :
     (indirectEmitted.all fun access => access.window && access.flows && access.translates) ∧
     (objectEmitted.all fun access => access.window && access.flows) := by
@@ -901,8 +901,8 @@ private theorem indirect_emissions_accepted :
 
 #print axioms indirect_emissions_accepted
 
-/-- Every forged emission fails the indirect access rule, so both flow checks and the whole
-    translation check reject it. -/
+/-- Every forged emission fails the indirect access rule, so both flow checks and the method's
+    evidence check reject it. -/
 private theorem indirect_forgeries_rejected :
     (indirectForged.all fun access => !access.window && !access.flows && !access.translates) ∧
     (objectForged.all fun access => !access.window && !access.flows) := by
