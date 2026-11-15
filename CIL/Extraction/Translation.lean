@@ -237,7 +237,7 @@ theorem argumentAccess_of_evidence {rawLayouts : List RawLayout} {layouts : Arra
     {original closed : RawMethod} {typeArguments : List TypeExpr} {raw : RawArguments}
     {reachable : List Bool} {method : Method} {index : Nat} {type : StorageType}
     (specialized : SpecializationValid rawLayouts original typeArguments closed raw)
-    (shape : MethodShapeValid closed method)
+    (declared : DeclaredValid closed method)
     (environment : MethodEnvironmentValid rawLayouts layouts method)
     (homes : ParameterHomesValid layouts raw reachable method)
     (unhomed : index ∉ requiredHomeIndices raw reachable)
@@ -249,7 +249,7 @@ theorem argumentAccess_of_evidence {rawLayouts : List RawLayout} {layouts : Arra
     rw [beq_eq_false_iff_ne]
     intro same
     exact unhomed (same ▸ member)
-  have declared := shape.2.2.1
+  change method.declared = _ at declared
   change method.environment = _ at environment
   have closedEq := specialized.2
   rw [closedArguments_eq_list] at closedEq
