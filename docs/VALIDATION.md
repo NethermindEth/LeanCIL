@@ -27,6 +27,12 @@ dotnet run --file scripts/Test.cs -- --suite outlines-objects
 - A C# change requires analyzer validation, including changed file-based tests.
 - Any `sorryAx`, unexpected diagnostic or failed proof is a failure.
 
+The blockers suite checks dead instructions in methods admitted from the extractor assembly under
+the scalar profile. Its hole corpus baseline pins argument indices requiring homes only at dead
+instructions, dead prefix positions and opcodes other than `unaligned.`, and the count of refused
+methods skipped. The per-method lists are written to `artifacts/HoleCorpus/methods.json`; admission
+results are reused from the self-admission check.
+
 | Changed area | Relevant suites or checks |
 | --- | --- |
 | Extraction certificates and metadata | `evidence`, plus the affected opcode or runtime-helper suite |
@@ -107,7 +113,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting and arguments bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
-| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal and self-admission |
+| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission and the admitted hole corpus |
 | `audit` | theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge |
 | `docs` | documentation Lean snippets, cited library names and documented commands against the library and tool |
 | `exports` | contract production, restrictions and caller reuse |
