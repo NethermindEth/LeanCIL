@@ -867,7 +867,7 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
         let siblings := (← getGoals).tail
         let tag ← (← getMainGoal).getTag
         evalTactic (← `(tactic| (
-          cil_strict refine CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
+          cil_strict cil_refine_by CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
             $methodFound $instructionFound
             (by cil_checked_step_normalized [$facts,*]) (by rfl) ?_ ?_)))
         for parameter in parameters do
@@ -925,7 +925,7 @@ elab_rules : tactic
         cilContractChild methodFound instructionFound facts
       return
     if operation == ``CIL.Instruction.ret then
-      evalTactic (← `(tactic| cil_strict refine CIL.Safety.run_return_exists
+      evalTactic (← `(tactic| cil_strict cil_refine_by CIL.Safety.run_return_exists
         $methodFound $instructionFound
         (by cil_checked_step_normalized [$[$facts:term],*])
         (by cil_checked_side [$[$facts:term],*]) ?_))
@@ -936,7 +936,7 @@ elab_rules : tactic
       return
     let advance (facts : Array Term) := do
       evalTactic (← `(tactic| (
-        cil_strict refine CIL.Safety.run_next_exists (post := _)
+        cil_strict cil_refine_by CIL.Safety.run_next_exists (post := _)
           $methodFound $instructionFound
           (by cil_checked_step_normalized [$[$facts:term],*]) ?_
         cil_stack_cleanup)))

@@ -47,6 +47,81 @@ elab "cil_strict " tactic:tactic : tactic =>
     evalTactic tactic
     if errors (← Core.getMessageLog) > earlier then throwError "Checked step candidate failed"
 
+open Lean Elab Tactic in
+/-- `term` with each `by` block replaced by a named hole, and the blocks in order of
+    appearance. -/
+private partial def holesForByBlocks (term : Syntax) :
+    StateT (Array (Name × Syntax)) TacticM Syntax := do
+  if term.isOfKind ``Lean.Parser.Term.byTactic then
+    -- A named hole refers to an existing hole of that name, so each block's name is fresh.
+    let name := Name.mkSimple s!"cilBlock{← mkFreshId}"
+    modify (·.push (name, term[1]))
+    return (← `(term| ?$(mkIdent name))).raw
+  match term with
+  | .node info kind arguments => return .node info kind (← arguments.mapM holesForByBlocks)
+  | other => return other
+
+open Lean Elab Tactic Meta in
+/-- Elaborates `term` against `expectedType?` and runs each `by` block of it as a tactic on its
+    own goal after the rest elaborates. A `by` block inside a term makes Lean rebuild the whole
+    local context before it runs, so its cost grows with the hypotheses in scope; a goal does
+    not. Returns the proof and the goals left, which are the holes `?_` and `?name` of `term`;
+    any other unassigned hole is an error, as in `refine`. -/
+def elabTermRunningBlocks (term : Syntax) (expectedType? : Option Expr) :
+    TacticM (Expr × List MVarId) := do
+  let (replaced, blocks) ← (holesForByBlocks term).run #[]
+  let holeCount := Id.run do
+    let mut count := 0
+    let mut pending := #[replaced]
+    while let some next := pending.back? do
+      pending := pending.pop
+      -- A hole that refers to an existing metavariable has a hygienic name and is no new goal.
+      if next.isOfKind ``Lean.Parser.Term.syntheticHole &&
+          !(next[1].isIdent && next[1].getId.hasMacroScopes) then count := count + 1
+      pending := pending ++ next.getArgs
+    return count
+  let (proof, holes) ← elabTermWithHoles replaced expectedType? `refine
+    (allowNaturalHoles := true)
+  for (name, tactics) in blocks do
+    let some hole ← holes.findM? fun hole => return (← hole.getTag) == name
+      | throwError "a `by` block was not elaborated: {name}"
+    let unsolved ← Tactic.run hole (evalTactic tactics)
+    unless unsolved.isEmpty do
+      throwError "a `by` block left goals{goalsToMessageData unsolved}"
+  let pending ← holes.filterM fun hole => return !(← hole.isAssigned)
+  unless pending.length == holeCount - blocks.size do
+    throwError "expected {holeCount - blocks.size} goals, found{goalsToMessageData pending}"
+  return (proof, pending)
+
+open Lean Elab Tactic Meta in
+/-- `refine term`, with each `by` block of `term` run as a tactic on its own goal
+    (`elabTermRunningBlocks`). -/
+elab "cil_refine_by " term:term : tactic => withMainContext do
+  let (proof, pending) ← elabTermRunningBlocks term.raw (← getMainTarget)
+  (← getMainGoal).assign (← instantiateMVars proof)
+  replaceMainGoal pending
+
+open Lean Elab Tactic Meta in
+/-- `have name := term`, with each `by` block of `term` run as a tactic on its own goal
+    (`elabTermRunningBlocks`). -/
+elab "cil_have_by " name:ident " := " term:term : tactic => withMainContext do
+  let (proof, pending) ← elabTermRunningBlocks term.raw none
+  unless pending.isEmpty do throwError "cil_have_by: the term leaves goals"
+  let proof ← instantiateMVars proof
+  let type ← instantiateMVars (← inferType proof)
+  replaceMainGoal [(← addFact (← getMainGoal) name.getId type proof).2]
+
+open Lean Elab Tactic Meta in
+/-- `have name : type := by steps`, with the steps run as a tactic on a goal of their own. -/
+elab "cil_have_proved " name:ident " : " type:term " := " "by " steps:tacticSeq : tactic =>
+    withMainContext do
+  let statement ← Term.withSynthesize <| Term.elabType type
+  let hole ← mkFreshExprSyntheticOpaqueMVar statement
+  let unsolved ← Tactic.run hole.mvarId! (evalTactic steps)
+  unless unsolved.isEmpty do
+    throwError "cil_have_proved: the proof left goals{goalsToMessageData unsolved}"
+  replaceMainGoal [(← addFact (← getMainGoal) name.getId statement (← instantiateMVars hole)).2]
+
 /-- The projections of a method contract that stepping unfolds in a goal: its argument and
     result encodings, precondition, footprint and postcondition. -/
 def contractProjections : List Lean.Name :=
@@ -306,8 +381,7 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
             | some eq => mkEqMP eq instanceProof
             | none => mkExpectedTypeHint instanceProof result.expr
           let name ← mkFreshUserName base
-          let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
-          replaceMainGoal [goal]
+          replaceMainGoal [(← addFact (← getMainGoal) name result.expr normalisedProof).2]
           names := names.push (mkIdent name)
       return names
     if !locals.isEmpty then
@@ -406,43 +480,48 @@ elab "cil_lookup_equation" : tactic => withMainContext do
   unless goals.isEmpty do throwError "The instruction equation left premises"
   replaceMainGoal []
 
-/-- Close a lookup goal `lookup = result` with a hypothesis, up to reducible unfolding, trying
-    only hypotheses that are equations whose left side has the goal's head; fails otherwise. -/
+/-- Close a lookup goal `lookup = result`, possibly quantified, with a hypothesis, up to reducible
+    unfolding, trying only equation hypotheses whose left side may unify with `lookup`; fails
+    otherwise. -/
 syntax "cil_lookup_assumption" : tactic
 
-open Lean in
-/-- The head of the left side of the equation `type` states, under any quantifiers. -/
-private def equationHead? : Expr → Option Expr
-  | .forallE _ _ body _ => equationHead? body
-  | .mdata _ body => equationHead? body
-  | type => type.eq?.map fun (_, lhs, _) => lhs.consumeMData.getAppFn
-
 open Lean Elab Tactic Meta in
-/-- The hypotheses that state an equation, in context order, with the head of each left side.
-    A stepping step reads the list the record holds for its local context, which is found once
-    per record; any other call scans the context. -/
-private def equationHypotheses : TacticM (Array (FVarId × Expr)) := do
-  let usable ← usableNormalNodes
-  if let some record := usable then
-    if let some found := record.equations then return found
+/-- The equation hypotheses that may state the goal `goal`, in context order. Inside a step of a
+    stepping driver they come from the index the driver keeps, which the step's start brought up
+    to date; any other call scans the context for hypotheses whose head `headsMayMeet` the
+    goal's, which costs less than building an index for one lookup. -/
+private def equationCandidates (goal : Expr) : TacticM (Array FVarId) := do
+  let record ← getNormalNodes
+  let context ← getLCtx
+  if record.driven && cil.stepping.record.get (← getOptions) then
+    if let some locals := record.equationLocals then
+      if ← contextKeeps locals context then
+        let index ← record.equations.extend context
+        -- The index may still name a hypothesis that a store cleared.
+        return (← index.candidates goal).filter context.contains
+  let some wanted := equationHead? goal | return #[]
+  let wantedUnfolds ← headUnfolds wanted
   let mut found := #[]
-  for declaration in ← getLCtx do
+  -- Hypotheses in a row often share a head, so the last head's verdict is kept.
+  let mut seen := wanted
+  let mut seenMeets := true
+  for declaration in context do
     if declaration.isImplementationDetail then continue
-    if let some head := equationHead? (← instantiateMVars declaration.type) then
-      found := found.push (declaration.fvarId, head)
-  if let some record := usable then
-    setNormalNodes { record with equations := some found }
+    let some head ← instantiatedEquationHead? declaration.type | continue
+    unless head == seen do
+      seen := head
+      seenMeets ← headsMayMeet wanted wantedUnfolds head
+    if seenMeets then found := found.push declaration.fvarId
   return found
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_lookup_assumption) => withMainContext do
     let goal ← getMainGoal
-    let some wanted := equationHead? (← instantiateMVars (← goal.getType))
-      | throwError "cil_lookup_assumption: the goal is not an equation"
-    for (hypothesis, found) in ← equationHypotheses do
-      -- A head that is not a constant may unify with anything, so every hypothesis is tried.
-      unless !wanted.isConst || !found.isConst || found == wanted do continue
+    let statement ← instantiateMVars (← goal.getType)
+    unless (equationHead? statement).isSome do
+      throwError "cil_lookup_assumption: the goal is not an equation"
+    for hypothesis in ← equationCandidates statement do
       let declaration ← hypothesis.getDecl
       let saved ← saveState
       if declaration.type.isForall then
@@ -1309,7 +1388,7 @@ syntax "cil_checked_steps_normalized" "[" term,* "]" : tactic
 macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    cil_strict refine Eq.trans (CIL.Safety.run_return $methodFound $instructionFound
+    cil_strict cil_refine_by Eq.trans (CIL.Safety.run_return $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by cil_checked_side [$[$facts:term],*])) ?_
     try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
@@ -1325,7 +1404,7 @@ macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max
 macro "cil_checked_next_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    cil_strict refine Eq.trans (CIL.Safety.run_next $methodFound $instructionFound
+    cil_strict cil_refine_by Eq.trans (CIL.Safety.run_next $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])) ?_
     cil_stack_cleanup))
 
@@ -1333,7 +1412,7 @@ macro "cil_checked_next_at " methodFound:term:max instructionFound:term:max
     located fault fixes the fault the step must raise. -/
 macro "cil_checked_fault_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
-  `(tactic| cil_strict exact CIL.Safety.run_fault $methodFound $instructionFound
+  `(tactic| cil_strict cil_refine_by CIL.Safety.run_fault $methodFound $instructionFound
     (by cil_checked_step_normalized [$[$facts:term],*]))
 
 /-- Close a child invocation with supplied exact-run or invocation-certificate evidence. -/
@@ -1394,7 +1473,7 @@ elab_rules : tactic
 macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    cil_strict refine CIL.Safety.run_call_of_invoke $methodFound $instructionFound
+    cil_strict cil_refine_by CIL.Safety.run_call_of_invoke $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by first | cil_checked_child [$[$facts:term],*]
                 | (cil_checked_steps_normalized [$[$facts:term],*]; done)) ?_

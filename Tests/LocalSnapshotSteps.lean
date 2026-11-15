@@ -647,4 +647,124 @@ theorem derived_homes_walk (program : CIL.Program) (method : Nat)
   rfl
 
 #print axioms derived_homes_walk
+
+/-- Three stores, the second one after a step that changes memory without a store. -/
+@[cil_code] def storesAroundChange : CIL.Method := {
+  code := [.ldarg 0, .stloc 0, .ldarg 1, .stloc 0, .ldarg 0, .stloc 0, .ret],
+  locals := [.i64 0], localKinds := [.word64], returnsValue := false }
+
+/-- A store after a step that changes memory without a store, and one more after it, find the
+    homes' access through the link the user states between the memories: the walk restates a
+    chain that starts at the memory the homes were last stated at, though a store made it. -/
+theorem stores_across_a_memory_change (memory : Memory) (slots : List LocalSlot)
+    (boundary : Nat)
+    (homes : CompleteWritableHomes memory boundary storesAroundChange.localKinds slots)
+    (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
+    (first second : BitVec 64) (bump : Memory → Memory)
+    (change : ∀ current, step storesAroundChange (.ldarg 1) 2
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] current =
+        .ok (.next 3 [.scalar (.i64 second)] ⟨0, slots, [], 0⟩ (bump current)))
+    (bumpFormed : ∀ current, current.WellFormed → (bump current).WellFormed)
+    (bumpBelow : ∀ current, AccessBelow current.nextIdentity current (bump current))
+    (bumpSnapshots : ∀ current known, LocalSnapshots current slots known →
+      LocalSnapshots (bump current) slots known) :
+    WP (Execution (fun fuel => run [storesAroundChange] fuel 0 0
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] memory))
+      (fun _ => True) := by
+  have formed := valid.wellFormed
+  have preserved := MemoryBelow.refl boundary memory
+  have authority := (MemoryBelow.refl memory.nextIdentity memory).accessBelow
+  have snapshots := LocalSnapshots.empty memory slots
+  cil_contract_steps (snapshots := snapshots) 2 []
+  have changedSnapshots := bumpSnapshots storedLocal _ localSnapshots
+  have link := bumpBelow storedLocal
+  have changedFormed := bumpFormed storedLocal localFormed
+  cil_contract_steps (snapshots := changedSnapshots) [change]
+  trivial
+
+#print axioms stores_across_a_memory_change
+
+open Lean Elab Tactic Meta in
+/-- How many hypotheses of the context state a predicate with this head. -/
+def hypothesesWith (head : Name) : TacticM Nat := withMainContext do
+  return (← getLCtx).foldl (init := 0) fun count declaration =>
+    if !declaration.isImplementationDetail && declaration.type.isAppOf head then count + 1
+    else count
+
+/-- Two stores into one numeric local. -/
+@[cil_code] def twoStores : CIL.Method := {
+  code := [.ldarg 0, .stloc 0, .ldarg 1, .stloc 0, .ret],
+  locals := [.i64 0], localKinds := [.word64], returnsValue := false }
+
+open Lean Elab Tactic Meta in
+/-- A walk of two stores leaves the caller's facts at the entry memory in scope next to their
+    restatement at the last memory, one restatement and no more, and each store's own evidence
+    under its names. -/
+theorem entry_facts_stay (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes memory boundary twoStores.localKinds slots)
+    (inputs outputs : List ArgumentView) (valid : ValidCall memory inputs outputs)
+    (first second : BitVec 64) :
+    WP (Execution (fun fuel => run [twoStores] fuel 0 0
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] memory))
+      (fun _ => True) := by
+  have formed := valid.wellFormed
+  have preserved := MemoryBelow.refl boundary memory
+  have authority := (MemoryBelow.refl memory.nextIdentity memory).accessBelow
+  have snapshots := LocalSnapshots.empty memory slots
+  cil_contract_steps (snapshots := snapshots) []
+  run_tac do
+    for (head, expected) in [(``ValidCall, 2), (``CompleteWritableHomes, 2)] do
+      let found ← hypothesesWith head
+      unless found == expected do
+        throwError "expected {expected} hypotheses about {head}, found {found}"
+    withMainContext do
+      for name in [`storedLocal, `storingLocal, `localSnapshots, `localFormed, `localBelow,
+          `localAccess, `localWrite, `storedLocal_1, `storingLocal_1, `localSnapshots_1,
+          `localFormed_1, `localBelow_1, `localAccess_1, `localWrite_1] do
+        unless ((← getLCtx).findFromUserName? name).isSome do
+          throwError "a store's own hypothesis {name} is missing"
+      -- The evidence a store unpacks into its named hypotheses is cleared with it.
+      for declaration in ← getLCtx do
+        let base := declaration.userName.eraseMacroScopes
+        if [`snapshotLocated, `snapshotStored, `snapshotRest].contains base then
+          throwError "a store's unpacked evidence {declaration.userName} is still in scope"
+  -- The entry memory's facts are still there for a proof that states them.
+  have _ : ValidCall memory inputs outputs := by assumption
+  have _ : CompleteWritableHomes memory boundary twoStores.localKinds slots := by assumption
+  have _ : MemoryBelow boundary memory memory := by assumption
+  have _ : AccessBelow memory.nextIdentity memory memory := by assumption
+  trivial
+
+#print axioms entry_facts_stay
+
+/-- A theorem may name its own memory `stored`: the walk clears restated facts only at the
+    memories it introduced, so the caller's facts at that memory stay in scope after two stores,
+    whatever their memory is called. -/
+theorem caller_memory_named_stored (stored : Memory) (slots : List LocalSlot) (boundary : Nat)
+    (homes : CompleteWritableHomes stored boundary twoStores.localKinds slots)
+    (inputs outputs : List ArgumentView) (valid : ValidCall stored inputs outputs)
+    (first second : BitVec 64) :
+    WP (Execution (fun fuel => run [twoStores] fuel 0 0
+      [.scalar (.i64 first), .scalar (.i64 second)] ⟨0, slots, [], 0⟩ [] stored))
+      (fun _ => True) := by
+  have formed := valid.wellFormed
+  have preserved := MemoryBelow.refl boundary stored
+  have authority := (MemoryBelow.refl stored.nextIdentity stored).accessBelow
+  have snapshots := LocalSnapshots.empty stored slots
+  cil_contract_steps (snapshots := snapshots) []
+  have _ : ValidCall stored inputs outputs := by assumption
+  have _ : CompleteWritableHomes stored boundary twoStores.localKinds slots := by assumption
+  have _ : MemoryBelow boundary stored stored := by assumption
+  trivial
+
+#print axioms caller_memory_named_stored
+
+-- `cil_cheap_assumption` closes what `assumption` closes when the hypothesis states the goal
+-- through a head that unfolds at reducible transparency, in either direction.
+example (left right : Nat) (greater : left > right) : right < left := by cil_cheap_assumption
+example (left right : Nat) (less : right < left) : left > right := by cil_cheap_assumption
+example (left right : Nat) (atLeast : left ≥ right) : right ≤ left := by cil_cheap_assumption
+example (left right : Nat) (atMost : right ≤ left) : left ≥ right := by cil_cheap_assumption
+example (left right : Nat) (apart : left ≠ right) : ¬ left = right := by cil_cheap_assumption
+example (left right : Nat) (apart : ¬ left = right) : left ≠ right := by cil_cheap_assumption
 end Tests.LocalSnapshotSteps

@@ -246,6 +246,18 @@ the memory written to at the new memory, each under the name it already has:
 
 A fact whose condition is not shown stays at the old memory.
 
+A restated fact replaces the fact it restates when that one is stated at a memory the walk
+introduced, the `storedLocal` of an earlier store: the hypothesis the new one shadows is cleared, so
+a walk adds the names of each store and nothing that grows with the stores before it. The walk
+records the variables it introduces, so a fact stated at the memory the walk entered with, such as
+`valid`, `homes` or `preserved`, stays in scope next to its restatement whatever that memory is
+named. A `MemoryBelow` or `AccessBelow` fact that starts at a `storedLocal` memory is restated only
+when homes are stated at that memory, as after a step that changes memory without a store; the ones
+that start at the memory the walk entered with, such as `MemoryBelow boundary memory`, follow every
+store, and the `localBelow` and `localAccess` of a store state the step from the memory before it.
+The access a store finds for its own home is read by that store only, and the walk clears it with
+the other facts the store alone uses.
+
 The contract form then prepares its step facts again at `storedLocal`. The carried `ValidCall`
 forms the by-reference arguments and reads their fields there, and the restated reads supply their loads, so
 `.ldarg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a

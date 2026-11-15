@@ -535,7 +535,9 @@ All gather facts as the other loop tactics do, so their lists are optional:
 Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`, `storedBelow`),
 and the tactic restates each `Contents`, `Filled` and `Writable` hypothesis about the stored-over
 memory, or about the caller's, at the new one under the same name, so an invariant reads them at
-the memory it is stated at.
+the memory it is stated at. The restated fact replaces the earlier one when the stored-over memory
+is one the walk introduced; a fact about a memory the theorem or the author introduced stays in
+scope, whatever that memory is named.
 
 [CountCalls](../Examples/Proofs/CountCalls.lean) proves a counted loop this way without unfolding
 the helper or naming its fuel.
@@ -784,18 +786,47 @@ simplification leaves. `set_option cil.stepping.record false` turns the record o
 simplifications then still run through `cil_simp_only`, so their messages and info trees differ
 from those of `simp only`. A run starts to use the record after `cil.stepping.warmup` steps (12
 by default), since the goal of a short run is small; a step is one stepping call, and a loop
-instruction takes up to three.
+instruction takes up to four.
 
 The record holds one set of terms for each list of supplied facts the run steps with, so a loop
 walk whose instructions read different groups of facts keeps them all. Each set is keyed by the
 facts as elaborated, a lemma with implicit arguments or universe parameters included, and by the
-hypotheses in scope. It is dropped when either changes, when a step fails, and when the tactic
-ends. A fact that does not elaborate makes its step run without the record, which
-`trace.CIL.record` reports. A step run outside these tactics, such as a single
-`cil_checked_step`, keeps none. A run also builds its simplification contexts and the list of
-equation hypotheses that `cil_lookup` tries once. Each step still unifies the step lemma with the
-whole state, so on a body whose values grow, the cost per instruction rises slowly with the
-program counter.
+hypotheses in scope when it was made. A step that only adds hypotheses, as a call does, keeps the
+set; a step that rewrites, renames or clears a hypothesis, which a snapshot or loop-frame store
+does when it supersedes a fact, a step that fails and the end of the tactic drop it. A fact that
+does not elaborate makes its step run without the record, which `trace.CIL.record` reports. A
+step run outside these tactics, such as a single `cil_checked_step`, keeps none.
+
+The simplifications of a step prove an equation theorem's side conditions from the simp set and
+never from a hypothesis, so a simplification gives the same result whatever else is in scope. A
+run builds its simplification contexts once, indexes the equation hypotheses that `cil_lookup`
+tries in a discrimination tree over their left sides as each is added, and runs the tactics of a
+step on goals of their own instead of inside `by` blocks of a term, which Lean would rebuild the
+whole local context for. A lookup in a step tries only the hypotheses whose left side may unify
+with it at reducible transparency. The tree reads a term after the reducible unfolding of local
+and reducible definitions that unification applies. A left side or lookup that unification may
+equate with a term the tree keys apart is not read by the tree: natural-number arithmetic that
+unification evaluates, a structure constructor it matches against projections, and a value of a
+type with one value. Such a hypothesis, or every hypothesis for such a lookup, is tried when the
+head of its left side may meet the lookup's, so a lookup in a step finds every hypothesis that a
+lookup outside a run finds. A lookup outside a run, or with `cil.stepping.record` off, reads each
+hypothesis in scope once and tries those whose left side has the lookup's head, a head that is not
+a constant, or a head that reducible unfolding replaces; it builds no index, which would cost more
+than one lookup. Each read of the record checks that the goal's local context is the one
+the record was made for; a goal that keeps that context object, as the goals within a step do,
+passes without reading a hypothesis. A step that adds or clears hypotheses, as a store or a call
+does, compares the whole context a few times, so the work of a step is at most linear in the
+hypotheses in scope with a small constant. The `stepping` suite bounds that constant at 100
+heartbeats per hypothesis per instruction and the cost per instruction between sizes at 1.35
+times, and bounds a lookup outside a run at 100 heartbeats per hypothesis in scope. Comparing contexts costs time but no heartbeats, so the automation tests also count the
+context positions a walk compares and allow at most one whole context per instruction.
+
+A snapshot or loop-frame walk adds the same hypotheses at every store: the store's own seven
+named hypotheses, or its memory, step and frame facts, and the memory variable, with a number of
+restated facts that does not depend on the stores before it. Each restated fact replaces the one
+at a memory the walk made, which the walk clears; a fact at the caller's memory stays. On a body
+whose values grow, each step also unifies the step lemma with the whole state, so the cost per
+instruction rises slowly with the program counter.
 
 To compare the cost of two versions of a proof, measure each with fresh Lean processes and
 prebuilt dependencies, alternating the runs serially on the same machine. Record elapsed time, CPU
