@@ -359,3 +359,4 @@ if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
 queue.Flush();
 
 Console.WriteLine($"Primitive operation proofs passed: {cases} cases; incorrect write rejected.");
+Run(["dotnet", "run", "--file", At("Tests/Strings.cs")], streamOutput: true, progress: "Strings as opaque references");
