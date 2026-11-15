@@ -17,6 +17,11 @@ if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
     ArgumentResolutionCosts();
     return;
 }
+if (args.Contains("--field-resolution-only", StringComparer.Ordinal))
+{
+    FieldResolutionCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -28,6 +33,7 @@ CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
 ArgumentResolutionCosts();
+FieldResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -286,6 +292,94 @@ void ArgumentResolutionCosts()
                     $"Argument {name} {label} cost {measured} heartbeats per argument; the limit is " +
                     $"{AllowedArgumentGrowth} times the cost per argument at the size before.");
             Console.WriteLine($"PASS argument {name} {label}: {measured} heartbeats per argument");
+        }
+    }
+}
+
+// Fails when shape facts or reads at 8, 32 and 128 distinct fields cost over 1.35 times more per field than at the
+// size before, with every field in one struct or each field in a struct of its own, read by a 512-instruction body.
+void FieldResolutionCosts()
+{
+    const double AllowedFieldGrowth = 1.35;
+    var resolutionDirectory = At("artifacts/LookupScaling/FieldResolution");
+    Directory.CreateDirectory(resolutionDirectory);
+    foreach (var spread in new[] { false, true })
+    {
+        var samples = new List<(int Size, long Facts, long Reads)>();
+        foreach (var size in new[] { 8, 32, 128 })
+        {
+            var structs = spread ? size : 1;
+            var fieldsPerStruct = spread ? 1 : size;
+            var structFields = string.Join(", ", Enumerable.Repeat("{ type := .signed32 }", fieldsPerStruct));
+            var raw = string.Join(",\n  ", Enumerable.Range(0, structs).Select(index =>
+                $"{{ identity := \"T::S{index}\", explicit := false, packing := 0, declaredSize := 0, " +
+                $"fields := [{structFields}] }}"));
+            var offsets = string.Join(", ", Enumerable.Range(0, fieldsPerStruct).Select(field =>
+                $"{{ offset := {4 * field}, width := 4 }}"));
+            var computed = string.Join(",\n  ", Enumerable.Repeat(
+                $"⟨{{ size := {4 * fieldsPerStruct}, fields := [{offsets}] }}, 4⟩", structs));
+            var fields = new StringBuilder();
+            var facts = new StringBuilder();
+            for (var field = 0; field < size; field++)
+            {
+                var owner = spread ? field : 0;
+                fields.AppendLine($"def field{field} : FieldRef := {{ owner := .aggregate \"T::S{owner}\" {owner}, " +
+                    $"index := {(spread ? 0 : field)}, type := .atom runtimeScope \"System.Int32\", " +
+                    $"name := name!\"f{field}\" }}");
+                facts.AppendLine($"#resolution_cost \"fact\" in cil_field_shape environment field{field}");
+            }
+            var reads = string.Join(", ", Enumerable.Range(0, size).Select(field => $"body.fieldShape field{field}"));
+            var shapes = string.Join(", ", Enumerable.Range(0, size).Select(field =>
+                $".value {(spread ? 0 : 4 * field)} 4 false"));
+            var source = $$"""
+                import CIL.Safety.ResolutionFacts
+                open CIL CIL.Extraction Lean Elab Command
+                set_option maxRecDepth 8192
+                /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+                elab "#resolution_cost " label:str " in " command:command : command => do
+                  let before <- IO.getNumHeartbeats
+                  elabCommand command
+                  let after <- IO.getNumHeartbeats
+                  logInfo m!"resolution {label.getString} {after - before} heartbeats"
+                def rawLayouts : List RawLayout := [
+                  {{raw}}]
+                def computedLayouts : Array ComputedLayout := #[
+                  {{computed}}]
+                @[cil_code] def environment : LayoutEnvironment :=
+                  { rawLayouts := rawLayouts, layouts := computedLayouts }
+                def body : Method :=
+                  { code := List.replicate 512 .nop, locals := [], returnsValue := false, environment }
+                {{fields}}
+                {{facts}}
+                #resolution_cost "simplifier" in
+                theorem body_reads : [{{reads}}] = [{{shapes}}] := by simp only [cil_code]
+                #print axioms field{{size - 1}}_shape
+                #print axioms body_reads
+                """ + "\n";
+            var path = Path.Combine(resolutionDirectory, $"{(spread ? "Spread" : "Struct")}{size}.lean");
+            File.WriteAllText(path, source);
+            var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+            if (output.Contains("sorryAx", StringComparison.Ordinal))
+                throw new InvalidOperationException("Field resolution introduced an unproved theorem.");
+            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            if (costs.Length != size + 1)
+                throw new InvalidOperationException("Missing field resolution costs: " + output);
+            long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
+                .Sum(match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+            samples.Add((size, Sum("fact"), Sum("simplifier")));
+        }
+        var label = spread ? "with each field in its own struct" : "with every field in one struct";
+        foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
+            { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
+        {
+            var perField = samples.Select(sample => (double)cost(sample) / sample.Size).ToArray();
+            var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+                $"{sample.Size} = {(double)cost(sample) / sample.Size:F0}")));
+            if (perField.Skip(1).Zip(perField).Any(pair => pair.First > pair.Second * AllowedFieldGrowth))
+                throw new InvalidOperationException(
+                    $"Field shape {name} {label} cost {measured} heartbeats per field; the limit is " +
+                    $"{AllowedFieldGrowth} times the cost per field at the size before.");
+            Console.WriteLine($"PASS field shape {name} {label}: {measured} heartbeats per field");
         }
     }
 }

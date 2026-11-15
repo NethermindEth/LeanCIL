@@ -657,3 +657,18 @@ declares `body_suffix{start}`, the code from every 16th pc on, and `body_suffix{
 proves each equation from the suffix that starts its block, so the equations cost time linear in
 the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
 [instruction lookups](performance/InstructionLookups.md) records.
+
+### Field and value shapes
+
+An extraction states once how its methods resolve each distinct operand of a reachable `ldfld`,
+`ldflda` or `stfld`, and of a reachable `ldobj`, `stobj`, `initobj`, `cpobj` or `sizeof`.
+`Extracted.fieldRef{k}` holds a field operand as a `CIL.Extraction.FieldRef` and
+`Extracted.valueType{k}` a type operand. `cil_field_shape` and `cil_value_shape` (from
+`CIL.Safety.ResolutionFacts`) declare `Extracted.fieldRef{k}_shape` and
+`Extracted.valueType{k}_shape`, which give `CIL.Method.fieldShape` or `CIL.Method.valueShape` of
+the operand for every method whose environment is `Extracted.environment`. Each fact costs one
+kernel check against the shared layout tables, however many sites and methods use the operand,
+and the `cil_code` simprocs `reduceFieldShape` and `reduceValueShape` read a method's shape of
+the operand from it. `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset
+and width of its checked layout entry when the operand holds the field's declared type, and a
+class instance field to the model slot of its index.

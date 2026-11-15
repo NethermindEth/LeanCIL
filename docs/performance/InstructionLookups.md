@@ -146,6 +146,17 @@ homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewe
 accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
 size.
 
+The suite declares `cil_field_shape` for 8, 32 and 128 `int32` fields, once with every field in
+one struct and once with each field in a struct of its own, and reads every field's
+`Method.fieldShape` through the facts with `simp only [cil_code]` from a 512-instruction body. It
+fails when the heartbeats per field of the facts, or of the reads, grow more than 1.35 times from
+one size to the next. Each fact is one kernel check of `LayoutEnvironment.fieldShape`, about
+290,000 heartbeats for the first field of the first struct, most of it in the type comparisons.
+The check walks the layout lists to the owner and its field lists to the index, so each struct
+before the owner adds about 970 heartbeats. The facts cost about 291,000, 300,000 and 337,000
+heartbeats per field in one struct and 293,000, 313,000 and 386,000 with a struct per field. The
+reads cost 12,200 to 14,400 heartbeats per field at every size.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the
