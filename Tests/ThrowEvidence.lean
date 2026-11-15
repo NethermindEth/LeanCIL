@@ -13,12 +13,14 @@ private def owner := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=
 private def intType : TypeExpr := .atom runtime "System.Int32"
 
 private def ctor (scope type : String) (parameters : Nat) : RawOperand := .call {
-  declaringType := .atom scope type, name := ".ctor",
+  method := {
+    owner := .atom scope type, name := name!".ctor", hasThis := true, genericArity := 0,
+    returnType := .void,
+    parameters := List.replicate parameters (.object runtime "System.String") },
+  name := ".ctor",
   target := .external (scope ++ "::System.Void " ++ type ++ "::.ctor(" ++
-    ",".intercalate (List.replicate parameters "System.String") ++ ")"),
-  typeArguments := [], parameterCount := parameters,
-  parameterTypes := List.replicate parameters (.object runtime "System.String"),
-  hasThis := true, returnsValue := false }
+    ",".intercalate (List.replicate parameters "System.String") ++ ")"), typeArguments := [],
+  parameterCount := parameters, returnsValue := false }
 private def argument := ctor runtime "System.ArgumentException" 1
 private def divide := ctor runtime "System.DivideByZeroException" 0
 
@@ -61,9 +63,13 @@ theorem rejects_missing_constructor :
 #print axioms rejects_missing_constructor
 
 private def wrongParameter : RawOperand := .call {
-  declaringType := .atom runtime "System.DivideByZeroException", name := ".ctor",
-  target := .external (runtime ++ "::System.Void System.DivideByZeroException::.ctor(System.Int32)"),
-  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false }
+  method := {
+    owner := .atom runtime "System.DivideByZeroException", name := name!".ctor", hasThis := true,
+    genericArity := 0, returnType := .void, parameters := [] },
+  name := ".ctor",
+  target := .external (runtime ++ "::System.Void System.DivideByZeroException::.ctor(\
+    System.Int32)"),
+  typeArguments := [], parameterCount := 1, returnsValue := false }
 
 theorem rejects_wrong_signature : throwFold [i 114 (.text "a"), i 115 wrongParameter, i 122] = none := by decide
 #print axioms rejects_wrong_signature
@@ -94,7 +100,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
     (guardCode.set 4 (.throw "System.InvalidOperationException")) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none)
     guardRaw .scalar guardStates (List.replicate 7 true)
-    (guardCode.set 4 (.unsupported "hidden")) := by decide
+    (guardCode.set 4 (.unadmitted 122)) := by decide
 
 -- A branch to the raw `throw` would raise whatever object it carries, so it is rejected.
 private def enteredRaw := raw [i 2, i 37, i 45 (.target 6), i 38, i 114 (.text "zero"), i 115 argument, i 122]
@@ -126,7 +132,7 @@ theorem null_throw_entry :
       [.memory .nullRef, .br 2, .nop, .throw "System.NullReferenceException"] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (raw [i 20, i 43 (.target 3), i 20, i 122]) .scalar
       [state [], state [none], none, state [none]] [true, true, false, true]
-      [.memory .nullRef, .br 3, .unsupported "dead", .throw "System.NullReferenceException"] :=
+      [.memory .nullRef, .br 3, .unadmitted 20, .throw "System.NullReferenceException"] :=
   by decide +kernel
 #print axioms null_throw_entry
 

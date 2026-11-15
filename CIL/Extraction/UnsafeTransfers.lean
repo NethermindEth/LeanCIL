@@ -12,6 +12,10 @@ bound to the one operation that displaces and transfers like `Unsafe.Add` and `l
 
 namespace CIL.Extraction
 
+/-- The alignment `cpblk`, `initblk`, `Unsafe.CopyBlock` and `Unsafe.InitBlock` assume of their
+    addresses without an `unaligned.` prefix or the `Unaligned` helper. -/
+def defaultBlockAlignment : Nat := 8
+
 /-- Exact byte-reference and pointer block helpers share the existing checked block operations. -/
 def unsafeBlockCall (raw : RawInstruction) : Option (Bool × Nat) := do
   if raw.opcode != 40 then none else pure ()
@@ -20,8 +24,8 @@ def unsafeBlockCall (raw : RawInstruction) : Option (Bool × Nat) := do
       site.hasThis || site.returnsValue || site.returnType != .void ||
       !site.typeArguments.isEmpty || site.parameterCount != 3 then none else pure ()
   let (copy, alignment) ← match site.name with
-    | "CopyBlock" => some (true, 8) | "CopyBlockUnaligned" => some (true, 1)
-    | "InitBlock" => some (false, 8) | "InitBlockUnaligned" => some (false, 1)
+    | "CopyBlock" => some (true, defaultBlockAlignment) | "CopyBlockUnaligned" => some (true, 1)
+    | "InitBlock" => some (false, defaultBlockAlignment) | "InitBlockUnaligned" => some (false, 1)
     | _ => none
   let byte := TypeExpr.atom runtimeScope "System.Byte"
   let pointer := site.parameterTypes.head? == some (.pointer .void)
@@ -60,8 +64,7 @@ def typedTransferMatches (layouts : List RawLayout) (type : TypeExpr) (read : Bo
     | some (.field kind) => match primitiveFieldWidth kind with
       | none => false
       | some width => match read, emitted with
-        | true, .loadScalar actual signed => actual == width &&
-          signed == (kind == .signed8 || kind == .signed16)
+        | true, .loadScalar actual signed => actual == width && signed == signedField kind
         | false, .storeScalar actual => actual == width
         | _, _ => false
     | _ => false

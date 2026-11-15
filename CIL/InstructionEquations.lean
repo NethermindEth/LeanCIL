@@ -12,7 +12,7 @@ after each generated template, and a hand-written body calls it itself, so `cil_
 from an extracted body and from a parametric one, such as
 `def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method`, by one rewrite instead of unfolding
 the body and walking its code list. An instruction that depends on a parameter is stated as
-written, for example `if avx2 then op else .unsupported ...`, and `cil_lookup` decides it from
+written, for example `if avx2 then op else .unadmitted opcode`, and `cil_lookup` decides it from
 the caller's facts or literal flags.
 
 The proofs follow `CIL.CodeSuffix`: the command names the suffix of the code at every
@@ -61,7 +61,7 @@ def instructions (body : Name) (code : Expr) : MetaM (Array Expr) := do
     throwError "cil_instruction_equations: the instruction at pc {found.size} of \
       {body} is not determined by its parameters, or the body does not unfold; state each \
       feature-dependent instruction as an `if` on the instruction, padding the shorter side \
-      with `.unsupported`, so every profile has the same pcs"
+      with `.unadmitted`, so every profile has the same pcs"
   return found
 
 /-- A body whose equations are being declared: its name, universe parameters, parameters and

@@ -3,6 +3,7 @@ import CIL.Extraction.FeatureEffects
 import CIL.Extraction.Folds
 import CIL.Extraction.FlowIndex
 import CIL.Extraction.FeatureLocals
+import CIL.Extraction.IndirectAccess
 import CIL.Semantics
 import Lean.Elab.Tactic.BuiltinTactic
 
@@ -14,15 +15,15 @@ the extractor prunes the branches they decide. `FeatureFlowValid` checks that pr
 abstract interpretation tracks known 32-bit words on the stack and in eligible locals, its
 transfer function and successor edges are recomputed here from the raw body, and the
 extractor's per-pc certificate must be closed under them. Only pcs the certificate reaches
-may be live; every other emitted instruction must be an `.unsupported` hole.
+may be live; every other emitted instruction must be a hole (`.unadmitted`).
 
 The same pass binds each raw instruction to its emitted counterpart, exactly for control
 flow, locals and feature tests, and by stack effect for everything else.
 
 A parameterless static Boolean call pushes the word `constantReturn` reads from the callee's own
 certificate, which the whole-program obligation validates alongside the caller's. Known words
-only decide which pcs are live, and every pc they rule out is emitted as an `.unsupported` hole
-that has no step. A wrong claim, cyclic or not, therefore sends execution into a hole that faults:
+only decide which pcs are live, and every pc they rule out is emitted as a hole, whose step
+faults. A wrong claim, cyclic or not, therefore sends execution into a hole that faults:
 it cannot make a successful outcome provable, only unreachable.
 -/
 
@@ -515,7 +516,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Inst
 
 /-- Bind every control-flow operation and every operation that propagates a known
     feature fact to the actual emitted instruction. Unknown operations may not
-    emit an unsupported hole on a reachable path. -/
+    emit a hole on a reachable path. -/
 def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     Id.run do
@@ -525,9 +526,9 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | .tailCall .. | .managed (.call _ _ true) => true | _ => false) then return false
   if instruction.opcode == 65039 then
     return match instruction.operand, emitted with
-      | .none, .stackAlloc flag => flag == raw.initLocals
+      | .none, .localloc => true
       | _, _ => false
-  if let .stackAlloc _ := emitted then return false
+  if let .localloc := emitted then return false
   if let some word := constant32 instruction <|> platformField instruction then
     return match emitted with | .ldc_i4 actual => word == actual | _ => false
   -- Any other static load is never a constant.
@@ -589,7 +590,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | 69, .targets x, .switch y => x == y
     | 42, _, .ret => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
-    | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
+    | _, _, .unadmitted _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
     | _, _, .brfalse _ | _, _, .brtrue _ => false
     | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
@@ -630,19 +631,21 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
       featureOpMatches layouts raw instruction emitted
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
-    be well shaped, match its emitted instruction, and flow into a weaker state at every
-    recomputed successor. -/
+    be well shaped, match its emitted instruction, including the indirect access rule over the
+    raw instructions `rawAt` gives, and flow into a weaker state at every recomputed
+    successor. -/
 private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     (constants : Nat → Option W32) (raw : RawMethod)
     (facts : LocalFacts Locals)
     (profile : FeatureProfile)
     (certificate : Nat → Option (Option (FeatureFacts Locals)))
-    (roles : Nat → Option (Option FoldRole)) :
+    (roles : Nat → Option (Option FoldRole)) (rawAt : Nat → Option RawInstruction) :
     (RawInstruction × Option FoldRole) × Nat → Option (FeatureFacts Locals) → Instruction → Bool
-  | _, none, .unsupported _ => true
+  | _, none, .unadmitted _ => true
   | ((instruction, role), pc), some state, emitted =>
     wellShaped raw facts state &&
-      featureOpMatchesAt layouts raw role instruction emitted &&
+      (featureOpMatchesAt layouts raw role instruction emitted &&
+        indirectSiteWindow rawAt pc instruction emitted) &&
       match featureTransferAtWith layouts raw facts profile (calleeConstant constants emitted)
           role instruction state,
           featureSuccessors role pc instruction state.stack with
@@ -663,7 +666,7 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
   | _, none, _ => false
 
 /-- No optional sites: entry, every raw PC, the entire parameter-reachability mask,
-    every successor, and all unsupported holes are covered. The entry state has no known fact.
+    every successor, and all holes are covered. The entry state has no known fact.
     `constants` gives, by emitted method index, the word a parameterless call to that method
     pushes. -/
 def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32)
@@ -674,7 +677,7 @@ def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32
   certificate[0]? = some (some { stack := [], locals := [] }) ∧
   (let facts := LocalFacts.known raw.locals.length (FeatureLocalIndex.ofRaw raw).eligible
    all3Flow (fun lookup => checkFeatureSiteWith layouts constants raw facts profile lookup
-      (FlowIndex.ofList (foldRoles raw.locals raw.code)).get?)
+      (FlowIndex.ofList (foldRoles raw.locals raw.code)).get? (FlowIndex.ofList raw.code).get?)
     (.ofList certificate) 0
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code) = true
 
@@ -698,7 +701,8 @@ def FeatureListValid (layouts : Array RawLayout) (constants : Nat → Option W32
   all3 (checkFeatureSiteWith layouts constants raw
       (LocalFacts.list raw.locals.length (featureLocalEligible raw)) profile
       (fun target => certificate[target]?)
-      (fun target => (foldRoles raw.locals raw.code)[target]?))
+      (fun target => (foldRoles raw.locals raw.code)[target]?)
+      (fun target => raw.code[target]?))
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true
 
 /-- Streaming validation has exactly the same entry, mask, shape and successor checks
@@ -712,7 +716,8 @@ private theorem FeatureFlowValid_iff_indexed (layouts : Array RawLayout)
       certificate[0]? = some (some { stack := [], locals := [] }) ∧
       all3 (checkFeatureSiteWith layouts constants raw (knownLocals raw) profile
           (fun target => certificate[target]?)
-          (fun target => (foldRoles raw.locals raw.code)[target]?))
+          (fun target => (foldRoles raw.locals raw.code)[target]?)
+          (fun target => raw.code[target]?))
         (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code = true := by
   unfold FeatureFlowValid
   have eligible : (FeatureLocalIndex.ofRaw raw).eligible = featureLocalEligible raw := by
@@ -724,7 +729,10 @@ private theorem FeatureFlowValid_iff_indexed (layouts : Array RawLayout)
       (fun target => (foldRoles raw.locals raw.code)[target]?) := by
     funext target
     exact FlowIndex.get?_ofList _ _
-  rw [roles]
+  have rawAt : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) := by
+    funext target
+    exact FlowIndex.get?_ofList _ _
+  rw [roles, rawAt]
   rfl
 
 #print axioms FeatureFlowValid_iff_indexed
@@ -861,14 +869,14 @@ private def expandCertificate (raw : RawMethod) (certificate : FeatureCertificat
 private theorem checkFeatureSiteWith_known_eq_list (layouts : Array RawLayout)
     (constants : Nat → Option W32) (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) (roles : Nat → Option (Option FoldRole))
-    (allKnown : AllKnown raw certificate)
+    (rawAt : Nat → Option RawInstruction) (allKnown : AllKnown raw certificate)
     (site : (RawInstruction × Option FoldRole) × Nat) (state : Option FeatureState)
     (emitted : Instruction) (member : state ∈ certificate) :
     checkFeatureSiteWith layouts constants raw (knownLocals raw) profile
-        (fun target => certificate[target]?) roles site state emitted =
+        (fun target => certificate[target]?) roles rawAt site state emitted =
       checkFeatureSiteWith layouts constants raw
         (LocalFacts.list raw.locals.length (featureLocalEligible raw)) profile
-        (fun target => (expandCertificate raw certificate)[target]?) roles site
+        (fun target => (expandCertificate raw certificate)[target]?) roles rawAt site
         (state.map (FeatureState.expand raw.locals.length)) emitted := by
   cases state with
   | none => cases emitted <;> rfl
@@ -928,8 +936,8 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
     (Option.map (FeatureState.expand raw.locals.length))
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code
     fun site state emitted member => checkFeatureSiteWith_known_eq_list layouts constants raw
-      profile certificate (fun target => (foldRoles raw.locals raw.code)[target]?) allKnown site
-      state emitted member
+      profile certificate (fun target => (foldRoles raw.locals raw.code)[target]?)
+      (fun target => raw.code[target]?) allKnown site state emitted member
   constructor
   · rintro ⟨length, codeLength, mask, entry, sites⟩
     have allKnown : AllKnown raw certificate := by

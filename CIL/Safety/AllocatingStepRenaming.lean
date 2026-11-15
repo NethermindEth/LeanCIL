@@ -77,54 +77,53 @@ theorem allocateStack_not_thrown (memory : Memory) (frame : Frame) (size : Nat)
 
 /-- Actual dynamic stack steps extend ownership and preserve exact quota and initialization rules.
     -/
-theorem Memory.Renamed.stepStackAlloc {indices : LocalIndexMap} {mapping : AllocationRenaming}
+theorem Memory.Renamed.stepLocalloc {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (staticBounds : ∀ binding ∈ source.staticBindings,
       binding.2.allocation < mapping.sourceLimit)
-    (sourceBody targetBody : CIL.Method) (initLocals : Bool) (pc : Nat)
-    (arguments stack : List Value)
+    (sourceBody targetBody : CIL.Method) (declared : targetBody.declared = sourceBody.declared)
+    (pc : Nat) (arguments stack : List Value)
     (observable : SuccessOrThrow
-      (step sourceBody (.stackAlloc initLocals) pc arguments sourceFrame stack source)) :
+      (step sourceBody .localloc pc arguments sourceFrame stack source)) :
     ∃ later, mapping.Extends later ∧
       ResultRenamed later (FrameAction.Renamed indices later scopes)
-        (step sourceBody (.stackAlloc initLocals) pc arguments sourceFrame stack source)
-        (step targetBody (.stackAlloc initLocals) pc (arguments.map mapping.value)
+        (step sourceBody .localloc pc arguments sourceFrame stack source)
+        (step targetBody .localloc pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step, declared, mapping.unspecifiedOperands] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
-    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
-    split at observable <;> try contradiction
-    · rename_i size same
-      cases same
+    simp only [guard, Bool.false_eq_true, ite_false, localAllocation] at observable ⊢
+    split at observable
+    · rename_i size
       simp only [List.map_cons, List.map_nil, AllocationRenaming.value]
       cases size <;> simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at observable ⊢
       all_goals try cases observable
       all_goals rename_i bits
       all_goals
-        cases allocated : CIL.Safety.allocateStack source sourceFrame bits.toNat initLocals with
+        cases allocated : CIL.Safety.allocateStack source sourceFrame bits.toNat
+            sourceBody.declared.initLocals with
         | error fault =>
           cases fault <;> simp only [allocated, SuccessOrThrow] at observable
           rename_i exception
-          exact False.elim (allocateStack_not_thrown source sourceFrame _ initLocals
+          exact False.elim (allocateStack_not_thrown source sourceFrame _ _
             exception allocated)
         | ok result =>
           obtain ⟨reference, finalFrame, finalMemory⟩ := result
           obtain ⟨later, targetReference, targetFinal, targetAfter, extension, targetAllocated,
             referenceEqual, finalFrames, memories⟩ :=
-            related.allocateStack frames sourceFormed targetFormed staticBounds _ initLocals
+            related.allocateStack frames sourceFormed targetFormed staticBounds _ _
               reference allocated
           subst targetReference
           refine ⟨later, extension, ?_⟩
           simp only [targetAllocated]
           exact .ok (.next memories finalFrames)
-    · simp only [pureArity, instruction] at observable
-      split at observable <;> cases observable
-#print axioms Memory.Renamed.stepStackAlloc
+    · cases observable
+#print axioms Memory.Renamed.stepLocalloc
 
 /-- Heap-resource and allocator faults cannot discharge a named exception obligation. -/
 theorem allocateArray_not_thrown (memory : Memory) (element : CIL.ArrayElement) (length : Nat)

@@ -5,6 +5,7 @@ import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.GuardCalls
+import CIL.Resolution
 
 /-!
 # Scalar flow
@@ -396,14 +397,6 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
-/-- The width and sign extension of a class instance field of `type`: integer, Boolean, Char
-    and enum fields only, each fitting one `objectFieldSlot`. -/
-private def objectFieldShape (type : TypeExpr) : Option (Nat × Bool) :=
-  match typeStorage [] type with
-  | some (.field kind) => (primitiveFieldWidth kind).map fun width =>
-    (width, kind == .signed8 || kind == .signed16)
-  | _ => none
-
 /-- An instance field instruction on a class, or an emitted class field operation. -/
 private def objectFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
@@ -414,19 +407,6 @@ private def objectFieldSite (instruction : RawInstruction) (emitted : Instructio
   | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..)
   | .memory (.arrayField ..) | .memory (.setArrayField ..) => true
   | _ => false
-
-/-- A class instance field whose slot holds an object reference: one typed as an admitted class
-    or as an array of one, which is itself an object on the heap. -/
-private def referenceFieldType : TypeExpr → Bool
-  | .object _ _ | .array (.object _ _) => true
-  | _ => false
-
-/-- The element of a class instance field typed as an array of a value type, as the evaluation
-    stack records it: a struct element by its identity alone. -/
-private def valueArrayFieldElement (type : TypeExpr) : Option ArrayElement :=
-  match type with
-  | .array element => arrayElementType element
-  | _ => none
 
 /-- An emitted field element is the declared one; a struct element's width is the layout's,
     which `MethodLayoutsValid` checks at the layout use naming the field access. -/
@@ -1067,15 +1047,16 @@ theorem readOnlySiteWindow_eq (raw : RawMethod) :
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, emit the right encoding, satisfy the readonly rule
-    `readOnly`, and give every successor, which must be reachable, exactly the resulting stack
-    kinds, with local slots read through `locals`. -/
+    `readOnly` and the indirect access rule over the raw instructions `rawAt` gives, and give
+    every successor, which must be reachable, exactly the resulting stack kinds, with local slots
+    read through `locals`. -/
 private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
     (context : NativeDispatchContext) (locals : ScalarLocals)
-    (readOnly : Nat → RawInstruction → Instruction → Bool)
+    (readOnly : Nat → RawInstruction → Instruction → Bool) (rawAt : Nat → Option RawInstruction)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Instruction → Bool
-  | _, none, none, .unsupported _ => true
+  | _, none, none, .unadmitted _ => true
   | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (match role with
@@ -1084,6 +1065,7 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
       readOnly pc instruction emitted &&
+      indirectSiteWindow rawAt pc instruction emitted &&
       scalarEmissionMatches layouts role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted locals ||
       match scalarTransfer raw instruction stack role context locals,
@@ -1099,13 +1081,14 @@ def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : Fe
     (certificate : ScalarCertificate) (code : List Instruction) : Prop :=
   let context := nativeDispatchContext raw
   let locals := ScalarLocals.indexed raw context
-  let readOnly := readOnlySiteWindow (FlowIndex.ofList raw.code).get?
-    (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
+  let rawAt := (FlowIndex.ofList raw.code).get?
+  let readOnly :=
+    readOnlySiteWindow rawAt (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
   raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3Flow (fun lookup instruction (feature, stack) emitted =>
-      checkScalarSite layouts raw context locals readOnly
+      checkScalarSite layouts raw context locals readOnly rawAt
         (fun after target => match lookup target with
           | some (some _, incoming) => incoming == some after
           | _ => false) instruction feature stack emitted)
@@ -1150,6 +1133,7 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
       all3 (fun (instruction, feature) stack emitted =>
           checkScalarSite layouts raw (nativeDispatchContext raw)
             (ScalarLocals.ofLists raw (nativeDispatchContext raw)) (readOnlySiteMatches raw)
+            (fun target => raw.code[target]?)
             (fun after target => match features[target]? with
             | some (some _) => certificate[target]? == some (some after)
             | _ => false)
@@ -1157,7 +1141,9 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
         ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code =
         true := by
   dsimp only [ScalarFlowValid]
-  rw [ScalarLocals.indexed_eq, readOnlySiteWindow_eq,
+  have rawAt : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) :=
+    funext (FlowIndex.get?_ofList raw.code)
+  rw [ScalarLocals.indexed_eq, readOnlySiteWindow_eq, rawAt,
     all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
   simp only [scalarSuccessor_zip]
   by_cases featureLength : raw.code.length = features.length

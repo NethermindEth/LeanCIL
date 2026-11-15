@@ -73,6 +73,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
   all_goals repeat' first
     | exact managedStep_callee h enters
     | unfold returnFrom at h
+    | unfold localAllocation at h
     | solve | cases h; cases enters
     | solve |
       cases h

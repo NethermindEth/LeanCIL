@@ -207,16 +207,15 @@ theorem step_appendLocals_conv_ovf_un (target : ConvTarget) :
 
 #print axioms step_appendLocals_conv_ovf_un
 
-/-- `stackAlloc` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_stackAlloc (initLocals : Bool) :
-    StepAppendLocals (.stackAlloc initLocals) := by
+/-- `localloc` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_localloc : StepAppendLocals .localloc := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step, allocateStack_appendLocals, bind_map_left]
+  simp only [step, localAllocation, allocateStack_appendLocals, bind_map_left]
   frame_natural
 
-#print axioms step_appendLocals_stackAlloc
+#print axioms step_appendLocals_localloc
 
 /-- Heap array allocation does not inspect or change a frame's local slots. -/
 theorem step_appendLocals_newArray (element : CIL.ArrayElement) :
@@ -1206,16 +1205,16 @@ theorem step_appendLocals_throw (exception : String) :
 
 #print axioms step_appendLocals_throw
 
-/-- `unsupported` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_unsupported (description : String) :
-    StepAppendLocals (.unsupported description) := by
+/-- A hole preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_unadmitted (opcode : Nat) :
+    StepAppendLocals (.unadmitted opcode) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   frame_natural
 
-#print axioms step_appendLocals_unsupported
+#print axioms step_appendLocals_unadmitted
 
 /-- Managed pointers and tables never inspect the unused trailing frame slots. -/
 theorem step_appendLocals_managed (operation : ManagedOp) :
@@ -1252,8 +1251,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_conv_ovf target
     case conv_ovf_un target =>
       exact step_appendLocals_conv_ovf_un target
-    case stackAlloc initLocals =>
-      exact step_appendLocals_stackAlloc initLocals
+    case localloc =>
+      exact step_appendLocals_localloc
     case newArray element => exact step_appendLocals_newArray element
     case newReferenceArray element => exact step_appendLocals_newReferenceArray element
     case nop =>
@@ -1408,8 +1407,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_ret
     case throw exception =>
       exact step_appendLocals_throw exception
-    case unsupported description =>
-      exact step_appendLocals_unsupported description
+    case unadmitted opcode =>
+      exact step_appendLocals_unadmitted opcode
   exact padded body pc args frame extra stack memory outcome stepped kept
 
 #print axioms step_appendLocals

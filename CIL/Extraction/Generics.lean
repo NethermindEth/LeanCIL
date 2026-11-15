@@ -162,13 +162,16 @@ def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := [
   | .call site => do
     let declaringType ← substituteType arguments site.declaringType
     return .call { site with
-      declaringType,
+      method := { site.method with
+        owner := declaringType,
+        returnType := ← substituteStorageType layouts arguments site.returnType,
+        parameters := ← site.parameterTypes.mapM (substituteStorageType layouts arguments),
+        methodArguments :=
+          ← site.method.methodArguments.mapM (substituteStorageType layouts arguments) },
       target := ← if mentionsParameter site.declaringType then
         substituteTarget methodArity site.declaringType declaringType site.target
         else pure site.target,
-      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments),
-      returnType := ← substituteStorageType layouts arguments site.returnType,
-      parameterTypes := ← site.parameterTypes.mapM (substituteStorageType layouts arguments) }
+      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments) }
   | .indirectCall returnType parameters hasThis explicitThis convention => do
     return .indirectCall (← substituteStorageType layouts arguments returnType)
       (← parameters.mapM (substituteStorageType layouts arguments)) hasThis explicitThis convention
@@ -201,10 +204,11 @@ def openConstraintValid (layouts : List RawLayout) (arguments : List TypeExpr)
       | none => false
     | _, _ => false
 
-/-- Instantiation preserves instruction encodings, offsets and branch targets exactly. -/
+/-- Instantiation preserves instruction encodings, offsets and branch targets exactly.
+    Explicit receiver signatures have no supported instantiation. -/
 def instantiateMethod (layouts : List RawLayout) (original : RawMethod)
     (arguments : List TypeExpr) : Option RawMethod := do
-  if original.ownerArgumentCount != 0 ||
+  if original.explicitThis || original.ownerArgumentCount != 0 ||
       arguments.length != original.genericParameters.length + original.ownerParameters.length ||
       !arguments.all (admittedTypeArgument layouts) ||
       !((original.genericParameters ++ original.ownerParameters).zip arguments).all
@@ -661,7 +665,7 @@ theorem validated_managed_call {methods : List SpecializedMethod} {imports : Lis
     {raw : RawMethod} {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
     validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
-      (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
+      (emitted.code[pc.val]?.getD (.unadmitted 0)) = true := by
   have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
   have live : pc.val < reachable.length := valid.2.1 ▸ pc.isLt
   have present : pc.val < emitted.code.length := valid.2.2.1 ▸ pc.isLt
@@ -684,8 +688,8 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
   obtain ⟨offset, opcode, operand⟩ := raw
   cases operand with
   | call site =>
-    obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue,
-      returnType, parameterTypes, ownerArgumentCount⟩ := site
+    obtain ⟨methodRef, name, method, typeArguments, parameterCount, returnsValue,
+      ownerArgumentCount⟩ := site
     cases method with
     | managed token =>
       have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside

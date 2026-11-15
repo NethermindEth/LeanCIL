@@ -20,6 +20,10 @@ structure StepMetadata (source target : CIL.Method) : Prop where
   /-- Both bodies read every argument from the incoming list, narrowed alike. -/
   arguments : ∀ index, ∃ narrow, source.argumentAccess index = .value narrow ∧
     target.argumentAccess index = .value narrow
+  /-- Both bodies declare one signature, so `localloc` zeroes storage alike. -/
+  declared : target.declared = source.declared
+  /-- Both bodies resolve types and layouts in the same environment. -/
+  environment : target.environment = source.environment
   /-- Both bodies enter the same methods, since each call reads its target from this table. -/
   links : target.links = source.links
 

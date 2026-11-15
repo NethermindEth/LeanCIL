@@ -265,6 +265,7 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
+set_option maxHeartbeats 400000 in
 /-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
 theorem step_relabel_faulting (op : Instruction)
     (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
@@ -434,10 +435,9 @@ theorem step_relabel_ret : StepRelabel .ret := by
 
 #print axioms step_relabel_ret
 
-theorem step_relabel_unsupported (description : String) :
-    StepRelabel (.unsupported description) := by
-  plain_cases
-  fallback_vacuous
+theorem step_relabel_unadmitted (opcode : Nat) : StepRelabel (.unadmitted opcode) := by
+  explicit_intro
+  cases h
 
 theorem step_relabel_throw (exception : String) : StepRelabel (.throw exception) := by
   explicit_intro
@@ -652,7 +652,14 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
-  case stackAlloc | newArray | newReferenceArray =>
+  case localloc =>
+    plain_cases
+    rw [context.declared]
+    unfold localAllocation at h ⊢
+    split at h
+    · split at h <;> first | lockstep | cases h
+    · cases h
+  case newArray | newReferenceArray =>
     stack_cases =>
       first
       | fallback_vacuous
@@ -684,7 +691,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case memory operation => exact step_relabel_memory operation
   case ret => exact step_relabel_ret
   case throw exception => exact step_relabel_throw exception
-  case unsupported description => exact step_relabel_unsupported description
+  case unadmitted opcode => exact step_relabel_unadmitted opcode
   case add => exact step_relabel_add
   case sub => exact step_relabel_sub
   case clt_un => exact step_relabel_clt_un
@@ -902,6 +909,7 @@ macro "lookup_raise" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
+set_option maxHeartbeats 300000 in
 /-- Division, remainder and overflow-checked arithmetic raise in lockstep with their
     relabeling. -/
 theorem step_raise_faulting (op : Instruction)
@@ -1195,7 +1203,14 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
-  case stackAlloc | newArray | newReferenceArray =>
+  case localloc =>
+    plain_cases
+    rw [context.declared]
+    unfold localAllocation at h ⊢
+    split at h
+    · split at h <;> first | raise_lockstep | cases h
+    · cases h
+  case newArray | newReferenceArray =>
     stack_cases =>
       first
         | fallback_raise_vacuous
@@ -1245,9 +1260,9 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case throw =>
     explicit_intro
     exact h
-  case unsupported =>
-    plain_cases
-    fallback_raise_vacuous
+  case unadmitted =>
+    explicit_intro
+    exact h
   case add => exact step_raise_add
   case sub => exact step_raise_sub
   case clt_un => exact step_raise_clt_un

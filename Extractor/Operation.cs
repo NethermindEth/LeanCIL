@@ -1,3 +1,5 @@
+using Mono.Cecil.Cil;
+
 namespace Nethermind.LeanCIL;
 
 /// <summary>
@@ -95,10 +97,22 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
     internal static readonly StackOperation Nop = new(StackOpcode.Nop);
 }
 
-/// <summary>An instruction that is not modelled in the selected profile's reachable code.</summary>
-internal sealed record Unsupported(string Message) : Operation
+/// <summary>
+/// A hole carrying the raw opcode at its pc, which faults when stepped. The extractor writes one at each pc outside
+/// the selected profile's reachable code and at each profile combination a template does not select.
+/// </summary>
+internal sealed record Unadmitted(int Opcode) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".unsupported \"{Message}\"";
+    /// <summary>The hole at <paramref name="instruction"/>.</summary>
+    internal static Unadmitted At(Instruction instruction) => new(RawOpcode(instruction));
+
+    /// <summary>
+    /// The opcode as <c>RawInstruction</c> numbers it: a one-byte opcode is its byte and <c>0xFE nn</c> is
+    /// <c>0xFE00 + nn</c>.
+    /// </summary>
+    internal static int RawOpcode(Instruction instruction) => (ushort)instruction.OpCode.Value;
+
+    internal override string Render(Func<int, string> calleeName) => $".unadmitted {Opcode}";
 }
 
 /// <summary>The jump kinds; a conditional jump pops one (zero tests) or two operands.</summary>
@@ -380,9 +394,10 @@ internal sealed record StoreScalar(int Width) : Operation
     internal override string Render(Func<int, string> calleeName) => $".storeScalar {Width}";
 }
 
-internal sealed record StackAlloc(bool Zeroed) : Operation
+/// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>
+internal sealed record Localloc : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".stackAlloc {LeanText.Bool(Zeroed)}";
+    internal override string Render(Func<int, string> calleeName) => ".localloc";
 }
 
 /// <summary>The target of an overflow-checked conversion; <c>I</c> and <c>U</c> are native-sized.</summary>

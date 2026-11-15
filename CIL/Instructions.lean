@@ -16,6 +16,27 @@ and `Program` the list a call index refers into.
 
 namespace CIL
 
+/-- The admitted integer suffixes of `ldind.*`, `stind.*`, `ldelem.*` and `stelem.*`. -/
+inductive NumericKind where
+  | i1 | u1 | i2 | u2 | i4 | u4 | i8 | i
+  deriving DecidableEq, Repr
+
+/-- The load width in bytes and whether a narrow value is sign-extended to i32. -/
+def NumericKind.load? : NumericKind -> Option (Prod Nat Bool)
+  | .i1 => some (1, true)
+  | .u1 => some (1, false)
+  | .i2 => some (2, true)
+  | .u2 => some (2, false)
+  | .i4 | .u4 => some (4, false)
+  | .i8 | .i => some (8, false)
+
+/-- The store width in bytes; narrow stores keep the low bytes of an i32 value. -/
+def NumericKind.store? : NumericKind -> Option Nat
+  | .i1 | .u1 => some 1
+  | .i2 | .u2 => some 2
+  | .i4 | .u4 => some 4
+  | .i8 | .i => some 8
+
 /-- Small integer storage types; all extend to the 32-bit evaluation-stack type. -/
 inductive NarrowKind where
   | signed8 | unsigned8 | signed16 | unsigned16
@@ -126,8 +147,8 @@ inductive Instruction where
   | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf | mul_ovf_un
   -- Overflow-checked conversion to `target`, reading the operand as signed or as unsigned.
   | conv_ovf (target : ConvTarget) | conv_ovf_un (target : ConvTarget)
-  /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
-  | stackAlloc (initLocals : Bool)
+  /-- Fresh frame storage of the popped byte count, zeroed when `declared.initLocals` is set. -/
+  | localloc
   /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
   | newArray (element : ArrayElement)
   /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
@@ -205,7 +226,9 @@ inductive Instruction where
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
   | throw (exception : String)
-  | unsupported (description : String)
+  /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
+      outside the code the extractor reaches under the selected profile. It faults when stepped. -/
+  | unadmitted (opcode : Nat)
   deriving Repr
 
 /-- The name of the instruction type, for tactics that recognise its constructors. -/
@@ -265,13 +288,15 @@ inductive Receiver where
   deriving DecidableEq, Repr
 
 /-- A method's declared signature after its type arguments are closed. Aggregate types refer
-    to `LayoutEnvironment.rawLayouts`. -/
+    to `LayoutEnvironment.rawLayouts`. Only implicit receiver signatures are supported. -/
 structure DeclaredSignature where
   /-- `some` exactly for an instance method. -/
   receiver : Option Receiver := none
   /-- Declared parameter types in order, `this` excluded. -/
   parameters : List Extraction.TypeExpr := []
   returnType : Extraction.TypeExpr := .void
+  /-- The body's localsinit flag: `localloc` storage and locals start zeroed when set. -/
+  initLocals : Bool := true
   deriving DecidableEq, Repr
 
 /-- The declared type of argument `index`, counting `this` as argument 0; `none` for `this`. -/

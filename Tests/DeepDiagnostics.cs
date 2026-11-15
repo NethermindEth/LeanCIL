@@ -134,13 +134,13 @@ for (var index = 0; index < scales.Length; index++)
     var started = GC.GetAllocatedBytesForCurrentThread();
     scales[index].Attempt.Failure("audit", "rejected");
     var allocated = GC.GetAllocatedBytesForCurrentThread() - started;
-    var median = timings[index].Order().ElementAt(3);
+    var minimum = timings[index].Min();
     if (previousTime > 0)
-        Require(Growth(previousTime, median) && allocated <= previousBytes * 6 + 1024,
+        Require(Growth(previousTime, minimum) && allocated <= previousBytes * 6 + 1024,
             "Failure mapping grows faster than linear work");
     Console.WriteLine($"PASS {scales[index].Count} failed image subjects: {allocated} bytes, " +
-        $"{median:F3} ms for {repetitions} mappings");
-    previousTime = median;
+        $"{minimum:F3} ms minimum for {repetitions} mappings");
+    previousTime = minimum;
     previousBytes = allocated;
 }
 

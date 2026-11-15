@@ -30,7 +30,7 @@ internal static class VerificationSuites
         [Core] =
         [
             "Add", "AddModel", "Alias", "Calls", "CertificateReuse", "Choose", "ConsumerBatchA", "ConsumerBatchB",
-            "ConsumerSupportUnion", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
+            "ConsumerSupportUnion", "DecodedAdd", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
             "ProofBindingFamilies",
             "StaticData", "Struct", "StructCopy", "VerificationReuse", "WrongAdd"
         ],
@@ -57,8 +57,8 @@ internal static class VerificationSuites
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),
         new("evidence", "Tests/ExtractionEvidence.cs",
-            "independent extraction certificates, malformed evidence rejection and the metadata decoder's method " +
-            "names against Cecil's"),
+            "independent extraction certificates, malformed evidence rejection, the metadata decoder's method " +
+            "names against Cecil's and framework argument guards"),
         // Split from evidence so neither job approaches the CI timeout.
         new("dispatch", "Tests/DispatchEvidence.cs",
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
@@ -133,20 +133,26 @@ internal static class VerificationSuites
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",
             "lookup equations of extracted methods, hand-written bodies and templates, and the scalar " +
-            "certificate of array element addresses, loaded and addressed integer locals and native-int " +
-            "locals consumed by calli, the closed argument storage of those native-int locals, and the " +
-            "feature certificate of local loads, stores and addresses, at a per-instruction cost that does " +
-            "not grow with the method or with locals holding no known word and grows linearly with the known " +
-            "facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with " +
-            "the calls, type identity equality at a cost that does not grow with the name, and one native " +
-            "method table step and one load of its first entry at a kernel cost that does not grow with the " +
-            "table's entries; the managed-call check of a body with many call sites at a per-site cost that " +
-            "does not grow with the call sites; the argument facts of cil_resolution_facts and the reads " +
-            "through them at a per-argument cost that does not grow with the parameters; the kernel check of " +
+            "certificate of array element addresses, loaded and addressed integer locals and native-int locals " +
+            "consumed by calli, the closed argument storage of those native-int locals, and the feature " +
+            "certificate of local loads, stores and addresses, at a per-instruction cost that does not grow " +
+            "with the method or with locals holding no known word and grows linearly with the known facts, " +
+            "embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, " +
+            "type identity equality at a cost that does not grow with the name, the method name clause of the " +
+            "call operand check and the encoding of a metadata name at a per-byte cost that does not grow with " +
+            "the name, and one native method table step and one load of its first entry at a kernel cost that " +
+            "does not grow with the table's entries; the managed-call check of a body with many call sites at " +
+            "a per-site cost that does not grow with the call sites; the argument facts of " +
+            "cil_resolution_facts and the reads through them at a per-argument cost that does not grow with " +
+            "the parameters; the shape facts of cil_field_shape and the reads through them at a per-field cost " +
+            "that grows less than 1.35 times from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 " +
+            "to 512 fields in a struct each, and the facts of cil_value_shape and their reads at a per-type " +
+            "cost that grows less than 1.35 times from 8 to 32 to 128 to 512 struct types; the kernel check of " +
             "one body at a cost independent of the methods and metadata rows of its extraction; the kernel's " +
-            "selection of a calli body at a cost linear in the length of the pointer's owner; and the " +
-            "certificate index, feature getter, layout accumulation and projection, and extraction home index " +
-            "libraries"),
+            "selection of a calli body at a cost linear in the length of the pointer's owner; raw value opcode " +
+            "decoding and the method decoded from a raw body at a per-instruction kernel cost that does not " +
+            "grow with the body; and the certificate index, feature getter, layout accumulation and " +
+            "projection, and extraction home index libraries"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +
@@ -161,7 +167,7 @@ internal static class VerificationSuites
             "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
             "they reject"),
         new("blockers", "Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
-            "profile-excluded branches and self-admission"),
+            "profile-excluded branches, runtime-async refusal, self-admission and the admitted hole corpus"),
         new("audit", "Tests/OleanAudit.cs",
             "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts " +
             "cannot forge"),

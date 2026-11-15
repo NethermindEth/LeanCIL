@@ -430,11 +430,15 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
     | some head => pure head
     | none => throw (.unresolvedType token)
   if bytesOf call.name != site.name then throw (.operandMismatch token)
+  if !call.method.name.spells site.name then throw (.operandMismatch token)
   let expected := site.methodArguments.getD [] ++ (if extracted then ownerList else [])
   if call.typeArguments.length != expected.length || !(expected.zip call.typeArguments).all
       (fun (type, claimed) => frame.admits type claimed) then
     throw (.genericMismatch token)
   if call.ownerArgumentCount != (if extracted then ownerList.length else 0) then
+    throw (.genericMismatch token)
+  if call.method.genericArity != site.genericArity ||
+      call.method.methodArguments != siteMethodArguments call then
     throw (.genericMismatch token)
   if call.declaringType.headScope.any (bytesOf · != head.scope) then
     throw (.scopeMismatch token)
@@ -675,7 +679,8 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
   if row.implFlags / runtimeAsyncFlag % 2 == 1 then throw (.runtimeAsync method.token)
   let signature ← decodeMethodSig (← index.blob row.signature)
   let convention := signature.convention
-  if method.hasThis != (convention / hasThisFlag % 2 == 1) ||
+  -- EXPLICITTHIS puts the receiver in the parameter list, outside the implicit receiver model.
+  if method.explicitThis || method.hasThis != (convention / hasThisFlag % 2 == 1) ||
       method.explicitThis != (convention / explicitThisFlag % 2 == 1) ||
       method.callingConvention != convention % 0x20 then throw (.methodMismatch method.token)
   let ownerToken ← env.declaringType 0 method.token

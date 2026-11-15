@@ -37,7 +37,8 @@ example (program : CIL.Program) (method : Nat) (pre : List Value → Memory → 
 
 /-! Unsupported execution, invalid state, fuel exhaustion, normal return and another exception never discharge an expected one. -/
 
-@[cil_code] def stuck : CIL.Method := { returnsValue := false, locals := [], code := [.unsupported "fixture"] }
+@[cil_code] def stuck : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.unadmitted 0] }
 @[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 @[cil_code] def done : CIL.Method := { returnsValue := false, locals := [], code := [.ret] }
 @[cil_code] def other : CIL.Method := { returnsValue := false, locals := [], code := [.throw "System.ArgumentException"] }
@@ -46,7 +47,7 @@ variable (post : Memory → List Value → Prop) (frame : Frame) (m : Memory)
 
 example : ¬ LoopOutcome [stuck] 0 [] post (some "System.InvalidOperationException") ⟨0, frame, [], m⟩ :=
   loop_outcome_some_refuted (fuel := 1)
-    (outcome := .error ⟨0, 0, .unsupported "Not a memory instruction"⟩) rfl
+    (outcome := .error ⟨0, 0, .unsupported "Opcode not admitted"⟩) rfl
     (by simp [Settled]) (by rintro _ ⟨⟩; simp)
 
 /-- A pc past the body is invalid state. -/

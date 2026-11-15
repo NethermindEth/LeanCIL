@@ -40,6 +40,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
   generalize narrowing : body.returnNarrow = narrow at executed
   repeat' first
     | unfold returnFrom at executed
+    | unfold localAllocation at executed
     | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ _ executed)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,

@@ -70,7 +70,16 @@ name = "Tests.Identity"
 name = "Tests.ResolutionFacts"
 
 [[lean_lib]]
+name = "Tests.ValueDecoding"
+
+[[lean_lib]]
+name = "Tests.DecodedMethod"
+
+[[lean_lib]]
 name = "Tests.FieldRef"
+
+[[lean_lib]]
+name = "Tests.FieldShape"
 
 [[lean_lib]]
 name = "Tests.ReturnOpcode"

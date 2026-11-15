@@ -33,6 +33,17 @@ pass by stack effect alone. Non-covered raw opcodes cannot emit these scalar ope
 feature-bound type-test words and size constants bound to exact primitive/vector widths or
 validated layouts.
 
+Indirect accesses are matched exactly too. Each integer `ldind` and `stind`, each `ldobj` and
+`stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit the
+one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
+without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
+emits its aggregate transfer, whose width its layout use binds. A span `ldobj` emits nothing, and
+`ldobj` or `stobj` of any other type, such as a floating-point or pointer type, is rejected. No
+other raw opcode may emit one
+of these forms, except a call, whose Unsafe and runtime-model checks bind it. `volatile.`, an
+`unaligned.` alignment other than 1, 2 or 4, and `unaligned.` before an instruction that does
+not take it are rejected.
+
 Mixed native/int32 operations execute the decoded arithmetic opcode with operand widening.
 Native/int64 arithmetic mixtures are rejected. The 64-bit representation interchange at homes
 and returns does not justify arithmetic interchange. Native shift counts use their low 32 bits;
@@ -178,7 +189,10 @@ What `MetadataResolution` and `MetadataBinding` check:
   parameter counts and flags; a class receiver also checks the class layout facts. A row whose
   flags give it no IL body (abstract, platform invoke, internal call, or a code type other than
   IL) is refused, and so is a runtime-async row (`ImplFlags` 0x2000), whose body returns the
-  result its signature states as a task. The `RVA` and `ParamList` columns are not read.
+  result its signature states as a task. An `EXPLICITTHIS` method is refused because the model
+  requires an implicit receiver outside the parameter list. Instantiation also refuses this
+  flag, including for methods decoded directly from raw definitions.
+  The `RVA` and `ParamList` columns are not read.
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
