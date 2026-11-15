@@ -896,9 +896,10 @@ private def loadSite : CallSite :=
 /-- A static call taking two words and returning nothing, the stack effect of a 64-bit store. -/
 private def storeSite : CallSite :=
   { method := {
-      owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
-      parameters := [word, word] },
-    target := .managed 0x06000002, typeArguments := [], parameterCount := 2, returnsValue := false }
+      owner := .void, name := name!"", hasThis := false, genericArity := 0,
+      returnType := .void, parameters := [word, word] },
+    target := .managed 0x06000002, typeArguments := [], parameterCount := 2,
+    returnsValue := false }
 
 /-- The emissions extraction gives these accesses, none of which carries a metadata token. -/
 private def indirectEmitted : List IndirectCase := [
