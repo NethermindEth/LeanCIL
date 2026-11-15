@@ -1951,10 +1951,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// <summary>
     /// Deletes a pin that no longer protects its entry. The pin is renamed to a name no pin pattern matches,
     /// and its age and liveness are read again from the renamed file; a pin that was renewed meanwhile is
-    /// renamed back, and one that cannot be renamed is left where it is. True when the pin is gone.
+    /// renamed back, and one that cannot be renamed is left where it is. True when the pin is gone. A pass that
+    /// has reached its limit retires no pin.
     /// </summary>
     static bool RetirePin(FileInfo pin, string key, TimeSpan retention, DateTime deadline, PassReport report)
     {
+        if (PassStopped(deadline, report)) return false;
         beforePinRetired(pin.FullName);
         var aside = pin.FullName + ".dead-" + Guid.NewGuid().ToString("N");
         try { File.Move(pin.FullName, aside); }
@@ -1994,9 +1996,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// With `library` the pass stops choosing, reading and removing once <see cref="passLimit"/> has passed
     /// or a lakefile read has waited out the rest of it, and a lakefile outside the cache is waited for at most
     /// <see cref="packageReadLimit"/>. A pin whose lakefile was not read, for either reason, keeps its entry,
-    /// so once the pass has reached its limit it removes no pin and no entry; a deletion already under way
-    /// finishes. `report` says what happened. Reads each
-    /// directory's name and write time once. Returns the names of the directories removed.
+    /// so once the pass has reached its limit it removes no pin, entry or closure record; a deletion under way
+    /// finishes. `report` says what happened. Reads each directory's name and write time once. Returns the
+    /// names of the directories removed.
     /// </summary>
     static List<string> EvictUnused(string root, Regex entries, Regex staging, TimeSpan retention, int? limit = null,
         string? protectedName = null, Action<int>? removing = null, bool library = false,
@@ -2110,6 +2112,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// Deletes the pins of removed entries and the closure records that name an entry that is absent or was
     /// removed. A pin renewed since the pass listed it stays. The `.use` and `.lock` files stay: a lock on a
     /// file that was deleted excludes nothing, because the next process locks a new file of the same name.
+    /// Nothing is deleted once the pass has reached its limit.
     /// </summary>
     static void RemoveSidecars(List<FileInfo> sidecars, HashSet<string> present, List<string> removed,
         TimeSpan retention, DateTime deadline, PassReport report)
@@ -2117,6 +2120,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var gone = removed.ToHashSet(StringComparer.Ordinal);
         foreach (var file in sidecars)
         {
+            if (PassStopped(deadline, report)) return;
             var match = LibrarySidecar().Match(file.Name);
             var key = match.Groups["key"].Value;
             if (match.Groups["kind"].Value == "closure")
