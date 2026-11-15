@@ -1,6 +1,5 @@
 import CIL.Identity
 import CIL.TypeExpr
-import CIL.Identity
 
 /-!
 # Call sites and field references
