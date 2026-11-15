@@ -370,6 +370,8 @@ internal static class LeanEmitter
                 $"Extraction.MethodShapeValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_unsafe_validated : Extraction.UnsafeCallsValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
             lean.AppendLine($"theorem method{n}_intrinsics_validated : Extraction.ExactIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_models_validated : " +
+                $"Extraction.RuntimeModelsAgree method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +
@@ -381,7 +383,7 @@ internal static class LeanEmitter
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
-                $"method{n}_intrinsics_validated, method{n}_opaque_validated, " +
+                $"method{n}_intrinsics_validated, method{n}_models_validated, method{n}_opaque_validated, " +
                 $"method{n}_vector_initializations_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
             lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated⟩");

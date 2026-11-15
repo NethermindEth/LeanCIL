@@ -17,8 +17,7 @@ namespace CIL.MethodBinding
 
 open Lean Meta Elab Tactic
 
--- Diagnostic comparison only; proofs never depend on these instances.
-deriving instance BEq for MemoryOp
+-- Diagnostic comparison only; proofs never depend on this instance.
 deriving instance BEq for Instruction
 
 /-- The first index where two lists differ, with the element of each side there. -/
