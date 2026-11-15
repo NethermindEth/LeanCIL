@@ -46,6 +46,44 @@ void Refused(string name, string[] command, string? expectedStage = null)
     Console.WriteLine("PASS " + name);
 }
 
+// The deep checks run only as an option of verify, so a command name that is not one of the listed commands
+// is a usage error that runs nothing, whatever it is called.
+void RefusedAsUnknownCommand(string[] cli, string output, string digestFile)
+{
+    foreach (var name in new[] { "audit" + "-binding", "audit", "binding-audit", "strict-binding", "deep-checks",
+                 "deep", "verify-deep", "audit-deep" })
+    {
+        var result = Execute([.. cli, name, output, "--deep-checks", digestFile]);
+        if (result.Code == 0 || !result.Output.Contains("Stage: arguments", StringComparison.Ordinal) ||
+            !result.Output.Contains("Usage: leancil", StringComparison.Ordinal) ||
+            result.Output.Contains("Binding:", StringComparison.Ordinal) ||
+            result.Output.Contains("BindingAudit", StringComparison.Ordinal) ||
+            result.Output.Contains("StrictBinding", StringComparison.Ordinal))
+            throw new InvalidOperationException(name + " was not refused as an unknown command: " + result.Output);
+    }
+    Console.WriteLine("PASS unknown audit command names");
+}
+
+// The help text lists the deep checks only as an option of verify. The one audit command, audit-library, checks
+// the theorems of a Lean library and runs no binding check.
+void RequireNoSeparateAudit(string[] cli)
+{
+    var help = Execute([.. cli, "--help"]);
+    var commands = help.Stdout.ReplaceLineEndings("\n").Split('\n')
+        .Select(line => line.Trim().StartsWith("Usage: ", StringComparison.Ordinal) ? line.Trim()["Usage: ".Length..]
+            : line.Trim())
+        .Where(line => line.StartsWith("leancil ", StringComparison.Ordinal)).ToArray();
+    var names = commands.Select(line => line.Split(' ')[1])
+        .Where(name => !name.StartsWith("--", StringComparison.Ordinal)).ToArray();
+    var audits = names.Where(name => name.Contains("audit", StringComparison.OrdinalIgnoreCase)).ToArray();
+    var deepLines = commands.Where(line => line.Contains("--deep-checks", StringComparison.Ordinal)).ToArray();
+    if (help.Code != 0 || !names.Contains("verify") || !audits.SequenceEqual(["audit-library"]) ||
+        deepLines.Length != 1 || !deepLines[0].StartsWith("leancil verify ", StringComparison.Ordinal) ||
+        help.Stdout.Contains("binding audit", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("The help text names a separate audit entry: " + help.Output);
+    Console.WriteLine("PASS help names no separate audit command");
+}
+
 if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--final-mutations"]))
 {
     Refused("missing digest option value", [.. verify, "--format", "json", "--deep-checks"], "arguments");
@@ -63,9 +101,10 @@ if (args is not (["--consumer"] or ["--mutations"] or ["--controls"] or ["--fina
     File.WriteAllBytes(digestFile, [0xff]);
     Refused("invalid UTF-8 digest file", [.. verify, "--deep-checks", digestFile, "--format", "json"], "arguments");
     File.WriteAllText(digestFile, digests);
-    foreach (var command in new[] { "verify-batch", "gates", "watch", "workspace", "check" })
+    foreach (var command in new[] { "verify-batch", "gates", "watch", "workspace", "check", "audit-library" })
         Refused(command + " rejects deep option", [.. cli, command, output, "--deep-checks", digestFile]);
-    Refused("removed command", [.. cli, "audit" + "-binding", output]);
+    RefusedAsUnknownCommand(cli, output, digestFile);
+    RequireNoSeparateAudit(cli);
     Refused("invalid proof root", [.. verify, "--proof-root", fixture.Root + ".missing", "--deep-checks",
         digestFile, "--format", "json"], "extraction integrity");
     File.Delete(Path.Combine(output, "verification.json"));
