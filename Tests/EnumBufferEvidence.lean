@@ -43,9 +43,10 @@ theorem span_identity_checked :
 /-- A method call cannot silently reinterpret one enum span as another. -/
 theorem span_call_identity_checked :
     let call : RawInstruction := ⟨0, 40, .call {
-      declaringType := .atom "Fixture" "Helpers", name := "Use", target := .managed 2,
-      typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := false,
-      returnType := .void, parameterTypes := [span "First"] }⟩
+      method := { owner := .atom "Fixture" "Helpers", name := name!"Use", hasThis := false,
+        genericArity := 0, returnType := .void, parameters := [span "First"] },
+      name := "Use", target := .managed 2, typeArguments := [], parameterCount := 1,
+      returnsValue := false }⟩
     scalarTransfer method call [scalarType (span "First")] = some [] ∧
     scalarTransfer method call [scalarType (span "Second")] = none := by decide +kernel
 #print axioms span_call_identity_checked
@@ -61,12 +62,12 @@ theorem array_identity_checked :
 /-- Pointer-based in-place construction keeps the enum receiver's exact metadata identity. -/
 theorem enum_local_constructor :
     let constructor : CallSite := {
-      declaringType := span "First", name := ".ctor"
+      method := { owner := span "First", name := name!".ctor", hasThis := true, genericArity := 0,
+        returnType := .void, parameters := [.pointer .void, .atom runtimeScope "System.Int32"] },
+      name := ".ctor",
       target := .external (runtimeScope ++
-        "::System.Void System.Span`1<First>::.ctor(System.Void*,System.Int32)")
-      typeArguments := [], parameterCount := 2, hasThis := true, returnsValue := false
-      returnType := .void
-      parameterTypes := [.pointer .void, .atom runtimeScope "System.Int32"] }
+        "::System.Void System.Span`1<First>::.ctor(System.Void*,System.Int32)"),
+      typeArguments := [], parameterCount := 2, returnsValue := false }
     spanLocalConstructor constructor = some (.reference 1 true) ∧
     scalarTransfer method ⟨0, 40, .call constructor⟩
       [.word32, .reference, scalarType (.byref (span "First"))] = some [] ∧

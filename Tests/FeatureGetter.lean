@@ -13,12 +13,13 @@ open CIL CIL.Extraction
 
 /-- A static feature getter with independently constructed raw metadata. -/
 def getter (owner member : String) : CallSite := {
-  declaringType := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner)
+  method := { owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner),
+    name := (MetadataName.ofBytes? (bytesOf member)).getD ⟨0⟩, hasThis := false,
+    genericArity := 0, returnType := .atom runtimeScope "System.Boolean", parameters := [] }
   name := member
   target := .external (intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++
     owner ++ "::" ++ member ++ "()")
-  parameterCount := 0, hasThis := false, returnsValue := true, typeArguments := []
-  returnType := .atom runtimeScope "System.Boolean", parameterTypes := [] }
+  parameterCount := 0, returnsValue := true, typeArguments := [] }
 
 /-- Hardware acceleration, nested class and ordinary supported getters retain their flags. -/
 theorem supported :
@@ -97,7 +98,7 @@ theorem wrong_prefix_or_tail :
 /-- Signature acceleration leaves the existing call-shape checks intact. -/
 theorem wrong_call_shape :
     featureGetter { getter "X86.Sse41" "get_IsSupported" with parameterCount := 1 } = none ∧
-    featureGetter { getter "X86.Sse41" "get_IsSupported" with hasThis := true } = none ∧
+    featureGetter { getter "X86.Sse41" "get_IsSupported" with method.hasThis := true } = none ∧
     featureGetter { getter "X86.Sse41" "get_IsSupported" with returnsValue := false } = none ∧
     featureGetter { getter "X86.Sse41" "get_IsSupported" with
       typeArguments := [.atom runtimeScope "System.Int32"] } = none := by decide +kernel
@@ -105,10 +106,12 @@ theorem wrong_call_shape :
 
 /-- Raw process-width calls retain their exact owner, result and external identity. -/
 def platform (owner member result : String) : CallSite := {
-  declaringType := .atom runtimeScope owner, name := member
+  method := { owner := .atom runtimeScope owner,
+    name := (MetadataName.ofBytes? (bytesOf member)).getD ⟨0⟩, hasThis := false,
+    genericArity := 0, returnType := .atom runtimeScope result, parameters := [] }
+  name := member
   target := .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++ "::" ++ member ++ "()")
-  parameterCount := 0, hasThis := false, returnsValue := true, typeArguments := []
-  returnType := .atom runtimeScope result, parameterTypes := [] }
+  parameterCount := 0, returnsValue := true, typeArguments := [] }
 
 /-- Both native-size getters and the process query use the admitted 64-bit platform. -/
 theorem platform_values :
@@ -124,13 +127,14 @@ theorem platform_encoding (raw : RawMethod) :
     featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.ldc_i4 8) = true ∧
     featureOpMatches #[] raw ⟨0, 40, .call site⟩ (.ldc_i4 4) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      declaringType := .atom "forged" "System.IntPtr" }⟩ (.ldc_i4 8) = false ∧
+      method.owner := .atom "forged" "System.IntPtr" }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
       target := .external "forged" }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
-      returnType := .atom runtimeScope "System.UInt32" }⟩ (.ldc_i4 8) = false ∧
+      method.returnType := .atom runtimeScope "System.UInt32" }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 111, .call site⟩ (.ldc_i4 8) = false ∧
-    featureOpMatches #[] raw ⟨0, 40, .call { site with hasThis := true }⟩ (.ldc_i4 8) = false ∧
+    featureOpMatches #[] raw ⟨0, 40, .call { site with method.hasThis := true }⟩ (.ldc_i4 8) =
+      false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with parameterCount := 1 }⟩ (.ldc_i4 8) = false ∧
     featureOpMatches #[] raw ⟨0, 40, .call { site with
       typeArguments := [.atom runtimeScope "System.Int32"] }⟩ (.ldc_i4 8) = false := by
@@ -162,13 +166,15 @@ theorem platform_field (raw : RawMethod) :
 
 /-- A reference-content query retains its independently serialized generic argument. -/
 def referenceQuery (type : TypeExpr) : CallSite := {
-  declaringType := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers"
-  name := "IsReferenceOrContainsReferences"
+  method := { owner := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers",
+    name := name!"IsReferenceOrContainsReferences", hasThis := false, genericArity := 1,
+    returnType := .atom runtimeScope "System.Boolean", parameters := [],
+    methodArguments := [type] },
+  name := "IsReferenceOrContainsReferences",
   target := .external (runtimeScope ++
     "::System.Boolean System.Runtime.CompilerServices.RuntimeHelpers::" ++
-    "IsReferenceOrContainsReferences()")
-  parameterCount := 0, hasThis := false, returnsValue := true, typeArguments := [type]
-  returnType := .atom runtimeScope "System.Boolean", parameterTypes := [] }
+    "IsReferenceOrContainsReferences()"), parameterCount := 0, returnsValue := true,
+  typeArguments := [type] }
 
 /-- Representable references and views are not reference-free generic value storage. -/
 theorem reference_content_boundary :

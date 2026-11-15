@@ -19,8 +19,9 @@ def emitted (code : List Instruction) : Method :=
   { locals := [], returnsValue := false, code := code }
 /-- A managed call to the identical scalar-free signature at a chosen table index. -/
 def call : RawInstruction := ⟨0, 40, .call {
-  declaringType := .atom "Tests" "Scaling", target := .managed 1, typeArguments := [], parameterCount := 0, hasThis := false,
-  returnsValue := false, returnType := .void, parameterTypes := [] }⟩
+  method := { owner := .atom "Tests" "Scaling", name := name!"", hasThis := false,
+    genericArity := 0, returnType := .void, parameters := [] },
+  target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }⟩
 /-- Each instruction calls a distinct table position. -/
 def calls (count : Nat) := raw (List.replicate count call)
 /-- Equal signatures at distinct positions isolate positional lookup costs. -/

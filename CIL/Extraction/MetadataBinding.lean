@@ -396,6 +396,7 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
     | some head => pure head
     | none => throw (.unresolvedType token)
   if bytesOf call.name != site.name then throw (.operandMismatch token)
+  if MetadataName.ofBytes? site.name != some call.method.name then throw (.operandMismatch token)
   let expected := site.methodArguments.getD [] ++ (if extracted then ownerList else [])
   if call.typeArguments.length != expected.length || !(expected.zip call.typeArguments).all
       (fun (type, claimed) => frame.admits type claimed) then

@@ -117,7 +117,7 @@ private def olderConsole : TypeExpr :=
     "System.Console"
 
 theorem rejects_an_owner_scope_with_another_version :
-    rejects own.1 lib tokens.writeLine (.call { writeLineSite with declaringType := olderConsole })
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.owner := olderConsole })
       (.scopeMismatch tokens.writeLine) = true := by decide +kernel
 #print axioms rejects_an_owner_scope_with_another_version
 
@@ -280,7 +280,7 @@ theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :
     passes own.1 lib tokens.sumRef (.call sumSite) = true ∧
     passes own.1 libWithoutCorlib tokens.sumRef (.call sumSite) = true ∧
     rejects own.1 libWithoutCorlib tokens.sumRef
-      (.call { sumSite with declaringType := .object libScope "Lib.Pair" })
+      (.call { sumSite with method.owner := .object libScope "Lib.Pair" })
       (.operandMismatch tokens.sumRef) = true := by decide +kernel
 #print axioms rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number
 

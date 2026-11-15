@@ -46,19 +46,23 @@ private def typeHandle : RawInstruction → Option TypeExpr
   | ⟨_, 208, .type type⟩ => some type
   | _ => none
 
-/-- The exact call site of a static `System.Type` method with `parameters` parameters. -/
-private def typeMethod (name signature : String) (parameters : Nat) : CallSite := {
-  declaringType := .atom runtimeScope "System.Type", name,
-  target := .external (runtimeScope ++ "::" ++ signature),
-  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true,
-  returnType := .atom runtimeScope
-    (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
-  parameterTypes := if name == "GetTypeFromHandle" then
-      [.atom runtimeScope "System.RuntimeTypeHandle"]
-    else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] }
+/-- The exact call site of a static `System.Type` method with `parameters` parameters;
+    `methodName` is the metadata name spelling `name`. -/
+private def typeMethod (name : String) (methodName : MetadataName) (signature : String)
+    (parameters : Nat) : CallSite := {
+  method := {
+    owner := .atom runtimeScope "System.Type", name := methodName, hasThis := false,
+    genericArity := 0,
+    returnType := .atom runtimeScope
+      (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+    parameters := if name == "GetTypeFromHandle" then
+        [.atom runtimeScope "System.RuntimeTypeHandle"]
+      else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] },
+  name, target := .external (runtimeScope ++ "::" ++ signature),
+  typeArguments := [], parameterCount := parameters, returnsValue := true }
 
 private def getTypeFromHandle : CallSite :=
-  typeMethod "GetTypeFromHandle"
+  typeMethod "GetTypeFromHandle" name!"GetTypeFromHandle"
     "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
 
 /-- Exactly `call Type.GetTypeFromHandle`. -/
@@ -74,9 +78,9 @@ private def typeComparison (instruction : RawInstruction) : Option Bool :=
     | .target _ => some (instruction.opcode == 46 || instruction.opcode == 59)
     | _ => none
   else if instruction.opcode != 40 then none
-  else if instruction.operand == .call (typeMethod "op_Equality"
+  else if instruction.operand == .call (typeMethod "op_Equality" name!"op_Equality"
       "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2) then some true
-  else if instruction.operand == .call (typeMethod "op_Inequality"
+  else if instruction.operand == .call (typeMethod "op_Inequality" name!"op_Inequality"
       "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2) then some false
   else none
 

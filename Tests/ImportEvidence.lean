@@ -19,9 +19,12 @@ def methods : List SpecializedMethod := [⟨[], callee⟩]
 def slot : ImportSlot := { identity := addToIdentity, closureDigest := "digest", parameterCount := 3, hasThis := false, returnsValue := false }
 def imports : List ImportSlot := [slot]
 def site : CallSite := {
-  declaringType := .atom "Library, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Library.Adder", name := "AddTo",
-  target := .external addToIdentity, typeArguments := [], parameterCount := 3, hasThis := false, returnsValue := false,
-  returnType := .void, parameterTypes := [.byref word, .byref word, .byref word] }
+  method := { owner := .atom "Library, Version=1.0.0.0, Culture=neutral, \
+      PublicKeyToken=null" "Library.Adder",
+    name := name!"AddTo", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [.byref word, .byref word, .byref word] },
+  name := "AddTo", target := .external addToIdentity, typeArguments := [], parameterCount := 3,
+  returnsValue := false }
 def call (site : CallSite) : RawInstruction := ⟨8, 40, .call site⟩
 
 example : validateManagedCall methods imports (call site) true (.call 1 3) = true := by decide +kernel
@@ -35,8 +38,10 @@ example : validateManagedCall methods [{ slot with hasThis := true }] (call site
 -- The emitted argument count must agree with the site, including the receiver.
 example : validateManagedCall methods imports (call site) true (.call 1 2) = false := by decide +kernel
 example : validateManagedCall methods imports (call site) true (.call 1 4) = false := by decide +kernel
-example : validateManagedCall methods [{ slot with hasThis := true }] (call { site with hasThis := true }) true (.call 1 4) = true := by decide +kernel
-example : validateManagedCall methods [{ slot with hasThis := true }] (call { site with hasThis := true }) true (.call 1 3) = false := by decide +kernel
+example : validateManagedCall methods [{ slot with hasThis := true }]
+    (call { site with method.hasThis := true }) true (.call 1 4) = true := by decide +kernel
+example : validateManagedCall methods [{ slot with hasThis := true }]
+    (call { site with method.hasThis := true }) true (.call 1 3) = false := by decide +kernel
 -- The site's own shape is checked against the slot too.
 example : validateManagedCall methods imports (call { site with returnsValue := true }) true (.call 1 3) = false := by decide +kernel
 example : validateManagedCall methods imports (call { site with parameterCount := 2 }) true (.call 1 2) = false := by decide +kernel
