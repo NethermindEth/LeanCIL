@@ -117,6 +117,16 @@ places the second block first, at 256 and 1,024 calls, under the same limit. Its
 once, and the link reads and code lookups start again from the head of the table and the code
 there; it costs about 53,800 heartbeats per call at both sizes.
 
+The suite declares `cil_resolution_facts` for methods of 8, 32 and 128 `int32` parameters, once
+with no parameter homes and once with every other argument homed, and reads every argument's
+`Method.argumentAccess` through the facts with `simp only [cil_code]`. The facts walk the parameter
+types and homes once, from named 16-entry suffixes built as the code suffixes are. The suite fails
+when the heartbeats per argument of the facts, or of the reads, grow more than 1.35 times from
+one size to the next. The facts cost about 7,400, 8,400 and 8,400 heartbeats per argument without
+homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewer entries, which
+accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
+size.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the

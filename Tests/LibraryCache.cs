@@ -353,6 +353,25 @@ try
         }
         Console.WriteLine("PASS the whole library replaces the closure entry and is preferred; an import outside " +
             "a closure is refused from the compiled header in every spelling");
+        // Consumer cache keys bind the library directory, so the run that builds and publishes the library must
+        // read the entry later runs open, or no later run can restore the support it publishes.
+        var buildingCache = Path.Combine(Path.GetTempPath(), "lp-" + Guid.NewGuid().ToString("N")[..8]);
+        Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", buildingCache);
+        try
+        {
+            using var built = Open(null);
+            using var reopened = Open(null);
+            if (built.libraryBuild != "fresh" || built.library != Path.Combine(buildingCache, wholeLibraryKey) ||
+                reopened.libraryBuild != "cache" || reopened.library != built.library)
+                throw new Exception("The run that built the library read another directory than later runs: " +
+                    built.library + " and " + reopened.library);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", builtCache);
+            if (Directory.Exists(buildingCache)) Directory.Delete(buildingCache, true);
+        }
+        Console.WriteLine("PASS the run that builds and publishes the library reads the entry later runs open");
     }
     finally
     {

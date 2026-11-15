@@ -1,6 +1,7 @@
 import CIL.Memory
 import CIL.Instructions
 import CIL.IntegerArithmetic
+import CIL.NativeEvaluation
 
 /-!
 # Instruction evaluation
@@ -142,13 +143,14 @@ def returnFromStack (narrow : Option NarrowKind) (returns : Bool)
   else if narrow.isNone && stack.isEmpty then return .returned [] memory else none
 
 /-- Executes instruction `op` at `pc`. Binary operands are popped as `b :: a :: rest`, so
-    `a` was pushed first. `returns` says whether the method returns a value; `profile`
-    decides feature tests and intrinsic availability. `narrow` is the method's return storage. -/
+    `a` was pushed first; a mixed int32 and native pair is first widened by `widenMixed`
+    (ECMA-335 III.1.5). `returns` says whether the method returns a value; `profile` decides
+    feature tests and intrinsic availability. `narrow` is the method's return storage. -/
 def step (op : Instruction) (returns : Bool)
     (narrow : Option NarrowKind) (pc : Nat) (args : List Value)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
-  match op, stack with
+  match op, widenMixed op stack with
   -- Constants and stack shuffling.
   | .nop, _ => return .next (pc + 1) stack memory
   | .ldc_i4 w, _ => return .next (pc + 1) (.i32 w :: stack) memory

@@ -44,7 +44,7 @@ elab_rules : command
     let simprocs := #[← Simp.getSimprocs]
     let selectionNames := #[
       ``CIL.Safety.pureArity, ``CIL.Safety.scalars, ``CIL.Safety.numericValue,
-      ``CIL.Safety.checkedValue, ``CIL.widenMixed, ``CIL.nativePureBinary,
+      ``CIL.Safety.checkedValue,
       ``CIL.Safety.observerCount, ``CIL.Safety.unspecifiedOperands,
       ``CIL.Safety.Value.hasUnspecified, ``CIL.Value.hasUnspecified, ``List.any,
       ``List.take, ``List.drop, ``List.map, ``Bind.bind, ``Pure.pure, ``Except.bind, ``Except.pure,
@@ -242,6 +242,17 @@ simproc [cil_step] reduceReturnNarrow (CIL.Method.returnNarrow _) := fun express
   let some proof ← ResolutionFacts.returnProof? method
       (← mkEqRefl (mkApp (mkConst ``CIL.Method.returnsValue) method))
       (← mkEqRefl (mkApp (mkConst ``CIL.Method.declared) method)) | return .continue
+  let some (_, _, result) := (← inferType proof).eq? | return .continue
+  return .done { expr := ← withDefault <| whnf result, proof? := some proof }
+
+open Lean Meta in
+/-- How a literal body reads a literal argument index, by the storage lemmas and premises the
+    kernel decides over its homes, local kinds and parameters; a symbolic part is left for a
+    caller's fact. -/
+simproc [cil_step] reduceArgumentAccess (CIL.Method.argumentAccess _ _) := fun expression => do
+  let_expr CIL.Method.argumentAccess method index := expression | return .continue
+  let some index ← (Meta.evalNat index).run | return .continue
+  let some proof ← ResolutionFacts.argumentProof? method index | return .continue
   let some (_, _, result) := (← inferType proof).eq? | return .continue
   return .done { expr := ← withDefault <| whnf result, proof? := some proof }
 

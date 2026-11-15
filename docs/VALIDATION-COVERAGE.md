@@ -625,7 +625,8 @@ These tests cover preparation:
 | Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
 | Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
-| Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests |
+| Division with references, stack underflow or a zero divisor | Semantic rejection tests |
+| Division and remainder of a mixed native/int32 pair, both operand orders, including the zero-divisor and signed-overflow faults | Semantic tests that both interpreters sign-extend the int32 operand and agree |
 | Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against .NET results or overflow exceptions and corresponding Lean proofs |
 | Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs; subtraction substituted for addition rejected |
 | All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against .NET execution and corresponding Lean proofs, including native destinations and overflow |
@@ -633,7 +634,7 @@ These tests cover preparation:
 | Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
 | Extracted native addition on the admitted 64-bit target | Universal modular-addition proof |
 | Required-32-bit assembly, forged native type identity, native field overrun, native/int64 operands and 32-bit execution profile | Five intended extraction rejections |
-| Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests; unsigned branch/comparison widening differences checked explicitly |
+| Mixed native/int32 operands of every widened instruction, overflow-checked arithmetic, memory instructions, unsigned branches or references | Both interpreters give the sign- or zero-extended result in both operand orders; memory instructions and references keep their operands; unsigned branches refused; a test proves the widened instruction list complete |
 | Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 .NET comparisons |
 | Overwriting an argument with a replacement value | Universal proof for arbitrary inputs; assignment to the wrong parameter rejected |
 | Returning an address into a parameter home | Lifetime fault proved for every input; successful execution ruled out for every fuel budget |

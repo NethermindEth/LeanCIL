@@ -448,17 +448,16 @@ theorem native_checked_unsigned_extension :
     CIL.checkedValues .add false (.i64 1) (.i32 4294967295) = .ok (.i64 4294967296) := rfl
 #print axioms native_checked_unsigned_extension
 
-/-- Unsigned branches preserve mixed operands, which the reference step rejects. -/
+/-- The reference step refuses a mixed pair for every unsigned branch. -/
 theorem native_unsigned_branch_family_rejected :
     ([CIL.Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
-      (CIL.step op false none 0 []
-        (CIL.widenMixed op [.i32 4294967295, .i64 0]) (fun _ => none)).isNone) = true := rfl
+      (CIL.step op false none 0 [] [.i32 4294967295, .i64 0] (fun _ => none)).isNone) = true :=
+  rfl
 #print axioms native_unsigned_branch_family_rejected
 
 /-- Unsigned scalar comparisons sign-extend int32 before comparing. -/
 theorem native_unsigned_compare_extension :
-    CIL.step .cgt_un false none 0 []
-      (CIL.widenMixed .cgt_un [.i32 4294967295, .i64 18446744073709551615])
+    CIL.step .cgt_un false none 0 [] [.i32 4294967295, .i64 18446744073709551615]
       (fun _ => none) = some (.next 1 [.i32 0] (fun _ => none)) := rfl
 #print axioms native_unsigned_compare_extension
 
