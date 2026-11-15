@@ -19,7 +19,7 @@ namespace CIL.Safety
   | .arithmetic _ => true
   | .memory .. => true
   | .invalidState => true
-  | .unsupported _ => false
+  | .unsupported .. => false
   | .thrown _ => true
   | .fuelExhausted => false
   | .stackAllocationFailure .. => true
