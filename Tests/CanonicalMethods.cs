@@ -13,7 +13,8 @@ using System.Text.Json;
 
 // The methods of the self-admission corpus whose extraction defines them from their decoder, against a checked-in
 // list that only grows: a listed method that is no longer defined from its decoder fails, and so does an addition
-// until --update records it. Reads the extractions Tests/SelfAdmission.cs ran with the current extractor.
+// until --update records it. Reads the extractions Tests/SelfAdmission.cs ran with the current extractor and the
+// report Tests/Blockers.cs writes for its fixture, and checks example methods that must be defined the same way.
 const string Usage = "Usage: CanonicalMethods.cs [--update]";
 var update = args switch { [] => false, ["--update"] => true, _ => throw new ArgumentException(Usage) };
 var listPath = At("Tests/canonical-methods.txt");
@@ -50,6 +51,42 @@ foreach (var method in added) Console.WriteLine("  added: " + method);
 if (lost.Length != 0)
     throw new InvalidOperationException($"Methods listed in {listPath} are no longer defined from their decoder:\n" +
         string.Join('\n', lost));
+
+// Examples and the blockers fixture whose bodies decode in full must be defined from their decoder: a fallback to a
+// literal would leave their proofs passing over a method that no decoder produced.
+var requiredDirectory = At("artifacts/CanonicalMethods");
+Directory.CreateDirectory(requiredDirectory);
+var requiredManifest = Path.Combine(requiredDirectory, "manifest.json");
+string[] requiredExamples =
+[
+    "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
+    "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)",
+    "System.UInt32 Examples.Loops::Countdown(System.UInt32)"
+];
+File.WriteAllText(requiredManifest, JsonSerializer.Serialize(new
+{
+    entries = requiredExamples.Select(signature => new { signature, profile = "scalar" })
+}));
+var examplesReport = Path.Combine(requiredDirectory, "blockers.json");
+Run(["dotnet", ExtractorPath, "blockers", At("Examples/Assembly/bin/Examples.dll"), "--manifest", requiredManifest,
+    "--output", examplesReport]);
+var fixtureReport = At("artifacts/Blockers/blockers.json");
+if (!File.Exists(fixtureReport))
+    throw new InvalidOperationException($"Missing {fixtureReport}; run Tests/Blockers.cs, which writes it.");
+foreach (var (report, signature) in requiredExamples.Select(signature => (examplesReport, signature))
+    .Append((fixtureReport, "System.UInt64 Fixture::Admitted(System.UInt64,System.UInt64)")))
+{
+    using var required = JsonDocument.Parse(File.ReadAllText(report));
+    if (required.RootElement.GetProperty("extractorSha256").GetString() != extractorHash)
+        throw new InvalidOperationException($"{report} was written by another extractor.");
+    var decodedHere = required.RootElement.GetProperty("entries").EnumerateArray()
+        .Where(entry => entry.GetProperty("status").GetString() == "admitted")
+        .SelectMany(entry => entry.GetProperty("decodedMethods").EnumerateArray())
+        .Select(method => method.GetString()!).ToHashSet(StringComparer.Ordinal);
+    if (!decodedHere.Contains(signature))
+        throw new InvalidOperationException($"{signature} is not defined from its decoder in {report}.");
+}
+Console.WriteLine($"PASS {requiredExamples.Length + 1} example and fixture methods are defined from their decoder");
 if (update)
 {
     File.WriteAllText(listPath, string.Concat(decoded.Select(method => method + "\n")));

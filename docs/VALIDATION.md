@@ -113,7 +113,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting, arguments and homes bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
-| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the self-admitted methods defined from their decoder |
+| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the self-admitted, example and fixture methods defined from their decoder |
 | `audit` | theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge |
 | `docs` | documentation Lean snippets, cited library names and documented commands against the library and tool |
 | `exports` | contract production, restrictions and caller reuse |

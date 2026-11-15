@@ -169,7 +169,7 @@ internal static class VerificationSuites
             "they reject"),
         new("blockers", "Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
             "profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the " +
-            "self-admitted methods defined from their decoder"),
+            "self-admitted, example and fixture methods defined from their decoder"),
         new("audit", "Tests/OleanAudit.cs",
             "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts " +
             "cannot forge"),
