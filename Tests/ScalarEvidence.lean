@@ -189,7 +189,8 @@ instance (signature : DeclaredSignature) : Decidable (declaredRejectedAlone sign
 
 -- One component of the signature differs in each case.
 example : declaredRejectedAlone { wordPair with returnType := intType } := by decide +kernel
-example : declaredRejectedAlone { wordPair with parameters := [word, intType] } := by decide +kernel
+example : declaredRejectedAlone { wordPair with parameters := [word, intType] } := by
+  decide +kernel
 example : declaredRejectedAlone { wordPair with receiver := some .reference } := by decide +kernel
 example : declaredRejectedAlone { wordPair with parameters := [word] } := by decide +kernel
 
