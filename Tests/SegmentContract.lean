@@ -51,7 +51,7 @@ def dividing (arguments : List Value) (frame : Frame) (memory : Memory) :
     CIL.Safety.SegmentContract where
   pre := SegmentState.exact arguments
     { frame := frame, stack := [.scalar (.i32 0), .scalar (.i32 1)], memory := memory }
-  post _ _ exit := exit.Raises "System.DivideByZeroException"
+  post _ _ exit := exit.Raises .divideByZero
 
 /-- The exception contract is witnessed by the checked interpreter's arithmetic fault. -/
 theorem raises_region (arguments : List Value) (frame : Frame) (memory : Memory) :
@@ -71,7 +71,7 @@ theorem raises_region (arguments : List Value) (frame : Frame) (memory : Memory)
 /-- The exception bridge preserves the CLR name at the run boundary. -/
 theorem raises_run (arguments : List Value) (frame : Frame) (memory : Memory) :
     RunRaisesCLR [division] 0 0 arguments frame
-      [.scalar (.i32 0), .scalar (.i32 1)] memory "System.DivideByZeroException" := by
+      [.scalar (.i32 0), .scalar (.i32 1)] memory .divideByZero := by
   exact (raises_region arguments frame memory).raises (And.intro rfl rfl)
     (fun _ result => Or.inl result.post)
 

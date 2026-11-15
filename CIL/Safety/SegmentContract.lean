@@ -187,7 +187,7 @@ inductive SegmentExit where
   | diverges
 
 /-- The exit's fault names this CLR exception, including arithmetic exceptions. -/
-def SegmentExit.Raises (exit : SegmentExit) (exception : String) : Prop :=
+def SegmentExit.Raises (exit : SegmentExit) (exception : CIL.ExceptionType) : Prop :=
   Exists fun fault => And (exit = .faults fault) (fault.fault.clrException = some exception)
 
 /-- An exit has interpreter evidence; reaching also requires a positive fuel lower bound. -/
@@ -338,7 +338,8 @@ theorem SegmentContract.Holds.wp {contract : SegmentContract} {program : CIL.Pro
 
 /-- Named exceptions at an exit or its continuation give the same exception at entry. -/
 theorem SegmentContract.Holds.raises {contract : SegmentContract} {program : CIL.Program}
-    {method start : Nat} {arguments : List Value} {before : SegmentState} {exception : String}
+    {method start : Nat} {arguments : List Value} {before : SegmentState}
+    {exception : CIL.ExceptionType}
     (holds : contract.Holds program method start) (permitted : contract.pre arguments before)
     (next : forall exit, SegmentResult contract program method start arguments before exit ->
       Or (exit.Raises exception) (Exists fun pc => Exists fun after =>
