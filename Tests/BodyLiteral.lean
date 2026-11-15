@@ -9,8 +9,8 @@ literal; the longer ones are split into 32-byte literals here to keep lines shor
 `bodyMatches` is irreducible, so the elaborator's `decide` refuses it at once, within a small
 heartbeat budget, and only kernel evaluation decides it. Fixtures that build their evidence with a
 function must use kernel evaluation too, since the elaborator would evaluate the builder by name
-without sharing. The cost rows at the end bound how elaborating a byte literal and checking a body
-read from one grow with the number of bytes.
+without sharing. The cost rows at the end bound how elaborating, decoding and body-checking a byte
+literal grow with the number of bytes, and what elaborating one costs per byte.
 -/
 
 namespace Tests.BodyLiteral
@@ -292,6 +292,10 @@ def hexByte (byte : Nat) : String :=
     logarithmic factor of the decode and for measurement noise. -/
 def growthBound : Nat := 6
 
+/-- The most heartbeats elaborating a byte literal may cost per byte; a list literal costs
+    thousands, a numeral and a constructor per byte. -/
+def elaborationPerByte : Nat := 200
+
 open Lean Elab Command Meta in
 set_option maxHeartbeats 0 in
 run_cmd do
@@ -308,6 +312,8 @@ run_cmd do
     logInfo m!"byte literal elaboration: {bytes.length} bytes, {elaboration} heartbeats"
     if previousElaboration != 0 && elaboration > previousElaboration * growthBound then
       throwError "byte literal elaboration grew faster than its bytes"
+    if elaboration > elaborationPerByte * bytes.length then
+      throwError "byte literal elaboration costs more than {elaborationPerByte} heartbeats per byte"
     previousElaboration := elaboration
     let proof := mkApp2 (mkConst ``Eq.refl [1]) (mkConst ``Bool) (mkConst ``Bool.true)
     let decoded ← liftTermElabM do
