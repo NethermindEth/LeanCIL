@@ -41,6 +41,11 @@ if (args.Contains("--raw-names-only", StringComparer.Ordinal))
     CheckRawNames(At("artifacts/Identities/Unusual.dll"));
     return;
 }
+if (args.Contains("--field-references-only", StringComparer.Ordinal))
+{
+    CheckFieldReferences();
+    return;
+}
 if (args.Contains("--code-cost", StringComparer.Ordinal))
 {
     CheckCodeCost();
@@ -51,6 +56,7 @@ CheckCodeCost();
 if (args.Contains("--scaling-only", StringComparer.Ordinal)) return;
 CheckHeapBounds();
 CheckAssemblyCache();
+CheckFieldReferences();
 var directory = At("artifacts/Identities");
 Directory.CreateDirectory(directory);
 var examplesPath = At("Examples/Assembly/bin/Examples.dll");
@@ -194,6 +200,41 @@ Console.WriteLine($"PASS {expected.Count} Lean displays of {corpus.Summary()} eq
 Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
     $"PASS identity records cost {clock.Elapsed.TotalSeconds:F1} s, " +
     $"of which Lean took {leanClock.Elapsed.TotalSeconds:F1} s"));
+
+// A rendered field reference elaborates to the structure holding the record's owner, index, type and name bytes;
+// a swapped field or a name rendered from other bytes fails to elaborate or fails its guard.
+static void CheckFieldReferences()
+{
+    const string scope = "\"T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null\"";
+    (FieldRef Reference, byte[] NameBytes)[] cases =
+    [
+        (new($".atom {scope} \"Program\"", 0, ".atom \"System.Private.CoreLib\" \"System.Int32\"",
+            MetadataName.OfText("count")), "count"u8.ToArray()),
+        (new($".apply (.constructor {scope} \"Box`1\") (.parameter 0)", 70000, ".array (.byref (.parameter 0))",
+            MetadataName.FromBytes([0xFF, 0x00])), [0xFF, 0x00]),
+        (new($".object {scope} \"Node\"", 3, $".pointer (.object {scope} \"Node\")",
+            MetadataName.OfText("quote\"back\\slash")), "quote\"back\\slash"u8.ToArray())
+    ];
+    var source = new StringBuilder("""
+        import CIL.CallSite
+        open CIL CIL.Extraction
+
+        """);
+    foreach (var (reference, nameBytes) in cases)
+        source.AppendLine(string.Create(CultureInfo.InvariantCulture, $"""
+            #guard
+              let reference : FieldRef := {reference.ToLean()}
+              reference.owner == ({reference.Owner}) && reference.index == {reference.Index} &&
+                reference.type == ({reference.Type}) &&
+                reference.name.bytes? == some [{string.Join(", ", nameBytes)}]
+            """));
+    var directory = At("artifacts/Identities");
+    Directory.CreateDirectory(directory);
+    var leanPath = Path.Combine(directory, "FieldReferences.lean");
+    File.WriteAllText(leanPath, source.ToString());
+    Run(["lake", "env", "lean", leanPath], cwd: FixturePackage());
+    Console.WriteLine($"PASS {cases.Length} rendered field references elaborate to their records");
+}
 
 // The rows of an image read with System.Reflection.Metadata, which shares no decoding with Cecil.
 static void CheckRows(string path, ModuleDefinition module)

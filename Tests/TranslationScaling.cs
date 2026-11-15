@@ -10,6 +10,8 @@
 
 using System.Text.Json;
 
+BuildLeanTestLibraries("Generic owner index scaling library", "Tests.GenericOwnerScaling");
+
 // Real compiled C# call graph: each method fits the ordinary budget, while one monolithic elaborator `decide`
 // over the whole certificate is refused at once, since only the kernel may evaluate the body and metadata check.
 var directory = At("artifacts/TranslationScaling");
