@@ -57,10 +57,8 @@ internal static class VerificationSuites
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),
         new("evidence", "Tests/ExtractionEvidence.cs",
-            "independent extraction certificates, malformed evidence rejection, the metadata decoder's method " +
-            "names against Cecil's, strings as opaque references, typed identity " +
-            "display, and the certificate index, feature getter, layout accumulation and projection, extraction " +
-            "home and generic owner index libraries"),
+            "independent extraction certificates, malformed evidence rejection and the metadata decoder's method " +
+            "names against Cecil's"),
         // Split from evidence so neither job approaches the CI timeout.
         new("dispatch", "Tests/DispatchEvidence.cs",
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
@@ -100,7 +98,8 @@ internal static class VerificationSuites
             "integer opcode encodings, boundary cases and universal negation proofs"),
         new("narrow", "Tests/NarrowIntegers.cs",
             "narrow integer conversions, storage, method boundaries and rejection proofs"),
-        new("primitive", "Tests/PrimitiveOperations.cs", "primitive memory, switch, sizeof and rejection proofs"),
+        new("primitive", "Tests/PrimitiveOperations.cs",
+            "primitive memory, switch, sizeof and rejection proofs, and strings as opaque references"),
         new("division", "Tests/Division.cs", "integer division and remainder runtime comparisons and proofs"),
         new("checked", "Tests/CheckedArithmetic.cs", "checked integer arithmetic runtime comparisons and proofs"),
         new("conversions", "Tests/CheckedConversions.cs",
@@ -113,7 +112,8 @@ internal static class VerificationSuites
         new("arguments", "Tests/Arguments.cs", "argument assignment, addressing, aliases and lifetime proofs"),
         new("native", "Tests/NativeIntegers.cs", "native integer storage, arithmetic and runtime comparisons"),
         new("identity", "Tests/MethodIdentity.cs",
-            "methods bound by signature or call shape that survive renumbering and renaming"),
+            "methods bound by signature or call shape that survive renumbering and renaming, and typed identity " +
+            "display"),
         new("labels", "Tests/StructuralLabels.cs", "loop-head and call-site labels that survive inserted statements"),
         new("names", "Tests/DebugNames.cs", "PDB local names and source locations that never change extraction"),
         new("symbols", "Tests/ConsumerSymbols.cs",
@@ -127,7 +127,8 @@ internal static class VerificationSuites
         // Split from evidence: each fixture alone runs for minutes, so they take separate runners.
         new("scaling", "Tests/TranslationScaling.cs",
             "compositional certificate for a six-method call graph and its consumer replay, and the header and " +
-            "per-method struct layout checks at a per-layout cost that does not grow with the table"),
+            "per-method struct layout checks at a per-layout cost that does not grow with the table, and the " +
+            "generic owner index library"),
         new("excluded", "Tests/ExcludedBranchScaling.cs",
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",
@@ -142,7 +143,8 @@ internal static class VerificationSuites
             "table's entries; the argument facts of cil_resolution_facts and the reads through them at a " +
             "per-argument cost that does not grow with the parameters; the kernel check of one body at a cost " +
             "independent of the methods and metadata rows of its extraction; raw value opcode decoding at a " +
-            "per-instruction kernel cost that does not grow with the body"),
+            "per-instruction kernel cost that does not grow with the body; and the certificate index, feature " +
+            "getter, layout accumulation and projection, and extraction home index libraries"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +
