@@ -151,7 +151,7 @@ one struct and once with each field in a struct of its own, and reads every fiel
 `Method.fieldShape` through the facts with `simp only [cil_code]` from a 512-instruction body. It
 fails when the heartbeats per field of the facts, or of the reads, grow more than 1.35 times from
 one size to the next. Each fact is one kernel check of `LayoutEnvironment.fieldShape`, about
-290,000 heartbeats for the first field of the first struct, most of it in the type comparisons.
+290,000 heartbeats for the first field of the first struct.
 The check walks the layout lists to the owner and its field lists to the index, so each struct
 before the owner adds about 970 heartbeats. The facts cost about 291,000, 300,000 and 337,000
 heartbeats per field in one struct and 293,000, 313,000 and 386,000 with a struct per field. The
