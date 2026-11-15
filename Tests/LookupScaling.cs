@@ -1095,8 +1095,9 @@ var featureLocalsMeasured = string.Join("; ", perFeatureInstruction.Select(run =
     CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
 if (perFeatureInstruction.Skip(1).Any(run => run.Cost > perFeatureInstruction[0].Cost * AllowedLocalGrowth))
     throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Checking the feature certificate of {FeatureLocalInstructions} instructions costs {featureLocalsMeasured}; " +
-        $"the limit is {AllowedLocalGrowth} times the cost per instruction at {FewFeatureLocals} locals."));
+        $"Checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
+        $"{featureLocalsMeasured}; the limit is {AllowedLocalGrowth} times the cost per instruction at " +
+        $"{FewFeatureLocals} locals."));
 Console.WriteLine($"PASS checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
     featureLocalsMeasured);
 
