@@ -147,9 +147,10 @@ var (tailFirst, tailSecond, tailOutput) = (Path.Combine(tailRoot, "First"), Path
 variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Method("Tail", ".tailCall 0 0")]);
 variants[tailSecond] = Variant(tailSecond, true, [Method("Tail", ".tailCall 1 0"), Method("Target", ".ret")]);
 run.Invoke(null, [(string[])[tailOutput, tailFirst, tailSecond], read]);
-if (!File.ReadAllText(Path.Combine(tailOutput, "Templates.lean")).Contains(".tailCall callee0 0",
-    StringComparison.Ordinal))
-    throw new Exception("A tail call kept its profile's callee index in the template");
+var tailTemplate = File.ReadAllText(Path.Combine(tailOutput, "Templates.lean"));
+if (!tailTemplate.Contains(".tailCall callee0 0", StringComparison.Ordinal) ||
+    !tailTemplate.Contains("links := ([(0, .direct callee0)])", StringComparison.Ordinal))
+    throw new Exception("A tail call kept its profile's callee index in the template or lost its link");
 Console.WriteLine("PASS template tail calls take the callee parameter of the profile-specific index");
 
 // A virtual dispatch, a callable pointer and a static initializer name their methods by the template's callee
