@@ -172,16 +172,22 @@ theorem short_value_width (body : Method) (shared : body.environment = environme
     body.valueShape shortType = .primitive 2 true := shortType_shape shared
 #print axioms short_value_width
 
--- Integer vectors and spans resolve before layouts; a double vector is no value type here.
+-- Integer vectors and spans resolve before layouts.
 theorem value_kinds :
     environment.valueShape (.apply (.constructor intrinsicsScope
         "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Int32")) =
       .vector 16 ∧
-    environment.valueShape (.apply (.constructor runtimeScope "System.Span`1") int16) = .span ∧
-    environment.valueShape (.apply (.constructor intrinsicsScope
-        "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Double")) =
-      .unsupported "Not a value type" := by decide +kernel
+    environment.valueShape (.apply (.constructor runtimeScope "System.Span`1") int16) = .span :=
+  by decide +kernel
 #print axioms value_kinds
+
+-- A floating-point vector has its size, so `sizeof` keeps admitting it; `ldobj` and `stobj`
+-- refuse it in their own rule.
+theorem double_vector_size :
+    (environment.valueShape (.apply (.constructor intrinsicsScope
+        "System.Runtime.Intrinsics.Vector128`1") (.atom runtimeScope "System.Double"))).size? =
+      some 16 := by decide +kernel
+#print axioms double_vector_size
 
 -- The kernel checks each generated fact, which rests on no axiom beyond `propext`.
 /-- info: 'Tests.FieldShape.lowField_shape' depends on axioms: [propext] -/

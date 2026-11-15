@@ -568,7 +568,7 @@ inductive ValueShape where
   | primitive (width : Nat) (signed : Bool)
   /-- A struct of `size` bytes. -/
   | aggregate (size : Nat)
-  /-- An integer vector of `width` bytes. -/
+  /-- A vector of `width` bytes. -/
   | vector (width : Nat)
   /-- A span, whose address on the stack is already the view it names. -/
   | span
@@ -576,7 +576,7 @@ inductive ValueShape where
   | unsupported (reason : String)
   deriving DecidableEq, Repr
 
-/-- How a value of `type` reaches memory: as a span, an integer vector, a struct sized by its
+/-- How a value of `type` reaches memory: as a span, a vector of its width, a struct sized by its
     checked layout or a primitive of its width. -/
 def LayoutEnvironment.valueShape (environment : LayoutEnvironment)
     (type : Extraction.TypeExpr) : ValueShape :=
@@ -590,6 +590,9 @@ def LayoutEnvironment.valueShape (environment : LayoutEnvironment)
     | some (.field kind) => match Extraction.primitiveFieldWidth kind with
       | some width => .primitive width (Extraction.signedField kind)
       | none => .unsupported "Value type without a width"
+    | some .vector128 => .vector 16
+    | some .vector256 => .vector 32
+    | some .vector512 => .vector 64
     | _ => .unsupported "Not a value type"
 
 /-- The bytes a value of the shape occupies; `none` for a span and an unsupported type. -/

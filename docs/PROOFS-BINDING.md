@@ -671,7 +671,8 @@ kernel check, however many sites and methods use the operand, and the `cil_code`
 `reduceFieldShape` and `reduceValueShape` read a method's shape of the operand from it.
 `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
 checked layout entry when the operand holds the field's declared type, and a class instance
-field to the model slot of its index.
+field to the model slot of its index; `valueShape` gives a vector, including a floating-point
+one, its width.
 
 The first fact of an environment names suffixes of its layout lists,
 `Extracted.environment_rawLayoutSuffix{start}` and `Extracted.environment_layoutSuffix{start}`
