@@ -60,12 +60,12 @@ theorem stepTransport : StepTransport := by
         targetBody metadata field pc arguments stack⟩
     case ldsflda.refl field =>
       exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
-        targetBody metadata _ (fun _ _ _ _ _ _ => step_ldsflda_eq ..) pc arguments stack bounds
+        targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds
         observable
     case ldtoken.refl operand =>
       cases operand
       exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
-        targetBody metadata _ (fun _ _ _ _ _ _ => step_ldtoken_eq ..) pc arguments stack bounds
+        targetBody metadata _ (fun _ _ _ _ _ _ => rfl) pc arguments stack bounds
         observable
     case stsfld.refl field =>
       refine ⟨mapping, .refl mapping, ?_⟩

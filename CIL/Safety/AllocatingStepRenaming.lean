@@ -83,7 +83,14 @@ theorem Memory.Renamed.stepLdsfld {indices : LocalIndexMap} {mapping : Allocatio
       (step sourceBody (.ldsfld field) pc arguments sourceFrame stack source)
       (step targetBody (.ldsfld field) pc (arguments.map mapping.value) targetFrame
         (stack.map mapping.value) target) := by
-  simp only [step_ldsfld_eq, staticLoad_metadata metadata]
+  show ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+    (do
+      let (memory, value) ← staticLoad sourceBody pc source
+      return FrameAction.next (pc + 1) (value :: stack) sourceFrame memory)
+    (do
+      let (memory, value) ← staticLoad targetBody pc target
+      return FrameAction.next (pc + 1) (value :: stack.map mapping.value) targetFrame memory)
+  rw [staticLoad_metadata metadata]
   apply (related.staticLoadResult staticBounds sourceBody pc).bind
   intro first second result
   rcases first with ⟨sourceAfter, value⟩
