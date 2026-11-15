@@ -245,4 +245,15 @@ simproc [cil_step] reduceReturnNarrow (CIL.Method.returnNarrow _) := fun express
   let some (_, _, result) := (← inferType proof).eq? | return .continue
   return .done { expr := ← withDefault <| whnf result, proof? := some proof }
 
+open Lean Meta in
+/-- How a literal body reads a literal argument index, by the storage lemmas and premises the
+    kernel decides over its homes, local kinds and parameters; a symbolic part is left for a
+    caller's fact. -/
+simproc [cil_step] reduceArgumentAccess (CIL.Method.argumentAccess _ _) := fun expression => do
+  let_expr CIL.Method.argumentAccess method index := expression | return .continue
+  let some index ← (Meta.evalNat index).run | return .continue
+  let some proof ← ResolutionFacts.argumentProof? method index | return .continue
+  let some (_, _, result) := (← inferType proof).eq? | return .continue
+  return .done { expr := ← withDefault <| whnf result, proof? := some proof }
+
 end CIL.Safety

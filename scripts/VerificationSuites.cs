@@ -134,8 +134,10 @@ internal static class VerificationSuites
             "locals consumed by calli, the closed argument storage of those native-int locals, and the " +
             "feature certificate of local loads, stores and addresses, at a per-instruction cost that does " +
             "not grow with the method, embeddings of bodies with many calls at a per-call kernel cost that " +
-            "does not grow with the calls, type identity equality at a cost that does not grow with the name, " +
-            "and one native method table step at a kernel cost that does not grow with the table's entries"),
+            "does not grow with the calls, type identity equality at a cost that does not grow with the " +
+            "name, the argument facts of cil_resolution_facts and the reads through them at a per-argument " +
+            "cost that does not grow with the parameters, and one native method table step at a kernel cost " +
+            "that does not grow with the table's entries"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +

@@ -676,7 +676,7 @@ theorem static_sites_embed :
 def unsortedTable : List (Nat × Link) := [(3, .direct 1), (1, .direct 2), (3, .direct 9)]
 
 /-- The table takes the scan, since its keys do not ascend. -/
-example : Extraction.linkKeysAscend 0 unsortedTable = false := by decide
+example : Extraction.keysAscend 0 unsortedTable = false := by decide
 
 /-- The scan answers each query with the first entry for it, in query order. -/
 example : Extraction.linkReads unsortedTable [1, 3, 2] =
