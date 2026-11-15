@@ -1027,8 +1027,6 @@ long Checked(string path, string text, string binder, string method, string equa
 
 // The three places `cil_instruction_equations` states lookup equations for one method: its extraction, a
 // hand-written body with a parameter, and the shared template of the extraction.
-// The three places `cil_instruction_equations` states lookup equations for one method: its extraction, a
-// hand-written body with a parameter, and the shared template of the extraction.
 (int Instructions, long[] Heartbeats) Measure(string name)
 {
     var output = Path.Combine(directory, name);

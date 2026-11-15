@@ -77,7 +77,7 @@ string[] expectedLiteral =
     [".ldc_i4 1", ".ret", $".unadmitted {OpCodes.Ldc_I4_0.Value}", $".unadmitted {OpCodes.Ret.Value}"];
 if (deadLines.Any(line => line.StartsWith("cil_decoded_method ", StringComparison.Ordinal)) ||
     !literal.SequenceEqual(expectedLiteral, StringComparer.Ordinal))
-    throw new InvalidOperationException("A method with an unreachable tail must keep its literal with a hole at each " +
-        "dead pc, found:\n" + string.Join('\n', literal));
+    throw new InvalidOperationException("A method with an unreachable tail must keep its literal with a hole " +
+        "at each dead pc, found:\n" + string.Join('\n', literal));
 Run(["lake", "env", "lean", deadSource], cwd: FixturePackage());
 Console.WriteLine("PASS a method with an unreachable tail keeps its literal, with holes at its dead pcs, and builds");
