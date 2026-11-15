@@ -4,10 +4,10 @@ import StrictBinding.Pe
 # Metadata tables
 
 Decodes the `#~` stream header of an image and computes, from the image alone, where each row
-of each table starts. A row's size depends on the row counts of other tables and on the heap
-size flags (II.22 and II.24.2.6), so the schema of every table is spelled out here: a row's
-position needs the size of all earlier tables. The heaps are read through the stream positions of
-`StrictBinding.PeLayout`.
+of each table starts and where each column lies in a row. A row's size depends on the row counts
+of other tables and on the heap size flags (II.22 and II.24.2.6), so the schema of every table is
+spelled out here: a row's position needs the size of all earlier tables. The heaps are read
+through the stream positions of `StrictBinding.PeLayout`.
 -/
 
 namespace StrictBinding
@@ -248,13 +248,33 @@ def MetadataLayout.rowAt (layout : MetadataLayout) (token : Nat) : Except AuditE
     else pure (rows.start + (row - 1) * rows.size, rows.size)
   | none => throw (.tokenOutOfScope token)
 
+/-- A column of a table as the rows of one image lay it out. -/
+structure ColumnPlace where
+  /-- Where the column starts within a row. -/
+  offset : Nat
+  width : Nat
+  column : Column
+
+/-- The columns of a row laid out one after another from `offset`, each as wide as the heap size
+    flags and row counts make it. -/
+def placeColumns (heapSizes : Nat) (rows : Nat → Nat) : Nat → List Column → List ColumnPlace
+  | _, [] => []
+  | offset, column :: rest =>
+    let width := columnWidth heapSizes rows column
+    { offset, width, column } :: placeColumns heapSizes rows (offset + width) rest
+
+/-- The laid-out columns of every table the schema covers, indexed by table number. -/
+def MetadataLayout.columnTable (layout : MetadataLayout) : List (Option (List ColumnPlace)) :=
+  (List.range tableLimit).map fun table =>
+    (schema table).map (placeColumns layout.heapSizes layout.rowCount 0)
+
 /-- The offset within a row of column `column` of `table`, and its width. -/
 def MetadataLayout.columnIn (layout : MetadataLayout) (table column : Nat) :
     Except AuditError (Nat × Nat) := do
   let some columns := schema table | throw (.tables (.noSuchColumn table column))
-  let widths := columns.map (columnWidth layout.heapSizes layout.rowCount)
-  let some width := widths[column]? | throw (.tables (.noSuchColumn table column))
-  pure ((widths.take column).foldl Nat.add 0, width)
+  let some place := (placeColumns layout.heapSizes layout.rowCount 0 columns)[column]?
+    | throw (.tables (.noSuchColumn table column))
+  pure (place.offset, place.width)
 
 /-- The file offset and width of column `column` of the row a token names. -/
 def MetadataLayout.cellAt (layout : MetadataLayout) (token column : Nat) :

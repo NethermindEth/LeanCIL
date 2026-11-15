@@ -82,8 +82,8 @@ inductive AuditError where
   /-- The carried entry with this key is not the entry of the image at the offset the key names. -/
   | heapMismatch (heap key : Nat)
   /-- Two row cells of one offset hold different keys, two of different offsets hold one key, a
-      carried entry has a key no row cell holds, a row key has no carried entry, or a key is not
-      below the omitted-entry marker. -/
+      carried entry has a key no row cell holds, a row key has no carried entry, a key is not
+      below the omitted-entry marker, or the carried entries of the heap do not ascend by key. -/
   | heapNumbering (heap key : Nat)
   deriving DecidableEq, Repr
 
