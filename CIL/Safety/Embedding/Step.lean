@@ -255,6 +255,7 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
+set_option maxHeartbeats 400000 in
 /-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
 theorem step_relabel_faulting (op : Instruction)
     (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
