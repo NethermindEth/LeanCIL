@@ -359,6 +359,11 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
         apply staticInstruction_contract
         assumption
     | solve |
+        apply StepContract.staticInstruction
+        first
+          | (apply staticLoad_contract; assumption)
+          | (apply staticAddress_contract; assumption)
+    | solve |
         apply StepContract.instruction
         apply instruction_contract
         assumption

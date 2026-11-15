@@ -291,6 +291,41 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
   simp only [step, observerCount]
   rfl
 
+/-- `ldsfld` pushes the value `staticLoad` reads through the descriptor bound to its pc. -/
+@[cil_step] theorem step_ldsfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.ldsfld field) pc args frame stack memory = do
+      let (memory, value) ← staticLoad body pc memory
+      return FrameAction.next (pc + 1) (value :: stack) frame memory := id rfl
+
+#print axioms step_ldsfld_eq
+
+/-- `ldsflda` pushes the reference to the storage of the descriptor bound to its pc. -/
+@[cil_step] theorem step_ldsflda_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.ldsflda field) pc args frame stack memory = do
+      let (memory, value) ← staticAddress body pc memory
+      return FrameAction.next (pc + 1) (value :: stack) frame memory := id rfl
+
+#print axioms step_ldsflda_eq
+
+/-- A field `ldtoken` pushes the same reference as `ldsflda` of that field. -/
+@[cil_step] theorem step_ldtoken_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.ldtoken (.field field)) pc args frame stack memory = do
+      let (memory, value) ← staticAddress body pc memory
+      return FrameAction.next (pc + 1) (value :: stack) frame memory := id rfl
+
+#print axioms step_ldtoken_eq
+
+/-- `stsfld` faults: no static field is writable. -/
+@[cil_step] theorem step_stsfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.stsfld field) pc args frame stack memory =
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else .error (.unsupported "Static field store") := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_stsfld_eq
+
 /-- An intrinsic must be available in the method's profile; its `argc` operands are taken
     deepest first. -/
 @[cil_step] theorem step_intrinsic_eq (operation : CIL.Intrinsic) (argc : Nat)

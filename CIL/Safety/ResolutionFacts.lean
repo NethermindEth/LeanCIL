@@ -9,7 +9,9 @@ Primitive and non-candidate heads use storage lemmas, without evaluating code or
 `cil_resolution_facts` declares a method's return narrowing and, for each declared argument,
 how the method reads it (`CIL.Method.argumentAccess`). The argument facts walk the parameter
 types and the parameter homes once through named suffixes, as `CIL.CodeSuffix` does for code,
-so a method's facts cost time linear in its arguments and homes.
+so a method's facts cost time linear in its arguments and homes. It also states, for each
+static site, the descriptor `CIL.Method.staticAt` resolves there, from one check that the site
+pcs ascend.
 -/
 
 namespace CIL.Safety.ResolutionFacts
@@ -342,8 +344,50 @@ def declareArgumentFacts (body : Body) (simpSet : SimpExtension) : TermElabM Uni
         (inv := false) .global (eval_prio default)
     if homed then passed := passed + 1
 
-/-- Declares a method's kernel-checked return narrowing from its named signature facts, and
-    how it reads each declared argument. -/
+/-- Declares `body_staticAt{pc}` for every static site of the method `body` names and adds each
+    to `cil_code`. One check that the site pcs ascend lets each fact read at most one block of a
+    named suffix, so the facts cost time linear in the sites. -/
+def declareStaticFacts (body : Body) (simpSet : SimpExtension) : TermElabM Unit := do
+  let method := body.constant ""
+  let siteList := mkApp (mkConst ``CIL.Method.staticSites) method
+  let (sites, complete) ← withDefault <| listElements siteList
+  unless complete do
+    throwError "cil_resolution_facts: the static sites of {body.name} are unresolved"
+  if sites.isEmpty then return
+  let mut keyed := #[]
+  for site in sites do
+    let (``Prod.mk, #[_, _, key, descriptor]) := (← withDefault <| whnf site).getAppFnArgs
+      | throwError "cil_resolution_facts: a static site of {body.name} is unresolved"
+    let some pc ← (Meta.evalNat key).run
+      | throwError "cil_resolution_facts: a static site pc of {body.name} is unresolved"
+    keyed := keyed.push (pc, descriptor)
+  for position in [1:keyed.size] do
+    unless keyed[position - 1]!.1 < keyed[position]!.1 do
+      throwError "cil_resolution_facts: the static sites of {body.name} do not ascend"
+  let descriptorType := mkConst ``CIL.StaticDescriptor
+  let siteType := mkApp2 (mkConst ``Prod [.zero, .zero]) (mkConst ``Nat) descriptorType
+  declareSuffixes body siteType "_siteSuffix"
+    (fun start => s!"The static sites of `{body.name}` from position {start} on") siteList sites
+  let ascends := mkApp3 (mkConst ``CIL.Extraction.keysAscend) descriptorType (mkNatLit 0) siteList
+  body.prove "_sitesAscend" s!"The static sites of `{body.name}` ascend by pc."
+    (← mkEq ascends (mkConst ``Bool.true)) (← mkEqRefl (mkConst ``Bool.true))
+  let ascending := body.constant "_sitesAscend"
+  for position in [0:keyed.size] do
+    let (pc, descriptor) := keyed[position]!
+    -- A window per fact, so a method with many sites does not exhaust the command's.
+    withCurrHeartbeats do
+      let (placed, next) := placedAt body "_siteSuffix" siteType siteList sites position
+      let proof := mkAppN (mkConst ``CIL.Method.staticAt_of_keysAscend)
+        #[method, next.appArg!, mkNatLit position, mkNatLit pc, descriptor, ascending, placed]
+      let resolved := mkApp2 (mkConst ``CIL.Method.staticAt) method (mkNatLit pc)
+      body.prove s!"_staticAt{pc}"
+        s!"The descriptor extraction bound to the static instruction at pc {pc} of `{body.name}`."
+        (← mkEq resolved (← mkAppM ``Option.some #[descriptor])) proof
+      addSimpTheorem simpSet (body.name.appendAfter s!"_staticAt{pc}") (post := false)
+        (inv := false) .global (eval_prio default)
+
+/-- Declares a method's kernel-checked return narrowing from its named signature facts, how it
+    reads each declared argument, and the descriptor bound to each static site. -/
 syntax "cil_resolution_facts " ident : command
 
 elab_rules : command
@@ -369,5 +413,6 @@ elab_rules : command
       addSimpTheorem simpSet (name.appendAfter "_returnNarrow") (post := false)
         (inv := false) .global (eval_prio default)
       declareArgumentFacts body simpSet
+      declareStaticFacts body simpSet
 
 end CIL.Safety.ResolutionFacts

@@ -76,5 +76,47 @@ theorem Memory.Equivalent.staticInstruction {m n : Memory} (same : m.Equivalent 
     | split
 
 #print axioms Memory.Equivalent.staticInstruction
+
+/-- Equivalent memories give equivalent results for `ldsfld`. -/
+theorem Memory.Equivalent.staticLoad {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (pc : Nat) :
+    ResultEquivalent MemoryFirstEquivalent (CIL.Safety.staticLoad body pc m)
+      (CIL.Safety.staticLoad body pc n) := by
+  unfold CIL.Safety.staticLoad
+  split
+  all_goals repeat first
+    | exact .ok ⟨same, rfl⟩
+    | exact .error _
+    | (apply ResultEquivalent.bind (same.staticReference _)
+       intro left right related
+       obtain ⟨memory, reference⟩ := left
+       obtain ⟨otherMemory, otherReference⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       simp only [checkedAt, equivalent.read]
+       repeat first
+         | exact .ok ⟨equivalent, rfl⟩
+         | exact .error _
+         | (apply ResultEquivalent.bind_same; intro)
+         | split)
+    | split
+
+#print axioms Memory.Equivalent.staticLoad
+
+/-- Equivalent memories give equivalent results for `ldsflda` and a field `ldtoken`. -/
+theorem Memory.Equivalent.staticAddress {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (pc : Nat) :
+    ResultEquivalent MemoryFirstEquivalent (CIL.Safety.staticAddress body pc m)
+      (CIL.Safety.staticAddress body pc n) := by
+  unfold CIL.Safety.staticAddress
+  split
+  · apply ResultEquivalent.bind (same.staticReference _)
+    intro left right related
+    obtain ⟨memory, reference⟩ := left
+    obtain ⟨otherMemory, otherReference⟩ := right
+    obtain ⟨equivalent, rfl⟩ := related
+    exact .ok ⟨equivalent, rfl⟩
+  · exact .error _
+
+#print axioms Memory.Equivalent.staticAddress
 #print axioms Memory.Equivalent.staticReference
 end CIL.Safety

@@ -36,7 +36,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .arrayStore _ => (3, 0)
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _ => (0, 1)
+  | .nullRef | .nullObject | .stringLiteral _ => (0, 1)
   | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => (1, 1)
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => (2, 0)
   | .referenceArrayLoad => (2, 1)
@@ -80,6 +80,8 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .newAggregate _ count _ | .newObject _ count .. => some (count, 1)
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
+  | .ldsfld _ | .ldsflda _ | .ldtoken _ => some (0, 1)
+  | .stsfld _ => some (1, 0)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
   | .ldloca _ | .stloc .. | .initializeSpanLocal ..
   | .feature _ | .ret | .throw _ | .unsupported _ | .br _ | .switch _ | .brfalse _

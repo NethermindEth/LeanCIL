@@ -47,20 +47,28 @@ def StepRelabel (op : CIL.Instruction) : Prop :=
 
 /-- Static-memory instructions at two pcs that resolve the same descriptor behave alike. -/
 theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
-    (same : actual.staticAt q = expected.staticAt pc) (operation : CIL.MemoryOp)
+    (_same : actual.staticAt q = expected.staticAt pc) (operation : CIL.MemoryOp)
     (stack : List Value) (m : Memory) :
     staticInstruction actual q operation stack m =
-      staticInstruction expected pc operation stack m := by
-  unfold CIL.Method.staticAt at same
-  cases operation
-  case staticAddress bytes | staticValue bytes =>
-    simp only [staticInstruction]
-    cases h1 : actual.staticSites.find? (fun site => site.1 == q) <;>
-      cases h2 : expected.staticSites.find? (fun site => site.1 == pc) <;> simp_all
-  case spanCreate | createSpan =>
-    unfold staticInstruction
-    split <;> first | contradiction | rfl
-  all_goals unfold staticInstruction; rfl
+      staticInstruction expected pc operation stack m := rfl
+
+/-- `ldsfld` at two pcs that resolve the same descriptor loads the same value. -/
+theorem staticLoad_congr {expected actual : CIL.Method} {pc q : Nat}
+    (same : actual.staticAt q = expected.staticAt pc) (memory : Memory) :
+    staticLoad actual q memory = staticLoad expected pc memory := by
+  unfold staticLoad
+  rw [same]
+
+#print axioms staticLoad_congr
+
+/-- `ldsflda` at two pcs that resolve the same descriptor gives the same storage. -/
+theorem staticAddress_congr {expected actual : CIL.Method} {pc q : Nat}
+    (same : actual.staticAt q = expected.staticAt pc) (memory : Memory) :
+    staticAddress actual q memory = staticAddress expected pc memory := by
+  unfold staticAddress
+  rw [same]
+
+#print axioms staticAddress_congr
 
 /-- The shared tail of `step` for instructions without a dedicated case. -/
 theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
@@ -399,6 +407,34 @@ theorem step_relabel_memory (operation : MemoryOp) : StepRelabel (.memory operat
   rw [staticInstruction_congr context.statics]
   lockstep
 
+theorem step_relabel_ldsfld (field : Extraction.FieldRef) : StepRelabel (.ldsfld field) := by
+  plain_cases
+  rw [staticLoad_congr context.statics]
+  lockstep
+
+#print axioms step_relabel_ldsfld
+
+theorem step_relabel_ldsflda (field : Extraction.FieldRef) : StepRelabel (.ldsflda field) := by
+  plain_cases
+  rw [staticAddress_congr context.statics]
+  lockstep
+
+#print axioms step_relabel_ldsflda
+
+theorem step_relabel_ldtoken (operand : TokenOperand) : StepRelabel (.ldtoken operand) := by
+  cases operand
+  plain_cases
+  rw [staticAddress_congr context.statics]
+  lockstep
+
+#print axioms step_relabel_ldtoken
+
+theorem step_relabel_stsfld (field : Extraction.FieldRef) : StepRelabel (.stsfld field) := by
+  plain_cases
+  cases h
+
+#print axioms step_relabel_stsfld
+
 theorem step_relabel_ret : StepRelabel .ret := by
   intro expected actual r pc q args frame stack m action context h
   unfold step at h ⊢
@@ -665,6 +701,10 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     exact step_relabel_newObject constructor argc owner bases size
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
+  case ldsfld field => exact step_relabel_ldsfld field
+  case ldsflda field => exact step_relabel_ldsflda field
+  case ldtoken operand => exact step_relabel_ldtoken operand
+  case stsfld field => exact step_relabel_stsfld field
   case ret => exact step_relabel_ret
   case throw exception => exact step_relabel_throw exception
   case unsupported description => exact step_relabel_unsupported description
@@ -1216,6 +1256,22 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [staticInstruction_congr context.statics]
     raise_lockstep
+  case ldsfld =>
+    plain_cases
+    rw [staticLoad_congr context.statics]
+    raise_lockstep
+  case ldsflda =>
+    plain_cases
+    rw [staticAddress_congr context.statics]
+    raise_lockstep
+  case ldtoken operand =>
+    cases operand
+    plain_cases
+    rw [staticAddress_congr context.statics]
+    raise_lockstep
+  case stsfld =>
+    plain_cases
+    cases h
   case ret => exact step_raise_ret
   case throw =>
     explicit_intro

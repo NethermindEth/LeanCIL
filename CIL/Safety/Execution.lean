@@ -270,6 +270,14 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value ← (CIL.convertInteger target.width target.signed true x).mapError
       ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- Static fields resolve the descriptor extraction bound to their pc.
+  | .ldsfld _, _ =>
+    let (memory, value) ← staticLoad body pc m
+    return .next (pc + 1) (value :: stack) frame memory
+  | .ldsflda _, _ | .ldtoken (.field _), _ =>
+    let (memory, value) ← staticAddress body pc m
+    return .next (pc + 1) (value :: stack) frame memory
+  | .stsfld _, _ => .error (.unsupported "Static field store")
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m

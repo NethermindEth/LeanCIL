@@ -17,6 +17,11 @@ if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
     ArgumentResolutionCosts();
     return;
 }
+if (args.Contains("--static-facts-only", StringComparer.Ordinal))
+{
+    StaticFactCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -29,6 +34,7 @@ if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
 ArgumentResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
+StaticFactCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
@@ -287,6 +293,72 @@ void ArgumentResolutionCosts()
                     $"{AllowedArgumentGrowth} times the cost per argument at the size before.");
             Console.WriteLine($"PASS argument {name} {label}: {measured} heartbeats per argument");
         }
+    }
+}
+
+// `cil_resolution_facts` states each static site's descriptor from one ascending check and the named site suffix
+// of its block, so facts and the simplifier's reads of them at 8, 32 and 128 sites cost at most 1.35 times more
+// per site than at the size before; a fact that searched the sites before it would grow with the size.
+void StaticFactCosts()
+{
+    const double AllowedSiteGrowth = 1.35;
+    var factDirectory = At("artifacts/LookupScaling/StaticFacts");
+    Directory.CreateDirectory(factDirectory);
+    var samples = new List<(int Size, long Facts, long Reads)>();
+    foreach (var size in new[] { 8, 32, 128 })
+    {
+        string Descriptor(int index) => string.Create(CultureInfo.InvariantCulture,
+            $"{{ identity := {index}, fieldName := \"Fixture::Field\", bytes := [{index % 256}] }}");
+        var code = string.Join(", ", Enumerable.Repeat(".ldsfld field, .pop", size)) + ", .ret";
+        var sites = string.Join(", ",
+            Enumerable.Range(0, size).Select(index => $"({2 * index}, {Descriptor(index)})"));
+        var reads = string.Join(", ", Enumerable.Range(0, size).Select(index => $"body.staticAt {2 * index}"));
+        var resolved = string.Join(", ", Enumerable.Range(0, size).Select(index => $"some {Descriptor(index)}"));
+        var source = $$"""
+            import CIL.Safety.ResolutionFacts
+            open CIL CIL.Extraction Lean Elab Command
+            set_option maxRecDepth 8192
+            /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+            elab "#resolution_cost " label:str " in " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              logInfo m!"resolution {label.getString} {after - before} heartbeats"
+            def field : FieldRef :=
+              { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "Pair", name := name!"Field" }
+            def body : Method := {
+              code := [{{code}}], locals := [], returnsValue := false, declared := {},
+              staticSites := [{{sites}}] }
+            theorem body_returnsValue : body.returnsValue = false := rfl
+            theorem body_declared : body.declared = {} := rfl
+            #resolution_cost "fact" in cil_resolution_facts body
+            #resolution_cost "simplifier" in
+            theorem body_reads : [{{reads}}] = [{{resolved}}] := by simp only [cil_code]
+            #print axioms body_staticAt{{2 * (size - 1)}}
+            #print axioms body_reads
+            """ + "\n";
+        var path = Path.Combine(factDirectory, $"Sites{size}.lean");
+        File.WriteAllText(path, source);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("Static site facts introduced an unproved theorem.");
+        var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+        if (costs.Length != 2)
+            throw new InvalidOperationException("Missing static site fact costs: " + output);
+        samples.Add((size, long.Parse(costs[0].Groups[2].Value, CultureInfo.InvariantCulture),
+            long.Parse(costs[1].Groups[2].Value, CultureInfo.InvariantCulture)));
+    }
+    foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
+        { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
+    {
+        var perSite = samples.Select(sample => (double)cost(sample) / sample.Size).ToArray();
+        var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+            $"{sample.Size} = {(double)cost(sample) / sample.Size:F0}")));
+        if (perSite.Skip(1).Zip(perSite).Any(pair => pair.First > pair.Second * AllowedSiteGrowth))
+            throw new InvalidOperationException(
+                $"Static site {name} cost {measured} heartbeats per site; the limit is " +
+                $"{AllowedSiteGrowth} times the cost per site at the size before.");
+        Console.WriteLine($"PASS static site {name}: {measured} heartbeats per site");
     }
 }
 

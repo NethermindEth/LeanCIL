@@ -244,7 +244,8 @@ internal static class LeanEmitter
             foreach (Instruction i in m.Body.Instructions)
                 ops.Add(reachable.Contains(i)
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
+                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets,
+                        access => genericEvidence.StaticField(m, access))
                     : new Unsupported("Unreachable under selected profile"));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());

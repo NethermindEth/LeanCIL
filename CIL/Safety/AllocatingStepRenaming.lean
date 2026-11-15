@@ -14,25 +14,20 @@ The memory case reuses the checked step equation instead of simplifying the full
 
 namespace CIL.Safety
 
-/-- Static dispatch depends on extraction-bound descriptors, not unrelated method metadata. -/
-theorem staticInstruction_metadata {sourceBody targetBody : CIL.Method}
-    (metadata : StepMetadata sourceBody targetBody) (pc : Nat) (operation : CIL.MemoryOp)
-    (stack : List Value) (memory : Memory) :
+/-- Memory dispatch reads neither the method nor the pc, so two bodies agree on it. -/
+theorem staticInstruction_body (sourceBody targetBody : CIL.Method) (pc : Nat)
+    (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     staticInstruction targetBody pc operation stack memory =
-      staticInstruction sourceBody pc operation stack memory := by
-  unfold staticInstruction
-  rw [metadata.staticSites]
-#print axioms staticInstruction_metadata
+      staticInstruction sourceBody pc operation stack memory := rfl
+#print axioms staticInstruction_body
 
-/-- Checked static-memory steps extend the map only when their actual operation allocates. -/
+/-- Checked memory steps, span constructors over static storage included, extend the map only
+    when their actual operation allocates. -/
 theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
-    (staticBounds : ∀ binding ∈ source.staticBindings,
-      binding.2.allocation < mapping.sourceLimit)
-    (sourceBody targetBody : CIL.Method) (metadata : StepMetadata sourceBody targetBody)
+    (sourceFormed : source.WellFormed) (sourceBody targetBody : CIL.Method)
     (operation : CIL.MemoryOp) (pc : Nat) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow
@@ -47,9 +42,9 @@ theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : Allocatio
   · cases observable
   · rename_i guard
     simp only [guard, Bool.false_eq_true, ite_false,
-      staticInstruction_metadata metadata] at observable ⊢
+      staticInstruction_body sourceBody targetBody] at observable ⊢
     obtain ⟨later, extension, operations⟩ := related.staticInstructionResult sourceFormed
-      targetFormed staticBounds sourceBody pc operation stack bounds observable.bind_left
+      sourceBody pc operation stack bounds observable.bind_left
     refine ⟨later, extension, ?_⟩
     apply operations.bind
     intro first second result
@@ -58,6 +53,81 @@ theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : Allocatio
     rcases result with ⟨memories, rfl⟩
     exact .ok (.next memories (frames.extend extension (fun _ _ scope => scope)))
 #print axioms Memory.Renamed.stepMemory
+
+/-- `ldsfld` reads the descriptor bound to its pc, which a step renaming keeps. -/
+theorem staticLoad_metadata {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (pc : Nat) (memory : Memory) :
+    staticLoad targetBody pc memory = staticLoad sourceBody pc memory := by
+  unfold staticLoad CIL.Method.staticAt
+  rw [metadata.staticSites]
+#print axioms staticLoad_metadata
+
+/-- `ldsflda` reads the descriptor bound to its pc, which a step renaming keeps. -/
+theorem staticAddress_metadata {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (pc : Nat) (memory : Memory) :
+    staticAddress targetBody pc memory = staticAddress sourceBody pc memory := by
+  unfold staticAddress CIL.Method.staticAt
+  rw [metadata.staticSites]
+#print axioms staticAddress_metadata
+
+/-- A checked `ldsfld` step keeps the allocation map. -/
+theorem Memory.Renamed.stepLdsfld {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (staticBounds : ∀ binding ∈ source.staticBindings,
+      binding.2.allocation < mapping.sourceLimit)
+    (sourceBody targetBody : CIL.Method) (metadata : StepMetadata sourceBody targetBody)
+    (field : CIL.Extraction.FieldRef) (pc : Nat) (arguments stack : List Value) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (step sourceBody (.ldsfld field) pc arguments sourceFrame stack source)
+      (step targetBody (.ldsfld field) pc (arguments.map mapping.value) targetFrame
+        (stack.map mapping.value) target) := by
+  simp only [step_ldsfld_eq, staticLoad_metadata metadata]
+  apply (related.staticLoadResult staticBounds sourceBody pc).bind
+  intro first second result
+  rcases first with ⟨sourceAfter, value⟩
+  rcases second with ⟨targetAfter, targetValue⟩
+  rcases result with ⟨memories, rfl⟩
+  exact .ok (.next memories frames)
+#print axioms Memory.Renamed.stepLdsfld
+
+/-- A checked `ldsflda` or field `ldtoken` step extends the map only when the field's storage
+    is allocated. -/
+theorem Memory.Renamed.stepStaticAddress {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
+    (staticBounds : ∀ binding ∈ source.staticBindings,
+      binding.2.allocation < mapping.sourceLimit)
+    (sourceBody targetBody : CIL.Method) (metadata : StepMetadata sourceBody targetBody)
+    (operation : CIL.Instruction)
+    (addressed : ∀ body pc args frame stack memory,
+      step body operation pc args frame stack memory = do
+        let (memory, value) ← staticAddress body pc memory
+        return FrameAction.next (pc + 1) (value :: stack) frame memory)
+    (pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody operation pc arguments sourceFrame stack source)) :
+    ∃ later, mapping.Extends later ∧
+      ResultRenamed later (FrameAction.Renamed indices later scopes)
+        (step sourceBody operation pc arguments sourceFrame stack source)
+        (step targetBody operation pc (arguments.map mapping.value)
+          targetFrame (stack.map mapping.value) target) := by
+  simp only [addressed, staticAddress_metadata metadata] at observable ⊢
+  obtain ⟨later, extension, operations⟩ := related.staticAddressResult sourceFormed
+    targetFormed staticBounds sourceBody pc observable.bind_left
+  refine ⟨later, extension, ?_⟩
+  apply operations.bind
+  intro first second result
+  rcases first with ⟨sourceAfter, value⟩
+  rcases second with ⟨targetAfter, targetValue⟩
+  rcases result with ⟨memories, rfl⟩
+  rw [← extension.values stack bounds]
+  exact .ok (.next memories (frames.extend extension (fun _ _ scope => scope)))
+#print axioms Memory.Renamed.stepStaticAddress
 
 /-- Stack allocation faults are resource or memory failures, never named CLR exceptions. -/
 theorem allocateStack_not_thrown (memory : Memory) (frame : Frame) (size : Nat)

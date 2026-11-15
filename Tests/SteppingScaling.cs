@@ -57,7 +57,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
-    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false)
+    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false), ("statics", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -113,6 +113,7 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // length. The faulting body divides, takes a remainder, adds with an overflow check and converts
 // with one, each from the arguments, so each step reads a fact of constant size. The arguments body
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
+// The statics body loads one static field and pops it per cycle, each load read from one quantified fact.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".ldarg 0", ".ldarg 1", ".store64", ".ldarg 0", ".load64", ".pop"],
@@ -123,6 +124,7 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
     "loop" or "loopfacts" => ([".ldarg 0"], [".ldarg 1", ".add"], [".nop"]),
     "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".ldarg 0", $".stloc {slot}" })
         .ToArray(), [".ldloc 0", ".ret"]),
+    "statics" => ([], [".ldsfld staticField", ".pop"], [".ldsfld staticField", ".ret"]),
     "faulting" => ([], [".ldarg 0", ".ldarg 1", ".div", ".pop", ".ldarg 0", ".ldarg 1", ".rem", ".pop",
         ".ldarg 0", ".ldarg 1", ".add_ovf", ".pop", ".ldarg 0", ".conv_ovf .i4", ".pop"], [".ldarg 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
@@ -153,6 +155,10 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var parameterTypes = string.Join(", ", Enumerable.Repeat(Int32Type, parameters));
     var signature = $"{{ parameters := [{parameterTypes}], returnType := {Int32Type} }}";
     var declaredField = workload == "arguments" ? $" declared := {signature}," : "";
+    var staticField = workload == "statics"
+        ? "def staticField : CIL.Extraction.FieldRef := { owner := .atom \"Fixture\" \"Holder\", index := 0,\n" +
+            "  type := .atom \"Fixture\" \"System.Int32\", name := name!\"Value\" }\n"
+        : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
@@ -167,7 +173,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         open CIL.Safety
         set_option maxRecDepth 8192
         set_option maxHeartbeats 800000
-        /-- A synthetic body in the emitter's explicit instruction-list shape. -/
+        {{staticField}}/-- A synthetic body in the emitter's explicit instruction-list shape. -/
         def body : CIL.Method := {
           locals := [], returnsValue := true,{{declaredField}}
           code := [{{string.Join(",\n    ", operations)}}] }
@@ -297,6 +303,13 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   [.scalar (.i64 left), .scalar (.i64 right)] memory =
                   .ok (memory, [.scalar (.i64 left)]) := by
               cil_checked_steps [divided, reduced, added, converted]
+            """,
+        "statics" => $$"""
+            /-- Every static load reads its value through a fact of constant size and leaves memory unchanged. -/
+            theorem checked (memory : Memory) (bits : CIL.W32)
+                (loaded : ∀ pc, staticLoad body pc memory = .ok (memory, .scalar (.i32 bits))) :
+                invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 bits)]) := by
+              cil_checked_steps [loaded]
             """,
         "arguments" => $$"""
             /-- Each argument is read once and added to the running sum of the ones before it. -/

@@ -116,6 +116,12 @@ def ConvTarget.signed : ConvTarget → Bool
   | .i1 | .i2 | .i4 | .i8 | .i => true
   | .u1 | .u2 | .u4 | .u8 | .u => false
 
+/-- The metadata item an `ldtoken` names. A field token's runtime handle is modelled by the
+    reference to the field's read-only storage, which `createSpan` consumes. -/
+inductive TokenOperand where
+  | field (field : Extraction.FieldRef)
+  deriving DecidableEq, Repr
+
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
@@ -202,6 +208,15 @@ inductive Instruction where
   | feature (id : Feature)
   | intrinsic (operation : Intrinsic) (argc : Nat)
   | memory (operation : MemoryOp)
+  -- Static fields; the descriptor extraction bound to the instruction's pc holds the storage.
+  /-- `ldsfld`: the value of the static field `field`. -/
+  | ldsfld (field : Extraction.FieldRef)
+  /-- `ldsflda`: the address of the static field `field`, in read-only storage. -/
+  | ldsflda (field : Extraction.FieldRef)
+  /-- `stsfld`: a store to the static field `field`; no static is writable, so it faults. -/
+  | stsfld (field : Extraction.FieldRef)
+  /-- `ldtoken`: the runtime handle of the token `operand` names. -/
+  | ldtoken (operand : TokenOperand)
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
   | throw (exception : String)

@@ -173,18 +173,19 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
     change read result reference 8 1 = .ok descriptor.bytes at actual
     simpa only [contents] using actual
   have load := load_word64_of_read loaded
-  have addressed : staticInstruction Extracted.method0 0 (.staticAddress descriptor.bytes) [] memory =
-      .ok (result, [.reference (.address reference)]) := by
+  have addressed : staticAddress Extracted.method0 0 memory =
+      .ok (result, .reference (.address reference)) := by
     change (do
       let (updated, address) ← staticReference descriptor memory
-      pure (updated, [CIL.Safety.Value.reference (.address address)]) :
-      ExecutionResult (CIL.Safety.Memory × List CIL.Safety.Value)) = _
+      pure (updated, CIL.Safety.Value.reference (.address address)) :
+      ExecutionResult (CIL.Safety.Memory × CIL.Safety.Value)) = _
     rw [resolved]
     rfl
   let frame : Frame := { activation := memory.nextIdentity, locals := [], owned := [] }
-  have first : step Extracted.method0 (.memory (.staticAddress descriptor.bytes)) 0 [] frame [] memory =
+  have first : ∀ field, step Extracted.method0 (.ldsflda field) 0 [] frame [] memory =
       .ok (.next 1 [.reference (.address reference)] frame result) := by
-    rw [step_memory_eq, addressed]
+    intro field
+    rw [step_ldsflda_eq, addressed]
     rfl
   have second : step Extracted.method0 .load64 1 [] frame [.reference (.address reference)] result =
       .ok (.next 2 [.scalar (.i64 17)] frame result) := by
@@ -196,7 +197,7 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
   have preserved := staticReference_preserves_static_world _ _ _ _ _ formed world (by simp) resolved
   rw [same] at preserved
   apply WP.enter (body := Extracted.method0) (by rfl) (by rfl) (by rfl)
-  apply WP.step (by rfl) (by rfl) first
+  apply WP.step (by rfl) (by rfl) (first _)
   apply WP.step (by rfl) (by rfl) second
   apply WP.returned (by rfl) (by rfl) returned (by rfl)
   exact ⟨Confined.ofMemoryBelow (staticReference_preserves_memory_below _ _ _ _ resolved)

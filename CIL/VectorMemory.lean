@@ -157,9 +157,7 @@ inductive MemoryOp where
   | pointerTransfer (kind : TransferKind) (alignment : Nat) (store : Bool)
   | bitcastByteBool
   | bitcastValue (source target : SnapshotShape)
-  | staticAddress (bytes : List (BitVec 8)) | spanCreate | spanReference
-  /-- The value of a constructor-initialized readonly field; its address is never formed. -/
-  | staticValue (bytes : List (BitVec 8))
+  | spanCreate | spanReference
   /-- A span of `width`-byte elements over a whole static field; indexing is bounds checked. -/
   | createSpan (width : Nat) | spanItem (width : Nat) | spanLength
   /-- Primitive spans over supplied storage; these operations never grant memory authority. -/
@@ -246,8 +244,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .referenceArrayLoad => 2
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => 2
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _
-  | .spanEmpty .. => 0
+  | .nullRef | .nullObject | .stringLiteral _ | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue .. | .createSpan _
   | .spanReference | .spanLength | .isNullRef
   | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => 1
@@ -317,7 +314,6 @@ def evalMemory (op : MemoryOp) (stack : List Value) (memory : Memory) :
       return (memory, .ref (.static bytes (offset + index.toNat * width)) :: rest)
     else none
   | .spanLength, .span _ length :: rest => return (memory, .i32 (BitVec.ofNat 32 length) :: rest)
-  | .staticAddress bytes, _ => return (memory, .ref (.static bytes 0) :: stack)
   | .spanCreate, .i32 length :: .ref (.static bytes offset) :: rest =>
     if 0 ≤ length.toInt ∧ offset + length.toNat ≤ bytes.length then
       return (memory, .span (.static bytes offset) length.toNat :: rest)

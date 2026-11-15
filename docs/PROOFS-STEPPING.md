@@ -277,6 +277,14 @@ from a supplied fact such as `body.argumentAccess 0 = .value none`, and steps by
 its narrowing or the load of the home slot. An access that none of these decides leaves the match
 of `loadArgument` on `body.argumentAccess index`, which a later fact decides.
 
+A `.ldsfld field` step pushes the value `staticLoad body pc memory` returns, and `.ldsflda field`
+or `.ldtoken (.field field)` the reference `staticAddress body pc memory` returns
+([StepComposition](../CIL/Safety/StepComposition.lean)); `.stsfld` faults. Both read the
+descriptor `body.staticAt pc` binds to the pc, and the stepping tactics take their result from a
+supplied fact. `cil_resolution_facts` declares `methodN_staticAtPC : methodN.staticAt PC = some
+descriptor` for each static site, from which `staticLoad_initialized` or `staticAddress_resolved`
+([StaticMemoryLemmas](../CIL/Safety/StaticMemoryLemmas.lean)) states the fact.
+
 ### Consumer stepping regressions
 
 The public tactics handle store and load facts, branch conditions, memory operations, profile
@@ -588,7 +596,7 @@ type, so an unrelated context adds nothing to simp. It gathers:
 - the declarations in scope with the `cil_loop_unfold` simp attribute, which `bind_cutpoint`
   gives its state and `bind_entry` its frame and normalized result and memory;
 - equations, possibly quantified or conjoined, about `step`, `instruction`, `memoryInstruction`,
-  `staticInstruction`, `loadLocal`, `storeLocal`, `loadValue`, `storeValue`, `form`, `add` and
+  `staticInstruction`, `staticLoad`, `staticAddress`, `loadLocal`, `storeLocal`, `loadValue`, `storeValue`, `form`, `add` and
   the span `element`, `slice`, `validate`, `width` and `writable` checks;
 - for a [`CheckedSpan`](../CIL/Safety/SpanContents.lean), its `facts`, `length_nil` or
   `length_cons` when its values are `[]` or a cons, and, for each `LoopFrame` from its memory

@@ -55,13 +55,30 @@ theorem stepTransport : StepTransport := by
     case newObject.refl callee argc owner bases size =>
       exact memories.stepNewObject sourceFormed targetFormed staticBounds sourceBody targetBody
         callee argc owner bases size pc arguments stack bounds observable
+    case ldsfld.refl field =>
+      exact ⟨mapping, .refl mapping, memories.stepLdsfld frames staticBounds sourceBody
+        targetBody metadata field pc arguments stack⟩
+    case ldsflda.refl field =>
+      exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
+        targetBody metadata _ (fun _ _ _ _ _ _ => step_ldsflda_eq ..) pc arguments stack bounds
+        observable
+    case ldtoken.refl operand =>
+      cases operand
+      exact memories.stepStaticAddress frames sourceFormed targetFormed staticBounds sourceBody
+        targetBody metadata _ (fun _ _ _ _ _ _ => step_ldtoken_eq ..) pc arguments stack bounds
+        observable
+    case stsfld.refl field =>
+      refine ⟨mapping, .refl mapping, ?_⟩
+      dsimp only [LocalIndexMap.operation]
+      rw [step_stsfld_eq, step_stsfld_eq, mapping.unspecifiedOperands]
+      split <;> exact .error _
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
     | exact ⟨mapping, .refl mapping,
         frames.stepInitializeSpanLocal memories sourceFormed sourceBody targetBody _ pc _
           arguments stack bounds observable⟩
-    | exact memories.stepMemory frames sourceFormed targetFormed staticBounds sourceBody targetBody
-        metadata _ pc arguments stack bounds observable
+    | exact memories.stepMemory frames sourceFormed sourceBody targetBody _ pc arguments stack
+        bounds observable
     | exact memories.stepStackAlloc frames sourceFormed targetFormed staticBounds
         sourceBody targetBody _ pc arguments stack observable
     | exact memories.stepNewAggregate frames sourceFormed targetFormed staticBounds

@@ -516,8 +516,8 @@ a direct struct construction, described in that order below.
 
 `public static readonly Word256 One = 1ul;` compiles to
 `ldc.i4.1; conv.i8; call op_Implicit(ulong); stsfld One` in the static constructor. A reachable
-`ldsfld` of such a field emits `.staticValue bytes`, which pushes the field's value as an
-aggregate and touches no memory. The static constructor must store the field exactly once,
+`ldsfld` of such a field emits `.ldsfld field`, naming the field as its raw operand does, and
+pushes the value of the descriptor bound to its pc as an aggregate, touching no memory. The static constructor must store the field exactly once,
 unconditionally (no control flow before the store and no branch back to it). A helper-call
 initializer uses a same-assembly static call whose arguments are integer constants (`ldc.i4*`,
 `ldc.i8` with `conv.i4`/`conv.u4`/`conv.i8`/`conv.u8`/`conv.i`/`conv.u`). A field may instead
@@ -525,7 +525,7 @@ copy (`ldsfld G; stsfld F`) such a field stored earlier, as in `MinValue = Zero`
 method and its callees become part of the extracted program and must not access static fields.
 The static site records the call, and the extraction certificate reruns it in the checked
 interpreter;
-`Extracted.translation_valid` fails unless the result is exactly the emitted bytes.
+`Extracted.translation_valid` fails unless the result is exactly the descriptor's bytes.
 
 Primitive integer fields (including Boolean, Char and 64-bit native integers) and same-assembly
 integer enums also admit a direct integer literal, optionally widened with the supported integer

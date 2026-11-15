@@ -6,7 +6,7 @@ import CIL.Safety.GuardNormalization
 
 One `@[cil_step]` equation per `memoryInstruction` arm and operand shape, so a `.memory` step
 rewrites to that arm's body and never unfolds `staticInstruction` or `memoryInstruction`.
-The static-field arms keep `step_memory_eq`, which these outrank.
+The span constructors over static storage keep `step_memory_eq`, which these outrank.
 -/
 
 namespace CIL.Safety

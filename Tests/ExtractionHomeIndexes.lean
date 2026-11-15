@@ -60,9 +60,13 @@ def descriptor : StaticDescriptor := ⟨0, "Field", [0], none, some false, "", 1
 def load : RawInstruction :=
   ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") true⟩
 
+/-- The field `load` names. -/
+def loaded : FieldRef :=
+  { owner := .void, index := 0, type := .atom runtimeScope "System.Byte", name := name!"Field" }
+
 /-- An emitted scalar load with caller-provided static metadata. -/
 def body (sites : List (Nat × StaticDescriptor)) : Method := {
-  code := [.memory (.staticValue [0])], locals := [], returnsValue := false, staticSites := sites }
+  code := [.ldsfld loaded], locals := [], returnsValue := false, staticSites := sites }
 
 /-- Duplicate static sites use the first descriptor, rather than overwriting it. -/
 theorem first_static_wins :

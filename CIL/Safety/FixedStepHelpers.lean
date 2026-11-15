@@ -156,6 +156,7 @@ inductive FixedStepFamily where
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
+  | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference

@@ -43,7 +43,9 @@ example : ¬ UnsafeCallsValid [] (raw call) [true] [] := by decide +kernel
 -- `NullRef` must push the null reference: no other operation with its stack effect.
 example : UnsafeCallsValid [] (raw nullCall) [true] [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.ldc_i4 0] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory (.staticAddress [])] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw nullCall) [true]
+    [.ldsflda { owner := .void, index := 0, type := .void, name := name!"Field" }] := by
+  decide +kernel
 example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory .isNullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { nullCall with target := .external "forged" }) [true] [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { nullCall with parameterCount := 1 }) [true] [.memory .nullRef] := by decide +kernel
