@@ -39,6 +39,21 @@ theorem keysAscend_bound {α : Type} (entries : List (Nat × α)) (lower : Nat)
 
 #print axioms keysAscend_bound
 
+/-- A table ascending from `lower` ascends from any bound its first key reaches. -/
+theorem keysAscend_raise {α : Type} {entries : List (Nat × α)} {lower higher : Nat}
+    (ascending : keysAscend lower entries = true)
+    (raised : (entries.head?.all fun entry => decide (higher ≤ entry.1)) = true) :
+    keysAscend higher entries = true := by
+  cases entries with
+  | nil => rfl
+  | cons head rest =>
+    obtain ⟨key, value⟩ := head
+    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending ⊢
+    simp only [List.head?_cons, Option.all_some, decide_eq_true_eq] at raised
+    exact ⟨raised, ascending.2⟩
+
+#print axioms keysAscend_raise
+
 /-- The entry at a position of an ascending table is the first entry for its key. -/
 theorem find_entry_of_ascending (links : List (Nat × Link)) (lower : Nat)
     (ascending : keysAscend lower links = true) (position : Nat) (entry : Nat × Link)
@@ -256,11 +271,13 @@ theorem linkReads_eq (links : List (Nat × Link)) (queries : List Nat) :
 theorem keysAscend_lower {α : Type} (entries : List (Nat × α)) {lower higher : Nat}
     (below : lower ≤ higher) (ascending : keysAscend higher entries = true) :
     keysAscend lower entries = true := by
+  refine keysAscend_raise ascending ?_
   cases entries with
   | nil => rfl
   | cons head rest =>
-    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending ⊢
-    exact ⟨by omega, ascending.2⟩
+    have := keysAscend_bound _ higher ascending head (List.mem_cons_self ..)
+    simp only [List.head?_cons, Option.all_some, decide_eq_true_eq]
+    omega
 
 #print axioms keysAscend_lower
 
@@ -282,14 +299,10 @@ theorem linkLookup_cons_ne {key query : Nat} (link : Link) (rest : List (Nat × 
 /-- No pc below the bound of an ascending table has a link. -/
 theorem linkLookup_below {links : List (Nat × Link)} {lower query : Nat}
     (ascending : keysAscend lower links = true) (below : query < lower) :
-    linkLookup links query = none := by
-  have none_found : (links.find? fun entry => entry.1 == query) = none := by
-    rw [List.find?_eq_none]
-    intro entry member
+    linkLookup links query = none :=
+  linkLookup_of_unlisted fun entry member => by
     have := keysAscend_bound links lower ascending entry member
-    simp only [beq_iff_eq]
     omega
-  simp [linkLookup, none_found]
 
 #print axioms linkLookup_below
 
@@ -369,15 +382,6 @@ theorem keysAscend_linksOfCode (code : List Instruction) :
 
 #print axioms keysAscend_linksOfCode
 
-/-- The table a code list implies gives each pc the link of the instruction there. -/
-theorem linkLookup_linksOfCode (code : List Instruction) (pc : Nat) :
-    linkLookup (linksOfCode code) pc = (code[pc]?).bind Instruction.link? := by
-  simp only [linkLookup, linksOfCode_eq_zipIdx]
-  rw [linksOfCode_find code 0 pc]
-  simp
-
-#print axioms linkLookup_linksOfCode
-
 /-- Every key of the table a code list implies is a pc of that code. -/
 theorem linksOfCode_keys (code : List Instruction) :
     (linksOfCode code).all (fun entry => decide (entry.1 < code.length)) = true := by
@@ -412,13 +416,9 @@ theorem eq_linksOfCode_iff (links : List (Nat × Link)) (code : List Instruction
       rw [List.getElem?_eq_getElem inside] at read ⊢
       simpa using read
     · rw [List.getElem?_eq_none (by omega)]
-      have none_found : (links.find? fun entry => entry.1 == query) = none := by
-        rw [List.find?_eq_none]
-        intro entry member
+      exact linkLookup_of_unlisted fun entry member => by
         have := of_decide_eq_true (List.all_eq_true.mp bounded entry member)
-        simp only [beq_iff_eq]
         omega
-      simp [linkLookup, none_found]
   · intro implied
     subst implied
     apply List.ext_getElem (by simp)
