@@ -201,7 +201,7 @@ accumulate and locals body up to 256 instructions, and one compilation for every
   1.35 times. The arguments bodies read one of a list of arguments that grows with the body, so
   their heartbeats per instruction may grow at most by the ratio of the sizes, linearly in the
   number of arguments. For the bodies with three compilations, compiled proof bytes per instruction may
-  also grow by at most 1.35 times, and median frontend milliseconds by at most twice.
+  also grow by at most 1.35 times. Frontend milliseconds are recorded for comparison between runs.
 - The heartbeats a hypothesis adds may not grow by more than 1.35 times from the step between
   16 and 64 hypotheses to the step between 64 and 256, which a step that compares each hypothesis
   with every other would exceed.

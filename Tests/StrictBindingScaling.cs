@@ -67,7 +67,8 @@ partial class Program
         var costs = cases.Zip(heartbeats, (item, count) => $"{item.Name} {count} heartbeats");
         Console.WriteLine("Body checks: " + string.Join(", ", costs));
         double Above(int index) => heartbeats[index] - heartbeats[0];
-        if (Above(1) <= 0) throw new InvalidOperationException("The body check has no measured work above the fixture");
+        if (Above(1) <= 0)
+            throw new InvalidOperationException("The body check has no measured work above the fixture");
         var perClaim = Above(3) / largerClaims / (Above(1) / smaller);
         var perImage = Above(2) / Above(1);
         if (perClaim > MaximumPerClaimGrowth || perImage > MaximumImageGrowth)

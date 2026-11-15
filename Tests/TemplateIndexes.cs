@@ -238,30 +238,43 @@ if (!Differing("Frame", FrameOf(false), [".ret"], FrameOf(true), [".ret"])
     throw new Exception("Profiles that differ in frame, length or an unflagged instruction were merged");
 Console.WriteLine("PASS template merge rejects differing frames, lengths and unflagged instructions");
 
-// The template merge and renderer are linear in a method's instructions: four times the code must cost far less
-// than the sixteen times a quadratic pass over it would.
-TimeSpan EmitTime(int length)
+// At 64x instructions, a quadratic merge or renderer costs 4096x, above the 256x bound.
+TimeSpan EmitTime(int length, ref int iterations, bool calibrate)
 {
     var scaleRoot = Path.Combine(root, "Scale" + length);
     var (one, two) = (Path.Combine(scaleRoot, "First"), Path.Combine(scaleRoot, "Second"));
-    string[] ops = [.. Enumerable.Repeat(".nop", length), ".ret"];
+    string[] ops = [.. Enumerable.Repeat(".nop", length - 1), ".ret"];
     variants[one] = Variant(one, false, [Method("Long", ops)]);
     variants[two] = Variant(two, true, [Method("Long", ops)]);
-    var best = TimeSpan.MaxValue;
-    for (var attempt = 0; attempt < 3; attempt++)
+    TimeSpan Measure(int repeats)
     {
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        run.Invoke(null, [(string[])[Path.Combine(scaleRoot, "Out" + attempt), one, two], read]);
-        best = TimeSpan.FromTicks(Math.Min(best.Ticks, clock.Elapsed.Ticks));
+        var best = TimeSpan.MaxValue;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            for (var iteration = 0; iteration < repeats; iteration++)
+                run.Invoke(null, [(string[])[Path.Combine(scaleRoot, "Out" + attempt), one, two], read]);
+            best = TimeSpan.FromTicks(Math.Min(best.Ticks, clock.Elapsed.Ticks));
+        }
+        return best;
     }
-    return best;
+    var elapsed = Measure(iterations);
+    const double minimumMilliseconds = 25;
+    while (calibrate && elapsed.TotalMilliseconds < minimumMilliseconds)
+    {
+        iterations = checked(iterations * 2);
+        elapsed = Measure(iterations);
+    }
+    return elapsed;
 }
-var (small, large) = (EmitTime(20_000), EmitTime(80_000));
-if (large.TotalMilliseconds > 8 * Math.Max(small.TotalMilliseconds, 5))
-    throw new Exception($"Template emission grew faster than linearly: {small.TotalMilliseconds:F0} ms for 20000 " +
+var iterations = 1;
+var small = EmitTime(1_250, ref iterations, calibrate: true);
+var large = EmitTime(80_000, ref iterations, calibrate: false);
+if (large.TotalMilliseconds > 256 * small.TotalMilliseconds)
+    throw new Exception($"Template emission grew faster than linearly: {small.TotalMilliseconds:F0} ms for 1250 " +
         $"instructions, {large.TotalMilliseconds:F0} ms for 80000");
 Console.WriteLine("PASS template emission is linear in the instructions " +
-    $"({small.TotalMilliseconds:F0} ms, {large.TotalMilliseconds:F0} ms)");
+    $"({small.TotalMilliseconds:F0} ms, {large.TotalMilliseconds:F0} ms for {iterations} emissions)");
 
 partial class Program
 {
