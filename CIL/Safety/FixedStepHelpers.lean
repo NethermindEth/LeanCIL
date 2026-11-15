@@ -291,10 +291,10 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     split at observable
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
     -- ones; `fixed_fallback` reads the table-offset exclusions, and the faulting and argument home
-    -- ones are cleared.
+    -- ones are cleared. `split` states the `ldarga` exclusion first, as its arm ignores the stack.
     all_goals try (
-      rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
-        mulOvfUn div divUn rem remUn convOvf convOvfUn storeHome addressHome
+      rename_i addressHome offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn
+        mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn storeHome
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
