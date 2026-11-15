@@ -22,6 +22,11 @@ if (args.Contains("--decode-only", StringComparer.Ordinal))
     DecodeCosts();
     return;
 }
+if (args.Contains("--method-decode-only", StringComparer.Ordinal))
+{
+    MethodDecodeCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -35,6 +40,7 @@ ReturnResolutionCosts();
 ArgumentResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 DecodeCosts();
+MethodDecodeCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
@@ -394,6 +400,73 @@ void DecodeCosts()
             $"Decoding raw value opcodes costs {measured} heartbeats per instruction; the limit is " +
             $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
     Console.WriteLine($"PASS decoding raw value opcodes costs {measured} heartbeats per instruction");
+}
+
+// The heartbeats `decide +kernel` adds to deciding that `Method.ofRaw?` of a value-only body of 500, 2000 and 8000
+// instructions with four locals gives the emitted code, the initialized locals and no homes or links. Each
+// instruction is decoded and instantiated once, so four times the instructions may cost at most
+// `AllowedLocalGrowth` more per instruction.
+void MethodDecodeCosts()
+{
+    var decodeDirectory = At("artifacts/LookupScaling/DecodedMethod");
+    Directory.CreateDirectory(decodeDirectory);
+    const int SegmentLength = 10;
+    var samples = new List<(int Instructions, long Cost)>();
+    foreach (var instructions in new[] { 500, 2000, 8000 })
+    {
+        var path = Path.Combine(decodeDirectory, $"Instructions{instructions}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.DecodedMethod
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            {{KernelCostCommand}}
+            namespace DecodedMethodCost
+            /-- The raw instructions of one segment: short and long constants, locals, arithmetic, a checked
+                conversion, a branch, a four-target switch and a return. -/
+            def segment (index : Nat) : List RawInstruction :=
+              let start := {{SegmentLength}} * index
+              [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
+                ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
+                ⟨start + 4, 6, .none⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+                ⟨start + 7, 58, .target index⟩,
+                ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
+            /-- The instructions the translator emits for one segment. -/
+            def codeSegment (index : Nat) : List Instruction :=
+              [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
+                .ldloc (index % 4), .stloc (index % 4), .ldloc 0, .add, .conv_ovf_un .i1, .brtrue index,
+                .switch [index, index + 1, index + 2, index + 3], .ret]
+            /-- The {{instructions}} emitted instructions of the body. -/
+            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+            /-- A static method with four zero-initialized `uint32` locals and {{instructions}} raw instructions. -/
+            def source : RawMethod :=
+              { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
+                attributes := 0, implementation := 0, returnType := .void, parameters := [],
+                locals := List.replicate 4 (.atom runtimeScope "System.UInt32"), initLocals := true,
+                maxStack := 8, genericParameters := [],
+                code := (List.range {{instructions / SegmentLength}}).flatMap segment }
+            #kernel_cost "decoded method {{instructions}}"
+              (Method.ofRaw? .scalar {} source []).any (fun method =>
+                method.code.length == {{instructions}} &&
+                  (method.code.zip code).all (fun pair => pair.1.sameValue pair.2) &&
+                  method.locals == List.replicate 4 (.i32 0) && method.parameterHomes.isEmpty &&
+                  method.links.isEmpty) = true
+            end DecodedMethodCost
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var cost = LookupPatterns.DecodedMethod().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the decoded method cost:\n{output}");
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions}")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+        throw new InvalidOperationException(
+            $"Decoding a method costs {measured} heartbeats per instruction; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
+    Console.WriteLine($"PASS decoding a method costs {measured} heartbeats per instruction");
 }
 
 // The heartbeats `decide +kernel` adds to one `add` of an int32 offset to a native method table of 16, 64 and 256
@@ -1483,4 +1556,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"decode [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex ValueDecoding();
+
+    [GeneratedRegex(@"decoded method [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex DecodedMethod();
 }
