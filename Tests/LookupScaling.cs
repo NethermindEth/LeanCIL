@@ -821,7 +821,7 @@ void ModelTableCosts()
     if (lookups[1] > lookups[0] * AllowedModelLookupGrowth)
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
             $"A model lookup costs {lookupMeasure} heartbeats; the limit is {AllowedModelLookupGrowth} times " +
-            "the cost in the smaller table."));
+            $"the cost in the smaller table."));
     Console.WriteLine($"PASS a model lookup costs {lookupMeasure} heartbeats");
     double PerSite(int count) => (double)costs[("agreement", count)] / count;
     var agreementMeasure = string.Join(", ", siteCounts.Select(count =>
@@ -829,7 +829,7 @@ void ModelTableCosts()
     if (!siteCounts.Zip(siteCounts.Skip(1)).All(pair => PerSite(pair.Second) <= PerSite(pair.First) * AllowedGrowth))
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
             $"The model agreement check costs {agreementMeasure} heartbeats; per site, the limit is {AllowedGrowth} " +
-            "times the cost at the smaller count."));
+            $"times the cost at the smaller count."));
     Console.WriteLine($"PASS the model agreement check costs {agreementMeasure} heartbeats");
 }
 
