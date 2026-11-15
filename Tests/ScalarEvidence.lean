@@ -668,7 +668,8 @@ private theorem tuple_result_cases :
 
 #print axioms tuple_result_cases
 
-private def tupleFieldRaw := raw [i 2, i 123 (.field tupleType 0 word false), i 42] [.byref tupleType]
+private def tupleFieldRaw :=
+  raw [i 2, i 123 (.field tupleType 0 word name!"Item1" false), i 42] [.byref tupleType]
 /-- Tuple field loads preserve the declared scalar result kind. -/
 private theorem tuple_field_cases :
     (ScalarFlowValid #[] tupleFieldRaw [unknown 0, unknown 1, unknown 1] [some [], some
@@ -1010,8 +1011,9 @@ example : ¬ ScalarFlowValid #[] (pushHoleRaw 35) pushHoleFeatures pushHoleState
 
 /-- A class with a field at raw index 1, read by `ldarg.0; ldfld; ret`. -/
 private def account : TypeExpr := .object "Scope" "Scope.Account"
-private def fieldRaw : RawMethod := { raw [i 2, i 123 (.field account 1 word false), i 42] [account] with
-  maxStack := 1 }
+private def fieldRaw : RawMethod :=
+  { raw [i 2, i 123 (.field account 1 word name!"balance" false), i 42] [account] with
+    maxStack := 1 }
 private def fieldFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
 private def fieldStates : ScalarCertificate := [some [], some [.object], some [.word64]]
 private def fieldCode (operation : MemoryOp) : List Instruction :=
@@ -1028,7 +1030,9 @@ example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
 
 /-- A class-typed field at raw index 1 of `Scope.Node`, holding another node. -/
 private def node : TypeExpr := .object "Scope" "Scope.Node"
-private def nextField : RawOperand := .field node 1 node false
+private def nextField : RawOperand := .field node 1 node name!"next" false
+/-- A scalar field at raw index 0 of `Scope.Node`. -/
+private def valueField : RawOperand := .field node 0 word name!"value" false
 private def nextRaw : RawMethod :=
   { raw [i 2, i 123 nextField, i 42] [node] with returnType := node, maxStack := 1 }
 private def nextStates : ScalarCertificate := [some [], some [.object], some [.object]]
@@ -1042,7 +1046,7 @@ example : ¬ ScalarFlowValid #[] nextRaw fieldFeatures nextStates
     (fieldCode (.objectReferenceField account 8)) := by decide
 example : scalarEmissionMatches #[] none (i 123 nextField) [.object]
     (.memory (.objectField node 8 8 false)) = false := by decide
-example : scalarEmissionMatches #[] none (i 123 (.field node 0 word false)) [.object]
+example : scalarEmissionMatches #[] none (i 123 valueField) [.object]
     (.memory (.objectReferenceField node 0)) = false := by decide
 -- A store takes an object or null as its value, and only as a slot store.
 example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
@@ -1053,22 +1057,23 @@ example : scalarEmissionMatches #[] none (i 125 nextField) [.word64, .object]
     (.memory (.setObjectReferenceField node 8)) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
     (.memory (.setObjectField node 8 8)) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 (.field node 0 word false)) [.word64, .object]
+example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .object]
     (.memory (.setObjectReferenceField node 0)) = false := by decide
 -- A field typed as an array of a class holds the array's reference in its slot; a value array
 -- field is never a reference slot.
-private def itemsField : RawOperand := .field node 1 (.array node) false
+private def itemsField : RawOperand := .field node 1 (.array node) name!"items" false
+/-- A value-array field at raw index 1 of `Scope.Node`. -/
+private def samplesField : RawOperand := .field node 1 (.array word) name!"samples" false
 example : scalarEmissionMatches #[] none (i 123 itemsField) [.object]
     (.memory (.objectReferenceField node 8)) = true := by decide
 example : scalarEmissionMatches #[] none (i 125 itemsField) [.nullObject, .object]
     (.memory (.setObjectReferenceField node 8)) = true := by decide
-example : scalarEmissionMatches #[] none (i 123 (.field node 1 (.array word) false)) [.object]
+example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
     (.memory (.objectReferenceField node 8)) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 (.field node 1 (.array word) false))
+example : scalarEmissionMatches #[] none (i 125 samplesField)
     [.object, .object] (.memory (.setObjectReferenceField node 8)) = false := by decide
 -- A value-array field is an array slot of the field's element type; it stores only an array
 -- of that element, and a class-array field is never one.
-private def samplesField : RawOperand := .field node 1 (.array word) false
 example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
     (.memory (.arrayField node 8 .unsigned64)) = true := by decide
 example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]

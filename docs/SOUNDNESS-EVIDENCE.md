@@ -179,7 +179,7 @@ What `MetadataResolution` and `MetadataBinding` check:
   checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
   for a type, and Lean accepts the choices that name the same scoped type with a form its kind
   allows. A field of a platform ``ValueTuple`2`` reads as the pair's first or second item only when
-  the pair's own `TypeRef` is scoped by a core-library assembly. A field's index and static flag,
+  the pair's own `TypeRef` is scoped by a core-library assembly. A field's name, index and static flag,
   the generic arguments of a type or method instantiation,
   the parameter and return types after substitution, the definition a member reference resolves to
   in a pinned assembly (its name, its signature and its place in its type's members) and the

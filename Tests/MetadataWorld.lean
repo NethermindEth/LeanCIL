@@ -228,7 +228,7 @@ def idSite : CallSite :=
 
 /-- The count and total fields of `T.Program`. -/
 def countOperand : RawOperand := .field (.atom "T, Version=1.0.0.0, Culture=neutral, \
-  PublicKeyToken=null" "Program") 0 int32 false
+  PublicKeyToken=null" "Program") 0 int32 name!"count" false
 
 /-- The identity of the assembly `T`. -/
 def ownIdentity : String :=

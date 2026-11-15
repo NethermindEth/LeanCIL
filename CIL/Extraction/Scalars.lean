@@ -400,7 +400,7 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
 /-- An instance field instruction on a class, or an emitted class field operation. -/
 private def objectFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
-    | .field (.object _ _) _ _ false => true
+    | .field (.object _ _) _ _ _ false => true
     | _ => false) ||
   match emitted with
   | .memory (.objectField ..) | .memory (.setObjectField ..)
@@ -423,29 +423,29 @@ private def fieldElementMatches (declared emitted : ArrayElement) : Bool :=
 private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Instruction) : Bool :=
   match instruction.opcode, instruction.operand, stack, emitted with
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.objectField owner offset width signed) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && objectFieldShape type == some (width, signed)
-  | 125, .field (.object scope name) index type false, _ :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, _ :: receiver :: _,
       .memory (.setObjectField owner offset width) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.objectReferenceField owner offset) =>
     referenceFieldType type && receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
-  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, value :: receiver :: _,
       .memory (.setObjectReferenceField owner offset) =>
     referenceFieldType type && value ∈ [.object, .nullObject] &&
       receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.arrayField owner offset element) =>
     (valueArrayFieldElement type).any (fieldElementMatches · element) &&
       receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
-  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, value :: receiver :: _,
       .memory (.setArrayField owner offset element) =>
     (valueArrayFieldElement type).any (fun declared =>
       fieldElementMatches declared element && value == .array declared) &&
@@ -806,7 +806,7 @@ private def pushedKind (raw : RawMethod)
     else if instruction.opcode ∈ [124, 127] then some .reference
     -- `ldfld` and `ldsfld`, then `ldobj`.
     else if instruction.opcode == 123 || instruction.opcode == 126 then
-      let .field _ _ type _ := instruction.operand | none
+      let .field _ _ type _ _ := instruction.operand | none
       return scalarType type
     else if instruction.opcode == 113 then
       let .type type := instruction.operand | none
