@@ -201,15 +201,18 @@ def misstatedField : FieldRef :=
   { owner := pair, index := 1, type := uint32, name := name!"misstated" }
 
 -- The kernel refuses a fact whose shape differs from the resolver's, so no fact rests on the
--- compiled evaluation that proposes its shape.
+-- compiled evaluation that proposes its shape. The attempt leaves no declaration behind.
 open Lean Meta Elab in
 set_option Elab.async false in
 run_cmd Command.liftTermElabM do
   let misstate : Expr → MetaM Expr := fun _ => pure (toExpr (FieldShape.value 4 2 true))
-  let refused ← try
+  let refused ← withoutModifyingEnv do
+    try
       Safety.ResolutionFacts.declareShapeFact .field ``environment ``misstatedField misstate
       pure false
     catch error => pure (((← error.toMessageData.toString).splitOn "(kernel)").length > 1)
   unless refused do throwError "the kernel did not refuse a misstated shape fact"
+  if (← getEnv).contains `Tests.FieldShape.misstatedField_shape then
+    throwError "a refused shape fact stayed in the environment"
 
 end Tests.FieldShape

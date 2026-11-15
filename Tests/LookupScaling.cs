@@ -330,10 +330,9 @@ void ArgumentResolutionCosts()
 }
 
 // Fails when the shape facts or reads of distinct operands cost over 1.35 times more per operand than at the size
-// before: fields of one struct up to 128, and fields and value types of a struct each from 32 to 512, read by a
+// before: fields of one struct up to 128, and fields and value types of a struct each up to 512, read by a
 // 512-instruction body. A fact that walks the layouts to its struct costs 1.7 times as much per operand at 512 as
-// at 128; one read from the suffix starting its block costs the same at every size of at least two blocks.
-// Every row is measured before the first failure is reported.
+// at 128 for fields and 3.2 times for value types. Every row is measured before the first failure is reported.
 void ShapeResolutionCosts()
 {
     const double AllowedShapeGrowth = 1.35;
@@ -342,8 +341,8 @@ void ShapeResolutionCosts()
     (string Name, string Label, int[] Sizes, bool Spread, bool Value)[] rows =
     [
         ("Struct", "field shape {0} with every field in one struct", [8, 32, 128], false, false),
-        ("Spread", "field shape {0} with each field in its own struct", [32, 128, 512], true, false),
-        ("Value", "value shape {0} with each type a struct of its own", [32, 128, 512], true, true),
+        ("Spread", "field shape {0} with each field in its own struct", [8, 32, 128, 512], true, false),
+        ("Value", "value shape {0} with each type a struct of its own", [8, 32, 128, 512], true, true),
     ];
     var failures = new List<string>();
     foreach (var row in rows)
