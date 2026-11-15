@@ -80,16 +80,12 @@ entries exceeds 1.15 times the cost at 16, or when the last entry's cost beyond 
 divided by its index, does. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
 
-The suite also measures `decide +kernel` on two metadata name computations, for names of 20, 80
-and 320 bytes that share all but their last byte, less the same statements closed with `sorry`.
-The name clause of the call and field operand checks, `MetadataName.spells`, reads the name's
-code back into bytes: about 41,300, 151,400 and 589,600 heartbeats, or 2,070, 1,890 and 1,840 per
-byte. `MetadataName.ofBytes?`, the encoder `MetadataName.spells_iff` states that clause by, reads
-one byte per kernel step from a leading one: about 13,500, 35,100 and 119,300
-heartbeats, or 670, 440 and 370 per byte. An encoder that indexes an array literal, which the
-kernel holds as a list, reads byte i in i steps and costs 143,500, 1,746,500 and 26,147,700. The
-suite fails when either cost per byte grows more than 1.15 times from one length to the next. Run
-this row alone with `dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
+The suite also measures `decide +kernel` on the name clause of the call and field operand checks,
+`MetadataName.spells`, for names of 20, 80 and 320 bytes that share all but their last byte, less
+the same statements closed with `sorry`. The clause reads the name's code back into bytes: about
+41,300, 151,400 and 589,600 heartbeats, or 2,070, 1,890 and 1,840 per byte. The suite fails when
+the cost per byte grows more than 1.15 times from one length to the next. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
 
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
 `calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
