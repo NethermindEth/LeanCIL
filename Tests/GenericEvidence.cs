@@ -298,7 +298,9 @@ const string word = "Extraction.runtimeScope \"System.UInt64\"";
 RejectDeclared(0, "wrong-declared-parameter", "method0", line =>
     line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]"));
 RejectDeclared(0, "wrong-declared-return", "method0", line =>
-    line.Replace($"returnType := .atom {word} }}", $"returnType := .atom {word.Replace("UInt64", "UInt32")} }}"));
+    line.Replace($"returnType := .atom {word}, initLocals := false }}",
+        $"returnType := .atom {word.Replace("UInt64", "UInt32")}, initLocals := false }}"));
+RejectDeclared(0, "wrong-declared-init-flag", "method0", line => line.Replace(", initLocals := false }", " }"));
 RejectDeclared(14, "missing-declared-receiver", "method1", line =>
     line.Replace("receiver := some .reference, ", ""));
 RejectDeclared(14, "wrong-declared-receiver-kind", "method1", line =>
