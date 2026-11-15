@@ -92,6 +92,7 @@ public static class Application
     public static ulong RunGenericOn(ulong x) => Run<GenericOn<uint>>(x);
     public static ulong RunAppGenericOff(ulong x) => Run<AppGenericOff<uint>>(x);
     public static ulong ScaledGenericPlain(ulong x) => Scaled<GenericPlain<uint>>(x);
+    public static string Text() => "carried user string";
 }
 // App structs and interfaces built on Lib's interfaces: dispatch reads both pinned assemblies.
 public struct AppScale : IScale { public static ulong Scale(ulong x) => x + 9; }
@@ -467,7 +468,8 @@ CheckBindingDecoding(Path.Combine(root, "binding"));
 // The slices the extractor carries for every method of the fixture and of both assembly pairs.
 string strictFixture = Path.Combine(root, "StrictFixture.dll");
 File.WriteAllBytes(strictFixture, StrictBindingFacts.ReadImage(File.ReadAllText(Fixture)));
-CheckExtractedSlices(Path.Combine(root, "binding-slices"), (strictFixture, []), (app, [lib]), (lib, []),
+CheckExtractedSlices(Path.Combine(root, "binding-slices"), FixturePackage(),
+    (strictFixture, []), (app, [lib]), (lib, []),
     (generic.App, [generic.Lib]), (generic.Lib, []));
 CheckBindingScaling(Path.Combine(root, "binding-scaling"));
 CheckDeepBinding(root, cli, Artifact("Direct"), app, lib, libName, Verify(Artifact("Direct")));
