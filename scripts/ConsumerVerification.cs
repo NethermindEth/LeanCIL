@@ -1467,7 +1467,7 @@ partial class Program
             return inputs;
         }
         foreach (var i in all)
-            try { proofs[i] = Within(root, Path.GetRelativePath(root, Path.GetFullPath(requests[i].Proof))); }
+            try { proofs[i] = Within(root, AbsolutePath(requests[i].Proof)); }
             catch (Exception error) { Fail([i], error); }
         // Only the last request for an output may leave a certificate, as in sequential runs. Spellings that may name
         // one output, through a link or in another case where case is ignored or unknown, can only lose one.
@@ -1774,12 +1774,9 @@ partial class Program
                 var packageRoots = dependencies.Where(dependency => dependency.Name != "leancil")
                     .Select(dependency => Within(session, Path.GetRelativePath(root, dependency.Source)))
                     .Prepend(session);
-                var pathComparison = OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                // Lake lists source directories with links followed, so the session holds them by location.
                 RequireConsumerDeepNamespaces(ConsumerSourceDirectories(session, packageRoots)
-                    .Where(directory => !directory.Equals(frameworkCopy, pathComparison) &&
-                        (directory.Equals(session, pathComparison) ||
-                         directory.StartsWith(session + Path.DirectorySeparatorChar, pathComparison))));
+                    .Where(directory => !SameLocation(directory, frameworkCopy) && Inside(session, directory)));
             }
             foreach (var member in members) outcomes[member].Sources = prepared.Sources;
             var generatedInputPaths = prepared.Copied.Keys.Where(path =>
