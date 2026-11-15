@@ -535,7 +535,8 @@ initializer and this proof before the remaining declarations. It admits valid sc
 aggregate values, null managed slots and unmodeled values. Private initialized
 homes are written outside the entire mapped allocation image, preserving caller bytes and
 permissions. `MethodRenaming` checks the target code's relocated local operands; method indices,
-call targets, profiles, return metadata and static sites stay exact. `ProgramRenaming` supplies this
+call targets, profiles, return metadata, layout environments and static sites stay exact.
+`ProgramRenaming` supplies this
 correspondence for every source method. The target is the extraction with the additional dead
 declarations.
 

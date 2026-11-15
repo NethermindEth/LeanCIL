@@ -20,6 +20,8 @@ structure StepMetadata (source target : CIL.Method) : Prop where
   /-- Both bodies read every argument from the incoming list, narrowed alike. -/
   arguments : ∀ index, ∃ narrow, source.argumentAccess index = .value narrow ∧
     target.argumentAccess index = .value narrow
+  /-- Both bodies resolve types and layouts in the same environment. -/
+  environment : target.environment = source.environment
 
 /-- One observable checked step transports frames, values and fresh allocation correspondence. -/
 def StepTransport : Prop :=

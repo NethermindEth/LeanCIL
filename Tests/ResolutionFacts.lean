@@ -300,6 +300,33 @@ theorem differing_narrowing_rejected : ¬ CIL.Safety.StepMetadata primitive enum
   cases mismatch
 #print axioms differing_narrowing_rejected
 
+/-- A body without code under the empty layout environment. -/
+def emptyEnvironment : Method := { code := [], locals := [], returnsValue := false }
+
+/-- The same body under an environment that holds one struct layout. -/
+def pointEnvironment : Method :=
+  { emptyEnvironment with environment := { rawLayouts := [pointLayout] } }
+
+/-- The bodies agree on every metadata field apart from their layout environments. -/
+theorem matching_environment_independent_metadata :
+    pointEnvironment.profile = emptyEnvironment.profile /\
+    pointEnvironment.returnsValue = emptyEnvironment.returnsValue /\
+    pointEnvironment.staticSites = emptyEnvironment.staticSites /\
+    pointEnvironment.returnNarrow = emptyEnvironment.returnNarrow /\
+    (forall index, exists narrow, emptyEnvironment.argumentAccess index = .value narrow /\
+      pointEnvironment.argumentAccess index = .value narrow) :=
+  And.intro rfl (And.intro rfl (And.intro rfl (And.intro rfl
+    (fun _ => Exists.intro _ (And.intro rfl rfl)))))
+#print axioms matching_environment_independent_metadata
+
+/-- Differing layout environments prevent metadata transport, since a step may read a layout. -/
+theorem differing_environment_rejected :
+    Not (CIL.Safety.StepMetadata emptyEnvironment pointEnvironment) := by
+  intro metadata
+  have mismatch := congrArg LayoutEnvironment.rawLayouts metadata.environment
+  cases mismatch
+#print axioms differing_environment_rejected
+
 /-- Signature and environment evidence suffice without an instruction-shaped hypothesis. -/
 theorem shape_narrowing {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {closed : RawMethod} {method : Method}
