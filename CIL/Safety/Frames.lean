@@ -259,7 +259,8 @@ def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m
     | .unmodeled => .ok (.methodPointer signature none, [], m)
     | _ => .error .invalidState
   | .methodTable signature => match initial with
-    | .nullRef => .ok (.methodTable signature (some { signature, targets := none, entryCount := 0 }), [], m)
+    | .nullRef =>
+      .ok (.methodTable signature (some { signature, targets := none, entryCount := 0 }), [], m)
     | .unmodeled => .ok (.methodTable signature none, [], m)
     | _ => .error .invalidState
   | .array element => match initial with

@@ -168,7 +168,8 @@ theorem native_add_storage :
       tableFault .unsupportedLayout ∧
     addStep [.scalar (.i64 8), .methodTable { opaqueTable with backing := none }] =
       tableFault .invalidReference ∧
-    addStep [.scalar (.i64 8), .methodTable { opaqueTable with targets := none, counted := nofun }] =
+    addStep [.scalar (.i64 8),
+        .methodTable { opaqueTable with targets := none, counted := nofun }] =
       tableFault .nullDereference ∧
     addStep [.scalar (.i64 8), .methodTable opaqueTable] { memory with staticBindings := [] } =
       tableFault .missingAllocation ∧

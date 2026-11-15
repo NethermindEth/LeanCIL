@@ -95,7 +95,8 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         var owner = module.Assembly.Name.FullName + "::Examples.ManagedDispatch";
         string Identity(uint token) => $"⟨{System.Text.Json.JsonSerializer.Serialize(owner)}, {token}, []⟩";
         string Table(params string[] targets) =>
-            $".methodTable ⟨dispatchSignature, some #[{string.Join(", ", targets)}], none, {targets.Length}, by decide⟩";
+            $".methodTable ⟨dispatchSignature, some #[{string.Join(", ", targets)}], none, " +
+            $"{targets.Length}, by decide⟩";
         var table = Table(Identity(repeat), Identity(raise));
         string Args(string view, int index, int value) => $"{view}, .scalar (.i32 {index}), .scalar (.i32 {value})";
         claims.Add($"({RunCase(Args(table, 0, 3))}).map Prod.snd = .ok [.scalar (.i32 17)]");

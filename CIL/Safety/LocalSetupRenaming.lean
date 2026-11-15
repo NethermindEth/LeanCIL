@@ -295,8 +295,8 @@ theorem Memory.Renamed.skipLocalInitialized {mapping : AllocationRenaming}
       .refl mapping, rfl, related, by simp⟩
   | methodTable signature =>
     cases initial <;> simp [InitializerFits] at fits unknown
-    exact ⟨mapping, .methodTable signature (some { signature, targets := none, entryCount := 0 }), [], target,
-      .refl mapping, rfl, related, by simp⟩
+    exact ⟨mapping, .methodTable signature (some { signature, targets := none, entryCount := 0 }),
+      [], target, .refl mapping, rfl, related, by simp⟩
   | reference =>
     cases initial <;> simp [InitializerFits] at fits unknown
     refine ⟨mapping, .root (some .null), [], target, .refl mapping, rfl, related, ?_⟩
