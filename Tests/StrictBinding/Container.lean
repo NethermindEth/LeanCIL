@@ -85,6 +85,71 @@ theorem rejects_row_counts_past_the_stream :
   decide +kernel
 #print axioms rejects_row_counts_past_the_stream
 
+/-! ## Metadata version length -/
+
+/-- The bytes of the unchanged fixture. -/
+private def fixtureBytes : List Nat :=
+  match ImageView.ofImage StrictFixture.image >>= (·.bytes 0 StrictFixture.image.length) with
+  | .ok bytes => bytes
+  | .error _ => []
+
+/-- The little-endian value of `width` bytes at `offset`. -/
+private def readLittle (bytes : List Nat) (offset width : Nat) : Nat :=
+  (List.range width).foldl
+    (fun value index => value + bytes.getD (offset + index) 0 * 256 ^ index) 0
+
+/-- The bytes with `width` bytes at `offset` replaced by the little-endian `value`. -/
+private def writeLittle (bytes : List Nat) (offset width value : Nat) : List Nat :=
+  (List.range width).foldl
+    (fun bytes index => bytes.set (offset + index) (value / 256 ^ index % 256)) bytes
+
+/-- The stream headers from `header` with `extra` added to each stream offset; a header is eight
+    bytes and a name padded to four. -/
+private def shiftStreams (extra : Nat) : Nat → Nat → List Nat → List Nat
+  | 0, _, bytes => bytes
+  | count + 1, header, bytes =>
+    let nameLength := ((bytes.drop (header + 8)).takeWhile (· != 0)).length
+    let shifted := writeLittle bytes header 4 (readLittle bytes header 4 + extra)
+    shiftStreams extra count (header + 8 + (nameLength + 4) / 4 * 4) shifted
+
+/-- The fixture's metadata root (offset 684, 0x62C bytes, a 12-byte version field), the size field
+    of its CLI header (offset 0x214) and the mapped size of its text section (offset 0x180). -/
+private def fixtureRoot : Nat := 684
+private def fixtureMetadataSize : Nat := 0x62C
+private def fixtureVersionLength : Nat := 12
+private def cliMetadataSize : Nat := 0x214
+private def textVirtualSize : Nat := 0x180
+
+/-- The fixture with `extra` more bytes allocated to its version string. The rest of the root and
+    its streams move up into the unused end of the text section, whose mapped size grows to cover
+    them, and the stream offsets and the metadata size follow. -/
+private def widenedVersion (extra : Nat) : ImageBytes :=
+  let bytes := fixtureBytes
+  let versionEnd := fixtureRoot + 16 + fixtureVersionLength
+  let metadataEnd := fixtureRoot + fixtureMetadataSize
+  let moved := bytes.take versionEnd ++ List.replicate extra 0 ++
+    (bytes.drop versionEnd).take (metadataEnd - versionEnd) ++ bytes.drop (metadataEnd + extra)
+  let length := fixtureVersionLength + extra
+  let rooted := writeLittle moved (fixtureRoot + 12) 4 length
+  let streams := readLittle rooted (fixtureRoot + 18 + length) 2
+  let shifted := shiftStreams extra streams (fixtureRoot + 20 + length) rooted
+  let sized := writeLittle shifted cliMetadataSize 4 (fixtureMetadataSize + extra)
+  ImageBytes.ofBytes (writeLittle sized textVirtualSize 4 0x800)
+
+/-- A version field of 256 bytes, the most II.24.2.1 allows (a 255-byte string rounded up to a
+    multiple of four), is read, and the `#~` stream is found 244 bytes further on. -/
+theorem accepts_a_version_length_of_256 :
+    ((ImageView.ofImage (widenedVersion 244) >>= decodeMetadata).toOption.map
+      (·.pe.tables.start)) = some (792 + 244) := by
+  decide +kernel
+#print axioms accepts_a_version_length_of_256
+
+/-- A version field of 260 bytes is longer than any version string the format allows. -/
+theorem rejects_a_version_length_of_260 :
+    decodeError (widenedVersion 248) = some (.pe .badMetadataRoot) := by
+  decide +kernel
+#print axioms rejects_a_version_length_of_260
+
 /-! ## Tokens -/
 
 /-- The layout of the unchanged fixture. -/
