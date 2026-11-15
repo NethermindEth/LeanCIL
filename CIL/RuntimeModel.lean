@@ -68,12 +68,10 @@ def MemoryOp.callReached : MemoryOp → Bool
   -- References, bit casts and guards
   | .asRef | .add .. | .byteOffset | .bitcastByteBool | .bitcastValue .. | .nullRef | .isNullRef
   | .throwIfNull | .zeroGuard .. | .comparisonGuard .. => true
-  -- Opcode meanings: vector loads and stores, statics, arrays, literals and class fields
+  -- Opcode meanings: vector loads and stores, statics, arrays and literals
   | .load128 | .load256 | .load512 | .store128 | .store256 | .store512
   | .staticAddress _ | .staticValue _ | .arrayLength | .arrayLoad .. | .arrayStore _
   | .arrayAddress .. | .arrayTransfer .. | .nullObject | .stringLiteral _
-  | .objectField .. | .setObjectField .. | .objectReferenceField .. | .setObjectReferenceField ..
-  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore | .arrayField ..
-  | .setArrayField .. => false
+  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore => false
 
 end CIL

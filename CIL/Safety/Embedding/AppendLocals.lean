@@ -1039,7 +1039,7 @@ theorem step_appendLocals_ldfld (field : CIL.Extraction.FieldRef) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step, bind_map_left]
+  simp only [step]
   frame_natural
 
 #print axioms step_appendLocals_ldfld
@@ -1050,7 +1050,7 @@ theorem step_appendLocals_stfld (field : CIL.Extraction.FieldRef) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step, bind_map_left]
+  simp only [step]
   frame_natural
 
 #print axioms step_appendLocals_stfld

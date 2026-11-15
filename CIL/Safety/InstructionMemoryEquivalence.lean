@@ -283,29 +283,23 @@ private theorem Memory.Equivalent.wideArithmeticInstruction {m n : Memory} (same
     | split
 #print axioms Memory.Equivalent.wideArithmeticInstruction
 
-/-- Object field accesses locate the same field and perform equivalent checked accesses. -/
-private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : m.Equivalent n)
-    (operation : CIL.MemoryOp) (stack : List Value) :
-    ResultEquivalent MemoryFirstEquivalent (objectFieldInstruction operation stack m)
-      (objectFieldInstruction operation stack n) := by
-  unfold CIL.Safety.objectFieldInstruction
-  split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot,
-    same.referenceArrayOf, same.referenceArraySlot, same.storableIn, same.loadArraySlot]
+/-- Reference array accesses locate the same slot and perform equivalent checked accesses. -/
+private theorem Memory.Equivalent.referenceArrayInstruction {m n : Memory}
+    (same : m.Equivalent n) (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (referenceArrayInstruction operation stack m)
+      (referenceArrayInstruction operation stack n) := by
+  unfold CIL.Safety.referenceArrayInstruction
+  split <;> try simp only [same.loadSlot, same.referenceArrayOf, same.referenceArraySlot,
+    same.storableIn]
   all_goals repeat first
     | exact .error _
     | exact .ok ⟨same, rfl⟩
     | (apply ResultEquivalent.bind_same; intro)
-    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
-       intro left right related
-       exact .ok ⟨related, rfl⟩)
     | (apply ResultEquivalent.bind (same.storeSlot _ _)
        intro left right related
        exact .ok ⟨related, rfl⟩)
-    | (apply ResultEquivalent.bind (same.storeArraySlot _ _ _)
-       intro left right related
-       exact .ok ⟨related, rfl⟩)
     | split
-#print axioms Memory.Equivalent.objectFieldInstruction
+#print axioms Memory.Equivalent.referenceArrayInstruction
 
 /-- Class field loads locate the same field and read equivalent memories alike. -/
 theorem Memory.Equivalent.classFieldLoad {m n : Memory} (same : m.Equivalent n)
@@ -530,15 +524,9 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.wideArithmeticInstruction _ _
     · exact same.staticSpanInstruction _ _
     · exact same.staticSpanInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
-    · exact same.objectFieldInstruction _ _
+    · exact same.referenceArrayInstruction _ _
+    · exact same.referenceArrayInstruction _ _
+    · exact same.referenceArrayInstruction _ _
     · exact same.stringLiteralInstruction _ _
     · exact same.throwIfNullInstruction _
     · exact same.zeroGuardInstruction _ _ _ _

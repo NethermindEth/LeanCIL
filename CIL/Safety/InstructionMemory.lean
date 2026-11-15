@@ -987,31 +987,12 @@ def storeArraySlot (memory : Memory) (field : Reference) (view : ArrayView)
   let held ← arraySlotValue memory view element
   return setSlot memory field held
 
-/-- `ldfld` and `stfld` of a field of a class instance, at the field's model offset: a scalar
-    field moves bytes, a class-typed field moves the object reference its slot holds. `ldlen`,
-    `ldelem.ref` and `stelem.ref` reach the slots of an array of class references the same way,
-    checking the null array, then the index, then a stored value's class, as the CLR does. -/
-def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+/-- `ldlen`, `ldelem.ref` and `stelem.ref` of an array of class references, whose slots hold
+    object references, checking the null array, then the index, then a stored value's class, as
+    the CLR does. -/
+def referenceArrayInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
   match operation, stack with
-  | .objectField owner offset width signed, .object reference :: rest =>
-    if width ∉ [1, 2, 4, 8] then .error (.unsupported "Object field width") else
-    let address ← objectFieldAddress memory reference owner offset
-    return (memory, .scalar (← loadValue memory (.address address) width signed) :: rest)
-  | .setObjectField owner offset width, .scalar value :: .object reference :: rest =>
-    let address ← objectFieldAddress memory reference owner offset
-    let number ← match width, value with
-      | 1, .i32 bits | 2, .i32 bits | 4, .i32 bits => .ok bits.toNat
-      | 8, .i64 bits => .ok bits.toNat
-      | _, _ => .error .invalidState
-    return (← checkedAt (.address address) width
-      (write memory address (numberBytes number width) ordinaryAccessAlignment), rest)
-  | .objectReferenceField owner offset, .object reference :: rest =>
-    let address ← objectFieldAddress memory reference owner offset
-    return (memory, (← loadSlot memory address) :: rest)
-  | .setObjectReferenceField owner offset, .object value :: .object reference :: rest =>
-    let address ← objectFieldAddress memory reference owner offset
-    return (← storeSlot memory address value, rest)
   | .referenceArrayLength, .object array :: rest =>
     let (_, _, length) ← referenceArrayOf memory array
     return (memory, .scalar (.i64 (BitVec.ofNat 64 length)) :: rest)
@@ -1024,12 +1005,6 @@ def objectFieldInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let (slot, element) ← referenceArraySlot memory array index
     let _ ← storableIn memory element value
     return (← storeSlot memory slot value, rest)
-  | .arrayField owner offset element, .object reference :: rest =>
-    let address ← objectFieldAddress memory reference owner offset
-    return (memory, (← loadArraySlot memory address element) :: rest)
-  | .setArrayField owner offset element, .array view :: .object reference :: rest =>
-    let address ← objectFieldAddress memory reference owner offset
-    return (← storeArraySlot memory address view element, rest)
   | _, _ => .error .invalidState
 
 /-- `ldfld` of a class instance field whose slot at model offset `offset` holds `slot`: the
@@ -1185,11 +1160,8 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
   | .spanCreate | .createSpan _ => staticSpanInstruction operation stack memory
-  | .objectField .. | .setObjectField ..
-  | .objectReferenceField .. | .setObjectReferenceField ..
-  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore
-  | .arrayField .. | .setArrayField .. =>
-    objectFieldInstruction operation stack memory
+  | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore =>
+    referenceArrayInstruction operation stack memory
   | .stringLiteral text => stringLiteralInstruction text stack memory
   | .throwIfNull => throwIfNullInstruction stack memory
   | .zeroGuard guard width signed => zeroGuardInstruction guard width signed stack memory
