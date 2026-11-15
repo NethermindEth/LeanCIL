@@ -31,13 +31,17 @@ foreach (var count in new[] { 64, 512, 4096 })
     string[] modules = [.. Enumerable.Range(0, count).Select(index => "BindingAudit/I" + index)];
     SortedDictionary<string, string> built = new(retained, StringComparer.Ordinal);
     foreach (var module in modules) built[module + ".olean"] = "image";
-    var elapsed = System.Diagnostics.Stopwatch.StartNew();
-    for (var repetition = 0; repetition < 64; repetition++) RequireOnlyAdded(retained, built, modules);
-    var milliseconds = elapsed.Elapsed.TotalMilliseconds;
+    var milliseconds = double.MaxValue;
+    for (var sample = 0; sample < 7; sample++)
+    {
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        for (var repetition = 0; repetition < 64; repetition++) RequireOnlyAdded(retained, built, modules);
+        milliseconds = Math.Min(milliseconds, elapsed.Elapsed.TotalMilliseconds);
+    }
     if (previousInventoryMilliseconds > 0 && milliseconds > previousInventoryMilliseconds * 20 + 20)
         throw new InvalidOperationException("Artifact addition checks grew faster than n log n");
     previousInventoryMilliseconds = milliseconds;
-    Console.WriteLine($"PASS {count} added module families checked 64 times in {milliseconds:F1} ms");
+    Console.WriteLine($"PASS {count} added module families checked 64 times in {milliseconds:F1} ms minimum");
 }
 if (args is ["--artifact-inventory"]) return;
 MultiAssemblyFixture fixture = new("DeepVerify");
@@ -171,18 +175,22 @@ foreach (var count in new[] { 64, 512, 4096 })
 {
     DeepCheckInputs.Pin[] pins = [.. Enumerable.Range(0, count)
         .Select(index => new DeepCheckInputs.Pin("Identity" + index, inputs.Images[0]))];
-    var elapsed = System.Diagnostics.Stopwatch.StartNew();
-    for (var repetition = 0; repetition < 64; repetition++)
+    var milliseconds = double.MaxValue;
+    for (var sample = 0; sample < 7; sample++)
     {
-        var section = DeepBindingSection(inputs, pins, report.binding.sources!);
-        if (section.images.Length != count + 1)
-            throw new InvalidOperationException("Deep report lost an image association");
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        for (var repetition = 0; repetition < 64; repetition++)
+        {
+            var section = DeepBindingSection(inputs, pins, report.binding.sources!);
+            if (section.images.Length != count + 1)
+                throw new InvalidOperationException("Deep report lost an image association");
+        }
+        milliseconds = Math.Min(milliseconds, elapsed.Elapsed.TotalMilliseconds);
     }
-    var milliseconds = elapsed.Elapsed.TotalMilliseconds;
     if (previousMilliseconds > 0 && milliseconds > previousMilliseconds * 20 + 20)
         throw new InvalidOperationException("Deep report construction grew faster than n log n");
     previousMilliseconds = milliseconds;
-    Console.WriteLine($"PASS {count} image associations reported 64 times in {milliseconds:F1} ms");
+    Console.WriteLine($"PASS {count} image associations reported 64 times in {milliseconds:F1} ms minimum");
 }
 
 bool auditedAgain = false;

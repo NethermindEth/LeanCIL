@@ -18,12 +18,8 @@ partial class Program
     const double MaximumPerRowGrowth = 1.5;
 
     /// <summary>
-    /// The body check costs time linear in the number of claims and independent of the image size per claim. The
-    /// 1272 claims of Examples.dll (98 KB) are repeated to 5088, which the page cap lays out in eight pages of
-    /// 636 where 1272 claims take six pages of 212, so the cost per claim cannot hide in the page count. The same
-    /// 1272 claims followed by 770 KB of other bytes, which no body reads, take at most about twice as long, the cost
-    /// of decoding the larger image once per page, where a read that touched the whole image would take about nine
-    /// times as long. Times are measured above the fixture's, which is the fixed cost.
+    /// Body-check heartbeats grow linearly with claims and cover decoding the image once per page.
+    /// The fixture's heartbeat count is the fixed cost subtracted from each larger case.
     /// </summary>
     static void CheckBindingScaling(string root)
     {
@@ -56,27 +52,29 @@ partial class Program
             ($"Examples.dll, {largerClaims} claims", examples, largerClaims)
         ];
         Directory.CreateDirectory(root);
-        var seconds = new double[cases.Length];
+        var heartbeats = new long[cases.Length];
         for (var index = 0; index < cases.Length; index++)
         {
             var path = Path.Combine(root, $"Bodies{index}.lean");
-            File.WriteAllText(path, AllBodiesModule(cases[index].Bytes, cases[index].Claims));
-            var started = System.Diagnostics.Stopwatch.StartNew();
-            var run = Execute(["lake", "env", "lean", path], cwd: package);
-            seconds[index] = started.Elapsed.TotalSeconds;
+            File.WriteAllText(path, AllBodiesModule(cases[index].Bytes, cases[index].Claims) +
+                "\n#eval show IO Nat from IO.getNumHeartbeats\n");
+            var run = Execute(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
             if (run.Code != 0)
                 throw new InvalidOperationException($"The bodies of {cases[index].Name} were not found: {run.Output}");
+            heartbeats[index] = long.Parse(run.Output.Split('\n', StringSplitOptions.TrimEntries |
+                StringSplitOptions.RemoveEmptyEntries).Last(), System.Globalization.CultureInfo.InvariantCulture);
         }
-        var times = cases.Zip(seconds, (item, time) => $"{item.Name} {time:F1} s");
-        Console.WriteLine("Body checks: " + string.Join(", ", times));
-        double Above(int index) => seconds[index] - seconds[0];
-        if (Above(1) < 2) throw new InvalidOperationException("The body check is too fast to measure its growth");
+        var costs = cases.Zip(heartbeats, (item, count) => $"{item.Name} {count} heartbeats");
+        Console.WriteLine("Body checks: " + string.Join(", ", costs));
+        double Above(int index) => heartbeats[index] - heartbeats[0];
+        if (Above(1) <= 0)
+            throw new InvalidOperationException("The body check has no measured work above the fixture");
         var perClaim = Above(3) / largerClaims / (Above(1) / smaller);
         var perImage = Above(2) / Above(1);
         if (perClaim > MaximumPerClaimGrowth || perImage > MaximumImageGrowth)
             throw new InvalidOperationException(
-                $"The body check took {perClaim:F1} times as long per claim for {largerClaims / smaller} times the " +
-                $"claims and {perImage:F1} times as long for 8.8 times the image");
+                $"The body check used {perClaim:F1} times the heartbeats per claim for " +
+                $"{largerClaims / smaller} times the claims and {perImage:F1} times for 8.8 times the image");
         Console.WriteLine($"PASS the body check is linear in the claims ({perClaim:F1} times per claim) and " +
             $"independent of the image size ({perImage:F1} times for 8.8)");
     }

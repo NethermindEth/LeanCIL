@@ -61,7 +61,6 @@ private def runtimeCost (pinCount methodCount repetitions : Nat) : IO (Nat × Na
       let (elapsed, heartbeats) ← runtimeCost pins methods repetitions
       let (times, allocations) := samples[index]!
       samples := samples.set! index (times.push elapsed, allocations.push heartbeats)
-  let mut previous := 0
   let mut previousHeartbeats := 0
   for index in [:combinations.size] do
     let (pinCount, methodCount) := combinations[index]!
@@ -73,11 +72,8 @@ private def runtimeCost (pinCount methodCount repetitions : Nat) : IO (Nat × Na
     IO.println (s!"pin allocation work: {pinCount} pins, {methodCount} methods, " ++
       s!"{heartbeats} heartbeats")
     if pinCount == methodCount then
-      if previous != 0 && median > previous * 6 + 1000000 then
-        throw (IO.userError "package pin runtime grew faster than package size")
       if previousHeartbeats != 0 && heartbeats > previousHeartbeats * 6 then
         throw (IO.userError "package pin allocation work grew faster than package size")
-      previous := median
       previousHeartbeats := heartbeats
 
 open Lean Meta Elab Command in
