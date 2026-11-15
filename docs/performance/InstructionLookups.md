@@ -163,16 +163,22 @@ homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewe
 accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
 size.
 
-The suite declares `cil_field_shape` for 8, 32 and 128 `int32` fields, once with every field in
-one struct and once with each field in a struct of its own, and reads every field's
-`Method.fieldShape` through the facts with `simp only [cil_code]` from a 512-instruction body. It
-fails when the heartbeats per field of the facts, or of the reads, grow more than 1.35 times from
-one size to the next. Each fact is one kernel check of `LayoutEnvironment.fieldShape`, about
-290,000 heartbeats for the first field of the first struct.
-The check walks the layout lists to the owner and its field lists to the index, so each struct
-before the owner adds about 970 heartbeats. The facts cost about 291,000, 300,000 and 337,000
-heartbeats per field in one struct and 293,000, 313,000 and 386,000 with a struct per field. The
-reads cost 12,200 to 14,400 heartbeats per field at every size.
+The suite declares `cil_field_shape` for 8, 32 and 128 `int32` fields of one struct and for 8,
+32, 128 and 512 fields each in a struct of its own, and `cil_value_shape` for 8, 32, 128 and 512
+struct types, and reads every operand's `Method.fieldShape` or `Method.valueShape` through the
+facts with `simp only [cil_code]` from a 512-instruction body. It fails when the heartbeats per
+operand of the facts, or of the reads, grow more than 1.35 times from one size to the next. The
+first fact of an environment names 16-entry suffixes of its layout lists, about 517,000
+heartbeats at 512 layouts, and each fact reads its struct's entries from the suffix that starts
+the entry's block, so an entry further into its block costs about 750 heartbeats more. The
+compiled resolver that proposes each shape evaluates the environment once. The field facts cost
+about 269,000, 280,000 and 326,000 heartbeats per field in one struct, where each fact walks the
+struct's field list to its index, and 269,000, 271,000, 272,000 and 272,000 with a struct per
+field; most of a field fact is the kernel deciding the storage of the field's `int32` type. The
+value facts cost about 13,300, 15,900, 16,000 and 16,100 heartbeats per type. Facts that walk the
+layout lists to the struct instead cost 293,000, 313,000, 386,000 and 672,000 heartbeats per
+field and 38,000, 58,000, 131,000 and 417,000 per type. The reads cost 11,100 to 14,700
+heartbeats per operand at every size.
 
 The suite decides `ManagedCallsValid` on bodies of 64, 256 and 1,024 call sites, each followed by a
 `nop`, with the literal link table the extractor writes, and reads the heartbeats of that one
