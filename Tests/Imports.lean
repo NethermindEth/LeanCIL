@@ -13,9 +13,10 @@ open CIL
 def method0Signature : String := "System.Void Contracts.Calls::Root(System.UInt64&,System.UInt64&)"
 def method1Signature : String := "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := false, locals := [], code :=
-  [.arg 0, .arg 1, .arg 0, .call 2 3, .arg 0, .arg 0, .load64, .arg 1, .load64, .call 1 2, .store64, .ret] }
+  [.ldarg 0, .ldarg 1, .ldarg 0, .call 2 3, .ldarg 0, .ldarg 0, .load64, .ldarg 1, .load64,
+      .call 1 2, .store64, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 3, .conv_i8, .mul, .arg 1, .add, .ret] }
+  [.ldarg 0, .ldc_i4 3, .conv_i8, .mul, .ldarg 1, .add, .ret] }
 @[cil_code] def program : Program := [method0, method1]
 def signatures : List String := [method0Signature, method1Signature]
 
@@ -127,7 +128,7 @@ example : ∀ linked, Links Extracted.program linked → addContract.Holds linke
 /-! One concrete implementation of the import, appended at its slot. -/
 
 @[cil_code] def addBody : CIL.Method := { returnsValue := false, locals := [], code :=
-  [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .load64, .ldarg 1, .load64, .add, .store64, .ret] }
 @[cil_code] def linkedProgram : CIL.Program := Extracted.program ++ [addBody]
 
 theorem add_linked : importsAdd linkedProgram := by
@@ -200,9 +201,10 @@ open CIL
 def method0Signature : String := "System.UInt64 Outcomes.Calls::Root(System.UInt64)"
 def method1Signature : String := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .ldc_i4 1, .conv_i8, .add, .ret] }
+  [.ldarg 0, .call 1 1, .ldc_i4 1, .conv_i8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 2 1, .brfalse 5, .arg 0, .ret, .nop, .nop, .throw "System.ArgumentException"] }
+  [.ldarg 0, .call 2 1, .brfalse 5, .ldarg 0, .ret, .nop, .nop,
+      .throw .argument] }
 @[cil_code] def program : Program := [method0, method1]
 def signatures : List String := [method0Signature, method1Signature]
 
@@ -224,11 +226,11 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 
-def strictRaises (v : CIL.W64) : Option String :=
-  if v ≤ 100 then if v = 0 then some "System.ArgumentException" else none
-  else some "System.ArgumentOutOfRangeException"
+def strictRaises (v : CIL.W64) : Option CIL.ExceptionType :=
+  if v ≤ 100 then if v = 0 then some .argument else none
+  else some .argumentOutOfRange
 
 def strictContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
@@ -309,8 +311,8 @@ theorem root_given :
     exact MethodContract.Holds.returns call.framed rfl
 
 @[cil_code] def percentBody : CIL.Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
-    .throw "System.ArgumentOutOfRangeException", .arg 0, .ret] }
+  [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
+    .throw .argumentOutOfRange, .ldarg 0, .ret] }
 @[cil_code] def linkedProgram : CIL.Program := Extracted.program ++ [percentBody]
 
 theorem percent_linked : importsPercent linkedProgram := by
@@ -328,7 +330,7 @@ theorem root_linked : rootContract.Holds linkedProgram root :=
   root_given.discharge ⟨[percentBody], rfl⟩ percent_linked
 
 /-- The imported exception reaches `Root` in the linked program. -/
-example (m : Memory) : Raises linkedProgram root [.scalar (.i64 101)] m "System.ArgumentOutOfRangeException" :=
+example (m : Memory) : Raises linkedProgram root [.scalar (.i64 101)] m .argumentOutOfRange :=
   root_linked.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
 
 /-- Linking further keeps both outcomes. -/

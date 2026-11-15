@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -39,8 +44,110 @@ MethodDefinition Added(ModuleDefinition module, string name, TypeReference resul
     return method;
 }
 
-// A conditional branch the native-width analysis wraps, in a method over a class instance, is a hole that names
-// the wrapped branch.
+// Loop callee selection excludes narrow result types even when the helper always throws.
+var throwOnly = Outline("NarrowThrowOnly", "Loops::CountUntil(uint,uint)", module =>
+{
+    var helper = module.GetType("Examples.Loops").Methods.Single(method => method.Name == "Bump");
+    var constructor = (MethodReference)helper.Body.Instructions.Single(instruction =>
+        instruction.OpCode == OpCodes.Newobj).Operand;
+    helper.ReturnType = module.TypeSystem.Byte;
+    helper.Body.Instructions.Clear();
+    helper.Body.Variables.Clear();
+    helper.Body.Instructions.Add(Instruction.Create(OpCodes.Newobj, constructor));
+    helper.Body.Instructions.Add(Instruction.Create(OpCodes.Throw));
+});
+if (throwOnly.Code == 0 || !throwOnly.Output.Contains("callee Bump returns System.Byte", StringComparison.Ordinal))
+    throw new InvalidOperationException("A narrow throw-only helper bypassed callee result selection:\n" +
+        throwOnly.Output + throwOnly.Proof);
+Console.WriteLine("PASS narrow throw-only helper retains its callee selection diagnostic");
+foreach (var (owner, methodName, selector) in new[]
+{
+    ("Arithmetic", "Larger", "Arithmetic::Larger(int,int)"),
+    ("PrimitiveArrays", "ReadInt32", "PrimitiveArrays::ReadInt32(int[],int)"),
+    ("Loops", "Put", "Loops::Put(System.Span`1<System.UInt32>,uint)"),
+    ("Counter", "Read", "Counter::Read()"),
+    ("OutlineCountdown", "Drain", "OutlineCountdown::Drain()")
+})
+{
+    var positive = Outline("WideReturn" + owner, selector, _ => { });
+    if (positive.Code != 0 || positive.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException("Wide return control failed: " + selector + "\n" + positive.Output);
+    var narrow = Outline("NarrowReturn" + owner, selector, module =>
+    {
+        var method = module.GetType("Examples." + owner).Methods.Single(method => method.Name == methodName);
+        if (method.ReturnType.MetadataType == MetadataType.Void)
+        {
+            var processor = method.Body.GetILProcessor();
+            foreach (var returned in method.Body.Instructions.Where(instruction =>
+                instruction.OpCode == OpCodes.Ret).ToArray())
+            {
+                returned.OpCode = OpCodes.Ldc_I4_0;
+                processor.InsertAfter(returned, Instruction.Create(OpCodes.Ret));
+            }
+        }
+        method.ReturnType = module.TypeSystem.Byte;
+    });
+    if (narrow.Code == 0 && !narrow.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException("Narrow return was outlined: " + selector + "\n" + narrow.Proof);
+    Console.WriteLine("PASS declared narrow return outline rejection and wide control: " + owner);
+}
+if (args is ["--return-only"]) return;
+
+// A parameter of a narrow declared type is loaded narrowed by its step, which no outline reader models, so each
+// reader refuses it and names it; the method before the retyping is the wide control.
+var unnamed = new List<string>();
+foreach (var (owner, methodName, parameter, selector, narrowSelector, prepare) in
+    new (string, string, int, string, string, Action<MethodDefinition>?)[]
+{
+    ("Arithmetic", "Larger", 0, "Arithmetic::Larger(int,int)", "Arithmetic::Larger(ushort,int)", null),
+    ("PrimitiveArrays", "ReadInt32", 1, "PrimitiveArrays::ReadInt32(int[],int)",
+        "PrimitiveArrays::ReadInt32(int[],ushort)", null),
+    ("Loops", "Put", 1, "Loops::Put(System.Span`1<System.UInt32>,uint)",
+        "Loops::Put(System.Span`1<System.UInt32>,ushort)", null),
+    ("Loops", "CountUntil", 1, "Loops::CountUntil(uint,uint)", "Loops::CountUntil(uint,ushort)", null),
+    ("Objects", "SetLimit", 1, "Objects::SetLimit(Examples.Account,uint)",
+        "Objects::SetLimit(Examples.Account,ushort)", null),
+    ("NarrowTotals", "WriteRead", 0, "NarrowTotals::WriteRead(uint)", "NarrowTotals::WriteRead(ushort)", null),
+    ("OutlineCountdown", "Drain", 0, "OutlineCountdown::Drain(ulong)", "OutlineCountdown::Drain(ushort)",
+        CountBy)
+})
+{
+    MethodDefinition Target(ModuleDefinition module)
+    {
+        var method = module.GetType("Examples." + owner).Methods.Single(method => method.Name == methodName);
+        prepare?.Invoke(method);
+        return method;
+    }
+    var wide = Outline("WideArgument" + owner + methodName, selector, module => Target(module));
+    if (wide.Code != 0 || wide.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException("Wide argument control failed: " + selector + "\n" + wide.Output);
+    var name = "";
+    var narrow = Outline("NarrowArgument" + owner + methodName, narrowSelector, module =>
+    {
+        var retyped = Target(module).Parameters[parameter];
+        retyped.ParameterType = module.TypeSystem.UInt16;
+        name = retyped.Name;
+    });
+    var refused = narrow.Code != 0 || narrow.Proof.Contains("-- not outlined:", StringComparison.Ordinal);
+    if (!refused || !(narrow.Output + narrow.Proof).Contains($"`{name}`", StringComparison.Ordinal))
+        unnamed.Add(
+            $"Narrow argument `{name}` was outlined or not named: {narrowSelector}\n{narrow.Output}{narrow.Proof}");
+    else Console.WriteLine($"PASS declared narrow argument outline rejection and wide control: {owner}::{methodName}");
+}
+if (unnamed.Count > 0) throw new InvalidOperationException(string.Join("\n", unnamed));
+
+// The receiver loop adds its one word argument to the count instead of one, so the loop body reads an argument.
+static void CountBy(MethodDefinition drain)
+{
+    drain.Parameters.Add(new ParameterDefinition("step", Mono.Cecil.ParameterAttributes.None,
+        drain.Module.TypeSystem.UInt64));
+    var one = drain.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Ldc_I4_1).ElementAt(1);
+    one.OpCode = OpCodes.Ldarg_1;
+    one.Next.OpCode = OpCodes.Conv_U8;
+}
+
+// A conditional branch with mixed native/int32 operands, in a method over a class instance, is a hole that names
+// the mixed-width branch.
 var wrapped = Outline("WrappedObject",
     "System.UInt64 Examples.NativeIntegers::Wrapped(Examples.Account,System.Int32[])", module =>
     {
@@ -61,36 +168,53 @@ var wrapped = Outline("WrappedObject",
         code.Add(Instruction.Create(OpCodes.Ret));
     });
 if (wrapped.Code != 0 || !wrapped.Proof.Contains("not outlined: ", StringComparison.Ordinal) ||
-    !wrapped.Proof.Contains(".nativeBinary (.blt", StringComparison.Ordinal))
-    throw new Exception("A wrapped native branch did not leave a hole naming it in the object outline:\n" +
+    !wrapped.Proof.Contains(".blt", StringComparison.Ordinal))
+    throw new Exception("A mixed native branch did not leave a hole naming it in the object outline:\n" +
         wrapped.Output + wrapped.Proof);
-Console.WriteLine("PASS a wrapped native and int32 branch is a hole that names it in the object outline");
+Console.WriteLine("PASS a mixed native and int32 branch is a hole that names it in the object outline");
 
-// A loop whose back edge the analysis wraps is refused with a message that names the back edge.
-var latch = Outline("WrappedLatch", "System.UInt32 Examples.NativeIntegers::WrappedLatch(System.UInt32)",
-    module =>
+// Mixed tests retain explicit diagnostics at both a loop latch and an internal branch.
+foreach (var atLatch in new[] { true, false })
 {
-    var method = Added(module, "WrappedLatch", module.TypeSystem.UInt32, module.TypeSystem.UInt32);
-    method.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
-    var code = method.Body.Instructions;
-    var head = Instruction.Create(OpCodes.Ldloc_0);
-    code.Add(Instruction.Create(OpCodes.Ldc_I4_0));
-    code.Add(Instruction.Create(OpCodes.Stloc_0));
-    code.Add(head);
-    code.Add(Instruction.Create(OpCodes.Ldc_I4_1));
-    code.Add(Instruction.Create(OpCodes.Add));
-    code.Add(Instruction.Create(OpCodes.Stloc_0));
-    code.Add(Instruction.Create(OpCodes.Ldloc_0));
-    code.Add(Instruction.Create(OpCodes.Conv_U));
-    code.Add(Instruction.Create(OpCodes.Ldarg_0));
-    code.Add(Instruction.Create(OpCodes.Blt, head));
-    code.Add(Instruction.Create(OpCodes.Ldloc_0));
-    code.Add(Instruction.Create(OpCodes.Ret));
-});
-if (latch.Code == 0 || !latch.Output.Contains("its loop at IL_0009 tests a native and an int32 value at its back edge",
-        StringComparison.Ordinal))
-    throw new Exception("A wrapped back edge was not refused by name in the loop outline:\n" + latch.Output);
-Console.WriteLine("PASS a wrapped back edge is refused by name in the loop outline");
+    var mixed = Outline(atLatch ? "MixedLatch" : "MixedInternal",
+        "System.Int32 Examples.NativeIntegers::MixedLoop(System.Int32)", module =>
+    {
+        var method = Added(module, "MixedLoop", module.TypeSystem.Int32, module.TypeSystem.Int32);
+        method.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+        var code = method.Body.Instructions;
+        var head = Instruction.Create(OpCodes.Ldc_I4_0);
+        var increment = Instruction.Create(OpCodes.Ldloc_0);
+        code.Add(Instruction.Create(OpCodes.Ldc_I4_0));
+        code.Add(Instruction.Create(OpCodes.Stloc_0));
+        code.Add(head);
+        code.Add(Instruction.Create(OpCodes.Conv_I));
+        code.Add(Instruction.Create(OpCodes.Ldarg_0));
+        if (atLatch)
+        {
+            code.Add(Instruction.Create(OpCodes.Blt, head));
+        }
+        else
+        {
+            code.Add(Instruction.Create(OpCodes.Beq, increment));
+            code.Add(Instruction.Create(OpCodes.Nop));
+            code.Add(increment);
+            code.Add(Instruction.Create(OpCodes.Ldc_I4_1));
+            code.Add(Instruction.Create(OpCodes.Add));
+            code.Add(Instruction.Create(OpCodes.Stloc_0));
+            code.Add(Instruction.Create(OpCodes.Ldloc_0));
+            code.Add(Instruction.Create(OpCodes.Ldarg_0));
+            code.Add(Instruction.Create(OpCodes.Blt, head));
+        }
+        code.Add(Instruction.Create(OpCodes.Ldloc_0));
+        code.Add(Instruction.Create(OpCodes.Ret));
+    });
+    if (atLatch ? mixed.Code == 0 || !mixed.Output.Contains("at its back edge", StringComparison.Ordinal)
+        : mixed.Code != 0 || !mixed.Proof.Contains("not outlined:", StringComparison.Ordinal))
+        throw new Exception("Mixed test lacks an outline diagnostic:\n" + mixed.Output + mixed.Proof);
+    if (!(mixed.Output + mixed.Proof).Contains("operands of different widths", StringComparison.Ordinal))
+        throw new Exception("Mixed test stopped before inspecting its operands:\n" + mixed.Output + mixed.Proof);
+    Console.WriteLine("PASS mixed-width outline diagnostic: " + (atLatch ? "latch" : "internal branch"));
+}
 
 // The element a span read loads must be as wide as the span's elements.
 var read = Outline("WrongWidth",
@@ -125,7 +249,7 @@ var straight = Outline("NarrowStraight", "System.Int32 Examples.NativeIntegers::
     code.Add(Instruction.Create(OpCodes.Ldloc_0));
     code.Add(Instruction.Create(OpCodes.Ret));
 });
-if (straight.Code != 0 || !straight.Proof.Contains("not outlined: `.setLocal 0` at IL_0001", StringComparison.Ordinal))
+if (straight.Code != 0 || !straight.Proof.Contains("not outlined: `.stloc 0` at IL_0001", StringComparison.Ordinal))
     throw new Exception("A store to a byte local was stepped by the straight-line outline:\n" +
         straight.Output + straight.Proof);
 Console.WriteLine("PASS a store to a byte local is a hole in the straight-line outline");

@@ -11,14 +11,14 @@ internal static partial class ProofOutline
     static (int Width, Operation Op)? SpanStores(Extraction extraction, int index)
     {
         var method = extraction.Methods[index];
-        var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
+        var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
         if (method.HasThis || method.ReturnType.FullName != "System.Void" || method.Parameters.Count != 2 ||
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
             !extraction.Emitted[index].Frame.HasNoLocals) return null;
-        if (ops is not [Local { Index: 0 }, Constant { Width: 32, Value: 0, Numeral: true },
-                Memory { Operation: SpanItem item }, Arg { Index: 1, Narrow: null }, var store,
-                Return { Narrow: null }] || item.Width != width)
+        if (ops is not [LocalAddress { Index: 0 }, Constant { Width: 32, Value: 0, Numeral: true },
+                Memory { Operation: SpanItem item }, Arg { Index: 1 }, var store,
+                Return] || item.Width != width || !MethodArguments.Plain(method, 1))
             return null;
         var stores = width == 4 ? store is StoreScalar { Width: 4 }
             : store is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 8 };

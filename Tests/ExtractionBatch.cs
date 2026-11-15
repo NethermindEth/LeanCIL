@@ -2,6 +2,10 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -27,7 +31,7 @@ var requests = new[]
     new Request(modified, "Examples", "Arithmetic::Add(ulong,ulong)", Path.Combine(root, "Modified"), "scalar"),
     new Request(assembly, "Examples", "GenericMethods::Repeated(ulong)", Path.Combine(root, "Arm"), "arm64-advsimd"),
     new Request(assembly, "Examples", "GenericMethods::Repeated(ulong)", Path.Combine(root, "Repeated"), "scalar"),
-    new Request(assembly, "Examples", "Arithmetic::Add(ulong,ulong)", Path.Combine(root, "Original"), "x64-sse2"),
+    new Request(assembly, "Examples", "Arithmetic::Add(ulong,ulong)", Path.Combine(root, "Original"), "x64-sse42"),
     new Request(assembly, "Examples", "Capabilities::Flags()", Path.Combine(root, "ScalarFlags"), "scalar"),
     new Request(assembly, "Examples", "Capabilities::Flags()", Path.Combine(root, "X64Flags"), "x64-v3"),
     new Request(assembly, "Examples", "Loops::Countdown(uint)", Path.Combine(root, "Loop"), "scalar"),

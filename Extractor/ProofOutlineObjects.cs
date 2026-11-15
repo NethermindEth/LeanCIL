@@ -331,7 +331,7 @@ internal static partial class ProofOutline
                     return true;
                 }
                 if (!visited.Add(pc)) return Stop("a backward jump");
-                if (op is Arg { Narrow: null } argument)
+                if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
                 {
                     var parameter = spec.Parameters[argument.Index];
                     Item? item = parameter.Shape switch
@@ -419,7 +419,6 @@ internal static partial class ProofOutline
                     var zero = Pop() is Null;
                     if (zero == (objectTest.Kind == JumpKind.IfZero)) pc = objectTest.Target - 1;
                 }
-                else if (op is NativeBinary) return Stop($"`{op.ToLean()}`, which the outline does not step");
                 else if (op is Jump { Conditional: true } test)
                 {
                     var operands = new Word?[test.Operands];
@@ -1138,7 +1137,7 @@ internal static partial class ProofOutline
                 return null;
             var spec = new Specification(method, parameters, DescribeResult(method, extraction.Architecture), true,
                 true);
-            var walk = new ObjectWalk(spec, extraction.Emitted[index].Operations, views, _ => null,
+            var walk = new ObjectWalk(spec, SlotOperations(extraction.Emitted[index]), views, _ => null,
                 numericHomes: HasNumericObjectHomes(method), throws: splits);
             // A contract states reference stores only of objects the callee reaches, and its caller cannot give
             // it the premise that a reference outside the model forms; it states no array a field holds.

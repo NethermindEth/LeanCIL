@@ -538,8 +538,9 @@ partial class Program
         string implementation = selection.Implementation;
         ContractExportManifest manifest =
             new(1, implementation, consumer, interfaces, slots.Select(slot => slot.Request).ToArray());
-        using ModuleDefinition module =
-            ModuleDefinition.ReadModule(new MemoryStream(File.ReadAllBytes(implementation)));
+        byte[] implementationBytes = File.ReadAllBytes(implementation);
+        using PinnedAssemblies pinned = new(implementationBytes, ContractInterface.Hash(implementationBytes), []);
+        ModuleDefinition module = pinned.Selected;
         PreparedContractExport[] prepared =
             slots.Select(slot => PrepareContractExport(manifest, module, slot.Request)).ToArray();
         using Program independent = new()
@@ -1099,6 +1100,7 @@ run_cmd do
         source.AppendLine("theorem extraction" + index + " : CIL.Extraction.TranslationValid " +
             library.ExpectedModule + ".Extracted.rawLayouts " +
             library.ExpectedModule + ".Extracted.computedLayouts " +
+            library.ExpectedModule + ".Extracted.assemblies " +
             library.ExpectedModule + ".Extracted.methodEvidence " +
             library.ExpectedModule + ".Extracted.imports " + program + " := " +
             library.ExpectedModule + ".Extracted.translation_valid");

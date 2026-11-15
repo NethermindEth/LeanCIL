@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Text.RegularExpressions;
 
@@ -131,3 +136,4 @@ catch (InvalidOperationException error) when (error.Message.Contains("rfl"))
 }
 if (!failed) throw new InvalidOperationException("A positional proof survived renumbering; the reordered build does not exercise identity.");
 Console.WriteLine("PASS positional indices break on renumbering; signatures do not");
+Run(["dotnet", "run", "--file", At("Tests/Identities.cs")], streamOutput: true, progress: "Typed identity display");

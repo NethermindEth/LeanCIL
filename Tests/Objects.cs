@@ -2,6 +2,12 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BatchVerification.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 
@@ -18,6 +24,8 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Objects");
 Directory.CreateDirectory(root);
 
+// One batch elaborates, replays and audits every proof; a pass is reported only after the whole batch is certified.
+var queue = new GeneratedQueue(verification, assembly);
 foreach (var (proof, entry) in new[]
 {
     ("SameObject", "Objects::Same(Examples.Account,Examples.Account)"),
@@ -60,10 +68,9 @@ foreach (var (proof, entry) in new[]
     ("TileHold",
         "TileArrays::Hold(Examples.AggregateArrays/Pair[],System.Runtime.Intrinsics.Vector128`1<System.UInt64>[])")
 })
-{
-    verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
-    Console.WriteLine($"PASS {proof}: {entry}");
-}
+    queue.Add(new(entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof)),
+        () => Console.WriteLine($"PASS {proof}: {entry}"));
+queue.Flush();
 
 // Each named field is checked against the operation it names, so a view with another offset, width or
 // element fails its own theorem instead of naming storage the code never touches.

@@ -2,6 +2,10 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ../scripts/ExportVerificationSuites.cs
@@ -233,7 +237,7 @@ if (cohort != "core")
 
         CallerVerify();
         var report = JsonNode.Parse(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")))!;
-        if (report["schema"]!.GetValue<int>() != 4 || report["contractImports"]!.AsArray().Count != 1 ||
+        if (report["schema"]!.GetValue<int>() != 5 || report["contractImports"]!.AsArray().Count != 1 ||
             report["imports"]![0]!["acceptedVia"]!.GetValue<string>() != "published-certification" ||
             !report["imports"]![0]!["deploymentObligation"]!.GetValue<string>()
                 .Contains("exact implementation bytes", StringComparison.Ordinal))
@@ -287,8 +291,8 @@ if (cohort != "core")
 completed.CompleteCase("core.publication");
 CallerVerify();
 JsonElement initialCaller = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(callerArtifact, "verified.json")));
-if (initialCaller.GetProperty("schema").GetInt32() != 4)
-    throw new InvalidOperationException("Imported contract verification did not produce the schema-4 trust report.");
+if (initialCaller.GetProperty("schema").GetInt32() != 5)
+    throw new InvalidOperationException("Imported contract verification did not produce the schema-5 trust report.");
 completed.CompleteCase("core.caller");
 Console.WriteLine("PASS verified Lib -> generated sidecar -> App, with a source-only complete bundle");
 
@@ -379,10 +383,10 @@ string customProfile = Path.Combine(root, "custom-profile.json");
 // A realizable x64 group still cannot masquerade as the built-in scalar profile.
 JsonObject profile = JsonNode.Parse(JsonSerializer.Serialize(new
 {
-    name = "scalar", architecture = "x64", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = true, ssse3 = false,
-    sse42 = false, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false, sse41 = false, avx512DQ = false,
-    avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false, x86Base64 = true,
-    vector128Accelerated = true, avx512Vbmi = false, aes = false, armAes = false
+    name = "scalar", architecture = "x64", nativeWidth = 64, littleEndian = true, advSimd = false, sse2 = true,
+    ssse3 = true, sse42 = true, avx = false, avx2 = false, avx512F = false, avx512FVL = false, bmi1 = false,
+    sse41 = true, avx512DQ = false, avx512DQVL = false, bmi2 = false, armBase64 = false, vector256Accelerated = false,
+    x86Base64 = true, vector128Accelerated = true, avx512Vbmi = false, aes = false, armAes = false
 }))!.AsObject();
 File.WriteAllText(customProfile, profile.ToJsonString());
 RejectExport(RestrictedManifest(library, "ImportFixture.Library::AddOne(ulong)",

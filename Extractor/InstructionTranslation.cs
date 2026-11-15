@@ -25,9 +25,6 @@ internal static class InstructionTranslation
         nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
         if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
         {
-            if (i.OpCode.Code == Code.Add && dispatchStack.Length >= 2 &&
-                NativeOperands.NativeTableAddition(dispatchStack[^2], dispatchStack[^1]))
-                return new TableOffset();
             if (i.OpCode.Code == Code.Ldind_I && dispatchStack.LastOrDefault() is
                 { Kind: NativeOperands.Kind.NativeMethodTable, Metadata: LocalKind.NativeMethodTable nativeTable })
                 return new TableLoad(nativeTable.Signature);
@@ -56,9 +53,6 @@ internal static class InstructionTranslation
             nativeOperands.Incoming.TryGetValue(i, out var tailStack) &&
             tailStack.Length != tailTarget.Parameters.Count + (tailTarget.HasThis ? 1 : 0))
             throw new InvalidDataException("Tail call requires exactly its arguments on the evaluation stack");
-        if (i.OpCode.Code == Code.Add && nativeOperands.Incoming.TryGetValue(i, out var incoming) &&
-            incoming.Length >= 2 && NativeOperands.ReferenceAddition(incoming[^2], incoming[^1]))
-            return MemoryOperation.Of(new AddOffset(1, true));
         if (i.OpCode.Code == Code.Readonly)
         {
             Arrays.ValidateReadOnly(instructions, i);
@@ -73,7 +67,7 @@ internal static class InstructionTranslation
         parameterHomes ??= ParameterStorage.IndexHomes(ParameterStorage.Analyze(m, reachable!));
         var translated = TranslateCore(i, m, methods, methodIndex, instructions, profile, parameterHomes,
             layouts, constrainedTargets);
-        return nativeOperands.Mixed.Contains(i) ? new NativeBinary(translated) : translated;
+        return translated;
     }
 
     static Operation TranslateCore(Instruction i, MethodDefinition m,
@@ -112,27 +106,21 @@ internal static class InstructionTranslation
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
             return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
-        if (throws.Raises.TryGetValue(i, out string? raised)) return new Throw(raised);
+        if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
         var spans = Spans.Analyze(m, profile);
         if (spans.Constructors.TryGetValue(i, out var constructor)) return constructor;
         if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return StackOperation.Nop;
         Operation JumpTo(JumpKind kind) => new Jump(kind, instructions.Position((Instruction)i.Operand));
         int LocalIndex() => ((VariableDefinition)i.Operand).Index;
-        Narrowing? NarrowOf(TypeReference type) => LeanEmitter.Narrow(type);
         Operation LoadLocal(int index) => new Local(index);
         Operation StoreLocal(int index) => new SetLocal(index);
         Operation AddressLocal(int index) => new LocalAddress(index);
-        Operation LoadArgument(int index)
-        {
-            var home = parameterHomes.GetValueOrDefault(index, -1);
-            return home < 0 ? new Arg(index, NarrowOf(MethodArguments.Type(m, index))) :
-                new Local(m.Body.Variables.Count + home);
-        }
+        // A store or address names the argument, which must have a home; the step reaches the home's slot.
         Operation Parameter(Func<int, Operation> operation)
         {
-            var home = parameterHomes.GetValueOrDefault(MethodArguments.Index(m, (ParameterDefinition)i.Operand), -1);
-            if (home < 0) throw new InvalidDataException("Missing parameter storage");
-            return operation(m.Body.Variables.Count + home);
+            var argument = MethodArguments.Index(m, (ParameterDefinition)i.Operand);
+            if (!parameterHomes.ContainsKey(argument)) throw new InvalidDataException("Missing parameter storage");
+            return operation(argument);
         }
         int Layout(TypeReference type) => layouts?.Size(type) ??
             MetadataValidation.Layout(type, m.Module, profile.Architecture);
@@ -209,18 +197,16 @@ internal static class InstructionTranslation
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => StackOperation.Nop,
-            Code.Localloc => new StackAlloc(m.Body.InitLocals),
+            Code.Localloc => new Localloc(),
             Code.Cpblk => MemoryOperation.Other($"(.copyBlock {MemoryPrefixes.BlockAlignment(i)})"),
             Code.Initblk => MemoryOperation.Other($"(.initBlock {MemoryPrefixes.BlockAlignment(i)})"),
-            Code.Starg or Code.Starg_S => Parameter(index => new SetLocal(index)),
+            Code.Starg or Code.Starg_S => Parameter(index => new Starg(index)),
             Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
                 ObjectTypes.Candidate(m.DeclaringType) =>
                 throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S when ObjectTypes.Rooted(((ParameterDefinition)i.Operand).ParameterType) =>
                 throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
-            Code.Ldarga or Code.Ldarga_S => Parameter(
-                !Spans.Is(((ParameterDefinition)i.Operand).ParameterType)
-                    ? index => new LocalAddress(index) : index => new Local(index)),
+            Code.Ldarga or Code.Ldarga_S => Parameter(index => new Ldarga(index)),
             Code.Conv_I => new StackOperation(StackOpcode.ConvI),
             Code.Ldind_I => new StackOperation(StackOpcode.Load64),
             Code.Stind_I => new StackOperation(StackOpcode.Store64),
@@ -302,11 +288,11 @@ internal static class InstructionTranslation
             Code.Stobj => new StoreScalar(MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)),
             Code.Initobj => new AggregateTransfer(AggregateAccess.Initialize,
                 MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)),
-            Code.Ldarg_0 => LoadArgument(0),
-            Code.Ldarg_1 => LoadArgument(1),
-            Code.Ldarg_2 => LoadArgument(2),
-            Code.Ldarg_3 => LoadArgument(3),
-            Code.Ldarg or Code.Ldarg_S => LoadArgument(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
+            Code.Ldarg_0 => new Arg(0),
+            Code.Ldarg_1 => new Arg(1),
+            Code.Ldarg_2 => new Arg(2),
+            Code.Ldarg_3 => new Arg(3),
+            Code.Ldarg or Code.Ldarg_S => new Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LoadLocal(0),
             Code.Ldloc_1 => LoadLocal(1),
             Code.Ldloc_2 => LoadLocal(2),
@@ -315,8 +301,7 @@ internal static class InstructionTranslation
             Code.Ldloca or Code.Ldloca_S when ObjectTypes.Rooted(((VariableDefinition)i.Operand).VariableType) ||
                 ReferenceArrays.Is(((VariableDefinition)i.Operand).VariableType) =>
                 throw new InvalidDataException("Unsupported address of a class instance local: " + m.FullName),
-            Code.Ldloca or Code.Ldloca_S => !Spans.Is(((VariableDefinition)i.Operand).VariableType)
-                ? AddressLocal(LocalIndex()) : LoadLocal(LocalIndex()),
+            Code.Ldloca or Code.Ldloca_S => AddressLocal(LocalIndex()),
             Code.Stloc_0 => StoreLocal(0),
             Code.Stloc_1 => StoreLocal(1),
             Code.Stloc_2 => StoreLocal(2),
@@ -371,7 +356,7 @@ internal static class InstructionTranslation
             Code.Blt or Code.Blt_S => JumpTo(JumpKind.Less),
             Code.Beq or Code.Beq_S => JumpTo(JumpKind.Equal),
             Code.Bne_Un or Code.Bne_Un_S => JumpTo(JumpKind.NotEqual),
-            Code.Ret => new Return(NarrowOf(m.ReturnType)),
+            Code.Ret => new Return(),
             _ => throw new InvalidDataException($"Unsupported instruction: {i}")
         };
     }

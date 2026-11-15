@@ -56,6 +56,7 @@ internal static partial class ProofOutline
     static StructWalk WalkStruct(Specification spec, Operation[] ops, Names names)
     {
         var walk = new StructWalk();
+        var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         var receiver = spec.Parameters[0];
         var stack = new Stack<string?>();
         const string Receiver = "\u0000receiver";
@@ -78,15 +79,14 @@ internal static partial class ProofOutline
         for (var pc = 0; pc < ops.Length; pc++)
         {
             var op = ops[pc];
-            if (op is Arg { Narrow: null } argument)
+            if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
             {
                 var parameter = spec.Parameters[argument.Index];
                 if (parameter.Shape == ParameterShape.StructReference) stack.Push(Receiver);
                 else if (parameter.Shape == ParameterShape.Scalar) stack.Push(parameter.Name);
-                else if (parameter.Shape == ParameterShape.Narrow)
-                    stack.Push($"({parameter.Name}.{(parameter.Signed ? "signExtend" : "setWidth")} 32)");
                 else return Stop($"the argument `{parameter.Name}`", pc);
             }
+            else if (op is Arg narrow) return Stop($"the narrow argument `{spec.Parameters[narrow.Index].Name}`", pc);
             else if (StructLiteral(op) is { } literal) stack.Push(literal.Term);
             else if (SizedConversion(op) is { } conversion)
             {
@@ -141,7 +141,7 @@ internal static partial class ProofOutline
                 stack.Push(stack.Peek());
             }
             else if (op.IsNop) { }
-            else if (op is Return { Narrow: null } && pc == ops.Length - 1)
+            else if (op is Return && plainReturn && pc == ops.Length - 1)
             {
                 if (spec.Result is not null)
                 {

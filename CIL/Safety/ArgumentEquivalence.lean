@@ -13,32 +13,16 @@ namespace CIL.Safety
 /-- Only argument loads observe the argument list after frame setup. -/
 theorem step_arguments_eq (body : CIL.Method) (op : CIL.Instruction) (pc : Nat)
     (args other : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
-    (agreement : ∀ index narrow, op = .arg index narrow → args[index]? = other[index]?) :
+    (agreement : ∀ index, op = .ldarg index → args[index]? = other[index]?) :
     step body op pc args frame stack memory = step body op pc other frame stack memory := by
   cases op <;> try rfl
-  case arg index narrow =>
-    cases narrow with
-    | none =>
-      exact congrArg (fun selected => do
-        let some value := selected | .error .invalidState
-        return FrameAction.next (pc + 1) ((← checkedValue memory value) :: stack) frame memory)
-        (agreement index none rfl)
-    | some kind =>
-      exact congrArg (fun (selected : Option Value) => show ExecutionResult FrameAction from do
-        if (selected.map Value.hasUnspecified).getD false then
-          .error (.unsupported "Instruction observes unspecified vector bits") else
-        let some (Value.scalar (.i32 bits)) := selected | .error .invalidState
-        return FrameAction.next (pc + 1)
-          ((← checkedValue memory (.scalar (.i32 (kind.extend bits)))) :: stack) frame memory)
-        (agreement index (some kind) rfl)
-  case ret narrow =>
-    cases narrow <;> try rfl
-    cases stack with
-    | nil => rfl
-    | cons value rest =>
-      cases value <;> try rfl
-      rename_i scalar
-      cases scalar <;> cases rest <;> rfl
+  case ldarg index =>
+    have same : loadArgument body index args frame memory =
+        loadArgument body index other frame memory := by
+      simp only [loadArgument, agreement index rfl]
+    exact congrArg (fun (loaded : ExecutionResult Value) =>
+      show ExecutionResult FrameAction from do
+        return FrameAction.next (pc + 1) ((← loaded) :: stack) frame memory) same
   all_goals
     cases stack with
     | nil => rfl
@@ -57,8 +41,7 @@ theorem step_arguments_eq (body : CIL.Method) (op : CIL.Instruction) (pc : Nat)
     Child calls receive the same evaluated stack arguments on both sides. -/
 theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)
     (lookup : program[method]? = some body) (args other : List Value)
-    (agreement : ∀ index narrow,
-      CIL.Instruction.arg index narrow ∈ body.code → args[index]? = other[index]?)
+    (agreement : ∀ index, CIL.Instruction.ldarg index ∈ body.code → args[index]? = other[index]?)
     (fuel pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
     run program fuel method pc args frame stack memory =
       run program fuel method pc other frame stack memory := by
@@ -69,9 +52,9 @@ theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Meth
     | none => simp [run, lookup, fetched]
     | some op =>
       have same := step_arguments_eq body op pc args other frame stack memory (by
-        intro index narrow equal
+        intro index equal
         subst op
-        exact agreement index narrow (List.mem_of_getElem? fetched))
+        exact agreement index (List.mem_of_getElem? fetched))
       simp only [run, lookup, fetched]
       rw [same]
       cases haction : step body op pc other frame stack memory with
@@ -91,8 +74,7 @@ theorem run_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Meth
     them, and set up the same frame. -/
 theorem invoke_arguments_eq (program : CIL.Program) (method : Nat) (body : CIL.Method)
     (lookup : program[method]? = some body) (args other : List Value)
-    (agreement : ∀ index narrow,
-      CIL.Instruction.arg index narrow ∈ body.code → args[index]? = other[index]?)
+    (agreement : ∀ index, CIL.Instruction.ldarg index ∈ body.code → args[index]? = other[index]?)
     (fuel : Nat) (memory : Memory)
     (checkedArgs : args.mapM (checkedValue memory) = .ok args)
     (checkedOther : other.mapM (checkedValue memory) = .ok other)

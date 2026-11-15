@@ -49,7 +49,7 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {pc : Nat} {frame : Frame
       cases executed
       simp only [FrameAction.callee, Option.some.injEq] at enters
       subst callee
-      exact List.mem_map.mpr ⟨_, List.mem_of_find?_eq_some (by assumption), rfl⟩
+      exact indirectTarget_mem (by assumption)
     | solve | cases executed; cases enters
     | cases executed
     | split at executed
@@ -62,7 +62,7 @@ theorem step_callVirtual_callee {body : CIL.Method}
     (executed : step body (.callVirtual targets argc) pc args frame stack memory = .ok action)
     (enters : action.callee = some callee) :
     callee ∈ (CIL.Instruction.callVirtual targets argc).callees := by
-  simp only [step, observerCount, Bool.or_false] at executed
+  simp only [step] at executed
   split at executed
   · cases executed
   split at executed
@@ -85,11 +85,13 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
     (enters : action.callee = some callee) : callee ∈ op.callees := by
   cases op
   case callVirtual targets argc => exact step_callVirtual_callee h enters
-  all_goals unfold step at h
+  all_goals unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h
   all_goals dsimp only at h
   all_goals split at h
   all_goals repeat' first
     | exact managedStep_callee h enters
+    | unfold returnFrom at h
+    | unfold localAllocation at h
     | solve | cases h; cases enters
     | solve |
       cases h
@@ -108,7 +110,7 @@ theorem step_managed_tail_action {body : CIL.Method} {signature : CIL.ManagedSig
     (executed : step body (.managed (.call signature catalog true)) pc args frame stack memory =
       .ok action) :
     ∃ callee arguments result, action = .tailCall callee arguments result := by
-  simp only [step, managedStep, observerCount, Bool.or_false,
+  simp only [step, managedStep,
     Bind.bind, Except.bind, Pure.pure, Except.pure, Bool.true_eq, ite_true] at executed
   repeat' first
     | solve | cases executed; exact ⟨_, _, _, rfl⟩
@@ -131,7 +133,7 @@ theorem step_next_target {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {
   have same : op.relabel r = op := op.relabel_eq_self r fun t member =>
     ite_eq_right fun e => outside (.inr (by rw [← e]; exact member))
   have moved := step_relabel op body body r pc pc args frame stack m _
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl,
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl,
       fun continues => ite_eq_right fun e => outside (.inl ⟨continues, e.symm⟩)⟩ h
   rw [same, h] at moved
   simp only [FrameAction.relabel, Except.ok.injEq, FrameAction.next.injEq] at moved

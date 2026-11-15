@@ -2,6 +2,12 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PinnedMetadata.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -30,8 +36,9 @@ MethodDefinition Method(TypeDefinition type, string name, params Instruction[] c
     type.Methods.Add(method);
     return method;
 }
-using (var module = ModuleDefinition.ReadModule(assembly))
+using (var pinned = new PinnedMetadata(extractor, assembly))
 {
+    var module = pinned.Module;
     var context = Context(module);
     foreach (var field in module.GetType("Examples.StaticScalars").Fields)
     {
@@ -53,7 +60,8 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 foreach (var scenario in new[] { "twice", "flow", "branch", "switch", "foreign", "outside", "address", "fresh" })
 {
-    using var module = ModuleDefinition.ReadModule(assembly);
+    using var pinned = new PinnedMetadata(extractor, assembly);
+    var module = pinned.Module;
     var type = module.GetType("Examples.StaticScalars");
     var field = type.Fields.Single(field => field.Name == "Byte");
     var constructor = type.Methods.Single(method => method.IsConstructor);
@@ -103,12 +111,20 @@ foreach (var scenario in new[] { "twice", "flow", "branch", "switch", "foreign",
     Reject(() => Resolve(context, field), marker);
 }
 Console.WriteLine("PASS scalar copies, control flow, switch/foreign targets, outside writes and fresh contexts");
+var missingReferenceImage = At("artifacts/StaticValueIndexes/missing-reference.dll");
+Directory.CreateDirectory(Path.GetDirectoryName(missingReferenceImage)!);
+using (var source = ModuleDefinition.ReadModule(assembly))
+{
+    source.AssemblyReferences.Add(new("MissingStaticIndexAssembly", new Version(1, 0)));
+    source.Write(missingReferenceImage);
+}
 foreach (var errorFirst in new[] { false, true })
 {
-    using var module = ModuleDefinition.ReadModule(assembly);
+    using var pinned = new PinnedMetadata(extractor, missingReferenceImage);
+    var module = pinned.Module;
     var type = module.GetType("Examples.StaticScalars");
     var field = type.Fields.Single(field => field.Name == "Byte");
-    var absent = new AssemblyNameReference("MissingStaticIndexAssembly", new Version(1, 0));
+    var absent = module.AssemblyReferences.Single(reference => reference.Name == "MissingStaticIndexAssembly");
     var unknown = new FieldReference("Unknown", module.TypeSystem.Int32,
         new TypeReference("Missing", "Owner", module, absent));
     var broken = Method(type, "BrokenWriter", Instruction.Create(OpCodes.Stsfld, unknown),

@@ -7,13 +7,14 @@ namespace Nethermind.LeanCIL;
 // Templates are proof inputs. Only the generated, kernel-checked bindings connect them to CIL.
 internal static partial class TemplateEmitter
 {
-    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations);
+    /// <summary>One extracted method: its identity, frame, operations and the raw opcode at each pc.</summary>
+    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes);
     internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods);
     /// <summary>One profile's frame and body, its callees renumbered to the template's callee parameters.</summary>
     sealed record Row(Variant Variant, FrameMetadata Frame, Operation[] Ops);
-    sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows);
+    sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows,
+        int[] Opcodes);
 
-    static readonly string MissingProfile = new Unsupported("Profile combination not selected for template").ToLean();
     const string Usage = "Usage: leancil templates output-directory extraction-directory... [--check] " +
         "[--namespace name] [--omit-equations] [--module file.lean]";
 
@@ -156,7 +157,8 @@ internal static partial class TemplateEmitter
     static Template Prepare(string identity, (Variant Variant, Method Method)[] selected)
     {
         var first = selected[0].Method;
-        if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length))
+        if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length ||
+            !row.Method.Opcodes.AsSpan().SequenceEqual(first.Opcodes)))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
         var features = Enum.GetValues<Feature>().Where(feature => selected.Any(row =>
@@ -177,7 +179,7 @@ internal static partial class TemplateEmitter
         if (rows.Any(row => row.Frame != rows[0].Frame))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
-        return new(identity, rows[0].Frame, features, callees, rows);
+        return new(identity, rows[0].Frame, features, callees, rows, first.Opcodes);
     }
 
     /// <summary>An instruction merged over profiles: the operation when every profile agrees, and its text.</summary>
@@ -185,10 +187,14 @@ internal static partial class TemplateEmitter
 
     static string Callee(int index) => "callee" + index;
 
-    // Missing combinations stay unsupported even where all selected rows share an instruction.
+    // A missing combination is a hole with the pc's raw opcode, even where all selected rows share an instruction.
     static Merged Instruction(Template template, Row[] rows, int pc, int featureIndex = 0)
     {
-        if (rows.Length == 0) return new(null, MissingProfile);
+        if (rows.Length == 0)
+        {
+            var operation = new Unadmitted(template.Opcodes[pc]);
+            return new(operation, operation.ToLean());
+        }
         if (featureIndex == template.Features.Length)
         {
             var values = rows.Select(row => row.Ops[pc]).Distinct().ToArray();
@@ -205,6 +211,28 @@ internal static partial class TemplateEmitter
         return enabled.Operation == disabled.Operation && enabled.Text == disabled.Text ? enabled
             : new(null, $"if {Flag(feature)} then ({enabled.Text}) else ({disabled.Text})");
     }
+    /// <summary>The table entries of one pc, as a list expression over the template's feature flags.</summary>
+    static string LinkEntries(Template template, Row[] rows, int pc, int featureIndex = 0)
+    {
+        if (rows.Length == 0) return "[]";
+        if (featureIndex == template.Features.Length)
+            return rows[0].Ops[pc].Link(Callee) is { } link ? $"[({pc}, {link})]" : "[]";
+        var feature = template.Features[featureIndex];
+        var enabled = LinkEntries(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], pc,
+            featureIndex + 1);
+        var disabled = LinkEntries(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], pc,
+            featureIndex + 1);
+        return enabled == disabled ? enabled : $"if {Flag(feature)} then ({enabled}) else ({disabled})";
+    }
+
+    /// <summary>The links field of a template: one entry per call site, in pc order, linear in the code.</summary>
+    static string LinkTable(Template template)
+    {
+        var entries = Enumerable.Range(0, template.Rows[0].Ops.Length)
+            .Select(pc => LinkEntries(template, template.Rows, pc)).Where(entry => entry != "[]").ToArray();
+        return entries.Length == 0 ? "[]" : string.Join(" ++ ", entries.Select(entry => $"({entry})"));
+    }
+
     // Lines end in LF on every platform, so committed output compares equal wherever it was generated.
     static string EmitTemplates(Template[] templates, string space, bool omitEquations)
     {
@@ -223,7 +251,8 @@ internal static partial class TemplateEmitter
                 $"({FrameMetadata.EnvironmentLean} : LayoutEnvironment)");
             foreach (var feature in template.Features) lean.Append($" ({Flag(feature)} : Bool)");
             for (var callee = 0; callee < template.Callees.Length; callee++) lean.Append($" (callee{callee} : Nat)");
-            Line($" : Method := {{ profile, {template.Frame.ToLean(Callee)}, code := [");
+            Line($" : Method := {{ profile, {template.Frame.ToLean(Callee)}, " +
+                $"links := {LinkTable(template)}, code := [");
             Line(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
                 .Select(pc => "  " + Instruction(template, template.Rows, pc).Text)) + "] }");
             if (!omitEquations)

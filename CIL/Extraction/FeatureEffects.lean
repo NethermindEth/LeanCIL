@@ -6,7 +6,8 @@ import CIL.Instructions
 The feature-flow check in `Features` matches most raw instructions to their emitted
 counterpart only by stack effect. This file gives that effect, as `(pops, pushes)`, for
 each emitted instruction that cannot disturb a tracked local; the rest have none and must
-be matched exactly.
+be matched exactly. Indirect loads, stores and block operations also meet the exact rule of
+`IndirectAccess`.
 -/
 
 namespace CIL.Extraction
@@ -54,13 +55,13 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   match op with
   | .managed (.address ..) => some (0, 1)
   | .managed .tableLength | .managed (.tableLoad _) => some (1, 1)
-  | .managed (.tableElement _) | .managed .tableOffset => some (2, 1)
+  | .managed (.tableElement _) => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
-  | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)
+  | .localloc | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
-  | .ldc_i4 _ | .ldc_i8 _ | .arg .. | .local .. => some (0, 1)
+  | .ldc_i4 _ | .ldc_i8 _ | .ldarg _ | .ldloc .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
@@ -69,11 +70,6 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
   | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => some (2, 1)
-  | .nativeBinary operation => match operation with
-    | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
-    | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
-    | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => some (2, 1)
-    | _ => none
   -- Stores and initialization through a reference, `pop` and `dup`.
   | .storeAggregate _ | .storeScalar _ | .store64 | .copyObject _
   | .setFieldAt .. | .setAggregateFieldAt .. => some (2, 0)
@@ -86,8 +82,8 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .intrinsic _ count => some (count, 1)
   | .memory operation => some (memoryFeatureEffect operation)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
-  | .localAddr _ | .setLocal .. | .initializeSpanLocal ..
-  | .feature _ | .ret _ | .throw _ | .unsupported _ | .br _ | .switch _ | .brfalse _
+  | .ldloca _ | .stloc .. | .starg _ | .ldarga _ | .initializeSpanLocal ..
+  | .feature _ | .ret | .throw _ | .unadmitted _ | .br _ | .switch _ | .brfalse _
   | .brtrue _ | .bgt _ | .ble _ | .ble_un _ | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _
   | .blt _ | .beq _ | .bne_un _ => none
 

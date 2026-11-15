@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -13,14 +18,15 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Guards");
 Directory.CreateDirectory(root);
 
-foreach (var (proof, entry) in new[]
+foreach (var (source, entry) in new[]
 {
-    ("GuardCount", "Guards::Count(System.Int32)"),
-    ("GuardIndex", "Guards::Index(System.UInt32,System.UInt32)"),
-    ("GuardRequired", "Guards::Required(System.String)")
+    ("Examples/Proofs/GuardCount.lean", "Guards::Count(System.Int32)"),
+    ("Examples/Proofs/GuardIndex.lean", "Guards::Index(System.UInt32,System.UInt32)"),
+    ("Examples/Proofs/GuardRequired.lean", "Guards::Required(System.String)")
 })
 {
-    verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
+    var proof = Path.GetFileNameWithoutExtension(source);
+    verification.Verify(assembly, "Examples", entry, At(source), Path.Combine(root, proof));
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 

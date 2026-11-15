@@ -1,17 +1,200 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ConsumerTraceDirectory.cs
 
+using System.Diagnostics;
+using System.Text.Json;
+
+if (args is not ([] or ["--audit-only"] or ["--results-only"] or ["--diagnostics-only"]))
+    throw new ArgumentException("Usage: JointReplay.cs [--audit-only|--results-only|--diagnostics-only]");
+CheckSeparateReplayResults();
+CheckReplayDiagnostics();
+CheckReplayWorkers();
+if (args is ["--results-only"]) return;
 using var verification = new Program();
-if (args is not ([] or ["--audit-only"]))
-    throw new ArgumentException("Usage: JointReplay.cs [--audit-only]");
 var root = At("artifacts/JointReplay");
 if (Directory.Exists(root)) Directory.Delete(root, true);
 Directory.CreateDirectory(root);
 var environment = new Dictionary<string, string> { ["LEAN_SYSROOT"] = verification.Toolchain };
+
+void CheckReplayWorkers()
+{
+    var original = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
+    try
+    {
+        foreach (var configured in new string?[] { null, "", " ", "8" })
+        {
+            Environment.SetEnvironmentVariable("LEAN_NUM_THREADS", configured);
+            if (ReplayWorkerCount() != (configured == "8" ? "8" : "2"))
+                throw new InvalidOperationException("Isolated replay worker count changed.");
+        }
+        foreach (var configured in new[] { "0", "-1", "invalid" })
+        {
+            Environment.SetEnvironmentVariable("LEAN_NUM_THREADS", configured);
+            try { ReplayWorkerCount(); }
+            catch (InvalidDataException) { continue; }
+            throw new InvalidOperationException("Invalid isolated replay worker count was accepted.");
+        }
+    }
+    finally { Environment.SetEnvironmentVariable("LEAN_NUM_THREADS", original); }
+    Console.WriteLine("PASS isolated replay worker configuration");
+}
+
+void CheckSeparateReplayResults()
+{
+    const string success = """{"module":"A","milliseconds":1}""";
+    const string failure = """{"module":"A","error":"rejected"}""";
+    void Reject(string[] targets, int code, string output)
+    {
+        try { ParseSeparateReplayResults(targets, code, output); }
+        catch (InvalidDataException) { return; }
+        throw new InvalidOperationException("Invalid replay result was accepted: " + output);
+    }
+    if (ParseSeparateReplayResults(["A"], 0, "progress\r\n  " + success + " \r\nfinished").Count != 0 ||
+        ParseSeparateReplayResults(["A"], 1, failure)["A"] != "rejected" ||
+        ParseSeparateReplayResults([], 0, "progress\n").Count != 0)
+        throw new InvalidOperationException("Valid replay results changed");
+    var mixed = ParseSeparateReplayResults(["A", "B"], 7,
+        success + "\n" + """{"error":"kernel rejected B","module":"B"}""");
+    if (mixed.Count != 1 || mixed["B"] != "kernel rejected B")
+        throw new InvalidOperationException("Replay failure ownership changed");
+    if (ParseSeparateReplayResults(["A"], 0,
+        """{"milliseconds":18446744073709551615,"module":"A"}""").Count != 0)
+        throw new InvalidOperationException("Maximum elapsed value was rejected");
+    if (ParseSeparateReplayResults(["A"], 0, """{"mo\u0064ule":"A","milliseconds":1}""").Count != 0)
+        throw new InvalidOperationException("Escaped field name was not read as its unescaped name");
+    Reject(["A"], 0, success + "\n" + success);
+    Reject(["A"], 1, failure + "\n" + failure);
+    Reject(["A"], 1, success + "\n" + failure);
+    Reject(["A"], 0, success + "\n" + success.Replace("A", "B", StringComparison.Ordinal));
+    Reject(["A"], 1, success + "\n" + failure.Replace("A", "B", StringComparison.Ordinal));
+    Reject(["A", "B"], 0, success);
+    Reject(["A"], 1, success);
+    Reject(["A"], 0, failure);
+    Reject(["A"], 0, "");
+    Reject(["A"], 0, success.Replace("A", "a", StringComparison.Ordinal));
+    Reject([], 0, success);
+    Reject([], 1, "");
+    Reject(["A", "A"], 0, success);
+    Reject([""], 0, "");
+    Reject([" "], 0, "");
+    try { SeparateReplayTargets(["A", "A"]); throw new Exception("Duplicate input targets accepted"); }
+    catch (InvalidDataException) { }
+    foreach (var malformed in new[]
+    {
+        "{", "{}", "{invalid", success + " trailing", """{"milliseconds":0}""",
+        """{"module":"A"}""", """{"module":null,"milliseconds":0}""",
+        """{"module":"","milliseconds":0}""", """{"module":" ","milliseconds":0}""",
+        """{"module":"A","module":"A","milliseconds":0}""",
+        """{"module":"A","mo\u0064ule":"A","milliseconds":0}""",
+        """{"module":"A","milliseconds":0,"milliseconds":1}""",
+        """{"module":"A","error":"one","error":"two"}""",
+        """{"module":"A","milliseconds":0,"extra":true}""",
+        """{"module":"A","milliseconds":0,"error":"rejected"}"""
+    }) Reject(["A"], 0, success + "\n" + malformed);
+    foreach (var invalidElapsed in new[] { "-1", "1.5", "1.0", "1e0", "18446744073709551616",
+        "null", "true", "\"1\"", "[]", "{}" })
+        Reject(["A"], 0, "{\"module\":\"A\",\"milliseconds\":" + invalidElapsed + "}");
+    foreach (var invalidError in new[] { "null", "true", "1", "\"\"", "[]", "{}" })
+        Reject(["A"], 1, "{\"module\":\"A\",\"error\":" + invalidError + "}");
+    Console.WriteLine("PASS separate replay exact records, target coverage, field types and exit status");
+
+    long previousBytes = 0;
+    double previousMilliseconds = 0;
+    // Each sample parses the same number of records, so the larger sizes stay well under a second.
+    const int recordsPerSample = 65536;
+    // A parse that allocates a line array, line strings or field-name strings exceeds this per record.
+    const int maxBytesPerRecord = 256;
+    foreach (int count in new[] { 256, 1024, 4096, 16384 })
+    {
+        var targets = Enumerable.Range(0, count).Select(index => "Module" + index).ToArray();
+        var output = string.Join('\n', targets.Select(module => JsonSerializer.Serialize(new { module, milliseconds = 1 })));
+        for (int warm = 0; warm < 4; warm++) ParseSeparateReplayResults(targets, 0, output);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        ParseSeparateReplayResults(targets, 0, output);
+        long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        int repetitions = recordsPerSample / count;
+        // The fastest sample is the parse itself; slower samples add scheduler and collector delays.
+        double milliseconds = double.MaxValue;
+        for (int sample = 0; sample < 9; sample++)
+        {
+            var timer = Stopwatch.StartNew();
+            for (int repeat = 0; repeat < repetitions; repeat++) ParseSeparateReplayResults(targets, 0, output);
+            milliseconds = Math.Min(milliseconds, timer.Elapsed.TotalMilliseconds / repetitions);
+        }
+        if (bytes > (long)maxBytesPerRecord * count)
+            throw new InvalidOperationException(
+                $"Separate replay parsing allocated {bytes} bytes for {count} records, " +
+                $"over {maxBytesPerRecord} per record");
+        if (previousBytes != 0 && (bytes > previousBytes * 6 || milliseconds > previousMilliseconds * 6 + 1))
+            throw new InvalidOperationException(
+                $"Separate replay parsing exceeded its growth bound at {count}: {bytes} allocated bytes and " +
+                $"{milliseconds:F3} ms against {previousBytes} bytes and {previousMilliseconds:F3} ms");
+        Console.WriteLine($"PASS replay parsing {count}: {bytes} allocated bytes, {milliseconds:F3} ms");
+        previousBytes = bytes;
+        previousMilliseconds = milliseconds;
+    }
+}
+
+void CheckReplayDiagnostics()
+{
+    const string accepted = """{"module":"A","outcome":"accepted"}""";
+    const string rejected =
+        """{"module":"A","outcome":"rejected","declaration":"A.bad","kind":"declTypeMismatch"}""";
+    const string complete = """{"complete":true}""";
+    void Reject(string[] targets, int code, string output)
+    {
+        try { ParseReplayDiagnostics(targets, code, output); }
+        catch (InvalidDataException) { return; }
+        throw new InvalidOperationException("Invalid diagnostic accepted: " + output);
+    }
+    if (ParseReplayDiagnostics(["A"], 0, accepted + "\n" + complete).Count != 0 ||
+        ParseReplayDiagnostics(["A"], 0, rejected + "\n" + complete)["A"].Declaration != "A.bad" ||
+        ParseReplayDiagnostics([], 0, complete).Count != 0 ||
+        ParseReplayDiagnostics(["A"], 0,
+            """{"module":"A","outcome":"unavailable","error":"resource"}""" + "\n" + complete).Count != 0)
+        throw new InvalidOperationException("Valid diagnostic rejected");
+    Reject(["A"], 1, rejected + "\n" + complete);
+    Reject(["A"], 0, rejected);
+    Reject(["A"], 0, complete + "\n" + rejected);
+    Reject(["A"], 0, rejected + "\n" + rejected + "\n" + complete);
+    Reject(["A", "B"], 0, rejected + "\n" + complete);
+    Reject(["B"], 0, rejected + "\n" + complete);
+    Reject(["A", "A"], 0, rejected + "\n" + complete);
+    foreach (var kind in new[] { "\"0\"", "0", "null", "\"other\"", "\"interrupted\"",
+        "\"deterministicTimeout\"", "\"excessiveMemory\"", "\"deepRecursion\"" })
+        Reject(["A"], 0, rejected.Replace("\"declTypeMismatch\"", kind, StringComparison.Ordinal) +
+            "\n" + complete);
+    foreach (var record in new[] { "{", "{}", "{\"complete\":false}",
+        accepted.Replace("\"A\"", "null", StringComparison.Ordinal),
+        rejected.Replace("\"A.bad\"", "\"\"", StringComparison.Ordinal),
+        rejected.Replace("\"kind\":", "\"kind\":0,\"kind\":", StringComparison.Ordinal),
+        accepted[..^1] + ",\"extra\":true}" })
+        Reject(["A"], 0, record + "\n" + complete);
+    long previous = 0;
+    foreach (int count in new[] { 64, 256, 1024 })
+    {
+        var targets = Enumerable.Range(0, count).Select(index => "M" + index).ToArray();
+        var output = string.Join('\n', targets.Select(module => JsonSerializer.Serialize(new
+        {
+            module, outcome = "rejected", declaration = module + ".bad", kind = "declTypeMismatch"
+        }))) + "\n" + complete;
+        ParseReplayDiagnostics(targets, 0, output);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        if (ParseReplayDiagnostics(targets, 0, output).Count != count) throw new Exception("Lost records");
+        var bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+        if (previous != 0 && bytes > previous * 6) throw new Exception("Diagnostic parsing allocation growth");
+        Console.WriteLine($"PASS diagnostic parser {count}: {bytes} allocated bytes");
+        previous = bytes;
+    }
+}
 
 void Compile(string module, string source)
 {
@@ -79,6 +262,31 @@ Compile("JointForgedDefinition", """
 Compile("JointForgedDefinitionUse", "import JointForgedDefinition\n" +
     "theorem JointForgedDefinitionUse.same : JointForgedDefinition.value = JointForgedDefinition.value := rfl\n");
 Compile("JointForgedChain", "import JointForged\ntheorem JointForgedChain.use : False := JointForged.false\n");
+
+void CheckIsolatedDiagnostics()
+{
+    if (args is not ["--diagnostics-only"]) verification.Library(Inputs(At("CIL.lean")));
+    var executable = args is ["--diagnostics-only"]
+        ? At(".lake/build/bin/leancil-audit" + (OperatingSystem.IsWindows() ? ".exe" : ""))
+        : verification.CheckedAuditExecutable();
+    string[] targets = ["JointA", "JointForged", "JointForgedDefinition", "JointForgedChain",
+        "JointHidden", "JointMalformed"];
+    var input = Path.Combine(root, "diagnostic-targets.json");
+    File.WriteAllText(input, JsonSerializer.Serialize(targets));
+    var result = Execute([executable, "--diagnose-replay", input], root, root, environment: environment);
+    var rejected = ParseReplayDiagnostics(targets, result.Code, result.Stdout);
+    if (rejected.Count != 3 || rejected["JointForged"].Declaration != "JointForged.false" ||
+        rejected["JointForgedDefinition"].Declaration != "JointForgedDefinition.value" ||
+        rejected["JointHidden"].Declaration != "JointHidden.correctness")
+        throw new InvalidOperationException("Isolated diagnostic ownership changed: " + result.Output);
+    Console.WriteLine("PASS isolated typed rejection, imported dependency exclusion and unavailable olean");
+}
+
+if (args is ["--diagnostics-only"])
+{
+    CheckIsolatedDiagnostics();
+    return;
+}
 
 void CheckFusedReplay()
 {
@@ -398,6 +606,7 @@ else
     CheckReplays(native: false);
     CheckReplays(native: true);
 }
+CheckIsolatedDiagnostics();
 CheckFusedReplay();
 CheckReplayedClosures();
 CheckReplayedInterfaces();

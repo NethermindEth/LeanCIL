@@ -2,6 +2,10 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 
@@ -188,6 +192,54 @@ void CheckInterfaceReuse()
     if (builds.Length != 2 || compiled != 1 || replayed < 2)
         throw new InvalidOperationException($"Interface reuse mismatch: {builds.Length} checks, {compiled} builds, {replayed} replays.");
     Console.WriteLine("PASS identical published interfaces compile once across fresh extraction groups and replay independently");
+    var selected = requests[0];
+    var pinManifest = Path.Combine(reuseRoot, "images.sha256");
+    File.WriteAllText(pinManifest, Sha(app) + "  " + Path.GetRelativePath(reuseRoot, app) + "\n");
+    var deepInputs = DeepCheckInputs.Read(pinManifest);
+    var extractionIdentity = ExtractionIdentity.Read(selected.output);
+    if (deepInputs.MatchPins(extractionIdentity.Root).Count != 1 || extractionIdentity.Imports.Length == 0)
+        throw new InvalidOperationException(
+            "Imported-interface deep fixture lost its executable pin or typed import.");
+    using Program deepConsumer = new();
+    var deepReport = deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness",
+        reusePackage, null, null, deepInputs);
+    if (deepReport.binding.mode != BindingMode.Deep ||
+        deepReport.binding.facts.Single(fact => fact.id == BindingFact.BodyBytes).status != BindingStatus.Reconfirmed)
+        throw new InvalidOperationException("Consumer deep verification did not check the imported caller body.");
+    Console.WriteLine("PASS consumer deep audit checks the caller with an independently audited published interface");
+    var token = Guid.NewGuid().ToString("N");
+    File.AppendAllText(proof, "\n-- " + token + "\n");
+    SortedDictionary<string, string> Receipts() => Directory.Exists(SuccessCacheRoot)
+        ? HashFiles(Directory.EnumerateFiles(SuccessCacheRoot, "receipt.*", SearchOption.AllDirectories)
+            .Select(path => (path, path))) : new(StringComparer.Ordinal);
+    var receipts = Receipts();
+    bool mutated = false;
+    bool rejected = false;
+    try
+    {
+        deepConsumer.VerifyConsumer(app, proof, selected.output, "ExampleProof.correctness", reusePackage, null,
+            stage =>
+            {
+                if (stage != "deep checks" || mutated) return;
+                var session = Directory.EnumerateDirectories(Path.GetTempPath(), "leancil-consumer-*")
+                    .Single(candidate => File.Exists(Path.Combine(candidate, "LeanCILProof.lean")) &&
+                        File.ReadAllText(Path.Combine(candidate, "LeanCILProof.lean"))
+                            .Contains(token, StringComparison.Ordinal));
+                var artifact = Path.Combine(session, ".lake/packages/leancil_generated/.lake/build/lib/lean",
+                    interfaceModule + ".olean");
+                if (!File.Exists(artifact))
+                    throw new InvalidOperationException("Accepted interface artifact is missing.");
+                File.WriteAllBytes(artifact + ".unexpected", [0]);
+                mutated = true;
+            }, deepInputs);
+    }
+    catch (InvalidOperationException error) when (error.Message.Contains("Compiled artifacts changed",
+        StringComparison.Ordinal)) { rejected = true; }
+    if (!mutated || !rejected || File.Exists(Path.Combine(selected.output, "verified.json")) ||
+        !Same(receipts, Receipts()))
+        throw new InvalidOperationException(
+            "Changed published interface escaped deep inventory or published a receipt.");
+    Console.WriteLine("PASS consumer deep audit rejects a new published-interface companion without receipts");
     Reset();
 }
 
@@ -275,7 +327,7 @@ if (!stages.Where(stage => stage.GetProperty("exitCode").GetInt32() == 0 &&
 if (!verified.Contains("Conditional verification: assumes _root_.CIL.Safety.MethodContract.Holds _root_.ImportFixture.addOne linked 1", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification did not disclose imported contract premises.");
 JsonElement report = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(Path.Combine(output, "verified.json")));
-if (report.GetProperty("schema").GetInt32() != 4 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
+if (report.GetProperty("schema").GetInt32() != 5 || report.GetProperty("contractImports").GetArrayLength() != 1 ||
     report.GetProperty("imports")[0].GetProperty("acceptedVia").GetString() != "published-certification" ||
     !report.GetProperty("imports")[0].GetProperty("deploymentObligation").GetString()!.Contains("exact implementation bytes", StringComparison.Ordinal))
     throw new InvalidOperationException("Verification report omitted imported contract premises.");

@@ -25,13 +25,40 @@ name = "StrictBinding"
 name = "Tests.Support"
 
 [[lean_lib]]
+name = "Tests.ReplayDiagnostics"
+
+[[lean_lib]]
 name = "Tests.Semantics"
+
+[[lean_lib]]
+name = "Tests.MixedNativeOpcodes"
 
 [[lean_lib]]
 name = "Tests.BodyEncoding"
 
 [[lean_lib]]
 name = "Tests.BodyDecoding"
+
+[[lean_lib]]
+name = "Tests.BodyLiteral"
+
+[[lean_lib]]
+name = "Tests.KernelEquation"
+
+[[lean_lib]]
+name = "Tests.MetadataBuilder"
+
+[[lean_lib]]
+name = "Tests.MetadataDecoding"
+
+[[lean_lib]]
+name = "Tests.MetadataWorld"
+
+[[lean_lib]]
+name = "Tests.MetadataBinding"
+
+[[lean_lib]]
+name = "Tests.GenericOwnerScaling"
 
 [[lean_lib]]
 name = "Tests.LiteralDisplay"
@@ -41,6 +68,27 @@ name = "Tests.Identity"
 
 [[lean_lib]]
 name = "Tests.ResolutionFacts"
+
+[[lean_lib]]
+name = "Tests.ValueDecoding"
+
+[[lean_lib]]
+name = "Tests.DecodedMethod"
+
+[[lean_lib]]
+name = "Tests.FieldRef"
+
+[[lean_lib]]
+name = "Tests.FieldShape"
+
+[[lean_lib]]
+name = "Tests.RuntimeModels"
+
+[[lean_lib]]
+name = "Tests.ReturnOpcode"
+
+[[lean_lib]]
+name = "Tests.ReturnMetadataBinding"
 
 [[lean_lib]]
 name = "Tests.Automation"
@@ -303,6 +351,9 @@ name = "Tests.FeatureGetter"
 name = "Tests.Segment"
 
 [[lean_lib]]
+name = "Tests.SegmentContract"
+
+[[lean_lib]]
 name = "Tests.AllocationRenaming"
 
 [[lean_lib]]
@@ -343,3 +394,12 @@ name = "Tests.PublicProofSurface"
 
 [[lean_lib]]
 name = "Tests.StrictBinding"
+
+[[lean_lib]]
+name = "Tests.Crypto"
+
+[[lean_lib]]
+name = "Tests.MetadataAssemblies"
+
+[[lean_lib]]
+name = "Tests.PinnedIndexScaling"

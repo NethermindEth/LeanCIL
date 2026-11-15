@@ -1,8 +1,14 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ConsumerTraceDirectory.cs
 
+// Standalone measurement of complete CLI requests against a certified library; no suite runs it.
 using System.Diagnostics;
 using System.Text.Json;
 
@@ -18,7 +24,8 @@ import Extracted
 namespace ExampleProof
 /-- The emitted program satisfies its complete translation evidence. -/
 theorem correctness : CIL.Extraction.TranslationValid Extracted.rawLayouts Extracted.computedLayouts
-    Extracted.methodEvidence Extracted.imports Extracted.program := Extracted.translation_valid
+    Extracted.assemblies Extracted.methodEvidence Extracted.imports Extracted.program :=
+  Extracted.translation_valid
 #print axioms correctness
 end ExampleProof
 """);
@@ -50,6 +57,13 @@ void Verify(string label, int expectedCompilations, params string[] options)
         "Joint kernel replay of consumer proof and dependencies").ToArray();
     if (expectedCompilations > 0 && replays.Length == 0)
         throw new InvalidOperationException("Missing independent kernel replay: " + label);
+    var audits = stages.Where(stage => stage.GetProperty("command") is var command &&
+        command.GetArrayLength() == 3 &&
+        Path.GetFileNameWithoutExtension(command[0].GetString()) == "leancil-audit" &&
+        command[1].GetString()!.EndsWith(".json", StringComparison.Ordinal) &&
+        command[2].GetString()!.EndsWith(".result.json", StringComparison.Ordinal)).ToArray();
+    if (audits.Length == 0)
+        throw new InvalidOperationException("Missing fresh theorem and extraction audit: " + label);
     measurements.Add(new { label, seconds = timer.Elapsed.TotalSeconds,
         frontendProcesses = compilations.Length,
         frontendSeconds = compilations.Sum(stage => stage.GetProperty("durationSeconds").GetDouble()) });

@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -198,10 +203,10 @@ rejected.Add(forged, "PASS span reference argument evidence rejection",
 // A span copy may emit only the empty operation; any load would reinterpret the view as bytes.
 var copy = NarrowEvidence(File.ReadAllText(Path.Combine(root, "Copy", "Extracted.lean")),
     "method0_features_validated");
-const string copied = "  .arg 0,\n  .nop,";
+const string copied = "  .ldarg 0,\n  .nop,";
 if (!copy.Contains(copied, StringComparison.Ordinal)) throw new InvalidOperationException("Missing span copy");
 var loaded = Path.Combine(root, "Forged-copy.lean");
-File.WriteAllText(loaded, copy.Replace(copied, "  .arg 0,\n  .loadScalar 8,", StringComparison.Ordinal));
+File.WriteAllText(loaded, copy.Replace(copied, "  .ldarg 0,\n  .loadScalar 8,", StringComparison.Ordinal));
 rejected.Add(loaded, "PASS span copy evidence rejection", "FeatureFlowValid", "is false");
 rejected.Check();
 

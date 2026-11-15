@@ -3,9 +3,15 @@
 #:property AllowUnsafeBlocks=true
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include ReferenceAddOutlines.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -13,6 +19,8 @@ using Mono.Cecil.Cil;
 
 var root = At("artifacts/ReferenceInstructions");
 Directory.CreateDirectory(root);
+CheckReferenceAddOutlines(root);
+if (args is ["--outlines-only"]) return;
 var evidence = new GeneratedEvidence(root);
 var rejected = new RejectedEvidence(root);
 var assembly = Path.Combine(root, "Examples.dll");
@@ -194,16 +202,16 @@ foreach (var (name, native, pointer) in additions)
     {
         var narrowed = NarrowEvidence(source, "method0_scalars_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
-        const string target = ".memory (.add 1 true)";
+        const string target = "  .add,";
         foreach (var (mutation, replacement) in new[]
         {
-            ("scalar", ".add"), ("subtract", ".sub"),
+            ("lowered", ".memory (.add 1 true)"), ("subtract", ".sub"),
             ("stride", ".memory (.add 2 true)"), ("unsigned", ".memory (.add 1 false)")
         })
         {
             if (!narrowed.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing commuted add target");
             var forged = Path.Combine(root, "ForgedAdd-" + mutation + ".lean");
-            File.WriteAllText(forged, narrowed.Replace(target, replacement, StringComparison.Ordinal));
+            File.WriteAllText(forged, narrowed.Replace(target, "  " + replacement + ",", StringComparison.Ordinal));
             rejected.Add(forged, "PASS independent forged commuted addition: " + mutation, "ScalarFlowValid");
         }
     }
@@ -237,7 +245,7 @@ File.WriteAllText(throwProof, throwSource + """
 
     theorem null_message_raises :
         CIL.Safety.invoke Extracted.program 16 0 [] CIL.Safety.Memory.empty =
-          .error ⟨0, 2, .thrown "System.DivideByZeroException"⟩ := rfl
+          .error ⟨0, 2, .thrown .divideByZero⟩ := rfl
     #print axioms null_message_raises
     """);
 evidence.Add(throwProof, "PASS existing null-message throw folding, runtime and certificate");

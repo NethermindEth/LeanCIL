@@ -103,7 +103,7 @@ local pushes, or `none`.
 
 | Need | Use |
 | --- | --- |
-| Step a `.local` load | `snapshots.load value specified`, a step fact the stepping tactics take |
+| Step a `.ldloc` load | `snapshots.load value specified`, a step fact the stepping tactics take |
 | Step a numeric store and get the updated snapshots | `LocalSnapshots.store` |
 | Keep snapshots across a call confined apart from the homes | `LocalSnapshots.after_confined` |
 | Keep snapshots across a write, or memory that keeps old allocations | `after_write_apart`, `after_below` |
@@ -135,6 +135,8 @@ Pass the `writable` projection to the general snapshot lemmas.
 The snapshot forms of the stepping tactics (`CIL.Safety.LocalSnapshotSteps`, part of `import CIL`)
 take numeric local stores and loads through a `LocalSnapshots` hypothesis and pass the updated
 snapshots to each later step. A load pushes the latest remembered value; a store replaces it.
+A homed argument's `starg` and `ldarg` are the store and load of its home slot, so the snapshots
+remember the argument at that slot.
 
 #### Tactic forms
 
@@ -152,7 +154,7 @@ The two forms differ:
 
 | | Checked form | Contract form |
 | --- | --- | --- |
-| Instructions other than `.local` and `.setLocal` | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
+| Instructions other than `.ldloc` and `.stloc` | Ordinary checked steps and the return | Ordinary contract steps: supplied step facts, calls and returns |
 | Finds each store's home | From the premises in context | From a homes hypothesis ([required context](#required-context)) |
 | Restates context facts after a store | `access` equations only; byte-value facts stay at the old memory | `access` equations and the [caller facts](#facts-the-contract-form-carries) |
 | Prepares step facts again after a store | No | Yes |
@@ -246,7 +248,7 @@ A fact whose condition is not shown stays at the old memory.
 
 The contract form then prepares its step facts again at `storedLocal`. The carried `ValidCall`
 forms the by-reference arguments and reads their fields there, and the restated reads supply their loads, so
-`.arg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
+`.ldarg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
 word load through a `ValidCall` is stated at that store's memory, as `view.word storedLocal
 offset`. `ArgumentView.word_below localBelow view old` restates a word at the memory the store
 wrote to, and `ArgumentView.bytes_below` the whole range.
@@ -295,11 +297,11 @@ reprofiled program, by `rfl` when only the profiles differ.
   "contract": "Public.supported",
   "theorem": "Proof.family",
   "program": "Reference.program",
-  "referenceProfile": "x64-sse2",
+  "referenceProfile": "x64-sse42",
   "profiles": [
-    { "profile": "x64-sse2", "artifact": "extractions/sse2" },
     { "profile": "x64-sse42", "artifact": "extractions/sse42" },
-    { "profile": "x64-v3", "artifact": "extractions/v3" }
+    { "profile": "x64-v3", "artifact": "extractions/v3" },
+    { "profile": "x64-v4", "artifact": "extractions/v4" }
   ]
 }
 ```
@@ -882,9 +884,11 @@ struct.
 
 ## Name exceptional outcomes
 
-An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds `raises : Input → Memory → Option String`
+An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds `raises : Input → Memory → Option ExceptionType`
 to a `MethodContract`: where it is `some exception` the method must end in exactly `.thrown
-exception` (`Raises`), and elsewhere the normal clause applies. Fuel exhaustion, unsupported
+exception` (`Raises`), and elsewhere the normal clause applies. `CIL.ExceptionType` lists the
+exceptions the model raises, such as `.argumentOutOfRange`; each member stands for one type of
+namespace `System` in the runtime assembly (`CIL.ExceptionType.typeIdentity`). Fuel exhaustion, unsupported
 instructions and memory faults never satisfy `Raises`, so a contract cannot be met by getting stuck.
 Memory after a throw is not observable to the caller, so `Raises` states none; runtime exceptions
 count only where the semantics models them as `.thrown`.
@@ -900,7 +904,7 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 ```
 
 | Name | Use |
@@ -912,7 +916,7 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
 | `invoke_unique` | Ties a computed fault to the contract's existential one |
 
 [CountUntil](../Examples/Proofs/CountUntil.lean) proves `bumpContract`, which raises
-`System.InvalidOperationException` when its two arguments are equal, with `cil_raise_steps` and
+`.invalidOperation` when its two arguments are equal, with `cil_raise_steps` and
 `cil_checked_steps`, then proves its loop returns or propagates that exception through the contract
 alone.
 
@@ -924,8 +928,8 @@ normal-return clause, footprint and `raises` field unchanged. Its fixed
 | Fault | Named CLR exception |
 | --- | --- |
 | `.thrown exception` | `exception` |
-| `.arithmetic .overflow` | `System.OverflowException` |
-| `.arithmetic .divideByZero` | `System.DivideByZeroException` |
+| `.arithmetic .overflow` | `.overflow` |
+| `.arithmetic .divideByZero` | `.divideByZero` |
 | Every other fault | None |
 
 Checked add, subtract, multiply and integer conversions report overflow through this mapping.
@@ -935,7 +939,7 @@ arithmetic operands, invalid bounds, memory faults, unsupported instructions, in
 exhaustion have no name in this mode. The mode does not change `Raises` or `.thrown`.
 `OutcomeContract.Holds.clr` lifts a thrown-outcome proof (`Holds`) to `HoldsCLR`.
 
-For a wide-integer `Divide` or `Mod` contract, select `some "System.DivideByZeroException"` in
+For a wide-integer `Divide` or `Mod` contract, select `some .divideByZero` in
 `raises` when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped
 arithmetic failure can establish this exact outcome. The proof must reach that fault through the
 actual extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and `raisesCLR_of_run`
@@ -1010,24 +1014,27 @@ body. Given `add_holds : addContract.Holds Extracted.program addTo`:
 
 ```lean extracted
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
-  add_holds.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+  add_holds.forward (loads := [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 ```
 
-`Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee narrow`
-with no locals or parameter homes, so frame entry and exit leave memory
+`Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee`
+with `body.returnNarrow = narrow` and no locals or parameter homes, so frame entry and exit leave memory
 unchanged and the callee's precondition, footprint and postcondition carry over verbatim. The loads
-are data: each is an argument index and the narrowing the extractor attaches to `bool`, `byte`,
-`sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones). The lemma has these premises:
+are data: each is an argument index, read as `Method.argumentAccess` says, which narrows `bool`,
+`char`, `byte`, `sbyte`, `short` and `ushort` parameters, and enums over them, to their declared
+width. The lemma has these
+premises:
 
-- The callee's arguments are the forwarder's at those indices, each kept by its load's narrowing
-  (`LoadsUnchanged`).
+- The callee's arguments are the forwarder's at those indices, each kept by the forwarder's read
+  (`LoadsUnchanged body index value`). `plainLoads_unchanged` discharges it for arguments read
+  without narrowing, and `LoadsUnchanged.narrow` for an i32 already in its declared range.
 - Every forwarder argument reaches the callee or is valid under the precondition, since the
   forwarder's own invocation checks them all.
 - The call exposes no unspecified vector bits.
-- A narrowed `ret (some kind)` does not change the callee's result (`ReturnsUnchanged`), which
+- A return with declared narrowing `some kind` does not change the callee's result (`ReturnsUnchanged`), which
   holds for a boolean.
 
 Aggregate results retain their complete byte list. Use `Holds.weaken` afterwards to export a

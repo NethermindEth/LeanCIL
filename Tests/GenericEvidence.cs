@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
@@ -11,14 +16,29 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Nethermind.LeanCIL;
 
-if (args is not ([] or ["--external-identities"] or ["--measure"]))
-    throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities|--measure]");
+if (args is not ([] or ["--external-identities"] or ["--measure"] or ["--return-only"]))
+    throw new ArgumentException("Usage: GenericEvidence.cs [--external-identities|--measure|--return-only]");
 var output = At("artifacts/GenericEvidence");
 Directory.CreateDirectory(output);
 var rejected = new RejectedEvidence(output);
 var evidence = new GeneratedEvidence(output, args.Contains("--measure", StringComparer.Ordinal));
 var controls = new Dictionary<int, List<string>>();
 var controlSources = new HashSet<string>(StringComparer.Ordinal);
+if (args is ["--return-only"])
+{
+    RequireLeanFixtures("CIL.Extraction.Translation");
+    var directory = Path.Combine(output, "9");
+    Run(Extract("extract", At("Examples/Assembly/bin/Examples.dll"), "Examples",
+        "GenericMethods::EnumIdentity(Examples.Signed8)", directory));
+    ReturnMutations();
+    var baseline = File.ReadAllText(Path.Combine(directory, "Extracted.lean"));
+    var positive = Path.Combine(output, "ReturnControl.lean");
+    File.WriteAllText(positive, baseline + "\n" + string.Join("\n", controls[9]));
+    evidence.Add(positive, "PASS declared return control");
+    evidence.Check();
+    rejected.Check();
+    return;
+}
 CheckExternalIdentities();
 if (args is ["--external-identities"])
 {
@@ -157,6 +177,8 @@ Reject(4, "altered-branch", source => ChangeDefinition(source, "method1Closed",
     line => line.Replace("operand := .target 4", "operand := .target 3")));
 // A failed kernel decision prints this text; a mutation that only breaks parsing does not.
 const string decisionFailed = "proved that the proposition";
+// A theorem proved by `rfl` prints this text when its two sides differ.
+const string rflRefused = "not definitionally equal";
 // The link moves with the call, so only the binding check can reject the changed target.
 Reject(0, "wrong-managed-target", source => ChangeDefinition(Replaced(source, ".call 1 1", ".call 0 1"),
     "method0Link1", line => Replaced(line, ".direct 1", ".direct 0")), "method0_calls_validated",
@@ -165,16 +187,51 @@ Console.WriteLine("PASS original-metadata generic substitution, complete managed
 // Each mutation changes one fact of the first sample's body evidence, so only the decoding check can reject it;
 // the unmutated obligation is checked as the positive control.
 const string bodyTheorem = "method0_body_validated";
-void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change) =>
-    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, decisionFailed);
+// The tactic that proves a body obligation names the method and the failure when the kernel refutes it; a mutation
+// that only breaks parsing prints other text, and the unmutated obligation is the positive control.
+const string bodyDecisionFailed = "the decoded method does not match its body bytes or metadata";
+// A mutated body obligation must fail to elaborate and its negation must be proved by the kernel.
+void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change)
+{
+    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, bodyDecisionFailed);
+    RefuteMutation(sample, name, theorem, definition, change);
+}
+// A file that keeps the mutated definitions and states the obligation's negation, which the kernel must prove.
+void RefuteMutation(int sample, string name, string theorem, string definition, Func<string, string> change)
+{
+    var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")),
+        definition, change);
+    var refutation = theorem[..^"_validated".Length] + "_refuted";
+    var refuted = KernelRefutation(mutated, theorem, refutation);
+    var path = Path.Combine(output, "Refuted-" + name + ".lean");
+    File.WriteAllText(path, NarrowEvidence(refuted, refutation));
+    evidence.Add(path, "PASS the kernel proves the mutated obligation false: " + name, refutation);
+}
+// A changed declared signature of `definition` fails its `rfl` obligation, which the kernel proves false.
+void RejectDeclared(int sample, string name, string definition, Func<string, string> change)
+{
+    var theorem = definition + "_declared_validated";
+    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, rflRefused);
+    RefuteMutation(sample, name, theorem, definition, change);
+}
 // The metadata rows of a body shift with the assembly, so each byte is found by its position in the emitted list.
 string ChangeByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
     match => match.Groups[1].Value + (int.Parse(match.Groups[2].Value) + change) + match.Groups[3].Value);
+// A byte list is emitted as `(CIL.Extraction.fixedBytes <count> 0x<digits>)`; a pattern's second group is one byte.
+const string literalHead = """\(CIL\.Extraction\.fixedBytes """;
+const string byteLiteral = literalHead + """\d+ 0x""";
+string ChangeLiteralByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
+    match => match.Groups[1].Value + ((Convert.ToInt32(match.Groups[2].Value, 16) + change) % 256).ToString("X2"));
 // Sample 0 starts `ldarg.0; call <token>` under a tiny header: header, ldarg.0, call, then the token bytes.
-RejectBody(0, "altered-body-byte", bodyTheorem, "method0Bytes", line => ChangeByte(line, @"(\[\d+, )(\d+)(,)", 1));
-RejectBody(0, "altered-body-header", bodyTheorem, "method0Bytes", line => ChangeByte(line, @"(\[)(\d+)(,)", 4));
+RejectBody(0, "altered-body-byte", bodyTheorem, "method0Bytes",
+    line => ChangeLiteralByte(line, $$"""({{byteLiteral}}[0-9A-F]{2})([0-9A-F]{2})""", 1));
+RejectBody(0, "altered-body-header", bodyTheorem, "method0Bytes",
+    line => ChangeLiteralByte(line, $$"""({{byteLiteral}})([0-9A-F]{2})""", 4));
 RejectBody(0, "altered-token-operand-byte", bodyTheorem, "method0Bytes",
-    line => ChangeByte(line, @"(\[\d+, 2, 40, )(\d+)(,)", 1));
+    line => ChangeLiteralByte(line, $$"""({{byteLiteral}}[0-9A-F]{2}0228)([0-9A-F]{2})""", 1));
+// A count one short of the digits keeps the code but drops its leading byte, the body header.
+RejectBody(0, "altered-literal-count", bodyTheorem, "method0Bytes",
+    line => ChangeByte(line, $$"""({{literalHead}})(\d+)( 0x)""", -1));
 RejectBody(0, "altered-token-table-key", bodyTheorem, "method0Body",
     line => ChangeByte(line, @"(\()(\d+)(, \.call)", 1));
 RejectBody(0, "altered-token-table-operand", bodyTheorem, "method0Body",
@@ -183,6 +240,31 @@ RejectBody(0, "altered-instruction-offset", bodyTheorem, "method0Original",
     line => line.Replace("offset := 1, opcode := 40", "offset := 2, opcode := 40"));
 RejectBody(0, "altered-max-stack", bodyTheorem, "method0Original",
     line => line.Replace("maxStack := 8", "maxStack := 9"));
+// The module's lookup tables are decided once against its metadata; a changed row, heap entry or table is
+// refuted there.
+void RejectTables(string name, string definition, Func<string, string> change)
+{
+    const string theorem = "method0_tables_valid";
+    Reject(0, name, source => ChangeDefinition(source, definition, change), theorem);
+    var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, "0", "Extracted.lean")), definition, change);
+    var refuted = KernelRefutation(mutated, theorem, "method0_tables_refuted");
+    var path = Path.Combine(output, "RefutedTables-" + name + ".lean");
+    File.WriteAllText(path, NarrowEvidence(refuted, "method0_tables_refuted"));
+    evidence.Add(path, "PASS the kernel proves the mutated tables obligation false: " + name,
+        "method0_tables_refuted");
+}
+RejectTables("altered-metadata-row", "method0Metadata",
+    line => ChangeLiteralByte(line, $$"""(rows := \[\(\d+, {{byteLiteral}})([0-9A-F]{2})""", 1));
+RejectTables("altered-metadata-string", "method0Metadata", line => ChangeLiteralByte(line,
+    $$"""(strings := \[\(0, {{literalHead}}1 0x00\)\), \(\d+, {{byteLiteral}})([0-9A-F]{2})""", 1));
+RejectTables("altered-lookup-row", "method0Tables",
+    line => ChangeLiteralByte(line, $$"""(rows := .*?{{byteLiteral}})([0-9A-F]{2})""", 1));
+// A leaf entry of the rows tree removed, and one added before another.
+RejectTables("missing-lookup-row", "method0Tables",
+    line => new Regex($$"""\(\.node \.leaf \d+ {{byteLiteral}}[0-9A-F]+\) \.leaf\)""").Replace(line, ".leaf", 1));
+RejectTables("extra-lookup-row", "method0Tables",
+    line => new Regex($$"""\(\.node \.leaf (\d+) ({{byteLiteral}}[0-9A-F]+\)) \.leaf\)""").Replace(line,
+        "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
 RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",
     line => line.Replace("operand := .target 4", "operand := .target 3"));
 Console.WriteLine("PASS body bytes, token table and original definition reject changed bytes and operands");
@@ -190,31 +272,51 @@ Reject(0, "omitted-method-evidence", source => ChangeDefinition(source, "methodE
     _ => "def methodEvidence : List Extraction.MethodEvidence := []"), null);
 Reject(0, "reordered-method-evidence", source => ChangeDefinition(source, "methodEvidence",
     line => line.Replace("method0", "swapped").Replace("method1", "method0").Replace("swapped", "method1")), null);
+// Identity64(ulong) and its callee Identity<UInt64>(ulong) have the same shape; with their signature strings swapped,
+// each body check refutes the string a proof would select the method by.
+string SwapSignatures(string source)
+{
+    string Value(string name) => Regex.Match(source, "(?m)^def " + name + " : String := (.*)$").Groups[1].Value;
+    var (first, second) = (Value("method0Signature"), Value("method1Signature"));
+    return ChangeDefinition(ChangeDefinition(source, "method0Signature", line => line.Replace(first, second)),
+        "method1Signature", line => line.Replace(second, first));
+}
+const string equationRefused = "cil_kernel_rfl: the kernel does not accept the two sides as equal";
+Reject(0, "swapped-signature-of-a-method", SwapSignatures, bodyTheorem, equationRefused);
+Reject(0, "swapped-signature-of-an-instance", SwapSignatures, "method1_body_validated", equationRefused);
 Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1",
     line => line.Replace("returnsValue := true", "returnsValue := false"))
         .Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"), "method1_shape_validated");
 Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32 1]"), "method1_shape_validated");
 Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"), "method1_shape_validated");
-Reject(9, "missing-return-narrowing", source => source.Replace(".ret (some .signed8)", ".ret none"), "method1_shape_validated");
-Reject(9, "wrong-return-signedness", source => source.Replace(".ret (some .signed8)", ".ret (some .unsigned8)"),
-    "method1_shape_validated");
+ReturnMutations();
+
+void ReturnMutations()
+{
+    foreach (var (name, replacement) in new[]
+        { ("missing-return-narrowing", "System.Int32"), ("wrong-return-signedness", "System.Byte") })
+        RejectDeclared(9, name, "method1", line =>
+        {
+            var returned = line.IndexOf("returnType :=", StringComparison.Ordinal);
+            var atom = returned < 0 ? -1 : line.IndexOf("System.SByte", returned, StringComparison.Ordinal);
+            if (atom < 0) throw new InvalidOperationException("Missing declared SByte return");
+            return line[..atom] + replacement + line[(atom + "System.SByte".Length)..];
+        });
+}
 
 // The declared signature, call links and layout environment are each checked against their own evidence.
 const string word = "Extraction.runtimeScope \"System.UInt64\"";
-Reject(0, "wrong-declared-parameter", source => ChangeDefinition(source, "method0", line =>
-    line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]")),
-    "method0_shape_validated",
-    decisionFailed);
-Reject(0, "wrong-declared-return", source => ChangeDefinition(source, "method0", line =>
-    line.Replace($"returnType := .atom {word} }}", $"returnType := .atom {word.Replace("UInt64", "UInt32")} }}")),
-    "method0_shape_validated",
-    decisionFailed);
-Reject(14, "missing-declared-receiver", source => ChangeDefinition(source, "method1", line =>
-    line.Replace("receiver := some .reference, ", "")), "method1_shape_validated",
-    decisionFailed);
-Reject(14, "wrong-declared-receiver-kind", source => ChangeDefinition(source, "method1", line =>
-    line.Replace("receiver := some .reference", "receiver := some .object")), "method1_shape_validated",
-    decisionFailed);
+RejectDeclared(0, "wrong-declared-parameter", "method0", line =>
+    line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]"));
+// The declared signature's own return type, whatever fields follow it.
+RejectDeclared(0, "wrong-declared-return", "method0", line => Regex.Replace(line,
+    $$"""(declared := {[^}]*returnType := .atom ){{Regex.Escape(word)}}""",
+    match => match.Groups[1].Value + word.Replace("UInt64", "UInt32"), RegexOptions.None));
+RejectDeclared(0, "wrong-declared-init-flag", "method0", line => line.Replace(", initLocals := false }", " }"));
+RejectDeclared(14, "missing-declared-receiver", "method1", line =>
+    line.Replace("receiver := some .reference, ", ""));
+RejectDeclared(14, "wrong-declared-receiver-kind", "method1", line =>
+    line.Replace("receiver := some .reference", "receiver := some .object"));
 Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
     line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
 Reject(0, "dropped-link", source => ChangeDefinition(source, "method0", line =>
@@ -228,7 +330,7 @@ Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1", line
     decisionFailed);
 Reject(0, "wrong-environment", source => ChangeDefinition(source, "environment", line =>
     line.Replace("layouts := computedLayouts", "layouts := #[⟨⟨4, []⟩, 4⟩]")), "method0_environment_validated",
-    "not definitionally equal");
+    rflRefused);
 
 foreach (var (selector, index) in samples.Select((selector, index) => (selector, index)))
 {

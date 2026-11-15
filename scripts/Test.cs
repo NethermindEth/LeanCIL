@@ -3,8 +3,14 @@
 #:property EnforceCodeStyleInBuild=true
 #:property GenerateDocumentationFile=true
 #:include Verification.cs
+#:include DeepChecks.cs
+#:include FailureReports.cs
+#:include LeanDiagnostics.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 #:include BatchVerification.cs
 #:include CoreExamples.cs
+#:include CertificateCases.cs
 #:include ExportVerificationSuites.cs
 #:include VerificationSuites.cs
 
@@ -99,11 +105,11 @@ if (suite is "all" or "core")
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
         "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/OutlineStops.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
-        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs"]);
+        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs", "Tests/SupportExtractionCache.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
-        "Tests/Objects.cs", "Tests/Strings.cs", "Tests/Guards.cs"]);
+        "Tests/Objects.cs", "Tests/Guards.cs"]);
 if (suite is "all" or "dispatch")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/ManagedDispatch.cs",
         "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs", "Tests/CompilerCoverage.cs",
@@ -113,7 +119,9 @@ if (suite is "all" or "evidence")
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
-        "Tests/TranslationAudit.cs"]);
+        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs"]);
+if (suite is "all" or "identity") projects.Add("Tests/Identities.cs");
+if (suite is "all" or "primitive") projects.Add("Tests/Strings.cs");
 if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
@@ -127,7 +135,8 @@ foreach (var (name, entry) in independentSuites)
         projects.Add(entry.Script);
 foreach (ExportSuite entry in ExportVerificationSuites.Plan())
     if (suite == "all" || suite == entry.Name)
-        projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal)));
+        projects.AddRange(entry.Inputs.Where(path => path.EndsWith(".cs", StringComparison.Ordinal) &&
+            File.ReadLines(At(path)).FirstOrDefault() == "#!/usr/bin/env dotnet"));
 
 foreach (string project in projects.Distinct(StringComparer.Ordinal))
 {
@@ -173,6 +182,9 @@ Passed("prepared extractor source and output identity");
 
 RunFixture("Tests/VerificationCache.cs", [], streamOutput: true, progress: "Certified verification cache checks");
 Passed("certified artifact receipts and cache tampering rejection");
+
+RunFixture("Tests/SupportExtractionCache.cs", [], streamOutput: true, progress: "Support extraction cache checks");
+Passed("support audit reuse bound to extraction identity");
 
 RunFixture("Tests/VerificationReuse.cs", [], streamOutput: true, progress: "Certified verification reuse checks");
 Passed("cold and warm verification, proof-edit invalidation and unchecked helper rejection");
@@ -226,15 +238,24 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
+    "Tests.SegmentContract",
     "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
-    "Tests.ResolutionFacts"],
+    "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
+    "Tests.ResolutionFacts", "Tests.ValueDecoding", "Tests.DecodedMethod", "Tests.ReplayDiagnostics",
+    "Tests.BodyLiteral",
+    "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
+    "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
+    "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.FieldShape",
+    "Tests.RuntimeModels"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
     + "local snapshot, struct field view, loop frame, contract consequence, invocation certificate, call transport, "
     + "buffer contents, linking, "
     + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity, method body "
-    + "decoding and declared narrowing tests");
+    + "decoding, declared narrowing, value opcode decoding, decoded method, replay diagnostic, literal body "
+    + "evidence, return metadata, object array, embedding retention and profile, full transfer, SHA-1, assembly "
+    + "index, pin index scaling, field reference and runtime model tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
 
@@ -363,25 +384,38 @@ var reportPath = Path.Combine(addOutput, "verified.json");
 var savedReport = File.ReadAllText(reportPath);
 try
 {
-    var legacy = JsonSerializer.Deserialize<Report>(savedReport)! with { schema = 2 };
-    File.WriteAllText(reportPath, JsonSerializer.Serialize(legacy, Json));
-    failed = false;
-    try
+    foreach (var (name, text) in CertificateCases.Refused(savedReport))
     {
-        verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
+        File.WriteAllText(reportPath, text);
+        failed = false;
+        try
+        {
+            verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput,
+                check: true);
+        }
+        // Only the certificate rule words its refusal this way; a later input check would not.
+        catch (InvalidOperationException error) when (error.Message.StartsWith("Stale verification report: ",
+            StringComparison.Ordinal))
+        {
+            failed = true;
+        }
+        if (!failed)
+            throw new InvalidOperationException("Certificate with " + name + " accepted");
     }
-    catch (InvalidOperationException error) when (error.Message.Contains("Stale verification report"))
-    {
-        failed = true;
-    }
-    if (!failed)
-        throw new InvalidOperationException("Legacy report without extraction certificate audit accepted");
 }
 finally
 {
     File.WriteAllText(reportPath, savedReport);
 }
-Passed("legacy report without extraction certificate audit rejected");
+verification.Verify(assembly, identity, signatures["Add"], At("Examples/Proofs/Add.lean"), addOutput, check: true);
+// A default certificate serves only a default run, and a well-formed deep one only a deep run.
+if (CertificateProblem(savedReport, BindingMode.Default) is { } defaultProblem)
+    throw new InvalidOperationException("Default certificate refused: " + defaultProblem);
+if (CertificateProblem(savedReport, BindingMode.Deep) is null)
+    throw new InvalidOperationException("Default certificate accepted where a deep one is required");
+if (CertificateProblem(CertificateCases.Deep(savedReport), BindingMode.Deep) is { } deepProblem)
+    throw new InvalidOperationException("Deep certificate refused where a deep one is required: " + deepProblem);
+Passed("certificates of another schema, mode or binding fact list rejected");
 
 Rejected(Extract("check", assembly, identity, signatures["Add"], addOutput, "x64-v3"), "Stale or mismatched");
 Passed("different feature profile rejected");

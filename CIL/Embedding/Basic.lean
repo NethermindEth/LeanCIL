@@ -6,7 +6,7 @@ import CIL.Extraction.LinkIndex
 
 An expected method body embeds into an actual one when every live expected
 instruction appears in the actual body at a mapped pc, with every code target
-mapped the same way. Instructions the expected body marks `.unsupported` impose
+mapped the same way. Holes (`.unadmitted`) in the expected body impose
 nothing, so dead code may be inserted, removed or renumbered. Every condition is a
 list equality or Boolean test the kernel decides by evaluation; no equality
 instance on `Instruction` is involved.
@@ -21,7 +21,6 @@ namespace CIL
 
 /-- Replaces every code target of an instruction by its image under `r`. -/
 def Instruction.relabel (r : Nat → Nat) : Instruction → Instruction
-  | .nativeBinary op => .nativeBinary (op.relabel r)
   | .bgt t => .bgt (r t) | .ble t => .ble (r t) | .ble_un t => .ble_un (r t)
   | .br t => .br (r t) | .switch ts => .switch (ts.map r)
   | .brfalse t => .brfalse (r t) | .brtrue t => .brtrue (r t)
@@ -39,7 +38,6 @@ theorem Instruction.link?_relabel (r : Nat → Nat) (op : Instruction) :
 
 /-- Every code target of an instruction, in operand order. -/
 def Instruction.targets : Instruction → List Nat
-  | .nativeBinary op => op.targets
   | .bgt t | .ble t | .ble_un t | .br t | .brfalse t | .brtrue t
   | .blt_un t | .bge_un t | .bgt_un t | .bge t | .blt t | .beq t | .bne_un t => [t]
   | .switch ts => ts
@@ -64,12 +62,12 @@ theorem Instruction.relabel_of_targets_nil (r : Nat → Nat) (op : Instruction)
 /-- False only for instructions that never resume at the next pc, including after a call. -/
 def Instruction.continues : Instruction → Bool
   | .managed (.call _ _ true) => false
-  | .br _ | .tailCall .. | .ret _ | .throw _ | .unsupported _ => false
+  | .br _ | .tailCall .. | .ret | .throw _ | .unadmitted _ => false
   | _ => true
 
-/-- `.unsupported` faults whenever it executes, so it constrains nothing. -/
+/-- A hole (`.unadmitted`) faults whenever it executes, so it constrains nothing. -/
 def Instruction.live : Instruction → Bool
-  | .unsupported _ => false
+  | .unadmitted _ => false
   | _ => true
 
 namespace Embedding

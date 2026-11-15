@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // The outcome proofs verify against the compiled build; an off-by-one threshold or a different
 // exception type must fail them and provably violate the callee's contract.
@@ -64,7 +69,7 @@ theorem correctness : ¬ percentContract.Holds Extracted.program percent := by
   intro holds
   obtain ⟨_, _, _, ran, -⟩ := holds.returning (input := 100) (initial := empty) trivial (by decide)
   have thrown : invoke Extracted.program 16 percent (percentContract.args 100) empty =
-      .error ⟨percent, 6, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
+      .error ⟨percent, 6, .thrown .argumentOutOfRange⟩ := rfl
   cases invoke_unique (by trivial) (by simp [Settled]) ran thrown
 
 """;
@@ -73,9 +78,9 @@ const string RefuteException = Empty + """
 theorem correctness : ¬ percentContract.Holds Extracted.program percent := by
   intro holds
   obtain ⟨_, fault, ran, named⟩ := holds.raising (input := 101) (initial := empty)
-    (exception := "System.ArgumentOutOfRangeException") trivial (by decide)
+    (exception := .argumentOutOfRange) trivial (by decide)
   have thrown : invoke Extracted.program 16 percent (percentContract.args 101) empty =
-      .error ⟨percent, 6, .thrown "System.ArgumentException"⟩ := rfl
+      .error ⟨percent, 6, .thrown .argument⟩ := rfl
   cases invoke_unique (by simp [Settled, named]) (by simp [Settled]) ran thrown
   simp at named
 

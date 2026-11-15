@@ -1,3 +1,5 @@
+using Mono.Cecil.Cil;
+
 namespace Nethermind.LeanCIL;
 
 /// <summary>
@@ -95,10 +97,22 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
     internal static readonly StackOperation Nop = new(StackOpcode.Nop);
 }
 
-/// <summary>An instruction that is not modelled in the selected profile's reachable code.</summary>
-internal sealed record Unsupported(string Message) : Operation
+/// <summary>
+/// A hole carrying the raw opcode at its pc, which faults when stepped. The extractor writes one at each pc outside
+/// the selected profile's reachable code and at each profile combination a template does not select.
+/// </summary>
+internal sealed record Unadmitted(int Opcode) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".unsupported \"{Message}\"";
+    /// <summary>The hole at <paramref name="instruction"/>.</summary>
+    internal static Unadmitted At(Instruction instruction) => new(RawOpcode(instruction));
+
+    /// <summary>
+    /// The opcode as <c>RawInstruction</c> numbers it: a one-byte opcode is its byte and <c>0xFE nn</c> is
+    /// <c>0xFE00 + nn</c>.
+    /// </summary>
+    internal static int RawOpcode(Instruction instruction) => (ushort)instruction.OpCode.Value;
+
+    internal override string Render(Func<int, string> calleeName) => $".unadmitted {Opcode}";
 }
 
 /// <summary>The jump kinds; a conditional jump pops one (zero tests) or two operands.</summary>
@@ -143,16 +157,16 @@ internal sealed record Switch(ValueList<int> Targets) : Operation
     internal override string Render(Func<int, string> calleeName) => $".switch [{string.Join(", ", Targets)}]";
 }
 
-/// <summary>A return of the stack value, narrowed to <paramref name="Narrow"/> when set, or of nothing.</summary>
-internal sealed record Return(Narrowing? Narrow) : Operation
+/// <summary>A return whose value and storage width are determined by the method declaration.</summary>
+internal sealed record Return : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => ".ret" + Narrow.Suffix();
+    internal override string Render(Func<int, string> calleeName) => ".ret";
 }
 
-/// <summary>A fault of the named CLR exception type.</summary>
-internal sealed record Throw(string Exception) : Operation
+/// <summary>A fault of the modelled CLR exception type.</summary>
+internal sealed record Throw(ExceptionType Exception) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".throw \"{Exception}\"";
+    internal override string Render(Func<int, string> calleeName) => $".throw {Exception.ToLean()}";
 }
 
 /// <summary>The width and signedness a narrow integer is truncated to when it is read.</summary>
@@ -167,33 +181,56 @@ internal static class NarrowingText
         Narrowing.Signed16 => "signed16", Narrowing.Unsigned16 => "unsigned16",
         _ => throw new ArgumentOutOfRangeException(nameof(narrowing))
     };
-
-    /// <summary>The optional narrowing argument of an argument or return instruction.</summary>
-    internal static string Suffix(this Narrowing? narrowing) =>
-        narrowing is { } kind ? $" (some .{kind.LeanName()})" : "";
 }
 
-/// <summary>An argument pushed from its slot, narrowed to <paramref name="Narrow"/> when set.</summary>
-internal sealed record Arg(int Index, Narrowing? Narrow) : Operation
+/// <summary>An argument pushed from its slot; the method's declared parameter type gives any narrowing.</summary>
+internal sealed record Arg(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".arg {Index}" + Narrow.Suffix();
+    internal override string Render(Func<int, string> calleeName) => $".ldarg {Index}";
+}
+
+/// <summary>An argument assigned from the stack into its home, whose kind gives any narrowing.</summary>
+internal sealed record Starg(int Index) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".starg {Index}";
+}
+
+/// <summary>The address of an argument's home.</summary>
+internal sealed record Ldarga(int Index) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".ldarga {Index}";
 }
 
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
 internal sealed record Local(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".local {Index}";
+    /// <summary>The load of the argument homed in this slot when the body names the argument, as diagnostics show it.
+    /// </summary>
+    internal Arg? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".ldloc {Index}";
 }
 
 /// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
 internal sealed record SetLocal(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".setLocal {Index}";
+    /// <summary>The store to the argument homed in this slot when the body names the argument, as diagnostics show it.
+    /// </summary>
+    internal Starg? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".stloc {Index}";
 }
 
 internal sealed record LocalAddress(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".localAddr {Index}";
+    /// <summary>The address of the argument homed in this slot when the body names the argument, as diagnostics show
+    /// it.</summary>
+    internal Ldarga? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".ldloca {Index}";
 }
 
 /// <summary>
@@ -311,12 +348,6 @@ internal sealed record FeatureTest(Feature Feature) : Operation
         ".feature " + FeatureProfile.LeanFeature(Feature);
 }
 
-/// <summary>An operation over operands the native-width analysis certified as a native and int32 mixture.</summary>
-internal sealed record NativeBinary(Operation Inner) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".nativeBinary ({Inner.Render(calleeName)})";
-}
-
 internal enum FieldAccess { Load, Store, LoadAggregate, StoreAggregate, Address }
 
 /// <summary>
@@ -390,9 +421,10 @@ internal sealed record StoreScalar(int Width) : Operation
     internal override string Render(Func<int, string> calleeName) => $".storeScalar {Width}";
 }
 
-internal sealed record StackAlloc(bool Zeroed) : Operation
+/// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>
+internal sealed record Localloc : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".stackAlloc {LeanText.Bool(Zeroed)}";
+    internal override string Render(Func<int, string> calleeName) => ".localloc";
 }
 
 /// <summary>The target of an overflow-checked conversion; <c>I</c> and <c>U</c> are native-sized.</summary>
@@ -461,11 +493,6 @@ internal abstract record ManagedPointer : Operation
     protected abstract string Body(Func<int, string> calleeName);
 
     internal sealed override string Render(Func<int, string> calleeName) => ".managed " + Body(calleeName);
-}
-
-internal sealed record TableOffset : ManagedPointer
-{
-    protected override string Body(Func<int, string> calleeName) => ".tableOffset";
 }
 
 internal sealed record TableLength : ManagedPointer

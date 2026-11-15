@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include GeneratedEvidence.cs
 
 using System.Text.Json;
@@ -68,6 +73,11 @@ void Reject(string name, string validator, string obligation, Func<int, bool> si
     var facts = Entries("method0FeatureStates");
     var pc = Enumerable.Range(0, live.Count).Last(i => live[i] == "false" && site(i));
     live[pc] = "true";
+    // The method has no locals, so the forged state is well shaped and only the pruned site's hole can reject it.
+    var closed = extracted.Split('\n').Single(l => l.StartsWith("def method0Closed ", StringComparison.Ordinal));
+    if (forgeState && !closed.Contains("], locals := [], initLocals", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "The excluded-branch method has locals; the forged state may be badly shaped.");
     if (forgeState) facts[pc] = "some { stack := [], locals := [] }";
     var tampered = Path.Combine(directory, name + ".lean");
     var changed = string.Join('\n', extracted.Split('\n').Select(line =>

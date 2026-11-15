@@ -53,6 +53,60 @@ private def bytes : ArrayView := ⟨.address ⟨0, 0⟩, 16, .signed8⟩
 private def noAuthority : Memory := { memory with views := [] }
 private def uninitialized : Memory := { memory with cells := fun _ _ => ⟨0, false⟩ }
 
+/-- Distinct high-bit bytes distinguish load widths, byte order and narrow sign extension. -/
+private def numericMemory : Memory :=
+  { memory with cells := fun _ offset =>
+      { bits := BitVec.ofNat 8 (128 + offset), initialized := true } }
+
+/-- Every admitted numeric suffix, including distinct signed and unsigned encodings. -/
+private def numericKinds : List CIL.NumericKind := [.i1, .u1, .i2, .u2, .i4, .u4, .i8, .i]
+
+/-- A numeric load description selects the existing checked scalar operation. -/
+private def numericLoad (kind : CIL.NumericKind) : MemoryStep :=
+  match kind.load? with
+  | some (width, signed) => instruction (.loadScalar width signed)
+  | none => fun _ _ => .error .invalidState
+
+/-- Every suffix loads its exact value, with sign or zero extension for the narrow kinds. -/
+theorem numeric_kind_load_values :
+    numericKinds.map (fun kind =>
+      (numericLoad kind [.reference (.address { allocation := 0, offset := 0 })]
+        numericMemory).map Prod.snd) =
+    [.ok [.scalar (.i32 0xFFFFFF80)], .ok [.scalar (.i32 0x80)],
+      .ok [.scalar (.i32 0xFFFF8180)], .ok [.scalar (.i32 0x8180)],
+      .ok [.scalar (.i32 0x83828180)], .ok [.scalar (.i32 0x83828180)],
+      .ok [.scalar (.i64 0x8786858483828180)],
+      .ok [.scalar (.i64 0x8786858483828180)]] := rfl
+#print axioms numeric_kind_load_values
+
+/-- A numeric store description selects the existing scalar or word store operation. -/
+private def numericStore (kind : CIL.NumericKind) : MemoryStep :=
+  match kind.store? with
+  | some 8 => instruction .store64
+  | some width => instruction (.storeScalar width)
+  | none => fun _ _ => .error .invalidState
+
+/-- Each store keeps the low bytes in little-endian order and preserves the following bytes. -/
+theorem numeric_kind_store_bytes :
+    ([(.i1, .i32 0x44332211), (.u1, .i32 0x44332211),
+      (.i2, .i32 0x44332211), (.u2, .i32 0x44332211),
+      (.i4, .i32 0x44332211), (.u4, .i32 0x44332211),
+      (.i8, .i64 0x8877665544332211), (.i, .i64 0x8877665544332211)] :
+      List (Prod CIL.NumericKind CIL.Value)).map (fun (kind, value) => do
+        let (stored, _) <- numericStore kind
+          [.scalar value, .reference (.address { allocation := 0, offset := 0 })] numericMemory
+        checkedAt (.address { allocation := 0, offset := 0 }) 8
+          (read stored { allocation := 0, offset := 0 } 8 1)) =
+    [.ok [0x11, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87],
+      .ok [0x11, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87],
+      .ok [0x11, 0x22, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87],
+      .ok [0x11, 0x22, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87],
+      .ok [0x11, 0x22, 0x33, 0x44, 0x84, 0x85, 0x86, 0x87],
+      .ok [0x11, 0x22, 0x33, 0x44, 0x84, 0x85, 0x86, 0x87],
+      .ok [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88],
+      .ok [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]] := rfl
+#print axioms numeric_kind_store_bytes
+
 /-- Length is native-sized and does not read array data or require read authority. -/
 theorem length_without_authority :
     memoryInstruction .arrayLength [.array words] noAuthority =
@@ -68,13 +122,13 @@ theorem empty_length :
 /-- Null is distinct from an empty array and raises the named runtime exception. -/
 theorem null_length :
     memoryInstruction .arrayLength [.array ⟨.null, 0, .signed32⟩] memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 #print axioms null_length
 
 /-- The raw null literal has the same runtime array-null behavior. -/
 theorem literal_null_length :
     memoryInstruction .arrayLength [.object .null] memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 #print axioms literal_null_length
 
 /-- A null byref, as `Unsafe.NullRef` produces, is not an array and has no length. -/
@@ -103,27 +157,27 @@ theorem native_index :
 /-- Index equal to length is outside the array even if its address could be a sentinel. -/
 theorem end_index_rejected :
     memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 4), .array words] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms end_index_rejected
 
 /-- Negative int32 indexes are out of bounds. -/
 theorem negative_index_rejected :
     memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 4294967295), .array words] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms negative_index_rejected
 
 /-- A high native index cannot wrap into the array. -/
 theorem high_native_index_rejected :
     memoryInstruction (.arrayLoad 4 false)
       [.scalar (.i64 18446744073709551615), .array words] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms high_native_index_rejected
 
 /-- Null is checked before index bounds. -/
 theorem null_before_bounds :
     memoryInstruction (.arrayLoad 4 false)
       [.scalar (.i32 4294967295), .array ⟨.null, 0, .signed32⟩] memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 #print axioms null_before_bounds
 
 /-- Array shape does not grant read authority. -/
@@ -213,7 +267,7 @@ theorem allocation_identity_reuse_is_not_exception :
 /-- Native negative lengths retain the CLI overflow exception. -/
 theorem native_negative_array_length :
     (match newArray memory .signed32 (.i64 (2^63)) with
-     | .error fault => fault == .thrown "System.OverflowException"
+     | .error fault => fault == .thrown .overflow
      | .ok _ => false) = true := by decide +kernel
 #print axioms native_negative_array_length
 

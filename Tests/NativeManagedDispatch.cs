@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -58,7 +63,7 @@ private def nativeMemory : CIL.Safety.Memory :=
     nextIdentity := 1
     staticBindings := [(42, ⟨0, 0⟩)] }
 private def nativeTable : MethodTable :=
-  ⟨nativeSignature, some #[nativeIdentity], some ⟨42, 0⟩⟩
+  ⟨nativeSignature, some #[nativeIdentity], some ⟨42, 0⟩, 1, by decide⟩
 private def nativeRun (table : MethodTable) (index : Nat) (marker : BitVec 64)
     (memory : CIL.Safety.Memory := nativeMemory) :=
   CIL.Safety.invoke Extracted.program 128 0
@@ -72,7 +77,7 @@ theorem native_cycle : (match nativeRun nativeTable 0 0 with
 /-- The same supplied native entry may terminate with its named modeled exception. -/
 theorem native_throw : (match nativeRun nativeTable 0 (-1) with
     | .error fault => some fault.fault | .ok _ => none) =
-      some (.thrown "System.InvalidOperationException") := by decide +kernel
+      some (.thrown .invalidOperation) := by decide +kernel
 #print axioms native_throw
 /-- A numeric local beside the authenticated target keeps its ordinary scalar representation. -/
 theorem numeric_local : Extracted.method0.localKinds[1]? = some .word64 := by decide +kernel
@@ -92,8 +97,10 @@ theorem native_invalid_storage :
 #print axioms native_invalid_storage
 /-- The catalog reauthenticates opaque identities obtained from supplied storage. -/
 theorem native_forged_identity :
-    (nativeRun { nativeTable with targets := some #[{ nativeIdentity with token := 0 }] } 0 0).isOk =
-      false := by decide +kernel
+    (nativeRun
+      { nativeTable with
+        targets := some #[{ nativeIdentity with token := 0 }], counted := by decide }
+      0 0).isOk = false := by decide +kernel
 #print axioms native_forged_identity
 """;
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.NativeMethodTables");
@@ -104,13 +111,21 @@ evidence.Add(path, "PASS native supplied-table cycle, exception, scalar local an
 var rejected = new RejectedEvidence(root);
 var load = Regex.Match(scalar, @"(?m)^  \.managed \(\.tableLoad [^\r\n]+$").Value;
 if (load.Length == 0) throw new InvalidOperationException("Missing native table load");
+// The dispatcher's table offset is the decoded add that feeds its table load, and raw add at offset 21 of its
+// original and closed bodies; the handler's own add is left unchanged.
+const string tableLoadLine = "\n  .managed (.tableLoad";
+const string emittedAdd = "  .add," + tableLoadLine;
+const string rawAdd = "{ offset := 21, opcode := 88, operand := .none }";
 foreach (var (name, mutated) in new[]
 {
     ("signature", scalar.Replace(load, load.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal),
         StringComparison.Ordinal)),
     ("raw-load", scalar.Replace("opcode := 77, operand := .none", "opcode := 76, operand := .none",
         StringComparison.Ordinal)),
-    ("offset", scalar.Replace(".managed .tableOffset", ".nativeBinary (.add)", StringComparison.Ordinal)),
+    ("emitted-sub", ReplaceExactly(scalar, emittedAdd, "  .sub," + tableLoadLine, 1)),
+    ("emitted-add-ovf", ReplaceExactly(scalar, emittedAdd, "  .add_ovf," + tableLoadLine, 1)),
+    ("raw-sub", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 89, operand := .none }", 2)),
+    ("raw-operand", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 88, operand := .local 0 }", 2)),
     ("input", scalar.Replace(".pointer (.atom Extraction.runtimeScope \"System.IntPtr\")",
         ".pointer (.atom Extraction.runtimeScope \"System.Int64\")", StringComparison.Ordinal))
 })
@@ -164,12 +179,19 @@ theorem commuted_native_kind :
 #print axioms commuted_native_kind
 """);
 evidence.Add(commutedProof, "PASS commuted native table extraction, certificate and exact offset kinds");
-var wrongAddition = commutedScalar.Replace("opcode := 88, operand := .none",
-    "opcode := 89, operand := .none", StringComparison.Ordinal);
-if (wrongAddition == commutedScalar) throw new InvalidOperationException("Missing commuted native addition");
+var wrongAddition = ReplaceExactly(commutedScalar, rawAdd, "{ offset := 21, opcode := 89, operand := .none }", 2);
 var wrongAdditionPath = Path.Combine(root, "Rejected-CommutedAddition.lean");
 File.WriteAllText(wrongAdditionPath, wrongAddition);
 rejected.Add(wrongAdditionPath, "PASS independently rejected commuted subtraction evidence",
     "Extraction.ScalarFlowValid");
 evidence.Check();
 rejected.Check();
+
+// Replaces `original` only where it occurs exactly `count` times, so a mutation changes exactly the evidence it names.
+static string ReplaceExactly(string text, string original, string replacement, int count)
+{
+    var found = Regex.Count(text, Regex.Escape(original));
+    if (found != count)
+        throw new InvalidOperationException($"Expected {count} occurrences, found {found}: {original}");
+    return text.Replace(original, replacement, StringComparison.Ordinal);
+}

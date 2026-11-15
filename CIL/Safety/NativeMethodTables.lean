@@ -18,6 +18,11 @@ structure NativeMethodTable where
   targets : Array CIL.ManagedIdentity
   origin : Reference
   cursor : Reference
+  /-- The number of entries, which the geometry checks and loads read instead of walking
+      `targets`. -/
+  entryCount : Nat
+  /-- The entries number exactly `entryCount`. -/
+  counted : targets.size = entryCount
   deriving DecidableEq, Repr
 
 /-- Every admitted runtime profile uses eight-byte native method addresses. -/
@@ -28,14 +33,14 @@ def nativeMethodWidth : Nat := 8
 def NativeMethodTable.check (table : NativeMethodTable) (memory : Memory) : Checked Unit := do
   let allocation ← liveAllocation memory table.origin.allocation
   if allocation.kind != .immutableStatic then .error .unsupportedLayout else pure ()
-  if table.targets.size >= 2^31 ||
-      table.origin.offset + nativeMethodWidth * table.targets.size > allocation.layout.size then
+  if table.entryCount >= 2^31 ||
+      table.origin.offset + nativeMethodWidth * table.entryCount > allocation.layout.size then
     .error .outsideAllocation else pure ()
   if allocation.layout.alignment % nativeMethodWidth != 0 ||
       table.origin.offset % nativeMethodWidth != 0 then .error .alignment else pure ()
   if table.cursor.allocation != table.origin.allocation ||
       table.cursor.offset < table.origin.offset ||
-      table.cursor.offset > table.origin.offset + nativeMethodWidth * table.targets.size then
+      table.cursor.offset > table.origin.offset + nativeMethodWidth * table.entryCount then
     .error .invalidReference else pure ()
 
 /-- Native byte addition preserves the supplied table and checks the resulting cursor;
@@ -57,9 +62,11 @@ def NativeMethodTable.load (table : NativeMethodTable) (memory : Memory) :
   let relative := table.cursor.offset - table.origin.offset
   if relative % nativeMethodWidth != 0 then .error .alignment else pure ()
   let index := relative / nativeMethodWidth
-  let some identity := table.targets[index]? | .error .outsideAllocation
-  let _ ← read memory table.cursor nativeMethodWidth nativeMethodWidth
-  return ⟨table.signature, some identity⟩
+  if inside : index < table.entryCount then
+    let identity := table.targets[index]'(by rw [table.counted]; exact inside)
+    let _ ← read memory table.cursor nativeMethodWidth nativeMethodWidth
+    return ⟨table.signature, some identity⟩
+  else .error .outsideAllocation
 
 /-- Moving the cursor never changes the admitted target identities or their signature. -/
 theorem NativeMethodTable.addBytes_provenance (table result : NativeMethodTable)
@@ -88,8 +95,7 @@ theorem NativeMethodTable.load_provenance (table : NativeMethodTable) (memory : 
   split at loaded <;> (try simp_all)
   split at loaded <;> (try simp_all)
   subst pointer
-  refine ⟨rfl, ⟨_, rfl, ?_⟩⟩
-  exact Array.mem_of_getElem? (by assumption)
+  exact ⟨rfl, ⟨_, rfl, Array.getElem_mem _⟩⟩
 
 #print axioms NativeMethodTable.load_provenance
 
@@ -97,14 +103,17 @@ theorem NativeMethodTable.load_provenance (table : NativeMethodTable) (memory : 
     Bindings are transported by the existing memory renaming relation. -/
 def nativeTableView (table : CIL.MethodTable) (memory : Memory) :
     Checked NativeMethodTable := do
-  let some targets := table.targets | .error .nullDereference
-  let some backing := table.backing | .error .invalidReference
-  let some (_, origin) := memory.staticBindings.find? (·.1 == backing.identity) |
-    .error .missingAllocation
-  let view : NativeMethodTable := ⟨table.signature, targets, origin,
-    { origin with offset := origin.offset + backing.byteOffset }⟩
-  view.check memory
-  return view
+  match found : table.targets with
+  | none => .error .nullDereference
+  | some targets =>
+    let some backing := table.backing | .error .invalidReference
+    let some (_, origin) := memory.staticBindings.find? (·.1 == backing.identity) |
+      .error .missingAllocation
+    let view : NativeMethodTable := ⟨table.signature, targets, origin,
+      { origin with offset := origin.offset + backing.byteOffset }, table.entryCount,
+      table.counted targets found⟩
+    view.check memory
+    return view
 
 /-- Move an opaque native table cursor without changing its identities or storage binding. -/
 def addNativeTable (table : CIL.MethodTable) (memory : Memory) (offset : BitVec 64) :

@@ -51,7 +51,8 @@ partial class Program
         }
         ContractExportManifest manifest = ContractExportManifest.Read(manifestPath);
         byte[] implementation = File.ReadAllBytes(manifest.Assembly);
-        using ModuleDefinition module = ModuleDefinition.ReadModule(new MemoryStream(implementation));
+        using PinnedAssemblies pinned = new(implementation, ContractInterface.Hash(implementation), []);
+        ModuleDefinition module = pinned.Selected;
         output ??= Path.Combine(Path.GetDirectoryName(manifest.Assembly)!,
             module.Assembly.Name.Name + SidecarExtension);
         if (!output.EndsWith(SidecarExtension, StringComparison.Ordinal))

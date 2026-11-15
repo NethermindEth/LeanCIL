@@ -30,8 +30,7 @@ theorem ManagedTarget.find?_relocate (f : Nat → Nat) (catalog : List ManagedTa
 
 #print axioms ManagedTarget.find?_relocate
 
-/-- Renames the methods an instruction calls or constructs with; `.nativeBinary` never
-    dispatches its operand. -/
+/-- Renames the methods an instruction calls or constructs with. -/
 def Instruction.relocate (f : Nat → Nat) : Instruction → Instruction
   | .call method argc => .call (f method) argc
   | .callInstance method argc => .callInstance (f method) argc
@@ -167,6 +166,24 @@ theorem step_body_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instr
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory) :
     step (body.relocate f) op pc args frame stack m = step body op pc args frame stack m := rfl
 
+/-- Relocating a catalog renames the body an indirect call selects and selects no other. -/
+theorem indirectTarget_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
+    (catalog : List CIL.ManagedTarget) (pointer : CIL.MethodPointer) :
+    indirectTarget signature (catalog.map (CIL.ManagedTarget.relocate f)) pointer =
+      (indirectTarget signature catalog pointer).map f := by
+  unfold indirectTarget
+  cases pointer.signature != signature with
+  | true => rfl
+  | false =>
+    cases pointer.target with
+    | none => rfl
+    | some identity =>
+      simp only [Bool.false_eq_true, ite_false, Option.bind, CIL.ManagedTarget.find?_relocate,
+        Option.map_map]
+      rfl
+
+#print axioms indirectTarget_relocate
+
 /-- Relocating an indirect catalog changes only the body index of its selected action. -/
 private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedSignature)
     (catalog : List CIL.ManagedTarget) (tail : Bool) (pc : Nat) (frame : Frame)
@@ -180,22 +197,15 @@ private theorem managedStep_relocate (f : Nat → Nat) (signature : CIL.ManagedS
   | cons value values =>
     cases value <;> try rfl
     rename_i pointer
-    cases target : pointer.target with
-    | none => simp [managedStep, target, Bind.bind, Except.bind, Except.map]
-    | some identity =>
-      cases found : catalog.find? (·.identity == identity) with
-      | none =>
-        simp only [managedStep, target, CIL.ManagedTarget.find?_relocate, found,
-          Bind.bind, Except.bind, Except.map, Option.map_none]
-        split <;> rfl
-      | some selected =>
-        simp only [managedStep, target, CIL.ManagedTarget.find?_relocate, found,
-          Option.map_some]
-        repeat' first
-          | rfl
-          | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure,
-              Except.map, CIL.ManagedTarget.relocate, FrameAction.relocate]
-          | split
+    cases selected : indirectTarget signature catalog pointer with
+    | none => simp only [managedStep, indirectTarget_relocate, selected, Option.map_none]; rfl
+    | some method =>
+      simp only [managedStep, indirectTarget_relocate, selected, Option.map_some]
+      repeat' first
+        | rfl
+        | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map,
+            FrameAction.relocate]
+        | split
 
 #print axioms managedStep_relocate
 
@@ -244,15 +254,18 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
     case managed operation =>
       cases operation <;> simp only [CIL.Instruction.callees, reduceCtorEq] at hc
       case call signature catalog tail =>
-        simp only [step, CIL.Instruction.relocate, observerCount, Bool.or_false]
-        split
-        · rfl
-        · exact managedStep_relocate f signature catalog tail pc frame stack m
+        simp only [step, CIL.Instruction.relocate, observerCount]
+        by_cases unknown : unspecifiedOperands (signature.parameters.length + 1) stack = true
+        · simp only [unknown, ite_true]
+          rfl
+        · simp only [unknown, Bool.false_eq_true, ite_false]
+          exact managedStep_relocate f signature catalog tail pc frame stack m
     case callVirtual targets argc =>
-      simp only [step, CIL.Instruction.relocate, observerCount, Bool.or_false,
-        virtualTarget_relocate]
-      split
-      · rfl
+      simp only [step, CIL.Instruction.relocate, observerCount, virtualTarget_relocate]
+      by_cases unknown : unspecifiedOperands argc stack = true
+      · simp only [unknown, ite_true]
+        rfl
+      simp only [unknown, Bool.false_eq_true, ite_false]
       split
       · rfl
       cases (stack.take argc).reverse.mapM (checkedValue m) with
@@ -264,10 +277,10 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
           cases virtualTarget m targets receiver <;> rfl
         all_goals rfl
     all_goals
+      simp only [CIL.Instruction.relocate]
       unfold step
-      simp only [CIL.Instruction.relocate, observerCount, Bool.or_false,
-        Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map]
-      repeat' (split <;> simp_all [FrameAction.relocate])
+      simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map]
+      repeat' (split <;> simp_all [FrameAction.relocate, observerCount])
     all_goals
       split <;> try rfl
       split <;> rfl
@@ -418,7 +431,7 @@ theorem invoke_bound {lib : CIL.Program} {fuel method : Nat} {args : List Value}
 
 /-- A raised exception is raised by the relocated method. -/
 theorem Raises.relocate {lib linked : CIL.Program} {f : Nat → Nat} {method : Nat}
-    {args : List Value} {memory : Memory} {exception : String}
+    {args : List Value} {memory : Memory} {exception : ExceptionType}
     (raised : Raises lib method args memory exception)
     (closed : Closed lib) (relocates : RelocatesInto lib linked f) :
     Raises linked (f method) args memory exception := by

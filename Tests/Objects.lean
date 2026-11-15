@@ -105,7 +105,7 @@ theorem base_fields_reached :
 /-- A field access through null throws, as `ldfld` and `stfld` do at run time. -/
 theorem null_field_throws :
     objectFieldAddress memory .null account.identity 0 =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 #print axioms null_field_throws
 
 /-- Byte storage that is not an object has no fields, whatever offset is asked for. -/
@@ -131,9 +131,9 @@ theorem allocation_over_budget :
     which then also waits on the caller's stack. -/
 private def creator : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.newObject 1 0 account.identity [] 8, .ret none] }
+    code := [.newObject 1 0 account.identity [] 8, .ret] }
 private def constructor : CIL.Method :=
-  { returnsValue := false, locals := [], code := [.ret none] }
+  { returnsValue := false, locals := [], code := [.ret] }
 
 /-- The constructed instance is returned to the caller and outlives the constructor's frame. -/
 theorem construction_returns_instance :
@@ -180,10 +180,10 @@ theorem reference_field_starts_null :
 /-- A null receiver throws on both the load and the store, before the value is checked. -/
 theorem reference_field_null_receiver_throws :
     objectFieldInstruction (.objectReferenceField node.identity 8) [.object .null] nodes =
-      .error (.thrown "System.NullReferenceException") ∧
+      .error (.thrown .nullReference) ∧
     objectFieldInstruction (.setObjectReferenceField node.identity 8)
         [.object (.address ⟨2, 0⟩), .object .null] nodes =
-      .error (.thrown "System.NullReferenceException") := ⟨rfl, rfl⟩
+      .error (.thrown .nullReference) := ⟨rfl, rfl⟩
 #print axioms reference_field_null_receiver_throws
 
 /-- Only an object or null may be stored: a byte buffer is not one. -/
@@ -205,15 +205,15 @@ theorem reference_field_checks_slot :
 
 /-- `callvirt` of method 4 on argument 0. -/
 @[cil_code] def depositing : CIL.Method :=
-  { returnsValue := false, locals := [], code := [.arg 0, .callInstance 4 1, .ret] }
+  { returnsValue := false, locals := [], code := [.ldarg 0, .callInstance 4 1, .ret] }
 /-- `ldfld` of a scalar field of argument 0. -/
 @[cil_code] def fieldReading : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.arg 0, .memory (.objectField account.identity 0 8 false), .ret] }
+    code := [.ldarg 0, .memory (.objectField account.identity 0 8 false), .ret] }
 /-- `ldfld` of a class-typed field of argument 0. -/
 @[cil_code] def slotReading : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.arg 0, .memory (.objectReferenceField account.identity 8), .ret] }
+    code := [.ldarg 0, .memory (.objectReferenceField account.identity 8), .ret] }
 /-- `newobj` of an 8-byte instance whose constructor is method 4. -/
 @[cil_code] def creating : CIL.Method :=
   { returnsValue := true, locals := [], code := [.newObject 4 0 account.identity [] 8, .ret] }
@@ -270,7 +270,7 @@ example (memory : CIL.Safety.Memory) (frame : Frame)
 set_option cil.diagnostics true in
 example (memory : CIL.Safety.Memory) (object : Reference) :
     invoke observed 100 0 [.object (.address object)] memory =
-      .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨0, 1, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 /-- A signed `ldfld` of a 16-bit field holding `0xFFFF` pushes -1, sign-extended to 32 bits, and
@@ -385,7 +385,7 @@ theorem self_linked_no_segment {field : ReferenceField} {linked : CIL.Safety.Mem
 
 /-- A reference load followed by a word load through the object it produced. -/
 @[cil_code] def linkedReading : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.arg 0,
+  { returnsValue := true, locals := [], code := [.ldarg 0,
       .memory (.objectReferenceField account.identity 8),
       .memory (.objectField account.identity 0 8 false), .ret] }
 
@@ -434,10 +434,14 @@ theorem named_reference_load_evidence (memory otherMemory : CIL.Safety.Memory)
 
 /-- A receiver check selects a Boolean-returning instance call or an explicit exception. -/
 @[cil_code] private def checkedReceiverProgram : CIL.Program := [
-  { returnsValue := true, locals := [], code := [
-    .arg 0, .brtrue 3, .throw "MissingReceiver", .arg 0, .ldc_i4 1,
-    .callInstance 1 2, .ret (some .unsigned8)] },
-  { returnsValue := true, locals := [], code := [.arg 1, .ret (some .unsigned8)] }]
+  {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code := [
+    .ldarg 0, .brtrue 3, .throw .nullReference, .ldarg 0, .ldc_i4 1,
+    .callInstance 1 2, .ret] },
+  {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  returnsValue := true, locals := [], code := [.ldarg 1, .ret] }]
 
 /-- A symbolic live receiver decides the branch and passes the call's closed argument guard. -/
 theorem checked_receiver_call (memory : CIL.Safety.Memory) (receiver : Reference)
@@ -451,22 +455,24 @@ theorem checked_receiver_call (memory : CIL.Safety.Memory) (receiver : Reference
 /-- A null receiver takes the explicit exception path without entering the callee. -/
 theorem checked_receiver_throws (memory : CIL.Safety.Memory) (frame : Frame) :
     run checkedReceiverProgram 12 0 0 [.object .null] frame [] memory =
-      .error ⟨0, 2, .thrown "MissingReceiver"⟩ := by
+      .error ⟨0, 2, .thrown .nullReference⟩ := by
   cil_checked_steps
 #print axioms checked_receiver_throws
 
-/-- A narrow Boolean parameter is written through its receiver's one-byte field. -/
-@[cil_code] private def narrowStoreProgram (kind : NarrowKind) : CIL.Program := [
-  { returnsValue := false, locals := [], code := [
-    .arg 0, .arg 1 (some kind), .memory (.setObjectField account.identity 0 1), .ret] }]
+/-- A Boolean parameter, read narrowed, is written through its receiver's one-byte field. -/
+@[cil_code] private def narrowStoreProgram : CIL.Program := [
+  { returnsValue := false, locals := [],
+    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Object",
+      .atom CIL.Extraction.runtimeScope "System.Boolean"] },
+    code := [.ldarg 0, .ldarg 1, .memory (.setObjectField account.identity 0 1), .ret] }]
 
 /-- Narrowing a literal Boolean preserves the payload of a supplied checked field write. -/
-theorem narrowed_boolean_store (kind : NarrowKind) (memory stored : CIL.Safety.Memory)
+theorem narrowed_boolean_store (memory stored : CIL.Safety.Memory)
     (receiver : Reference) (frame : Frame)
     (formed : formObject memory (.address receiver) = .ok (.object (.address receiver)))
     (written : memoryInstruction (.setObjectField account.identity 0 1)
       [.scalar (.i32 1), .object (.address receiver)] memory = .ok (stored, [])) :
-    run (narrowStoreProgram kind) 5 0 0 [.object (.address receiver), .scalar (.i32 1)]
+    run narrowStoreProgram 5 0 0 [.object (.address receiver), .scalar (.i32 1)]
       frame [] memory = .ok (leaveFrame frame stored, []) := by
   cil_checked_steps [formed, written]
 #print axioms narrowed_boolean_store

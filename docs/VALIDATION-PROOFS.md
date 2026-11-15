@@ -34,6 +34,9 @@ library and tactic regressions kernel-check the resulting proofs.
 - `Tests.AggregateSetup` and `Tests.Semantics` cover frame setup and interpreter behavior.
 - `Tests.BodyDecoding` checks the method body decoder against hand-made bodies, one rejection per
   failure kind and the operand table against a static list generated from Mono.Cecil.
+- `Tests.MetadataDecoding` and `Tests.MetadataBinding` check the metadata table, heap and
+  signature decoders and the binding of operands, locals and method definitions to carried
+  metadata, as [VALIDATION-COVERAGE](VALIDATION-COVERAGE.md) describes.
 - `Tests.InterpreterEquations` checks that each shared equation lemma is stored by its LeanCIL
   module, not rebuilt by the importer, and that a tactic macro naming `CIL.step.eq_def`
   elaborates.

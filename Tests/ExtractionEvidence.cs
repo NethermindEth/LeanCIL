@@ -1,13 +1,19 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 
 if (args is not ([] or ["--prepare-only"]))
     throw new ArgumentException("Usage: ExtractionEvidence.cs [--prepare-only]");
 using var fixtures = new Program();
 fixtures.PrepareLeanFixtures(
-    "Tests.BodyEncoding", "Tests.ExtractionLayout", "Tests.ExtractionParameters", "Tests.FeatureEvidence",
+    "Tests.MetadataBuilder", "Tests.BodyEncoding", "Tests.ExtractionLayout", "Tests.ExtractionParameters",
+    "Tests.FeatureEvidence",
     "Tests.ScalarEvidence",
     "Tests.LayoutCoverage", "Tests.TypeTestEvidence", "Tests.ThrowEvidence", "Tests.SpanEvidence",
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
@@ -29,7 +35,7 @@ foreach (var name in new[]
 {
     "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables",
     "MemorySpans", "ReferenceInstructions", "PointerOperations", "Objects", "StaticValues", "StaticScalarValues",
-    "TranslationAudit"
+    "TranslationAudit", "MetadataDifferential", "Guards"
 })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");

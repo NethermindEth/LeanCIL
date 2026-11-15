@@ -18,7 +18,7 @@ private def body : RawMethod := {
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := word, parameters := [packet], locals := [packet],
   initLocals := true, maxStack := 8, genericParameters := [],
-  code := [⟨0, 0x7b, .field packet 0 word false⟩,
+  code := [⟨0, 0x7b, .field packet 0 word name!"first" false⟩,
     ⟨5, 0xfe15, .type packet⟩, ⟨11, 0x0f, .argument 0⟩] }
 private def arguments : RawArguments :=
   ⟨[.field (.aggregate 0)], [.field (.aggregate 0)], [.other, .other, .address 0]⟩
@@ -32,11 +32,15 @@ example : ∀ index ∈ List.range uses.length,
 example : ¬ LayoutUsesComplete layouts body arguments [true] uses := by decide
 example : ¬ LayoutUsesComplete layouts body arguments [true, true, true] uses.reverse := by decide
 example : instructionLayoutUses layouts 0
-    ⟨0, 0x7b, .field packet 1 word false⟩ = none := by decide
+    ⟨0, 0x7b, .field packet 1 word name!"first" false⟩ = none := by decide
 example : instructionLayoutUses layouts 0
-    ⟨0, 0x7b, .field packet 0 packet false⟩ = none := by decide
+    ⟨0, 0x7b, .field packet 0 packet name!"first" false⟩ = none := by decide
 example : instructionLayoutUses layouts 0
-    ⟨0, 0x73, .call { target := .managed 1, declaringType := packet, name := ".ctor", typeArguments := [], parameterCount := 0, hasThis := true, returnsValue := false }⟩ =
+    ⟨0, 0x73, .call { method := {
+                        owner := packet, name := name!".ctor", hasThis := true, genericArity := 0,
+                        returnType := .void, parameters := [] },
+                      target := .managed 1, name := ".ctor", typeArguments := [],
+                      parameterCount := 0, returnsValue := false }⟩ =
       some [.size 0 0 .construct] := by decide
 
 end Tests.LayoutCoverage

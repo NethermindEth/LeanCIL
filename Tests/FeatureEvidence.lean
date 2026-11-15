@@ -9,10 +9,13 @@ private def intType : TypeExpr := .atom
   "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
   "System.Int32"
 private def getter : CallSite := {
+  method := {
+    owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [] },
   target := .external "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
     PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean \
-    System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()"
-  typeArguments := [], parameterCount := 0, hasThis := false, returnsValue := true }
+    System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()", typeArguments := [],
+  parameterCount := 0, returnsValue := true }
 private def intrinsic (member : String) : CallSite :=
   { getter with target := .external ("System.Runtime.Intrinsics, Version=11.0.0.0, \
     Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean \
@@ -27,6 +30,10 @@ example : ¬ ({ architecture := .x64, bmi2 := true } : FeatureProfile).Valid := 
 example : ¬ ({ architecture := .x64, bmi2 := true, x86Base64 := true } : FeatureProfile).Valid := by decide
 example : ¬ ({ architecture := .arm64, x86Base64 := true } : FeatureProfile).Valid := by decide
 example : ¬ ({ architecture := .arm64, vector128Accelerated := true } : FeatureProfile).Valid := by decide
+-- .NET 11 x64 reports SSE2 only with SSSE3, SSE4.1 and SSE4.2; EnableHWIntrinsic=0 turns all off.
+example : ¬ ({ architecture := .x64, x86Base64 := true, sse2 := true,
+    vector128Accelerated := true } : FeatureProfile).Valid := by decide
+example : ({ architecture := .x64 } : FeatureProfile).Valid := by decide
 
 private def v3 : FeatureProfile := {
   architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true, sse42 := true
@@ -48,12 +55,13 @@ private def raw (code : List RawInstruction) (locals : List TypeExpr := [])
   returnType, parameters := [], locals, initLocals := true, maxStack := 8,
   genericParameters := [], code }
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
-private def state (stack : List (Option W32)) (locals : List (Option W32) := []) : Option FeatureState :=
+private def state (stack : List (Option W32)) (locals : List (Nat × W32) := []) :
+    Option FeatureState :=
   some ⟨stack, locals⟩
 private def branchRaw := raw [i 40 (.call getter), i 45 (.target 4), i 22, i 42, i 23, i 42]
 private def branchStates : FeatureCertificate := [state [], state [some 0], state [], state [some 0], none, none]
 private def branchCode : List Instruction :=
-  [.feature .sse2, .brtrue 4, .ldc_i4 0, .ret, .unsupported "pruned", .unsupported "pruned"]
+  [.feature .sse2, .brtrue 4, .ldc_i4 0, .ret, .unadmitted 23, .unadmitted 42]
 private def branchMask := [true, true, true, true, false, false]
 
 example : FeatureFlowValid #[] (fun _ => none)
@@ -63,7 +71,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
     branchRaw .scalar (branchStates.set 1 (state [some 1]))
     branchMask branchCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) branchRaw .scalar (branchStates.set 2 none)
-    (branchMask.set 2 false) (branchCode.set 2 (.unsupported "false pruning")) := by decide
+    (branchMask.set 2 false) (branchCode.set 2 (.unadmitted 22)) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) branchRaw .scalar branchStates branchMask
     (branchCode.set 0 (.feature .avx2)) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) branchRaw .scalar branchStates branchMask
@@ -79,35 +87,67 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
 -- so the branch keeps both successors even though the first iteration is false.
 private def loopRaw := raw
   [i 22, i 10, i 6, i 22, i 51 (.target 8), i 23, i 10, i 43 (.target 2), i 42] [intType] .void
-private def loopStates : FeatureCertificate := [state [] [none], state [some 0] [none],
-  state [] [none], state [none] [none], state [some 0, none] [none],
-  state [] [none], state [some 1] [none],
-  state [] [some 1], state [] [none]]
+private def loopStates : FeatureCertificate := [state [] [], state [some 0] [],
+  state [] [], state [none] [], state [some 0, none] [],
+  state [] [], state [some 1] [],
+  state [] [(0, 1)], state [] []]
 private def loopCode : List Instruction :=
-  [.ldc_i4 0, .setLocal 0, .local 0, .ldc_i4 0, .bne_un 8, .ldc_i4 1, .setLocal 0, .br 2, .ret]
+  [.ldc_i4 0, .stloc 0, .ldloc 0, .ldc_i4 0, .bne_un 8, .ldc_i4 1, .stloc 0, .br 2, .ret]
 example : FeatureFlowValid #[] (fun _ => none) loopRaw .scalar loopStates
     (List.replicate 9 true) loopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none)
-    loopRaw .scalar (loopStates.set 2 (state [] [some 0]))
+    loopRaw .scalar (loopStates.set 2 (state [] [(0, 0)]))
     (List.replicate 9 true) loopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) loopRaw .scalar (loopStates.set 8 none)
     [true, true, true, true, true, true, true, true, false]
-    (loopCode.set 8 (.unsupported "pruned backedge exit")) := by decide
+    (loopCode.set 8 (.unadmitted 42)) := by decide
 -- Taking a local's address anywhere invalidates constant facts for that local.
 example : ¬ FeatureFlowValid #[] (fun _ => none)
     { loopRaw with code := loopRaw.code ++ [i 18 (.local 0)] }
     .scalar (loopStates ++ [none]) ((List.replicate 9 true) ++ [false])
-    (loopCode ++ [.unsupported "unreachable address"]) := by decide
+    (loopCode ++ [.unadmitted 18]) := by decide
+
+-- A state no edge reaches is checked for its shape alone: its known facts must name each local
+-- once, by increasing index, below the local count, with a word the local's type admits.
+private def boolType : TypeExpr := .atom
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+  "System.Boolean"
+private def deadRaw := raw [i 22, i 10, i 42, i 6, i 38, i 42] [intType, boolType] .void
+private def deadStates (facts : List (Nat × W32)) : FeatureCertificate :=
+  [state [], state [some 0], state [] [(0, 0)], state [] facts, state [some 0], state []]
+private def deadCode : List Instruction := [.ldc_i4 0, .stloc 0, .ret, .ldloc 0, .pop, .ret]
+example : FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(0, 0), (1, 1)])
+    (List.replicate 6 true) deadCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(1, 1), (0, 0)])
+    (List.replicate 6 true) deadCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(0, 0), (0, 0)])
+    (List.replicate 6 true) deadCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(0, 0), (2, 1)])
+    (List.replicate 6 true) deadCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(0, 0), (1, 2)])
+    (List.replicate 6 true) deadCode := by decide
+-- The entry state has no known fact.
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar
+    ((deadStates [(0, 0)]).set 0 (state [] [(0, 0)])) (List.replicate 6 true) deadCode := by decide
+-- Loading or storing a local the method does not have is rejected.
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    (raw [i 17 (.local 2), i 38, i 42] [intType] .void) .scalar
+    [state [], state [none], state []] (List.replicate 3 true) [.ldloc 2, .pop, .ret] := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    (raw [i 22, i 19 (.local 2), i 42] [intType] .void) .scalar
+    [state [], state [some 0], state []] (List.replicate 3 true) [.ldc_i4 0, .stloc 2, .ret] := by
+  decide
 
 private def switchRaw := raw [i 2, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 42, i 25, i 42]
 private def switchStates : FeatureCertificate := [state [], state [none], state [], state [some 1],
   state [], state [some 2], state [], state [some 3]]
 private def switchCode : List Instruction :=
-  [.arg 0, .switch [4, 6], .ldc_i4 1, .ret, .ldc_i4 2, .ret, .ldc_i4 3, .ret]
+  [.ldarg 0, .switch [4, 6], .ldc_i4 1, .ret, .ldc_i4 2, .ret, .ldc_i4 3, .ret]
 example : FeatureFlowValid #[] (fun _ => none) switchRaw .scalar switchStates
     (List.replicate 8 true) switchCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) switchRaw .scalar (switchStates.set 6 none)
-    [true, true, true, true, true, true, false, true] (switchCode.set 6 (.unsupported "missing switch edge")) := by decide
+    [true, true, true, true, true, true, false, true] (switchCode.set 6 (.unadmitted 25)) := by
+  decide
 
 -- Bitwise feature expressions preserve exact int32 words, including negative
 -- constants. Unknown operands remain unknown; ceq never guesses equality.
@@ -118,8 +158,8 @@ example : featureTransfer #[] branchRaw .scalar (i 65025) ⟨[some 1, some 1], [
 example : featureTransfer #[] branchRaw .scalar (i 65025) ⟨[none, some 1], []⟩ = some ⟨[none], []⟩ := by decide
 example : featureTransfer #[] branchRaw .scalar (i 95) ⟨[], []⟩ = none := by decide
 -- Native operand normalization does not change a binary branch destination.
-example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.nativeBinary (.bgt 2)) = true := by decide
-example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.nativeBinary (.bgt 3)) = false := by decide
+example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.bgt 2) = true := by decide
+example : featureOpMatches #[] branchRaw (i 48 (.target 2)) (.bgt 3) = false := by decide
 
 -- A stack-changing replacement for nop used to forge the value at a following
 -- branch while the raw-body analysis still justified pruning its taken edge.
@@ -127,20 +167,19 @@ private def nopRaw := raw [i 22, i 0, i 45 (.target 5), i 22, i 42, i 23, i 42]
 private def nopStates : FeatureCertificate := [state [], state [some 0], state [some 0],
   state [], state [some 0], none, none]
 private def nopCode : List Instruction :=
-  [.ldc_i4 0, .nop, .brtrue 5, .ldc_i4 0, .ret, .unsupported "pruned", .unsupported "pruned"]
+  [.ldc_i4 0, .nop, .brtrue 5, .ldc_i4 0, .ret, .unadmitted 23, .unadmitted 42]
 example : FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates
     [true, true, true, true, true, false, false] nopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) nopRaw .scalar nopStates
     [true, true, true, true, true, false, false]
     (nopCode.set 1 (.ldc_i4 1)) := by decide
-example : featureOpMatches #[] loopRaw (i 0) (.setLocal 0) = false := by decide
-example : featureOpMatches #[] loopRaw (i 38) (.setLocal 0) = false := by decide
+example : featureOpMatches #[] loopRaw (i 0) (.stloc 0) = false := by decide
+example : featureOpMatches #[] loopRaw (i 38) (.stloc 0) = false := by decide
 example : featureOpMatches #[] loopRaw (i 0) (.bgt 7) = false := by decide
 example : featureOpMatches #[] loopRaw (i 0) (.ret) = false := by decide
-example : featureOpMatches #[] loopRaw (i 0) (.nativeBinary (.bgt 7)) = false := by decide
-example : featureOpMatches #[] loopRaw (i 33 (.integer 0)) (.localAddr 0) = false := by decide
-example : featureOpMatches #[] loopRaw (i 10) (.setLocal 1) = false := by decide
-example : featureOpMatches #[] loopRaw (i 18 (.local 0)) (.localAddr 1) = false := by decide
+example : featureOpMatches #[] loopRaw (i 33 (.integer 0)) (.ldloca 0) = false := by decide
+example : featureOpMatches #[] loopRaw (i 10) (.stloc 1) = false := by decide
+example : featureOpMatches #[] loopRaw (i 18 (.local 0)) (.ldloca 1) = false := by decide
 example : featureOpMatches #[] loopRaw (i 122) (.pop) = false := by decide
 example : featureOpMatches #[] loopRaw (i 65050) (.nop) = false := by decide
 example : featureOpMatches #[] loopRaw (i 220) (.nop) = false := by decide
@@ -152,11 +191,28 @@ example : featureOpMatches #[] branchRaw (i 88) (.nop) = false := by decide
 -- A Boolean local that is never addressed is eligible for constant facts; its load and store bind
 -- to the plain instructions at its own index, since the slot's kind does the narrowing.
 private def booleanRaw := raw [i 6, i 10] [.atom runtimeScope "System.Boolean"] .void
-example : featureOpMatches #[] booleanRaw (i 6) (.local 0) = true := by decide +kernel
-example : featureOpMatches #[] booleanRaw (i 10) (.setLocal 0) = true := by decide +kernel
-example : featureOpMatches #[] booleanRaw (i 6) (.local 1) = false := by decide +kernel
-example : featureOpMatches #[] booleanRaw (i 10) (.local 0) = false := by decide +kernel
-example : featureOpMatches #[] booleanRaw (i 6) (.setLocal 0) = false := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 6) (.ldloc 0) = true := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 10) (.stloc 0) = true := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 6) (.ldloc 1) = false := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 10) (.ldloc 0) = false := by decide +kernel
+example : featureOpMatches #[] booleanRaw (i 6) (.stloc 0) = false := by decide +kernel
+-- Taking the address of a span local or of a span argument binds only the address instruction of
+-- the same local or argument, whose step pushes the span's view; a load in its place is rejected.
+private def spanRaw := raw [i 18 (.local 0), i 15 (.argument 0)]
+  [.apply (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.UInt32")] .void
+example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloca 0) = true := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloc 0) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarga 0) = true := by
+  decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarga 1) = false := by
+  decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloca 1) = false := by
+  decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarg 0) = false := by decide +kernel
+-- An argument store binds only `starg` of the same argument, not a store to its home slot.
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.starg 0) = true := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.stloc 1) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.starg 1) = false := by decide +kernel
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/
@@ -189,7 +245,7 @@ theorem constant_branch_boundaries :
         List (Int × Int × List Bool)).all (fun (left, right, expected) =>
           [46, 59].all fun first => (List.range 10).all fun index =>
             featureSuccessors none 2 (i (first + index) (.target 5))
-              ⟨[some (BitVec.ofInt 32 right), some (BitVec.ofInt 32 left)], []⟩ ==
+              [some (BitVec.ofInt 32 right), some (BitVec.ofInt 32 left)] ==
                 some [if expected[index]?.getD false then 5 else 3]) = true := by decide +kernel
 #print axioms constant_branch_boundaries
 
@@ -197,7 +253,7 @@ theorem constant_branch_boundaries :
 theorem unknown_comparison_edges :
     [46, 59].all (fun first => (List.range 10).all fun index =>
       [([none, some 0] : List (Option W32)), [some 0, none], [none, none]].all fun stack =>
-        featureSuccessors none 2 (i (first + index) (.target 5)) ⟨stack, []⟩ == some [5, 3]) =
+        featureSuccessors none 2 (i (first + index) (.target 5)) stack == some [5, 3]) =
           true := by decide +kernel
 #print axioms unknown_comparison_edges
 
@@ -206,7 +262,7 @@ theorem comparison_certificate :
     let body := raw [i 21, i 22, i 50 (.target 5), i 22, i 42, i 23, i 42]
     let facts := [state [], state [some (-1)], state [some 0, some (-1)], none, none,
       state [], state [some 1]]
-    let code := [.ldc_i4 (-1), .ldc_i4 0, .blt 5, .unsupported "pruned", .unsupported "pruned",
+    let code := [.ldc_i4 (-1), .ldc_i4 0, (.blt 5), .unadmitted 22, .unadmitted 42,
       .ldc_i4 1, .ret]
     FeatureFlowValid #[] (fun _ => none)
         body .scalar facts [true, true, true, false, false, true, true] code ∧
@@ -231,19 +287,19 @@ theorem comparison_results :
 theorem widened_comparison_unknown :
     featureTransfer #[] (raw []) .scalar (i 211) ⟨[some (-1)], []⟩ = some ⟨[none], []⟩ ∧
     featureTransfer #[] (raw []) .scalar (i 224) ⟨[some (-1)], []⟩ = some ⟨[none], []⟩ ∧
-    featureSuccessors none 2 (i 51 (.target 5)) ⟨[none, some (-1)], []⟩ = some [5, 3] :=
+    featureSuccessors none 2 (i 51 (.target 5)) [none, some (-1)] = some [5, 3] :=
   by decide +kernel
 #print axioms widened_comparison_unknown
 
 /-- Switch indices are unsigned int32 values; unknowns preserve every encoded successor. -/
 theorem constant_switch_successors :
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 0], []⟩ = some [4] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 1], []⟩ = some [6] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 4])) ⟨[some 1], []⟩ = some [4] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 2], []⟩ = some [2] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some (-1)], []⟩ = some [2] ∧
-    featureSuccessors none 1 (i 69 (.targets [])) ⟨[some 0], []⟩ = some [2] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[none], []⟩ = some [2, 4, 6] :=
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [some 0] = some [4] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [some 1] = some [6] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 4])) [some 1] = some [4] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [some 2] = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [some (-1)] = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [])) [some 0] = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [none] = some [2, 4, 6] :=
   by decide +kernel
 #print axioms constant_switch_successors
 
@@ -251,8 +307,8 @@ theorem constant_switch_successors :
 theorem switch_certificate_targets :
     let body := raw [i 22, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 42, i 25, i 42]
     let facts := [state [], state [some 0], none, none, state [], state [some 2], none, none]
-    let code := [.ldc_i4 0, .switch [4, 6], .unsupported "pruned", .unsupported "pruned",
-      .ldc_i4 2, .ret, .unsupported "pruned", .unsupported "pruned"]
+    let code := [.ldc_i4 0, .switch [4, 6], .unadmitted 23, .unadmitted 42,
+      .ldc_i4 2, .ret, .unadmitted 25, .unadmitted 42]
     let mask := [true, true, false, false, true, true, false, false]
     FeatureFlowValid #[] (fun _ => none) body .scalar facts mask code ∧
     ¬ FeatureFlowValid #[] (fun _ => none) body .scalar facts mask
@@ -261,7 +317,7 @@ theorem switch_certificate_targets :
         { body with code := body.code.set 1 (i 69 (.targets [4, 100])) }
       .scalar facts mask (code.set 1 (.switch [4, 100])) ∧
     ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 4 none) (mask.set 4 false)
-      (code.set 4 (.unsupported "false pruning")) := by decide +kernel
+      (code.set 4 (.unadmitted 24)) := by decide +kernel
 #print axioms switch_certificate_targets
 
 /-- An unselected table arm or untaken comparison cannot enter a tail transfer after its prefix. -/
@@ -270,12 +326,12 @@ theorem pruned_tail_entry_rejected :
     let switchBody := raw ([i 22, i 69 (.targets [2, 5]), i 23, i 42] ++ tail)
     let switchFacts := [state [], state [some 0], state [], state [some 1], none, none, none]
     let switchCode := [.ldc_i4 0, .switch [2, 5], .ldc_i4 1, .ret,
-      .unsupported "pruned", .unsupported "pruned", .unsupported "pruned"]
+      .unadmitted 65044, .unadmitted 40, .unadmitted 42]
     let branchBody := raw ([i 22, i 22, i 51 (.target 6), i 23, i 42] ++ tail)
     let branchFacts := [state [], state [some 0], state [some 0, some 0], state [], state [some 1],
       none, none, none]
     let branchCode := [.ldc_i4 0, .ldc_i4 0, .bne_un 6, .ldc_i4 1, .ret,
-      .unsupported "pruned", .unsupported "pruned", .unsupported "pruned"]
+      .unadmitted 65044, .unadmitted 40, .unadmitted 42]
     FeatureFlowValid #[] (fun _ => none)
       { switchBody with code := switchBody.code.set 1 (i 69 (.targets [2, 4])) }
       .scalar switchFacts [true, true, true, true, false, false, false]
@@ -294,16 +350,16 @@ theorem pruned_tail_entry_rejected :
 theorem switch_backedge_weakening :
     let body := raw [i 22, i 10, i 6, i 69 (.targets [4, 7]), i 23, i 10,
       i 43 (.target 2), i 42] [intType] .void
-    let facts := [state [] [none], state [some 0] [none], state [] [none], state [none] [none],
-      state [] [none], state [some 1] [none], state [] [some 1], state [] [none]]
-    let code := [.ldc_i4 0, .setLocal 0, .local 0, .switch [4, 7], .ldc_i4 1, .setLocal 0,
+    let facts := [state [] [], state [some 0] [], state [] [], state [none] [],
+      state [] [], state [some 1] [], state [] [(0, 1)], state [] []]
+    let code := [.ldc_i4 0, .stloc 0, .ldloc 0, .switch [4, 7], .ldc_i4 1, .stloc 0,
       .br 2, .ret]
     FeatureFlowValid #[] (fun _ => none) body .scalar facts (List.replicate 8 true) code ∧
-    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 2 (state [] [some 0]))
+    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 2 (state [] [(0, 0)]))
       (List.replicate 8 true) code ∧
     ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 7 none)
       [true, true, true, true, true, true, true, false]
-      (code.set 7 (.unsupported "pruned backedge exit")) := by decide +kernel
+      (code.set 7 (.unadmitted 42)) := by decide +kernel
 #print axioms switch_backedge_weakening
 
 end Tests.FeatureEvidence

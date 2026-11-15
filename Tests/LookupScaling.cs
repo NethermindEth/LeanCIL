@@ -1,9 +1,84 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
+#:include GeneratedEvidence.cs
 
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
+
+if (args.Contains("--exception-types-only", StringComparer.Ordinal))
+{
+    ExceptionDecisionCosts();
+    return;
+}
+if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
+{
+    ArgumentResolutionCosts();
+    return;
+}
+if (args.Contains("--shape-resolution-only", StringComparer.Ordinal))
+{
+    ShapeResolutionCosts();
+    return;
+}
+if (args.Contains("--indirect-access-only", StringComparer.Ordinal))
+{
+    IndirectAccessCosts();
+    return;
+}
+if (args.Contains("--call-check-only", StringComparer.Ordinal))
+{
+    CallCheckCosts();
+    return;
+}
+if (args.Contains("--decode-only", StringComparer.Ordinal))
+{
+    DecodeCosts();
+    return;
+}
+if (args.Contains("--method-decode-only", StringComparer.Ordinal))
+{
+    MethodDecodeCosts();
+    return;
+}
+if (args.Contains("--return-step-only", StringComparer.Ordinal))
+{
+    ReturnResolutionCosts(stepOnly: true);
+    return;
+}
+if (args.Contains("--metadata-name-only", StringComparer.Ordinal))
+{
+    MetadataNameCosts();
+    return;
+}
+if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
+{
+    IndirectTargetCosts();
+    return;
+}
+NativeTableCosts();
+if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
+ExceptionDecisionCosts();
+CheckNarrowedResolution();
+if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
+ReturnResolutionCosts();
+ArgumentResolutionCosts();
+ShapeResolutionCosts();
+if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
+CallCheckCosts();
+DecodeCosts();
+MethodDecodeCosts();
+
+Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
+BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
+    "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter", "Tests.ExtractionHomeIndexes",
+    "Tests.LayoutAccumulation", "Tests.LayoutProjectionIndexes");
 
 // `cil_instruction_equations` proves each equation from the code suffix that starts its block. Proved
 // against the whole code list instead, it walks one cell per preceding instruction and a method's equations
@@ -11,7 +86,7 @@ using System.Text.RegularExpressions;
 const int ShortStatements = 125;
 const int LongStatements = 500;
 // Compiling four times the instructions may cost at most this much more per instruction.
-const double AllowedGrowth = 1.25;
+const double AllowedGrowth = 1.15;
 const int FewCalls = 100;
 const int ManyCalls = 400;
 // Link reads whose cost grows with the square of the calls make the recheck of an embedding cost 1.29 times as
@@ -39,7 +114,7 @@ const long KernelDecisionFloor = 2_000;
 const int FewAddresses = 128;
 const int MoreAddresses = 256;
 const int ManyAddresses = 512;
-// Bodies of these many local loads and stores, which cycle over four int32 locals.
+// Bodies of these many local loads, stores, addresses and pops, which cycle over four int32 locals.
 const int FewLocalAccesses = 256;
 const int MoreLocalAccesses = 1024;
 const int ManyLocalAccesses = 4096;
@@ -49,9 +124,687 @@ const int ManyLocalAccesses = 4096;
 const int FewLocals = 128;
 const int MoreLocals = 256;
 const int ManyLocals = 512;
+// Four times the locals may cost at most this much more per instruction; the closed argument storage reads a set
+// of pointer locals whose lookups cost the logarithm of the locals.
+const double AllowedLocalGrowth = 1.25;
+// Bodies of a fixed length over these many int32 locals, cycling through every local. Feature states list known
+// facts alone, so a body that stores no constant costs the same per instruction at every local count.
+const int FewFeatureLocals = 16;
+const int MoreFeatureLocals = 64;
+const int ManyFeatureLocals = 256;
+const int FeatureLocalSegments = 256;
+const int FeatureLocalInstructions = 8 * FeatureLocalSegments + 1;
+// Bodies over `ManyKnownFacts` int32 locals that store zero into the first few, more or many of them, then store a
+// new word into each in turn and load it back for `KnownFactRounds` rounds; every loop state holds every fact.
+const int FewKnownFacts = 4;
+const int MoreKnownFacts = 16;
+const int ManyKnownFacts = 64;
+const int KnownFactRounds = 128;
+// Linear growth makes the increment from 16 to 64 facts four times the one from 4 to 16; at about 400 heartbeats per
+// fact, a quadratic term of one heartbeat per fact pair in each state exceeds this ratio.
+const double AllowedFactIncrementRatio = 4.5;
 
 var directory = At("artifacts/LookupScaling");
 Directory.CreateDirectory(directory);
+
+// Signature facts inspect a return head; code and unrelated layout entries stay outside that inspection.
+void ReturnResolutionCosts(bool stepOnly = false)
+{
+    var resolutionDirectory = At("artifacts/LookupScaling/ReturnResolution");
+    Directory.CreateDirectory(resolutionDirectory);
+    const double GrowthLimit = AllowedLocalGrowth;
+    static bool WithinGrowth((int Size, double Cost)[] samples, bool perItem)
+    {
+        double Normalized((int Size, double Cost) sample) => sample.Cost / (perItem ? sample.Size : 1);
+        return samples.Skip(1).All(sample => Normalized(sample) <= Normalized(samples[0]) * GrowthLimit);
+    }
+    int[] controlSizes = [32, 128, 512];
+    if (!WithinGrowth(controlSizes.Select(size => (size, (double)size)).ToArray(), perItem: true) ||
+        WithinGrowth(controlSizes.Select(size => (size, (double)size * size)).ToArray(), perItem: true) ||
+        !WithinGrowth(controlSizes.Select(size => (size, 32.0)).ToArray(), perItem: false) ||
+        WithinGrowth(controlSizes.Select(size => (size, (double)size)).ToArray(), perItem: false))
+        throw new InvalidOperationException("Return resolution growth check failed its normalization controls.");
+    var dimensions = stepOnly ? new[] { "step-methods", "step-body" } :
+        ["methods", "depth", "body", "layouts", "enum-depth", "enum-layouts", "step-methods", "step-body"];
+    foreach (var dimension in dimensions)
+    {
+        var samples = new List<(int Size, long Facts, long Simplifier)>();
+        foreach (var size in new[] { 32, 128, 512 })
+        {
+            var source = new StringBuilder("""
+                import CIL.Safety.ValueSteps
+                import CIL.Safety.StepComposition
+                open CIL CIL.Extraction Lean Elab Command
+                set_option maxRecDepth 8192
+                /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+                elab "#resolution_cost " label:str " in " command:command : command => do
+                  let before <- IO.getNumHeartbeats
+                  elabCommand command
+                  let after <- IO.getNumHeartbeats
+                  logInfo m!"resolution {label.getString} {after - before} heartbeats"
+
+                """);
+            var type = ".atom runtimeScope \"System.Byte\"";
+            var expected = "some .unsigned8";
+            if (dimension == "depth")
+                type = string.Concat(Enumerable.Repeat(".enum \"Nested\" (", size)) + type + new string(')', size);
+            if (dimension == "layouts")
+            {
+                type = ".aggregate \"Point\" 0";
+                expected = "none";
+            }
+            if (dimension is "enum-depth" or "enum-layouts")
+            {
+                var depth = dimension == "enum-depth" ? size : 1;
+                type = string.Concat(Enumerable.Repeat(".enum \"Nested\" (", depth)) +
+                    ".array (.aggregate \"Point\" 0)" + new string(')', depth);
+                expected = "none";
+            }
+            var instructions = dimension is "body" or "step-body"
+                ? string.Join(", ", Enumerable.Repeat(".nop", size)) : "";
+            var layouts = dimension is "layouts" or "enum-layouts" ? string.Join(", ", Enumerable.Repeat(
+                "{ identity := \"Point\", explicit := false, packing := 0, declaredSize := 0, fields := [] }",
+                size)) : "";
+            source.AppendLine($"def rawLayouts : List RawLayout := [{layouts}]");
+            var methods = dimension is "methods" or "step-methods" ? size : 1;
+            for (var index = 0; index < methods; index++)
+            {
+                source.AppendLine($$"""
+                    def body{{index}} : Method := {
+                      code := [{{instructions}}], locals := [], returnsValue := true,
+                      declared := { returnType := {{type}} }, environment := { rawLayouts := rawLayouts } }
+                    theorem body{{index}}_returnsValue : body{{index}}.returnsValue = true := rfl
+                    theorem body{{index}}_declared :
+                      body{{index}}.declared = { returnType := {{type}} } := rfl
+                    #resolution_cost "fact" in cil_resolution_facts body{{index}}
+                    """);
+                if (dimension.StartsWith("step-", StringComparison.Ordinal))
+                    source.AppendLine($$"""
+                    #resolution_cost "simplifier" in
+                    theorem body{{index}}_simplified (frame : Safety.Frame) (memory : Safety.Memory) :
+                        Safety.step body{{index}} .ret 0 [] frame [.scalar (.i32 300)] memory =
+                          .ok (.returned [.scalar (.i32 44)] memory) := by
+                      simp only [Safety.step_ret_eq, body{{index}}_returnsValue,
+                        body{{index}}_returnNarrow]
+                      rfl
+                    """);
+                else source.AppendLine($$"""
+                    #resolution_cost "simplifier" in
+                    theorem body{{index}}_simplified : body{{index}}.returnNarrow = {{expected}} := by
+                      simp only [cil_step]
+                    """);
+                foreach (var suffix in new[] { "returnsValue", "declared", "returnNarrow", "simplified" })
+                    source.AppendLine($"#print axioms body{index}_{suffix}");
+            }
+            var path = Path.Combine(resolutionDirectory, $"{dimension}{size}.lean");
+            File.WriteAllText(path, source.ToString());
+            var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+            if (output.Contains("sorryAx", StringComparison.Ordinal))
+                throw new InvalidOperationException("Return resolution introduced an unproved theorem.");
+            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            if (costs.Length != methods * 2)
+                throw new InvalidOperationException("Missing return resolution costs: " + output);
+            long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
+                .Sum(match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+            samples.Add((size, Sum("fact"), Sum("simplifier")));
+        }
+        foreach (var simplifier in new[] { false, true })
+        {
+            var measured = samples.Select(sample =>
+                (sample.Size, (double)(simplifier ? sample.Simplifier : sample.Facts))).ToArray();
+            if (!WithinGrowth(measured,
+                perItem: dimension is "methods" or "depth" or "enum-depth" or "step-methods"))
+                throw new InvalidOperationException($"Superlinear return resolution {dimension}: " +
+                    string.Join("; ", measured));
+            Console.WriteLine($"PASS return resolution {(simplifier ? "simplifier" : "fact")} {dimension}: " +
+                string.Join("; ", samples.Select(sample =>
+                    $"{sample.Size} = {(simplifier ? sample.Simplifier : sample.Facts)} heartbeats")));
+        }
+    }
+}
+
+// Fails when argument facts or reads at 8, 32 and 128 parameters cost over 1.35 times more per argument than
+// at the size before; evaluating parameters[index]? or searching homes gives 2.40x, 3.40x (2.48x, 3.46x homed).
+void ArgumentResolutionCosts()
+{
+    const double AllowedArgumentGrowth = 1.35;
+    var resolutionDirectory = At("artifacts/LookupScaling/ArgumentResolution");
+    Directory.CreateDirectory(resolutionDirectory);
+    const string Int32Type = ".atom runtimeScope \"System.Int32\"";
+    foreach (var homed in new[] { false, true })
+    {
+        var samples = new List<(int Size, long Facts, long Reads)>();
+        foreach (var size in new[] { 8, 32, 128 })
+        {
+            // Each homed argument's slot follows the one declared local, in argument order.
+            var slots = Enumerable.Range(0, size).Where(index => homed && index % 2 == 1)
+                .Select((index, position) => (index, position))
+                .ToDictionary(home => home.index, home => 1 + home.position);
+            var homes = string.Join(", ", slots.Keys.Order().Select(index => $"({index}, .word32)"));
+            var signature = $"{{ parameters := [{string.Join(", ", Enumerable.Repeat(Int32Type, size))}] }}";
+            var code = string.Join(", ", Enumerable.Range(0, size).Select(index =>
+                slots.TryGetValue(index, out var slot) ? $".ldloc {slot}, .pop" : $".ldarg {index}, .pop")) + ", .ret";
+            var accesses = string.Join(", ", Enumerable.Range(0, size).Select(index =>
+                slots.TryGetValue(index, out var slot) ? $".home {slot}" : ".value none"));
+            var reads = string.Join(", ", Enumerable.Range(0, size).Select(index => $"body.argumentAccess {index}"));
+            var source = $$"""
+                import CIL.Safety.ValueSteps
+                open CIL CIL.Extraction Lean Elab Command
+                set_option maxRecDepth 8192
+                /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+                elab "#resolution_cost " label:str " in " command:command : command => do
+                  let before <- IO.getNumHeartbeats
+                  elabCommand command
+                  let after <- IO.getNumHeartbeats
+                  logInfo m!"resolution {label.getString} {after - before} heartbeats"
+                def body : Method := {
+                  code := [{{code}}], locals := [.i32 0], localKinds := [.word32],
+                  parameterHomes := [{{homes}}], returnsValue := false, declared := {{signature}} }
+                theorem body_returnsValue : body.returnsValue = false := rfl
+                theorem body_declared : body.declared = {{signature}} := rfl
+                #resolution_cost "fact" in cil_resolution_facts body
+                #resolution_cost "simplifier" in
+                theorem body_reads : [{{reads}}] = [{{accesses}}] := by simp only [cil_code]
+                #print axioms body_argumentAccess{{size - 1}}
+                #print axioms body_reads
+                """ + "\n";
+            var path = Path.Combine(resolutionDirectory, $"{(homed ? "Homed" : "Unhomed")}{size}.lean");
+            File.WriteAllText(path, source);
+            var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+            if (output.Contains("sorryAx", StringComparison.Ordinal))
+                throw new InvalidOperationException("Argument resolution introduced an unproved theorem.");
+            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            if (costs.Length != 2)
+                throw new InvalidOperationException("Missing argument resolution costs: " + output);
+            samples.Add((size, long.Parse(costs[0].Groups[2].Value, CultureInfo.InvariantCulture),
+                long.Parse(costs[1].Groups[2].Value, CultureInfo.InvariantCulture)));
+        }
+        var label = homed ? "with every other argument homed" : "without homes";
+        foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
+            { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
+        {
+            var perArgument = samples.Select(sample => (double)cost(sample) / sample.Size).ToArray();
+            var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+                $"{sample.Size} = {(double)cost(sample) / sample.Size:F0}")));
+            if (perArgument.Skip(1).Zip(perArgument).Any(pair => pair.First > pair.Second * AllowedArgumentGrowth))
+                throw new InvalidOperationException(
+                    $"Argument {name} {label} cost {measured} heartbeats per argument; the limit is " +
+                    $"{AllowedArgumentGrowth} times the cost per argument at the size before.");
+            Console.WriteLine($"PASS argument {name} {label}: {measured} heartbeats per argument");
+        }
+    }
+}
+
+// Fails when the shape facts or reads of distinct operands cost over 1.35 times more per operand than at the size
+// before: fields of one struct up to 128, and fields and value types of a struct each up to 512, read by a
+// 512-instruction body. A fact that walks the layouts to its struct costs 1.7 times as much per operand at 512 as
+// at 128 for fields and 3.2 times for value types. Every row is measured before the first failure is reported.
+void ShapeResolutionCosts()
+{
+    const double AllowedShapeGrowth = 1.35;
+    var resolutionDirectory = At("artifacts/LookupScaling/ShapeResolution");
+    Directory.CreateDirectory(resolutionDirectory);
+    (string Name, string Label, int[] Sizes, bool Spread, bool Value)[] rows =
+    [
+        ("Struct", "field shape {0} with every field in one struct", [8, 32, 128], false, false),
+        ("Spread", "field shape {0} with each field in its own struct", [8, 32, 128, 512], true, false),
+        ("Value", "value shape {0} with each type a struct of its own", [8, 32, 128, 512], true, true),
+    ];
+    var failures = new List<string>();
+    foreach (var row in rows)
+    {
+        var samples = new List<(int Size, long Facts, long Reads)>();
+        foreach (var size in row.Sizes)
+        {
+            var output = RunShapeFixture(resolutionDirectory, row.Name, size, row.Spread, row.Value);
+            var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+            if (costs.Length != size + 1)
+                throw new InvalidOperationException("Missing shape resolution costs: " + output);
+            long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
+                .Sum(match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+            samples.Add((size, Sum("fact"), Sum("simplifier")));
+        }
+        foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
+            { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
+        {
+            var label = string.Format(CultureInfo.InvariantCulture, row.Label, name);
+            var perOperand = samples.Select(sample => (double)cost(sample) / sample.Size).ToArray();
+            var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+                $"{sample.Size} = {(double)cost(sample) / sample.Size:F0}")));
+            if (perOperand.Skip(1).Zip(perOperand).Any(pair => pair.First > pair.Second * AllowedShapeGrowth))
+            {
+                failures.Add($"{label} cost {measured} heartbeats per operand; the limit is {AllowedShapeGrowth} " +
+                    "times the cost per operand at the size before.");
+                Console.WriteLine($"FAIL {label}: {measured} heartbeats per operand");
+            }
+            else Console.WriteLine($"PASS {label}: {measured} heartbeats per operand");
+        }
+    }
+    if (failures.Count > 0) throw new InvalidOperationException(string.Join("\n", failures));
+}
+
+// Declares one shape fact per operand over size structs, or over one struct of size fields, and reads every fact.
+string RunShapeFixture(string directory, string name, int size, bool spread, bool value)
+{
+    var structs = spread ? size : 1;
+    var fieldsPerStruct = spread ? 1 : size;
+    var structFields = string.Join(", ", Enumerable.Repeat("{ type := .signed32 }", fieldsPerStruct));
+    var raw = string.Join(",\n  ", Enumerable.Range(0, structs).Select(index =>
+        $"{{ identity := \"T::S{index}\", explicit := false, packing := 0, declaredSize := 0, " +
+        $"fields := [{structFields}] }}"));
+    var offsets = string.Join(", ", Enumerable.Range(0, fieldsPerStruct).Select(field =>
+        $"{{ offset := {4 * field}, width := 4 }}"));
+    var computed = string.Join(",\n  ", Enumerable.Repeat(
+        $"⟨{{ size := {4 * fieldsPerStruct}, fields := [{offsets}] }}, 4⟩", structs));
+    var operands = new StringBuilder();
+    var facts = new StringBuilder();
+    for (var operand = 0; operand < size; operand++)
+    {
+        var owner = spread ? operand : 0;
+        operands.AppendLine(value
+            ? $"def operand{operand} : TypeExpr := .aggregate \"T::S{owner}\" {owner}"
+            : $"def operand{operand} : FieldRef := {{ owner := .aggregate \"T::S{owner}\" {owner}, " +
+                $"index := {(spread ? 0 : operand)}, type := .atom runtimeScope \"System.Int32\", " +
+                $"name := name!\"f{operand}\" }}");
+        facts.AppendLine($"#resolution_cost \"fact\" in cil_{(value ? "value" : "field")}_shape environment " +
+            $"operand{operand}");
+    }
+    var reads = string.Join(", ", Enumerable.Range(0, size).Select(operand =>
+        $"body.{(value ? "valueShape" : "fieldShape")} operand{operand}"));
+    var shapes = string.Join(", ", Enumerable.Range(0, size).Select(operand =>
+        value ? ".aggregate 4" : $".value {(spread ? 0 : 4 * operand)} 4 false"));
+    var shapeType = value ? "ValueShape" : "FieldShape";
+    var source = $$"""
+        import CIL.Safety.ResolutionFacts
+        open CIL CIL.Extraction Lean Elab Command
+        set_option maxRecDepth 8192
+        /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+        elab "#resolution_cost " label:str " in " command:command : command => do
+          let before <- IO.getNumHeartbeats
+          elabCommand command
+          let after <- IO.getNumHeartbeats
+          logInfo m!"resolution {label.getString} {after - before} heartbeats"
+        def rawLayouts : List RawLayout := [
+          {{raw}}]
+        def computedLayouts : Array ComputedLayout := #[
+          {{computed}}]
+        @[cil_code] def environment : LayoutEnvironment :=
+          { rawLayouts := rawLayouts, layouts := computedLayouts }
+        def body : Method :=
+          { code := List.replicate 512 .nop, locals := [], returnsValue := false, environment }
+        {{operands}}
+        {{facts}}
+        #resolution_cost "simplifier" in
+        theorem body_reads : ([{{reads}}] : List {{shapeType}}) = [{{shapes}}] := by simp only [cil_code]
+        #print axioms operand{{size - 1}}_shape
+        #print axioms body_reads
+        """ + "\n";
+    var path = Path.Combine(directory, $"{name}{size}.lean");
+    File.WriteAllText(path, source);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException("Shape resolution introduced an unproved theorem.");
+    return output;
+}
+
+// Decides the managed-call check on bodies of call and nop pairs with the extractor's literal table; a per-pc table
+// scan costs the square of the call sites.
+void CallCheckCosts()
+{
+    var checkDirectory = At("artifacts/LookupScaling/CallCheck");
+    Directory.CreateDirectory(checkDirectory);
+    var samples = new List<(int Sites, long Cost)>();
+    foreach (var sites in new[] { 64, 256, 1024 })
+    {
+        var pcs = Enumerable.Range(0, sites).Select(site => 2 * site).ToArray();
+        var raw = string.Join(", ", pcs.Select(_ => "site, ⟨0, 0, .none⟩"));
+        var code = string.Join(", ", pcs.Select(_ => ".call 0 0, .nop"));
+        var links = string.Join(", ", pcs.Select(pc => $"({pc}, .direct 0)"));
+        var statement = $"ManagedCallsValid [⟨[], callee⟩] [] raw (List.replicate {2 * sites} true) body";
+        var source = $$"""
+            import CIL.Extraction.Generics
+            open CIL CIL.Extraction Lean Elab Command
+            set_option maxRecDepth 65536
+            set_option maxHeartbeats 0
+            /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+            elab "#call_check_cost " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              logInfo m!"call check {after - before} heartbeats"
+            def callee : RawMethod := {
+              token := 1, owner := "Tests::Scaling", hasThis := false, explicitThis := false,
+              callingConvention := 0, attributes := 0, implementation := 0,
+              returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
+              genericParameters := [], code := [] }
+            def site : RawInstruction := ⟨0, 40, .call {
+              method := {
+                owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
+                returnType := .void, parameters := [] },
+              target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }⟩
+            def raw : RawMethod := { callee with code := [{{raw}}] }
+            def body : Method := { locals := [], returnsValue := false, code := [{{code}}], links := [{{links}}] }
+            #call_check_cost
+            theorem checked : {{statement}} := by decide +kernel
+            #print axioms checked
+            """ + "\n";
+        var path = Path.Combine(checkDirectory, $"Sites{sites}.lean");
+        File.WriteAllText(path, source);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("The call check cost fixture introduced an unproved theorem.");
+        var cost = LookupPatterns.CallCheck().Match(output);
+        if (!cost.Success) throw new InvalidOperationException("Missing the call check cost: " + output);
+        samples.Add((sites, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perSite = samples.Select(sample => (double)sample.Cost / sample.Sites).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{sample.Sites} = {(double)sample.Cost / sample.Sites:F0}")));
+    if (perSite.Skip(1).Zip(perSite).Any(pair => pair.First > pair.Second * AllowedCallGrowth))
+        throw new InvalidOperationException(
+            $"The managed-call check costs {measured} heartbeats per call site; the limit is {AllowedCallGrowth} " +
+            "times the cost per call site at the size before.");
+    Console.WriteLine($"PASS the managed-call check costs {measured} heartbeats per call site");
+}
+
+// Isolating one validator must also remove generated facts whose signature premises were removed.
+void CheckNarrowedResolution()
+{
+    const string Source = """
+        import CIL.Safety.ResolutionFacts
+        namespace Extracted
+        open CIL CIL.Extraction
+        def method0 : Method :=
+          { code := [], locals := [], returnsValue := true,
+            declared := { returnType := .atom runtimeScope "System.Byte" } }
+        theorem method0_returnsValue : method0.returnsValue = true := rfl
+        theorem method0_declared :
+          method0.declared = { returnType := .atom runtimeScope "System.Byte" } := rfl
+        cil_resolution_facts method0
+        theorem selected : True := True.intro
+        #print axioms method0_returnsValue
+        #print axioms method0_declared
+        #print axioms method0_returnNarrow
+        #print axioms selected
+        end Extracted
+        """;
+    var directory = At("artifacts/LookupScaling/ReturnResolution");
+    Directory.CreateDirectory(directory);
+    var path = Path.Combine(directory, "Narrowed.lean");
+    File.WriteAllText(path, NarrowEvidence(Source + "\n", "selected") + "\n#print axioms Extracted.selected\n");
+    Run(["lake", "env", "lean", path], cwd: FixturePackage());
+    Console.WriteLine("PASS isolated evidence retains its selected obligation with generated return facts");
+}
+
+// A command that logs the heartbeats `decide +kernel` adds to the same statement closed with `sorry`.
+const string KernelCostCommand = """
+    /-- Logs what `decide +kernel` costs beyond elaborating the statement. -/
+    elab "#kernel_cost " label:str statement:term : command => do
+      let before <- IO.getNumHeartbeats
+      elabCommand (<- `(example : $statement := sorry))
+      let middle <- IO.getNumHeartbeats
+      elabCommand (<- `(example : $statement := by decide +kernel))
+      let after <- IO.getNumHeartbeats
+      let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
+      logInfo m!"{label.getString} {cost} heartbeats"
+    """;
+
+// Exception decisions compare constructors, so display-name length cannot increase their cost.
+void ExceptionDecisionCosts()
+{
+    var directory = At("artifacts/LookupScaling/ExceptionTypes");
+    Directory.CreateDirectory(directory);
+    string[] members = ["format", "applicationException"];
+    var statements = members.SelectMany(member =>
+    {
+        string fault = $"ExecutionFault.thrown .{member}";
+        return new[]
+        {
+            $"#kernel_cost \"thrownEqual {member}\" {fault} = {fault}",
+            $"#kernel_cost \"thrownUnequal {member}\" Not ({fault} = ExecutionFault.thrown .overflow)",
+            $"#kernel_cost \"clrUnequal {member}\" Not (({fault}).clrException = some .overflow)",
+            $"#kernel_cost \"raisesEqual {member}\" (some .{member} : Option ExceptionType) = some .{member}"
+        };
+    });
+    var path = Path.Combine(directory, "Equality.lean");
+    File.WriteAllText(path, """
+        import CIL.Safety.RuntimeExceptions
+        open CIL CIL.Safety Lean Elab Command
+
+        """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.ExceptionDecision().Matches(output).ToDictionary(
+        match => match.Groups[1].Value,
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != 8) throw new InvalidOperationException("Missing exception decision costs:\n" + output);
+    foreach (var decision in new[] { "thrownEqual", "thrownUnequal", "clrUnequal", "raisesEqual" })
+    {
+        long shortName = costs[decision + " format"];
+        long longName = costs[decision + " applicationException"];
+        var measured = $"{shortName} heartbeats at format and {longName} at applicationException";
+        if (Math.Min(shortName, longName) < KernelDecisionFloor ||
+            Math.Max(shortName, longName) > TypeDecisionLimit || longName > shortName * AllowedNameGrowth)
+            throw new InvalidOperationException($"Exception decision {decision} exceeds its cost bound: {measured}");
+        Console.WriteLine($"PASS deciding {decision} costs {measured}");
+    }
+}
+
+// Lean definitions of a value-only body of `instructions` instructions: `raw`, its raw instructions, and `code`, the
+// instructions the translator emits for them. Raw instructions carry distinct offsets, so the kernel decodes each one
+// instead of reusing a cached decode.
+static string ValueBody(int instructions)
+{
+    const int SegmentLength = 10;
+    return $$"""
+        /-- The raw instructions of one segment: short and long constants, locals, an argument,
+            arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
+        def segment (index : Nat) : List RawInstruction :=
+          let start := {{SegmentLength}} * index
+          [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
+            ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
+            ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+            ⟨start + 7, 58, .target index⟩,
+            ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
+        /-- The instructions the translator emits for one segment. -/
+        def codeSegment (index : Nat) : List Instruction :=
+          [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
+            .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1,
+            .brtrue index, .switch [index, index + 1, index + 2, index + 3], .ret]
+        /-- A body of {{instructions}} raw instructions. -/
+        def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
+        /-- The {{instructions}} emitted instructions of the body. -/
+        def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+        """;
+}
+
+// The heartbeats `decide +kernel` adds to deciding that every instruction of a body of 500, 2000 and 8000
+// instructions is the one its raw value opcode decodes to. Decoding costs the same at every instruction and a
+// `switch` its targets, so four times the instructions may cost at most `AllowedLocalGrowth` more per instruction.
+void DecodeCosts()
+{
+    var decodeDirectory = At("artifacts/LookupScaling/ValueDecoding");
+    Directory.CreateDirectory(decodeDirectory);
+    var samples = new List<(int Instructions, long Cost, long Milliseconds)>();
+    foreach (var instructions in new[] { 500, 2000, 8000 })
+    {
+        var path = Path.Combine(decodeDirectory, $"Instructions{instructions}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.ValueDecoding
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            {{KernelCostCommand}}
+            namespace ValueDecodingCost
+            {{ValueBody(instructions)}}
+            #kernel_cost "decode {{instructions}}"
+              (raw.zip code).all (fun pair => valueEncodingMatches pair.1 pair.2) = true
+            end ValueDecodingCost
+            """ + "\n");
+        var package = FixturePackage();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
+        var cost = LookupPatterns.ValueDecoding().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the value decoding cost:\n{output}");
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture),
+            clock.ElapsedMilliseconds));
+    }
+    var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions} ({sample.Milliseconds} ms)")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+        throw new InvalidOperationException(
+            $"Decoding raw value opcodes costs {measured} heartbeats per instruction; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
+    Console.WriteLine($"PASS decoding raw value opcodes costs {measured} heartbeats per instruction");
+}
+
+// The heartbeats `decide +kernel` adds to deciding that `Method.ofRaw?` of a value-only body of 500, 2000 and 8000
+// instructions with four parameters and four locals gives the emitted code, the initialized locals and no homes or
+// links. Each instruction is decoded and instantiated once, so four times the instructions may cost at most
+// `AllowedLocalGrowth` more per instruction.
+void MethodDecodeCosts()
+{
+    var decodeDirectory = At("artifacts/LookupScaling/DecodedMethod");
+    Directory.CreateDirectory(decodeDirectory);
+    var samples = new List<(int Instructions, long Cost)>();
+    foreach (var instructions in new[] { 500, 2000, 8000 })
+    {
+        var path = Path.Combine(decodeDirectory, $"Instructions{instructions}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.DecodedMethod
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            {{KernelCostCommand}}
+            namespace DecodedMethodCost
+            {{ValueBody(instructions)}}
+            /-- The type of every parameter and local. -/
+            def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
+            /-- A static method with four parameters, four zero-initialized locals and {{instructions}} raw
+                instructions. -/
+            def source : RawMethod :=
+              { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
+                attributes := 0, implementation := 0, returnType := .void, parameters := List.replicate 4 uint32,
+                locals := List.replicate 4 uint32, initLocals := true,
+                maxStack := 8, genericParameters := [], code := raw }
+            #kernel_cost "decoded method {{instructions}}"
+              (Method.ofRaw? .scalar {} source []).any (fun method =>
+                method.code.length == {{instructions}} &&
+                  (method.code.zip code).all (fun pair => pair.1.sameValue pair.2) &&
+                  method.locals == List.replicate 4 (.i32 0) && method.parameterHomes.isEmpty &&
+                  method.links.isEmpty) = true
+            end DecodedMethodCost
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var cost = LookupPatterns.DecodedMethod().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the decoded method cost:\n{output}");
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions}")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+        throw new InvalidOperationException(
+            $"Decoding a method costs {measured} heartbeats per instruction; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
+    Console.WriteLine($"PASS decoding a method costs {measured} heartbeats per instruction");
+}
+
+// The heartbeats `decide +kernel` adds to one `add` of an int32 offset to a native method table of 16, 64 and 256
+// entries and to one load of its first and of its last entry, each table and its storage defined once outside the
+// decision. The step and the load's bound read the table's entry count, not its entries, so their cost may grow by at
+// most `AllowedGrowth` between sizes. Reading entry i walks i cells of the literal, so the last entry's cost beyond
+// the first's may grow per index by at most `AllowedGrowth`.
+void NativeTableCosts()
+{
+    var tableDirectory = At("artifacts/LookupScaling/NativeTableStep");
+    Directory.CreateDirectory(tableDirectory);
+    var costs = new List<(int Entries, long Step, long First, long Last)>();
+    foreach (var entries in new[] { 16, 64, 256 })
+    {
+        var targets = string.Join(", ", Enumerable.Range(1, entries).Select(token => $"⟨\"Handlers\", {token}, []⟩"));
+        var path = Path.Combine(tableDirectory, $"Entries{entries}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Safety.Execution
+            set_option maxRecDepth 8192
+            open CIL CIL.Safety Lean Elab Command
+            {{KernelCostCommand}}
+            namespace NativeTableStep
+            /-- The closed signature every entry shares. -/
+            def signature : ManagedSignature := ⟨.void, []⟩
+            /-- The {{entries}} supplied entries, the entry at index i holding token i + 1. -/
+            def targets : Array ManagedIdentity := #[{{targets}}]
+            /-- A supplied native table of the entries whose storage is static binding 42. -/
+            def table : MethodTable :=
+              { signature, targets := some targets, backing := some ⟨42, 0⟩, entryCount := {{entries}} }
+            /-- The table with its cursor on the last entry. -/
+            def lastTable : MethodTable :=
+              { signature, targets := some targets, backing := some ⟨42, {{8 * (entries - 1)}}⟩,
+                entryCount := {{entries}} }
+            /-- Immutable static storage holding exactly the table's entries. -/
+            def memory : CIL.Safety.Memory :=
+              { allocations := fun index => if index == 0 then
+                  some { kind := .immutableStatic, layout := ⟨{{8 * entries}}, 8, []⟩ } else none
+                cells := fun _ _ => ⟨0, true⟩
+                views := [⟨0, 0, {{8 * entries}}, true, false⟩]
+                nextIdentity := 1
+                staticBindings := [(42, ⟨0, 0⟩)] }
+            /-- A body with no code; the step reads only its profile. -/
+            def body : CIL.Method := { code := [], locals := [], returnsValue := false }
+            /-- The frame of the step, which owns nothing. -/
+            def frame : CIL.Safety.Frame := { activation := 0, locals := [], owned := [] }
+            #kernel_cost "table step {{entries}}" (match CIL.Safety.step body .add 0 [] frame
+                [.scalar (.i32 8), .methodTable table] memory with
+              | .ok (.next _ [.methodTable moved] _ _) => moved.backing
+              | _ => none) = some ⟨42, 8⟩
+            #kernel_cost "table load first {{entries}}" (match loadNativeTable table memory with
+              | .ok ⟨_, some ⟨_, token, _⟩⟩ => token == 1
+              | _ => false) = true
+            #kernel_cost "table load last {{entries}}" (match loadNativeTable lastTable memory with
+              | .ok ⟨_, some ⟨_, token, _⟩⟩ => token == {{entries}}
+              | _ => false) = true
+            end NativeTableStep
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        long Measured(Regex pattern, string row)
+        {
+            var cost = pattern.Match(output);
+            if (!cost.Success) throw new InvalidOperationException($"Missing the native table {row} cost:\n{output}");
+            return long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture);
+        }
+        costs.Add((entries, Measured(LookupPatterns.NativeTableStep(), "step"),
+            Measured(LookupPatterns.NativeTableLoadFirst(), "first load"),
+            Measured(LookupPatterns.NativeTableLoadLast(), "last load")));
+    }
+    RequireConstant("one native table step", costs.Select(sample => (sample.Entries, sample.Step)).ToList());
+    RequireConstant("one load of a native table's first entry",
+        costs.Select(sample => (sample.Entries, sample.First)).ToList());
+    // The last entry sits at index entries - 1, so its cost beyond the first entry's is divided by that index.
+    var perIndex = costs.Select(sample => (sample.Entries, sample.Last,
+        PerIndex: (sample.Last - sample.First) / (sample.Entries - 1))).ToList();
+    var walked = string.Join("; ", perIndex.Select(sample =>
+        $"{sample.Last} heartbeats, {sample.PerIndex} per index, at {sample.Entries}"));
+    if (costs.Any(sample => sample.Last < KernelDecisionFloor) ||
+        perIndex.Skip(1).Any(sample => sample.PerIndex > perIndex[0].PerIndex * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Loading a native table's last entry costs {walked}; the limit is {AllowedGrowth} times the cost per " +
+            $"index at {costs[0].Entries} entries."));
+    Console.WriteLine($"PASS loading a native table's last entry costs {walked} entries");
+}
+
+// Fails unless every cost is a real decision and none exceeds `AllowedGrowth` times the cost at the smallest size.
+void RequireConstant(string row, List<(int Entries, long Cost)> costs)
+{
+    var measured = string.Join("; ", costs.Select(sample => $"{sample.Cost} heartbeats at {sample.Entries} entries"));
+    if (costs.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        costs.Skip(1).Any(sample => sample.Cost > costs[0].Cost * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Deciding {row} costs {measured}; the limit is {AllowedGrowth} times the cost at " +
+            $"{costs[0].Entries} entries."));
+    Console.WriteLine($"PASS deciding {row} costs {measured}");
+}
 
 // The heartbeats `decide +kernel` adds to the same statement closed with `sorry`, for equal and unequal type
 // identities whose names have 20 and 80 characters and share all but their last character. Each statement is
@@ -78,17 +831,8 @@ Dictionary<string, long> TypeDecisionCosts()
         def runtime : AssemblyName :=
           { name := name!"System.Runtime", version := { major := 11, minor := 0, build := 0, revision := 0 },
             culture := name!"", publicKeyToken := some 0xb03f5f7f11d50a3a }
-        /-- Logs what `decide +kernel` costs beyond elaborating the statement. -/
-        elab "#kernel_cost " label:str statement:term : command => do
-          let before <- IO.getNumHeartbeats
-          elabCommand (<- `(example : $statement := sorry))
-          let middle <- IO.getNumHeartbeats
-          elabCommand (<- `(example : $statement := by decide +kernel))
-          let after <- IO.getNumHeartbeats
-          let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
-          logInfo m!"{label.getString} {cost} heartbeats"
 
-        """ + string.Join("\n", statements) + "\n");
+        """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var costs = LookupPatterns.TypeDecision().Matches(output).ToDictionary(
         match => match.Groups[1].Value, match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
@@ -106,6 +850,53 @@ foreach (var outcome in new[] { "equal", "unequal" })
             $"Deciding {outcome} type identities costs {measured}; the limits are {TypeDecisionLimit} heartbeats " +
             $"and {AllowedNameGrowth} times as many at 80 characters."));
     Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
+}
+MetadataNameCosts();
+
+// The heartbeats `decide +kernel` adds to the name clause of the call and field operand checks, which reads a typed
+// name back and compares its bytes with the row's. Names of 20, 80 and 320 bytes share all but their last byte. The
+// clause reads one byte per step, so the cost per byte may grow at most `AllowedGrowth` times from one length to the
+// next.
+void MetadataNameCosts()
+{
+    var nameDirectory = At("artifacts/LookupScaling/MetadataNames");
+    Directory.CreateDirectory(nameDirectory);
+    const string Prefix = "WriteLineToTheConsoleOfTheRuntimeEachValueThatTheCallerPassesAsAnIntegerOfThirtyTwoBits";
+    int[] lengths = [20, 80, 320];
+    string Statement(int length)
+    {
+        var name = string.Concat(Enumerable.Repeat(Prefix, length / Prefix.Length + 1))[..(length - 1)] + "0";
+        var bytes = string.Join(", ", Encoding.UTF8.GetBytes(name));
+        return $$"""
+            /-- The {{length}} bytes of a row name. -/
+            def bytes{{length}} : List Nat := [{{bytes}}]
+            /-- The metadata name of those bytes. -/
+            def name{{length}} : MetadataName := name!"{{name}}"
+            #kernel_cost "name spells {{length}}" (name{{length}}.spells bytes{{length}} = true)
+            """;
+    }
+    var path = Path.Combine(nameDirectory, "MetadataNames.lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Identity
+        open CIL Lean Elab Command
+        {{KernelCostCommand}}
+        {{string.Join("\n", lengths.Select(Statement))}}
+        """);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.MetadataNameCost().Matches(output).ToDictionary(
+        match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != lengths.Length)
+        throw new InvalidOperationException("Missing metadata name costs:\n" + output);
+    double PerByte(int length) => (double)costs[length] / length;
+    var measured = string.Join(", ", lengths.Select(length =>
+        string.Create(CultureInfo.InvariantCulture, $"{costs[length]} at {length} bytes")));
+    var flat = lengths.Zip(lengths.Skip(1)).All(pair => PerByte(pair.Second) <= PerByte(pair.First) * AllowedGrowth);
+    if (lengths.Min(length => costs[length]) < KernelDecisionFloor || !flat)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"A metadata name spells its bytes at {measured} heartbeats; per byte, the limit is " +
+            $"{AllowedGrowth} times the cost at the shorter length."));
+    Console.WriteLine($"PASS a metadata name spells its bytes at {measured} heartbeats");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -135,22 +926,14 @@ File.WriteAllText(Path.Combine(source, "Lookups.cs"), "public static class Looku
 Run(["dotnet", "build", Path.Combine(source, "Lookups.csproj"), "-c", "Release"]);
 var assembly = Path.Combine(source, "bin/Lookups.dll");
 
-const string Report = "\n#eval show IO Nat from IO.getNumHeartbeats\n";
-
-// Heartbeats count the elaborator's and the kernel's work on one thread, so they repeat exactly
-// where compile time varies with the machine's load.
+// The heartbeats `text` costs, imports included.
 long Heartbeats(string path, string text, bool equations = true)
 {
-    File.WriteAllText(path, text + Report);
-    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    if (output.Contains("sorryAx", StringComparison.Ordinal))
-        throw new InvalidOperationException("Untrusted lookup equations: " + path);
-    var count = Regex.Match(output, @"(?m)^([0-9]+)\r?$");
-    if (!count.Success) throw new InvalidOperationException("Missing heartbeat count:\n" + output);
+    var (count, output) = CountHeartbeats(path, text);
     // Each file reports the last equation's axioms once; a report per equation would walk the body each time.
     if (equations && Regex.Matches(output, @"_instruction[0-9]+' depends on axioms: \[propext\]").Count != 1)
         throw new InvalidOperationException("Instruction equations must depend on propext alone:\n" + output);
-    return long.Parse(count.Groups[1].Value, CultureInfo.InvariantCulture);
+    return count;
 }
 
 // The last pc is the farthest from the head of the code list. Its equation must keep the statement
@@ -298,9 +1081,9 @@ long EmbeddingCost(string name, string definitions)
 string DeadBlocks(int calls) => $$"""
 /-- What an extraction emits for one call followed by a dead block. -/
 def extractedSegment : List Instruction :=
-  [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
+  [.ldarg 0, .call 1 1, .pop, .ret, .unadmitted 0]
 /-- The hand-written segment without the dead block. -/
-def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+def writtenSegment : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
@@ -314,9 +1097,9 @@ def written : Method :=
 // second block first, so the pc map descends once at every size.
 string Reordered(int segments) => $$"""
 /-- The block after the head. -/
-def first : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+def first : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The block the head branches to. -/
-def second : List Instruction := [.arg 1, .call 2 1, .pop, .ret]
+def second : List Instruction := [.ldarg 1, .call 2 1, .pop, .ret]
 /-- The extraction, with the second block first. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
@@ -396,7 +1179,7 @@ long ComputedLookupCost(int cases)
         import CIL.InstructionEquations
         import CIL.Safety.SymbolicExecution
         open CIL.Safety
-        def segment : List CIL.Instruction := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
+        def segment : List CIL.Instruction := [.ldarg 0, .ldarg 1, .add, .nop, .nop, .nop, .nop]
         def body : CIL.Method :=
           { locals := [], returnsValue := true,
             code := [.nop] ++ (List.replicate {{cases}} segment).flatten ++ [.ret] }
@@ -418,6 +1201,307 @@ Console.WriteLine(FormattableString.Invariant(
     $"PASS computed lookup: {fourCaseCost:F0} heartbeats/case at 4; {sixteenCaseCost:F0} at 16"));
 if (sixteenCaseCost > fourCaseCost * AllowedGrowth)
     throw new Exception("Computed lookup cost per case grows with the segment count.");
+
+// Each distinct metadata token of a body adds a row lookup and a decode to the kernel's metadata check, so the cost
+// per token may not grow with the number of tokens, whichever table the token names: user strings, instance fields
+// of a class, and methods (whose count also grows the number of methods of the extraction and so the metadata
+// carried).
+const int FewTokens = 125;
+const int ManyTokens = 500;
+// Each called method is an extracted method with a certificate of its own, and composing the certificate of an
+// extraction of about 500 methods exceeds the default heartbeat budget, so the call counts stay below that.
+const int FewCalledMethods = 25;
+const int ManyCalledMethods = 100;
+var tokenSource = Path.Combine(directory, "TokenAssembly");
+Directory.CreateDirectory(tokenSource);
+File.WriteAllText(Path.Combine(tokenSource, "Tokens.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize></PropertyGroup>
+</Project>
+""");
+string Join(int count, Func<int, string> piece) => string.Concat(Enumerable.Range(0, count).Select(piece));
+string StringMethod(int count, string name) =>
+    $"public static ulong {name}(ulong x) {{ " + Join(count, index => $"Use(\"{name}{index}\"); ") + "return x; } ";
+string FieldMethod(int count, string name) =>
+    $"public static ulong {name}(Wide{count} w) {{ return 0UL" + Join(count, index => $" + w.F{index}") + "; } " +
+    $"public sealed class Wide{count} {{ " + Join(count, index => $"public ulong F{index}; ") + "} ";
+string CallMethod(int count, string name) =>
+    $"public static ulong {name}(ulong x) {{ " + Join(count, index => $"x = {name}{index}(x); ") + "return x; } " +
+    Join(count, index => $"static ulong {name}{index}(ulong x) => x + {index + 1}UL; ");
+File.WriteAllText(Path.Combine(tokenSource, "Tokens.cs"),
+    "public static class Tokens { public static void Use(string text) { } " +
+    StringMethod(FewTokens, "StringsFew") + StringMethod(ManyTokens, "StringsMany") +
+    FieldMethod(FewTokens, "FieldsFew") + FieldMethod(ManyTokens, "FieldsMany") +
+    CallMethod(FewCalledMethods, "CallsFew") + CallMethod(ManyCalledMethods, "CallsMany") + "}");
+Run(["dotnet", "build", Path.Combine(tokenSource, "Tokens.csproj"), "-c", "Release"]);
+var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
+double TokenCost(string name, string selector, int count, string distinctPattern)
+{
+    var output = Path.Combine(directory, "Tokens" + name);
+    Run(Extract("extract", tokenAssembly, "Tokens", selector, output));
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var distinct = Regex.Matches(extracted, distinctPattern).Count;
+    if (distinct < count)
+        throw new InvalidOperationException($"Expected {count} distinct tokens in {name}; found {distinct}.");
+    return (double)(Heartbeats(Path.Combine(output, "Measured.lean"), extracted, equations: false) - floor) / count;
+}
+foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
+{
+    ("Strings", "Tokens::StringsFew(ulong)", "Tokens::StringsMany(ulong)",
+        @"\(\d+, \.text ""[^""]*""\)", FewTokens, ManyTokens),
+    ("Fields", $"Tokens::FieldsFew(Tokens/Wide{FewTokens})", $"Tokens::FieldsMany(Tokens/Wide{ManyTokens})",
+        @"\(\d+, \.field ", FewTokens, ManyTokens),
+    ("Calls", "Tokens::CallsFew(ulong)", "Tokens::CallsMany(ulong)", @"\(\d+, \.call ", FewCalledMethods,
+        ManyCalledMethods)
+})
+{
+    var tokenGrowth = TokenCost(kind + "Many", many, manyCount, pattern) /
+        TokenCost(kind + "Few", few, fewCount, pattern);
+    Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+        $"PASS metadata check of {fewCount} and {manyCount} distinct {kind.ToLowerInvariant()} tokens: " +
+        $"{tokenGrowth:F2} times the cost per token"));
+    if (tokenGrowth > AllowedGrowth)
+        throw new Exception(string.Create(CultureInfo.InvariantCulture,
+            $"Checking {manyCount} {kind.ToLowerInvariant()} tokens costs {tokenGrowth:F2} times as much per token " +
+            $"as {fewCount}; the limit is {AllowedGrowth}."));
+}
+
+// One method's body check reads the literal lookup tables of its own metadata slice by name, so its kernel cost is its
+// own slice and tokens times a logarithm: independent of the number of methods in the extraction and of the rows
+// that other methods carry.
+const double AllowedBodyGrowth = 1.1;
+int[] chainLengths = [8, 32, 128];
+int[] bulkSizes = [125, 500];
+int[] fieldCounts = [10, 100, 200];
+var bodySource = Path.Combine(directory, "BodyAssembly");
+Directory.CreateDirectory(bodySource);
+File.WriteAllText(Path.Combine(bodySource, "Bodies.csproj"),
+    File.ReadAllText(Path.Combine(tokenSource, "Tokens.csproj")));
+string Chain(int count) =>
+    $"public static ulong Chain{count}(ulong x) {{ " +
+    Join(count, index => $"x = Chain{count}_{index}(x); ") + "return x; } " +
+    Join(count, index => $"static ulong Chain{count}_{index}(ulong x) => x + {index + 1}UL; ");
+string Rows(int count) =>
+    $"public static ulong Rows{count}(ulong x) {{ x = Small{count}(x); return Bulk{count}(x); }} " +
+    $"static ulong Small{count}(ulong x) => x + 1UL; " +
+    $"static ulong Bulk{count}(ulong x) {{ " + Join(count, index => $"Use(\"r{count}_{index}\"); ") + "return x; } ";
+// A method that reads one field of a class with `count` fields carries that class's field rows.
+string Fields(int count) =>
+    $"public sealed class Wide{count} {{ " + Join(count, index => $"public ulong F{index}; ") + "} " +
+    $"public static ulong Read{count}(Wide{count} w) => w.F{count / 2}; ";
+File.WriteAllText(Path.Combine(bodySource, "Bodies.cs"),
+    "public static class Bodies { public static void Use(string text) { } " +
+    string.Concat(chainLengths.Select(Chain)) + string.Concat(bulkSizes.Select(Rows)) +
+    string.Concat(fieldCounts.Select(Fields)) + "}");
+Run(["dotnet", "build", Path.Combine(bodySource, "Bodies.csproj"), "-c", "Release"]);
+var bodyAssembly = Path.Combine(bodySource, "bin/Bodies.dll");
+// The index of a method in an extraction, found by the name in its signature.
+string MethodNumber(string extracted, string method, string name)
+{
+    var number = Regex.Match(extracted, @"def method(\d+)Signature : String := ""[^""]*Bodies::" +
+        Regex.Escape(method) + @"\(").Groups[1].Value;
+    return number.Length == 0
+        ? throw new InvalidOperationException($"Method {method} is not in the extraction {name}.")
+        : number;
+}
+// Heartbeats of the method's `method{n}_body_validated`, less the same file with its proof left open.
+long BodyCheck(string name, string entry, string method)
+{
+    var output = Path.Combine(directory, "Body" + name);
+    Run(Extract("extract", bodyAssembly, "Bodies", entry.Contains('(') ? entry : $"Bodies::{entry}(ulong)", output));
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var number = MethodNumber(extracted, method, name);
+    var theorem = $"method{number}_body_validated";
+    var narrowed = NarrowEvidence(extracted, theorem);
+    var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := ⟨[^\r\n]*⟩\r?$").Value;
+    if (proof.Length == 0) throw new InvalidOperationException("Missing body obligation " + theorem);
+    var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := ⟨", StringComparison.Ordinal)] + " := sorry");
+    return Heartbeats(Path.Combine(output, "BodyChecked.lean"), narrowed, equations: false) -
+        Heartbeats(Path.Combine(output, "BodyOpen.lean"), open, equations: false);
+}
+var chainCosts = chainLengths.Select(count => (double)BodyCheck("Chain" + count, "Chain" + count,
+    $"Chain{count}_{count - 1}")).ToArray();
+var rowCosts = bulkSizes.Select(count => (double)BodyCheck("Rows" + count, "Rows" + count, $"Small{count}")).ToArray();
+for (var step = 1; step < chainCosts.Length; step++)
+{
+    var growth = chainCosts[step] / chainCosts[step - 1];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS body check of one method in {chainLengths[step - 1]} and {chainLengths[step]} methods: ") +
+        FormattableString.Invariant($"{chainCosts[step - 1]:F0} and {chainCosts[step]:F0} heartbeats, ") +
+        FormattableString.Invariant($"{growth:F2} times"));
+    if (growth > AllowedBodyGrowth)
+        throw new Exception(FormattableString.Invariant(
+            $"One body check costs {growth:F2} times as much at {chainLengths[step]} methods ") +
+            FormattableString.Invariant($"as at {chainLengths[step - 1]}; the limit is {AllowedBodyGrowth}."));
+}
+var rowGrowth = rowCosts[1] / rowCosts[0];
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of one method against {bulkSizes[0]} and {bulkSizes[1]} metadata rows: {rowGrowth:F2} times"));
+if (rowGrowth > AllowedBodyGrowth)
+    throw new Exception(FormattableString.Invariant(
+        $"One body check costs {rowGrowth:F2} times as much against {bulkSizes[1]} rows ") +
+        FormattableString.Invariant($"as against {bulkSizes[0]}; the limit is {AllowedBodyGrowth}."));
+// The kernel's decision that a method's literal tables are the decoder's costs the rows that method carries, times a
+// logarithm, and is made once per method.
+long TablesCheck(string name, string method)
+{
+    var output = Path.Combine(directory, "Body" + name);
+    var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
+    var theorem = $"method{MethodNumber(extracted, method, name)}_tables_valid";
+    var narrowed = NarrowEvidence(extracted, theorem);
+    var proof = Regex.Match(narrowed, @"(?m)^theorem " + theorem + @" : [^\r\n]*? := by decide \+kernel\r?$").Value;
+    if (proof.Length == 0) throw new InvalidOperationException("Missing tables obligation in " + name);
+    var open = narrowed.Replace(proof, proof[..proof.IndexOf(" := by", StringComparison.Ordinal)] + " := sorry");
+    return Heartbeats(Path.Combine(output, "TablesChecked.lean"), narrowed, equations: false) -
+        Heartbeats(Path.Combine(output, "TablesOpen.lean"), open, equations: false);
+}
+var tablesFew = TablesCheck("Rows" + bulkSizes[0], "Bulk" + bulkSizes[0]);
+var tablesMany = TablesCheck("Rows" + bulkSizes[1], "Bulk" + bulkSizes[1]);
+var tablesGrowth = tablesMany / (double)tablesFew;
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS tables check of a method carrying {bulkSizes[0]} and {bulkSizes[1]} user string rows: ") +
+    FormattableString.Invariant($"{tablesFew} and {tablesMany} heartbeats, ") +
+    FormattableString.Invariant($"{tablesGrowth / (bulkSizes[1] / (double)bulkSizes[0]):F2} times the cost per row"));
+if (tablesGrowth > AllowedBodyGrowth * bulkSizes[1] / bulkSizes[0])
+    throw new Exception(FormattableString.Invariant(
+        $"The tables check costs {tablesGrowth:F2} times as much for {bulkSizes[1]} rows ") +
+        FormattableString.Invariant($"as for {bulkSizes[0]}."));
+
+// A method reading one field of a class with 10, 100 and 200 fields carries those field rows. Its body check does one
+// lookup of the field's index, so it stays flat. Its tables check is a fixed part plus a part linear in the rows
+// carried: the increment from 100 to 200 fields is 100/90 of the increment from 10 to 100, and a quadratic walk of the
+// rows makes it more than three times as large.
+const double AllowedFieldIncrementRatio = 1.5;
+var fieldBody = fieldCounts.Select(count => (double)BodyCheck("Fields" + count,
+    $"Bodies::Read{count}(Bodies/Wide{count})", $"Read{count}")).ToArray();
+var fieldTables = fieldCounts.Select(count => (double)TablesCheck("Fields" + count, $"Read{count}")).ToArray();
+var fieldBodyGrowth = fieldBody[^1] / fieldBody[0];
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
+    FormattableString.Invariant($"{fieldBody[0]:F0}, {fieldBody[1]:F0} and {fieldBody[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"{fieldBodyGrowth:F2} times"));
+if (fieldBodyGrowth > AllowedBodyGrowth)
+    throw new Exception(FormattableString.Invariant(
+        $"The body check costs {fieldBodyGrowth:F2} times as much with {fieldCounts[2]} fields ") +
+        FormattableString.Invariant($"as with {fieldCounts[0]}; the limit is {AllowedBodyGrowth}."));
+var fieldIncrementRatio = (fieldTables[2] - fieldTables[1]) / (fieldTables[1] - fieldTables[0]);
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS tables check of a method reading one of {fieldCounts[0]}, {fieldCounts[1]} and {fieldCounts[2]} fields: ") +
+    FormattableString.Invariant($"{fieldTables[0]:F0}, {fieldTables[1]:F0} and {fieldTables[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"increments in the ratio {fieldIncrementRatio:F2}"));
+if (fieldIncrementRatio > AllowedFieldIncrementRatio)
+    throw new Exception(FormattableString.Invariant(
+        $"The tables check grows by {fieldIncrementRatio:F2} times as much from {fieldCounts[1]} to ") +
+        FormattableString.Invariant(
+            $"{fieldCounts[2]} fields as from {fieldCounts[0]} to {fieldCounts[1]}; ") +
+        FormattableString.Invariant($"the limit is {AllowedFieldIncrementRatio}."));
+
+// `spelled?` reads a name's bytes in one pass, and `cil_kernel_rfl` equates the result with the name's literal:
+// the cost grows with the length of the name and no faster. Each file is measured against the same file with
+// the proof left open, so the statement's own elaboration is not counted.
+const double AllowedSpellingGrowth = 1.1;
+var spellingLengths = new[] { 20, 80, 320 };
+long SpellingCheck(int length)
+{
+    var name = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
+    var bytes = string.Join(", ", name.Select(character => (int)character));
+    var statement = $"theorem spells : CIL.Extraction.spelled? [{bytes}] = some \"{name}\"";
+    var header = "import CIL.Extraction.KernelEquation\n";
+    return Heartbeats(Path.Combine(directory, $"Spelling{length}Checked.lean"),
+            $"{header}{statement} := by cil_kernel_rfl\n", equations: false) -
+        Heartbeats(Path.Combine(directory, $"Spelling{length}Open.lean"),
+            $"{header}{statement} := sorry\n", equations: false);
+}
+var spellingCosts = spellingLengths.Select(length => (double)SpellingCheck(length)).ToArray();
+for (var step = 1; step < spellingLengths.Length; step++)
+{
+    var lengthRatio = spellingLengths[step] / (double)spellingLengths[step - 1];
+    var growth = spellingCosts[step] / spellingCosts[step - 1];
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS spelling a name of {spellingLengths[step - 1]} and {spellingLengths[step]} bytes: ") +
+        FormattableString.Invariant($"{spellingCosts[step - 1]:F0} and {spellingCosts[step]:F0} heartbeats, ") +
+        FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
+    if (growth > AllowedSpellingGrowth * lengthRatio)
+        throw new Exception(FormattableString.Invariant(
+            $"Spelling {spellingLengths[step]} bytes costs {growth:F2} times as much as ") +
+            FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
+            FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+}
+
+// `indirectTarget` selects the body of a `calli` by comparing the pointer's owner with each catalog entry's, and a
+// proof decides it by `cil_kernel_rfl`: the kernel's cost grows with the owner's length and no faster.
+void IndirectTargetCosts()
+{
+    var targetDirectory = At("artifacts/LookupScaling/IndirectTarget");
+    Directory.CreateDirectory(targetDirectory);
+    int[] ownerLengths = [64, 256, 1024];
+    long Selection(int length, bool proved)
+    {
+        var owner = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
+        var identity = $$"""⟨"{{owner}}", 6, []⟩""";
+        var proof = proved ? "by cil_kernel_rfl" : "sorry";
+        var text = $$"""
+            import CIL.Safety.Execution
+            import CIL.Extraction.KernelEquation
+            def signature : CIL.ManagedSignature :=
+              ⟨.atom CIL.Extraction.runtimeScope "System.Int32", [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
+            theorem selected : CIL.Safety.indirectTarget signature [⟨⟨"other", 6, []⟩, 2⟩, ⟨{{identity}}, 1⟩]
+                ⟨signature, some {{identity}}⟩ = some 1 := {{proof}}
+            """;
+        var path = Path.Combine(targetDirectory, $"Owner{length}{(proved ? "Checked" : "Open")}.lean");
+        return Heartbeats(path, text, equations: false);
+    }
+    var costs = ownerLengths.Select(length => (double)(Selection(length, true) - Selection(length, false))).ToArray();
+    for (var step = 1; step < ownerLengths.Length; step++)
+    {
+        var lengthRatio = ownerLengths[step] / (double)ownerLengths[step - 1];
+        var growth = costs[step] / costs[step - 1];
+        Console.WriteLine(FormattableString.Invariant(
+            $"PASS selecting a calli body for an owner of {ownerLengths[step - 1]} and {ownerLengths[step]} bytes: ") +
+            FormattableString.Invariant($"{costs[step - 1]:F0} and {costs[step]:F0} heartbeats, ") +
+            FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
+        if (growth > AllowedSpellingGrowth * lengthRatio)
+            throw new Exception(FormattableString.Invariant(
+                $"Selecting a calli body for an owner of {ownerLengths[step]} bytes costs {growth:F2} times ") +
+                FormattableString.Invariant($"as much as for {ownerLengths[step - 1]}; ") +
+                FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+    }
+}
+IndirectTargetCosts();
+
+// A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
+// its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from
+// depth 8 to 16 is twice the increment from 4 to 8; a quadratic walk makes it four times.
+const double AllowedChainIncrementRatio = 2.5;
+int[] baseDepths = [4, 8, 16];
+var deepSource = Path.Combine(directory, "DeepAssembly");
+Directory.CreateDirectory(deepSource);
+File.WriteAllText(Path.Combine(deepSource, "Deep.csproj"), """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net11.0</TargetFramework><Optimize>true</Optimize>
+    <AssemblyName>Bodies</AssemblyName></PropertyGroup>
+</Project>
+""");
+string Deep(int depth) =>
+    $"public class Deep{depth}_0 {{ public ulong F; }} " +
+    Join(depth, index => $"public class Deep{depth}_{index + 1} : Deep{depth}_{index} {{ }} ") +
+    $"public static ulong ReadDeep{depth}(Deep{depth}_{depth} o) => o.F; ";
+File.WriteAllText(Path.Combine(deepSource, "Deep.cs"),
+    "public static class Bodies { " + string.Concat(baseDepths.Select(Deep)) + "}");
+Run(["dotnet", "build", Path.Combine(deepSource, "Deep.csproj"), "-c", "Release"]);
+bodyAssembly = Path.Combine(deepSource, "bin/Bodies.dll");
+var depthCosts = baseDepths.Select(depth => (double)BodyCheck("Deep" + depth,
+    $"Bodies::ReadDeep{depth}(Bodies/Deep{depth}_{depth})", $"ReadDeep{depth}")).ToArray();
+var incrementRatio = (depthCosts[2] - depthCosts[1]) / (depthCosts[1] - depthCosts[0]);
+Console.WriteLine(FormattableString.Invariant(
+    $"PASS body check of a field read through {baseDepths[0]}, {baseDepths[1]} and {baseDepths[2]} base classes: ") +
+    FormattableString.Invariant($"{depthCosts[0]:F0}, {depthCosts[1]:F0} and {depthCosts[2]:F0} heartbeats, ") +
+    FormattableString.Invariant($"increments in the ratio {incrementRatio:F2} (linear 2, quadratic 4)"));
+if (incrementRatio > AllowedChainIncrementRatio)
+    throw new Exception(FormattableString.Invariant(
+        $"The body check grows by {incrementRatio:F2} times as much from depth {baseDepths[1]} to {baseDepths[2]} ") +
+        FormattableString.Invariant(
+            $"as from {baseDepths[0]} to {baseDepths[1]}; the limit is {AllowedChainIncrementRatio}."));
 
 // The kernel heartbeats of the scalar certificate of a body whose segments each address an array element, with
 // or without a `readonly.` prefix, and branch to the next segment, less those of stating the same certificate.
@@ -454,7 +1538,7 @@ long ArrayAddressCost(bool prefixed, int sites)
         def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
           (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
         def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
-          [.arg 0, .arg 1] ++ (if prefixed then [.nop] else []) ++
+          [.ldarg 0, .ldarg 1] ++ (if prefixed then [.nop] else []) ++
             [.memory (.arrayAddress .signed32 !prefixed), .pop, .br ((index + 1) * width prefixed)]
         def code (prefixed : Bool) (sites : Nat) : List Instruction :=
           (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
@@ -483,12 +1567,89 @@ foreach (var prefixed in new[] { false, true })
             $"times the cost per address at {FewAddresses}."));
     Console.WriteLine($"PASS checking the scalar certificate of {label} costs {addressesMeasured}");
 }
+IndirectAccessCosts();
 
-// The kernel heartbeats of the feature certificate of a body that loads and stores four int32 locals in turn,
-// less those of stating the same certificate. A local load or store checks its opcode and index alone.
+// The kernel heartbeats of the feature and scalar certificates of a body whose segments each copy a block, with or
+// without an `unaligned.` prefix, and branch to the next segment, less those of stating them. The indirect access
+// rule reads the instructions next to each site from an index built once per body.
+void IndirectAccessCosts()
+{
+    var accessDirectory = At("artifacts/LookupScaling/IndirectAccess");
+    Directory.CreateDirectory(accessDirectory);
+    long Cost(bool prefixed, int sites)
+    {
+        var flag = prefixed ? "true" : "false";
+        var header = $$"""
+            import CIL.Extraction.Scalars
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            namespace IndirectAccesses
+            open CIL CIL.Extraction
+            def word : TypeExpr := .atom runtimeScope "System.UInt64"
+            def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
+            def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
+              [⟨0, 2, .none⟩, ⟨0, 2, .none⟩, ⟨0, 2, .none⟩] ++
+                (if prefixed then [⟨0, 65042, .integer 1⟩] else []) ++
+                [⟨0, 65047, .none⟩, ⟨0, 43, .target ((index + 1) * width prefixed)⟩]
+            def raw (prefixed : Bool) (sites : Nat) : RawMethod := {
+              token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+              callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+              parameters := [word], locals := [], initLocals := true, maxStack := 3,
+              genericParameters := [],
+              code := (List.range sites).flatMap (segment prefixed) ++ [⟨0, 42, .none⟩] }
+            def featureSegment (prefixed : Bool) : FeatureCertificate :=
+              [some ⟨[], []⟩, some ⟨[none], []⟩, some ⟨[none, none], []⟩] ++
+                (if prefixed then [some ⟨[none, none, none], []⟩] else []) ++
+                [some ⟨[none, none, none], []⟩, some ⟨[], []⟩]
+            def features (prefixed : Bool) (sites : Nat) : FeatureCertificate :=
+              (List.replicate sites (featureSegment prefixed)).flatten ++ [some ⟨[], []⟩]
+            def stateSegment (prefixed : Bool) : ScalarCertificate :=
+              [some [], some [.word64], some [.word64, .word64]] ++
+                (if prefixed then [some [.word64, .word64, .word64]] else []) ++
+                [some [.word64, .word64, .word64], some []]
+            def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
+              (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
+            def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
+              [.ldarg 0, .ldarg 0, .ldarg 0] ++ (if prefixed then [.nop] else []) ++
+                [.memory (.copyBlock (if prefixed then 1 else 8)), .br ((index + 1) * width prefixed)]
+            def code (prefixed : Bool) (sites : Nat) : List Instruction :=
+              (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
+            """ + "\n";
+        var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {flag} {sites}) .scalar " +
+            $"(features {flag} {sites}) ((features {flag} {sites}).map Option.isSome) (code {flag} {sites}) ∧ " +
+            $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
+            $"(code {flag} {sites})";
+        var path = Path.Combine(accessDirectory, $"Blocks{(prefixed ? "Prefixed" : "")}{sites}.lean");
+        var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend IndirectAccesses\n",
+            equations: false);
+        var decided = Heartbeats(path, header + $"""
+            theorem valid : {statement} := by decide +kernel
+            #print axioms valid
+            end IndirectAccesses
+            """ + "\n", equations: false);
+        return decided - stated;
+    }
+    foreach (var prefixed in new[] { false, true })
+    {
+        var label = prefixed ? "unaligned block copies" : "block copies";
+        var perSite = new[] { FewAddresses, MoreAddresses, ManyAddresses }
+            .Select(sites => (Sites: sites, Cost: (double)Cost(prefixed, sites) / sites)).ToArray();
+        var measured = string.Join("; ", perSite.Select(run =>
+            string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per copy at {run.Sites}")));
+        if (perSite.Skip(1).Any(run => run.Cost > perSite[0].Cost * AllowedGrowth))
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"Checking the feature and scalar certificates of {label} costs {measured}; the limit is " +
+                $"{AllowedGrowth} times the cost per copy at {FewAddresses}."));
+        Console.WriteLine($"PASS checking the feature and scalar certificates of {label} costs {measured}");
+    }
+}
+
+// The kernel heartbeats of the feature certificate of a body that loads, stores and addresses four int32 locals in
+// turn, popping each address, less those of stating the same certificate. A local load, store or address checks
+// its opcode and index alone.
 long LocalAccessCost(int accesses)
 {
-    var pairs = accesses / 2;
+    var cycles = accesses / 4;
     var header = $$"""
         import CIL.Extraction.Features
         set_option maxRecDepth 100000
@@ -498,23 +1659,25 @@ long LocalAccessCost(int accesses)
         def intType : TypeExpr := .atom runtimeScope "System.Int32"
         def localCount : Nat := 4
         def segment (index : Nat) : List RawInstruction :=
-          [⟨0, 17, .local (index % localCount)⟩, ⟨0, 19, .local ((index + 1) % localCount)⟩]
-        def raw (pairs : Nat) : RawMethod := {
+          [⟨0, 17, .local (index % localCount)⟩, ⟨0, 19, .local ((index + 1) % localCount)⟩,
+            ⟨0, 18, .local ((index + 2) % localCount)⟩, ⟨0, 38, .none⟩]
+        def raw (cycles : Nat) : RawMethod := {
           token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
           callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
           parameters := [], locals := List.replicate localCount intType, initLocals := true,
           maxStack := 1, genericParameters := [],
-          code := (List.range pairs).flatMap segment ++ [⟨0, 42, .none⟩] }
-        def unknown : List (Option W32) := List.replicate localCount none
-        def features (pairs : Nat) : FeatureCertificate :=
-          (List.replicate pairs [some ⟨[], unknown⟩, some ⟨[none], unknown⟩]).flatten ++
-            [some ⟨[], unknown⟩]
+          code := (List.range cycles).flatMap segment ++ [⟨0, 42, .none⟩] }
+        def unknown : List (Nat × W32) := []
+        def features (cycles : Nat) : FeatureCertificate :=
+          (List.replicate cycles [some ⟨[], unknown⟩, some ⟨[none], unknown⟩, some ⟨[], unknown⟩,
+            some ⟨[none], unknown⟩]).flatten ++ [some ⟨[], unknown⟩]
         def codeSegment (index : Nat) : List Instruction :=
-          [.local (index % localCount), .setLocal ((index + 1) % localCount)]
-        def code (pairs : Nat) : List Instruction := (List.range pairs).flatMap codeSegment ++ [.ret]
+          [.ldloc (index % localCount), .stloc ((index + 1) % localCount),
+            .ldloca ((index + 2) % localCount), .pop]
+        def code (cycles : Nat) : List Instruction := (List.range cycles).flatMap codeSegment ++ [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {pairs}) .scalar (features {pairs}) " +
-        $"(List.replicate {accesses + 1} true) (code {pairs})";
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {cycles}) .scalar (features {cycles}) " +
+        $"(List.replicate {accesses + 1} true) (code {cycles})";
     var path = Path.Combine(directory, $"LocalAccesses{accesses}.lean");
     var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend LocalAccesses\n", equations: false);
     var decided = Heartbeats(path, header + $"""
@@ -527,15 +1690,17 @@ long LocalAccessCost(int accesses)
 var perAccess = new[] { FewLocalAccesses, MoreLocalAccesses, ManyLocalAccesses }
     .Select(accesses => (Accesses: accesses, Cost: (double)LocalAccessCost(accesses) / accesses)).ToArray();
 var accessesMeasured = string.Join("; ", perAccess.Select(run =>
-    string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per access at {run.Accesses}")));
+    string.Create(CultureInfo.InvariantCulture,
+        $"{run.Cost:F0} kernel heartbeats per instruction at {run.Accesses}")));
 if (perAccess.Skip(1).Any(run => run.Cost > perAccess[0].Cost * AllowedGrowth))
     throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-        $"Checking the feature certificate of local loads and stores costs {accessesMeasured}; the limit is " +
-        $"{AllowedGrowth} times the cost per access at {FewLocalAccesses}."));
-Console.WriteLine($"PASS checking the feature certificate of local loads and stores costs {accessesMeasured}");
+        $"Checking the feature certificate of local loads, stores and addresses costs {accessesMeasured}; " +
+        $"the limit is {AllowedGrowth} times the cost per instruction at {FewLocalAccesses}."));
+Console.WriteLine(
+    $"PASS checking the feature certificate of local loads, stores and addresses costs {accessesMeasured}");
 // The kernel heartbeats of a check over a body that stores each of its locals once and then loads or addresses
 // it, less those of stating the same check. Integer locals take a constant and are popped after a load or after
-// `ldloca`, which also names each as a receiver fold candidate; native-int locals take a method address and are
+// `ldloca`; native-int locals take a method address and are
 // consumed by `calli`, which makes each a pointer local. The check is the scalar certificate, or for pointer
 // locals also the closed argument storage.
 long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
@@ -549,7 +1714,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
     var consume = pointers ? "⟨0, 41, .indirectCall .void [] false false 0⟩" : "⟨0, 38, .none⟩";
     var loaded = addressed ? ".reference" : "kind";
     var pushed = pointers ? ".managed (.address ⟨⟨\"Scaling\", 2, []⟩, 0⟩ signature)" : ".ldc_i4 0";
-    var emittedLoad = addressed ? ".localAddr index" : ".local index";
+    var emittedLoad = addressed ? ".ldloca index" : ".ldloc index";
     var consumed = pointers ? ".managed (.call signature [] false)" : ".pop";
     var header = $$"""
         import CIL.Extraction.Scalars
@@ -559,8 +1724,10 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         open CIL CIL.Extraction
         def slotType : TypeExpr := .atom runtimeScope "{{slotType}}"
         def handler : CallSite :=
-          { target := .managed 2, typeArguments := [], parameterCount := 0, hasThis := false,
-            returnsValue := false }
+          { method := {
+              owner := .void, name := name!"", hasThis := false, genericArity := 0,
+              returnType := .void, parameters := [] },
+            target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
         def signature : ManagedSignature := ⟨.void, []⟩
         def kind : ScalarKind := {{kind}}
         def segment (index : Nat) : List RawInstruction :=
@@ -577,7 +1744,7 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         def states (slots : Nat) : ScalarCertificate :=
           (List.replicate slots [some [], some [kind], some [], some [{{loaded}}]]).flatten ++ [some []]
         def codeSegment (index : Nat) : List Instruction :=
-          [{{pushed}}, .setLocal index, {{emittedLoad}}, {{consumed}}]
+          [{{pushed}}, .stloc index, {{emittedLoad}}, {{consumed}}]
         def code (slots : Nat) : List Instruction := (List.range slots).flatMap codeSegment ++ [.ret]
         """ + "\n";
     var statement = storage ? $"(closedArguments [] (raw {count})).isSome = true"
@@ -606,12 +1773,157 @@ foreach (var (slots, storage, label) in localChecks)
         .ToArray();
     var localsMeasured = string.Join("; ", perInstruction.Select(run => string.Create(CultureInfo.InvariantCulture,
         $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
-    if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedGrowth))
+    if (perInstruction.Skip(1).Any(run => run.Cost > perInstruction[0].Cost * AllowedLocalGrowth))
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Checking {label} costs {localsMeasured}; the limit is {AllowedGrowth} " +
+            $"Checking {label} costs {localsMeasured}; the limit is {AllowedLocalGrowth} " +
             $"times the cost per instruction at {FewLocals} locals."));
     Console.WriteLine($"PASS checking {label} costs {localsMeasured}");
 }
+
+// The kernel heartbeats of the feature certificate of a body of fixed length over `count` int32 locals, less those of
+// stating the same certificate. Each segment loads, stores and addresses a local, then addresses the argument and
+// stores a constant into it, so the local and argument sites of the check are all exercised.
+long FeatureLocalCost(int count)
+{
+    var header = $$"""
+        import CIL.Extraction.Features
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        namespace FeatureLocals
+        open CIL CIL.Extraction
+        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def localCount : Nat := {{count}}
+        def segment (index : Nat) : List RawInstruction :=
+          [⟨0, 17, .local (index % localCount)⟩, ⟨0, 19, .local ((index + 1) % localCount)⟩,
+            ⟨0, 18, .local ((index + 2) % localCount)⟩, ⟨0, 38, .none⟩, ⟨0, 15, .argument 0⟩, ⟨0, 38, .none⟩,
+            ⟨0, 22, .none⟩, ⟨0, 16, .argument 0⟩]
+        def raw (segments : Nat) : RawMethod := {
+          token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+          callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+          parameters := [intType], locals := List.replicate localCount intType, initLocals := true,
+          maxStack := 1, genericParameters := [],
+          code := (List.range segments).flatMap segment ++ [⟨0, 42, .none⟩] }
+        def unknown : List (Nat × W32) := []
+        def features (segments : Nat) : FeatureCertificate :=
+          (List.replicate segments [some ⟨[], unknown⟩, some ⟨[none], unknown⟩, some ⟨[], unknown⟩,
+            some ⟨[none], unknown⟩, some ⟨[], unknown⟩, some ⟨[none], unknown⟩, some ⟨[], unknown⟩,
+            some ⟨[some 0], unknown⟩]).flatten ++ [some ⟨[], unknown⟩]
+        def codeSegment (index : Nat) : List Instruction :=
+          [.ldloc (index % localCount), .stloc ((index + 1) % localCount),
+            .ldloca ((index + 2) % localCount), .pop, .ldloca localCount, .pop, .ldc_i4 0, .stloc localCount]
+        def code (segments : Nat) : List Instruction := (List.range segments).flatMap codeSegment ++ [.ret]
+        """ + "\n";
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
+        $"(features {FeatureLocalSegments}) (List.replicate {FeatureLocalInstructions} true) " +
+        $"(code {FeatureLocalSegments})";
+    var path = Path.Combine(directory, $"FeatureLocals{count}.lean");
+    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend FeatureLocals\n", equations: false);
+    var decided = Heartbeats(path, header + $"""
+        theorem valid : {statement} := by decide +kernel
+        #print axioms valid
+        end FeatureLocals
+        """ + "\n", equations: false);
+    return decided - stated;
+}
+var perFeatureInstruction = new[] { FewFeatureLocals, MoreFeatureLocals, ManyFeatureLocals }
+    .Select(count => (Count: count, Cost: (double)FeatureLocalCost(count) / FeatureLocalInstructions)).ToArray();
+var featureLocalsMeasured = string.Join("; ", perFeatureInstruction.Select(run => string.Create(
+    CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per instruction at {run.Count} locals")));
+if (perFeatureInstruction.Skip(1).Any(run => run.Cost > perFeatureInstruction[0].Cost * AllowedLocalGrowth))
+    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+        $"Checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
+        $"{featureLocalsMeasured}; the limit is {AllowedLocalGrowth} times the cost per instruction at " +
+        $"{FewFeatureLocals} locals."));
+Console.WriteLine($"PASS checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
+    featureLocalsMeasured);
+
+// One literal certificate state, written as the extractor writes states, so a fact costs only what the check costs.
+static string KnownFactState(IEnumerable<int> stack, IEnumerable<int> words) =>
+    $"some ⟨[{string.Join(", ", stack.Select(word => $"some {word}"))}], " +
+    $"[{string.Join(", ", words.Select((word, index) => $"({index}, {word})"))}]⟩";
+
+// The literal certificate of the body `KnownFactCost` checks: round `round` stores the word `round + 1`.
+static string KnownFactCertificate(int facts, int rounds)
+{
+    var states = new List<string>();
+    for (var index = 0; index < facts; index++)
+    {
+        var stored = new int[index];
+        states.Add(KnownFactState([], stored));
+        states.Add(KnownFactState([0], stored));
+    }
+    var words = new int[facts];
+    for (var round = 0; round < rounds; round++)
+    {
+        states.Add(KnownFactState([], words));
+        states.Add(KnownFactState([round + 1], words));
+        words[round % facts] = round + 1;
+        states.Add(KnownFactState([], words));
+        states.Add(KnownFactState([round + 1], words));
+    }
+    states.Add(KnownFactState([], words));
+    return string.Join(",\n  ", states);
+}
+
+// The kernel heartbeats of the certificate of a body storing zero into `facts` of `ManyKnownFacts` int32 locals and
+// then running `rounds` rounds that each store into one of them in turn and load it, less those of stating it.
+long KnownFactCost(int facts, int rounds)
+{
+    var header = $$"""
+        import CIL.Extraction.Features
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        namespace KnownFacts
+        open CIL CIL.Extraction
+        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def facts : Nat := {{facts}}
+        def rounds : Nat := {{rounds}}
+        def raw : RawMethod := {
+          token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+          callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+          parameters := [], locals := List.replicate {{ManyKnownFacts}} intType, initLocals := true,
+          maxStack := 1, genericParameters := [],
+          code := (List.range facts).flatMap (fun index => [⟨0, 22, .none⟩, ⟨0, 19, .local index⟩]) ++
+            (List.range rounds).flatMap (fun round => [⟨0, 32, .integer (round + 1 : Nat)⟩,
+              ⟨0, 19, .local (round % facts)⟩, ⟨0, 17, .local (round % facts)⟩, ⟨0, 38, .none⟩]) ++
+            [⟨0, 42, .none⟩] }
+        def features : FeatureCertificate := [
+          {{KnownFactCertificate(facts, rounds)}}]
+        def code : List Instruction :=
+          (List.range facts).flatMap (fun index => [.ldc_i4 0, .stloc index]) ++
+            (List.range rounds).flatMap (fun round =>
+              [.ldc_i4 (BitVec.ofNat 32 (round + 1)), .stloc (round % facts), .ldloc (round % facts), .pop]) ++
+            [.ret]
+        """ + "\n";
+    var statement = $"FeatureFlowValid #[] (fun _ => none) raw .scalar features " +
+        $"(List.replicate {2 * facts + 4 * rounds + 1} true) code";
+    var path = Path.Combine(directory, $"KnownFacts{facts}-{rounds}.lean");
+    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend KnownFacts\n", equations: false);
+    var decided = Heartbeats(path, header + $"""
+        theorem valid : {statement} := by decide +kernel
+        #print axioms valid
+        end KnownFacts
+        """ + "\n", equations: false);
+    return decided - stated;
+}
+// Subtract the stores alone, whose states together hold about the square of the facts.
+int[] factCounts = [FewKnownFacts, MoreKnownFacts, ManyKnownFacts];
+var factCosts = factCounts
+    .Select(facts => (double)(KnownFactCost(facts, KnownFactRounds) - KnownFactCost(facts, 0))).ToArray();
+var factIncrementRatio = (factCosts[2] - factCosts[1]) / (factCosts[1] - factCosts[0]);
+var perFactState = (factCosts[2] - factCosts[1]) / ((ManyKnownFacts - MoreKnownFacts) * 4.0 * KnownFactRounds);
+var factsMeasured = string.Join("; ", factCounts.Zip(factCosts, (facts, cost) =>
+    string.Create(CultureInfo.InvariantCulture, $"{cost:F0} kernel heartbeats at {facts} facts"))) +
+    string.Create(CultureInfo.InvariantCulture,
+        $"; increments in the ratio {factIncrementRatio:F2} (linear 4, quadratic 16); {perFactState:F0} per fact " +
+        $"per state, {perFactState * ManyKnownFacts * 4 * KnownFactRounds:F0} for {ManyKnownFacts} facts in " +
+        $"{4 * KnownFactRounds} states");
+if (factIncrementRatio > AllowedFactIncrementRatio)
+    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+        $"Checking the feature certificate of {KnownFactRounds} rounds of known facts costs {factsMeasured}; the " +
+        $"limit on the ratio is {AllowedFactIncrementRatio}."));
+Console.WriteLine(
+    $"PASS checking the feature certificate of {KnownFactRounds} rounds of known facts costs {factsMeasured}");
 
 /// <summary>How the generated bodies of the local slot checks use each local.</summary>
 enum LocalSlots
@@ -627,6 +1939,12 @@ enum LocalSlots
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
+    [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
+    internal static partial Regex ReturnResolution();
+
+    [GeneratedRegex(@"call check ([0-9]+) heartbeats")]
+    internal static partial Regex CallCheck();
+
     [GeneratedRegex(@"([0-9]+) lemmas rechecked, ([0-9]+) kernel heartbeats")]
     internal static partial Regex EmbeddingRecheck();
 
@@ -638,4 +1956,25 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex TypeDecision();
+
+    [GeneratedRegex(@"\bname spells ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex MetadataNameCost();
+
+    [GeneratedRegex(@"\b((?:thrownEqual|thrownUnequal|clrUnequal|raisesEqual) [A-Za-z]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex ExceptionDecision();
+
+    [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex NativeTableStep();
+
+    [GeneratedRegex(@"table load first [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex NativeTableLoadFirst();
+
+    [GeneratedRegex(@"table load last [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex NativeTableLoadLast();
+
+    [GeneratedRegex(@"decode [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex ValueDecoding();
+
+    [GeneratedRegex(@"decoded method [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex DecodedMethod();
 }

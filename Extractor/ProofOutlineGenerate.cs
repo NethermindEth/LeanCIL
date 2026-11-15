@@ -106,14 +106,14 @@ internal static partial class ProofOutline
         var names = new Names();
         var views = new FieldViews(extraction);
         var receiver = method.HasThis ? new[] { Receiver(method, names, views) } : [];
+        var body = new Body(SlotOperations(emitted));
         var parameters = WrittenArrays(method, receiver.Concat(method.Parameters.Select(parameter =>
-            Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), emitted.Operations,
-            new Body(emitted.Operations).Loops().Count);
+            Describe(method, parameter, names, views, extraction.Architecture))).ToArray(), body.Operations,
+            body.Loops().Count);
         var result = DescribeResult(method, extraction.Architecture);
         bool symbolic = parameters.Any(parameter => parameter.Shape is ParameterShape.Reference or
             ParameterShape.Span or ParameterShape.Object or ParameterShape.StructReference or
             ParameterShape.Array or ParameterShape.WordArray or ParameterShape.ValueArray);
-        var body = new Body(emitted.Operations);
         var lean = new Writer();
         var loops = body.Loops();
         var spec = new Specification(method, parameters, result, symbolic, extraction.Views.Length > 0);
@@ -137,7 +137,9 @@ internal static partial class ProofOutline
         var spanStore = loops.Count == 0 ? SpanStores(extraction, 0) : null;
         if (loops.Count == 0 && spanStore is null && parameters.Any(parameter => parameter.Writable))
             throw Unsupported($"{method.FullName} writes a span outside a loop other than by storing its value " +
-                "into `target[0]`; new-proof follows a span written from the front by a loop or that one store");
+                "into `target[0]`; new-proof follows a span written from the front by a loop or that one store" +
+                (parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Narrow) is { } narrow
+                    ? $", of a word argument where `{narrow.Name}` is a narrow integer" : ""));
         if (spanStore is { } store)
             source = SpanStoreLine(spec, store.Op, lean);
         else if (structReceiver && loops.Count > 0)
@@ -506,9 +508,11 @@ internal static partial class ProofOutline
     static string StraightLine(Extraction extraction, Specification spec, Body body, Writer lean)
     {
         if (spec.Framed) return ObjectStraightLine(extraction, spec, body, lean)!;
+        var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
-            ParameterShape.StructValue) && body.Operations.All(op => Body.Pure(op) || Steps(spec.Method, op));
-        var split = !steppable && SplitsOnBooleans(body.Operations, spec.Parameters);
+            ParameterShape.StructValue) &&
+            body.Operations.All(op => Body.Pure(op, spec.Method, plainReturn) || Steps(spec.Method, op));
+        var split = !steppable && SplitsOnBooleans(body.Operations, spec.Method, spec.Parameters, plainReturn);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Operations);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
         if (!steppable && !split && paths is null &&
@@ -582,15 +586,15 @@ internal static partial class ProofOutline
 
     /// <summary>Whether a body over words and `bool`s steps once each `bool` is a literal: every operation is
     /// pure or a jump, and every test reads a `bool` argument just loaded.</summary>
-    static bool SplitsOnBooleans(Operation[] ops, Parameter[] parameters)
+    static bool SplitsOnBooleans(Operation[] ops, MethodDefinition method, Parameter[] parameters, bool plainReturn)
     {
         var booleans = parameters.Count(parameter => parameter.Shape == ParameterShape.Boolean);
         if (booleans is 0 or > MaxBooleanSplits ||
             parameters.Any(parameter => parameter.Shape is not (ParameterShape.Scalar or ParameterShape.Boolean)))
             return false;
-        bool LoadsBoolean(Operation op) => op is Arg { Narrow: null or Narrowing.Unsigned8 } load &&
-            parameters[load.Index].Shape == ParameterShape.Boolean;
-        return ops.Select((op, pc) => Body.Pure(op) || LoadsBoolean(op) || op is Jump { Kind: JumpKind.Always } ||
+        bool LoadsBoolean(Operation op) => op is Arg load && parameters[load.Index].Shape == ParameterShape.Boolean;
+        return ops.Select((op, pc) => Body.Pure(op, method, plainReturn) || LoadsBoolean(op) ||
+            op is Jump { Kind: JumpKind.Always } ||
                 op is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } && pc > 0 && LoadsBoolean(ops[pc - 1]))
             .All(stepped => stepped);
     }
@@ -793,7 +797,9 @@ internal static partial class ProofOutline
     /// `cil_checked_steps` cannot take without facts or a case split.</summary>
     static string Unstepped(MethodDefinition method, Operation[] ops, IEnumerable<Parameter> parameters)
     {
-        if (parameters.FirstOrDefault(parameter => parameter.Shape != ParameterShape.Scalar) is { } argument)
+        // A narrow parameter is named first: its load is what refuses an otherwise outlined body.
+        if (parameters.OrderBy(parameter => parameter.Shape != ParameterShape.Narrow)
+                .FirstOrDefault(parameter => parameter.Shape != ParameterShape.Scalar) is { } argument)
             return $"the body reads `{argument.Name}`, " + argument.Shape switch
             {
                 ParameterShape.Boolean => "a `bool` that needs a case split",
@@ -806,7 +812,8 @@ internal static partial class ProofOutline
                 ParameterShape.WordArray => "an array of caller memory",
                 _ => "a span of caller memory"
             };
-        var pc = Array.FindIndex(ops, op => !Body.Pure(op));
+        var plainReturn = LeanEmitter.Narrow(method.ReturnType) is null;
+        var pc = Array.FindIndex(ops, op => !Body.Pure(op, method, plainReturn));
         if (pc < 0) return "the body has locals";
         // A call the outline cannot compose names the contract the author must write and prove.
         return ops[pc] is Call { Kind: CallKind.Static or CallKind.Instance } call

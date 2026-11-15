@@ -79,6 +79,10 @@ that omit or split `aesX64` or `armAes64` are rejected. `BitConverter.IsLittleEn
 big-endian branch on those profiles; forged owners and values are rejected by both certificates,
 and lookalike scopes, fields and same-named module types are rejected by the extractor.
 
+The runtime profile cases include an x64 set with `x86Base64` and `sse2` on and SSSE3, SSE4.1 and
+SSE4.2 off, which no .NET 11 process reports: the extractor rejects it with a message naming the
+three missing sets, and a generated kernel-checked theorem proves it is not `FeatureProfile.Valid`.
+
 ### Exact intrinsics
 
 `Tests/ExactIntrinsics.cs` compares each intrinsic below with the host CPU, except where the row
@@ -135,7 +139,37 @@ workflow.
   switch, two-byte opcodes, token operands and float constants, rejects each kind of malformed
   body separately with its specific error, and compares the operand table with a static list
   generated once from the opcodes of Mono.Cecil.
-  `Tests/BodyEncoding.lean` writes bytes for the hand-built methods of other Lean fixtures.
+  `Tests/BodyEncoding.lean` writes bytes and the metadata slice for the hand-built methods of
+  other Lean fixtures.
+  `Tests/MetadataDecoding.lean` decodes rows, headers, heap entries, signature blobs and
+  assembly names copied from `Examples.dll` (two-byte columns) and from the runtime's
+  `System.Private.CoreLib.dll` (four-byte columns) and compares them with the values
+  System.Reflection.Metadata and Mono.Cecil read from the same positions, and rejects malformed
+  rows, headers, heaps and signatures with their specific errors.
+  `Tests/MetadataBinding.lean` checks every operand form, the locals and a method definition
+  against a hand-built pair of pinned assemblies, and changes one row byte, blob byte, heap
+  offset, scope, instantiation, field index, local or link at a time, each with its exact error.
+  `Tests/MetadataDifferential.cs` writes every reference, type definition, type specification and
+  method specification row of `Examples.dll`, with the links that locate nested types and the
+  definitions of its own methods and Cecil's full name for each method reference, and Lean must
+  spell the same names from the bytes and refuse every reference that names a general array. The
+  kernel decides 128 references per theorem, one theorem at a time, so the memory of a run does
+  not grow with the assembly, and the cost per added reference must stay within 1.25 times from
+  64 to 128 references.
+  Tests/BodyLiteral.lean writes the evidence of one method with `fixedBytes` byte literals, with
+  literals over 32 bytes split into 32-byte ones to keep lines short, proves in the kernel that
+  each kind of literal equals its list literal, proves its body check with the kernel, rejects a
+  changed byte of the body literal, and requires the elaborator's decide to refuse the check within
+  a small heartbeat budget. Its cost rows write literals as the extractor does, in numerals of at
+  most 256 bytes. Elaborating the literal of a body of 16384, 65536 and 262144 `nop`s must stay
+  within 4.5 times the heartbeats and, taking the fastest of three runs, 8 times the time at 4 times
+  the body, and within 200 heartbeats per byte; a numeral parse quadratic in its digits grows 16
+  times. Body-checking the literal of a body of 128, 512 and 2048 `nop`s must stay within 4.5
+  times the heartbeats at 4 times the body. Tests/ScalarEvidence.lean requires the same
+  refusal and kernel decision for a whole certificate, and reduces the fixture encoder in the
+  elaborator at two method sizes.
+  Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
+  string and field tokens and for 25 and 100 call tokens.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one
@@ -323,9 +357,14 @@ performance fixture is never supplied to a verifier as a certified library.
 - CLI regressions cover unchecked-theorem and transitive-helper rejection, stale-report removal
   and changed-code proof failure.
 - `Tests/TranslationScaling.cs` checks the extraction prefix once, then imports it into the
-  compositional certificate and a deliberately failing monolithic certificate. `--measure` also
+  compositional certificate and a monolithic certificate that the elaborator's decide refuses at once,
+  since only the kernel may evaluate the body and metadata check. `--measure` also
   checks both complete files and records command timings for the identical six-method workload.
-  The consumer verifies the original extraction. The fixture then checks the emitted
+  The kernel decides the monolithic certificate of call graphs of 2, 4 and 8 methods, and the
+  heartbeats and peak memory of a method added from 4 to 8 may be at most 1.2 times those of one
+  added from 2 to 4. The consumer verifies the original extraction, the extraction checks at the
+  default heartbeat budget with the kernel counted on the elaborating thread, and the same file
+  fails at 100 heartbeats with a deterministic timeout. The fixture then checks the emitted
   `Extracted.layouts_validated` theorem over a chain of nested structs, each holding the one
   before it, and over a chain of generic structs, each holding the previous distinct closed
   generic owner, and the emitted `Extracted.method0_layouts_validated` theorem over the nested
@@ -454,7 +493,16 @@ Its CLI regressions cover initial proof selection and theorem output, an
 addition-to-subtraction source edit and rebuild, recovery using settings kept after the failed
 proof, the invalid-memory-access theorem, the integer opcode, narrow-storage and
 primitive-operation matrices, `new-proof` rejecting an existing file, a stale extraction and a
-struct parameter, and an isolated installation of the packaged .NET tool.
+struct parameter, and an isolated installation of the packaged .NET tool. They also check that a
+default certificate lists every binding fact as trusted, in order, and that a run without settings
+or `--proof` takes no proof from an earlier certificate.
+
+The `core` suite checks that `verify` refuses a certificate of schema 4, one without a binding
+section, one whose binding facts are missing, reordered, repeated or unknown, one with an unknown,
+numeric, absent or misplaced status, one whose default section names a digest file or lacks its
+images, and one whose binding section has mode `deep`. Its consumer test republishes an
+authenticated proof receipt with an unknown status and checks that the next run verifies afresh.
+`scripts/TestProofCost.cs` checks that the proof cost measurement refuses the same certificates.
 
 The runner, the tool and library preparation reject every run of Lean, Lake or the audit
 executable whose output holds an [internal error](CLI.md#diagnostics), so a panic while building
@@ -593,7 +641,8 @@ These tests cover preparation:
 | Reference-free array allocation | Checked primitive/enum, packed/nested aggregate and vector zero initialization, payload alignment, empty/non-null identity, negative/native lengths, helper returns and packed field stores; forged element identity, layout identity/width and byref-like certificates, malformed markers and unsupported extents rejected |
 | Integer `div`, `div.un`, `rem`, `rem.un`, both widths | 648 comparisons against .NET execution and corresponding Lean proofs, including divide-by-zero and signed overflow |
 | Extracted unsigned quotient for arbitrary inputs with a nonzero divisor | Universal proofs for 32 and 64 bits; multiplication substituted for division rejected by the unchanged contract |
-| Division with mixed widths, references, stack underflow or a zero divisor | Semantic rejection tests |
+| Division with references, stack underflow or a zero divisor | Semantic rejection tests |
+| Division and remainder of a mixed native/int32 pair, both operand orders, including the zero-divisor and signed-overflow faults | Semantic tests that both interpreters sign-extend the int32 operand and agree |
 | Checked add/subtract/multiply, signed and unsigned at both widths | 2,028 comparisons against .NET results or overflow exceptions and corresponding Lean proofs |
 | Checked addition with a sum that fits | Universal 32-/64-bit natural-number addition proofs; subtraction substituted for addition rejected |
 | All 20 integer checked-conversion encodings, from both input widths | 762 comparisons against .NET execution and corresponding Lean proofs, including native destinations and overflow |
@@ -601,7 +650,7 @@ These tests cover preparation:
 | Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
 | Extracted native addition on the admitted 64-bit target | Universal modular-addition proof |
 | Required-32-bit assembly, forged native type identity, native field overrun, native/int64 operands and 32-bit execution profile | Five intended extraction rejections |
-| Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests; unsigned branch/comparison widening differences checked explicitly |
+| Mixed native/int32 operands of every widened instruction, overflow-checked arithmetic, memory instructions, unsigned branches or references | Both interpreters give the sign- or zero-extended result in both operand orders; memory instructions and references keep their operands; unsigned branches refused; a test proves the widened instruction list complete |
 | Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 .NET comparisons |
 | Overwriting an argument with a replacement value | Universal proof for arbitrary inputs; assignment to the wrong parameter rejected |
 | Returning an address into a parameter home | Lifetime fault proved for every input; successful execution ruled out for every fuel budget |
@@ -611,7 +660,7 @@ These tests cover preparation:
 | Invalid packing, oversized layout, auto layout, reference/float fields, inline arrays, generics, explicit offsets on sequential fields, nested reference-bearing and recursive fields | Ten intended metadata rejections |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, static initializer and forged runtime scope | Seven intended metadata rejections |
 | Identity-bound static RVA data | Regression checks |
-| Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; forged receiver folds fail the feature certificate; tampered RVA bytes change the proved word; branches into the fold rejected |
+| Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; receiver stores and addresses remain local instructions, and erased stores fail the feature certificate; tampered RVA bytes change the proved word |
 | Memory-backed primitive spans | Compiled readonly and writable slices to helpers; sequence-content read and update contracts, and readonly/writable caller composition without unfolding helper bodies; creation over an existing reference; forged element widths and write capabilities rejected by specialization evidence; empty end slices, invalid indexes and slices, alias visibility, missing write authority, uninitialized reads and expired local storage; by-reference and floating-point span signatures rejected |
 | Static readonly struct values | `Zero`, `One` and `MinValue` limbs proved and compared with the values .NET's static constructor stored, also through an out parameter; a changed constructor argument changes the proved limbs; forged value bytes fail `Extracted.translation_valid`; a missing initialization assumption, a `newobj` initializer, `ldsflda`, a store outside the static constructor and a second store rejected; Lean regressions for the load semantics and a self-justifying initializer |
 | Static `ReadOnlySpan<byte>` lookup tables | First and last byte proved; past-end read and write to immutable data rejected; tampered RVA bytes change the proved value; four intended span metadata rejections and positive stored-span parameter/local fixtures |
@@ -743,8 +792,8 @@ and a list-returning function must fail extraction. These examples use the share
 
 `Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results
 with and without localsinit, rejects uninitialized reads and escaped storage, and checks
-insufficient-budget failure. Mutating the emitted initialization flag is rejected by the Lean
-certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
+insufficient-budget failure. Mutating the localsinit flag of the emitted declared signature is
+rejected by the Lean certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
 `Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack items
 and non-native 64-bit size operands. These run in the `dispatch` suite.
 

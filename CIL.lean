@@ -9,6 +9,7 @@ import CIL.Embedding.BaseStep
 import CIL.Embedding.Tactic
 import CIL.Features
 import CIL.Identity
+import CIL.ExceptionType
 import CIL.Imports
 import CIL.InstructionEquations
 import CIL.Instructions
@@ -192,6 +193,7 @@ import CIL.Safety.WideMultiply
 import CIL.Safety.TupleDivision
 import CIL.Extraction.LayoutProjection
 import CIL.Extraction.Translation
+import CIL.Extraction.DecodedMethod
 import CIL.Safety.MemoryEquivalence
 import CIL.Safety.FrameEquivalence
 import CIL.Safety.ExecutionEquivalence
@@ -203,6 +205,7 @@ import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
 import CIL.Safety.Segment
 import CIL.Safety.SegmentLocals
+import CIL.Safety.SegmentContract
 import CIL.Safety.LocalCalls
 
 /-!
@@ -216,6 +219,8 @@ Allocation-renaming proofs are optional: import `CIL.Safety.AllocationRefinement
 * `CIL.Identity`: metadata names, user strings, assemblies, type identities, primitive types and
   type kinds as values whose equality the kernel decides on codes, with `name!` and `str!`
   literals.
+* `CIL.ExceptionType`: the .NET exceptions the model raises, as a closed enumeration whose
+  members stand for distinct type identities.
 * `CIL.Semantics`: the shared single-instruction evaluator (`CIL.step`). Checked execution
   delegates value-only instructions to it; `CIL.SymbolicExecution` supplies shared simp sets.
 * `CIL.Features`, `CIL.SIMD.*` and `CIL.ProfileEquivalence`: hardware feature profiles, the

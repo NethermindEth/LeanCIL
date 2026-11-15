@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ConsumerTraceDirectory.cs
 
 using System.Text.Json;
@@ -30,7 +35,7 @@ public static class InitializedFamily
 """);
 Run(["dotnet", "build", Path.Combine(assemblyRoot, "Family.csproj"), "-c", "Release"]);
 var assembly = Path.Combine(assemblyRoot, "bin/Family.dll");
-var profiles = new[] { "x64-sse2", "x64-sse42", "x64-v3", "scalar" };
+var profiles = new[] { "x64-sse42", "x64-v3", "x64-v4", "scalar" };
 var artifacts = profiles.Select(profile => Path.Combine(root, profile)).ToArray();
 var proof = Path.Combine(package, "FamilyProof.lean");
 for (var index = 0; index < profiles.Length; index++)
@@ -230,7 +235,7 @@ outcome["exports"]![0]!["theorem"] = "FamilyProof.outcomeFamily";
 Export(outcome);
 Console.WriteLine("PASS one outcome-family entry certifies two profiles");
 var pruned = new[] { Path.Combine(root, "PrunedReference"), Path.Combine(root, "PrunedWide") };
-foreach (var (index, profile) in new[] { "x64-sse2", "x64-v3" }.Index())
+foreach (var (index, profile) in new[] { profiles[0], profiles[2] }.Index())
 {
     Run(Extract("extract", assembly, "Family", "Family::Pruned()", pruned[index], profile));
     File.Copy(Path.Combine(artifacts[0], "verification.json"), Path.Combine(pruned[index], "verification.json"), true);
@@ -246,7 +251,7 @@ Export(pruning, "extraction differs from the reprofiled reference program");
 File.WriteAllText(reference, referenceSource);
 Console.WriteLine("PASS independently checked pruning difference rejected");
 var initialized = new[] { Path.Combine(root, "InitializedReference"), Path.Combine(root, "InitializedWide") };
-foreach (var (index, profile) in new[] { "x64-sse2", "x64-v3" }.Index())
+foreach (var (index, profile) in new[] { profiles[0], profiles[2] }.Index())
 {
     Run(["dotnet", ExtractorPath, "extract", assembly, "InitializedFamily::Supported()", initialized[index],
         profile, "--assume-initialized", "InitializedFamily"]);

@@ -2,6 +2,12 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ExceptionMembers.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include WordArrayOutlines.cs
 
 using System.Reflection;
@@ -315,7 +321,7 @@ Console.WriteLine("PASS loop returns its input or propagates the helper exceptio
 object Outcome(string dll, string name, uint value, uint limit)
 {
     try { return Assembly.Load(File.ReadAllBytes(dll)).GetType("Examples.Loops")!.GetMethod(name)!.Invoke(null, [value, limit])!; }
-    catch (TargetInvocationException error) { return error.InnerException!.GetType().FullName!; }
+    catch (TargetInvocationException error) { return ExceptionMember(error.InnerException!); }
 }
 (uint Value, uint Limit)[] untilInputs = [(0, 0), (3, 7), (3, 3), (5, 2), (4, 0)];
 var untilClaims = untilInputs.Select(input => (input, Outcome(assembly, "CountUntil", input.Value, input.Limit))).Select(pair =>
@@ -323,9 +329,9 @@ var untilClaims = untilInputs.Select(input => (input, Outcome(assembly, "CountUn
     var invocation = $"CIL.Safety.invoke Extracted.program {32 + 16 * pair.input.Value} 0 [.scalar (.i32 {pair.input.Value}), .scalar (.i32 {pair.input.Limit})] CIL.Safety.Memory.empty";
     return pair.Item2 is uint result
         ? $"({invocation}).map Prod.snd = .ok [.scalar (.i32 {result})]"
-        : $"(match {invocation} with | .error fault => fault.fault | .ok _ => .invalidState) = .thrown \"{pair.Item2}\"";
+        : $"(match {invocation} with | .error fault => fault.fault | .ok _ => .invalidState) = .thrown .{pair.Item2}";
 }).ToArray();
-if (untilClaims.Count(claim => claim.Contains("System.InvalidOperationException")) != 2)
+if (untilClaims.Count(claim => claim.EndsWith(".thrown .invalidOperation", StringComparison.Ordinal)) != 2)
     throw new InvalidOperationException("CountUntil fixture did not raise for exactly the two inputs above their limit");
 Prove(assembly, CountUntil, "CountUntilRuntime",
     "theorem correctness :\n" + string.Join(" ∧\n", untilClaims) + " := by\n  exact ⟨" + string.Join(", ", untilClaims.Select(_ => "rfl")) + "⟩");
@@ -398,15 +404,15 @@ var otherException = UntilVariant("CountUntilOtherException", (module, helper) =
     var type = new TypeReference("System", "ArgumentException", module, original.DeclaringType.Scope);
     ctor.Operand = new MethodReference(".ctor", module.TypeSystem.Void, type) { HasThis = true };
 });
-if (!Outcome(otherException, "CountUntil", 5, 2).Equals("System.ArgumentException"))
+if (!Outcome(otherException, "CountUntil", 5, 2).Equals("argument"))
     throw new InvalidOperationException("The other-exception fixture did not change the thrown type");
 var helperContract = untilProof[contractStart..bumpStart];
-if (helperContract.Split("\"System.InvalidOperationException\"").Length != 2)
+if (helperContract.Split("some .invalidOperation").Length != 2)
     throw new InvalidDataException("Ambiguous helper contract mutation");
 Directory.CreateDirectory(Path.Combine(root, "CountUntilOtherException"));
 var otherProof = Path.Combine(root, "CountUntilOtherException", "CountUntil.lean");
 File.WriteAllText(otherProof, untilProof[..contractStart] +
-    helperContract.Replace("System.InvalidOperationException", "System.ArgumentException") + untilProof[bumpStart..]);
+    helperContract.Replace("some .invalidOperation", "some .argument") + untilProof[bumpStart..]);
 var otherLines = RejectedLines(otherException, otherProof, "CountUntilOtherException", existingArtifacts: true, CountUntil);
 if (otherLines.Length == 0 || otherLines.Any(line => line != exceptionalExit))
     throw new InvalidOperationException($"CountUntilOtherException was not rejected at line {exceptionalExit}: lines {string.Join(", ", otherLines)}");
@@ -421,8 +427,8 @@ foreach (var (name, original, mutated, obligation) in new[]
     ("CountUntilLimitInvariant", "state.values.2.toNat ≤ limit.toNat\n",
         "state.values.2.toNat ≤ limit.toNat - state.values.1.toNat\n",
         "show (count + 1).toNat ≤ limit.toNat"),
-    ("CountUntilWrongException", "then some \"System.InvalidOperationException\" else none\n\nbind_entry entry",
-        "then some \"System.ArgumentException\" else none\n\nbind_entry entry",
+    ("CountUntilWrongException", "then some .invalidOperation else none\n\nbind_entry entry",
+        "then some .argument else none\n\nbind_entry entry",
         "case raises => simp only [bumpContract, ite_true]")
 })
 {

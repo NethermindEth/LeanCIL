@@ -13,8 +13,8 @@ set_option maxRecDepth 65536
 def raw (count : Nat) : RawArguments :=
   ⟨List.replicate count (.field .unsigned64), [], (List.range count).map ArgumentOp.store⟩
 
-/-- Each argument store targets its appended home slot. -/
-def emitted (count : Nat) : List Instruction := (List.range count).map fun index => .setLocal index
+/-- Each argument store names its own argument, whose home the check looks up. -/
+def emitted (count : Nat) : List Instruction := (List.range count).map fun index => .starg index
 
 /-- Reference list lookup at 128 argument instructions. -/
 theorem baseline128 : all3 (validateArgumentOpIn (raw 128) (List.range 128)) (raw 128).code

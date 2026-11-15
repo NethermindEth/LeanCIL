@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -44,7 +49,7 @@ foreach (var method in methods.Where(method => method.IsPublic))
             claims.Add($"({Run(length, length == 0)}).map Prod.snd = " +
                 $".ok [{View(length * sourceWidth / targetWidth, targetWidth, length == 0)}]");
         if (sourceWidth > targetWidth)
-            claims.Add($"({Run(int.MaxValue)}).map Prod.snd = .error ⟨0, 1, .thrown \"System.OverflowException\"⟩");
+            claims.Add($"({Run(int.MaxValue)}).map Prod.snd = .error ⟨0, 1, .thrown .overflow⟩");
         var uninitialized = Run(7).Replace("] memory", "] { memory with cells := fun _ _ => ⟨0, false⟩ }",
             StringComparison.Ordinal);
         claims.Add($"({uninitialized}).map Prod.snd = .ok [{View(7 * sourceWidth / targetWidth, targetWidth)}]");
@@ -113,6 +118,4 @@ partial class Program
         catch (OverflowException) { }
     }
 }
-
-
 

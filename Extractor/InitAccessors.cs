@@ -6,13 +6,13 @@ namespace Nethermind.LeanCIL;
 // which C# callers may bind the accessor: the method returns nothing, exactly as a plain void method.
 internal static class InitAccessors
 {
-    const string Modifier = "System.Runtime.CompilerServices.IsExternalInit";
+    static readonly TypeLevel Modifier = new(MetadataName.OfText("System.Runtime.CompilerServices"),
+        MetadataName.OfText("IsExternalInit"));
 
-    // Roslyn binds the marker by full name from any assembly, since libraries for older frameworks
-    // declare their own; it carries no IL semantics wherever it is declared.
+    // The top-level marker may be declared in any assembly; it carries no IL semantics.
     internal static TypeReference? Unwrap(TypeReference type) =>
         type is RequiredModifierType { ModifierType: var modifier, ElementType: var element } &&
-        modifier is not TypeSpecification && modifier.DeclaringType is null && modifier.FullName == Modifier &&
+        modifier is not TypeSpecification && IdentityRows.TopLevelMatches(modifier, Modifier) &&
         element is not TypeSpecification && element.MetadataType == MetadataType.Void ? element : null;
 
     internal static bool Is(TypeReference type) => Unwrap(type) is not null;

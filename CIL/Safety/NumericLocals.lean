@@ -60,10 +60,10 @@ theorem step_load_numeric_local {body : CIL.Method} {pc index : Nat} {args stack
     (slot : frame.locals[index]? = some (.bytes kind reference))
     (loaded : read memory reference (localWidth kind) 1 =
       .ok (numberBytes number (localWidth kind))) :
-    step body (.local index) pc args frame stack memory =
+    step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (localResult kind value) :: stack) frame memory) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false, slot,
+    Bool.false_eq_true, ite_false, slot,
     load_numeric_local kind value number fits loaded,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
@@ -76,7 +76,7 @@ theorem step_store_numeric_local {body : CIL.Method} {pc index : Nat} {args rest
     (slot : frame.locals[index]? = some (.bytes kind reference))
     (ready : access memory reference (localWidth kind) 1 true = .ok ()) :
     ∃ result,
-      step body (.setLocal index) pc args frame (.scalar value :: rest) memory =
+      step body (.stloc index) pc args frame (.scalar value :: rest) memory =
         .ok (.next (pc + 1) rest frame result) ∧
       write memory reference (numberBytes number (localWidth kind)) 1 = .ok result ∧
       read result reference (localWidth kind) 1 = .ok (numberBytes number (localWidth kind)) := by
@@ -91,7 +91,7 @@ theorem step_store_numeric_local {body : CIL.Method} {pc index : Nat} {args rest
     · simp only [List.getElem?_set_ne same]
   refine ⟨result, ?_, written, readback⟩
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, unchanged,
+    Bool.false_eq_true, ite_false, slot, stored, unchanged,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms make_numeric_local

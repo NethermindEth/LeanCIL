@@ -4,8 +4,8 @@ using Mono.Cecil;
 partial class Program
 {
     /// <summary>Generic structs and static methods of generic classes across their own SDK-built Lib and
-    /// App pair, run by the assemblies suite after the non-generic cases.</summary>
-    static void CheckGenericAssemblies()
+    /// App pair, run by the assemblies suite after the non-generic cases; returns the App and Lib it built.</summary>
+    static (string App, string Lib) CheckGenericAssemblies()
     {
         const string libName = "GenericFixture.Lib";
         const string appName = "GenericFixture.App";
@@ -150,7 +150,7 @@ partial class Program
             string artifact = fixture.Artifact(name);
             Run([.. cli, "extract", app, selector, artifact, .. Reference(lib), .. extra]);
             string extracted = File.ReadAllText(Path.Combine(artifact, "Extracted.lean"));
-            if (extracted.Contains("assembly := assembly1", StringComparison.Ordinal) != referencedBody)
+            if (extracted.Contains("assembly := assembly1, signature", StringComparison.Ordinal) != referencedBody)
                 throw new InvalidOperationException("Certificate misattributes the referenced bodies: " + name);
             return extracted;
         }
@@ -165,7 +165,7 @@ partial class Program
                 theorem generic_result :
                     (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 5)] CIL.Safety.Memory.empty).map
                       Prod.snd =
-                      .ok [.scalar (.i64 {{result}})] := by rfl
+                      .ok [.scalar (.i64 {{result}})] := by cil_kernel_rfl
                 #print axioms generic_result
                 """);
             evidence.Add(path, "PASS cross-assembly generic " + name + ": pinned layouts and bodies with proof");
@@ -242,13 +242,13 @@ partial class Program
                 /-- A catalogued handler runs; `LocalAlgo<ulong>.Run`, addressed by no extracted body, does not. -/
                 theorem correctness :
                     (CIL.Safety.invoke Extracted.program 64 0
-                      [.methodTable ⟨signature, some #[{{identity}}], none⟩, {{arguments}}]
+                      [.methodTable ⟨signature, some #[{{identity}}], none, 1, by decide⟩, {{arguments}}]
                       CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {{result}})] ∧
                     (match CIL.Safety.invoke Extracted.program 64 0
-                      [.methodTable ⟨signature, some #[{{uncatalogued}}], none⟩, {{arguments}}]
+                      [.methodTable ⟨signature, some #[{{uncatalogued}}], none, 1, by decide⟩, {{arguments}}]
                       CIL.Safety.Memory.empty with
                       | .error fault => some fault.fault | .ok _ => none) = some .invalidState :=
-                  ⟨by rfl, by rfl⟩
+                  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
 
                 #print axioms correctness
                 """;
@@ -345,5 +345,6 @@ partial class Program
             throw new InvalidOperationException("Lean accepted a moved generic layout owner: " + kernel.Output);
         Console.WriteLine("PASS Lean rejected moved generic owner");
         Console.WriteLine("PASS cross-assembly generics: structs, generic classes, entries, addresses and rejections");
+        return (app, lib);
     }
 }

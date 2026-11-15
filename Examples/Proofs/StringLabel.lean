@@ -38,7 +38,7 @@ theorem correctness (memory : Memory) (item : Reference) (label : ManagedReferen
 theorem relabel_null_throws (memory : Memory) (label : ManagedReference)
     (labelFormed : formObject memory label = .ok (.object label)) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null, .object label] memory =
-      .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨0, 1, .thrown .nullReference⟩ := by
   cil_checked_steps [labelFormed]
 
 #print axioms relabel_null_throws

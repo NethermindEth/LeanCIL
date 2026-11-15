@@ -78,7 +78,7 @@ theorem square_mismatch (memory : Memory) (shapes target : Reference) (length : 
     (kind : allocation.kind = .object square) :
     ∃ fuel, invoke Extracted.program fuel put
         [.object (.address shapes), .scalar (.i32 index), .object (.address target)] memory =
-      .error ⟨put, 3, .thrown "System.ArrayTypeMismatchException"⟩ := by
+      .error ⟨put, 3, .thrown .arrayTypeMismatch⟩ := by
   have mismatch := ReferenceArray.storableIn_mismatch (element := circleType) found kind rfl
     rfl (by decide)
   have located := owned.slot_located owned.inside
@@ -94,7 +94,7 @@ theorem index_out_of_range (memory : Memory) (shapes : Reference) (length : Nat)
     (formed : formObject memory shape = .ok (.object shape)) :
     ∃ fuel, invoke Extracted.program fuel put
         [.object (.address shapes), .scalar (.i32 index), .object shape] memory =
-      .error ⟨put, 3, .thrown "System.IndexOutOfRangeException"⟩ := by
+      .error ⟨put, 3, .thrown .indexOutOfRange⟩ := by
   have past := live.slot_outside outside
   cil_checked_steps [formed, past]
 
@@ -104,7 +104,7 @@ theorem index_out_of_range (memory : Memory) (shapes : Reference) (length : Nat)
 theorem null_array (memory : Memory) (index : BitVec 32) (shape : ManagedReference)
     (formed : formObject memory shape = .ok (.object shape)) :
     ∃ fuel, invoke Extracted.program fuel put [.object .null, .scalar (.i32 index), .object shape]
-        memory = .error ⟨put, 3, .thrown "System.NullReferenceException"⟩ := by
+        memory = .error ⟨put, 3, .thrown .nullReference⟩ := by
   cil_checked_steps [formed]
 
 #print axioms null_array

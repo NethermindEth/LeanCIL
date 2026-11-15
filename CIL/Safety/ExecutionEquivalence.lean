@@ -92,7 +92,7 @@ theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
     ResultEquivalent FrameActionEquivalent (managedStep operation pc frame stack m)
       (managedStep operation pc frame stack n) := by
   unfold CIL.Safety.managedStep
-  split <;> try simp only [same.checkedValues, same.addNativeTable, same.loadNativeTable]
+  split <;> try simp only [same.checkedValues, same.loadNativeTable]
   all_goals repeat' first
     | exact .error _
     | exact .ok (.next same _ _ _)
@@ -213,19 +213,55 @@ theorem Memory.Equivalent.newReferenceArray {m n : Memory} (same : m.Equivalent 
     | split
 #print axioms Memory.Equivalent.newReferenceArray
 
+/-- Equivalent memories load every argument alike, from its home or the incoming list. -/
+theorem Memory.Equivalent.loadArgument {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (index : Nat) (args : List Value) (frame : Frame) :
+    loadArgument body index args frame m = loadArgument body index args frame n := by
+  simp only [CIL.Safety.loadArgument, same.checkedValue, same.loadLocal]
+#print axioms Memory.Equivalent.loadArgument
+
+/-- Equivalent memories store every argument into the same home, leaving equivalent memories. -/
+theorem Memory.Equivalent.storeArgument {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (index : Nat) (value : Value) (frame : Frame) :
+    ResultEquivalent MemoryLastEquivalent (storeArgument body index value frame m)
+      (storeArgument body index value frame n) := by
+  unfold CIL.Safety.storeArgument
+  split
+  · split
+    · apply ResultEquivalent.bind (same.storeLocal _ _)
+      intro left right related
+      obtain ⟨home, memory⟩ := left
+      obtain ⟨otherHome, otherMemory⟩ := right
+      obtain ⟨rfl, equivalent⟩ := related
+      exact .ok ⟨rfl, equivalent⟩
+    · exact .error _
+  · exact .error _
+#print axioms Memory.Equivalent.storeArgument
+
+/-- Equivalent memories give every argument the same address. -/
+theorem Memory.Equivalent.addressArgument {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (index : Nat) (frame : Frame) :
+    addressArgument body index frame m = addressArgument body index frame n := by
+  simp only [CIL.Safety.addressArgument, same.localAddress]
+#print axioms Memory.Equivalent.addressArgument
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
     ResultEquivalent FrameActionEquivalent (step body op pc args frame stack m)
       (step body op pc args frame stack n) := by
-  unfold CIL.Safety.step
+  unfold CIL.Safety.step intrinsicCall referenceCompareCall referenceSubtractCall
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
+    same.loadArgument, same.addressArgument,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
     same.objectAboveNull, same.virtualTarget, same.objectTest]
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
+    | unfold returnFrom
+    | unfold localAllocation
+    | simp only [same.checkedValues]
     | (apply ResultEquivalent.bind (same.newArray _ _)
        intro left right related
        obtain ⟨view, memory⟩ := left
@@ -255,11 +291,18 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     | exact .ok (.call same _ _ _)
     | exact .ok (.tailCall same _ _)
     | exact .ok (.returned same _)
+    | rw [same.addNativeTable]
     | (apply ResultEquivalent.bind_same; intro)
     | (apply ResultEquivalent.bind (same.storeLocal _ _)
        intro left right related
        obtain ⟨slot, memory⟩ := left
        obtain ⟨otherSlot, otherMemory⟩ := right
+       obtain ⟨rfl, equivalent⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.storeArgument _ _ _ _)
+       intro left right related
+       obtain ⟨frame, memory⟩ := left
+       obtain ⟨otherFrame, otherMemory⟩ := right
        obtain ⟨rfl, equivalent⟩ := related
        exact .ok (.next equivalent _ _ _))
     | (apply ResultEquivalent.bind (same.memoryInstruction _ _)
@@ -277,6 +320,12 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
          obtain ⟨rfl, stored⟩ := related
          exact .ok (.next stored _ _ _))
     | (apply ResultEquivalent.bind (same.staticInstruction _ _ _ _)
+       intro left right related
+       obtain ⟨memory, values⟩ := left
+       obtain ⟨otherMemory, otherValues⟩ := right
+       obtain ⟨equivalent, rfl⟩ := related
+       exact .ok (.next equivalent _ _ _))
+    | (apply ResultEquivalent.bind (same.referenceAddInstruction _ _ _)
        intro left right related
        obtain ⟨memory, values⟩ := left
        obtain ⟨otherMemory, otherValues⟩ := right

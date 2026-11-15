@@ -364,7 +364,7 @@ theorem rent_exhausted_throws (memory : Memory) (pool : Reference)
     (capacity : ItemPool._capacity.Readable memory pool)
     (full : ItemPool._live.of memory pool = ItemPool._capacity.of memory pool) :
     ∃ fuel, invoke Extracted.program fuel rent [.object (.address pool)] memory =
-      .error ⟨rent, 12, .thrown "System.InvalidOperationException"⟩ := by
+      .error ⟨rent, 12, .thrown .invalidOperation⟩ := by
   obtain ⟨home, entered, enter⟩ :=
     entry.checked memory (.address pool) wellFormed
   have keep := enter.entryMemory.kept
@@ -382,7 +382,7 @@ theorem rent_exhausted_throws (memory : Memory) (pool : Reference)
 /-- Renting from a null pool throws `NullReferenceException` at the first field load, pc 1. -/
 theorem rent_null_pool_throws (memory : Memory) (wellFormed : memory.WellFormed) :
     ∃ fuel, invoke Extracted.program fuel rent [.object .null] memory =
-      .error ⟨rent, 1, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨rent, 1, .thrown .nullReference⟩ := by
   obtain ⟨home, entered, enter⟩ := entry.checked memory .null wellFormed
   cil_checked_steps [enter.setup]
 

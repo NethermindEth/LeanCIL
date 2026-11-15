@@ -9,16 +9,17 @@ open CIL.Safety
 
 /-- `*sum = a + b + c; *carry = (a + b + c < a) ? 1 : 0`. -/
 @[cil_code] def carryMethod : CIL.Method := {
-  code := [.arg 3, .arg 0, .arg 1, .add, .arg 2, .add, .store64,
-    .arg 4, .arg 0, .arg 1, .add, .arg 2, .add, .arg 0, .clt_un, .conv_u8, .store64, .ret]
+  code := [.ldarg 3, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .store64,
+    .ldarg 4, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .ldarg 0, .clt_un, .conv_u8, .store64,
+    .ret]
   locals := [], returnsValue := false }
 @[cil_code] def carryProgram : CIL.Program := [carryMethod]
 
 /-- `*difference = a - b - c; *borrow = (a < b) | (c & (a == b))`, with sign-extended flags. -/
 @[cil_code] def borrowMethod : CIL.Method := {
-  code := [.arg 3, .arg 0, .arg 1, .sub, .arg 2, .sub, .store64,
-    .arg 4, .arg 0, .arg 1, .clt_un, .conv_i8, .arg 2, .arg 0, .arg 1, .ceq, .conv_i8, .and, .or,
-    .store64, .ret]
+  code := [.ldarg 3, .ldarg 0, .ldarg 1, .sub, .ldarg 2, .sub, .store64,
+    .ldarg 4, .ldarg 0, .ldarg 1, .clt_un, .conv_i8, .ldarg 2, .ldarg 0, .ldarg 1, .ceq, .conv_i8,
+    .and, .or, .store64, .ret]
   locals := [], returnsValue := false }
 @[cil_code] def borrowProgram : CIL.Program := [borrowMethod]
 
@@ -142,12 +143,13 @@ theorem contract_normalize_once (words : Nat → Nat) (memory : Memory) (_zero :
   exact ⟨rfl, rfl⟩
 
 @[cil_code] def twentySevenRaises : CIL.Method :=
-  { code := List.replicate 26 .nop ++ [.throw "Test.Exception"], locals := [], returnsValue := false }
+  { code := List.replicate 26 .nop ++ [.throw .baseException], locals := [],
+    returnsValue := false }
 
 @[cil_code] def twentySevenRaisesProgram : CIL.Program := [twentySevenRaises]
 
 theorem raise_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : words 0 = 0) :
-    Raises twentySevenRaisesProgram 0 [] memory "Test.Exception" := by
+    Raises twentySevenRaisesProgram 0 [] memory .baseException := by
   fact_normalizations 1 in
     cil_raise_steps [_zero]
 
@@ -170,8 +172,8 @@ theorem large_indexed_fact (words : Fin 65536 → Nat) (all : ∀ index, words i
   cil_fact_simp [] [all]
 
 @[cil_code] def fourLimb : CIL.Method :=
-  { code := [.arg 0, .fieldAt 0 8, .arg 0, .fieldAt 8 8, .arg 0, .fieldAt 16 8,
-      .arg 0, .fieldAt 24 8, .pop, .pop, .pop, .ret], locals := [], returnsValue := true }
+  { code := [.ldarg 0, .fieldAt 0 8, .ldarg 0, .fieldAt 8 8, .ldarg 0, .fieldAt 16 8,
+      .ldarg 0, .fieldAt 24 8, .pop, .pop, .pop, .ret], locals := [], returnsValue := true }
 
 @[cil_code] def fourLimbProgram : CIL.Program := [fourLimb]
 
@@ -185,7 +187,7 @@ theorem indexed_fields (memory : Memory) (left : Reference) (words : Fin 4 → C
   cil_checked_steps [formed, limbs]
 
 @[cil_code] def literalBranch : CIL.Method :=
-  { code := [.arg 0, .fieldAt 8 8, .brfalse 5, .ldc_i4 9, .ret, .ldc_i4 0, .ret],
+  { code := [.ldarg 0, .fieldAt 8 8, .brfalse 5, .ldc_i4 9, .ret, .ldc_i4 0, .ret],
     locals := [], returnsValue := true }
 
 @[cil_code] def literalBranchProgram : CIL.Program := [literalBranch]

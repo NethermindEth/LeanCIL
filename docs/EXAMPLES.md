@@ -20,6 +20,8 @@ sentences name the wrong implementations that each unchanged proof rejects.
 - `Add`: universal modular arithmetic correctness in the specified empty initial memory.
 - `AddModel`: carries a theorem about a pure Lean model to the compiled `Add` through one theorem
   that the method returns the model's result, without re-proving the model theorem.
+- `DecodedAdd`: the `Add` contract for the program `Extraction.decodedProgram?` reads from the
+  extraction's body bytes, proved by evaluating the decoded method without the translator's output.
 - `CheckedArithmetic.Add64`: universal checked addition for every pair whose sum fits, over
   arbitrary caller memory, with exact memory preservation. The checked automation follows generated
   instruction lookups; the same contract is tested after inserting NOPs and rejected for

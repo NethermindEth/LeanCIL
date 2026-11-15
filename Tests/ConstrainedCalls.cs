@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -32,6 +37,7 @@ static string Narrowed(string source, out string control)
     var declarations = Regex.Replace(source,
         @"(?m)^(?:@\[[^\r\n]*\] )?theorem [^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*\r?\n", "");
     declarations = Regex.Replace(declarations, @"(?m)^#print axioms [^\r\n]*\r?\n", "");
+    declarations = ResolutionFactsCommand().Replace(declarations, "");
     var names = obligations.Select(match => Regex.Match(match.Value, @"theorem (\w+)").Groups[1].Value).ToArray();
     var narrowed = declarations.Replace("end Extracted", string.Join("\n", obligations.Zip(names).Select(pair =>
         pair.First.Value + "\n#print axioms " + pair.Second)) + "\nend Extracted", StringComparison.Ordinal);
@@ -213,7 +219,7 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
     var output = Path.Combine(root, "Flags-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"ConstantFlags::{name}(ulong)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (!source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+    if (!source.Contains("  .unadmitted ", StringComparison.Ordinal))
         throw new Exception("Constant flag block was not pruned: " + name);
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
         .Select(input => (input, result: (ulong)constantFlags.GetMethod(name)!.Invoke(null, [input])!))
@@ -247,7 +253,7 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
         .. assume ? new[] { "--assume-initialized", "Examples.StaticScalars" } : []]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     if (pruned is bool expected && expected !=
-        source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        source.Contains("  .unadmitted ", StringComparison.Ordinal))
         throw new Exception("Unexpected flag pruning: " + name);
     if (name == "WidthNarrow") widthNarrow = source;
     var entry = staticInterfaces.Assembly.GetType("Examples." + type)!.GetMethod(name)!;
@@ -452,7 +458,7 @@ foreach (var (owner, name) in new[]
     Run(["dotnet", ExtractorPath, "extract", assembly, $"{owner}::{name}(ulong)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     if (name == "TraceQuiet" &&
-        !source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        !source.Contains("  .unadmitted ", StringComparison.Ordinal))
         throw new Exception("Derived constant flag block was not pruned: " + name);
     mostSpecificSources[name] = source;
     var method = examples.GetType("Examples." + owner)!.GetMethod(name)!;
@@ -666,7 +672,8 @@ Console.WriteLine("PASS constrained extraction rejection: open-generic-receiver"
 const string modifierRejection = "except System.Runtime's modreq(InAttribute) directly on a by-reference parameter";
 MethodDefinition InAdd(ModuleDefinition module) => module.GetType("Examples.InWord").Methods
     .Single(method => method.Name.EndsWith(".Add", StringComparison.Ordinal));
-foreach (var mutation in new[] { "modopt", "other-modreq", "by-value", "nested", "versioned-scope", "foreign-scope" })
+foreach (var mutation in new[]
+    { "modopt", "other-modreq", "by-value", "nested", "versioned-scope", "foreign-scope", "flattened-name" })
 {
     var dll = Path.Combine(root, "in-" + mutation + ".dll");
     string selector;
@@ -676,10 +683,15 @@ foreach (var mutation in new[] { "modopt", "other-modreq", "by-value", "nested",
         var modified = (RequiredModifierType)method.Parameters[0].ParameterType;
         var reference = (ByReferenceType)modified.ElementType;
         var runtime = (AssemblyNameReference)modified.ModifierType.Scope;
-        TypeReference Forged(AssemblyNameReference scope) =>
-            new(modified.ModifierType.Namespace, modified.ModifierType.Name, module, scope);
+        TypeReference Forged(AssemblyNameReference scope)
+        {
+            module.AssemblyReferences.Add(scope);
+            return new(modified.ModifierType.Namespace, modified.ModifierType.Name, module, scope);
+        }
         method.Parameters[0].ParameterType = mutation switch
         {
+            "flattened-name" => new RequiredModifierType(new TypeReference("",
+                "System.Runtime.InteropServices.InAttribute", module, runtime), reference),
             "modopt" => new OptionalModifierType(modified.ModifierType, reference),
             "other-modreq" => new RequiredModifierType(
                 new TypeReference("System.Runtime.CompilerServices", "IsVolatile", module, runtime), reference),

@@ -85,6 +85,62 @@ theorem rejects_row_counts_past_the_stream :
   decide +kernel
 #print axioms rejects_row_counts_past_the_stream
 
+/-! ## Metadata version length -/
+
+/-- The stream headers from `header` with `extra` added to each stream offset; a header is eight
+    bytes and a name padded to four. -/
+private def shiftStreams (extra : Nat) : Nat → Nat → List Nat → List Nat
+  | 0, _, bytes => bytes
+  | count + 1, header, bytes =>
+    let nameLength := ((bytes.drop (header + 8)).takeWhile (· != 0)).length
+    let shifted := writeLittle bytes header 4 (readLittle bytes header 4 + extra)
+    shiftStreams extra count (header + 8 + (nameLength + 4) / 4 * 4) shifted
+
+/-- The file offset of the fixture's metadata root. -/
+private def fixtureRoot : Nat := 684
+
+/-- The bytes of the fixture's metadata, from its root. -/
+private def fixtureMetadataSize : Nat := 0x62C
+
+/-- The bytes the fixture's metadata root allocates to its version string. -/
+private def fixtureVersionLength : Nat := 12
+
+/-- The file offset of the metadata size field in the fixture's CLI header. -/
+private def cliMetadataSize : Nat := 0x214
+
+/-- The file offset of the mapped size of the fixture's text section. -/
+private def textVirtualSize : Nat := 0x180
+
+/-- The fixture with `extra` more bytes allocated to its version string. The rest of the root and
+    its streams move up into the unused end of the text section, whose mapped size grows to cover
+    them, and the stream offsets and the metadata size follow. -/
+private def widenedVersion (extra : Nat) : ImageBytes :=
+  let bytes := imageBytes StrictFixture.image
+  let versionEnd := fixtureRoot + 16 + fixtureVersionLength
+  let metadataEnd := fixtureRoot + fixtureMetadataSize
+  let moved := bytes.take versionEnd ++ List.replicate extra 0 ++
+    (bytes.drop versionEnd).take (metadataEnd - versionEnd) ++ bytes.drop (metadataEnd + extra)
+  let length := fixtureVersionLength + extra
+  let rooted := writeLittle moved (fixtureRoot + 12) 4 length
+  let streams := readLittle rooted (fixtureRoot + 18 + length) 2
+  let shifted := shiftStreams extra streams (fixtureRoot + 20 + length) rooted
+  let sized := writeLittle shifted cliMetadataSize 4 (fixtureMetadataSize + extra)
+  ImageBytes.ofBytes (writeLittle sized textVirtualSize 4 0x800)
+
+/-- A version field of 256 bytes, the most II.24.2.1 allows (a 255-byte string rounded up to a
+    multiple of four), is read, and the `#~` stream is found 244 bytes further on. -/
+theorem accepts_a_version_length_of_256 :
+    ((ImageView.ofImage (widenedVersion 244) >>= decodeMetadata).toOption.map
+      (·.pe.tables.start)) = some (792 + 244) := by
+  decide +kernel
+#print axioms accepts_a_version_length_of_256
+
+/-- A version field of 260 bytes is longer than any version string the format allows. -/
+theorem rejects_a_version_length_of_260 :
+    decodeError (widenedVersion 248) = some (.pe .badMetadataRoot) := by
+  decide +kernel
+#print axioms rejects_a_version_length_of_260
+
 /-! ## Tokens -/
 
 /-- The layout of the unchanged fixture. -/
@@ -170,6 +226,71 @@ theorem rejects_an_address_in_two_sections :
 #print axioms rejects_an_address_in_two_sections
 
 /-! ## Heap entries and identity -/
+
+/-- The fixture identity with selected Assembly flags and key bytes in its blob heap. -/
+private def identityWithKey (flags : Nat) (key : List Nat) :
+    Except AuditError (List Nat) := do
+  let (view, layout) ← fixtureLayout
+  let (flagsOffset, _) ← layout.cellAt (tokenOf 0x20 1) 5
+  let (keyOffset, keyWidth) ← layout.cellAt (tokenOf 0x20 1) 6
+  let bytes ← view.bytes 0 StrictFixture.image.length
+  let bytes := (List.range 4).foldl
+    (fun bytes index => bytes.set (flagsOffset + index) (flags / 256 ^ index % 256)) bytes
+  let bytes := (List.range keyWidth).foldl
+    (fun bytes index => bytes.set (keyOffset + index) 0) bytes
+  let blob := key.length :: key
+  let changed ← ImageView.ofImage (ImageBytes.ofBytes (bytes ++ blob))
+  let pe := { layout.pe with blobs := { start := bytes.length, size := blob.length } }
+  assemblyIdentity changed { layout with pe := pe }
+
+/-- An unflagged eight-byte key is already a token, in display byte order. -/
+theorem assembly_uses_unflagged_token :
+    (identityWithKey 0 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption =
+      some (asciiOf
+        "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=00ab0000000000cd") := by
+  decide +kernel
+#print axioms assembly_uses_unflagged_token
+
+/-- Empty key blobs have no token with either PublicKey flag value. -/
+theorem assembly_empty_key_has_no_token :
+    (identityWithKey 0 []).toOption = some (asciiOf
+      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=null") ∧
+    (identityWithKey 1 []).toOption = (identityWithKey 0 []).toOption := by
+  decide +kernel
+#print axioms assembly_empty_key_has_no_token
+
+/-- A flagged full key uses the reversed low eight SHA-1 digest bytes. -/
+theorem assembly_hashes_flagged_key :
+    (identityWithKey 1 (asciiOf "abc")).toOption = some (asciiOf
+      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=9dd8d09c6cc25078") := by
+  decide +kernel
+#print axioms assembly_hashes_flagged_key
+
+/-- Flags other than PublicKey preserve both key interpretations. -/
+theorem assembly_ignores_other_key_flags :
+    (identityWithKey 0x8100 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption =
+      (identityWithKey 0 [0, 0xab, 0, 0, 0, 0, 0, 0xcd]).toOption ∧
+    (identityWithKey 0x8101 (asciiOf "abc")).toOption =
+      (identityWithKey 1 (asciiOf "abc")).toOption := by
+  decide +kernel
+#print axioms assembly_ignores_other_key_flags
+
+/-- Nonempty unflagged blobs must have exactly eight bytes. -/
+theorem assembly_rejects_invalid_token_widths :
+    failsWith (identityWithKey 0 [1]) (.tables (.invalidPublicKeyToken 1)) = true ∧
+    failsWith (identityWithKey 0 (List.replicate 7 0))
+      (.tables (.invalidPublicKeyToken 7)) = true ∧
+    failsWith (identityWithKey 0 (List.replicate 9 0))
+      (.tables (.invalidPublicKeyToken 9)) = true := by
+  decide +kernel
+#print axioms assembly_rejects_invalid_token_widths
+
+/-- An eight-byte zero token remains distinct from an absent token. -/
+theorem assembly_preserves_zero_token :
+    (identityWithKey 0 (List.replicate 8 0)).toOption = some (asciiOf
+      "StrictFixture, Version=1.2.3.4, Culture=neutral, PublicKeyToken=0000000000000000") := by
+  decide +kernel
+#print axioms assembly_preserves_zero_token
 
 theorem spells_version_components :
     decimal 0 = asciiOf "0" ∧ decimal 7 = asciiOf "7" ∧ decimal 10 = asciiOf "10" ∧

@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -18,10 +23,10 @@ string Span(int width, bool writable = true, int offset = 0, int length = 2) =>
     $".bufferSpan ⟨.address ⟨0, {offset}⟩, {length}, {width}, {writable.ToString().ToLowerInvariant()}⟩";
 foreach (var method in metadata.GetType("Examples.AggregateSpans").Methods.Where(method => method.IsPublic))
 foreach (var profile in method.Name.StartsWith("Layout", StringComparison.Ordinal)
-    ? new[] { "x64-sse2", "arm64-advsimd" } : ["scalar"])
+    ? new[] { "x64-sse42", "arm64-advsimd" } : ["scalar"])
 {
     var name = method.Name;
-    var layoutWidth = profile == "x64-sse2" ? 64 : 48;
+    var layoutWidth = profile == "x64-sse42" ? 64 : 48;
     var output = Path.Combine(root, profile == "scalar" ? name : name + "-" + profile);
     Directory.CreateDirectory(output);
     var arguments = name switch

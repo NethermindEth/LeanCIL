@@ -102,7 +102,7 @@ theorem and audit, source bundle identities, and `acceptedVia:
 independently-verified`. Metadata and token resolution, the PE container, the extractor's translation of instructions
 outside the checked families and CIL/runtime correspondence remain trust boundaries of full verification. To reconfirm in the
 kernel that the method bodies of an extraction of a library assembly are the bytes of its DLL, run
-[`leancil audit-binding`](CLI.md#strict-binding-audit) with the digest of that DLL. These checks
+[`leancil verify --deep-checks`](CLI.md#deep-verification) with a sha256sum file naming that DLL and every pinned reference. These checks
 establish CIL theorems. They do not establish correctness of CoreCLR or a JIT.
 
 Imported libraries may depend on each other in any acyclic graph, such as a chain (a caller

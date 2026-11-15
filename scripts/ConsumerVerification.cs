@@ -188,7 +188,7 @@ partial class Program
     // Receipts reuse only the linter-stripped byte transformation. Source/import binding,
     // certificate eligibility and replay remain the callers' independent obligations.
     Dictionary<string, SortedDictionary<string, string>> PortableConsumerModuleParts(
-        string session, Dictionary<string, string> modules)
+        string session, Dictionary<string, string> modules, bool publishReceipts = true)
     {
         var started = DateTimeOffset.UtcNow;
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
@@ -262,12 +262,15 @@ partial class Program
             {
                 if (!Same(item.Input.Parts, ConsumerModuleParts(item.Source)))
                     throw new InvalidDataException("Fingerprint input snapshot changed: " + item.Input.Name);
-                Directory.CreateDirectory(item.Receipt);
-                File.WriteAllText(Path.Combine(item.Receipt, "fingerprints.json"),
-                    JsonSerializer.Serialize(results[item.Input.Name]));
-                PublishSuccess(item.Input.Key, item.Receipt);
+                if (publishReceipts)
+                {
+                    Directory.CreateDirectory(item.Receipt);
+                    File.WriteAllText(Path.Combine(item.Receipt, "fingerprints.json"),
+                        JsonSerializer.Serialize(results[item.Input.Name]));
+                    PublishSuccess(item.Input.Key, item.Receipt);
+                }
             }
-            if (UseSuccessCache && Directory.Exists(SuccessCacheRoot)) EvictStaleSupport();
+            if (publishReceipts && UseSuccessCache && Directory.Exists(SuccessCacheRoot)) EvictStaleSupport();
             RequireCertifiedFingerprints(certified, modules, canonicalTools);
             TraceConsumerFingerprints(session, started, elapsed.Elapsed,
                 certified.Count + inputs.Length - missing.Count, missing.Count);
@@ -296,9 +299,11 @@ partial class Program
 
     // Called only after the workspace's replay, audits, rechecks and source-stability checks passed.
     void AddExportedSupport(ConsumerSupportExport export, string session, string root, SortedDictionary<string, string> inputs,
-        Dictionary<string, string> independent, Dictionary<string, string[]> graph, string? collected)
+        Dictionary<string, string> independent, Dictionary<string, string[]> graph, string? collected,
+        bool publishReceipts = true, Action? requireStable = null)
     {
-        var fingerprints = PortableConsumerModuleParts(session, independent);
+        var fingerprints = PortableConsumerModuleParts(session, independent, publishReceipts);
+        requireStable?.Invoke();
         var record = collected is null ? null : ReadConsumerSupportRecord(Path.Combine(collected, ConsumerSupportRecordName));
         var sources = PortableConsumerSources(root, inputs);
         lock (export.Gate)
@@ -448,11 +453,20 @@ partial class Program
         if (restored > 0) CacheProgress($"portable consumer support library ({restored} modules)");
     }
 
-    HashSet<string> ImportedConsumerSupport(string session, TrustedSupport[] trusted, Dictionary<string, string> modules)
+    static Dictionary<string, string> ConsumerSupportModules(IEnumerable<IEnumerable<string>> manifests,
+        Dictionary<string, string> modules)
+    {
+        var names = manifests.SelectMany(manifest => manifest).ToHashSet(StringComparer.Ordinal);
+        return modules.Where(pair => names.Contains(pair.Key)).ToDictionary(StringComparer.Ordinal);
+    }
+
+    HashSet<string> ImportedConsumerSupport(string session, TrustedSupport[] trusted,
+        Dictionary<string, string> modules, bool publishReceipts = true)
     {
         if (trusted.Length == 0) return [];
         var fingerprints = PortableConsumerModuleParts(session,
-            modules.Where(pair => trusted.Any(support => support.Manifest.Modules.ContainsKey(pair.Key))).ToDictionary());
+            ConsumerSupportModules(trusted.Select(support => support.Manifest.Modules.Keys), modules),
+            publishReceipts);
         var result = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (manifest, _) in trusted)
         {
@@ -487,85 +501,6 @@ partial class Program
         return ReplayConsumerModulesSeparately(session, targets, leanPath, profile);
     }
 
-    Dictionary<string, string> ReplayConsumerModulesSeparately(string session, string[] targets, string leanPath, bool profile)
-    {
-        var configuredThreads = Environment.GetEnvironmentVariable("LEAN_NUM_THREADS");
-        var threads = string.IsNullOrWhiteSpace(configuredThreads) ? "2" : configuredThreads;
-        if (!uint.TryParse(threads, out var count) || count == 0)
-            throw new InvalidDataException("LEAN_NUM_THREADS must be a positive integer.");
-        var runner = Path.Combine(Path.GetTempPath(), "leancil-replay-" + Guid.NewGuid().ToString("N") + ".lean");
-        var targetsPath = Path.ChangeExtension(runner, ".json");
-        var native = !profile && auditExecutable is not null;
-        try
-        {
-            // A literal target list exceeds Lean's recursion limit for large module sets.
-            File.WriteAllText(targetsPath, JsonSerializer.Serialize(targets));
-            // Use the pinned toolchain's checker, not a consumer implementation
-            // of kernel replay. Explicit targets avoid repeated search-path scans.
-            if (!native) File.WriteAllText(runner, """
-import LeanChecker
-unsafe def replayConsumerModule (name : String) : IO Nat := do
-  let started ← IO.monoMsNow
-  replayFromImports name.toName
-  return (← IO.monoMsNow) - started
-def reportConsumerModule (name : String) (elapsed : Nat) : IO Unit :=
-  IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("milliseconds", Lean.toJson elapsed)]).compress
-def reportConsumerFailure (name : String) (error : IO.Error) : IO Unit :=
-  IO.println (Lean.Json.mkObj [("module", Lean.toJson name), ("error", Lean.toJson (toString error))]).compress
-unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit := do
-  Lean.initSearchPath (← Lean.findSysroot)
-  let mut failed := false
-  if profile then
-    for name in args do
-      try
-        reportConsumerModule name (← replayConsumerModule name)
-      catch error =>
-        reportConsumerFailure name error
-        failed := true
-  else
-    let tasks ← args.toArray.mapM fun name => do
-      return (name, ← IO.asTask (replayConsumerModule name))
-    for (name, task) in tasks do
-      match task.get with
-      | .ok elapsed => reportConsumerModule name elapsed
-      | .error error =>
-        reportConsumerFailure name error
-        failed := true
-  if failed then
-    throw (IO.userError "Kernel replay rejected at least one consumer module")
-""" + "\n#eval do\n  let json ← IO.FS.readFile (String.fromUTF8! (ByteArray.mk #[" +
-                string.Join(",", System.Text.Encoding.UTF8.GetBytes(targetsPath)) +
-                "]))\n  let args ← IO.ofExcept <| (Lean.Json.parse json).bind Lean.fromJson?\n  replayConsumerModules args " +
-                profile.ToString().ToLowerInvariant() + "\n");
-            // Unlike leanchecker, the lean frontend defaults to hardware
-            // concurrency rather than honoring LEAN_NUM_THREADS itself.
-            string[] command = native ? [CheckedAuditExecutable(), "--replay-separately", targetsPath]
-                : [LeanExecutable, "-j" + threads, runner];
-            var environment = new Dictionary<string, string>(LeanEnvironment) { ["LEAN_NUM_THREADS"] = threads };
-            var result = Execute(command, session, leanPath, progress: profile
-                ? "Profiled kernel replay of consumer modules" : "Kernel replay of consumer proof and dependencies",
-                environment: environment);
-            if (native) CheckedAuditExecutable();
-            var replayed = new HashSet<string>(StringComparer.Ordinal);
-            var failures = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (var line in result.Stdout.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (!line.StartsWith('{')) continue;
-                JsonElement record;
-                try { record = JsonSerializer.Deserialize<JsonElement>(line); }
-                catch (JsonException) { continue; }
-                if (record.ValueKind != JsonValueKind.Object || !record.TryGetProperty("module", out var module) ||
-                    module.ValueKind != JsonValueKind.String) continue;
-                if (record.TryGetProperty("error", out var error)) failures[module.GetString()!] = error.ToString();
-                else replayed.Add(module.GetString()!);
-            }
-            if ((result.Code == 0) != (failures.Count == 0) || replayed.Overlaps(failures.Keys) ||
-                !targets.All(name => replayed.Contains(name) || failures.ContainsKey(name)))
-                throw new InvalidOperationException($"Command failed ({result.Code}): {string.Join(' ', command)}\n{result.Output}");
-            return failures;
-        }
-        finally { File.Delete(runner); File.Delete(targetsPath); }
-    }
 
     /// <summary>A Lake dependency of a consumer package: a git checkout pinned by a full revision.</summary>
     sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
@@ -767,6 +702,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static string CertifiedModuleDirectory(string certified) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(certified, ".lake/build/lib/lean")));
 
+    /// <summary>
+    /// The import directories in `leanPath`, read against `session`, without the trusted toolchain's: the certified
+    /// base spelled as `certified` and every other directory spelled under `session`. A directory that lies outside
+    /// the session once links are followed is refused, so no import is read from a directory the session does not hold.
+    /// </summary>
+    static string[] ValidatedConsumerImportDirectories(
+        string session, string trusted, string? certified, string leanPath) =>
+        [.. leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => Path.Combine(session, path))
+            // Lake reports directories with links followed, so each is compared after following links too.
+            .Where(path => !SameLocation(trusted, path))
+            .Select(path => certified is not null && SameLocation(certified, path) ? certified : Within(session, path))
+            .Distinct(LocationComparer)];
+
     (string[] Directories, string LeanPath) ConsumerImportDirectories(string session)
     {
         // Ask the same Lake environment used by the checker. Package buildDir and
@@ -775,18 +724,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .Where(line => line.StartsWith("LEAN_PATH=", StringComparison.Ordinal)).ToArray();
         if (lines.Length != 1) throw new InvalidDataException("Could not resolve consumer Lean import paths.");
         var leanPath = lines[0]["LEAN_PATH=".Length..];
-        // Lake reports directories with links followed, so each is compared after following links too.
-        var trusted = ResolvedPath(Path.Combine(Toolchain, "lib/lean"));
+        var trusted = Path.GetFullPath(Path.Combine(Toolchain, "lib/lean"));
         var certified = library is null ? null : CertifiedModuleDirectory(library);
-        var resolvedCertified = certified is null ? null : ResolvedPath(certified);
-        return (leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => Path.GetFullPath(path, session))
-            .Select(path => (Spelled: path, Resolved: ResolvedPath(path)))
-            .Where(path => !LocationComparer.Equals(path.Resolved, trusted))
-            // Keep the certified base in place; map other imports into the session, spelled as the session is.
-            .Select(path => LocationComparer.Equals(path.Resolved, resolvedCertified)
-                ? certified! : Within(session, path.Spelled))
-            .Distinct(LocationComparer).ToArray(), leanPath);
+        return (ValidatedConsumerImportDirectories(session, trusted, certified, leanPath), leanPath);
     }
 
     // Variables read by Lean, Lake and elan, plus any a consumer's elaborators read
@@ -1074,7 +1014,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         if (methods.Count < 2 || aggregate <= methods[^1].Index)
             return new(ContentKey(source), source, new(StringComparer.Ordinal));
         var localValidation = new Regex(@"(?m)^theorem method([0-9]+)_" +
-            @"(?:coverage|shape|unsafe|division|opaque|vector_initializations)_validated[^\r\n]*\r?\n");
+            @"(?:coverage|shape|declared|unsafe|division|opaque|vector_initializations)_validated[^\r\n]*\r?\n");
         var tail = source[aggregate..];
         var validations = localValidation.Matches(tail).GroupBy(match => int.Parse(match.Groups[1].Value))
             .ToDictionary(group => group.Key, group => string.Concat(group.Select(match => match.Value)));
@@ -1385,12 +1325,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     Report VerifyConsumer(string assembly, string proof, string output, string theorem, string root,
-        string? settings, Action<string>? stage)
+        string? settings, Action<string>? stage, DeepCheckInputs? deepChecks = null, DeepCheckRun? deepRun = null)
     {
         ProofMessages = null;
         VerifiedStatement = null;
         var outcome = VerifyConsumerRequests(root, [new(assembly, output, proof, theorem, settings)],
-            (_, value) => stage?.Invoke(value), batch: false)[0];
+            (_, value) => stage?.Invoke(value), batch: false, deepChecks: deepChecks, deepRun: deepRun)[0];
         ProofMessages = outcome.ProofMessages(proof);
         VerifiedStatement = outcome.Statement;
         if (outcome.Located() is { } error) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(error);
@@ -1410,6 +1350,31 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             .Where(path => Path.GetFileName(path).Contains(".olean", StringComparison.Ordinal))
             .Select(path => (Path.GetRelativePath(directory, path).Replace('\\', '/'), path)));
 
+    /// <summary>Counts each compiled module's recorded parts in one pass.</summary>
+    static Dictionary<string, int> ConsumerArtifactCounts(IEnumerable<string> paths)
+    {
+        Dictionary<string, int> counts = new(StringComparer.Ordinal);
+        foreach (var path in paths)
+        {
+            var module = ModuleName(path);
+            counts[module] = counts.GetValueOrDefault(module) + 1;
+        }
+        return counts;
+    }
+
+    /// <summary>Consumer source roots cannot supply the verifier's binding namespaces.</summary>
+    static void RequireConsumerDeepNamespaces(IEnumerable<string> sourceDirectories)
+    {
+        foreach (var directory in sourceDirectories)
+            foreach (var module in new[] { "StrictBinding", "BindingAudit" })
+            {
+                var source = Path.Combine(directory, module);
+                if (File.Exists(source + ".lean") || (Directory.Exists(source) &&
+                    Directory.EnumerateFiles(source, "*.lean", SearchOption.AllDirectories).Any()))
+                    throw new InvalidDataException("Consumer source uses a reserved deep-check namespace: " + source);
+            }
+    }
+
     // The replay manifest binds exactly the parts consumed by Lean.
     static SortedDictionary<string, string> ConsumerSnapshotParts(
         IReadOnlyDictionary<string, string> artifacts, string modulePath, string path)
@@ -1428,8 +1393,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // `finished` reports each request once its outcome is final, possibly from parallel workspaces.
     ConsumerOutcome[] VerifyConsumerRequests(string root, IReadOnlyList<ConsumerRequest> requests,
         Action<int, string>? stage, bool batch, int parallelism = 1,
-        Action<int, ConsumerOutcome>? finished = null, bool checkOnly = false)
+        Action<int, ConsumerOutcome>? finished = null, bool checkOnly = false, DeepCheckInputs? deepChecks = null,
+        DeepCheckRun? deepRun = null)
     {
+        deepRun = DeepCheckRun.Claim(deepChecks, deepRun);
+        if (deepChecks is not null && (batch || checkOnly || requests.Count != 1 ||
+            requests[0].ExpectRejection || requests[0].ExportAudit is not null))
+            throw new InvalidDataException("Deep checks require one ordinary consumer verification request.");
         var requestClock = System.Diagnostics.Stopwatch.StartNew();
         root = Path.GetFullPath(root);
         if (requests.Any(request => request.ExportAudit is not null) && !freshProofs && !freshLibrary)
@@ -1476,6 +1446,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var all = Enumerable.Range(0, requests.Count).ToArray();
         var identities = new string[requests.Count];
         var extractions = new ExtractionIdentity[requests.Count];
+        IReadOnlyList<DeepCheckInputs.Pin>? matchedPins = null;
         var proofKeys = new string[requests.Count];
         // Symbols.lean hash for requests whose proofs import ExtractedSymbols, else null.
         var symbols = new string?[requests.Count];
@@ -1505,9 +1476,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         foreach (var output in outputs.Distinct(StringComparer.Ordinal))
             File.Delete(Path.Combine(output, "verified.json"));
         var parallel = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism) };
-        void CheckExtractions(int[] members)
+        void CheckExtractions(int[] members, bool reportStage = true)
         {
-            Stage(members, "extraction integrity");
+            if (reportStage) Stage(members, "extraction integrity");
             // Grouped by exact resolved spelling, so every directory is checked whatever its volume's case rule.
             Parallel.ForEach(Pending(members).GroupBy(i => locations[i], StringComparer.Ordinal), parallel, group =>
             {
@@ -1573,11 +1544,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Fail(live, error);
             return outcomes;
         }
-        void Recheck(int[] members)
+        void Recheck(int[] members, bool reportStage = true)
         {
             var started = DateTimeOffset.UtcNow;
             var elapsed = System.Diagnostics.Stopwatch.StartNew();
-            CheckExtractions(members);
+            CheckExtractions(members, reportStage);
             members = Pending(members);
             if (members.Length == 0) return;
             try
@@ -1597,6 +1568,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
         live = Pending(all);
         if (live.Length == 0) return outcomes;
+        if (deepRun is not null)
+        {
+            Stage(live, "arguments");
+            try
+            {
+                extractions[0] = ExtractionIdentity.Read(outputs[0]);
+                matchedPins = deepRun.Begin(extractions[0]);
+            }
+            catch (Exception error)
+            {
+                Fail(live, error);
+                return outcomes;
+            }
+        }
         Stage(live, "Lean library build");
         string certifiedLibrary;
         Dictionary<string, string> certifiedBase;
@@ -1605,6 +1590,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         try
         {
             Library(Inputs(proofs[live[0]], requests[live[0]].Settings));
+            if (deepChecks is not null)
+            {
+                deepRun!.Attempt!.RequireIdentity(ExtractionIdentity.Read(outputs[0]));
+                PrepareBindingLibrary(this.session!);
+            }
             certifiedLibrary = library!;
             certifiedBase = baseModules!.Where(pair =>
                 ModuleName(pair.Key) == "CIL" || ModuleName(pair.Key).StartsWith("CIL.", StringComparison.Ordinal)).ToDictionary();
@@ -1624,7 +1614,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         {
             try
             {
-                extractions[i] = ExtractionIdentity.Read(outputs[i]);
+                extractions[i] ??= ExtractionIdentity.Read(outputs[i]);
                 identities[i] = extractions[i].Sha256;
                 // PDB names bind only proofs that import them; identity.json does not cover the PDB.
                 // A result cached without a statement view must not satisfy a run that prints one.
@@ -1632,14 +1622,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     (symbols[i] is null ? "" : "\n" + symbols[i]) + (viewsStatement ? "\nstatement-view" : "") +
                     ProofOptionsKey +
                     (requests[i].Statement is { } statement ? "\nstatement " + JsonSerializer.Serialize(statement) : ""));
-                if (checkOnly || requests[i].ExpectRejection || ReferenceOnlyImports(extractions[i])) continue;
+                if (deepChecks is not null || checkOnly || requests[i].ExpectRejection ||
+                    ReferenceOnlyImports(extractions[i])) continue;
                 var receipt = Path.Combine(Path.GetTempPath(), "leancil-consumer-receipt-" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(receipt);
                 try
                 {
                     if (!RestoreSuccess(proofKeys[i], receipt)) continue;
-                    var report = JsonSerializer.Deserialize<Report>(File.ReadAllText(Path.Combine(receipt, "report.json")))!;
-                    if (report.schema != 4) continue;
+                    // A receipt whose certificate this run does not accept is a miss, never a failure.
+                    if (ReadCertificate(File.ReadAllText(Path.Combine(receipt, "report.json")), BindingMode.Default,
+                        out _) is not { } report) continue;
                     var cachedMessages = Path.Combine(receipt, ProofMessagesFile);
                     outcomes[i].Messages = File.Exists(cachedMessages)
                         ? JsonSerializer.Deserialize<ProofMessage[]>(File.ReadAllText(cachedMessages)) : null;
@@ -1661,7 +1653,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 JsonElement current = extractions[i].Root;
                 var report = JsonSerializer.Deserialize<Report>(outcomes[i].Detail!)! with
                 {
-                    schema = 4, identitySha256 = identities[i],
+                    identitySha256 = identities[i],
                     assemblySha256 = Sha(requests[i].Assembly), inputs = before[i], imports = PublishedImports(current),
                     contractImports = ContractImportAssumptions(current), contractDependencies = DeploymentDependencies(current)
                 };
@@ -1726,6 +1718,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
         void VerifyGroup(int[] members, string session, bool first, bool share)
         {
+            void RequireDeepBindingStable()
+            {
+                if (deepChecks is not null) RequirePreparedBindingLibrary();
+            }
+            var bindingModules = deepChecks is null ? null : CertifiedModuleDirectory(bindingSession!);
+            (string[] Directories, string LeanPath) ImportDirectories()
+            {
+                var resolved = ConsumerImportDirectories(session);
+                if (bindingModules is null) return resolved;
+                RequireDeepBindingStable();
+                return ([.. resolved.Directories, bindingModules],
+                    resolved.LeanPath + Path.PathSeparator + bindingModules);
+            }
             var components = componentPlans[members[0]];
             bool checkRejectedProofs = members.Any(index => requests[index].ExpectRejection);
             Dictionary<string, string> bound = new(WithExtraction(sources, Sha(Path.Combine(outputs[members[0]], "Extracted.lean"))), StringComparer.Ordinal);
@@ -1761,6 +1766,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     i => requestModules[i], i => requests[i].ExportAudit!.Source, StringComparer.Ordinal),
                 generatedSources: generatedSources, components: components, checkRejectedProofs: checkRejectedProofs);
             var generatedPackage = prepared.Generated;
+            if (deepChecks is not null)
+            {
+                var frameworkCopy = Within(session, Path.GetRelativePath(root,
+                    dependencies.Single(dependency => dependency.Name == "leancil").Source));
+                var packageRoots = dependencies.Where(dependency => dependency.Name != "leancil")
+                    .Select(dependency => Within(session, Path.GetRelativePath(root, dependency.Source)))
+                    .Prepend(session);
+                var pathComparison = OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                RequireConsumerDeepNamespaces(ConsumerSourceDirectories(session, packageRoots)
+                    .Where(directory => !directory.Equals(frameworkCopy, pathComparison) &&
+                        (directory.Equals(session, pathComparison) ||
+                         directory.StartsWith(session + Path.DirectorySeparatorChar, pathComparison))));
+            }
             foreach (var member in members) outcomes[member].Sources = prepared.Sources;
             var generatedInputPaths = prepared.Copied.Keys.Where(path =>
                     path.StartsWith(generatedPackage + Path.DirectorySeparatorChar, StringComparison.Ordinal))
@@ -1788,11 +1807,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (!first && relativeImportDirectories.Length > 0)
                 initialImportDirectories = relativeImportDirectories.Select(path => Path.GetFullPath(path, session)).ToArray();
             else if (!first)
-                initialImportDirectories = ConsumerImportDirectories(session).Directories;
+                initialImportDirectories = ImportDirectories().Directories;
             else
             {
-                initialImportDirectories = ConsumerImportDirectories(session).Directories;
-                relativeImportDirectories = initialImportDirectories.Select(path => Path.GetRelativePath(session, path)).ToArray();
+                initialImportDirectories = ImportDirectories().Directories;
+                relativeImportDirectories = initialImportDirectories.Where(path => path != bindingModules)
+                    .Select(path => Path.GetRelativePath(session, path)).ToArray();
                 // Lean sources are bound per module inside each generation, not by this key.
                 var configuration = prepared.Copied.Where(pair => Path.GetFileName(pair.Key) is "lakefile.toml" or "lakefile.lean" or "lake-manifest.json" or "lean-toolchain")
                     .OrderBy(pair => pair.Key, StringComparer.Ordinal)
@@ -1802,6 +1822,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 supportArtifacts = RestoreConsumerSupport(supportKey, bound, support, dependent: false);
             }
             RestorePortableSupport(session, trusted);
+            RequireDeepBindingStable();
             var sharedRecord = ReadConsumerSupportRecord(Path.Combine(support, ConsumerSupportRecordName));
             // Initial persistent restoration already selected and authenticated this bound
             // closure; its copied artifacts do not include the support manifest.
@@ -1818,6 +1839,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 File.Copy(Within(support, file), target, true);
             }
             if (restoredArtifacts.Count > 0) CacheProgress("certified consumer support library");
+            RequireDeepBindingStable();
             var certificateRestoration = new SortedDictionary<string, string>(restoredArtifacts, StringComparer.Ordinal);
             // Not part of restoredArtifacts: these are rebuilt only if stale and always replayed.
             SortedDictionary<string, string> RestoreCertificateSupport(string key, bool? dependent,
@@ -1836,6 +1858,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         certificateRestoration[file] = dependentFiles[file];
                     }
                     if (dependentFiles.Count > 0) CacheProgress("certified extraction-dependent consumer modules");
+                    RequireDeepBindingStable();
                     return dependentFiles;
                 }
                 finally { Directory.Delete(own, true); }
@@ -1853,9 +1876,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     progress: "Compiling published contract interfaces");
                 // The audit, the replay and the proof must all read the bytes compiled here.
                 acceptedInterfaceArtifacts = InterfaceArtifacts();
-                string interfaceLeanPath = ConsumerImportDirectories(session).LeanPath;
+                string interfaceLeanPath = ImportDirectories().LeanPath;
                 Stage(members, "kernel replay");
                 RequireInterfaceArtifacts();
+                RequireDeepBindingStable();
                 string InterfaceArtifact(string module) =>
                     Path.Combine(generatedPackage, ".lake/build/lib/lean", module.Replace('.', '/') + ".olean");
                 if (!TryReplayContractInterfaces(extractions[members[0]], interfaceModules, interfaceLeanPath,
@@ -1999,6 +2023,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             string[] command = ["lake", "build", .. names.Select(name => "+" + name + ":olean")];
             var build = Execute(command, session, progress: "Building fresh consumer proof and dependencies",
                 internalErrors: false);
+            RequireDeepBindingStable();
             RequireExtractionArtifacts();
             RequireGeneratedArtifacts();
             FailInternalErrors(members, names, command, build.Code, build.Output);
@@ -2010,7 +2035,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (buildFailure is null || members.Length > 1)
             {
                 if (members.Length == 1) Stage(members, "kernel replay");
-                (importDirectories, leanPath) = ConsumerImportDirectories(session);
+                (importDirectories, leanPath) = ImportDirectories();
                 // Lake writes a module's olean and trace only after it checks successfully.
                 built = names.Select(name => importDirectories.Any(directory =>
                     File.Exists(Path.Combine(directory, name + ".olean")) && File.Exists(Path.Combine(directory, name + ".trace")))).ToArray();
@@ -2081,6 +2106,43 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     : ConsumerArtifactSnapshot(directory);
             var artifactSnapshots = importDirectories.Where(Directory.Exists)
                 .Select(directory => (Directory: directory, Artifacts: DirectoryArtifacts(directory))).ToArray();
+            DeepSessionContribution? deep = null;
+            if (deepChecks is not null)
+            {
+                foreach (var (_, artifacts) in artifactSnapshots)
+                    if (artifacts.Keys.Any(path => ModuleName(path) is "BindingAudit" ||
+                        ModuleName(path).StartsWith("BindingAudit.", StringComparison.Ordinal)))
+                        throw new InvalidDataException("Consumer module uses the reserved BindingAudit namespace.");
+                var extractedPaths = artifactSnapshots.SelectMany(snapshot => snapshot.Artifacts.Keys
+                    .Where(path => path == "Extracted.olean")
+                    .Select(path => Path.Combine(snapshot.Directory, path))).ToArray();
+                if (extractedPaths.Length != 1 || !LocationComparer.Equals(extractedPaths[0],
+                    Path.Combine(generatedModules, "Extracted.olean")))
+                    throw new InvalidDataException("Deep checks require the consumer's generated Extracted module.");
+                if (Directory.Exists(Path.Combine(session, "BindingAudit")) ||
+                    File.Exists(Path.Combine(session, "BindingAudit.lean")))
+                    throw new InvalidDataException("Consumer source uses the reserved BindingAudit namespace.");
+                SortedDictionary<string, string> PhysicalArtifacts() => new(artifactSnapshots
+                    .SelectMany(snapshot => DirectoryArtifacts(snapshot.Directory).Select(pair =>
+                        KeyValuePair.Create(Path.GetFullPath(Path.Combine(snapshot.Directory, pair.Key)), pair.Value)))
+                    .ToDictionary(), StringComparer.Ordinal);
+                var priorArtifacts = PhysicalArtifacts();
+                Stage(proceeding, "deep checks");
+                RequireDeepBindingStable();
+                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts());
+                var deepRoot = Path.Combine(session, ".deep-checks");
+                Directory.CreateDirectory(deepRoot);
+                leanPath += Path.PathSeparator + deepRoot;
+                deep = BuildDeepSession(deepRoot, leanPath, extractedPaths[0],
+                    extractions[members[0]], matchedPins!, () => Stage(proceeding, "deep-check sources"));
+                importDirectories = [.. importDirectories, deepRoot];
+                artifactSnapshots = [.. artifactSnapshots.Select(snapshot =>
+                    (snapshot.Directory, Artifacts: DirectoryArtifacts(snapshot.Directory))),
+                    (deepRoot, ConsumerArtifactSnapshot(deepRoot))];
+                RequireOnlyAdded(priorArtifacts, PhysicalArtifacts(), [.. deep.Artifacts
+                    .Where(pair => pair.Key != "Extracted").Select(pair => Path.ChangeExtension(pair.Value, null)!) ]);
+                RequireDeepBindingStable();
+            }
             // The module parts on the import path now, in the shape of the replay manifest.
             Dictionary<string, SortedDictionary<string, string>> ImportArtifactParts() => importDirectories
                 .Where(Directory.Exists).SelectMany(directory =>
@@ -2094,6 +2156,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 })
                 .OrderBy(pair => pair.Name, StringComparer.Ordinal).ToDictionary(pair => pair.Name, pair => pair.Parts);
             var baseUnchanged = importDirectories.Any(path => LocationComparer.Equals(path, frameworkModules));
+            var certifiedCounts = ConsumerArtifactCounts(certifiedBase.Keys);
+            var interfaceCounts = ConsumerArtifactCounts(acceptedInterfaceArtifacts.Keys);
+            var preparedArtifacts = bindingPreparation?.SessionArtifacts;
+            var preparedCounts = ConsumerArtifactCounts(preparedArtifacts?.Keys ?? Enumerable.Empty<string>());
             var moduleNames = new HashSet<string>(StringComparer.Ordinal);
             var discovered = new List<(string Name, bool Certified)>();
             foreach (var (directory, artifacts) in artifactSnapshots)
@@ -2104,8 +2170,18 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     if (File.Exists(Path.Combine(Toolchain, "lib/lean", module.Key.Replace('.', '/') + ".olean")))
                         throw new InvalidDataException("Consumer module shadows the trusted Lean toolchain: " + module.Key);
                     var unchanged = LocationComparer.Equals(directory, frameworkModules) &&
-                        module.Count() == certifiedBase.Count(pair => ModuleName(pair.Key) == module.Key) &&
+                        module.Count() == certifiedCounts.GetValueOrDefault(module.Key) &&
                         module.All(pair => certifiedBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
+                    bool preparedBinding = bindingModules is not null &&
+                        LocationComparer.Equals(directory, bindingModules) &&
+                        module.Count() == preparedCounts.GetValueOrDefault(module.Key) &&
+                        module.All(pair => preparedArtifacts!.TryGetValue(pair.Key, out var hash) &&
+                            hash == pair.Value);
+                    if (deep is not null && !preparedBinding &&
+                        (module.Key == "StrictBinding" ||
+                            module.Key.StartsWith("StrictBinding.", StringComparison.Ordinal)))
+                        throw new InvalidDataException(
+                            "Consumer module shadows the prepared StrictBinding library: " + module.Key);
                     if (!unchanged && (module.Key == "CIL" || module.Key.StartsWith("CIL.", StringComparison.Ordinal)))
                         baseUnchanged = false;
                     var certifiedSupport = supportUnchanged && module.All(pair =>
@@ -2115,10 +2191,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     });
                     bool publishedInterface = LocationComparer.Equals(directory, generatedModules) &&
                         interfaceModuleNames.Contains(module.Key);
-                    if (publishedInterface && (module.Count() != acceptedInterfaceArtifacts.Count(pair => ModuleName(pair.Key) == module.Key) ||
+                    if (publishedInterface && (module.Count() != interfaceCounts.GetValueOrDefault(module.Key) ||
                         module.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value)))
                         throw new InvalidDataException("Published contract interface artifacts changed after their closure audit: " + module.Key);
-                    discovered.Add((module.Key, unchanged || certifiedSupport || publishedInterface));
+                    discovered.Add((module.Key,
+                        unchanged || preparedBinding || certifiedSupport || publishedInterface));
                 }
             }
             if (!moduleNames.Contains("Extracted") || (checkRejectedProofs && !moduleNames.Contains("ExtractionAudit")) ||
@@ -2133,7 +2210,34 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 .ToDictionary(pair => pair.Name, pair => pair.Path, StringComparer.Ordinal);
             var checkedArtifacts = JsonSerializer.Serialize(mainArtifacts.OrderBy(pair => pair.Name, StringComparer.Ordinal)
                 .ToDictionary(pair => pair.Name, pair => pair.Parts));
-            var portableSupport = ImportedConsumerSupport(session, trusted, currentArtifacts);
+            var checkedPhysicalArtifacts = deep is null ? null : BindingArtifactHashes(currentArtifacts.Values);
+            void RequireDeepStable()
+            {
+                if (deep is null) return;
+                deep.RequireStable();
+                RequireDeepBindingStable();
+                RequireExtractionArtifacts();
+                RequireGeneratedArtifacts();
+                RequireInterfaceArtifacts();
+                if (!Same(checkedPhysicalArtifacts!, BindingArtifactHashes(currentArtifacts.Values)) ||
+                    checkedArtifacts != JsonSerializer.Serialize(ImportArtifactParts()) ||
+                    prepared.Copied.Any(pair => !File.Exists(pair.Key) || Sha(pair.Key) != pair.Value))
+                    throw new InvalidDataException("Deep-check consumer sources or compiled artifacts changed.");
+            }
+            void RequireDiagnosticInputs()
+            {
+                if (auditExecutable is not null) CheckedAuditExecutable();
+                Recheck(proceeding, reportStage: false);
+                foreach (var index in proceeding)
+                {
+                    if (!Live(index)) throw outcomes[index].Error!;
+                    deepRun?.Attempt?.RequireIdentity(extractions[index]);
+                }
+                RequireCertifiedLibraryContents();
+                RequireDeepStable();
+            }
+            var portableSupport = ImportedConsumerSupport(session, trusted, currentArtifacts,
+                publishReceipts: deepChecks is null);
             var graph = members.Length > 1 || share || UseSuccessCache || exporting || restoredArtifacts.Count > 0 || symbolHash is not null
                 ? ConsumerModuleImports(session, currentArtifacts) : null;
             // Cached support was checked against another Extracted or PDB, so its importers are always replayed.
@@ -2142,6 +2246,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             var replayTargets = discovered.Where(module =>
                 !baseUnchanged || extractionDependent.Contains(module.Name) ||
                 (!module.Certified && !portableSupport.Contains(module.Name))).Select(module => module.Name).ToArray();
+            if (deep is not null)
+                replayTargets = [.. replayTargets.Concat(deep.Modules).Distinct(StringComparer.Ordinal)];
             Dictionary<int, AuditedOleans>? combinedAudits = null;
             bool jointReplayRejected = false;
             bool jointReplaySucceeded = false;
@@ -2152,7 +2258,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             bool completeConsumerReplay = discovered.All(module => module.Name == "CIL" ||
                 module.Name.StartsWith("CIL.", StringComparison.Ordinal) || replayedNames.Contains(module.Name));
             string[] AuditModules(int index) => [requestModules[index], "Extracted",
-                .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>(),
+                .. deep?.Modules.Where(module => module != "Extracted") ?? []];
+            AuditRequest[] BindingRequestsForConsumer() => deep is null
+                ? [ExtractionCertificate("Extracted.translation_valid")]
+                : [.. deep.Requests.Select(request => request.Audit)];
+            if (deep is not null && deep.Requests.Any(request => request.Audit.name == requests[members[0]].Theorem))
+                throw new InvalidDataException("Proof theorem collides with a deep-check request: " +
+                    requests[members[0]].Theorem);
             AuditRequest Statemented(int index, AuditRequest audit) =>
                 requests[index].Statement?.Apply(audit) ?? audit;
             AuditRequest ScopedProof(int index)
@@ -2166,6 +2279,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             static bool RetainScopedAudit(string? error) => error is null || error.StartsWith(
                 "Theorem dependency is outside its request's import closure:", StringComparison.Ordinal);
+            RequireDeepStable();
             if (replayTargets.Length > 0 && fullImportAudit is null &&
                 (members.Length == 1 || completeConsumerReplay) &&
                 proceeding.All(index => (requests[index].ExportAudit is null || members.Length == 1) &&
@@ -2178,10 +2292,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     var proofAudits = exportAudit?.Theorems ?? proceeding.Select(ScopedProof).ToArray();
                     var audited = AuditOleans(leanPath,
                         proceeding.SelectMany(AuditModules).Distinct(StringComparer.Ordinal).ToArray(),
-                        [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")],
+                        [.. proofAudits, .. BindingRequestsForConsumer()],
                         premise, closures: exportAudit?.Closures, replayTargets: replayTargets);
                     jointReplaySucceeded = true;
-                    combinedAudits = exportAudit is not null
+                    combinedAudits = exportAudit is not null || deep is not null
                         ? new Dictionary<int, AuditedOleans> { [proceeding[0]] = audited }
                         : proceeding.Select((index, position) => (index, position))
                         // A conservative owner scope may omit a transitive toolchain import.
@@ -2202,10 +2316,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             HashSet<string>? RequestClosure(int index) => graph is null ? null
                 : ImportClosure(graph, [requestModules[index], "Extracted",
                     .. checkRejectedProofs ? new[] { "ExtractionAudit" } : [],
-                    .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>()]);
+                    .. HasContractImports(extractions[index]) ? ["ExtractedImports"] : Array.Empty<string>(),
+                    .. deep?.Modules ?? []]);
             var failures = new Dictionary<string, string>();
             if (!jointReplaySucceeded)
             {
+                if (deep is not null) RequireDiagnosticInputs();
                 if (members.Length == 1)
                     // The failed fused audit already tried this exact joint target set.
                     failures = jointReplayRejected
@@ -2247,6 +2363,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         foreach (var (module, error) in own) failures.TryAdd(module, error);
                     }
             }
+            if (deep is not null && failures.Count > 0)
+            {
+                Stage(proceeding, "replay diagnostics");
+                RequireDiagnosticInputs();
+                Dictionary<string, ReplayRejection>? rejections = null;
+                try
+                {
+                    rejections = DiagnoseReplayFailures(session, deep.OwnedFailures(failures.Keys), leanPath);
+                }
+                catch (Exception) { }
+                RequireDiagnosticInputs();
+                if (rejections is not null) deep.RejectReplay(rejections, deepRun?.Attempt);
+            }
             foreach (var i in proceeding)
             {
                 // A request depends only on its own proof's import closure and the extraction certificate.
@@ -2259,7 +2388,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             proceeding = Pending(proceeding);
             if (proceeding.Length == 0) return;
             // Audit the certificate and proof in one import environment containing only replayed oleans.
-            var audits = new Dictionary<int, (string Audit, string[] Axioms, AuditedOleans Result)>();
+            var audits = new Dictionary<int,
+                (string Audit, string[] Axioms, AuditedOleans Result, AuditedTheorem Proof)>();
             string certificateText = "";
             foreach (var i in proceeding)
             {
@@ -2267,20 +2397,37 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 {
                     Stage([i], "extraction certificate audit");
                     var module = requestModules[i];
-                    string[] auditModules = [module, "Extracted",
-                        .. HasContractImports(extractions[i]) ? ["ExtractedImports"] : Array.Empty<string>()];
+                    string[] auditModules = AuditModules(i);
                     AuditRequest[] proofAudits = requests[i].ExportAudit?.Theorems ??
                         [Statemented(i, ProofTheorem(requests[i].Theorem, extractions[i]))];
                     var audited = combinedAudits?.GetValueOrDefault(i) ?? AuditOleans(leanPath, auditModules,
-                        [.. proofAudits, ExtractionCertificate("Extracted.translation_valid")], ImportPremise(extractions[i]),
+                        [.. proofAudits, .. BindingRequestsForConsumer()], ImportPremise(extractions[i]),
                         closures: requests[i].ExportAudit?.Closures);
                     foreach (string audit in auditModules) RequireAuditedModule(audited, audit, currentArtifacts[audit]);
-                    AuditedAxioms(audited.theorems[^1]);
-                    certificateText = AuditText(audited.theorems[^1]);
+                    var namedAudits = audited.theorems.ToDictionary(result => result.name, StringComparer.Ordinal);
+                    var expectedNames = proofAudits.Concat(BindingRequestsForConsumer())
+                        .Select(request => request.name).ToHashSet(StringComparer.Ordinal);
+                    if (!expectedNames.SetEquals(namedAudits.Keys))
+                        throw new InvalidDataException("Consumer audit returned an unexpected theorem set.");
+                    var certificateAudit = namedAudits["Extracted.translation_valid"];
+                    AuditedAxioms(certificateAudit);
+                    certificateText = AuditText(certificateAudit);
                     Stage([i], "theorem audit");
                     RequireAuditedConstants(audited);
+                    deep?.RequireAudited(audited);
+                    deepRun?.Attempt?.RequireIdentity(extractions[i]);
+                    if (deep is not null)
+                    {
+                        Recheck([i], reportStage: false);
+                        if (!Live(i)) throw outcomes[i].Error!;
+                        RequireCertifiedLibraryContents();
+                    }
+                    RequireDeepStable();
+                    deep?.RequireTheorems(audited, [.. proofAudits, .. BindingRequestsForConsumer()],
+                        deepRun?.Attempt);
                     foreach (AuditedTheorem checkedTheorem in audited.theorems) AuditedAxioms(checkedTheorem);
-                    audits[i] = (AuditText(audited.theorems[0]), AuditedAxioms(audited.theorems[0]), audited);
+                    var proofAudit = namedAudits[proofAudits[0].name];
+                    audits[i] = (AuditText(proofAudit), AuditedAxioms(proofAudit), audited, proofAudit);
                 }
                 catch (Exception error) { Fail([i], error); }
             }
@@ -2294,6 +2441,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 throw new InvalidOperationException("Sources changed in the fresh consumer build");
             if (checkedArtifacts != JsonSerializer.Serialize(ImportArtifactParts()))
                 throw new InvalidOperationException("Compiled artifacts changed during consumer verification");
+            RequireDeepStable();
             bool contractExportAudit = proceeding.Any(i => requests[i].ExportAudit is not null);
             foreach (int i in proceeding)
                 requests[i].ExportAudit?.Checked(session, requestModules[i], leanPath, audits[i].Result);
@@ -2301,6 +2449,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             foreach (int i in proceeding)
                 if (fullImportAudit is not null)
                     fullResults.Add(i, fullImportAudit(outputs[i], session, requestModules[i], leanPath));
+            RequireDeepStable();
             if (contractExportAudit || fullImportAudit is not null)
             {
                 // Only callbacks can run further verification code after the first recheck.
@@ -2316,13 +2465,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             }
             // Publish only after the complete declaration replay, exact theorem
             // audit, extraction recheck and source-stability checks succeeded.
-            if (failures.Count == 0 && graph is not null)
+            void PublishSupport()
             {
+                if (failures.Count != 0 || graph is null) return;
+                RequireDeepStable();
                 var dependent = DependentModules(graph,
                     ["Extracted", "ExtractedSymbols", "ExtractionAudit", .. names, .. components.Sources.Keys]);
                 // Extraction-dependent modules are recorded too, bound to this Extracted; export uses only the others.
                 // Records bind no PDB names, so importers of ExtractedSymbols stay unbound and are never cached.
                 var excluded = DependentModules(graph, names);
+                if (deep is not null)
+                {
+                    excluded.UnionWith(deep.Modules.Where(module => module != "Extracted"));
+                    excluded.UnionWith(preparedCounts.Keys);
+                }
                 excluded.Add("ExtractedSymbols");
                 excluded.UnionWith(members.SelectMany(member => selections[member]).Where(SelectionModules.IsSymbols));
                 var collected = UseSuccessCache || share || exporting
@@ -2330,15 +2486,35 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 try
                 {
                     if (exporting)
+                    {
+                        RequireDeepStable();
+                        void RequireNormalizedSupportStable()
+                        {
+                            Stage(proceeding, "support normalization");
+                            Recheck(proceeding);
+                            foreach (var member in proceeding)
+                                if (!Live(member))
+                                    throw outcomes[member].Error ?? new InvalidOperationException(
+                                        "Consumer request ended during support normalization.");
+                            RequireDeepStable();
+                        }
                         AddExportedSupport(export, session, root, before[proceeding[0]],
-                            currentArtifacts.Where(pair => !dependent.Contains(pair.Key)).ToDictionary(), graph, collected);
+                            currentArtifacts.Where(pair => !dependent.Contains(pair.Key) &&
+                                (deep is null || !excluded.Contains(pair.Key))).ToDictionary(), graph, collected,
+                            publishReceipts: deep is null,
+                            requireStable: deep is null ? null : RequireNormalizedSupportStable);
+                    }
                     if (collected is not null)
                     {
                         if (UseSuccessCache && Same(generatedInputs, GeneratedInputs()))
+                        {
+                            RequireDeepStable();
                             PublishConsumerCertificateSupport(certificateSupportKey, collected,
                                 certificateModules.ToHashSet(StringComparer.Ordinal));
+                        }
                         if (supportKey.Length > 0)
                         {
+                            RequireDeepStable();
                             PublishSuccess(supportKey + "-" + Sha(Path.Combine(collected, ConsumerSupportRecordName)), collected, supportKey);
                             if (UseSuccessCache) EvictStaleSupport();
                         }
@@ -2357,6 +2533,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                 }
                 finally { if (collected is not null && Directory.Exists(collected)) Directory.Delete(collected, true); }
             }
+            if (deep is null) PublishSupport();
             // Read from the audited proof module after every check above; the receipt caches it with the result.
             void ShowConsumerProof(int i, string receipt)
             {
@@ -2373,8 +2550,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     ? assumptions.Deserialize<string[]>() : [];
                 RequireImplementationImports(extractions[i]);
                 fullResults.TryGetValue(i, out FullImportResult? fullResult);
-                var report = new Report(4, Sha(requests[i].Assembly), identities[i], requests[i].Theorem, audits[i].Axioms,
-                    audits[i].Audit, before[i], libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
+                var report = new Report(CertificateSchema, Sha(requests[i].Assembly), identities[i],
+                    requests[i].Theorem, audits[i].Axioms, audits[i].Audit, before[i],
+                    deepChecks is null ? BindingSection.Default : DeepBindingSection(deepChecks, matchedPins!,
+                        new(bindingSourcesKey!,
+                            File.ReadAllText(Path.Combine(bindingSession!, "lean-toolchain")).Trim(),
+                            Sha(LeanExecutable))),
+                    libraryKey, "consumer-" + libraryBuild, extractionAudit, initializedTypes,
                     consumerSupportSha256: baseUnchanged && portableSupport.Count > 0
                         ? Environment.GetEnvironmentVariable("LEANCIL_CONSUMER_SUPPORT_SHA256") : null,
                     staticValues: StaticValueAssumptions(extraction),
@@ -2384,12 +2566,20 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                     contractDependencies: fullResult?.Dependencies ?? DeploymentDependencies(extraction),
                     compositionTheorem: fullResult?.Theorem, compositionAudit: fullResult?.Audit,
                     initializationAssumptions: InitializationAssumptions(extraction),
-                    statementIdentity: requests[i].Statement is null ? null : Identity(audits[i].Result.theorems[0]));
+                    statementIdentity: requests[i].Statement is null ? null : Identity(audits[i].Proof));
                 var receipt = Path.Combine(session, "certified-result-" + i);
                 Directory.CreateDirectory(receipt);
                 File.WriteAllText(Path.Combine(receipt, "report.json"), JsonSerializer.Serialize(report, Json));
                 ShowConsumerProof(i, receipt);
-                PublishSuccess(proofKeys[i], receipt);
+                if (deep is not null)
+                {
+                    Recheck([i]);
+                    if (!Live(i)) continue;
+                    RequireDeepStable();
+                    PublishSupport();
+                    RequireDeepStable();
+                }
+                if (deep is null) PublishSuccess(proofKeys[i], receipt);
                 if (last[locations[i]] == i)
                     File.WriteAllText(Path.Combine(outputs[i], "verified.json"),
                         JsonSerializer.Serialize(report, Json) + "\n");

@@ -1,4 +1,6 @@
 import CIL.Extraction.Scalars
+import CIL.Extraction.Translation
+import CIL.Safety.Execution
 
 /-! # Independent certificate rejection of forged stack allocation metadata -/
 
@@ -11,20 +13,51 @@ private def raw : RawMethod := {
   returnType := .void, parameters := [], locals := [], initLocals := false
   maxStack := 1, genericParameters := [], code := [⟨0, 65039, .none⟩] }
 
+/-- The emitted body: `localloc` under the signature the raw method declares. -/
+private def emitted : Method :=
+  { code := [.localloc], locals := [], returnsValue := false, declared := .ofRaw raw }
+
+/-- The emitted body's shape and declared signature, localsinit flag included, are the raw
+    method's. -/
+theorem shape_matches_metadata : MethodShapeValid raw emitted ∧ DeclaredValid raw emitted := by
+  decide
+#print axioms shape_matches_metadata
+
 /-- Raw uninitialized storage cannot be emitted as initialized storage. -/
 theorem forged_initialization_rejected :
-    featureOpMatches #[] raw ⟨0, 65039, .none⟩ (.stackAlloc true) = false := by decide +kernel
+    ¬ DeclaredValid raw
+      { emitted with declared := { emitted.declared with initLocals := true } } := by decide
 #print axioms forged_initialization_rejected
 
-/-- An initialized raw method admits its matching flag. -/
-theorem initialization_matches_metadata :
-    featureOpMatches #[] { raw with initLocals := true } ⟨0, 65039, .none⟩ (.stackAlloc true) =
-      true := by decide +kernel
-#print axioms initialization_matches_metadata
+/-- Empty memory with a stack budget, for stepping `emitted`. -/
+private def memory : CIL.Safety.Memory := {
+  allocations := fun _ => none
+  cells := fun _ _ => ⟨0, false⟩
+  views := []
+  nextIdentity := 0
+  stackLimit := 32 }
+
+/-- A frame with no locals or owned storage. -/
+private def frame : CIL.Safety.Frame := { activation := 0, locals := [], owned := [] }
+
+/-- `localloc` faults unless the byte count is the only stack item: a size with another item
+    below it and an empty stack both fault before allocating. -/
+theorem malformed_stack_faults :
+    CIL.Safety.step emitted .localloc 0 [] frame
+        ([.scalar (.i32 1), .scalar (.i32 4)] : List CIL.Safety.Value) memory =
+      .error .invalidState ∧
+    CIL.Safety.step emitted .localloc 0 [] frame [] memory = .error .invalidState := by
+  constructor <;> rfl
+#print axioms malformed_stack_faults
+
+/-- The raw opcode admits the emitted `localloc`. -/
+theorem allocation_matches_opcode :
+    featureOpMatches #[] raw ⟨0, 65039, .none⟩ .localloc = true := by decide +kernel
+#print axioms allocation_matches_opcode
 
 /-- Another opcode cannot inject a dynamic allocation into the emitted program. -/
 theorem injected_allocation_rejected :
-    featureOpMatches #[] raw ⟨0, 0, .none⟩ (.stackAlloc false) = false := by decide +kernel
+    featureOpMatches #[] raw ⟨0, 0, .none⟩ .localloc = false := by decide +kernel
 #print axioms injected_allocation_rejected
 
 /-- localloc requires the size to be the only stack item. -/

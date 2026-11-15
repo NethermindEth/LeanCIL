@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -15,6 +20,7 @@ using Mono.Cecil;
 using X86Aes = System.Runtime.Intrinsics.X86.Aes;
 
 using Program verification = new();
+Run(["lake", "build", "Tests.ExactIntrinsics"], verification.CheckoutPackage());
 string assembly = At("Examples/Assembly/bin/Examples.dll");
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
 Dictionary<string, string> selectors = metadata.GetType("Examples.DivisionIntrinsics").Methods
@@ -133,11 +139,11 @@ foreach ((string name, ulong left, ulong right, ulong expected, bool wide) in ne
     string BroadcastProof(string operation, int lane, string lemma) =>
         $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastBinary_word " +
         $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
-        $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
+        $"rfl rfl rfl rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
     string ShiftProof(string operation, int lane, string lemma) =>
         $"exact congrArg (Except.map Prod.snd) (CIL.Safety.invoke_broadcastShift " +
         $"Extracted.profile .{operation} {lane} {left} {right} {expected} CIL.Safety.Memory.empty " +
-        $"rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
+        $"rfl rfl rfl rfl (by decide) (CIL.Safety.checked_broadcast_{lemma} {left} {right}))";
     File.WriteAllText(proof, "import Extracted\nimport Tests.Support\n" +
         "import CIL.Safety.IntrinsicExecution\nnamespace ExampleProof\n" +
         (wide ? "private theorem ok_of_toOption {error value : Type} {result : Except error value} {expected : value}\n" +
@@ -230,7 +236,7 @@ const int ShuffleCases = 12;
 var shuffleRandom = new Random(0x5348);
 foreach ((string name, int width, string profile, string unavailable, string feature) in new[]
 {
-    ("Shuffle256", 32, "x64-v3", "x64-sse42", "Avx2"), ("Shuffle128", 16, "x64-sse42", "x64-sse2", "Ssse3")
+    ("Shuffle256", 32, "x64-v3", "x64-sse42", "Avx2"), ("Shuffle128", 16, "x64-sse42", "scalar", "Ssse3")
 })
 {
     var cases = new List<(byte[] Source, byte[] Control)>();
@@ -283,7 +289,7 @@ foreach ((string name, int width, string profile, string unavailable, string fea
     foreach ((int sourceLength, int controlLength, int pc) in new[] { (width - 1, width, 1), (width, width - 1, 3) })
     {
         claims.Add(Claim(sourceLength, controlLength, "[]", "[]",
-            $".error ⟨0, {pc}, .thrown \"System.ArgumentOutOfRangeException\"⟩"));
+            $".error ⟨0, {pc}, .thrown .argumentOutOfRange⟩"));
         proofs.Add("by rfl");
     }
     File.WriteAllText(proof, $$"""
@@ -654,7 +660,7 @@ foreach ((string name, string theorem, string before, string after, string valid
 }
 rejectedEndian.Check();
 
-// PMULUDQ runs on the host CPU and its x64-sse2 extraction must return the same products.
+// PMULUDQ runs on the host CPU and its x64-sse42 extraction must return the same products.
 // Lanes with set high halves and both 32-bit extremes come first, then seeded random words.
 const int MultiplyCases = 12;
 var multiplyRandom = new Random(0x4d55);
@@ -717,7 +723,7 @@ File.WriteAllText(multiplyProof, $$"""
     #print axioms correctness
     end ExampleProof
     """);
-pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse2",
+pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse42",
     () => Console.WriteLine($"PASS MultiplyEven128 matches the host CPU on {multiplyClaims.Length} inputs")));
 Flush();
 // Without SSE2 the reachable call is rejected before any evidence is written.

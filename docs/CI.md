@@ -239,7 +239,8 @@ A source is measured on each tree by the run that verifies it:
   reported as unmeasured. Each extracted method's instruction equations are one row, named for
   its `cil_instruction_equations` command. A directory is measured only while it holds the report
   of an accepted proof, so a suite that also checks rejected proofs against an extraction verifies
-  the accepted one last.
+  the accepted one last. A report that is not a certificate a default `verify` accepts, by its
+  schema and binding section, leaves its directory unmeasured.
 
 ### Row measurement
 
@@ -350,7 +351,9 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
   functions: `step`, `run`, `invoke`, `pureArity`, `scalars`, `instructionStep`,
   `staticInstruction`, `checkedIntrinsic`, `checkedValue`, `numericValue`, `checkedAt`,
   `formValue`, `storeValue`, `instruction`, `memoryInstruction`, `otherMemoryInstruction`,
-  `observerCount`, `unspecifiedOperands` or `hasUnspecified`, or the monad plumbing
+  `observerCount`, `unspecifiedOperands`, `hasUnspecified`, the runtime model runner `runModel`
+  and its helpers `observedCall`, `intrinsicCall`, `featureCall`, `referenceCompareCall`,
+  `referenceSubtractCall`, `typedTransferCall` and `skipInitCall`, or the monad plumbing
   `Except.mapError`, `Bind.bind`, `Except.bind`, `Pure.pure` or `Except.pure`, by any suffix of its
   full name. Such a proof runs the method by unfolding the interpreter; step with
   `cil_checked_steps` and pass a fact about the operation instead. A name the block binds with

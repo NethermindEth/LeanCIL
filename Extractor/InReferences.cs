@@ -6,13 +6,15 @@ namespace Nethermind.LeanCIL;
 // The modifier only affects signature identity: the parameter is the same reference a non-virtual `in` passes.
 internal static class InReferences
 {
-    const string Modifier = "System.Runtime.InteropServices.InAttribute";
+    static readonly TypeLevel Modifier = new(MetadataName.OfText("System.Runtime.InteropServices"),
+        MetadataName.OfText("InAttribute"));
 
     // Exactly System.Runtime's InAttribute, required directly on a modifier-free by-reference type.
     internal static ByReferenceType? Unwrap(TypeReference type) =>
         type is RequiredModifierType { ModifierType: var modifier, ElementType: ByReferenceType reference } &&
-        modifier is not TypeSpecification && modifier.FullName == Modifier &&
-        RuntimeModels.ExactScope(modifier.Scope, "System.Runtime") && !Modified(reference.ElementType)
+        modifier is not TypeSpecification &&
+        IdentityRows.TopLevelMatches(modifier, Modifier, PlatformAssemblies.SystemRuntime) &&
+        !Modified(reference.ElementType)
             ? reference : null;
 
     internal static bool Is(TypeReference type) => Unwrap(type) is not null;

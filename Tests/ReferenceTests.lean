@@ -68,7 +68,7 @@ theorem readonly_reference_observed :
 #print axioms readonly_reference_observed
 
 private def compare : CIL.Method := {
-  code := [.arg 0, .arg 1, .ceq, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .ldarg 1, .ceq, .ret], locals := [], returnsValue := true }
 
 /-- Compiled equality observes readonly and writable views without changing memory. -/
 theorem mixed_capability_equality :
@@ -77,7 +77,7 @@ theorem mixed_capability_equality :
 #print axioms mixed_capability_equality
 
 private def branch (operation : CIL.Instruction) : CIL.Method := {
-  code := [.arg 0, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
+  code := [.ldarg 0, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
   locals := [], returnsValue := true }
 
 /-- Null reference branches select the zero arm. -/
@@ -93,7 +93,7 @@ theorem readonly_branch :
 #print axioms readonly_branch
 
 private def compareBranch (operation : CIL.Instruction) : CIL.Method := {
-  code := [.arg 0, .arg 1, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
+  code := [.ldarg 0, .ldarg 1, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
   locals := [], returnsValue := true }
 
 /-- Equality branches use the same checked comparison as ceq. -/
@@ -200,7 +200,7 @@ private def writableMemory : Memory := { memory with
 
 /-- Offset then store a word; only the base reference's capability varies. -/
 private def offsetStore : CIL.Method := {
-  code := [.arg 0, .ldc_i4 4, .memory (.add 1 true), .ldc_i4 7, .storeScalar 4, .ret]
+  code := [.ldarg 0, .ldc_i4 4, .add, .ldc_i4 7, .storeScalar 4, .ret]
   locals := [], returnsValue := false }
 
 /-- A store through an offset readonly reference faults, while the writable base stores. -/
@@ -216,18 +216,49 @@ theorem readonly_derived_store_faults :
 /-- Only int32/native offsets certify in either order; pointer sums and reversed subtraction fail. -/
 theorem reference_arithmetic_kinds :
     CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .word32]
-      (.memory (.add 1 true)) = true ∧
+      (.add) = true ∧
     CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .native]
-      (.memory (.add 1 true)) = true ∧
+      (.add) = true ∧
     CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .word64]
-      (.memory (.add 1 true)) = false ∧
+      (.add) = false ∧
     CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.reference, .reference]
-      (.memory (.add 1 true)) = false ∧
+      (.add) = false ∧
     CIL.Extraction.scalarOpMatches ⟨0, 89, .none⟩ [.reference, .word32] .sub = false :=
   by decide +kernel
 #print axioms reference_arithmetic_kinds
 
 section SymbolicAddition
+
+/-- Bare reference addition retains all checked byte-offset outcomes in either operand order. -/
+theorem reference_add_byte_offsets (body : CIL.Method) (pc : Nat) (args : List Value)
+    (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.Value)
+    (rest : List Value) :
+    step body .add pc args frame (.scalar offset :: .reference reference :: rest) memory =
+      step body (.memory (.add 1 true)) pc args frame
+        (.scalar offset :: .reference reference :: rest) memory ∧
+    step body .add pc args frame (.reference reference :: .scalar offset :: rest) memory =
+      step body (.memory (.add 1 true)) pc args frame
+        (.reference reference :: .scalar offset :: rest) memory ∧
+    step body .add pc args frame (.scalar offset :: .readOnlyReference reference :: rest) memory =
+      step body (.memory (.add 1 true)) pc args frame
+        (.scalar offset :: .readOnlyReference reference :: rest) memory ∧
+    step body .add pc args frame (.readOnlyReference reference :: .scalar offset :: rest) memory =
+      step body (.memory (.add 1 true)) pc args frame
+        (.readOnlyReference reference :: .scalar offset :: rest) memory := by
+  cases unspecified : offset.hasUnspecified <;>
+    simp [step, staticInstruction, memoryInstruction, observerCount,
+      CIL.MemoryOp.argumentCount, unspecifiedOperands, Value.hasUnspecified, unspecified]
+#print axioms reference_add_byte_offsets
+
+/-- Reference addition rejects memory-model substitution and a spurious encoded operand. -/
+theorem reference_add_encoding :
+    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.word32, .reference] .add = true ∧
+    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.native, .reference] .add = true ∧
+    CIL.Extraction.scalarOpMatches ⟨0, 88, .none⟩ [.word32, .reference]
+      (.memory (.add 1 true)) = false ∧
+    CIL.Extraction.scalarOpMatches ⟨0, 88, .target 1⟩ [.word32, .reference] .add = false :=
+  by decide +kernel
+#print axioms reference_add_encoding
 
 attribute [local irreducible] step
 
@@ -235,7 +266,7 @@ attribute [local irreducible] step
 theorem commuted_i32_step (body : CIL.Method) (pc : Nat) (args : List Value)
     (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.W32)
     (rest : List Value) :
-    step body (.memory (.add 1 true)) pc args frame
+    step body (.add) pc args frame
       (.reference reference :: .scalar (.i32 offset) :: rest) memory = do
       let address ← referenceAt reference
       let result ← checkedAt reference 0 (add memory address 1 (BitVec.ofInt 64 offset.toInt))
@@ -248,7 +279,7 @@ theorem commuted_i32_step (body : CIL.Method) (pc : Nat) (args : List Value)
 theorem commuted_native_step (body : CIL.Method) (pc : Nat) (args : List Value)
     (frame : Frame) (memory : Memory) (reference : ManagedReference) (offset : CIL.W64)
     (rest : List Value) :
-    step body (.memory (.add 1 true)) pc args frame
+    step body (.add) pc args frame
       (.reference reference :: .scalar (.i64 offset) :: rest) memory = do
       let address ← referenceAt reference
       let result ← checkedAt reference 0 (add memory address 1 (BitVec.ofInt 64 offset.toInt))

@@ -8,19 +8,20 @@ namespace Tests.OutcomeEmbedding
 
 open CIL CIL.Safety
 
-def outOfRange : String := "System.ArgumentOutOfRangeException"
+def outOfRange : ExceptionType := .argumentOutOfRange
 
 /-- `Outer(v) => Check(v)`: any exception comes from the helper. -/
-@[cil_code] def outer : Method := { returnsValue := true, locals := [], code := [.arg 0, .call 1 1, .ret] }
+@[cil_code] def outer : Method :=
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call 1 1, .ret] }
 
 /-- `Check(v) => v > 100 ? throw new ArgumentOutOfRangeException() : v`, as the proof states it. -/
 @[cil_code] def check : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 100, .conv_i8, .bgt_un 6, .arg 0, .ret, .throw outOfRange] }
+  [.ldarg 0, .ldc_i4 100, .conv_i8, .bgt_un 6, .ldarg 0, .ret, .throw outOfRange] }
 
 /-- `check` as the profile-specific extraction emits it: a dead block moves the throw to pc 7. -/
 @[cil_code] def extractedCheck : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 100, .conv_i8, .bgt_un 7, .arg 0, .ret,
-    .unsupported "Unreachable under selected profile", .throw outOfRange] }
+  [.ldarg 0, .ldc_i4 100, .conv_i8, .bgt_un 7, .ldarg 0, .ret,
+    .unadmitted 0, .throw outOfRange] }
 
 @[cil_code] def literal : Program := [outer, check]
 @[cil_code] def extracted : Program := [outer, extractedCheck]
@@ -29,7 +30,7 @@ theorem literal_set : literal = extracted.set 1 check := rfl
 
 theorem check_embeds : MethodEmbeds extracted 1 check := by cil_embed
 
-def raisesAbove (v : W64) : Option String := if v ≤ 100 then none else some outOfRange
+def raisesAbove (v : W64) : Option ExceptionType := if v ≤ 100 then none else some outOfRange
 
 def checkContract : OutcomeContract W64 W64 where
   args v := [.scalar (.i64 v)]
@@ -139,15 +140,16 @@ example : (⟨1, 6, .thrown outOfRange⟩ : LocatedFault).relocate
 
 /-! A changed reachable throw condition or exception type neither embeds nor satisfies the contract. -/
 
-def renamedException : Method := { extractedCheck with code := extractedCheck.code.set 7 (.throw "System.ArgumentException") }
+def renamedException : Method :=
+  { extractedCheck with code := extractedCheck.code.set 7 (.throw .argument) }
 def lowerBound : Method := { extractedCheck with code := extractedCheck.code.set 1 (.ldc_i4 50) }
 
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 6 maps to actual pc 7
-  expected: CIL.Instruction.throw "System.ArgumentOutOfRangeException"
-  actual:   CIL.Instruction.throw "System.ArgumentException"
+  expected: CIL.Instruction.throw (CIL.ExceptionType.argumentOutOfRange)
+  actual:   CIL.Instruction.throw (CIL.ExceptionType.argument)
   the instructions differ
 -/
 #guard_msgs (substring := true) in
@@ -170,7 +172,7 @@ example : ¬ checkContract.Holds [outer, renamedException] 1 := by
   obtain ⟨_, fault, ran, named⟩ := holds.raising (input := 101) (initial := empty) (exception := outOfRange) trivial
     (by decide)
   have thrown : Safety.invoke [outer, renamedException] 10 1 (checkContract.args 101) empty =
-      .error ⟨1, 7, .thrown "System.ArgumentException"⟩ := rfl
+      .error ⟨1, 7, .thrown .argument⟩ := rfl
   cases invoke_unique (by simp [Settled, named]) (by simp [Settled]) ran thrown
   simp [outOfRange] at named
 
@@ -184,24 +186,24 @@ example : ¬ checkContract.Holds [outer, lowerBound] 1 := by
 
 /-! Only named throws are transported: fuel exhaustion and unsupported execution are not exceptions. -/
 
-/-- A literal body that leaves the throw unsupported still embeds: dead code constrains nothing. -/
-def unsupportedThrow : Method := { check with code := check.code.set 6 (.unsupported "fixture") }
+/-- A literal body that leaves a hole at the throw still embeds: dead code constrains nothing. -/
+def holeThrow : Method := { check with code := check.code.set 6 (.unadmitted 0x7A) }
 
-theorem unsupported_embeds : MethodEmbeds extracted 1 unsupportedThrow := by cil_embed
+theorem hole_embeds : MethodEmbeds extracted 1 holeThrow := by cil_embed
 
-theorem unsupported_faults :
-    Safety.invoke (extracted.set 1 unsupportedThrow) 10 1 [.scalar (.i64 101)] empty =
-      .error ⟨1, 6, .unsupported "Not a memory instruction"⟩ := rfl
+theorem hole_faults :
+    Safety.invoke (extracted.set 1 holeThrow) 10 1 [.scalar (.i64 101)] empty =
+      .error ⟨1, 6, .unsupported "Opcode not admitted"⟩ := rfl
 
-example : ¬ Transported (.error ⟨1, 6, .unsupported "Not a memory instruction"⟩ :
+example : ¬ Transported (.error ⟨1, 6, .unsupported "Opcode not admitted"⟩ :
     Except LocatedFault (Safety.Memory × List Safety.Value)) := by
   rintro ⟨_, thrown⟩
   cases thrown
 
 /-- The extraction raises, but the literal body proves nothing about it: it never raises. -/
-example : ¬ Raises (extracted.set 1 unsupportedThrow) 1 [.scalar (.i64 101)] empty outOfRange := by
+example : ¬ Raises (extracted.set 1 holeThrow) 1 [.scalar (.i64 101)] empty outOfRange := by
   rintro ⟨_, fault, ran, thrown⟩
-  cases invoke_unique (by simp [Settled, thrown]) (by simp [Settled]) ran unsupported_faults
+  cases invoke_unique (by simp [Settled, thrown]) (by simp [Settled]) ran hole_faults
   simp at thrown
 
 theorem literal_exhausted : Safety.invoke literal 0 1 [.scalar (.i64 101)] empty = .error ⟨1, 0, .fuelExhausted⟩ := rfl

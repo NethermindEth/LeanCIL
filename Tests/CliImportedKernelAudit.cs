@@ -1,6 +1,10 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
 #:include ConsumerTraceDirectory.cs
@@ -68,8 +72,11 @@ if (!baseline)
     // Checkout inputs enumerate these folders; the packaged corpus has no sources in them.
     foreach (var folder in new[] { "Extractor", "Examples", "Tests" })
         Directory.CreateDirectory(Path.Combine(corpus, folder));
-    foreach (var name in new[]
-             { "PrepareLibrary.cs", "Verification.cs", "ConsumerVerification.cs", "LeanDiagnostics.cs" })
+    var producerScripts = File.ReadLines(At("scripts/PrepareLibrary.cs"))
+        .Where(line => line.StartsWith("#:include ", StringComparison.Ordinal))
+        .Select(line => line["#:include ".Length..].Trim())
+        .Prepend("PrepareLibrary.cs");
+    foreach (var name in producerScripts)
         File.Copy(At("scripts/" + name), Path.Combine(scripts, name));
     foreach (var name in new[] { "global.json", "Directory.Build.props", "Directory.Packages.props", ".editorconfig" })
         File.Copy(At(name), Path.Combine(corpus, name));
@@ -136,4 +143,3 @@ var measurements = new
 };
 File.WriteAllText(Path.Combine(importedRoot, "timings.json"), JsonSerializer.Serialize(measurements, Json));
 Console.WriteLine("PASS CLI imported helper preparation counts: " + JsonSerializer.Serialize(measurements));
-

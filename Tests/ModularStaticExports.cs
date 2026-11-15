@@ -2,8 +2,14 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../Extractor/StaticIdentity.cs
 #:include ImportReviewRegressions.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using System.Text.Json;

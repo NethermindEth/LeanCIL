@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
 #:include DirectoryLinks.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // Child mode: an independent process holding the use lock of one entry until told to stop.
 if (args is ["hold-entry", var heldByChild, var childSignal, var childStop])
@@ -349,6 +354,81 @@ try
         }
         Console.WriteLine("PASS the whole library replaces the closure entry and is preferred; an import outside " +
             "a closure is refused from the compiled header in every spelling");
+        // Consumer cache keys bind the library directory, so the run that builds and publishes the library must
+        // read the entry later runs open, or no later run can restore the support it publishes.
+        var buildingCache = Path.Combine(Path.GetTempPath(), "lp-" + Guid.NewGuid().ToString("N")[..8]);
+        Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", buildingCache);
+        try
+        {
+            using var built = Open(null);
+            using var reopened = Open(null);
+            if (built.libraryBuild != "fresh" || built.library != Path.Combine(buildingCache, wholeLibraryKey) ||
+                reopened.libraryBuild != "cache" || reopened.library != built.library)
+                throw new Exception("The run that built the library read another directory than later runs: " +
+                    built.library + " and " + reopened.library);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", builtCache);
+            if (Directory.Exists(buildingCache)) Directory.Delete(buildingCache, true);
+        }
+        Console.WriteLine("PASS the run that builds and publishes the library reads the entry later runs open");
+
+        // Lake on Windows reports a file whose full path exceeds its limit as missing, so an entry it cannot read
+        // is refused when opened instead of failing the first build that requires it; the limit itself is checked.
+        var longest = ReadManifest(wholeEntry)!.Keys
+            .Where(name => name.StartsWith(CompiledLibraryPrefix, StringComparison.Ordinal))
+            .MaxBy(name => name.Length)!;
+        var compiledModule = longest[CompiledLibraryPrefix.Length..longest.IndexOf('.', CompiledLibraryPrefix.Length)]
+            .Replace('/', '.');
+        // A module importing the one that owns the longest file makes Lake read that file's hash; the package
+        // requires the entry by its absolute path, as consumer verification does.
+        void BuildImporter(string entry)
+        {
+            var package = Path.Combine(Path.GetTempPath(), "lq-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(package);
+            try
+            {
+                File.Copy(Path.Combine(entry, "lean-toolchain"), Path.Combine(package, "lean-toolchain"));
+                var location = System.Text.Json.JsonSerializer.Serialize(entry.Replace('\\', '/'));
+                File.WriteAllText(Path.Combine(package, "lakefile.toml"), "name = \"probe\"\n\n[[require]]\n" +
+                    "name = \"leancil\"\npath = " + location + "\n\n[[lean_lib]]\nname = \"PathProbe\"\n");
+                File.WriteAllText(Path.Combine(package, "PathProbe.lean"), "import " + compiledModule + "\n");
+                Run(["lake", "build", "PathProbe"], package);
+            }
+            finally { Directory.Delete(package, true); }
+        }
+        foreach (var beyondLimit in new[] { false, true })
+        {
+            var padded = Path.Combine(Path.GetTempPath(), "ll-");
+            var rootLength = LakePathLimit + (beyondLimit ? 1 : 0) - longest.Length - wholeLibraryKey.Length - 2;
+            var longRoot = padded + new string('r', rootLength - padded.Length);
+            var longEntry = Path.Combine(longRoot, wholeLibraryKey);
+            CopyTree(wholeEntry, longEntry);
+            Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", longRoot);
+            var reader = new Program();
+            try
+            {
+                if (!beyondLimit || !OperatingSystem.IsWindows())
+                {
+                    reader.Library(Inputs(At("CIL.lean")));
+                    BuildImporter(longEntry);
+                    if (reader.libraryBuild != "cache" || reader.library != longEntry)
+                        throw new Exception("A library entry within the path limit was not opened in place");
+                    continue;
+                }
+                ExpectRejection(() => reader.Library(Inputs(At("CIL.lean"))), "cannot be read by Lake");
+                ExpectRejection(() => BuildImporter(longEntry), "no such file");
+            }
+            finally
+            {
+                ((IDisposable)reader).Dispose();
+                Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", builtCache);
+                Directory.Delete(longRoot, true);
+            }
+        }
+        Console.WriteLine($"PASS a library entry whose files Lake reads at {LakePathLimit} characters is opened; " +
+            "one character more is refused on Windows, where Lake fails to read it");
     }
     finally
     {
@@ -969,6 +1049,48 @@ try
         if (!jumped.GaveUp) throw new Exception("A pass whose clock jumped past its limit did not say so");
     }
     finally { passClock = realClock; }
+    // Past its limit a pass retires no pin, even one judged by its age without reading a lakefile, and a pass
+    // that reaches its limit while removing closure records stops there.
+    var agedPinRoot = NewEvictionRoot();
+    var agedPin = PlantPin(agedPinRoot, PlantEntry(agedPinRoot, LibraryKeyOf('a'), Days(30)), "", 8);
+    var lateRoot = NewEvictionRoot();
+    var lateRecord = Path.Combine(lateRoot, LibraryKeyOf('d') + ".closure");
+    File.WriteAllText(lateRecord, LibraryKeyOf('7'));
+    var lateCalls = 0;
+    try
+    {
+        passLimit = TimeSpan.Zero;
+        EvictLibraries(agedPinRoot);
+        if (!File.Exists(agedPin)) throw new Exception("A pass past its limit deleted a pin");
+        passLimit = zeroLimit;
+        // The first two readings are the deadline and the check before closure records are removed.
+        passClock = () => lateCalls++ < 2 ? jumpStart : jumpStart.AddHours(2);
+        EvictLibraries(lateRoot);
+        if (!File.Exists(lateRecord)) throw new Exception("A pass past its limit deleted a closure record");
+    }
+    finally { (passLimit, passClock) = (zeroLimit, realClock); }
+    // A read that waited out the rest of the pass stops it even when the clock has not yet passed the
+    // deadline, as when a wait rounded down to whole milliseconds returns just before it.
+    var stalledRead = new ManualResetEventSlim(false);
+    var limitsBefore = (packageReader, packageReadLimit, passLimit);
+    try
+    {
+        var frozenAt = DateTime.UtcNow;
+        passClock = () => frozenAt;
+        packageReader = _ => { stalledRead.Wait(); return ""; };
+        packageReadLimit = TimeSpan.FromSeconds(30);
+        passLimit = TimeSpan.FromMilliseconds(200);
+        var cutShort = new PassReport();
+        EvictUnused(unread, KeyName(), LibraryStaging(), Days(7), null, null, null, true, cutShort);
+        RequireUnreadKept("a read that waited out the pass");
+        if (!cutShort.GaveUp) throw new Exception("A pass whose read waited out its limit did not say so");
+    }
+    finally
+    {
+        stalledRead.Set();
+        passClock = realClock;
+        (packageReader, packageReadLimit, passLimit) = limitsBefore;
+    }
     var holdsRead = new ManualResetEventSlim(false);
     var readerBefore = (packageReader, packageReadLimit);
     try

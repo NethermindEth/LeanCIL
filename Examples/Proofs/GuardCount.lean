@@ -18,15 +18,18 @@ theorem correctness (memory : Memory) (literal : Reference) (count : CIL.W32)
     (bound : memory.literals.lookup "count" = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 count)] memory =
-      if count.toInt < 0 then .error ⟨0, 2, .thrown "System.ArgumentOutOfRangeException"⟩
+      if count.toInt < 0 then .error ⟨0, 2, .thrown .argumentOutOfRange⟩
       else .ok (memory, [.scalar (.i32 count)]) := by
+  have outcome : zeroGuardOutcome .negative 32 true (.i32 count) =
+      if count.toInt < 0 then .error (.thrown .argumentOutOfRange)
+      else .ok () := by
+    by_cases negative : count.toInt < 0 <;>
+      simp [zeroGuardOutcome, CIL.guardOperand, CIL.ZeroGuard.throws, negative]
   by_cases negative : count.toInt < 0
   · simp only [negative, ite_true]
-    cil_checked_steps [literalObject_of_lookup bound, formed, zeroGuardOutcome,
-      CIL.guardOperand, CIL.ZeroGuard.throws, BitVec.setWidth_eq, negative]
+    cil_checked_steps [literalObject_of_lookup bound, formed, outcome, negative]
   · simp only [negative, ite_false]
-    cil_checked_steps [literalObject_of_lookup bound, formed, zeroGuardOutcome,
-      CIL.guardOperand, CIL.ZeroGuard.throws, BitVec.setWidth_eq, negative]
+    cil_checked_steps [literalObject_of_lookup bound, formed, outcome, negative]
 
 #print axioms correctness
 
