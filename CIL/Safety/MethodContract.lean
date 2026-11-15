@@ -368,7 +368,7 @@ def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
 theorem MethodContract.not_holds_of_fault {Input Output : Type}
     (contract : MethodContract Input Output) {program : CIL.Program} {method observed : Nat}
     {input : Input} {initial : Memory} {fault : LocatedFault}
-    (permitted : contract.pre input initial) (definite : fault.fault.definite = true)
+    (permitted : contract.pre input initial) (definite : fault.fault.definite ≠ false)
     (failed : invoke program observed method (contract.args input) initial = .error fault) :
     ¬ contract.Holds program method := by
   intro holds

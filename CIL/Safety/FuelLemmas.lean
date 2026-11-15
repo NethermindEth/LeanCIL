@@ -31,12 +31,12 @@ namespace CIL.Safety
 def Settled (outcome : Except LocatedFault α) : Prop :=
   match outcome with
   | .ok _ => True
-  | .error fault => fault.fault.definite = true
+  | .error fault => fault.fault.definite ≠ false
 
 instance (outcome : Except LocatedFault α) : Decidable (Settled outcome) :=
   match outcome with
   | .ok _ => isTrue trivial
-  | .error fault => inferInstanceAs (Decidable (fault.fault.definite = true))
+  | .error fault => inferInstanceAs (Decidable (fault.fault.definite ≠ false))
 
 section
 
@@ -180,7 +180,7 @@ theorem invoke_mono (program : CIL.Program) (fuel extra method : Nat)
     budget used to exhibit the fault. -/
 theorem invoke_fault_refutes_success (program : CIL.Program) (observed method : Nat)
     (args : List Value) (memory : Memory) (fault : LocatedFault)
-    (definite : fault.fault.definite = true)
+    (definite : fault.fault.definite ≠ false)
     (witness : invoke program observed method args memory = .error fault)
     (fuel : Nat) (result : Memory × List Value) :
     invoke program fuel method args memory ≠ .ok result := by
