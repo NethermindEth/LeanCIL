@@ -240,7 +240,8 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
     "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
     "Tests.ResolutionFacts", "Tests.ValueDecoding", "Tests.DecodedMethod", "Tests.ReplayDiagnostics",
-    "Tests.BodyLiteral", "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
+    "Tests.BodyLiteral",
+    "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
     "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
     "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
