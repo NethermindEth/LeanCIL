@@ -16,6 +16,12 @@ parameter home, which follows the declared locals, or as the incoming value narr
 declared type requires. Under `ParameterHomesValid` the home slot is the one the argument check
 expects. The key lemmas over ascending homes let a generated fact name an argument's home
 position without searching the homes before it.
+
+`CIL.Method.elementShape` says how an array of a declared element type holds its elements: inline
+values of a primitive, an enum, a vector or a struct of the size its checked layout gives, class
+references, or method-table entries of one managed signature; a by-ref-like struct has no shape.
+The primitive, enum and class lemmas state a shape without evaluating a type name, and the struct
+lemmas take the layout entries as premises, so a generated fact reads them through named suffixes.
 -/
 
 namespace CIL
@@ -456,5 +462,132 @@ theorem argumentAccess_of_homed {layouts : Array ComputedLayout} {raw : RawArgum
 #print axioms argumentAccess_of_homed
 
 end Extraction
+
+/-! ## Array element shapes -/
+
+/-- How an array of one element type holds its elements: reference-free values of an exact
+    element identity and width, class references, or method-table entries of one managed
+    signature. Every other element type is `unsupported`, with the reason. -/
+inductive ElementShape where
+  /-- Inline values: a primitive, an enum over its underlying integer type, an integer vector or
+      a struct of the size its checked layout gives. -/
+  | value (element : ArrayElement)
+  /-- References to instances of the class `element`. -/
+  | reference (element : Extraction.TypeExpr)
+  /-- Method-table entries: managed method pointers of `signature`. -/
+  | method (signature : ManagedSignature)
+  /-- An element type no array of the model holds. -/
+  | unsupported (reason : String)
+  deriving DecidableEq, Repr
+
+namespace ElementShape
+
+/-- Why a struct element without an entry in the checked layouts has no shape. -/
+def outsideLayouts : String := "Array element outside the checked layouts"
+
+/-- Why a by-ref-like struct element has no shape: no heap array holds one. -/
+def byRefLikeElement : String := "By-ref-like array element"
+
+/-- Why any other element type without array storage has no shape. -/
+def unsupportedType : String := "Array element type"
+
+end ElementShape
+
+/-- The shape of an array element of declared type `type`: a class reference for a class, the
+    size the checked layout gives for a struct that the raw layouts hold under its identity and
+    that is not by-ref-like, the managed signature of a function pointer, and the storage
+    `arrayElementType` gives for every other type. -/
+def LayoutEnvironment.elementShape (environment : LayoutEnvironment)
+    (type : Extraction.TypeExpr) : ElementShape :=
+  match type with
+  | .object .. => .reference type
+  | .aggregate identity index =>
+    match environment.rawLayouts[index]? with
+    | none => .unsupported ElementShape.outsideLayouts
+    | some metadata =>
+      if metadata.identity ≠ identity then .unsupported ElementShape.outsideLayouts
+      else if metadata.byRefLike then .unsupported ElementShape.byRefLikeElement
+      else match environment.layouts[index]? with
+        | some layout => .value (.aggregate identity layout.layout.size)
+        | none => .unsupported ElementShape.outsideLayouts
+  | _ => match Extraction.managedSignature type with
+    | some signature => .method signature
+    | none => match Extraction.arrayElementType type with
+      | some element => .value element
+      | none => .unsupported ElementShape.unsupportedType
+
+/-- The shape of an array element of declared type `type` in the method's layouts. -/
+def Method.elementShape (body : Method) (type : Extraction.TypeExpr) : ElementShape :=
+  body.environment.elementShape type
+
+/-- The shape of an array of the primitive: its own storage, and none for floating point. -/
+def PrimitiveType.elementShape : PrimitiveType → ElementShape
+  | .sbyte => .value .signed8 | .byte => .value .unsigned8 | .boolean => .value .boolean
+  | .int16 => .value .signed16 | .uint16 => .value .unsigned16 | .char => .value .character
+  | .int32 => .value .signed32 | .uint32 => .value .unsigned32
+  | .int64 => .value .signed64 | .uint64 => .value .unsigned64
+  | .intPtr => .value .nativeInt | .uintPtr => .value .nativeUInt
+  | .single | .double => .unsupported ElementShape.unsupportedType
+
+/-- The storage of an enum over the primitive; `none` where `typeStorage` admits no enum. -/
+def PrimitiveType.enumStorage : PrimitiveType → Option EnumStorage
+  | .sbyte => some .signed8 | .byte => some .unsigned8
+  | .int16 => some .signed16 | .uint16 => some .unsigned16
+  | .int32 => some .signed32 | .uint32 => some .unsigned32
+  | .int64 => some .signed64 | .uint64 => some .unsigned64
+  | .boolean | .char | .single | .double | .intPtr | .uintPtr => none
+
+/-- The shape of an array of the enum `identity` over the primitive. -/
+def PrimitiveType.enumElementShape (identity : String) (type : PrimitiveType) : ElementShape :=
+  match type.enumStorage with
+  | some storage => .value (.enumeration identity storage)
+  | none => .unsupported ElementShape.unsupportedType
+
+/-- An array of a primitive holds the primitive's storage, whatever the layouts. -/
+theorem Method.elementShape_primitive (body : Method) (type : PrimitiveType) :
+    body.elementShape type.typeExpr = type.elementShape := by
+  cases type <;> rfl
+
+#print axioms Method.elementShape_primitive
+
+/-- An array of an enum over a primitive holds the enum's storage where `typeStorage` admits
+    the primitive as an enum's underlying type, whatever the layouts. -/
+theorem Method.elementShape_enum (body : Method) (identity : String) (type : PrimitiveType) :
+    body.elementShape (.enum identity type.typeExpr) = type.enumElementShape identity := by
+  cases type <;> rfl
+
+#print axioms Method.elementShape_enum
+
+/-- An array of a class holds references to its instances. -/
+theorem Method.elementShape_object (body : Method) (scope name : String) :
+    body.elementShape (.object scope name) = .reference (.object scope name) := rfl
+
+#print axioms Method.elementShape_object
+
+/-- An array of a struct the raw layouts hold under its identity, and that is not by-ref-like,
+    holds values of the size its checked layout gives. -/
+theorem Method.elementShape_aggregate {body : Method} {identity : String} {index : Nat}
+    {metadata : Extraction.RawLayout} {layout : Extraction.ComputedLayout}
+    (declared : body.environment.rawLayouts[index]? = some metadata)
+    (identified : metadata.identity = identity) (inline : metadata.byRefLike = false)
+    (computed : body.environment.layouts.toList[index]? = some layout) :
+    body.elementShape (.aggregate identity index) =
+      .value (.aggregate identity layout.layout.size) := by
+  rw [Array.getElem?_toList] at computed
+  simp [Method.elementShape, LayoutEnvironment.elementShape, declared, identified, inline,
+    computed]
+
+#print axioms Method.elementShape_aggregate
+
+/-- An array of a by-ref-like struct has no shape: no heap array holds one. -/
+theorem Method.elementShape_byRefLike {body : Method} {identity : String} {index : Nat}
+    {metadata : Extraction.RawLayout}
+    (declared : body.environment.rawLayouts[index]? = some metadata)
+    (identified : metadata.identity = identity) (byRefLike : metadata.byRefLike = true) :
+    body.elementShape (.aggregate identity index) =
+      .unsupported ElementShape.byRefLikeElement := by
+  simp [Method.elementShape, LayoutEnvironment.elementShape, declared, identified, byRefLike]
+
+#print axioms Method.elementShape_byRefLike
 
 end CIL
