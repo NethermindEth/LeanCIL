@@ -1056,7 +1056,7 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Instruction → Bool
-  | _, none, none, .unsupported _ => true
+  | _, none, none, .unadmitted _ => true
   | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (match role with

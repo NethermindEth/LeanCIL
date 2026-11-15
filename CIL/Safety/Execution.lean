@@ -330,6 +330,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     return .next (pc + 1) (.object result :: rest) frame m
   -- Dynamic frame storage, zeroed as the body's declared localsinit flag says.
   | .localloc, _ => localAllocation body.declared.initLocals pc frame stack m
+  -- A hole faults on every stack.
+  | .unadmitted _, _ => .error (.unsupported "Opcode not admitted")
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m

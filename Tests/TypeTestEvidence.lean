@@ -70,8 +70,8 @@ private def foldStates : FeatureCertificate := [state [], state [none], state [n
   state [none, none], state [none, none], state [some 1], state [], state [some 1], none, none]
 private def foldMask := [true, true, true, true, true, true, true, true, false, false]
 private def foldCode : List Instruction :=
-  [.nop, .nop, .nop, .nop, .ldc_i4 1, .brfalse 8, .ldc_i4 1, .ret, .unsupported "pruned",
-   .unsupported "pruned"]
+  [.nop, .nop, .nop, .nop, .ldc_i4 1, .brfalse 8, .ldc_i4 1, .ret, .unadmitted 22,
+   .unadmitted 42]
 
 example : FeatureFlowValid #[] (fun _ => none)
     foldRaw .scalar foldStates foldMask foldCode := by decide
@@ -89,7 +89,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
 example : FeatureFlowValid #[] (fun _ => none) distinctRaw .scalar
     ((foldStates.set 5 (state [some 0])).set 6 none |>.set 7 none |>.set 8 (state []) |>.set 9 (state [some 0]))
     [true, true, true, true, true, true, false, false, true, true]
-    [.nop, .nop, .nop, .nop, .ldc_i4 0, .brfalse 8, .unsupported "pruned", .unsupported "pruned",
+    [.nop, .nop, .nop, .nop, .ldc_i4 0, .brfalse 8, .unadmitted 23, .unadmitted 42,
       .ldc_i4 0, .ret] := by decide
 
 -- A branch into the operands would reach the comparison with a different emitted stack.
@@ -97,7 +97,7 @@ private def enteredRaw := raw ([i 22, i 43 (.target 4)] ++ test marker marker ++
 example : ¬ FeatureFlowValid #[] (fun _ => none) enteredRaw .scalar
     [state [], state [some 0], none, none, state [some 0], state [none, some 0], state [none, some 0], state [some 1]]
     [true, true, false, false, true, true, true, true]
-    [.ldc_i4 0, .br 4, .unsupported "", .unsupported "", .nop, .nop, .ldc_i4 1, .ret] := by decide
+    [.ldc_i4 0, .br 4, .unadmitted 208, .unadmitted 40, .nop, .nop, .ldc_i4 1, .ret] := by decide
 -- The same facts are accepted once the edge enters at the first operand.
 example : FeatureFlowValid #[] (fun _ => none)
     (raw ([i 22, i 43 (.target 2)] ++ test marker marker ++ [i 42])) .scalar
@@ -134,10 +134,10 @@ private def branchKinds (taken : Bool) : ScalarCertificate :=
 /-- Four erased operands and one exact transfer preserve instruction numbering. -/
 private def branchCode (taken : Bool) : List Instruction :=
   [.nop, .nop, .nop, .nop, if taken then .br 7 else .nop,
-    if taken then .unsupported "pruned" else .ldc_i4 1,
-    if taken then .unsupported "pruned" else .ret,
-    if taken then .ldc_i4 0 else .unsupported "pruned",
-    if taken then .ret else .unsupported "pruned"]
+    if taken then .unadmitted 23 else .ldc_i4 1,
+    if taken then .unadmitted 42 else .ret,
+    if taken then .ldc_i4 0 else .unadmitted 22,
+    if taken then .ret else .unadmitted 42]
 
 /-- Short and long equality/inequality branches certify both type-identity outcomes. -/
 theorem reference_type_branches :

@@ -249,7 +249,7 @@ internal static class LeanEmitter
                 ops.Add(reachable.Contains(i)
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                         scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
-                    : new Unsupported("Unreachable under selected profile"));
+                    : Unadmitted.At(i));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
             var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);
@@ -274,7 +274,8 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
             callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
-            if (collectTemplates) templates.Add(new(m.FullName, frame, [.. ops]));
+            if (collectTemplates)
+                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             // Each link's text is written once, as a definition the table, the index and its facts name.
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
             foreach (var (pc, link) in linkEntries)

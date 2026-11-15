@@ -1205,16 +1205,16 @@ theorem step_appendLocals_throw (exception : String) :
 
 #print axioms step_appendLocals_throw
 
-/-- `unsupported` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_unsupported (description : String) :
-    StepAppendLocals (.unsupported description) := by
+/-- A hole preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_unadmitted (opcode : Nat) :
+    StepAppendLocals (.unadmitted opcode) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   frame_natural
 
-#print axioms step_appendLocals_unsupported
+#print axioms step_appendLocals_unadmitted
 
 /-- Managed pointers and tables never inspect the unused trailing frame slots. -/
 theorem step_appendLocals_managed (operation : ManagedOp) :
@@ -1407,8 +1407,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_ret
     case throw exception =>
       exact step_appendLocals_throw exception
-    case unsupported description =>
-      exact step_appendLocals_unsupported description
+    case unadmitted opcode =>
+      exact step_appendLocals_unadmitted opcode
   exact padded body pc args frame extra stack memory outcome stepped kept
 
 #print axioms step_appendLocals

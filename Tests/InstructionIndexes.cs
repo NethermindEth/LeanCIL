@@ -429,7 +429,7 @@ static partial class RenderedLeanReaders
     private static partial Regex GeneratedDeclaration();
 
     [GeneratedRegex(@"\b(?:op|operation|ops\[\w+\]|values\[\w+\])\.ToLean\(|\bop\.Link\(|" +
-        @"new Unsupported\(.*\)\.ToLean\(")]
+        @"new Unadmitted\(.*\)\.ToLean\(")]
     private static partial Regex RenderedOperation();
 
     [GeneratedRegex(@"\$""[^""]*\{(?:op|ops\[\w+\])\.ToLean\(\)\}|""\s*\+\s*operation\.ToLean\(\)")]

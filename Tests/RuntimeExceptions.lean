@@ -101,9 +101,10 @@ theorem memory_faults_never_named (rule : Fault) (reference : ManagedReference) 
   simp [ExecutionFault.clrException]
 
 theorem unsupported_never_named (exception : String) :
-    ¬ RaisesCLR [{ code := [.unsupported "operation"], locals := [], returnsValue := false }] 0 [] empty exception := by
+    ¬ RaisesCLR [{ code := [.unadmitted 0], locals := [], returnsValue := false }] 0 [] empty
+      exception := by
   apply RaisesCLR.not_of_invoke (fuel := 1)
-    (fault := ⟨0, 0, .unsupported "Not a memory instruction"⟩)
+    (fault := ⟨0, 0, .unsupported "Opcode not admitted"⟩)
   · simp [Settled]
   · rfl
   · simp [ExecutionFault.clrException]

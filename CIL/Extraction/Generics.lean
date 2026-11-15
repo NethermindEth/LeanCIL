@@ -664,7 +664,7 @@ theorem validated_managed_call {methods : List SpecializedMethod} {imports : Lis
     {raw : RawMethod} {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
     validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
-      (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
+      (emitted.code[pc.val]?.getD (.unadmitted 0)) = true := by
   have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
   have live : pc.val < reachable.length := valid.2.1 ▸ pc.isLt
   have present : pc.val < emitted.code.length := valid.2.2.1 ▸ pc.isLt

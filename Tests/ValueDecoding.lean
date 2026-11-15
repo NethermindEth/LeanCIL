@@ -100,7 +100,7 @@ def undecoded : List Name := [
   ``Instruction.callVirtual, ``Instruction.newAggregate, ``Instruction.newObject,
   ``Instruction.objectTest, ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.memory, ``Instruction.throw,
-  ``Instruction.unsupported]
+  ``Instruction.unadmitted]
 
 /-- What each named opcode decodes to. -/
 def decodedNamed : List (Option Instruction) := named.map (Instruction.ofRaw? ·.1)

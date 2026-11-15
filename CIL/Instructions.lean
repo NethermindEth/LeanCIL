@@ -205,7 +205,9 @@ inductive Instruction where
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
   | throw (exception : String)
-  | unsupported (description : String)
+  /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
+      outside the code the extractor reaches under the selected profile. It faults when stepped. -/
+  | unadmitted (opcode : Nat)
   deriving Repr
 
 /-- The name of the instruction type, for tactics that recognise its constructors. -/
