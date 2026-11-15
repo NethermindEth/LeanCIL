@@ -213,6 +213,7 @@ private theorem fixture_string_keys :
        (image.columnsOf (assemblyToken / 2 ^ 24)).map (rowKeys stringsHeap · block.assemblyRow)
      | .error _ => none) = some [1, 0] := by
   decide +kernel
+#print axioms fixture_string_keys
 
 /-- No numbering makes the suffix block the fixture's, since its key 2 is held by no row cell. -/
 theorem the_suffix_block_does_not_match {image : PreparedImage} (prepared : fixture = .ok image) :
@@ -378,6 +379,9 @@ private def overlayToken : Nat := 0x02000003
 /-- The offset of the RVA in a MethodDef row. -/
 private def rvaAt : Nat := 0
 
+/-- The offset of the implementation flags in a MethodDef row, the byte after its RVA. -/
+private def implementationAt : Nat := 4
+
 /-- The offset of the flags in a MethodDef row. -/
 private def flagsAt : Nat := 6
 
@@ -439,6 +443,32 @@ theorem accepts_an_image_with_a_changed_rva :
   decide +kernel
 #print axioms accepts_an_image_with_a_changed_rva
 
+/-- The mask is the four RVA bytes: an image change to the last of them is accepted, and a change
+    to the first byte of ImplFlags after them is refused in the image and in the carried row. -/
+theorem masks_exactly_the_rva :
+    ok (rowsChecked (changedRow tinyToken (implementationAt - 1)) slice.rows slice.strings
+      slice.blobs) = true ∧
+    failsWith
+      (rowsChecked (changedRow tinyToken implementationAt) slice.rows slice.strings slice.blobs)
+      (.rowMismatch tinyToken) = true ∧
+    failsWith
+      (rowsChecked fixture (withRow tinyToken (flipAt · implementationAt 1)) slice.strings
+        slice.blobs)
+      (.rowMismatch tinyToken) = true := by
+  decide +kernel
+#print axioms masks_exactly_the_rva
+
+/-- The mask reaches no other table: a TypeDef flags byte of `Small` changed in the image, or in
+    the carried row, is refused. -/
+theorem rejects_a_changed_typedef_flags_byte :
+    failsWith (rowsChecked (changedRow smallToken 0) slice.rows slice.strings slice.blobs)
+      (.rowMismatch smallToken) = true ∧
+    failsWith
+      (rowsChecked fixture (withRow smallToken (flipAt · 0 1)) slice.strings slice.blobs)
+      (.rowMismatch smallToken) = true := by
+  decide +kernel
+#print axioms rejects_a_changed_typedef_flags_byte
+
 /-- A carried MethodDef row holds its RVA as zero. -/
 theorem rejects_a_carried_nonzero_rva :
     failsWith
@@ -476,7 +506,8 @@ theorem rejects_a_row_one_byte_short :
   decide +kernel
 #print axioms rejects_a_row_one_byte_short
 
-/-- A GenericParam row, a table the fixture does not have, and an eleventh MethodDef row. -/
+/-- A GenericParam row, a table the fixture does not have; an eleventh MethodDef row; MethodDef row
+    0; and a row of table 0x2D, above the tables the schema covers. -/
 theorem rejects_a_token_the_tables_do_not_have :
     failsWith
       (rowsChecked fixture (slice.rows ++ [(0x2A000001, List.replicate 8 0)])
@@ -485,7 +516,15 @@ theorem rejects_a_token_the_tables_do_not_have :
     failsWith
       (rowsChecked fixture (slice.rows ++ [(0x0600000B, List.replicate 14 0)])
         slice.strings slice.blobs)
-      (.tokenOutOfScope 0x0600000B) = true := by
+      (.tokenOutOfScope 0x0600000B) = true ∧
+    failsWith
+      (rowsChecked fixture (slice.rows ++ [(0x06000000, List.replicate 14 0)])
+        slice.strings slice.blobs)
+      (.tokenOutOfScope 0x06000000) = true ∧
+    failsWith
+      (rowsChecked fixture (slice.rows ++ [(0x2D000001, List.replicate 4 0)])
+        slice.strings slice.blobs)
+      (.tokenOutOfScope 0x2D000001) = true := by
   decide +kernel
 #print axioms rejects_a_token_the_tables_do_not_have
 
@@ -581,5 +620,15 @@ theorem rejects_the_marker_for_a_carried_entry :
       (.heapNumbering stringsHeap tinyKey) = true := by
   decide +kernel
 #print axioms rejects_the_marker_for_a_carried_entry
+
+/-- The marker in one `.ctor` row while the other rows name `.ctor` by its key: the offset of
+    `.ctor` would be both numbered and omitted. -/
+theorem rejects_a_marker_beside_a_key :
+    failsWith
+      (rowsChecked fixture (withRow constructorToken (writeLittle · methodNameAt 2 0xFFFF))
+        slice.strings slice.blobs)
+      (.heapNumbering stringsHeap 1) = true := by
+  decide +kernel
+#print axioms rejects_a_marker_beside_a_key
 
 end Tests.StrictBinding.Rows
