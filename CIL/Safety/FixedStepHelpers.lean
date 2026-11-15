@@ -154,7 +154,7 @@ inductive FixedStepFamily where
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
-  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
+  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
   | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
   | .add | .sub => .reference
@@ -291,17 +291,28 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
-    -- ones; `fixed_fallback` reads the table-offset exclusions and the faulting ones are cleared.
+    -- ones; `fixed_fallback` reads the table-offset ones and the others are cleared.
     all_goals try (
-      rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
-        mulOvfUn div divUn rem remUn convOvf convOvfUn
+      rename_i localAllocation loadsStatic addressesStatic tokensStatic storesStatic offsetBeforeTable
+        tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
+        convOvf convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
+        objectBranchFalse objectBranchTrue objectTested
+      guard_hyp localAllocation : operation = .localloc → False
+      guard_hyp loadsStatic : ∀ field, operation = .ldsfld field → False
+      guard_hyp addressesStatic : ∀ field, operation = .ldsflda field → False
+      guard_hyp tokensStatic : ∀ field, operation = .ldtoken (.field field) → False
+      guard_hyp storesStatic : ∀ field, operation = .stsfld field → False
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
       guard_hyp div : ∀ (y x : CIL.Value) (rest : List Value), operation = .div →
         stack = Value.scalar y :: Value.scalar x :: rest → False
+      guard_hyp objectsEqual : ∀ (right left : ManagedReference) (rest : List Value),
+        operation = .ceq → stack = Value.object right :: Value.object left :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
-        convOvfUn
+        convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
+        objectBranchFalse objectBranchTrue objectTested localAllocation loadsStatic
+        addressesStatic tokensStatic storesStatic
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

@@ -49,7 +49,7 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {pc : Nat} {frame : Frame
       cases executed
       simp only [FrameAction.callee, Option.some.injEq] at enters
       subst callee
-      exact List.mem_map.mpr ⟨_, List.mem_of_find?_eq_some (by assumption), rfl⟩
+      exact indirectTarget_mem (by assumption)
     | solve | cases executed; cases enters
     | cases executed
     | split at executed
@@ -91,6 +91,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
   all_goals repeat' first
     | exact managedStep_callee h enters
     | unfold returnFrom at h
+    | unfold localAllocation at h
     | solve | cases h; cases enters
     | solve |
       cases h

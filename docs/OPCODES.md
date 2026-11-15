@@ -158,8 +158,8 @@ fresh allocation-relative storage owned by the current activation. The caller su
 request charges its size rounded to 16 bytes. Insufficient quota produces a distinct
 `stackAllocationFailure`; a zero request returns null and consumes no quota.
 
-The raw method's `localsinit` flag controls zero initialization. Otherwise bytes remain unreadable
-until written. Checked pointer offsets, typed loads and stores, and admitted span construction
+The method's `localsinit` flag, which the extracted body records as `DeclaredSignature.initLocals`,
+controls zero initialization. Otherwise bytes remain unreadable until written. Checked pointer offsets, typed loads and stores, and admitted span construction
 retain allocation bounds and authority. Returning a reference or span into expired stack storage
 fails. Numeric address fabrication and general pointer casts are unsupported.
 

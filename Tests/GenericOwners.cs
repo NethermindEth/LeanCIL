@@ -76,7 +76,8 @@ foreach (var name in new[] { "Identity", "Combined", "Nested", "NestedHelper", "
         theorem generic_owner_result :
             (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 42)]
               { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
-                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] :=
+              by cil_kernel_rfl
         #print axioms generic_owner_result
         """;
     if (name == "Combined")
@@ -246,7 +247,7 @@ foreach (var (name, fixture, definition, change) in targetCases)
                 by decide⟩,
                 .scalar (.i32 42)]
               { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
-                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := by rfl
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := by cil_kernel_rfl
         #print axioms generic_table_entry
         """);
     evidence.Add(tablePath, "PASS generic entry over a supplied table: TableFirst<ulong>");

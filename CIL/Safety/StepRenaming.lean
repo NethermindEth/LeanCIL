@@ -79,8 +79,8 @@ theorem stepTransport : StepTransport := by
           arguments stack bounds observable⟩
     | exact memories.stepMemory frames sourceFormed sourceBody targetBody _ pc arguments stack
         bounds observable
-    | exact memories.stepStackAlloc frames sourceFormed targetFormed staticBounds
-        sourceBody targetBody _ pc arguments stack observable
+    | exact memories.stepLocalloc frames sourceFormed targetFormed staticBounds
+        sourceBody targetBody metadata.declared pc arguments stack observable
     | exact memories.stepNewAggregate frames sourceFormed targetFormed staticBounds
         sourceBody targetBody _ _ pc _ arguments stack bounds
     | exact ⟨mapping, .refl mapping,

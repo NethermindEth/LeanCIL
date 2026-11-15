@@ -124,7 +124,21 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var name = extracted
             ? ((MethodDefinition)Original(definition.Resolve().Module)
                 .LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
-        return $"{{ declaringType := {Type(declaringType, true)}, name := {Quote(name)}, target := {target}, typeArguments := {List(arguments.Select(Type))}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, hasThis := {Bool(reference.HasThis)}, returnsValue := {Bool(Returned(reference).FullName != "System.Void")}, returnType := {Type(Returned(reference))}, parameterTypes := {List(CallReturnType.Parameters(reference).Select(Parameter))} }}";
+        var genericArity = (reference is MethodDefinition own ? MethodSpecialization.Definition(own) : definition)
+            .GenericParameters.Count;
+        // Types render in the order they always have, since rendering a type can number its layout.
+        var ownerType = Type(declaringType, true);
+        var typeArguments = List(arguments.Select(Type));
+        var returnType = Type(Returned(reference));
+        var parameters = List(CallReturnType.Parameters(reference).Select(Parameter));
+        var methodArguments = List(arguments[..^owners.Length].Select(Type));
+        var method = $"{{ owner := {ownerType}, name := {MetadataName.OfText(name).ToLean()}, " +
+            $"hasThis := {Bool(reference.HasThis)}, genericArity := {genericArity}, returnType := {returnType}, " +
+            $"parameters := {parameters}, methodArguments := {methodArguments} }}";
+        return $"{{ method := {method}, name := {Quote(name)}, target := {target}, " +
+            $"typeArguments := {typeArguments}, ownerArgumentCount := {owners.Length}, " +
+            $"parameterCount := {reference.Parameters.Count}, " +
+            $"returnsValue := {Bool(Returned(reference).FullName != "System.Void")} }}";
     }
 
     // An open owner spells caller parameters by position, so the certificate can instantiate it;
@@ -311,13 +325,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             Type(InitAccessors.Return(method.ReturnType)));
     }
 
-    /// <summary>The method's DeclaredSignature: the receiver kind and types of method{n}Closed.</summary>
+    /// <summary>
+    /// The method's DeclaredSignature: the receiver kind, types and localsinit flag of method{n}Closed. Fields at
+    /// their default are omitted.
+    /// </summary>
     internal string Declared(MethodDefinition method)
     {
         var receiver = method.HasThis
             ? $"receiver := some .{(ObjectReceiver(method) ? "object" : "reference")}, " : "";
         var (parameters, returnType) = SignatureTypes(method);
-        return $"{{ {receiver}parameters := {parameters}, returnType := {returnType} }}";
+        var initLocals = method.Body.InitLocals ? "" : ", initLocals := false";
+        return $"{{ {receiver}parameters := {parameters}, returnType := {returnType}{initLocals} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,

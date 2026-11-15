@@ -55,9 +55,11 @@ def copySlot : ImportSlot := {
   parameterCount := 2, hasThis := false, returnsValue := false,
   signature := some copySignature, layouts := catalog }
 def copySite : CallSite := {
-  declaringType := owner, name := "Copy", target := .external copySlot.identity,
-  typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := false,
-  returnType := .void, parameterTypes := [.byref pair, .byref pair] }
+  method := {
+    owner := owner, name := name!"Copy", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [.byref pair, .byref pair] },
+  name := "Copy", target := .external copySlot.identity, typeArguments := [], parameterCount := 2,
+  returnsValue := false }
 
 theorem imported_pair_valid : ImportedLayoutsValid [copySlot] .scalar := by decide +kernel
 #print axioms imported_pair_valid
@@ -78,11 +80,12 @@ theorem rejection_8 : ¬ ImportedLayoutsValid [{ copySlot with layouts := ⟨[le
 theorem rejection_9 : validateImportCall [] [{ copySlot with signature := none, layouts := {} }]
     40 copySite copySlot.identity 0 2 = false := by decide +kernel
 #print axioms rejection_9
-theorem rejection_10 : validateImportCall [] [copySlot] 40 { copySite with parameterTypes := [.byref pair] }
+theorem rejection_10 : validateImportCall [] [copySlot] 40
+    { copySite with method.parameters := [.byref pair] }
     copySlot.identity 0 2 = false := by decide +kernel
 #print axioms rejection_10
 theorem rejection_11 : validateImportCall [] [copySlot] 40
-    { copySite with parameterTypes := [.byref (.atom "Other" "Library.Pair"), .byref pair] }
+    { copySite with method.parameters := [.byref (.atom "Other" "Library.Pair"), .byref pair] }
     copySlot.identity 0 2 = false := by decide +kernel
 #print axioms rejection_11
 
@@ -91,9 +94,11 @@ def identitySlot : ImportSlot := {
   identity := library ++ "::Identity<UInt64>", closureDigest := "digest",
   parameterCount := 1, hasThis := false, returnsValue := true, signature := some identitySignature }
 def identitySite : CallSite := {
-  declaringType := owner, name := "Identity", target := .external identitySlot.identity,
-  typeArguments := [word], parameterCount := 1, hasThis := false, returnsValue := true,
-  returnType := word, parameterTypes := [word] }
+  method := {
+    owner := owner, name := name!"Identity", hasThis := false, genericArity := 1,
+    returnType := word, parameters := [word], methodArguments := [word] },
+  name := "Identity", target := .external identitySlot.identity, typeArguments := [word],
+  parameterCount := 1, returnsValue := true }
 
 theorem closed_generic_valid : ImportedLayoutsValid [identitySlot] .scalar := by decide +kernel
 #print axioms closed_generic_valid

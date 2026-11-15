@@ -76,6 +76,10 @@ private def initialLocal : LocalKind → Value
   | .vector512 => .v512 0
   | .aggregate size => .aggregate (List.replicate size.val 0)
 
+/-- The value a local of `kind` starts with: its zero when the body initializes locals. -/
+def _root_.CIL.LocalKind.initialValue (initLocals : Bool) (kind : LocalKind) : Value :=
+  if initLocals then initialLocal kind else .unmodeled
+
 /-- Integer static-field storage and its narrow-load signedness. -/
 private def staticScalarType : TypeExpr → Option (Nat × Bool)
   | .enum _ underlying => staticScalarType underlying
@@ -155,25 +159,32 @@ theorem methodShapeInstructions_eq_scan (closed : RawMethod)
   rfl
 
 #print axioms methodShapeInstructions_eq_scan
-/-- The declared signature a closed raw method implies: its receiver kind, parameter types and
-    return type. -/
+/-- The declared signature a closed raw method implies: its receiver kind, parameter types,
+    return type and localsinit flag. -/
 def _root_.CIL.DeclaredSignature.ofRaw (closed : RawMethod) : DeclaredSignature where
   receiver :=
     if closed.hasThis then some (if closed.objectReceiver then .object else .reference) else none
   parameters := closed.parameters
   returnType := closed.returnType
+  initLocals := closed.initLocals
 
 /-- Bind non-instruction method fields that affect frame setup and return behavior. -/
 def MethodShapeValid (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
-  method.declared = DeclaredSignature.ofRaw closed ∧
-  method.locals = method.localKinds.map (fun kind =>
-    if closed.initLocals then initialLocal kind else .unmodeled) ∧
+  method.locals = method.localKinds.map (LocalKind.initialValue closed.initLocals) ∧
   methodShapeInstructions closed method = true
 
 instance (closed : RawMethod) (method : Method) :
     Decidable (MethodShapeValid closed method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+
+/-- The method's declared signature is the one its closed metadata implies. -/
+def DeclaredValid (closed : RawMethod) (method : Method) : Prop :=
+  method.declared = DeclaredSignature.ofRaw closed
+
+-- Generated proofs use `rfl`, which compares the two signature literals once per method.
+instance (closed : RawMethod) (method : Method) : Decidable (DeclaredValid closed method) :=
+  inferInstanceAs (Decidable (_ = _))
 
 /-- The method's environment is the program's layout tables, so every method of one extraction
     shares it. -/
@@ -184,11 +195,11 @@ def MethodEnvironmentValid (rawLayouts : List RawLayout) (layouts : Array Comput
 /-- Valid signature and environment metadata determine return narrowing independently of code. -/
 theorem returnNarrow_of_shape {rawLayouts : List RawLayout}
     {layouts : Array ComputedLayout} {closed : RawMethod} {method : Method}
-    (shape : MethodShapeValid closed method)
+    (shape : MethodShapeValid closed method) (declared : DeclaredValid closed method)
     (environment : MethodEnvironmentValid rawLayouts layouts method) :
     method.returnNarrow = declaredNarrow rawLayouts closed.returnType := by
   have returns := shape.2.1
-  have declared := shape.2.2.1
+  change method.declared = _ at declared
   change method.environment = _ at environment
   by_cases void : closed.returnType = .void
   · simp [Method.returnNarrow, returns, void, declaredNarrow, typeStorage]
@@ -253,7 +264,7 @@ theorem argumentAccess_of_evidence {rawLayouts : List RawLayout} {layouts : Arra
     {original closed : RawMethod} {typeArguments : List TypeExpr} {raw : RawArguments}
     {reachable : List Bool} {method : Method} {index : Nat} {type : StorageType}
     (specialized : SpecializationValid rawLayouts original typeArguments closed raw)
-    (shape : MethodShapeValid closed method)
+    (declared : DeclaredValid closed method)
     (environment : MethodEnvironmentValid rawLayouts layouts method)
     (homes : ParameterHomesValid layouts raw reachable method)
     (unhomed : index ∉ requiredHomeIndices raw reachable)
@@ -265,7 +276,7 @@ theorem argumentAccess_of_evidence {rawLayouts : List RawLayout} {layouts : Arra
     rw [beq_eq_false_iff_ne]
     intro same
     exact unhomed (same ▸ member)
-  have declared := shape.2.2.1
+  change method.declared = _ at declared
   change method.environment = _ at environment
   have closedEq := specialized.2
   rw [closedArguments_eq_list] at closedEq
@@ -331,13 +342,14 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   ConstrainedCallsValid item.dispatchTypes (specializationTable all) item.closed item.reachable
     method ∧
   BodyDecodes pins item.assembly item.body item.original item.arguments item.signature ∧
-  MethodEnvironmentValid rawLayouts layouts method
+  MethodEnvironmentValid rawLayouts layouts method ∧
+  DeclaredValid item.closed method
 
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
     (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts pins all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)

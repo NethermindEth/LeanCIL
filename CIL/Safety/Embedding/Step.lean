@@ -263,6 +263,7 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
+set_option maxHeartbeats 300000 in
 /-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
 theorem step_relabel_faulting (op : Instruction)
     (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
@@ -671,7 +672,14 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
-  case stackAlloc | newArray | newReferenceArray =>
+  case localloc =>
+    plain_cases
+    rw [context.declared]
+    unfold localAllocation at h ⊢
+    split at h
+    · split at h <;> first | lockstep | cases h
+    · cases h
+  case newArray | newReferenceArray =>
     stack_cases =>
       first
       | fallback_vacuous
@@ -925,6 +933,7 @@ macro "lookup_raise" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
+set_option maxHeartbeats 300000 in
 /-- Division, remainder and overflow-checked arithmetic raise in lockstep with their
     relabeling. -/
 theorem step_raise_faulting (op : Instruction)
@@ -1210,7 +1219,14 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
       | cases h
       | (split at h <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_true, ite_false,
           Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢)
-  case stackAlloc | newArray | newReferenceArray =>
+  case localloc =>
+    plain_cases
+    rw [context.declared]
+    unfold localAllocation at h ⊢
+    split at h
+    · split at h <;> first | raise_lockstep | cases h
+    · cases h
+  case newArray | newReferenceArray =>
     stack_cases =>
       first
         | fallback_raise_vacuous

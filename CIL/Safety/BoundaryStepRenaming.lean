@@ -357,8 +357,7 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
       | exact False.elim (tested ⟨_, _, rfl⟩)
-      -- The dispatcher's four static-field exclusions are reintroduced after the argument index.
-      | (rename_i position _ _ _ _
+      | (rename_i position
          obtain ⟨_, sourceAccess, targetAccess⟩ := metadata.arguments position
          apply (related.loadArgument sourceAccess targetAccess arguments argumentBounds).bind
          intro first second same

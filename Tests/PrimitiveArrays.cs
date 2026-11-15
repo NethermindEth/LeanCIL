@@ -464,8 +464,7 @@ foreach (var (name, _, element, width, counted) in fills)
             ("element", ".arrayFill .signed32 false", ".arrayFill .unsigned32 false"),
             ("width", ".arrayFill .signed32 false", ".arrayFill .signed64 false"),
             ("operation", ".arrayFill .signed32 false", ".spanFill 4 false"),
-            ("arity", "parameterCount := 2, hasThis := false, returnsValue := false",
-                "parameterCount := 4, hasThis := false, returnsValue := false"),
+            ("arity", "parameterCount := 2, returnsValue := false", "parameterCount := 4, returnsValue := false"),
             ("scope", ".atom Extraction.runtimeScope \"System.Array\"", ".atom \"Wrong.Scope\" \"System.Array\"")
         })
         {

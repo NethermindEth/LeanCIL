@@ -8,9 +8,11 @@ def span : TypeExpr := .apply (.constructor runtimeScope "System.Span`1")
   (.atom runtimeScope "System.Byte")
 /-- A receiver call that completes a span fold. -/
 def spanLength : RawInstruction := ⟨0, 40, .call {
-  declaringType := span,
+  method := {
+    owner := span, name := name!"get_Length", hasThis := true, genericArity := 0,
+    returnType := .void, parameters := [] },
   name := "get_Length", target := .external "", typeArguments := [], parameterCount := 0,
-  hasThis := true, returnsValue := true}⟩
+  returnsValue := true }⟩
 /-- Each local has exactly one store and one address load. -/
 def code (size : Nat) : List RawInstruction := (List.range size).flatMap fun index =>
   [⟨0, 19, .local index⟩, ⟨0, 18, .local index⟩, spanLength]
