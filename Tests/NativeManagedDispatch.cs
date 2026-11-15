@@ -97,9 +97,10 @@ theorem native_invalid_storage :
 #print axioms native_invalid_storage
 /-- The catalog reauthenticates opaque identities obtained from supplied storage. -/
 theorem native_forged_identity :
-    (nativeRun { nativeTable with targets := some #[{ nativeIdentity with token := 0 }],
-      counted := by decide } 0 0).isOk =
-      false := by decide +kernel
+    (nativeRun
+      { nativeTable with
+        targets := some #[{ nativeIdentity with token := 0 }], counted := by decide }
+      0 0).isOk = false := by decide +kernel
 #print axioms native_forged_identity
 """;
 RequireLeanFixtures("CIL.Extraction.Translation", "CIL.SymbolicExecution", "Tests.NativeMethodTables");
