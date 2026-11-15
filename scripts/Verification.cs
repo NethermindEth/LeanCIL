@@ -2366,12 +2366,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         // Only a publication evicts, so opening a cached entry reads no other entry, and it runs after
         // the key's lock is released so that a waiter is not held up by deleting other entries.
         if (publishedEntry) EvictUnusedLibraries(cacheRoot, libraryKey!);
-        const string compiledPrefix = ".lake/build/lib/lean/";
         // Lake compiles a dependency's missing modules into its own build directory, so a library
         // extended with uncompiled sources is read from a private copy; a complete one is never written.
         var incomplete = manifest.Keys.Any(name => name.StartsWith("CIL/", StringComparison.Ordinal) &&
             name.EndsWith(".lean", StringComparison.Ordinal) &&
-            !manifest.ContainsKey(compiledPrefix + name[..^".lean".Length] + ".olean"));
+            !manifest.ContainsKey(CompiledLibraryPrefix + name[..^".lean".Length] + ".olean"));
         if (!ownsLibrary && (incomplete || writes))
         {
             var started = DateTimeOffset.UtcNow;
@@ -2383,12 +2382,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             Trace(incomplete ? "Copying incomplete certified Lean verification library" : "Copying certified Lean verification library",
                 started, copy, elapsed.Elapsed, 0, "", [copy]);
         }
+        RequireLakeReadable(library, manifest.Keys);
         // Lake rebuilds a module it finds stale into the library; no build of this process may have done so.
         libraryStamps = ownsLibrary ? null : libraryStamps ?? FileStamps(library);
         libraryManifest = new(manifest, StringComparer.Ordinal);
-        baseModules = new(manifest.Where(pair => pair.Key.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
+        baseModules = new(manifest.Where(pair =>
+                pair.Key.StartsWith(CompiledLibraryPrefix, StringComparison.Ordinal) &&
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal))
-            .ToDictionary(pair => pair.Key[compiledPrefix.Length..], pair => pair.Value), StringComparer.Ordinal);
+            .ToDictionary(pair => pair.Key[CompiledLibraryPrefix.Length..], pair => pair.Value),
+            StringComparer.Ordinal);
         certifiedModules = new(baseModules, StringComparer.Ordinal);
         libraryInputs = common;
         auditExecutable = Path.Combine(library, ".lake/build/bin", OperatingSystem.IsWindows() ? "leancil-audit.exe" : "leancil-audit");
@@ -2415,6 +2417,32 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     /// <summary>The module that the audit executable is built from; every library entry holds its imports.</summary>
     const string AuditModule = "CIL.OleanAudit";
+
+    /// <summary>The directory of a library that holds its compiled modules, their companions and hashes.</summary>
+    const string CompiledLibraryPrefix = ".lake/build/lib/lean/";
+
+    /// <summary>
+    /// The longest full path of a compiled library file that Lake reads on Windows; it reports a longer one as a
+    /// missing file, so no package builds against a library holding one.
+    /// </summary>
+    const int LakePathLimit = 259;
+
+    /// <summary>
+    /// Refuses, on Windows, a library holding a compiled file whose full path is longer than Lake reads, naming
+    /// the file, since every package that requires the library would fail on it.
+    /// </summary>
+    static void RequireLakeReadable(string library, IEnumerable<string> files)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var longest = files.Where(name => name.StartsWith(CompiledLibraryPrefix, StringComparison.Ordinal))
+            .MaxBy(name => name.Length);
+        var length = longest is null ? 0 : Path.Combine(library, longest).Length;
+        if (length > LakePathLimit)
+            throw new InvalidOperationException($"The certified library {library} cannot be read by Lake on " +
+                $"Windows: its file {longest} makes a path of {length} characters and Lake reads at most " +
+                $"{LakePathLimit}. Use a library cache directory (LEANCIL_CACHE_DIR) or supplied library " +
+                $"(LEANCIL_CERTIFIED_LIBRARY) whose path is at least {length - LakePathLimit} characters shorter.");
+    }
 
     // Resolve source roots through Lake so library and package srcDir settings agree with imports.
     internal static string[] ConsumerSourceDirectories(string session, IEnumerable<string> packageRoots)
@@ -2463,11 +2491,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static bool ClosureManifest(SortedDictionary<string, string> manifest, SortedDictionary<string, string> sources,
         string[] modules)
     {
-        const string compiledPrefix = ".lake/build/lib/lean/";
         var expected = modules.Select(ModuleSource).Concat(LibraryConfiguration).ToHashSet(StringComparer.Ordinal);
-        var compiled = manifest.Keys.Where(name => name.StartsWith(compiledPrefix, StringComparison.Ordinal) &&
+        var compiled = manifest.Keys.Where(name => name.StartsWith(CompiledLibraryPrefix, StringComparison.Ordinal) &&
                 Path.GetFileName(name).Contains(".olean", StringComparison.Ordinal))
-            .Select(name => ModuleName(name[compiledPrefix.Length..])).ToHashSet(StringComparer.Ordinal);
+            .Select(name => ModuleName(name[CompiledLibraryPrefix.Length..])).ToHashSet(StringComparer.Ordinal);
         return expected.SetEquals(LibrarySources(manifest).Keys) && compiled.SetEquals(modules) &&
             expected.All(name => sources.TryGetValue(name, out var hash) && manifest[name] == hash);
     }

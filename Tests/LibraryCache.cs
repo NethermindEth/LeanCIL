@@ -372,6 +372,62 @@ try
             if (Directory.Exists(buildingCache)) Directory.Delete(buildingCache, true);
         }
         Console.WriteLine("PASS the run that builds and publishes the library reads the entry later runs open");
+
+        // Lake on Windows reports a file whose full path exceeds its limit as missing, so an entry it cannot read
+        // is refused when opened instead of failing the first build that requires it; the limit itself is checked.
+        var longest = ReadManifest(wholeEntry)!.Keys
+            .Where(name => name.StartsWith(CompiledLibraryPrefix, StringComparison.Ordinal))
+            .MaxBy(name => name.Length)!;
+        var compiledModule = longest[CompiledLibraryPrefix.Length..longest.IndexOf('.', CompiledLibraryPrefix.Length)]
+            .Replace('/', '.');
+        // A module importing the one that owns the longest file makes Lake read that file's hash; the package
+        // requires the entry by its absolute path, as consumer verification does.
+        void BuildImporter(string entry)
+        {
+            var package = Path.Combine(Path.GetTempPath(), "lq-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(package);
+            try
+            {
+                File.Copy(Path.Combine(entry, "lean-toolchain"), Path.Combine(package, "lean-toolchain"));
+                var location = System.Text.Json.JsonSerializer.Serialize(entry.Replace('\\', '/'));
+                File.WriteAllText(Path.Combine(package, "lakefile.toml"), "name = \"probe\"\n\n[[require]]\n" +
+                    "name = \"leancil\"\npath = " + location + "\n\n[[lean_lib]]\nname = \"PathProbe\"\n");
+                File.WriteAllText(Path.Combine(package, "PathProbe.lean"), "import " + compiledModule + "\n");
+                Run(["lake", "build", "PathProbe"], package);
+            }
+            finally { Directory.Delete(package, true); }
+        }
+        foreach (var beyondLimit in new[] { false, true })
+        {
+            var padded = Path.Combine(Path.GetTempPath(), "ll-");
+            var rootLength = LakePathLimit + (beyondLimit ? 1 : 0) - longest.Length - wholeLibraryKey.Length - 2;
+            var longRoot = padded + new string('r', rootLength - padded.Length);
+            var longEntry = Path.Combine(longRoot, wholeLibraryKey);
+            CopyTree(wholeEntry, longEntry);
+            Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", longRoot);
+            var reader = new Program();
+            try
+            {
+                if (!beyondLimit || !OperatingSystem.IsWindows())
+                {
+                    reader.Library(Inputs(At("CIL.lean")));
+                    BuildImporter(longEntry);
+                    if (reader.libraryBuild != "cache" || reader.library != longEntry)
+                        throw new Exception("A library entry within the path limit was not opened in place");
+                    continue;
+                }
+                ExpectRejection(() => reader.Library(Inputs(At("CIL.lean"))), "cannot be read by Lake");
+                ExpectRejection(() => BuildImporter(longEntry), "no such file");
+            }
+            finally
+            {
+                ((IDisposable)reader).Dispose();
+                Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", builtCache);
+                Directory.Delete(longRoot, true);
+            }
+        }
+        Console.WriteLine($"PASS a library entry whose files Lake reads at {LakePathLimit} characters is opened; " +
+            "one character more is refused on Windows, where Lake fails to read it");
     }
     finally
     {
