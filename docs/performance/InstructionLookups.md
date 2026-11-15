@@ -89,6 +89,22 @@ locals, less the heartbeats of stating the same certificate. It fails when the c
 at 1,024 or 4,096 exceeds 1.25 times the cost at 256. A local load, store or address is checked by
 its opcode and index, and the cost per instruction measures 1.00 at 1,024 and 1.05 at 4,096.
 
+It checks `FeatureFlowValid` on bodies of 2,049 instructions over 16, 64 and 256 `int32` locals as
+well. Each segment loads, stores and addresses a local, then addresses the argument and stores a
+constant into it. A feature state lists only the locals that hold a known word, as (local index,
+word) pairs in increasing index order, so none of these states holds a local fact. The suite fails
+when the cost per instruction at 64 or 256 locals exceeds 1.25 times the cost at 16; it measures
+1.01 at 64 and 1.02 at 256, where a state with one entry per local measures 1.23 and 2.26.
+
+A last body over 64 `int32` locals stores zero into the first 4, 16 or 64 of them and then loads
+and pops those in turn 1,024 times, so each of the 2,048 loop states holds every stored fact. The
+suite subtracts the cost of the stores alone, whose states together hold about the square of the
+facts, and fails when the increment from 16 to 64 facts exceeds 4.5 times the increment from 4 to
+16: linear growth in the facts gives four, a logarithmic factor about 5.7 and a quadratic state
+check sixteen. Reads, stores and weakening walk the known facts, and each fact's eligibility is a
+lookup in a balanced index built once per body. The ratio measures 4.00, about 160 kernel
+heartbeats per fact per state, or about 21 million for 64 facts over 2,048 states.
+
 The suite embeds a hand-written body built with `Method.withCode`, one call per segment, into an
 extraction with a dead block after each return, at 512 and 2,048 calls, and reads the kernel
 heartbeats to recheck the lemma `cil_embed` states. It fails when the heartbeats per call grow

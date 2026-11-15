@@ -71,13 +71,23 @@ const int ManyLocals = 512;
 // Four times the locals may cost at most this much more per instruction; the closed argument storage reads a set
 // of pointer locals whose lookups cost the logarithm of the locals.
 const double AllowedLocalGrowth = 1.25;
-// Bodies of a fixed length over these many int32 locals, cycling through every local. A feature certificate whose
-// states hold one fact per local costs more per instruction as the locals grow at the same body length.
+// Bodies of a fixed length over these many int32 locals, cycling through every local. Feature states list known
+// facts alone, so a body that stores no constant costs the same per instruction at every local count.
 const int FewFeatureLocals = 16;
 const int MoreFeatureLocals = 64;
 const int ManyFeatureLocals = 256;
 const int FeatureLocalSegments = 256;
 const int FeatureLocalInstructions = 8 * FeatureLocalSegments + 1;
+// Bodies over `ManyKnownFacts` int32 locals that store a constant into the first few, more or many of them and then
+// load those in turn `KnownFactLoads` times. Every loop state holds all the stored facts, so the loop costs the
+// facts times the loads.
+const int FewKnownFacts = 4;
+const int MoreKnownFacts = 16;
+const int ManyKnownFacts = 64;
+const int KnownFactLoads = 1024;
+// The increment from 16 to 64 facts is four times the increment from 4 to 16 when each state costs time linear in
+// its facts; a logarithmic factor makes it about 5.7 times and a quadratic state check sixteen times.
+const double AllowedFactIncrementRatio = 4.5;
 
 var directory = At("artifacts/LookupScaling");
 Directory.CreateDirectory(directory);
@@ -933,7 +943,7 @@ long LocalAccessCost(int accesses)
           parameters := [], locals := List.replicate localCount intType, initLocals := true,
           maxStack := 1, genericParameters := [],
           code := (List.range cycles).flatMap segment ++ [⟨0, 42, .none⟩] }
-        def unknown : List (Option W32) := List.replicate localCount none
+        def unknown : List (Nat × W32) := []
         def features (cycles : Nat) : FeatureCertificate :=
           (List.replicate cycles [some ⟨[], unknown⟩, some ⟨[none], unknown⟩, some ⟨[], unknown⟩,
             some ⟨[none], unknown⟩]).flatten ++ [some ⟨[], unknown⟩]
@@ -1067,7 +1077,7 @@ long FeatureLocalCost(int count)
           parameters := [intType], locals := List.replicate localCount intType, initLocals := true,
           maxStack := 1, genericParameters := [],
           code := (List.range segments).flatMap segment ++ [⟨0, 42, .none⟩] }
-        def unknown : List (Option W32) := List.replicate localCount none
+        def unknown : List (Nat × W32) := []
         def features (segments : Nat) : FeatureCertificate :=
           (List.replicate segments [some ⟨[], unknown⟩, some ⟨[none], unknown⟩, some ⟨[], unknown⟩,
             some ⟨[none], unknown⟩, some ⟨[], unknown⟩, some ⟨[none], unknown⟩, some ⟨[], unknown⟩,
@@ -1100,6 +1110,66 @@ if (perFeatureInstruction.Skip(1).Any(run => run.Cost > perFeatureInstruction[0]
         $"{FewFeatureLocals} locals."));
 Console.WriteLine($"PASS checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
     featureLocalsMeasured);
+
+// The kernel heartbeats of the feature certificate of a body over `ManyKnownFacts` int32 locals that stores zero
+// into the first `facts` of them and then loads and pops those in turn `loads` times, less those of stating it.
+long KnownFactCost(int facts, int loads)
+{
+    var header = $$"""
+        import CIL.Extraction.Features
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        namespace KnownFacts
+        open CIL CIL.Extraction
+        def intType : TypeExpr := .atom runtimeScope "System.Int32"
+        def facts : Nat := {{facts}}
+        def loads : Nat := {{loads}}
+        def known (count : Nat) : List (Nat × W32) := (List.range count).map fun index => (index, 0)
+        def raw : RawMethod := {
+          token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+          callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+          parameters := [], locals := List.replicate {{ManyKnownFacts}} intType, initLocals := true,
+          maxStack := 1, genericParameters := [],
+          code := (List.range facts).flatMap (fun index => [⟨0, 22, .none⟩, ⟨0, 19, .local index⟩]) ++
+            (List.range loads).flatMap (fun index => [⟨0, 17, .local (index % facts)⟩, ⟨0, 38, .none⟩]) ++
+            [⟨0, 42, .none⟩] }
+        def features : FeatureCertificate :=
+          (List.range facts).flatMap (fun index => [some ⟨[], known index⟩, some ⟨[some 0], known index⟩]) ++
+            (List.replicate loads [some ⟨[], known facts⟩, some ⟨[some 0], known facts⟩]).flatten ++
+            [some ⟨[], known facts⟩]
+        def code : List Instruction :=
+          (List.range facts).flatMap (fun index => [.ldc_i4 0, .stloc index]) ++
+            (List.range loads).flatMap (fun index => [.ldloc (index % facts), .pop]) ++ [.ret]
+        """ + "\n";
+    var statement = $"FeatureFlowValid #[] (fun _ => none) raw .scalar features " +
+        $"(List.replicate {2 * facts + 2 * loads + 1} true) code";
+    var path = Path.Combine(directory, $"KnownFacts{facts}-{loads}.lean");
+    var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend KnownFacts\n", equations: false);
+    var decided = Heartbeats(path, header + $"""
+        theorem valid : {statement} := by decide +kernel
+        #print axioms valid
+        end KnownFacts
+        """ + "\n", equations: false);
+    return decided - stated;
+}
+// Subtract the stores alone, whose states together hold about the square of the facts.
+int[] factCounts = [FewKnownFacts, MoreKnownFacts, ManyKnownFacts];
+var factCosts = factCounts
+    .Select(facts => (double)(KnownFactCost(facts, KnownFactLoads) - KnownFactCost(facts, 0))).ToArray();
+var factIncrementRatio = (factCosts[2] - factCosts[1]) / (factCosts[1] - factCosts[0]);
+var perFactState = (factCosts[2] - factCosts[1]) / ((ManyKnownFacts - MoreKnownFacts) * 2.0 * KnownFactLoads);
+var factsMeasured = string.Join("; ", factCounts.Zip(factCosts, (facts, cost) =>
+    string.Create(CultureInfo.InvariantCulture, $"{cost:F0} kernel heartbeats at {facts} facts"))) +
+    string.Create(CultureInfo.InvariantCulture,
+        $"; increments in the ratio {factIncrementRatio:F2} (linear 4, quadratic 16); {perFactState:F0} per fact " +
+        $"per state, {perFactState * ManyKnownFacts * 2 * KnownFactLoads:F0} for {ManyKnownFacts} facts in " +
+        $"{2 * KnownFactLoads} states");
+if (factIncrementRatio > AllowedFactIncrementRatio)
+    throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+        $"Checking the feature certificate of {KnownFactLoads} loads of known facts costs {factsMeasured}; the " +
+        $"limit on the ratio is {AllowedFactIncrementRatio}."));
+Console.WriteLine(
+    $"PASS checking the feature certificate of {KnownFactLoads} loads of known facts costs {factsMeasured}");
 
 /// <summary>How the generated bodies of the local slot checks use each local.</summary>
 enum LocalSlots
