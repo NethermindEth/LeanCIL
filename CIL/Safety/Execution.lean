@@ -119,6 +119,32 @@ inductive FrameAction where
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
+/-- The catalog body an indirect call through `pointer` enters: the entry for the pointer's
+    target, when the pointer has the call site's signature; `none` for any other pointer. A
+    step proof rewrites this with a fact the kernel checks, so the elaborator never compares the
+    identities, whose strings it compares with recursion as deep as they are long. -/
+def indirectTarget (signature : CIL.ManagedSignature) (catalog : List CIL.ManagedTarget)
+    (pointer : CIL.MethodPointer) : Option Nat :=
+  if pointer.signature != signature then none
+  else pointer.target.bind fun identity =>
+    (catalog.find? (·.identity == identity)).map (·.method)
+
+/-- A selected body is one the catalog lists. -/
+theorem indirectTarget_mem {signature : CIL.ManagedSignature} {catalog : List CIL.ManagedTarget}
+    {pointer : CIL.MethodPointer} {method : Nat}
+    (selected : indirectTarget signature catalog pointer = some method) :
+    method ∈ catalog.map CIL.ManagedTarget.method := by
+  unfold indirectTarget at selected
+  split at selected
+  · cases selected
+  · cases target : pointer.target with
+    | none => simp [target] at selected
+    | some identity =>
+      simp only [target, Option.bind] at selected
+      obtain ⟨entry, found, rfl⟩ := Option.map_eq_some_iff.mp selected
+      exact List.mem_map.mpr ⟨entry, List.mem_of_find?_eq_some found, rfl⟩
+#print axioms indirectTarget_mem
+
 /-- Managed dispatch checks stable pointer identity and signature before selecting a body.
     Tail calls use the same retirement action as direct tail calls. -/
 def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
@@ -150,15 +176,13 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table memory)
     return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
   | .call signature catalog tail, .methodPointer pointer :: values =>
-    if pointer.signature != signature then .error .invalidState else pure ()
-    let some identity := pointer.target | .error .invalidState
-    let some target := catalog.find? (·.identity == identity) | .error .invalidState
+    let some method := indirectTarget signature catalog pointer | .error .invalidState
     let count := signature.parameters.length
     if (if tail then values.length != count else values.length < count) then
       .error .invalidState else pure ()
     let arguments ← (values.take count).reverse.mapM (checkedValue memory)
-    if tail then return .tailCall target.method arguments memory
-    else return .call target.method arguments (values.drop count) memory
+    if tail then return .tailCall method arguments memory
+    else return .call method arguments (values.drop count) memory
   | _, _ => .error .invalidState
 
 /-- Evaluates an intrinsic. Operands with unspecified bits are allowed only where the
