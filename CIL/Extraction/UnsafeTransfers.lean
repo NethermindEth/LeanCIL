@@ -64,8 +64,7 @@ def typedTransferMatches (layouts : List RawLayout) (type : TypeExpr) (read : Bo
     | some (.field kind) => match primitiveFieldWidth kind with
       | none => false
       | some width => match read, emitted with
-        | true, .loadScalar actual signed => actual == width &&
-          signed == (kind == .signed8 || kind == .signed16)
+        | true, .loadScalar actual signed => actual == width && signed == signedField kind
         | false, .storeScalar actual => actual == width
         | _, _ => false
     | _ => false
