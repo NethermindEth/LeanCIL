@@ -278,7 +278,8 @@ example : scalarTransfer addRaw (i 42) [.word64] = some [] := by decide
 
 private def localRaw := { raw [i 23, i 107, i 10, i 6, i 106, i 42] [] with locals := [intType] }
 private def localFeatures : FeatureCertificate :=
-  ([[], [some 1], [none], [], [none], [none]] : List (List (Option W32))).map fun stack => some ⟨stack, [none]⟩
+  ([[], [some 1], [none], [], [none], [none]] : List (List (Option W32))).map fun stack =>
+    some ⟨stack, []⟩
 private def localStates : ScalarCertificate := [some [], some [.word32], some [.other], some [], some [.word32], some [.word64]]
 private def localEvidence : MethodEvidence := withBody {
   body := noBody, original := localRaw, arguments := [], closed := localRaw,
@@ -406,7 +407,7 @@ private theorem call_signature_cases :
 
 private def faultLocalRaw := { raw [i 2, i 10, i 6, i 42] [word] with locals := [intType], returnType := intType }
 private def faultLocalFeatures : FeatureCertificate :=
-  ([[], [none], [], [none]] : List (List (Option W32))).map fun stack => some ⟨stack, [none]⟩
+  ([[], [none], [], [none]] : List (List (Option W32))).map fun stack => some ⟨stack, []⟩
 private def faultLocalStates : ScalarCertificate := [some [], some [.word64], some [], some [.word32]]
 private def faultLocalEvidence : MethodEvidence := withBody {
   body := noBody, original := faultLocalRaw, arguments := [], closed := faultLocalRaw,

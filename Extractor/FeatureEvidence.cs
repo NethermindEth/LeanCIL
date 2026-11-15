@@ -10,6 +10,12 @@ internal static class FeatureEvidence
 {
     static string Fact(int? value) => value is int word ? $"some (BitVec.ofInt 32 ({word}))" : "none";
 
+    // Lean accepts only known facts in increasing local order, so unknown locals cost nothing.
+    static IEnumerable<string> KnownLocals(IReadOnlyList<int?> locals) =>
+        locals.Select((value, index) => (value, index))
+            .Where(entry => entry.value is not null)
+            .Select(entry => $"({entry.index}, BitVec.ofInt 32 ({entry.value}))");
+
     internal static void Emit(StringBuilder lean, MethodDefinition method, int number,
         IReadOnlyDictionary<Instruction, FeatureConstants> incoming)
     {
@@ -17,7 +23,7 @@ internal static class FeatureEvidence
         {
             if (!incoming.TryGetValue(instruction, out FeatureConstants? state)) return "none";
             return $"some {{ stack := [{string.Join(", ", state.Stack.Reverse().Select(Fact))}], " +
-                $"locals := [{string.Join(", ", state.Locals.Select(Fact))}] }}";
+                $"locals := [{string.Join(", ", KnownLocals(state.Locals))}] }}";
         });
         lean.AppendLine($"def method{number}FeatureStates : Extraction.FeatureCertificate := [{string.Join(", ", states)}]");
     }

@@ -48,7 +48,8 @@ private def raw (code : List RawInstruction) (locals : List TypeExpr := [])
   returnType, parameters := [], locals, initLocals := true, maxStack := 8,
   genericParameters := [], code }
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
-private def state (stack : List (Option W32)) (locals : List (Option W32) := []) : Option FeatureState :=
+private def state (stack : List (Option W32)) (locals : List (Nat × W32) := []) :
+    Option FeatureState :=
   some ⟨stack, locals⟩
 private def branchRaw := raw [i 40 (.call getter), i 45 (.target 4), i 22, i 42, i 23, i 42]
 private def branchStates : FeatureCertificate := [state [], state [some 0], state [], state [some 0], none, none]
@@ -79,16 +80,16 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
 -- so the branch keeps both successors even though the first iteration is false.
 private def loopRaw := raw
   [i 22, i 10, i 6, i 22, i 51 (.target 8), i 23, i 10, i 43 (.target 2), i 42] [intType] .void
-private def loopStates : FeatureCertificate := [state [] [none], state [some 0] [none],
-  state [] [none], state [none] [none], state [some 0, none] [none],
-  state [] [none], state [some 1] [none],
-  state [] [some 1], state [] [none]]
+private def loopStates : FeatureCertificate := [state [] [], state [some 0] [],
+  state [] [], state [none] [], state [some 0, none] [],
+  state [] [], state [some 1] [],
+  state [] [(0, 1)], state [] []]
 private def loopCode : List Instruction :=
   [.ldc_i4 0, .stloc 0, .ldloc 0, .ldc_i4 0, .bne_un 8, .ldc_i4 1, .stloc 0, .br 2, .ret]
 example : FeatureFlowValid #[] (fun _ => none) loopRaw .scalar loopStates
     (List.replicate 9 true) loopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none)
-    loopRaw .scalar (loopStates.set 2 (state [] [some 0]))
+    loopRaw .scalar (loopStates.set 2 (state [] [(0, 0)]))
     (List.replicate 9 true) loopCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) loopRaw .scalar (loopStates.set 8 none)
     [true, true, true, true, true, true, true, true, false]
@@ -98,6 +99,37 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
     { loopRaw with code := loopRaw.code ++ [i 18 (.local 0)] }
     .scalar (loopStates ++ [none]) ((List.replicate 9 true) ++ [false])
     (loopCode ++ [.unsupported "unreachable address"]) := by decide
+
+-- A state no edge reaches is checked for its shape alone: its known facts must name each local
+-- once, by increasing index, below the local count, with a word the local's type admits.
+private def boolType : TypeExpr := .atom
+  "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+  "System.Boolean"
+private def deadRaw := raw [i 22, i 10, i 42, i 6, i 38, i 42] [intType, boolType] .void
+private def deadStates (facts : List (Nat × W32)) : FeatureCertificate :=
+  [state [], state [some 0], state [] [(0, 0)], state [] facts, state [some 0], state []]
+private def deadCode : List Instruction := [.ldc_i4 0, .stloc 0, .ret, .ldloc 0, .pop, .ret]
+example : FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(0, 0), (1, 1)])
+    (List.replicate 6 true) deadCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(1, 1), (0, 0)])
+    (List.replicate 6 true) deadCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(0, 0), (0, 0)])
+    (List.replicate 6 true) deadCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(0, 0), (2, 1)])
+    (List.replicate 6 true) deadCode := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar (deadStates [(0, 0), (1, 2)])
+    (List.replicate 6 true) deadCode := by decide
+-- The entry state has no known fact.
+example : ¬ FeatureFlowValid #[] (fun _ => none) deadRaw .scalar
+    ((deadStates [(0, 0)]).set 0 (state [] [(0, 0)])) (List.replicate 6 true) deadCode := by decide
+-- Loading or storing a local the method does not have is rejected.
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    (raw [i 17 (.local 2), i 38, i 42] [intType] .void) .scalar
+    [state [], state [none], state []] (List.replicate 3 true) [.ldloc 2, .pop, .ret] := by decide
+example : ¬ FeatureFlowValid #[] (fun _ => none)
+    (raw [i 22, i 19 (.local 2), i 42] [intType] .void) .scalar
+    [state [], state [some 0], state []] (List.replicate 3 true) [.ldc_i4 0, .stloc 2, .ret] := by
+  decide
 
 private def switchRaw := raw [i 2, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 42, i 25, i 42]
 private def switchStates : FeatureCertificate := [state [], state [none], state [], state [some 1],
@@ -197,7 +229,7 @@ theorem constant_branch_boundaries :
         List (Int × Int × List Bool)).all (fun (left, right, expected) =>
           [46, 59].all fun first => (List.range 10).all fun index =>
             featureSuccessors none 2 (i (first + index) (.target 5))
-              ⟨[some (BitVec.ofInt 32 right), some (BitVec.ofInt 32 left)], []⟩ ==
+              [some (BitVec.ofInt 32 right), some (BitVec.ofInt 32 left)] ==
                 some [if expected[index]?.getD false then 5 else 3]) = true := by decide +kernel
 #print axioms constant_branch_boundaries
 
@@ -205,7 +237,7 @@ theorem constant_branch_boundaries :
 theorem unknown_comparison_edges :
     [46, 59].all (fun first => (List.range 10).all fun index =>
       [([none, some 0] : List (Option W32)), [some 0, none], [none, none]].all fun stack =>
-        featureSuccessors none 2 (i (first + index) (.target 5)) ⟨stack, []⟩ == some [5, 3]) =
+        featureSuccessors none 2 (i (first + index) (.target 5)) stack == some [5, 3]) =
           true := by decide +kernel
 #print axioms unknown_comparison_edges
 
@@ -239,19 +271,19 @@ theorem comparison_results :
 theorem widened_comparison_unknown :
     featureTransfer #[] (raw []) .scalar (i 211) ⟨[some (-1)], []⟩ = some ⟨[none], []⟩ ∧
     featureTransfer #[] (raw []) .scalar (i 224) ⟨[some (-1)], []⟩ = some ⟨[none], []⟩ ∧
-    featureSuccessors none 2 (i 51 (.target 5)) ⟨[none, some (-1)], []⟩ = some [5, 3] :=
+    featureSuccessors none 2 (i 51 (.target 5)) [none, some (-1)] = some [5, 3] :=
   by decide +kernel
 #print axioms widened_comparison_unknown
 
 /-- Switch indices are unsigned int32 values; unknowns preserve every encoded successor. -/
 theorem constant_switch_successors :
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 0], []⟩ = some [4] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 1], []⟩ = some [6] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 4])) ⟨[some 1], []⟩ = some [4] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some 2], []⟩ = some [2] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[some (-1)], []⟩ = some [2] ∧
-    featureSuccessors none 1 (i 69 (.targets [])) ⟨[some 0], []⟩ = some [2] ∧
-    featureSuccessors none 1 (i 69 (.targets [4, 6])) ⟨[none], []⟩ = some [2, 4, 6] :=
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [some 0] = some [4] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [some 1] = some [6] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 4])) [some 1] = some [4] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [some 2] = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [some (-1)] = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [])) [some 0] = some [2] ∧
+    featureSuccessors none 1 (i 69 (.targets [4, 6])) [none] = some [2, 4, 6] :=
   by decide +kernel
 #print axioms constant_switch_successors
 
@@ -302,12 +334,12 @@ theorem pruned_tail_entry_rejected :
 theorem switch_backedge_weakening :
     let body := raw [i 22, i 10, i 6, i 69 (.targets [4, 7]), i 23, i 10,
       i 43 (.target 2), i 42] [intType] .void
-    let facts := [state [] [none], state [some 0] [none], state [] [none], state [none] [none],
-      state [] [none], state [some 1] [none], state [] [some 1], state [] [none]]
+    let facts := [state [] [], state [some 0] [], state [] [], state [none] [],
+      state [] [], state [some 1] [], state [] [(0, 1)], state [] []]
     let code := [.ldc_i4 0, .stloc 0, .ldloc 0, .switch [4, 7], .ldc_i4 1, .stloc 0,
       .br 2, .ret]
     FeatureFlowValid #[] (fun _ => none) body .scalar facts (List.replicate 8 true) code ∧
-    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 2 (state [] [some 0]))
+    ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 2 (state [] [(0, 0)]))
       (List.replicate 8 true) code ∧
     ¬ FeatureFlowValid #[] (fun _ => none) body .scalar (facts.set 7 none)
       [true, true, true, true, true, true, true, false]
