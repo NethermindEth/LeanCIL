@@ -60,8 +60,22 @@ theorem relinked_call : step relinked (.call 1 0) 0 args frame [] m = .ok (.call
 theorem unlinked_call :
     step { relinked with links := [] } (.call 1 0) 0 args frame [] m = .error unlinkedCall := rfl
 
+/-- A tail call the table gives no link faults before its stack check, which an empty stack under
+    one argument would fail with `invalidState`. -/
+theorem unlinked_tail_call :
+    step { code := [.tailCall 1 1], locals := [], returnsValue := false, links := [] }
+      (.tailCall 1 1) 0 args frame [] m = .error unlinkedCall := rfl
+
+/-- A construction the table gives no link faults before its size check, which size 0 would fail
+    with `invalidState`. -/
+theorem unlinked_aggregate :
+    step { code := [.newAggregate 1 0 0], locals := [], returnsValue := true, links := [] }
+      (.newAggregate 1 0 0) 0 args frame [] m = .error unlinkedCall := rfl
+
 #print axioms relinked_call
 #print axioms unlinked_call
+#print axioms unlinked_tail_call
+#print axioms unlinked_aggregate
 #print axioms step_next_target
 #print axioms step_call_action
 #print axioms step_newAggregate_action

@@ -641,6 +641,17 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
 
 #print axioms ManagedCallsValid_iff_original
 
+/-- An admitted body gives every pc the link its own instruction states. Each call arm of `step`
+    matches the constructor that `link?` gives its instruction, so a step of an admitted body
+    never takes the `unlinkedCall` branch. -/
+theorem ManagedCallsValid.linkAt_eq {methods : List SpecializedMethod}
+    {imports : List ImportSlot} {raw : RawMethod} {reachable : List Bool} {emitted : Method}
+    (valid : ManagedCallsValid methods imports raw reachable emitted) {pc : Nat}
+    {op : Instruction} (found : emitted.code[pc]? = some op) : emitted.linkAt pc = op.link? :=
+  Method.linkAt_of_instruction ((ManagedCallsValid_iff_original _ _ _ _ _).mp valid).1 found
+
+#print axioms ManagedCallsValid.linkAt_eq
+
 instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) :
     Decidable (ManagedCallsValid methods imports raw reachable emitted) :=

@@ -263,16 +263,19 @@ that `withCode` resets the sites and what entries to supply after it. `cil_embed
 text when the static descriptor lists differ or a moved pc resolves another descriptor. The
 `declared` and `environment` lines name no remedy: take both from the extraction's method.
 
-A proof that steps through a call reads the link at the call's pc. For an extracted method the
-generated fact `methodN_linkPC` gives the link of each call site in logarithmic time, and the
-`cil_code` simp set unfolds its named link to the constructor. For a pc without a call the table is
-read by its listed keys, which costs the number of calls and never gets stuck
-(`Method.linkAt_of_unlisted`). A template or a literal body keeps the table its code implies, and
-`Method.linkAt_of_instruction` reads the link from the instruction equation of its pc in one step,
-whatever the callee of a template is; evaluating `linkAt` instead rebuilds that table.
-`cil_instruction_equations` states that read as `body_link{pc}` for each call site of such a body
-whose instruction fixes its link. The stepping tactics read a call's link from these facts, or
-evaluate the table of a literal body or of a named body that has none.
+A proof that steps through a call reads the link at the call's pc. `cil_instruction_equations`
+states that read as `body_link{pc} : body.linkAt pc = some link` for each call site, so no proof
+walks the table. For a body that keeps the table its code implies, the fact comes from the
+instruction equation of its pc through `Method.linkAt_of_instruction`, whatever the callee of a
+template is. For an explicit table, as an extraction or a template writes, the command checks once
+that the keys ascend (`body_links_ascend`) and proves each fact from the table's entry
+(`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. The
+`cil_code` simp set unfolds an extracted method's named link `methodNLinkPC` to its constructor.
+For a pc without a call the table is read by its listed keys, which costs the number of calls and
+never gets stuck (`Method.linkAt_of_unlisted`). A template whose table a feature flag decides
+gets no link facts. The stepping tactics read a call's link from these facts; without one they
+evaluate the table of a literal body or of a named body that unfolds, which costs the table's
+length per call, and only an opaque body needs the link as a supplied fact.
 
 `cil_body` runs `rfl`, so the proof is the same kernel-checked `Eq.refl`. When `rfl` fails, it
 evaluates both closed sides and reports, for each differing `Method` field, the first differing
@@ -658,11 +661,11 @@ example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
 ```
 
 A body whose code length depends on a parameter, such as an `if` around a whole block, is rejected
-with the first pc that is not determined. Only the kernel checks the equations. For a body whose
-table is the one its code implies, it also states `body_link{pc} : body.linkAt pc = some link` for
-each pc whose instruction fixes its link, `.direct callee` for `.call callee argc` above. The command also
-declares `body_suffix{start}`, the code from every 16th pc on, and `body_suffix{start}_placed`, and
-proves each equation from the suffix that starts its block, so the equations cost time linear in
+with the first pc that is not determined. Only the kernel checks the equations. The command also
+states `body_link{pc} : body.linkAt pc = some link` for each call site, `.direct callee` for
+`.call callee argc` above, when the body's table is the one its code implies or an explicit table
+whose cells and keys are literals. It declares `body_suffix{start}`, the code from every 16th pc
+on, and `body_suffix{start}_placed`, and proves each equation from the suffix that starts its block, so the equations cost time linear in
 the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
 [instruction lookups](performance/InstructionLookups.md) records.
 

@@ -251,7 +251,8 @@ width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and 
   `instructionStep`. A `.call` step has its own `cil_step` equation, so a call checks its
   arguments without unfolding the dispatcher. Its target is the body's link at the call's pc,
   which the stepper reads from the generated link fact of a named body or by evaluating the table
-  of a literal one; a body with neither needs the link as a supplied fact.
+  of a literal body or of a named body that unfolds; only an opaque body needs the link as a
+  supplied fact.
 
 Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies
