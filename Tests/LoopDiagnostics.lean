@@ -1090,4 +1090,31 @@ theorem factListTraversal (_tail : List (Option Nat)) : True := by
 
 #print axioms factListTraversal
 
+/-- A static field whose value the caller's memory binds, so no step can compute its load. -/
+def opaqueField : CIL.Extraction.FieldRef :=
+  { owner := .atom "Fixture" "Holder", index := 0, type := .atom "Fixture" "System.Int32",
+    name := name!"Value" }
+
+/-- The site of `opaqueField`: an opaque value of four bytes. -/
+def opaqueSite : CIL.StaticDescriptor :=
+  { identity := 0, fieldName := "Fixture::Value", bytes := [0, 0, 0, 0],
+    initializer := some { method := 1, arguments := [] }, scalar := some true,
+    opaqueValue := true }
+
+/-- A loop that loads `opaqueField` and drops it on every iteration. -/
+def staticLoop : CIL.Method := {
+  code := [.ldsfld opaqueField, .pop, .br 0], locals := [], returnsValue := false,
+  staticSites := [(0, opaqueSite)] }
+
+/-- `cil_loop_steps` takes the `staticLoad` fact from the context and cannot cross the load
+    without it. -/
+theorem static_load_gathered (memory : Memory) (frame : Frame) (value : W32)
+    (loaded : staticLoad staticLoop 0 memory = .ok (memory, .scalar (.i32 value))) :
+    LoopReaches [staticLoop] 0 [] (LoopState.mk 0 frame [] memory)
+      (LoopState.mk 2 frame [] memory) := by
+  fail_if_success (clear loaded; cil_loop_steps)
+  cil_loop_steps
+
+#print axioms static_load_gathered
+
 end Tests.LoopDiagnostics

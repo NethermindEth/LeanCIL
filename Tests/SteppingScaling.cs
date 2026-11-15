@@ -155,10 +155,20 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var parameterTypes = string.Join(", ", Enumerable.Repeat(Int32Type, parameters));
     var signature = $"{{ parameters := [{parameterTypes}], returnType := {Int32Type} }}";
     var declaredField = workload == "arguments" ? $" declared := {signature}," : "";
-    var staticField = workload == "statics"
+    var statics = workload == "statics";
+    var staticField = statics
         ? "def staticField : CIL.Extraction.FieldRef :=\n" +
             "  { owner := .atom \"Fixture\" \"Holder\", index := 0, type := .atom \"Fixture\" \"System.Int32\",\n" +
-            "    name := name!\"Value\" }\n"
+            "    name := name!\"Value\" }\n" +
+            "def staticValue : CIL.StaticDescriptor :=\n" +
+            "  { identity := 0, fieldName := \"Fixture::Value\", bytes := [7, 0, 0, 0],\n" +
+            "    initializer := some { method := 1, arguments := [] }, scalar := some true }\n"
+        : "";
+    // One site per load, so every step resolves its own pc among all the body's sites.
+    var sitesField = statics
+        ? " staticSites := [" + string.Join(", ", operations.Select((operation, pc) => (operation, pc))
+            .Where(entry => entry.operation.StartsWith(".ldsfld", StringComparison.Ordinal))
+            .Select(entry => $"({entry.pc}, staticValue)")) + "],"
         : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
@@ -176,12 +186,12 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         set_option maxHeartbeats 800000
         {{staticField}}/-- A synthetic body in the emitter's explicit instruction-list shape. -/
         def body : CIL.Method := {
-          locals := [], returnsValue := true,{{declaredField}}
+          locals := [], returnsValue := true,{{declaredField}}{{sitesField}}
           code := [{{string.Join(",\n    ", operations)}}] }
         cil_instruction_equations body
-        """ + "\n" + (workload == "arguments" ? $$"""
+        """ + "\n" + (workload == "arguments" || statics ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
-        theorem body_declared : body.declared = {{signature}} := rfl
+        theorem body_declared : body.declared = {{(statics ? "{}" : signature)}} := rfl
         cil_resolution_facts body
         """ + "\n" : "");
     var incoming = string.Join(", ",
@@ -306,11 +316,11 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
               cil_checked_steps [divided, reduced, added, converted]
             """,
         "statics" => $$"""
-            /-- Every static load reads its value through a fact of constant size and leaves memory unchanged. -/
-            theorem checked (memory : Memory) (bits : CIL.W32)
-                (loaded : ∀ pc, staticLoad body pc memory = .ok (memory, .scalar (.i32 bits))) :
-                invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 bits)]) := by
-              cil_checked_steps [loaded]
+            /-- Every static load reads the descriptor its pc's site binds and leaves memory unchanged. -/
+            theorem checked (memory : Memory) :
+                invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 7)]) := by
+              cil_checked_steps
+              rfl
             """,
         "arguments" => $$"""
             /-- Each argument is read once and added to the running sum of the ones before it. -/

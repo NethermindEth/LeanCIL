@@ -194,7 +194,8 @@ reference into each of eight locals of a literal frame per cycle. The depth bodi
 operation does not fault. The arguments bodies have 16, 64 and 256 instructions and add 8, 32 and
 128 `int32` arguments of a declared signature, each read once, with the method's
 `cil_resolution_facts` in scope. The statics bodies have 16, 64 and 256 instructions and load a
-static field and pop it per cycle, each load advanced by one quantified fact on `staticLoad`.
+static field and pop it per cycle, with one static site per load, so each step resolves its pc
+among all the body's sites.
 The suite uses the proof-cost measuring frontend, with three
 sequential proof compilations and a header-only baseline per scalar, memory, reference, table,
 accumulate and locals body up to 256 instructions, and one compilation for every other body.

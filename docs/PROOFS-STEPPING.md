@@ -291,8 +291,11 @@ of `loadArgument` on `body.argumentAccess index`, which a later fact decides.
 A `.ldsfld field` step pushes the value `staticLoad body pc memory` returns, and `.ldsflda field`
 or `.ldtoken (.field field)` the reference `staticAddress body pc memory` returns
 ([StepComposition](../CIL/Safety/StepComposition.lean)); `.stsfld` faults. Both read the
-descriptor `body.staticAt pc` binds to the pc, and the stepping tactics take their result from a
-supplied fact. `cil_resolution_facts` declares `methodN_staticAtPC : methodN.staticAt PC = some
+descriptor `body.staticAt pc` binds to the pc. In a body given as a literal, the stepping tactics
+compute a load whose value extraction fixed. Otherwise they take the result from a fact, supplied
+or, for the loop tactics, in the context; an opaque value read from the caller's memory always
+needs one.
+`cil_resolution_facts` declares `methodN_staticAtPC : methodN.staticAt PC = some
 descriptor` for each static site, from which `staticLoad_initialized` or `staticAddress_resolved`
 ([StaticMemoryLemmas](../CIL/Safety/StaticMemoryLemmas.lean)) states the fact.
 
