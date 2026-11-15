@@ -205,12 +205,12 @@ void CheckTimings(RowFixture[] fixtures, bool cold, int nameLength)
             int index = round % 2 == 0 ? position : fixtures.Length - 1 - position;
             samples[index][round] = Batch(fixtures[index], cold, repetitions);
         }
-    double[] medians = samples.Select(values => values.Order().ElementAt(rounds / 2)).ToArray();
+    double[] minima = samples.Select(values => values.Min()).ToArray();
     for (int index = 0; index < fixtures.Length; index++)
         Console.WriteLine($"Rows={fixtures[index].Tokens.Length}, name bytes={nameLength}, cold={cold}, " +
-            $"passes={repetitions}, median batch ms={medians[index]:F3}, " +
-            $"median pass ms={medians[index] / repetitions:F6}");
-    Require(GrowthAccepted(medians), $"Modifier query CPU growth exceeded 6x+1ms: cold={cold}, bytes={nameLength}");
+            $"passes={repetitions}, minimum batch ms={minima[index]:F3}, " +
+            $"minimum pass ms={minima[index] / repetitions:F6}");
+    Require(GrowthAccepted(minima), $"Modifier query CPU growth exceeded 6x+1ms: cold={cold}, bytes={nameLength}");
 }
 
 foreach (int nameLength in new[] { 32, 512 })

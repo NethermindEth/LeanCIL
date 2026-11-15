@@ -297,15 +297,15 @@ Console.WriteLine(Elaborated("""
         let pattern := Json.mkObj [("list", Json.mkObj [
           ("type", Json.mkObj [("const", toJson "Nat")]), ("level", toJson (0 : Nat)),
           ("items", toJson (Array.replicate count (Json.str "_")))])]
-        let started ← IO.monoNanosNow
+        let started <- IO.getNumHeartbeats
         for iteration in [:1000] do
           unless (LeanCILAudit.fits pattern (cons (mkNatLit iteration) tail)).toOption == some true do
             throw <| IO.userError "matcher scaling result"
-        let elapsed := (← IO.monoNanosNow) - started
-        IO.println s!"PASS list matcher {count}: {elapsed / 1000000} ms for 1000 matches"
-        if previous > 0 && elapsed > previous * 12 + 20000000 then
+        let used := (<- IO.getNumHeartbeats) - started
+        IO.println s!"PASS list matcher {count}: {used} heartbeats for 1000 matches"
+        if previous > 0 && used > previous * 12 then
           throw <| IO.userError "list matcher growth exceeds linear allowance"
-        previous := elapsed
+        previous := used
     """));
 if (listsOnly) return;
 

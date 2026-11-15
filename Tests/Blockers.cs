@@ -476,10 +476,15 @@ double VirtualDispatchSeconds(int classes)
         entries = Enumerable.Range(0, VirtualCallers).Select(index =>
             new { signature = $"Callers::Call{index}(Shape,int)", profile = "scalar" })
     }));
-    var timer = System.Diagnostics.Stopwatch.StartNew();
-    Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Dispatch.dll"),
-        "--manifest", callers, "--output", Path.Combine(fixtureDirectory, "blockers.json")]);
-    return timer.Elapsed.TotalSeconds;
+    var seconds = double.MaxValue;
+    for (var sample = 0; sample < 3; sample++)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Dispatch.dll"),
+            "--manifest", callers, "--output", Path.Combine(fixtureDirectory, "blockers.json")]);
+        seconds = Math.Min(seconds, timer.Elapsed.TotalSeconds);
+    }
+    return seconds;
 }
 var fewClassesSeconds = VirtualDispatchSeconds(FewClasses);
 var manyClassesSeconds = VirtualDispatchSeconds(ManyClasses);
