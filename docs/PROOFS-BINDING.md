@@ -178,7 +178,7 @@ instructions stay in the region; `regionClosedCheck` decides it for a region lis
 lower)` suffixes (`inStarts`). `AgreesOn program other region` says `other` has the same methods and
 metadata, link table included, and the same instruction at every region pc; `AgreesOn.set` and
 `code_agrees_of_drop` build it for one replaced body. Then `run_congr_region` gives equal runs from any region pc, faults
-included. Masking the code outside the region with `.unsupported` makes it dead for `Embeds`, so
+included. Masking the code outside the region with holes (`.unadmitted`) makes it dead for `Embeds`, so
 `run_refines` carries the suffix run on to a body with a different prefix, for example a suffix
 after inline code to the same suffix after a helper call, one pc earlier.
 
@@ -246,7 +246,7 @@ open CIL
 
 /-- What an extraction emits: a dead block puts the call at pc 3. -/
 def emitted : Method :=
-  { code := [.ldarg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret],
+  { code := [.ldarg 0, .br 3, .unadmitted 0, .call 1 1, .ret],
     locals := [], returnsValue := true }
 
 /-- The body the proof uses; its call is at pc 2, and `withCode` gives it the link of that pc. -/
@@ -406,8 +406,9 @@ documents share. Without a PDB every message is unchanged.
 
 ### Bodies modulo dead code
 
-A profile can make the extractor emit dead `.unsupported` blocks that shift every later branch
-target, which breaks a `cil_body` equality even though reachable behaviour is unchanged. `cil_embed`
+A profile can make the extractor emit dead blocks of holes, `.unadmitted` with the raw opcode of
+each pc, that shift every later branch target. That breaks a `cil_body` equality even though
+reachable behaviour is unchanged, so `cil_embed`
 (from `CIL.Embedding.Tactic`) proves the weaker `MethodEmbeds` relation instead: every live
 instruction of the literal body appears in the extracted method at a mapped pc, with its code
 targets mapped the same way and its fallthrough kept adjacent. The literal body must carry the
@@ -431,7 +432,7 @@ open CIL (Method MethodEmbeds)
 /-- `body` as a profile-specific extraction emits it, with a dead block before the branch target. -/
 def extracted : Method := {
   code := [.ldarg 0, .brfalse 6, .ldarg 1, .ret,
-    .unsupported "Unreachable under selected profile", .ldc_i4 9, .ldarg 1, .ret]
+    .unadmitted 0, .ldc_i4 9, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem bound : MethodEmbeds [extracted] 0 body := by cil_embed
@@ -458,7 +459,7 @@ static descriptor list; `ProgramRefines.set` composes several bound methods. Nam
 transfer too: `bound.raises` transports `Raises`, `bound.holds` an `OutcomeContract.Holds` with both
 clauses (from `CIL.Safety.Embedding.Outcomes`), and `Embeds.invoke_raise` states the actual fault,
 whose pc is the one the map assigns in the throwing method. Other faults, including fuel exhaustion
-and `.unsupported`, do not transfer. The pc map is computed outside the kernel and then checked by
+and the fault of a hole, do not transfer. The pc map is computed outside the kernel and then checked by
 it, so the kernel rejects a wrong map without trusting it. A changed reachable instruction or an
 inserted live one is reported by expected and actual pc:
 
@@ -522,7 +523,7 @@ create or change any allocation.
 
 For numeric or interspersed dead locals, keep the extracted declarations and original local indices
 in the expected body and use ordinary `MethodEmbeds`. Unreachable code can still be omitted or
-marked `.unsupported`. This route preserves the identities of later parent and callee allocations
+marked as holes (`.unadmitted`). This route preserves the identities of later parent and callee allocations
 and so retains exact final memory; use it when a postcondition names fresh references.
 
 To omit numeric or interspersed declarations from the proof body, import
@@ -623,7 +624,7 @@ rejected rather than remapped. Imported callee slots are not supported in templa
 
 A body written once for every profile takes its feature flags and callee indices as parameters and
 keeps each feature-dependent instruction as an `if`, padding the other profile's side with
-`.unsupported` so every profile has the same pcs. `cil_instruction_equations` (from
+a hole (`.unadmitted`) so every profile has the same pcs. `cil_instruction_equations` (from
 `CIL.InstructionEquations`) states one `@[cil_code ↓]` equation per pc for such a body, the same
 `code[pc]? = some op` equations it states for each method of an extraction, so a lookup rewrites by
 one equation instead of unfolding the body:
@@ -632,7 +633,7 @@ one equation instead of unfolding the body:
 import CIL.InstructionEquations
 import CIL.Safety.SymbolicExecution
 
-abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected profile"
+abbrev unreachable : CIL.Instruction := .unadmitted 0
 
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
