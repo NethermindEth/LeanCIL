@@ -62,6 +62,10 @@ characters long and differ only in their last character, less the same statement
 than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
 check takes about 5 seconds.
 
+Exception decisions compare `CIL.ExceptionType` constructors. The equality, inequality,
+CLR mapping and optional outcome rows each allow 2,000 to 9,500 kernel heartbeats. Using
+`applicationException` instead of `format` may increase the cost by at most 1.05 times.
+
 The suite also measures `decide +kernel` on one `add` of an int32 offset to a native method
 table of 16, 64 and 256 entries, less the same statement closed with `sorry`. Each table and its
 static storage are definitions outside the decision, so the proof of `MethodTable.counted` is
@@ -80,16 +84,12 @@ entries exceeds 1.15 times the cost at 16, or when the last entry's cost beyond 
 divided by its index, does. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
 
-The suite also measures `decide +kernel` on the two metadata name computations of the call and
-field operand checks, for names of 20, 80 and 320 bytes that share all but their last byte, less
-the same statements closed with `sorry`. The method name clause of the call operand check,
-`MetadataName.spells`, reads the name's code back into bytes: about 41,300, 151,400 and 589,600
-heartbeats, or 2,070, 1,890 and 1,840 per byte. `MetadataName.ofBytes?`, which names a field
-row's bytes, reads one byte per kernel step from a leading one: about 13,500, 35,100 and 119,300
-heartbeats, or 670, 440 and 370 per byte. An encoder that indexes an array literal, which the
-kernel holds as a list, reads byte i in i steps and costs 143,500, 1,746,500 and 26,147,700. The
-suite fails when either cost per byte grows more than 1.15 times from one length to the next. Run
-this row alone with `dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
+The suite also measures `decide +kernel` on the name clause of the call and field operand checks,
+`MetadataName.spells`, for names of 20, 80 and 320 bytes that share all but their last byte, less
+the same statements closed with `sorry`. The clause reads the name's code back into bytes: about
+41,300, 151,400 and 589,600 heartbeats, or 2,070, 1,890 and 1,840 per byte. The suite fails when
+the cost per byte grows more than 1.15 times from one length to the next. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
 
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
 `calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
@@ -110,7 +110,7 @@ at each address measures 2.6 for plain and 3.4 for prefixed addresses without th
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
 128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
 of stating the same certificate. Integer locals take a constant and are popped after a load or
-after `ldloca`, which also makes each a receiver fold candidate; native-int locals take a method
+after `ldloca`; native-int locals take a method
 address and are consumed by `calli`, which makes each a pointer local. For the pointer locals it
 also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
 exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a

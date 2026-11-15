@@ -28,9 +28,10 @@ library and tactic regressions kernel-check the resulting proofs.
   use checked invocation and the shared feature evaluator.
 - `Tests.StoreFacts` checks symbolic carry and borrow stores whose write facts state `a + b + c`,
   `a - b - c` and the flag words in source form, through both `cil_checked_steps` and
-  `cil_contract_steps`. A wrong stored value, address or source memory leaves the run stuck at that
-  store, with the exact unsolved goal asserted. It also counts exactly 12
-  `trace.CIL.factNormalize` events for a 27-instruction run.
+  `cil_contract_steps`, and a native-int `stind.i` store stepped from the same kind of eight-byte
+  write fact. A wrong stored value, address or source memory leaves the run stuck at that store,
+  with the exact unsolved goal asserted. It also counts exactly 12 `trace.CIL.factNormalize`
+  events for a 27-instruction run.
 - `Tests.AggregateSetup` and `Tests.Semantics` cover frame setup and interpreter behavior.
 - `Tests.BodyDecoding` checks the method body decoder against hand-made bodies, one rejection per
   failure kind and the operand table against a static list generated from Mono.Cecil.

@@ -309,7 +309,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
   else if instruction.opcode == 65054 then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
-    instruction.operand == .none && match emitted with | .memory .nullObject => true | _ => false
+    instruction.operand == .none && match emitted with | .ldnull => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
     match instruction.operand, stack, emitted with
     | .target target, value :: _, .brfalse actual =>
@@ -400,7 +400,7 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
 /-- An instance field instruction on a class, or an emitted class field operation. -/
 private def objectFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
-    | .field (.object _ _) _ _ false => true
+    | .field (.object _ _) _ _ _ false => true
     | _ => false) ||
   match emitted with
   | .memory (.objectField ..) | .memory (.setObjectField ..)
@@ -423,29 +423,29 @@ private def fieldElementMatches (declared emitted : ArrayElement) : Bool :=
 private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Instruction) : Bool :=
   match instruction.opcode, instruction.operand, stack, emitted with
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.objectField owner offset width signed) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && objectFieldShape type == some (width, signed)
-  | 125, .field (.object scope name) index type false, _ :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, _ :: receiver :: _,
       .memory (.setObjectField owner offset width) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.objectReferenceField owner offset) =>
     referenceFieldType type && receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
-  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, value :: receiver :: _,
       .memory (.setObjectReferenceField owner offset) =>
     referenceFieldType type && value ∈ [.object, .nullObject] &&
       receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.arrayField owner offset element) =>
     (valueArrayFieldElement type).any (fieldElementMatches · element) &&
       receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
-  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, value :: receiver :: _,
       .memory (.setArrayField owner offset element) =>
     (valueArrayFieldElement type).any (fun declared =>
       fieldElementMatches declared element && value == .array declared) &&
@@ -461,20 +461,19 @@ private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInst
   | 114, .text text, .memory (.stringLiteral actual) => role == none && text == actual
   | _, _, _ => false
 
-/-- Covered opcodes emit exactly their encoding, and a class type test only from `castclass`
-    (throwing) or `isinst` on an object. Elsewhere only a decided type test's word,
-    a size constant or an exact runtime query may emit a scalar operation. -/
+/-- Covered opcodes emit exactly their encoding, and a class type test only from the raw
+    `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's
+    word, a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Instruction) : Bool :=
   if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
     match emitted with | .ldc_i4 bits => bits == if value then 1 else 0 | _ => false
-  else if let .objectTest type throwing := emitted then
+  else if let some (opcode, type) := typeTestSource emitted then
     match instruction.operand, stack with
     | .type target, value :: _ =>
-      instruction.opcode ∈ [116, 117] && throwing == (instruction.opcode == 116) &&
-        type == target && value ∈ [.object, .nullObject]
+      instruction.opcode == opcode && type == target && value ∈ [.object, .nullObject]
     | _, _ => false
   else if (match instruction.operand with
     | .call site => referenceContentQuery site | _ => false) then
@@ -485,7 +484,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if instruction.opcode == 77 && (stack.head?).any
       (fun kind => match kind with | .nativeMethodTable _ => true | _ => false) then
     match stack, emitted with
-    | .nativeMethodTable signature :: _, .managed (.tableLoad actual) => signature == actual
+    | .nativeMethodTable _ :: _, .ldind .i => true
     | _, _ => false
   else if instruction.opcode == 88 && (match stack with
       | .nativeMethodTable _ :: _ | _ :: .nativeMethodTable _ :: _ => true | _ => false) then
@@ -496,8 +495,6 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if let .managed operation := emitted then match operation, stack with
     | .address .., _ => instruction.opcode == 65030
     | .call .., _ => instruction.opcode == 41
-    | .tableLoad signature, .nativeMethodTable actual :: _ =>
-      instruction.opcode == 77 && signature == actual
     | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
     | .tableElement signature, index :: .methodTable actual :: _ =>
       index ∈ [.word32, .native] && signature == actual &&
@@ -806,7 +803,7 @@ private def pushedKind (raw : RawMethod)
     else if instruction.opcode ∈ [124, 127] then some .reference
     -- `ldfld` and `ldsfld`, then `ldobj`.
     else if instruction.opcode == 123 || instruction.opcode == 126 then
-      let .field _ _ type _ := instruction.operand | none
+      let .field _ _ type _ _ := instruction.operand | none
       return scalarType type
     else if instruction.opcode == 113 then
       let .type type := instruction.operand | none

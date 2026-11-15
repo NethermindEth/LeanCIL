@@ -349,7 +349,7 @@ def twoParameterSignature : DeclaredSignature :=
 /-- A static method with a byte parameter read as it arrives and an int parameter that the body
     stores to, so it has a home after the method's one local. -/
 def twoParameters : Method :=
-  { code := [.ldc_i4 0, .stloc 1, .ldarg 0, .ret], locals := [.i32 0],
+  { code := [.ldc_i4 0, .starg 1, .ldarg 0, .ret], locals := [.i32 0],
     localKinds := [.word32], parameterHomes := [(1, .word32)], returnsValue := true,
     declared := twoParameterSignature }
 
@@ -378,6 +378,59 @@ example : twoParameters.argumentAccess 0 = .value (some .unsigned8) :=
 example : twoParameters.argumentAccess 1 = .home 1 := twoParameters_argumentAccess1
 example : twoParameters.argumentAccess 1 = .home 1 := by simp only [cil_code]
 
+section ArgumentSteps
+
+variable (pc : Nat) (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame)
+  (memory : CIL.Safety.Memory) (value : CIL.Safety.Value) (stack : List CIL.Safety.Value)
+
+open CIL.Safety in
+-- A store to the homed argument steps as the store to its home slot, by the declared fact.
+example : step twoParameters (.starg 1) pc args frame (value :: stack) memory = (do
+      let some home := frame.locals[1]? | .error .invalidState
+      let (home, memory) ← storeLocal memory home value
+      return FrameAction.next (pc + 1) stack { frame with locals := frame.locals.set 1 home }
+        memory) := by
+  simp only [reduceArgumentStore]
+  rfl
+
+open CIL.Safety in
+-- A store to an argument without a home faults.
+example : step twoParameters (.starg 0) pc args frame (value :: stack) memory =
+    .error (.unsupported "Store to an argument without a home") := by
+  simp only [reduceArgumentStore]
+
+open CIL.Safety in
+-- The homed argument's address is its home slot's.
+example : step twoParameters (.ldarga 1) pc args frame stack memory = (do
+      let some home := frame.locals[1]? | .error .invalidState
+      return FrameAction.next (pc + 1) ((← localAddress memory home) :: stack) frame memory) := by
+  simp only [reduceArgumentAddress]
+  rfl
+
+open CIL.Safety in
+-- An argument without a home has no address.
+example : step twoParameters (.ldarga 0) pc args frame stack memory =
+    .error (.unsupported "Address of an argument without a home") := by
+  simp only [reduceArgumentAddress]
+
+open CIL.Safety in
+-- Under a home, each argument instruction is the local instruction of the home slot.
+example : step twoParameters (.starg 1) pc args frame (value :: stack) memory =
+    step twoParameters (.stloc 1) pc args frame (value :: stack) memory :=
+  step_starg_home_stloc _ _ _ _ _ _ _ _ _ twoParameters_argumentAccess1
+
+open CIL.Safety in
+example : step twoParameters (.ldarg 1) pc args frame stack memory =
+    step twoParameters (.ldloc 1) pc args frame stack memory :=
+  step_ldarg_home_ldloc _ _ _ _ _ _ _ _ twoParameters_argumentAccess1
+
+open CIL.Safety in
+example : step twoParameters (.ldarga 1) pc args frame stack memory =
+    step twoParameters (.ldloca 1) pc args frame stack memory :=
+  step_ldarga_home_ldloca _ _ _ _ _ _ _ _ twoParameters_argumentAccess1
+
+end ArgumentSteps
+
 /--
 info: 'Tests.ResolutionFacts.twoParameters_argumentAccess0' depends on axioms:
 [propext, Quot.sound]
@@ -387,7 +440,7 @@ info: 'Tests.ResolutionFacts.twoParameters_argumentAccess0' depends on axioms:
 
 /--
 info: 'Tests.ResolutionFacts.twoParameters_argumentAccess1' depends on axioms:
-[propext, Classical.choice, Quot.sound]
+[propext, Quot.sound]
 -/
 #guard_msgs (whitespace := lax) in
 #print axioms twoParameters_argumentAccess1
@@ -514,6 +567,16 @@ example (homes : List (Nat × LocalKind)) (access : ArgumentAccess)
     (symbolicHomes homes).argumentAccess 0 = access := by
   fail_if_success simp only [cil_step]
   exact known
+
+open CIL.Safety in
+-- A store whose access stays unknown steps to `storeArgument`, which a later fact decides.
+example (homes : List (Nat × LocalKind)) (pc : Nat) (args : List CIL.Safety.Value)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) (value : CIL.Safety.Value)
+    (rest : List CIL.Safety.Value) :
+    step (symbolicHomes homes) (.starg 0) pc args frame (value :: rest) memory = (do
+      let (frame, memory) ← storeArgument (symbolicHomes homes) 0 value frame memory
+      return FrameAction.next (pc + 1) rest frame memory) := by
+  simp only [reduceArgumentStore]
 
 /-- Two methods that differ only in their locals' initial values read arguments alike. -/
 example : ({ twoParameters with locals := [.i32 7] } : Method).argumentAccess =

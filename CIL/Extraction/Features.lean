@@ -182,12 +182,12 @@ def platformConstant (site : CallSite) : Option W32 := do
           "::" ++ site.name ++ "()") then none
     else some (if site.name == "get_Size" then 8 else 1)
 
-/-- `ldsfld` of the System.Runtime `BitConverter` static Boolean, whose only such field is
-    `IsLittleEndian`; the raw operand omits field names, so the extractor checks the member.
-    Valid profiles are little-endian, so the load is the constant 1. -/
+/-- `ldsfld` of the System.Runtime `BitConverter` static Boolean `IsLittleEndian`. Valid
+    profiles are little-endian, so the load is the constant 1. -/
 def platformField (instruction : RawInstruction) : Option W32 :=
   if instruction.opcode == 126 && instruction.operand ==
-      .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean") true
+      .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean")
+        name!"IsLittleEndian" true
   then some 1 else none
 
 /-- Classify reference-free storage against a table whose `LayoutsValid` is checked separately.
@@ -508,7 +508,8 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Inst
     | .call .. => instruction.opcode == 40 || instruction.opcode == 111
     | .callInstance .. | .callVirtual .. => instruction.opcode == 111
     | .newAggregate .. | .newObject .. => instruction.opcode == 115
-    | .objectTest .. => instruction.opcode ∈ [116, 117]
+    | .castclass _ | .isinst _ =>
+      (typeTestSource emitted).any fun (opcode, _) => opcode == instruction.opcode
     | _ => true
   properCall && match rawFeatureEffect instruction, emittedFeatureEffect emitted returnsValue with
     | some rawEffect, some emittedEffect => rawEffect == emittedEffect
@@ -557,14 +558,16 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     return match localIndex instruction, emitted with
       | some index, .ldloca actual => index == actual
       | _, _ => false
-  -- Argument homes are appended after all raw locals. Their precise mapping is
-  -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
+  -- An argument's address and store name the argument itself; ParameterHomesValid checks that
+  -- it has a home, so neither can alias a tracked local.
   if instruction.opcode ∈ [15, 65034] then
-    return match emitted with
-      | .ldloca index => raw.locals.length <= index
-      | _ => false
+    return match argumentOperation instruction, emitted with
+      | some (.address index), .ldarga actual => index == actual
+      | _, _ => false
   if instruction.opcode ∈ [16, 65035] then
-    return match emitted with | .stloc index => raw.locals.length <= index | _ => false
+    return match argumentOperation instruction, emitted with
+      | some (.store index), .starg actual => index == actual
+      | _, _ => false
   -- A span address on the stack is already the view it names, so copying the span emits nothing.
   if instruction.opcode == 113 then
     if let .type type := instruction.operand then
@@ -614,7 +617,7 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
   | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
-  | some (.raise name), .throw exception => name == exception
+  | some (.raise raised), .throw exception => raised == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
     index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with

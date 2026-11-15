@@ -41,27 +41,29 @@ example (program : CIL.Program) (method : Nat) (pre : List Value → Memory → 
   { returnsValue := false, locals := [], code := [.unadmitted 0] }
 @[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 @[cil_code] def done : CIL.Method := { returnsValue := false, locals := [], code := [.ret] }
-@[cil_code] def other : CIL.Method := { returnsValue := false, locals := [], code := [.throw "System.ArgumentException"] }
+@[cil_code] def other : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.throw .argument] }
 
 variable (post : Memory → List Value → Prop) (frame : Frame) (m : Memory)
 
-example : ¬ LoopOutcome [stuck] 0 [] post (some "System.InvalidOperationException") ⟨0, frame, [], m⟩ :=
+example : ¬ LoopOutcome [stuck] 0 [] post (some .invalidOperation) ⟨0, frame, [], m⟩ :=
   loop_outcome_some_refuted (fuel := 1)
     (outcome := .error ⟨0, 0, .unsupported "Opcode not admitted"⟩) rfl
     (by simp [Settled]) (by rintro _ ⟨⟩; simp)
 
 /-- A pc past the body is invalid state. -/
-example : ¬ LoopOutcome [stuck] 0 [] post (some "System.InvalidOperationException") ⟨1, frame, [], m⟩ :=
+example : ¬ LoopOutcome [stuck] 0 [] post (some .invalidOperation) ⟨1, frame, [], m⟩ :=
   loop_outcome_some_refuted (fuel := 1) (outcome := .error ⟨0, 1, .invalidState⟩) rfl (by simp [Settled]) (by rintro _ ⟨⟩; simp)
 
 /-- A method index outside the program is invalid state. -/
-example : ¬ LoopOutcome [] 0 [] post (some "System.InvalidOperationException") ⟨0, frame, [], m⟩ :=
+example : ¬ LoopOutcome [] 0 [] post (some .invalidOperation) ⟨0, frame, [], m⟩ :=
   loop_outcome_some_refuted (fuel := 1) (outcome := .error ⟨0, 0, .invalidState⟩) rfl (by simp [Settled]) (by rintro _ ⟨⟩; simp)
 
-example : ¬ LoopOutcome [other] 0 [] post (some "System.InvalidOperationException") ⟨0, frame, [], m⟩ :=
-  loop_outcome_some_refuted (fuel := 1) (outcome := .error ⟨0, 0, .thrown "System.ArgumentException"⟩) rfl (by simp [Settled]) (by rintro _ ⟨⟩; simp)
+example : ¬ LoopOutcome [other] 0 [] post (some .invalidOperation) ⟨0, frame, [], m⟩ :=
+  loop_outcome_some_refuted (fuel := 1) (outcome := .error ⟨0, 0, .thrown .argument⟩) rfl
+    (by simp [Settled]) (by rintro _ ⟨⟩; simp)
 
-example : ¬ LoopOutcome [done] 0 [] post (some "System.InvalidOperationException") ⟨0, frame, [], m⟩ :=
+example : ¬ LoopOutcome [done] 0 [] post (some .invalidOperation) ⟨0, frame, [], m⟩ :=
   loop_outcome_some_refuted (fuel := 1) (outcome := .ok (leaveFrame frame m, [])) rfl trivial (by rintro _ ⟨⟩)
 
 theorem spin_exhausts (fuel : Nat) :
@@ -70,7 +72,7 @@ theorem spin_exhausts (fuel : Nat) :
   | zero => rfl
   | succ fuel ih => exact (show run [spin] (fuel + 1) 0 0 [] frame [] m = run [spin] fuel 0 0 [] frame [] m from rfl).trans ih
 
-example : ¬ LoopOutcome [spin] 0 [] post (some "System.InvalidOperationException") ⟨0, frame, [], m⟩ := by
+example : ¬ LoopOutcome [spin] 0 [] post (some .invalidOperation) ⟨0, frame, [], m⟩ := by
   rintro ⟨fuel, fault, ran, thrown⟩
   change run [spin] fuel 0 0 [] frame [] m = _ at ran
   rw [spin_exhausts] at ran
@@ -79,7 +81,7 @@ example : ¬ LoopOutcome [spin] 0 [] post (some "System.InvalidOperationExceptio
 
 /-- The method-level outcome inherits the same exactness. -/
 example : ¬ EnsuresOutcome [spin] 0 (fun args initial => args = [] ∧ initial = m) (fun _ _ _ _ => True)
-    (fun _ _ => some "System.InvalidOperationException") := by
+    (fun _ _ => some .invalidOperation) := by
   intro holds
   obtain ⟨fuel, fault, ran, thrown⟩ := holds [] m ⟨rfl, rfl⟩
   change run [spin] fuel 0 0 [] _ [] m = _ at ran

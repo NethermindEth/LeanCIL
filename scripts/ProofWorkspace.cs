@@ -67,7 +67,8 @@ partial class Program
         var created = root is null;
         // A proof outside any Lake package becomes the root of a generated one, so it is edited in place.
         root ??= Path.GetDirectoryName(proof)!;
-        Within(root, Path.GetRelativePath(root, proof));
+        // Spelled under the root, so module names derived from the proof's path stay below it.
+        proof = Within(root, proof);
         return new(Path.GetFullPath(args[0]), args[1], profile, proof, root, options.GetValueOrDefault("--assembly"),
             [.. initialized], theorem, created);
     }

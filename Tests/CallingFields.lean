@@ -54,7 +54,7 @@ theorem overlapping_read (memory : Memory) (left right : Reference)
 /-- Sum all input words and write the result only after reading every input. -/
 @[cil_code] def writer : CIL.Method :=
   { locals := [], returnsValue := false,
-    code := [.ldarg 2] ++ reader.code.dropLast ++ [.store64, .ret] }
+    code := [.ldarg 2] ++ reader.code.dropLast ++ [.stind .i8, .ret] }
 
 /-- The checksum uses the original input snapshots, including when output overlaps an input. -/
 def checksum (memory : Memory) (left right : Reference) : CIL.W64 :=
@@ -108,7 +108,7 @@ theorem supplied_write_priority (memory after : Memory) (output : Reference) (wo
     (_call : ValidCall memory [] [⟨output, 8⟩])
     (written : write memory output (numberBytes word.toNat 8) 1 = .ok after) :
     WP (Execution (fun fuel => run
-      [{ locals := [], returnsValue := false, code := [.store64, .ret] }] fuel 0 0 []
+      [{ locals := [], returnsValue := false, code := [.stind .i8, .ret] }] fuel 0 0 []
       { activation := 0, locals := [], owned := [] }
       [.scalar (.i64 word), .reference (.address output)] memory))
       (fun (final, values) => final = after ∧ values = []) := by
@@ -129,7 +129,7 @@ theorem output_bounds_and_permissions (memory : Memory) (output _other : Referen
       trivial
   fail_if_success
     have unauthorized : WP (Execution (fun fuel => run
-      [{ locals := [], returnsValue := false, code := [.store64, .ret] }] fuel 0 0 []
+      [{ locals := [], returnsValue := false, code := [.stind .i8, .ret] }] fuel 0 0 []
       { activation := 0, locals := [], owned := [] }
       [.scalar (.i64 1), .reference (.address _other)] memory)) (fun _ => True) := by
       cil_contract_steps []

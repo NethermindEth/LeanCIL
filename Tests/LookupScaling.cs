@@ -12,6 +12,11 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
+if (args.Contains("--exception-types-only", StringComparer.Ordinal))
+{
+    ExceptionDecisionCosts();
+    return;
+}
 if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
 {
     ArgumentResolutionCosts();
@@ -59,6 +64,7 @@ if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
 }
 NativeTableCosts();
 if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
+ExceptionDecisionCosts();
 CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
@@ -543,6 +549,46 @@ const string KernelCostCommand = """
       logInfo m!"{label.getString} {cost} heartbeats"
     """;
 
+// Exception decisions compare constructors, so display-name length cannot increase their cost.
+void ExceptionDecisionCosts()
+{
+    var directory = At("artifacts/LookupScaling/ExceptionTypes");
+    Directory.CreateDirectory(directory);
+    string[] members = ["format", "applicationException"];
+    var statements = members.SelectMany(member =>
+    {
+        string fault = $"ExecutionFault.thrown .{member}";
+        return new[]
+        {
+            $"#kernel_cost \"thrownEqual {member}\" {fault} = {fault}",
+            $"#kernel_cost \"thrownUnequal {member}\" Not ({fault} = ExecutionFault.thrown .overflow)",
+            $"#kernel_cost \"clrUnequal {member}\" Not (({fault}).clrException = some .overflow)",
+            $"#kernel_cost \"raisesEqual {member}\" (some .{member} : Option ExceptionType) = some .{member}"
+        };
+    });
+    var path = Path.Combine(directory, "Equality.lean");
+    File.WriteAllText(path, """
+        import CIL.Safety.RuntimeExceptions
+        open CIL CIL.Safety Lean Elab Command
+
+        """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.ExceptionDecision().Matches(output).ToDictionary(
+        match => match.Groups[1].Value,
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != 8) throw new InvalidOperationException("Missing exception decision costs:\n" + output);
+    foreach (var decision in new[] { "thrownEqual", "thrownUnequal", "clrUnequal", "raisesEqual" })
+    {
+        long shortName = costs[decision + " format"];
+        long longName = costs[decision + " applicationException"];
+        var measured = $"{shortName} heartbeats at format and {longName} at applicationException";
+        if (Math.Min(shortName, longName) < KernelDecisionFloor ||
+            Math.Max(shortName, longName) > TypeDecisionLimit || longName > shortName * AllowedNameGrowth)
+            throw new InvalidOperationException($"Exception decision {decision} exceeds its cost bound: {measured}");
+        Console.WriteLine($"PASS deciding {decision} costs {measured}");
+    }
+}
+
 // Lean definitions of a value-only body of `instructions` instructions: `raw`, its raw instructions, and `code`, the
 // instructions the translator emits for them. Raw instructions carry distinct offsets, so the kernel decodes each one
 // instead of reusing a cached decode.
@@ -807,18 +853,16 @@ foreach (var outcome in new[] { "equal", "unequal" })
 }
 MetadataNameCosts();
 
-// The heartbeats `decide +kernel` adds to the two metadata name computations every call and field operand check
-// reduces: the call check's name clause, which reads a typed name back and compares its bytes with the row's, and
-// `MetadataName.ofBytes?`, which encodes a field row's bytes as a name. Names of 20, 80 and 320 bytes share all but
-// their last byte. Both read one byte per step, so the cost per byte may grow at most `AllowedGrowth` times from one
-// length to the next; an encoder that indexes an array literal reads byte i in i kernel steps and grows 3 to 4 times.
+// The heartbeats `decide +kernel` adds to the name clause of the call and field operand checks, which reads a typed
+// name back and compares its bytes with the row's. Names of 20, 80 and 320 bytes share all but their last byte. The
+// clause reads one byte per step, so the cost per byte may grow at most `AllowedGrowth` times from one length to the
+// next.
 void MetadataNameCosts()
 {
     var nameDirectory = At("artifacts/LookupScaling/MetadataNames");
     Directory.CreateDirectory(nameDirectory);
     const string Prefix = "WriteLineToTheConsoleOfTheRuntimeEachValueThatTheCallerPassesAsAnIntegerOfThirtyTwoBits";
     int[] lengths = [20, 80, 320];
-    string[] computations = ["spells", "encodes"];
     string Statement(int length)
     {
         var name = string.Concat(Enumerable.Repeat(Prefix, length / Prefix.Length + 1))[..(length - 1)] + "0";
@@ -829,7 +873,6 @@ void MetadataNameCosts()
             /-- The metadata name of those bytes. -/
             def name{{length}} : MetadataName := name!"{{name}}"
             #kernel_cost "name spells {{length}}" (name{{length}}.spells bytes{{length}} = true)
-            #kernel_cost "name encodes {{length}}" (MetadataName.ofBytes? bytes{{length}} = some name{{length}})
             """;
     }
     var path = Path.Combine(nameDirectory, "MetadataNames.lean");
@@ -841,23 +884,19 @@ void MetadataNameCosts()
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var costs = LookupPatterns.MetadataNameCost().Matches(output).ToDictionary(
-        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
-        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
-    if (costs.Count != lengths.Length * computations.Length)
+        match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != lengths.Length)
         throw new InvalidOperationException("Missing metadata name costs:\n" + output);
-    foreach (var computation in computations)
-    {
-        double PerByte(int length) => (double)costs[(computation, length)] / length;
-        var measured = string.Join(", ", lengths.Select(length =>
-            string.Create(CultureInfo.InvariantCulture, $"{costs[(computation, length)]} at {length} bytes")));
-        var flat = lengths.Zip(lengths.Skip(1))
-            .All(pair => PerByte(pair.Second) <= PerByte(pair.First) * AllowedGrowth);
-        if (lengths.Min(length => costs[(computation, length)]) < KernelDecisionFloor || !flat)
-            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-                $"A metadata name {computation} its bytes at {measured} heartbeats; per byte, the limit is " +
-                $"{AllowedGrowth} times the cost at the shorter length."));
-        Console.WriteLine($"PASS a metadata name {computation} its bytes at {measured} heartbeats");
-    }
+    double PerByte(int length) => (double)costs[length] / length;
+    var measured = string.Join(", ", lengths.Select(length =>
+        string.Create(CultureInfo.InvariantCulture, $"{costs[length]} at {length} bytes")));
+    var flat = lengths.Zip(lengths.Skip(1)).All(pair => PerByte(pair.Second) <= PerByte(pair.First) * AllowedGrowth);
+    if (lengths.Min(length => costs[length]) < KernelDecisionFloor || !flat)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"A metadata name spells its bytes at {measured} heartbeats; per byte, the limit is " +
+            $"{AllowedGrowth} times the cost at the shorter length."));
+    Console.WriteLine($"PASS a metadata name spells its bytes at {measured} heartbeats");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -1661,7 +1700,7 @@ Console.WriteLine(
     $"PASS checking the feature certificate of local loads, stores and addresses costs {accessesMeasured}");
 // The kernel heartbeats of a check over a body that stores each of its locals once and then loads or addresses
 // it, less those of stating the same check. Integer locals take a constant and are popped after a load or after
-// `ldloca`, which also names each as a receiver fold candidate; native-int locals take a method address and are
+// `ldloca`; native-int locals take a method address and are
 // consumed by `calli`, which makes each a pointer local. The check is the scalar certificate, or for pointer
 // locals also the closed argument storage.
 long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
@@ -1918,8 +1957,11 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex TypeDecision();
 
-    [GeneratedRegex(@"\bname (spells|encodes) ([0-9]+) (-?[0-9]+) heartbeats")]
+    [GeneratedRegex(@"\bname spells ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex MetadataNameCost();
+
+    [GeneratedRegex(@"\b((?:thrownEqual|thrownUnequal|clrUnequal|raisesEqual) [A-Za-z]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex ExceptionDecision();
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex NativeTableStep();

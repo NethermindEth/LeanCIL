@@ -246,7 +246,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
             case FieldReference field:
                 var (owner, index, held, isStatic) = FieldOperand(instruction, field);
-                return $".field ({owner}) {index} ({held}) {Bool(isStatic)}";
+                var name = MetadataName.OfText(field.Name).ToLean();
+                return $".field ({owner}) {index} ({held}) {name} {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
             case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";
@@ -426,7 +427,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Each closed instantiation carries its own bytes and metadata slice, built from the open definition and the
         // assembly, so a method's component names no other method and does not depend on which instantiations the
         // extraction holds or in which order.
-        var data = List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        var data = MetadataSlices.Bytes(bytes);
         var classOwner = original.HasThis && ObjectTypes.Is(original.DeclaringType);
         var (rows, tables, assemblies) = (metadata ?? throw new InvalidOperationException(
             "Method evidence requires the pinned assemblies.")).Method(original,
@@ -509,7 +510,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := " +
                 slices.AssemblyBlock(module));
             lean.AppendLine($"def assembly{index}Identity : List Nat := " +
-                MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(identity)));
+                MetadataSlices.Bytes(Encoding.UTF8.GetBytes(identity)));
             // The assembly's header bytes decode to the stated header, its bytes spell this identity, and it is the
             // string the block states: one proof for every method of the assembly.
             lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +

@@ -22,14 +22,14 @@ Directory.CreateDirectory(root);
 using var metadata = ModuleDefinition.ReadModule(assembly);
 var queue = new GeneratedQueue(verification, assembly);
 foreach (var method in metadata.GetType("Examples.SpanConstructors").Methods.Where(method => method.IsPublic))
-foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse2", "arm64-advsimd" } : ["scalar"])
+foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse42", "arm64-advsimd" } : ["scalar"])
 {
     var name = method.Name;
     var width = name switch
     {
         "Aggregate" or "AggregateLocal" or "Pointer" or "ReadOnlyEmpty" or "ReadOnlyDefaultReset" => 32,
         "Vector" or "VectorPointer" => 16,
-        "LayoutLocal" => profile == "x64-sse2" ? 64 : 48,
+        "LayoutLocal" => profile == "x64-sse42" ? 64 : 48,
         _ => 4
     };
     var counted = name.Contains("Pointer", StringComparison.Ordinal) || name == "LayoutLocal";
@@ -59,7 +59,7 @@ foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse2", "arm6
         /-- No element is addressable through an empty view, regardless of its write capability. -/
         theorem emptyIndex : CIL.Safety.memoryInstruction (.spanItem 4)
             [.scalar (.i32 0), .bufferSpan ⟨.null, 0, 4, true⟩] memory =
-            .error (.thrown "System.IndexOutOfRangeException") := by rfl
+            .error (.thrown .indexOutOfRange) := by rfl
         #print axioms emptyIndex
         """ : "") + (name == "Single" ? """
         /-- View construction rejects expired storage, even when no bytes are read. -/
@@ -85,7 +85,7 @@ foreach (var profile in method.Name == "LayoutLocal" ? new[] { "x64-sse2", "arm6
         /-- A negative pointer length raises the specified runtime exception. -/
         theorem negative : CIL.Safety.memoryInstruction (.spanFromReference 32 true)
             [.scalar (.i32 (-1)), .reference (.address ⟨0, 0⟩)] memory =
-            .error (.thrown "System.ArgumentOutOfRangeException") := by rfl
+            .error (.thrown .argumentOutOfRange) := by rfl
         #print axioms negative
         """ : "") + "\nend ExampleProof\n");
     queue.Add(new(method.FullName, proof, output, Profile: profile),
@@ -111,7 +111,7 @@ foreach (var (name, before, after, theorem, marker) in new[]
         "method0_layouts_validated", "MethodLayoutsValid"),
     ("Pointer", ".spanFromReference 32 true", ".spanFromReference 16 true",
         "method0_layouts_validated", "MethodLayoutsValid"),
-    ("LayoutLocal-x64-sse2", ".reference 64 true", ".reference 48 true",
+    ("LayoutLocal-x64-sse42", ".reference 64 true", ".reference 48 true",
         "method0_layouts_validated", "MethodLayoutsValid"),
     ("AggregateLocal", ".spanSingleReference 32 false", ".spanSingleReference 16 false",
         "method0_layouts_validated", "MethodLayoutsValid"),
@@ -167,7 +167,7 @@ foreach (var mutation in new[] { "reset-scope", "reset-unscoped", "reset-interio
     var result = Execute(Extract("extract", path, null, method.FullName, Path.Combine(root, mutation)));
     var expected = mutation switch
     {
-        "reset-interior" => "Branch into a folded span receiver",
+        "reset-interior" => "Branch into a folded span constructor",
         "reset-unscoped" => "Type reference has no scope",
         _ => "Span default type does not match its local"
     };

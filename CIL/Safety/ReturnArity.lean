@@ -35,7 +35,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
     values.length = (if body.returnsValue then 1 else 0) ∧
       values.any Value.hasUnspecified = false := by
-  unfold step at executed
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at executed
   dsimp only at executed
   generalize narrowing : body.returnNarrow = narrow at executed
   repeat' first

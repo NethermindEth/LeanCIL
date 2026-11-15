@@ -1169,6 +1169,43 @@ private theorem Memory.Renamed.vector128UnsafeInstructionResult {mapping : Alloc
        exact .ok ⟨memoryRelated, rfl⟩)
 #print axioms Memory.Renamed.vector128UnsafeInstructionResult
 
+/-- A static span keeps the allocation identity of its base under renaming. -/
+private theorem Memory.Renamed.staticSpanInstructionResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (operation : CIL.MemoryOp)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (staticSpanInstruction operation stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (staticSpanInstruction operation stack source)
+      (staticSpanInstruction operation (stack.map mapping.value) target) := by
+  unfold staticSpanInstruction at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value,
+    AllocationRenaming.managedReference]
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below,
+    ManagedReference.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply ((related.liveAllocation _ (by assumption)).checkedAt _ _).bindWithSuccess
+       intro first second sourceStep descriptors
+       rw [← descriptors.layout, ← descriptors.kind.immutable]
+       try (unfold staticSpanAligned; rw [← descriptors.layout]))
+    | (apply (related.formValue _ (by assumption)).bindWithSuccess
+       intro first second sourceStep same
+       subst second)
+    | dsimp +instances only [AllocationRenaming.reference]
+    | (split <;> try simp only [*, Bind.bind, Except.bind])
+  all_goals repeat first
+    | contradiction
+    | cases observable
+    | split at observable
+    | simp only [SuccessOrThrow] at observable
+#print axioms Memory.Renamed.staticSpanInstructionResult
+
 /-- A memory instruction's successful effect is preserved on the corresponding allocations. -/
 theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory}
@@ -1200,6 +1237,7 @@ theorem Memory.Renamed.memoryInstructionResult {mapping : AllocationRenaming}
       | with_reducible exact related.spanFillInstructionResult _ _ _ bounds observable
       | with_reducible exact related.arrayFillInstructionResult formed _ _ _ bounds observable
       | with_reducible exact related.wideArithmeticInstructionResult _ _ bounds observable
+      | with_reducible exact related.staticSpanInstructionResult _ _ bounds observable
       | with_reducible exact related.objectFieldInstructionResult _ formed _ bounds observable
       | with_reducible exact related.stringLiteralInstructionResult formed _ _ observable
       | with_reducible exact related.throwIfNullInstructionResult _ observable

@@ -27,11 +27,6 @@ internal sealed record OtherMemory : MemoryOperation
     internal override string ToLean() => lean;
 }
 
-internal sealed record NullObject : MemoryOperation
-{
-    internal override string ToLean() => ".nullObject";
-}
-
 internal sealed record ArrayLength : MemoryOperation
 {
     internal override string ToLean() => ".arrayLength";

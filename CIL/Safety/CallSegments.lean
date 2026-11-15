@@ -13,7 +13,7 @@ namespace CIL.Safety
 
 /-- Load two input words, call a binary scalar helper, and store its result to the output. -/
 def loadCallStoreCode (callee : Nat) : List CIL.Instruction :=
-  [.ldarg 2, .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 0 8, .call callee 2, .store64]
+  [.ldarg 2, .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 0 8, .call callee 2, .stind .i8]
 
 /-- Compose a load/call/store segment once for any proved helper with scalar encodings.
     The continuation receives the real call result and checked write, not an assumed summary. -/
@@ -53,7 +53,7 @@ theorem WP.load_call_store {Input Output : Type} {contract : MethodContract Inpu
       (call.output_bound (output := ⟨output, 8⟩) (by simp)) 8 1).trans
       (call.writable ⟨output, 8⟩ (by simp))
   obtain ⟨after, written, _, _⟩ := store_word64 (decode value) writable
-  have stored := step_store64_of_write written
+  have stored := step_stind_i8_of_write written
   rw [results]
   cil_contract_steps [found, placed, stored] until suffix middle value after result written
 

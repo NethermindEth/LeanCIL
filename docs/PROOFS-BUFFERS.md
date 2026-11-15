@@ -390,9 +390,10 @@ theorem Filled.extend {xs : List (BitVec (8 * width))} {room index : Nat}
     Filled m base width (xs ++ [x]) room := by
 ```
 
-`Writable.write_one` with `step_storeScalar_of_write` (1-, 2- or 4-byte `int` stores) or
-`step_storeScalar_i64_of_write` ([LoopFrames](../CIL/Safety/LoopFrames.lean)) proves a one-word
-store helper's contract, as `Stamp`'s in CopyUntilZero.
+`Writable.write_one` with `step_stind_narrow_of_write` (1-, 2- or 4-byte `stind` of an `int`),
+`step_stind_i8_of_write` or `step_stind_i_of_write`
+([CheckedMemoryFacts](../CIL/Safety/CheckedMemoryFacts.lean)) proves a one-word store helper's
+contract, as `Stamp`'s in CopyUntilZero.
 
 ## Track a struct local by its fields in a loop
 

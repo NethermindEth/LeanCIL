@@ -46,7 +46,7 @@ theorem suffix_moves (fuel : Nat) (args stack : List Value) (frame : Frame) (m :
 def caller : Method :=
   { code := [.ldc_i4 5, .ret, .ldarg 0, .call 1 1, .ret], locals := [], returnsValue := true }
 def rewritten : Method :=
-  { caller with code := [.unadmitted 0, .throw "System.Exception",
+  { caller with code := [.unadmitted 0, .throw .baseException,
       .ldarg 0, .call 1 1, .ret] }
 
 abbrev calling : Nat → Nat → Prop := fun method pc => inStarts [(0, 2), (1, 0)] method pc = true

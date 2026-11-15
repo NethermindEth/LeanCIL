@@ -55,8 +55,8 @@ theorem field_starts_null :
 
 /-- A null receiver throws on both the load and the store. -/
 theorem null_receiver_throws :
-    load holding .null = .error (.thrown "System.NullReferenceException") ∧
-    store numbers .null = .error (.thrown "System.NullReferenceException") := ⟨rfl, rfl⟩
+    load holding .null = .error (.thrown .nullReference) ∧
+    store numbers .null = .error (.thrown .nullReference) := ⟨rfl, rfl⟩
 #print axioms null_receiver_throws
 
 /-- A store needs write authority over the field's slot. -/

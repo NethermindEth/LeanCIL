@@ -31,7 +31,7 @@ internal static partial class ProofOutline
             return new(array, index, null);
         // A helper's address is loaded with `ldind.i4`, the only indirect load whose step the outline gives.
         if (ops.Length != 5 || array.Width != 4 ||
-            ops[3] is not LoadScalar { Width: 4, Signed: false } ||
+            ops[3] is not IndirectAccess { Kind: NumericKind.I4, Store: false } ||
             ops[2] is not Call { Kind: CallKind.Static, Arguments: 2 } call)
             return null;
         return ElementAddress(extraction, call.Method, array.Element!) is { } method
@@ -46,7 +46,7 @@ internal static partial class ProofOutline
     static MethodDefinition? ElementAddress(Extraction extraction, int index, Arrays.Element element)
     {
         var method = extraction.Methods[index];
-        var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
+        var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
         return !method.HasThis && method.Parameters.Count == 2 && method.ReturnType is ByReferenceType &&
             method.Parameters[0].ParameterType is ArrayType { Rank: 1 } array &&
             WordArrayElement(array.ElementType) == element &&

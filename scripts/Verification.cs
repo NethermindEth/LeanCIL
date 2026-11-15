@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -25,10 +26,16 @@ partial class Program : IDisposable
         var root = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_ROOT");
         var manifest = Environment.GetEnvironmentVariable("LEANCIL_FIXTURE_MANIFEST");
         if (string.IsNullOrEmpty(root) || string.IsNullOrEmpty(manifest)) return null;
-        var directory = Path.GetDirectoryName(Path.GetFullPath(manifest))! + Path.DirectorySeparatorChar;
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        return typeof(Program).Assembly.Location.StartsWith(directory, comparison) ? Path.GetFullPath(root) : null;
+        return RunsFromFixtures(manifest) ? Path.GetFullPath(root) : null;
     }
+
+    /// <summary>
+    /// Whether this program is a prepared fixture listed in `manifest`, built below the manifest's directory. The
+    /// runtime may report the assembly with links followed, so both sides are compared resolved.
+    /// </summary>
+    static bool RunsFromFixtures(string manifest) =>
+        typeof(Program).Assembly.Location is { Length: > 0 } location &&
+        ResolvedRelativePath(Path.GetDirectoryName(Path.GetFullPath(manifest))!, location) is not (null or ".");
 #endif
 
     static string Source([CallerFilePath] string path = "") => path;
@@ -79,8 +86,8 @@ partial class Program : IDisposable
         void Add(string path)
         {
             path = Path.GetFullPath(path);
-            var relative = Path.GetRelativePath(Root, path).Replace('\\', '/');
-            if (relative.StartsWith("../", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            // A sibling of the checkout whose name differs only in case is outside it where case is told apart.
+            var relative = RelativeBelow(Path.GetFullPath(Root), path)?.Replace('\\', '/') ??
                 throw new InvalidOperationException("Fixture input is outside the checkout: " + path);
             if (!inputs.TryAdd(relative, Sha(path))) return;
             if (Path.GetExtension(path) != ".cs") return;
@@ -92,7 +99,6 @@ partial class Program : IDisposable
         }
         Add(At(script));
         var root = Path.TrimEndingDirectorySeparator(Root);
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         for (var directory = Path.GetDirectoryName(Path.GetFullPath(script, Root)); directory is not null;
              directory = Path.GetDirectoryName(directory))
         {
@@ -100,7 +106,7 @@ partial class Program : IDisposable
                   if (Path.GetExtension(path).ToLowerInvariant() is ".props" or ".targets" ||
                       Path.GetFileName(path).ToLowerInvariant() is "global.json" or "nuget.config" or ".editorconfig")
                     Add(path);
-            if (directory.Equals(root, comparison)) break;
+            if (LocationComparer.Equals(directory, root)) break;
         }
         return supported ? inputs : null;
     }
@@ -129,7 +135,7 @@ partial class Program : IDisposable
         foreach (var (path, hash) in fixture.Outputs)
         {
             var full = Path.GetFullPath(path, directory);
-            if (!full.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+            if (ResolvedRelativePath(directory, full) is null or "." ||
                 !File.Exists(full) || Sha(full) != hash)
                 throw new InvalidOperationException("Prepared fixture output changed: " + path);
         }
@@ -693,6 +699,294 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     static string At(string path) => Path.Combine(Root, path);
 
+    /// <summary>Links one path may expand through before it is taken for a cycle, the bound POSIX sets.</summary>
+    const int MaximumPathLinks = 40;
+
+    /// <summary>
+    /// The absolute location `path` names, with every symbolic link and junction among its existing components
+    /// followed, the last one included; the components below the deepest existing one follow as spelled. A `..`
+    /// names the parent of the location reached so far, as POSIX reads it, so a link before it is followed first.
+    /// </summary>
+    internal static string ResolvedPath(string path)
+    {
+        char[] separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+        var full = AbsolutePath(path);
+        var resolved = Path.GetPathRoot(full)!;
+        // The components still to resolve, the next one on top.
+        var pending = new Stack<string>(full[resolved.Length..]
+            .Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse());
+        var links = 0;
+        while (pending.TryPop(out var component))
+        {
+            if (component == ".") continue;
+            if (component == "..")
+            {
+                resolved = Path.GetDirectoryName(resolved) ?? resolved;
+                continue;
+            }
+            var next = Path.Join(resolved, component);
+            // A dangling link is still a link: where it points is where a write through it lands.
+            if (new FileInfo(next).LinkTarget is { } target)
+            {
+                if (++links > MaximumPathLinks)
+                    throw new InvalidDataException($"Path expands through more than {MaximumPathLinks} links: {path}");
+                var targetRoot = Path.GetPathRoot(target);
+                if (!string.IsNullOrEmpty(targetRoot))
+                    resolved = Path.GetPathRoot(Path.GetFullPath(targetRoot, resolved))!;
+                foreach (var part in target[(targetRoot?.Length ?? 0)..]
+                    .Split(separators, StringSplitOptions.RemoveEmptyEntries).Reverse())
+                    pending.Push(part);
+            }
+            else if (Directory.Exists(next) || File.Exists(next)) resolved = next;
+            else return Path.GetFullPath(Path.Join([next, .. pending]));
+        }
+        return resolved;
+    }
+
+    /// <summary>
+    /// `path` made absolute against the working directory with its `.` and `..` components kept, which
+    /// Path.GetFullPath would remove before any link is followed.
+    /// </summary>
+    static string AbsolutePath(string path)
+    {
+        var absolute = Path.IsPathFullyQualified(path) ? path
+            : Path.IsPathRooted(path) ? Path.GetFullPath(path) : Path.Join(Environment.CurrentDirectory, path);
+        return Path.DirectorySeparatorChar == '\\' ? absolute.Replace('/', '\\') : absolute;
+    }
+
+    /// <summary>
+    /// `path` relative to `root` once both are resolved through their links, or null when it lies outside `root`:
+    /// two spellings of one location agree, and a link cannot carry a path out of `root` unnoticed. Windows reads
+    /// `..` before following links and POSIX after, so a path the two readings place apart is refused.
+    /// </summary>
+    internal static string? ResolvedRelativePath(string root, string path)
+    {
+        var relative = RelativeBelow(ResolvedPath(root), ResolvedPath(path));
+        if (relative is null || !PathNames(root).Contains("..") && !PathNames(path).Contains("..")) return relative;
+        return RelativeBelow(ResolvedPath(Path.GetFullPath(root)), ResolvedPath(Path.GetFullPath(path))) == relative
+            ? relative : null;
+    }
+
+    /// <summary>
+    /// `path` relative to `root`, or null when it lies outside; both are taken as already resolved. Two names
+    /// differing only in case are one entry exactly where the directory holding them is known to ignore case.
+    /// </summary>
+    internal static string? RelativeBelow(string root, string path) => RelativeBelow(root, path, NameCaseIn);
+
+    /// <summary>
+    /// Whether `path` may lie below `root` (both resolved): as <see cref="RelativeBelow(string, string)"/>, but a
+    /// name differing only in case matches where the case rule is unknown, for checks that must keep outputs apart.
+    /// </summary>
+    internal static bool MayLieBelow(string root, string path) =>
+        RelativeBelow(root, path, NameCaseIn, unknownMatches: true) is not null;
+
+    /// <summary>
+    /// `path` relative to `root` (`.` when they are equal), or null when it lies outside; both are full paths
+    /// without `.` or `..` components. `nameCaseIn` gives the rule by which a directory matches entry names, and a
+    /// name differing only in case where that rule is unknown matches only when `unknownMatches` is set.
+    /// </summary>
+    internal static string? RelativeBelow(string root, string path, Func<string, NameCase> nameCaseIn,
+        bool unknownMatches = false)
+    {
+        var rootPrefix = Path.GetPathRoot(root) ?? "";
+        // Drive letters and server names match ignoring case on every volume.
+        if (!string.Equals(rootPrefix, Path.GetPathRoot(path), StringComparison.OrdinalIgnoreCase)) return null;
+        var rootNames = PathNames(root[rootPrefix.Length..]);
+        var pathNames = PathNames(path[rootPrefix.Length..]);
+        if (pathNames.Length < rootNames.Length) return null;
+        var directory = rootPrefix;
+        for (var index = 0; index < rootNames.Length; index++)
+        {
+            var (expected, actual) = (rootNames[index], pathNames[index]);
+            if (expected != actual)
+            {
+                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase)) return null;
+                var rule = nameCaseIn(directory);
+                if (rule is NameCase.Sensitive || rule is NameCase.Unknown && !unknownMatches) return null;
+            }
+            directory = Path.Join(directory, expected);
+        }
+        return pathNames.Length == rootNames.Length ? "."
+            : string.Join(Path.DirectorySeparatorChar, pathNames[rootNames.Length..]);
+    }
+
+    /// <summary>The names of the directories and file below a path's root, in order.</summary>
+    static string[] PathNames(string belowRoot) => belowRoot.Split(
+        [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>
+    /// Whether `path` is `root` or lies below it once links in both are followed, matching a name in another case
+    /// only where the directory holding it is known to ignore case.
+    /// </summary>
+    internal static bool Inside(string root, string path) => ResolvedRelativePath(root, path) is not null;
+
+    /// <summary>
+    /// Whether two paths name one location once links are followed, matching a name in another case only where the
+    /// directory holding it is known to ignore case.
+    /// </summary>
+    internal static bool SameLocation(string first, string second) => ResolvedRelativePath(first, second) == ".";
+
+    /// <summary>
+    /// How a directory matches the names of its entries: telling case apart, ignoring it, or unknown where neither
+    /// the operating system nor the directory's entries tell.
+    /// </summary>
+    internal enum NameCase { Sensitive, Insensitive, Unknown }
+
+    // Answers for directories that existed when asked; an unknown rule is asked again.
+    static readonly ConcurrentDictionary<string, NameCase> nameCases = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The rule by which `directory` matches entry names. A directory that does not exist yet takes the rule of its
+    /// nearest existing ancestor, where it would be created; the operating system is asked first, and the
+    /// directory's entries are read where it gives no answer.
+    /// </summary>
+    internal static NameCase NameCaseIn(string directory)
+    {
+        string? existing = Path.GetFullPath(directory);
+        while (existing is not null && !Directory.Exists(existing)) existing = Path.GetDirectoryName(existing);
+        if (existing is null) return NameCase.Unknown;
+        if (nameCases.TryGetValue(existing, out var known)) return known;
+        var rule = QueriedNameCase(existing) ?? EntryNameCase(existing);
+        if (rule is not NameCase.Unknown) nameCases.TryAdd(existing, rule);
+        return rule;
+    }
+
+    /// <summary>
+    /// The rule the operating system reports for an existing directory, or null where it reports none that decides
+    /// it: the volume's case sensitivity on macOS, the case-sensitive flag of a Windows directory, and the
+    /// case-folding flag of a Linux directory.
+    /// </summary>
+    internal static NameCase? QueriedNameCase(string directory)
+    {
+        if (OperatingSystem.IsMacOS())
+            return pathconf(directory, CaseSensitivePathSetting) switch
+            {
+                1 => NameCase.Sensitive, 0 => NameCase.Insensitive, _ => null
+            };
+        if (OperatingSystem.IsWindows())
+        {
+            using var handle = CreateFileW(Win32Path(directory), ReadAttributesAccess, ShareAll, 0, OpenExisting,
+                BackupSemantics, 0);
+            // A directory without the flag can still sit on a volume that tells case apart, such as a share.
+            return !handle.IsInvalid && GetFileInformationByHandleEx(handle, FileCaseSensitiveInfo, out var flags,
+                sizeof(uint)) && (flags & CaseSensitiveDirectoryFlag) != 0 ? NameCase.Sensitive : null;
+        }
+        if (OperatingSystem.IsLinux())
+        {
+            var descriptor = open(directory, ReadOnlyCloseOnExec);
+            if (descriptor < 0) return null;
+            try
+            {
+                // Without the flag the volume may still ignore case, as a FAT or SMB mount does.
+                return ioctl(descriptor, GetFlagsRequest, out var flags) == 0 && (flags & CaseFoldFlag) != 0
+                    ? NameCase.Insensitive : null;
+            }
+            finally { close(descriptor); }
+        }
+        return null;
+    }
+
+    /// <summary>`_PC_CASE_SENSITIVE`: 1 where the volume holding a path tells case apart, 0 where not.</summary>
+    const int CaseSensitivePathSetting = 11;
+    const uint ReadAttributesAccess = 0x80, ShareAll = 7, OpenExisting = 3, BackupSemantics = 0x02000000;
+    /// <summary>`FileCaseSensitiveInfo` and its `FILE_CS_FLAG_CASE_SENSITIVE_DIR` bit.</summary>
+    const int FileCaseSensitiveInfo = 23;
+    const uint CaseSensitiveDirectoryFlag = 1;
+    /// <summary>`O_RDONLY | O_CLOEXEC`, `FS_IOC_GETFLAGS` and its `FS_CASEFOLD_FL` bit on Linux.</summary>
+    const int ReadOnlyCloseOnExec = 0x80000, CaseFoldFlag = 0x40000000;
+    const nuint GetFlagsRequest = 0x80086601;
+
+    [DllImport("libc", CharSet = CharSet.Ansi, SetLastError = true)]
+    static extern nint pathconf(string path, int name);
+
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string fileName, uint access, uint share,
+        nint securityAttributes, uint disposition, uint flags, nint template);
+
+    [DllImport("kernel32", SetLastError = true)]
+    static extern bool GetFileInformationByHandleEx(Microsoft.Win32.SafeHandles.SafeFileHandle file,
+        int informationClass, out uint information, uint size);
+
+    [DllImport("libc", CharSet = CharSet.Ansi, SetLastError = true)]
+    static extern int open(string path, int flags);
+
+    [DllImport("libc", SetLastError = true)]
+    static extern int ioctl(int descriptor, nuint request, out int flags);
+
+    [DllImport("libc")]
+    static extern int close(int descriptor);
+
+    /// <summary>
+    /// The rule shown by the entries of an existing directory: the case-flipped name of an entry finds it only
+    /// where case is ignored. Entries whose flipped name is itself listed are passed over, a finding is confirmed
+    /// by listing the directory again, and Unknown is returned when no entry decides it.
+    /// </summary>
+    internal static NameCase EntryNameCase(string directory)
+    {
+        if (EntryNames(directory) is not { } names) return NameCase.Unknown;
+        foreach (var name in names)
+        {
+            var flipped = FlippedAsciiCase(name);
+            if (flipped == name || names.Contains(flipped)) continue;
+            var found = File.Exists(Path.Join(directory, flipped)) || Directory.Exists(Path.Join(directory, flipped));
+            // The listing must still hold the entry and not its flipped name, or it changed while being read.
+            if (EntryNames(directory) is not { } again || !again.Contains(name) || again.Contains(flipped)) continue;
+            return found ? NameCase.Insensitive : NameCase.Sensitive;
+        }
+        return NameCase.Unknown;
+    }
+
+    /// <summary>The names of a directory's entries other than links as listed, or null when unreadable.</summary>
+    static HashSet<string>? EntryNames(string directory)
+    {
+        // Links are skipped: whether a flipped name exists must not depend on where a link points.
+        try
+        {
+            return new DirectoryInfo(directory).EnumerateFileSystemInfos()
+                .Where(entry => (entry.Attributes & FileAttributes.ReparsePoint) == 0)
+                .Select(entry => entry.Name).ToHashSet(StringComparer.Ordinal);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    /// <summary>`name` with each ASCII letter in the other case.</summary>
+    static string FlippedAsciiCase(string name) => string.Create(name.Length, name, (flipped, source) =>
+    {
+        for (var index = 0; index < source.Length; index++)
+            flipped[index] = char.IsAsciiLetterLower(source[index]) ? char.ToUpperInvariant(source[index])
+                : char.IsAsciiLetterUpper(source[index]) ? char.ToLowerInvariant(source[index]) : source[index];
+    });
+
+    /// <summary>
+    /// Equality of full paths without `.` or `..` components, matching a name in another case where the directory
+    /// holding it ignores case and, when `unknownMatches` is set, where its rule is unknown. Every spelling that
+    /// differs only in case has one hash code, so hashed sets and groupings stay exact.
+    /// </summary>
+    internal sealed class LocationEquality(Func<string, NameCase> nameCaseIn, bool unknownMatches)
+        : IEqualityComparer<string>
+    {
+        public bool Equals(string? first, string? second) => first is null || second is null ? first == second
+            : RelativeBelow(first, second, nameCaseIn, unknownMatches) == ".";
+
+        public int GetHashCode(string path)
+        {
+            var hash = new HashCode();
+            hash.Add(Path.GetPathRoot(path) ?? "", StringComparer.OrdinalIgnoreCase);
+            foreach (var name in PathNames(path[(Path.GetPathRoot(path) ?? "").Length..]))
+                hash.Add(name, StringComparer.OrdinalIgnoreCase);
+            return hash.ToHashCode();
+        }
+    }
+
+    /// <summary>Equality of resolved paths known to name one location, for checks that require it.</summary>
+    internal static readonly LocationEquality LocationComparer = new(NameCaseIn, unknownMatches: false);
+
+    /// <summary>
+    /// Equality of resolved paths that may name one location, for checks that keep outputs apart: two spellings
+    /// differing only in case collide unless the directory holding them is known to tell case apart.
+    /// </summary>
+    internal static readonly LocationEquality CollidingLocationComparer = new(NameCaseIn, unknownMatches: true);
+
     /// <summary>Deletes a tree that may hold git objects, which git marks read-only and Windows refuses to delete.</summary>
     static void DeleteTree(string directory)
     {
@@ -1095,8 +1389,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         string Printed(string name) => lake.FirstOrDefault(entry => entry.Key == name).Value ?? "";
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var elanBin = Printed("ELAN_HOME") is { Length: > 0 } home ? Path.Combine(home, "bin") : null;
-        if (elanBin is null || LakeOnPath() is not { } proxy ||
-            !string.Equals(Path.GetDirectoryName(proxy), elanBin, comparison)) return;
+        // PATH may reach the elan directory through a link that Lake's ELAN_HOME does not, or the reverse.
+        if (elanBin is null || LakeOnPath() is not { } proxy || !SameLocation(Path.GetDirectoryName(proxy)!, elanBin))
+            return;
         void Set(string name, Func<string?, string> value)
         {
             var index = inherited.FindIndex(entry => entry.Key.Equals(name, comparison));
@@ -1752,11 +2047,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// segments and separators only, so it is for paths this process derived from one setting, never for
     /// paths another process wrote.
     /// </summary>
-    static bool SamePath(string first, string second) => string.Equals(
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)),
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)),
-        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal);
+    static bool SamePath(string first, string second) =>
+        LocationComparer.Equals(Path.GetFullPath(first), Path.GetFullPath(second));
 
     /// <summary>Whether `entry` holds the manifest and receipt that only a library publisher writes.</summary>
     static bool HoldsReceipt(DirectoryInfo entry) =>
@@ -3113,8 +3405,10 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var result = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var pending = new Queue<string>(roots);
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        string[] compiled = [Path.GetFullPath(Path.Combine(session, ".lake/build/lib/lean")),
-            Path.GetFullPath(Path.Combine(library!, ".lake/build/lib/lean"))];
+        // Lean may spell a file through other links than these directories, so both sides are compared resolved.
+        string[] compiled = [ResolvedPath(Path.Combine(session, ".lake/build/lib/lean")),
+            ResolvedPath(Path.Combine(library!, ".lake/build/lib/lean"))];
+        var toolchain = ResolvedPath(Toolchain);
         while (pending.TryDequeue(out var module))
         {
             if (!seen.Add(module)) continue;
@@ -3126,10 +3420,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             if (dependencies.Code != 0) return Conservative();
             foreach (var dependency in dependencies.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                var path = Path.GetFullPath(dependency);
-                if (path.StartsWith(Path.GetFullPath(Toolchain) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
-                var name = compiled.Select(directory => Path.GetRelativePath(directory, path).Replace('\\', '/'))
-                    .FirstOrDefault(candidate => !candidate.StartsWith("../", StringComparison.Ordinal) && !Path.IsPathRooted(candidate));
+                var path = ResolvedPath(dependency);
+                if (RelativeBelow(toolchain, path) is not null) continue;
+                var name = CompiledName(compiled, path);
                 if (name is null || !name.EndsWith(".olean", StringComparison.Ordinal)) return Conservative();
                 var imported = name[..^6].Replace('/', '.');
                 // All certified CIL sources are already bound by libraryKey.
@@ -3143,6 +3436,14 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         SortedDictionary<string, string> Conservative() => new(snapshot.Where(pair =>
             pair.Key.EndsWith(".lean", StringComparison.Ordinal) && !pair.Key.StartsWith("proof:", StringComparison.Ordinal)).ToDictionary(), StringComparer.Ordinal);
     }
+
+    /// <summary>
+    /// `path` relative to the first of the `compiled` directories that holds it, with `/` separators, or null when
+    /// none does; all are taken as resolved.
+    /// </summary>
+    internal static string? CompiledName(string[] compiled, string path) =>
+        compiled.Select(directory => RelativeBelow(directory, path))
+            .FirstOrDefault(name => name is not (null or "."))?.Replace('\\', '/');
 
     static void CopySupportArtifacts(string session, string destination, SortedDictionary<string, string> sources)
     {
@@ -3363,54 +3664,11 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         finally { File.Delete(request); File.Delete(result); }
     }
 
-    /// <summary>Resolves directory aliases, including ancestors of build directories not yet created.</summary>
-    static string PhysicalImportDirectory(string path)
-    {
-        const int maximumLinks = 64;
-        var remainingLinks = maximumLinks;
-        string Resolve(string absolute)
-        {
-            var root = Path.GetPathRoot(absolute)
-                ?? throw new InvalidDataException("Import directory must be absolute: " + absolute);
-            var current = root;
-            foreach (var component in absolute[root.Length..].Split(
-                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (component == ".") continue;
-                if (component == "..")
-                {
-                    current = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(current)) ?? root;
-                    continue;
-                }
-                var candidate = Path.Combine(current, component);
-                var directory = new DirectoryInfo(candidate);
-                if (directory.LinkTarget is { } target)
-                {
-                    if (--remainingLinks < 0)
-                        throw new InvalidDataException("Import directory has too many symbolic links: " + path);
-                    current = Resolve(Path.IsPathFullyQualified(target) ? target : Path.Combine(current, target));
-                    if (!Directory.Exists(current))
-                        throw new InvalidDataException(
-                            "Import directory has an unresolved symbolic link: " + candidate);
-                }
-                else current = candidate;
-            }
-            return Path.TrimEndingDirectorySeparator(current);
-        }
-        return Resolve(path);
-    }
-
     // The audited module must be the artifact that was hashed and replayed, not a shadow on the search path.
+    // Lean reports the file with links followed, so both sides are compared that way.
     static void RequireAuditedModule(AuditedOleans audited, string module, string path)
     {
-        static string PhysicalArtifact(string artifact)
-        {
-            var absolute = Path.IsPathFullyQualified(artifact) ? artifact :
-                Path.Combine(Environment.CurrentDirectory, artifact);
-            return Path.Combine(PhysicalImportDirectory(Path.GetDirectoryName(absolute)!), Path.GetFileName(absolute));
-        }
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        if (!PhysicalArtifact(audited.modules[module]).Equals(PhysicalArtifact(path), comparison))
+        if (!SameLocation(audited.modules[module], path))
             throw new InvalidDataException($"Audited module {module} resolved to {audited.modules[module]}, not {path}");
     }
 
@@ -3867,7 +4125,6 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         var text = new StringBuilder();
         var messages = new List<ProofMessage>();
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var line in output.ReplaceLineEndings("\n").Split('\n'))
         {
             JsonElement message;
@@ -3892,7 +4149,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             text.Append($"{file}:{row}:{column}: {label}{name}: {data}");
             if (!data.EndsWith('\n')) text.Append('\n');
             if (label != "error" && file.Length > 0 &&
-                Path.GetFullPath(file, Path.GetDirectoryName(source)!).Equals(source, comparison))
+                LocationComparer.Equals(Path.GetFullPath(file, Path.GetDirectoryName(source)!), source))
                 messages.Add(new(label, row, column, data.TrimEnd('\n')));
         }
         return (text.ToString(), [.. messages]);
@@ -3923,14 +4180,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     static ProofMessage[] SourceMessages(IEnumerable<(string Level, string Message)> entries, string package,
         string source)
     {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var messages = new List<ProofMessage>();
         foreach (var (level, text) in entries)
         {
             var label = level switch { "info" => "info", "warning" => "warning", _ => null };
             var located = LocatedMessage().Match(text);
             if (label is null || !located.Success ||
-                !Path.GetFullPath(located.Groups["file"].Value, package).Equals(source, comparison))
+                !LocationComparer.Equals(Path.GetFullPath(located.Groups["file"].Value, package), source))
                 continue;
             messages.Add(new(label, int.Parse(located.Groups["line"].Value),
                 int.Parse(located.Groups["column"].Value), located.Groups["text"].Value.TrimEnd('\n')));
@@ -4467,6 +4723,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // are not built yet, a conservative source snapshot safely widens the key.
             var supportSources = SupportInputs(session, support, before);
             var supportKey = ContentKey("support-audit-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" +
+                extraction.Sha256 + "\n" +
                 string.Join("\n", support.Order(StringComparer.Ordinal)) + "\n" + JsonSerializer.Serialize(supportSources));
             if (!preparedSupport.Contains(supportKey))
             {
@@ -5157,12 +5414,10 @@ internal sealed partial class SourceCopies(string directory)
     /// <summary>Exception.Data key holding the session's copies when verification fails.</summary>
     internal const string Key = "LeanCIL.SourceCopies";
 
-    static readonly StringComparer PathComparer =
-        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-    readonly Dictionary<string, string> originals = new(PathComparer);
+    readonly Dictionary<string, string> originals = new(Program.LocationComparer);
     readonly Dictionary<string, string> modules = new(StringComparer.Ordinal);
     // An observed copy's line holding the inserted import, by the copy's path.
-    readonly Dictionary<string, int> observedLines = new(PathComparer);
+    readonly Dictionary<string, int> observedLines = new(Program.LocationComparer);
 
     [GeneratedRegex(@"\A(?<file>.+?\.lean):(?<line>\d+):(?<column>\d+)\z")]
     private static partial Regex Location();
@@ -5233,7 +5488,7 @@ internal sealed partial class SourceCopies(string directory)
     internal Program.ProofMessage[]? Relocate(string original, Program.ProofMessage[]? messages)
     {
         var full = Path.GetFullPath(original);
-        var copy = observedLines.Keys.FirstOrDefault(key => PathComparer.Equals(originals[key], full));
+        var copy = observedLines.Keys.FirstOrDefault(key => Program.LocationComparer.Equals(originals[key], full));
         if (messages is null || copy is null) return messages;
         int Column(int line, int column) => Position(copy, line, column).Column;
         return [.. messages.Select(message => message with

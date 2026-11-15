@@ -8,9 +8,9 @@ open CIL CIL.Safety
 open Tests.Imports.Calls (addContract AddInput rootContract root root_given)
 
 @[cil_code] def addEntry : Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 2, .ldarg 0, .ldarg 1, .call 1 2, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .ldarg 1, .call 1 2, .stind .i8, .ret] }
 @[cil_code] def sumHelper : Method := { returnsValue := true, locals := [], code :=
-  [.ldarg 0, .load64, .ldarg 1, .load64, .add, .ret] }
+  [.ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .ret] }
 def addLib : Library := { entry := addEntry, helpers := [sumHelper] }
 @[cil_code] def addProgram : CIL.Program := [addEntry, sumHelper]
 
@@ -139,7 +139,7 @@ theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1
   rfl
 
 /-- The relocated helper's exception reaches `Root` through two relocated calls. -/
-example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "System.ArgumentOutOfRangeException" :=
+example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m .argumentOutOfRange :=
   root_composed.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
 
 /-- Two libraries: entries fill slots 0 and 1, then each library's helpers follow in order. -/

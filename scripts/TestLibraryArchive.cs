@@ -1,6 +1,13 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include CertifiedLibraryArchive.cs
+#:include Verification.cs
+#:include DeepChecks.cs
+#:include FailureReports.cs
+#:include LeanDiagnostics.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
+#:include ../Tests/DirectoryLinks.cs
 
 using System.Diagnostics;
 using System.Formats.Tar;
@@ -49,6 +56,17 @@ void Run(string executable, params string[] arguments)
 try
 {
     if (OperatingSystem.IsLinux()) Run("ln", executable, Path.Combine(source, "hard-link"));
+    Reject("archive inside the library", () => CertifiedLibraryArchive.Pack(source,
+        Path.Combine(source, "nested", CertifiedLibraryArchive.FileName), manifest), "outside the library");
+    // An archive spelled through a link into the library would be packed into itself.
+    var intoSource = Path.Combine(root, "into-source");
+    if (TryLinkDirectory(intoSource, source))
+    {
+        Reject("archive reached through a link into the library", () => CertifiedLibraryArchive.Pack(source,
+            Path.Combine(intoSource, CertifiedLibraryArchive.FileName), manifest), "outside the library");
+        Directory.Delete(intoSource);
+    }
+    else Console.WriteLine("SKIP archive reached through a link: no directory link or junction could be made");
     var digest = CertifiedLibraryArchive.Pack(source, archive, manifest);
     var restored = Path.Combine(root, "restored");
     CertifiedLibraryArchive.Restore(download, restored + Path.DirectorySeparatorChar, manifest, digest);

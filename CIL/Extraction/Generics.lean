@@ -20,8 +20,8 @@ Opcodes are numeric ECMA-335 encodings; two-byte opcodes `0xFE nn` appear as `0x
 namespace CIL.Extraction
 
 
-/-- A decoded instruction operand. A field operand names its owner type and the field's
-    index in the owner's raw layout. -/
+/-- A decoded instruction operand. A field operand names its owner type, the field's index in
+    the owner's raw layout, the type it holds and the name of the metadata row its token names. -/
 inductive RawOperand where
   | none
   | integer (value : Int)
@@ -31,11 +31,35 @@ inductive RawOperand where
   | target (pc : Nat)
   | targets (pcs : List Nat)
   | type (value : TypeExpr)
-  | field (owner : TypeExpr) (index : Nat) (type : TypeExpr) (isStatic : Bool)
+  | field (owner : TypeExpr) (index : Nat) (type : TypeExpr) (name : MetadataName)
+      (isStatic : Bool)
   | call (site : CallSite)
   | indirectCall (returnType : TypeExpr) (parameters : List TypeExpr)
       (hasThis explicitThis : Bool) (callingConvention : Nat)
   deriving DecidableEq, Repr
+
+/-- The typed reference a field operand names: its owner, index, held type and name. `none` for
+    any other operand; the opcode, not the reference, says whether the field is static. -/
+def FieldRef.ofOperand? : RawOperand → Option FieldRef
+  | .field owner index type name _ => some { owner, index, type, name }
+  | _ => none
+
+/-- A reference is built exactly from a field operand with its owner, index, type and name. -/
+theorem FieldRef.ofOperand?_eq_some {operand : RawOperand} {reference : FieldRef} :
+    FieldRef.ofOperand? operand = some reference ↔ ∃ isStatic,
+      operand = .field reference.owner reference.index reference.type reference.name isStatic := by
+  cases operand
+  case field owner index type name isStatic =>
+    cases reference
+    simp only [FieldRef.ofOperand?, Option.some.injEq, FieldRef.mk.injEq, RawOperand.field.injEq]
+    constructor
+    · rintro ⟨rfl, rfl, rfl, rfl⟩
+      exact ⟨isStatic, rfl, rfl, rfl, rfl, rfl⟩
+    · rintro ⟨_, rfl, rfl, rfl, rfl, rfl⟩
+      exact ⟨rfl, rfl, rfl, rfl⟩
+  all_goals simp [FieldRef.ofOperand?]
+
+#print axioms FieldRef.ofOperand?_eq_some
 
 /-- One CIL instruction: its byte offset, opcode and operand. Branch operands are
     already instruction indices. -/
@@ -156,9 +180,9 @@ def substituteTarget (methodArity : Nat) (openOwner closedOwner : TypeExpr) :
 def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := [])
     (methodArity : Nat := 0) : RawOperand → Option RawOperand
   | .type type => RawOperand.type <$> substituteStorageType layouts arguments type
-  | .field owner index type isStatic => do
-    return .field (← substituteStorageType layouts arguments owner) index (← substituteStorageType layouts arguments type)
-      isStatic
+  | .field owner index type name isStatic => do
+    return .field (← substituteStorageType layouts arguments owner) index
+      (← substituteStorageType layouts arguments type) name isStatic
   | .call site => do
     let declaringType ← substituteType arguments site.declaringType
     return .call { site with

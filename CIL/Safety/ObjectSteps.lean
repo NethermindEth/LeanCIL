@@ -6,7 +6,7 @@ import CIL.Safety.ObjectAllocationLemmas
 
 `cil_step` equations for the instructions that observe class instance references: identity
 comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`),
-`isinst` and `castclass` (`objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
+`isinst` and `castclass` (through `objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
 `ldstr` of a caller-bound literal (`literalObject_of_lookup`), `ldfld`/`stfld` of scalar class
 fields, and `newobj` of a class, which calls the constructor with a fresh instance that
 `allocateObject_ok` or `allocateObject_insufficient` decides, and `callvirt` of a non-virtual
@@ -96,7 +96,7 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
     ExecutionResult FrameAction :=
   match arguments with
   | .object (.address _) :: _ => .ok (.call callee arguments rest memory)
-  | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | .object .null :: _ => .error (.thrown .nullReference)
   | _ => .error .invalidState
 
 /-- `callvirt` of a non-virtual method checks its `argc` arguments and calls the method its link
@@ -128,7 +128,7 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
 /-- A null receiver throws before the call. -/
 @[cil_checked] theorem receiverCall_null (callee : Nat) (arguments rest : List Value) :
     receiverCall callee (.object .null :: arguments) rest memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 
 #print axioms receiverCall_null
 
@@ -140,7 +140,7 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
   match arguments with
   | .object (.address receiver) :: _ => do
     return .call (← virtualTarget memory targets receiver) arguments rest memory
-  | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | .object .null :: _ => .error (.thrown .nullReference)
   | _ => .error .invalidState
 
 /-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its link's
@@ -208,7 +208,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
 @[cil_checked] theorem virtualCall_null (targets : List (CIL.Extraction.TypeExpr × Nat))
     (arguments rest : List Value) :
     virtualCall targets (.object .null :: arguments) rest memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 
 #print axioms virtualCall_null
 
@@ -261,12 +261,21 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return .next (if present then target else pc + 1) rest frame memory :=
   id rfl
 
-/-- `isinst` and `castclass` replace an object reference by its tested form: itself when its
-    runtime lineage holds the class, else null or `InvalidCastException`. -/
-@[cil_step high] theorem step_objectTest_eq (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+/-- `castclass` keeps an object reference whose runtime lineage holds the class, and null;
+    any other object throws `InvalidCastException`. -/
+@[cil_step high] theorem step_castclass_eq (type : CIL.Extraction.TypeExpr)
     (value : ManagedReference) (rest : List Value) :
-    step body (.objectTest type throwing) pc args frame (.object value :: rest) memory = do
-      let result ← objectTest memory type throwing value
+    step body (.castclass type) pc args frame (.object value :: rest) memory = do
+      let result ← objectTest memory type true value
+      return .next (pc + 1) (.object result :: rest) frame memory :=
+  id rfl
+
+/-- `isinst` keeps an object reference whose runtime lineage holds the class, and null; any
+    other object becomes null. -/
+@[cil_step high] theorem step_isinst_eq (type : CIL.Extraction.TypeExpr)
+    (value : ManagedReference) (rest : List Value) :
+    step body (.isinst type) pc args frame (.object value :: rest) memory = do
+      let result ← objectTest memory type false value
       return .next (pc + 1) (.object result :: rest) frame memory :=
   id rfl
 
@@ -285,12 +294,9 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return .next (pc + 1) (.object (.address array) :: rest) frame allocated := id rfl
 
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
-@[cil_step high] theorem step_nullObject_eq (stack : List Value) :
-    step body (.memory .nullObject) pc args frame stack memory =
-      .ok (.next (pc + 1) (.object .null :: stack) frame memory) := by
-  simp only [step, observerCount, staticInstruction, memoryInstruction,
-    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any]
-  rfl
+@[cil_step high] theorem step_ldnull_eq (stack : List Value) :
+    step body .ldnull pc args frame stack memory =
+      .ok (.next (pc + 1) (.object .null :: stack) frame memory) := id rfl
 
 /-- `ldstr` pushes the object bound to its text and leaves memory unchanged. -/
 @[cil_step high] theorem step_stringLiteral_eq (text : String) (stack : List Value) :
@@ -309,7 +315,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.memory .throwIfNull) pc args frame (.object name :: .object argument :: rest)
         memory =
       match argument with
-      | .null => .error (.thrown "System.ArgumentNullException")
+      | .null => .error (.thrown .argumentNull)
       | .address _ => .ok (.next (pc + 1) rest frame memory) := by
   cases argument <;> rfl
 
@@ -319,7 +325,7 @@ def zeroGuardOutcome (guard : ZeroGuard) (width : Nat) (signed : Bool) (value : 
   match guardOperand width signed value with
   | some number =>
     match guard.throws number with
-    | true => .error (.thrown "System.ArgumentOutOfRangeException")
+    | true => .error (.thrown .argumentOutOfRange)
     | false => .ok ()
   | none => .error .invalidState
 
@@ -329,7 +335,7 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
   match guardOperand width signed value, guardOperand width signed other with
   | some number, some bound =>
     match guard.throws number bound with
-    | true => .error (.thrown "System.ArgumentOutOfRangeException")
+    | true => .error (.thrown .argumentOutOfRange)
     | false => .ok ()
   | _, _ => .error .invalidState
 
@@ -710,8 +716,9 @@ end ObjectEquations
 #print axioms step_cgt_un_object_eq
 #print axioms step_brfalse_object_eq
 #print axioms step_brtrue_object_eq
-#print axioms step_objectTest_eq
-#print axioms step_nullObject_eq
+#print axioms step_castclass_eq
+#print axioms step_isinst_eq
+#print axioms step_ldnull_eq
 #print axioms step_newReferenceArray_i32_eq
 #print axioms step_newReferenceArray_i64_eq
 #print axioms step_stringLiteral_eq

@@ -189,6 +189,20 @@ def argumentAccessProof? (method index : Expr) : MetaM (Option Expr) := do
   let some literal ← (Meta.evalNat index).run | return none
   argumentProof? method literal
 
+/-- How `method` reads argument `index`, reduced to an `ArgumentAccess` constructor, with the
+    proof `argumentAccessProof?` finds for it. -/
+def resolvedArgumentAccess? (method index : Expr) : MetaM (Option (Expr × Expr)) := do
+  let some proof ← argumentAccessProof? method index | return none
+  let some (_, _, access) := (← inferType proof).eq? | return none
+  return some (← whnfR (← instantiateMVars access), proof)
+
+/-- The frame slot of the home of argument `index` of `method`, with the proof that the method
+    reads the argument there; none for an argument without a home or an undecided access. -/
+def argumentHome? (method index : Expr) : MetaM (Option (Expr × Expr)) := do
+  let some (access, proof) ← resolvedArgumentAccess? method index | return none
+  let_expr CIL.ArgumentAccess.home slot := access | return none
+  return some (slot, proof)
+
 /-- What a method's argument facts read: its receiver, parameter types and homes. -/
 structure Signature where
   /-- The receiver's value, for an instance method. -/

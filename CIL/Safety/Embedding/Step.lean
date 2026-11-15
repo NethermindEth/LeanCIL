@@ -57,9 +57,6 @@ theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
     simp only [staticInstruction]
     cases h1 : actual.staticSites.find? (fun site => site.1 == q) <;>
       cases h2 : expected.staticSites.find? (fun site => site.1 == pc) <;> simp_all
-  case spanCreate | createSpan =>
-    unfold staticInstruction
-    split <;> first | contradiction | rfl
   all_goals unfold staticInstruction; rfl
 
 /-- The shared tail of `step` for instructions without a dedicated case. -/
@@ -144,7 +141,7 @@ private theorem observer_ok {observed : Bool} {result : ExecutionResult FrameAct
 
 /-- A step that throws passed the unspecified-bits guard. -/
 private theorem observer_thrown {observed : Bool} {result : ExecutionResult FrameAction}
-    {exception : String}
+    {exception : ExceptionType}
     (h : (if observed then .error (.unsupported "Instruction observes unspecified vector bits")
       else result) = .error (.thrown exception)) :
     observed = false ∧ result = .error (.thrown exception) := by
@@ -199,7 +196,7 @@ set_option hygiene false in
 /-- Introduces a `StepRelabel` or `StepRaise` goal, unfolds both steps and clears the guard. -/
 macro "explicit_intro" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
-  unfold step at h ⊢
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers))
 
@@ -214,7 +211,7 @@ set_option hygiene false in
     before examining the second operand. -/
 local macro "stack_cases" " => " close:tacticSeq : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
-  unfold step at h ⊢
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rcases stack with _ | ⟨v1, rest⟩ <;> (try cases v1)
@@ -265,14 +262,17 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
-set_option maxHeartbeats 400000 in
 /-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
 theorem step_relabel_faulting (op : Instruction)
     (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
   cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
     Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
-  all_goals stack_cases =>
-    first | fallback_vacuous | lockstep
+  -- One goal per arm of the dispatcher's first match, so its cost does not grow with the values.
+  all_goals
+    explicit_intro
+    (try rw [context.profile])
+    split at h
+    all_goals first | contradiction | lockstep | fallback_vacuous
 
 #print axioms step_relabel_faulting
 
@@ -298,6 +298,26 @@ theorem step_relabel_ldarg (index : Nat) : StepRelabel (.ldarg index) := by
   lockstep
 
 #print axioms step_relabel_ldarg
+
+/-- An argument store writes the home `Method.argumentAccess` gives, which both methods share. -/
+theorem step_relabel_starg (index : Nat) : StepRelabel (.starg index) := by
+  stack_cases =>
+    first
+    | fallback_vacuous
+    | (rw [show ∀ value, storeArgument actual index value frame m =
+          storeArgument expected index value frame m by
+        intro value
+        simp only [storeArgument, context.arguments]]
+       lockstep)
+#print axioms step_relabel_starg
+
+/-- An argument address is the home `Method.argumentAccess` gives, which both methods share. -/
+theorem step_relabel_ldarga (index : Nat) : StepRelabel (.ldarga index) := by
+  plain_cases
+  rw [show addressArgument actual index frame m = addressArgument expected index frame m by
+    simp only [addressArgument, context.arguments]]
+  lockstep
+#print axioms step_relabel_ldarga
 
 theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases
@@ -439,7 +459,7 @@ theorem step_relabel_unadmitted (opcode : Nat) : StepRelabel (.unadmitted opcode
   explicit_intro
   cases h
 
-theorem step_relabel_throw (exception : String) : StepRelabel (.throw exception) := by
+theorem step_relabel_throw (exception : ExceptionType) : StepRelabel (.throw exception) := by
   explicit_intro
   cases h
 
@@ -495,9 +515,9 @@ theorem step_relabel_brtrue (target : Nat) : StepRelabel (.brtrue target) := by
 
 #print axioms step_relabel_brtrue
 
-/-- A type test continues at the next pc with the tested reference or null. -/
-theorem step_relabel_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
-    StepRelabel (.objectTest type throwing) := by
+/-- A cast continues at the next pc with the tested reference. -/
+theorem step_relabel_castclass (type : CIL.Extraction.TypeExpr) :
+    StepRelabel (.castclass type) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -507,7 +527,21 @@ theorem step_relabel_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Boo
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_objectTest
+#print axioms step_relabel_castclass
+
+/-- A type test continues at the next pc with the tested reference or null. -/
+theorem step_relabel_isinst (type : CIL.Extraction.TypeExpr) :
+    StepRelabel (.isinst type) := by
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
+            context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_isinst
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := by
@@ -675,6 +709,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case conv_ovf target => exact step_relabel_conv_ovf target
   case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case ldarg index => exact step_relabel_ldarg index
+  case starg index => exact step_relabel_starg index
+  case ldarga index => exact step_relabel_ldarga index
   case ldloc index => exact step_relabel_ldloc index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
@@ -703,7 +739,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case ceq => exact step_relabel_ceq
   case brfalse target => exact step_relabel_brfalse target
   case brtrue target => exact step_relabel_brtrue target
-  case objectTest type throwing => exact step_relabel_objectTest type throwing
+  case castclass type => exact step_relabel_castclass type
+  case isinst type => exact step_relabel_isinst type
   case beq target => exact step_relabel_beq target
   case bne_un target => exact step_relabel_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
@@ -712,7 +749,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | load64 | store64 | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | ldind | stind | dup | pop | skipInit =>
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
@@ -765,8 +802,8 @@ theorem step_relabel_shl : StepRelabel .shl := step_relabel _
 theorem step_relabel_shr : StepRelabel .shr := step_relabel _
 theorem step_relabel_shr_un : StepRelabel .shr_un := step_relabel _
 theorem step_relabel_clt : StepRelabel .clt := step_relabel _
-theorem step_relabel_load64 : StepRelabel .load64 := step_relabel _
-theorem step_relabel_store64 : StepRelabel .store64 := step_relabel _
+theorem step_relabel_ldind (kind : CIL.NumericKind) : StepRelabel (.ldind kind) := step_relabel _
+theorem step_relabel_stind (kind : CIL.NumericKind) : StepRelabel (.stind kind) := step_relabel _
 theorem step_relabel_dup : StepRelabel .dup := step_relabel _
 theorem step_relabel_pop : StepRelabel .pop := step_relabel _
 theorem step_relabel_br (target : Nat) : StepRelabel (.br target) := step_relabel _
@@ -782,7 +819,7 @@ theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_
     renamed pc. -/
 def StepRaise (op : CIL.Instruction) : Prop :=
   ∀ (expected actual : CIL.Method) (r : Nat → Nat) (pc q : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) (m : Memory) (exception : String),
+    (frame : Frame) (stack : List Value) (m : Memory) (exception : ExceptionType),
     StepContext expected actual r op pc q →
     step expected op pc args frame stack m = .error (.thrown exception) →
     step actual (op.relabel r) q args frame stack m = .error (.thrown exception)
@@ -798,13 +835,15 @@ theorem except_bind_error {x : Except ε α} {f : α → Except ε β} {e : ε}
     (Except.error e >>= f) = .error e := rfl
 
 /-- An arithmetic fault is never a thrown exception. -/
-theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α} {exception : String} :
+theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α}
+    {exception : ExceptionType} :
     x.mapError ExecutionFault.arithmetic ≠ .error (.thrown exception) := by
   cases x <;> simp [Except.mapError]
 
 /-- The shared tail of `step` throws only from `instruction`, which both steps share. -/
 theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
-    {stack : List Value} {frame : Frame} {m : Memory} {exception : String} (op : CIL.Instruction)
+    {stack : List Value} {frame : Frame} {m : Memory} {exception : ExceptionType}
+    (op : CIL.Instruction)
     (arity : pureArity (op.relabel r) = pureArity op)
     (base : pureArity op ≠ none → BaseRelabel op)
     (plain : pureArity op = none → instruction op stack m = .error (.thrown exception) →
@@ -1053,15 +1092,24 @@ theorem step_raise_brtrue (target : Nat) : StepRaise (.brtrue target) := by
 #print axioms step_raise_brtrue
 
 /-- A failed cast raises `InvalidCastException` at the same relabelled location. -/
-theorem step_raise_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
-    StepRaise (.objectTest type throwing) := by
+theorem step_raise_castclass (type : CIL.Extraction.TypeExpr) : StepRaise (.castclass type) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun absent => absurd rfl absent) (fun _ ran => ran) context.next h
         | raise_lockstep
 
-#print axioms step_raise_objectTest
+#print axioms step_raise_castclass
+
+/-- A throwing `isinst` step throws the same at the relabelled location. -/
+theorem step_raise_isinst (type : CIL.Extraction.TypeExpr) : StepRaise (.isinst type) := by
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun absent => absurd rfl absent) (fun _ ran => ran) context.next h
+        | raise_lockstep
+
+#print axioms step_raise_isinst
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_beq (target : Nat) : StepRaise (.beq target) := by
@@ -1226,6 +1274,20 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     rw [show loadArgument actual index args frame m = loadArgument expected index args frame m by
       simp only [loadArgument, context.arguments]]
     raise_lockstep
+  case starg index =>
+    stack_cases =>
+      first
+      | fallback_raise_vacuous
+      | (rw [show ∀ value, storeArgument actual index value frame m =
+            storeArgument expected index value frame m by
+          intro value
+          simp only [storeArgument, context.arguments]]
+         raise_lockstep)
+  case ldarga index =>
+    plain_cases
+    rw [show addressArgument actual index frame m = addressArgument expected index frame m by
+      simp only [addressArgument, context.arguments]]
+    raise_lockstep
   case ldloc | ldloca =>
     plain_cases
     lookup_raise
@@ -1274,7 +1336,8 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case ceq => exact step_raise_ceq
   case brfalse target => exact step_raise_brfalse target
   case brtrue target => exact step_raise_brtrue target
-  case objectTest type throwing => exact step_raise_objectTest type throwing
+  case castclass type => exact step_raise_castclass type
+  case isinst type => exact step_raise_isinst type
   case beq target => exact step_raise_beq target
   case bne_un target => exact step_raise_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
@@ -1283,7 +1346,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | load64 | store64 | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | ldind | stind | dup | pop | skipInit =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)
 
 #print axioms step_raise

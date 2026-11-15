@@ -1,4 +1,5 @@
 import CIL.Types
+import CIL.ExceptionType
 import CIL.IntegerArithmetic
 import CIL.Features
 import CIL.SIMD.Availability
@@ -21,21 +22,18 @@ inductive NumericKind where
   | i1 | u1 | i2 | u2 | i4 | u4 | i8 | i
   deriving DecidableEq, Repr
 
-/-- The load width in bytes and whether a narrow value is sign-extended to i32. -/
-def NumericKind.load? : NumericKind -> Option (Prod Nat Bool)
-  | .i1 => some (1, true)
-  | .u1 => some (1, false)
-  | .i2 => some (2, true)
-  | .u2 => some (2, false)
-  | .i4 | .u4 => some (4, false)
-  | .i8 | .i => some (8, false)
+/-- Bytes the access moves; native int is eight bytes on every admitted profile. -/
+def NumericKind.width : NumericKind → Nat
+  | .i1 | .u1 => 1
+  | .i2 | .u2 => 2
+  | .i4 | .u4 => 4
+  | .i8 | .i => 8
 
-/-- The store width in bytes; narrow stores keep the low bytes of an i32 value. -/
-def NumericKind.store? : NumericKind -> Option Nat
-  | .i1 | .u1 => some 1
-  | .i2 | .u2 => some 2
-  | .i4 | .u4 => some 4
-  | .i8 | .i => some 8
+/-- Whether a load sign-extends to the stack width: only the one- and two-byte signed kinds,
+    since a four-byte load gives the same i32 bits either way. -/
+def NumericKind.signed : NumericKind → Bool
+  | .i1 | .i2 => true
+  | _ => false
 
 /-- Small integer storage types; all extend to the 32-bit evaluation-stack type. -/
 inductive NarrowKind where
@@ -165,6 +163,11 @@ inductive Instruction where
   | initAggregate (size : Nat)
   | loadScalar (width : Nat) (signed : Bool := false)
   | storeScalar (width : Nat)
+  /-- `ldind` of `kind`: a load through a reference, or of the entry a native method table
+      cursor names. -/
+  | ldind (kind : NumericKind)
+  /-- `stind` of `kind`: a store through a writable reference. -/
+  | stind (kind : NumericKind)
   | fieldAt (offset width : Nat) (signed : Bool := false)
   | fieldAddress (offset : Nat)
   | setFieldAt (offset width : Nat)
@@ -173,6 +176,10 @@ inductive Instruction where
   -- Arguments and locals.
   /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/
   | ldarg (index : Nat)
+  /-- Stores the top of the stack into argument `index`'s home, as `storeArgument` says. -/
+  | starg (index : Nat)
+  /-- Pushes the address of argument `index`'s home, as `addressArgument` says. -/
+  | ldarga (index : Nat)
   | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)
@@ -181,13 +188,15 @@ inductive Instruction where
   | tailCall (callee argc : Nat)
   /-- Authenticated managed pointers, immutable tables and exact-signature indirect calls. -/
   | managed (operation : ManagedOp)
-  -- Constants, conversions, arithmetic, 64-bit memory access and stack shuffling.
+  -- Constants, conversions, arithmetic and stack shuffling.
   | ldc_i4 (value : W32)
   | ldc_i8 (value : W64)
+  /-- `ldnull`: the null object reference. -/
+  | ldnull
   | conv_i1 | conv_i2 | conv_u2
   | conv_i8 | conv_i4 | conv_u1 | conv_u4 | conv_u8 | conv_u | conv_i | not | add | sub | mul
   | and | or
-  | xor | shl | shr | shr_un | clt | clt_un | cgt_un | ceq | load64 | store64 | dup | pop
+  | xor | shl | shr | shr_un | clt | clt_un | cgt_un | ceq | dup | pop
   -- Control flow.
   | br (target : Nat)
   | switch (targets : List Nat)
@@ -214,10 +223,11 @@ inductive Instruction where
       `constructor` as its receiver ahead of `argc` arguments and pushed once it returns. -/
   | newObject (constructor : Nat) (argc : Nat) (owner : Extraction.TypeExpr)
       (bases : List Extraction.TypeExpr) (size : Nat)
-  /-- `castclass` (`throwing`) or `isinst` of class `type`: an object whose runtime class or one
-      of its bases is `type` stays on the stack, as does null; any other object becomes null,
-      or throws `System.InvalidCastException` for `castclass`. -/
-  | objectTest (type : Extraction.TypeExpr) (throwing : Bool)
+  /-- `castclass`: the object unchanged when it is null or an instance of `type`;
+      `InvalidCastException` otherwise. -/
+  | castclass (type : Extraction.TypeExpr)
+  /-- `isinst`: the object when it is null or an instance of `type`; null otherwise. -/
+  | isinst (type : Extraction.TypeExpr)
   | skipInit
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)
@@ -225,7 +235,7 @@ inductive Instruction where
   | memory (operation : MemoryOp)
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
-  | throw (exception : String)
+  | throw (exception : ExceptionType)
   /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
       outside the code the extractor reaches under the selected profile. It faults when stepped. -/
   | unadmitted (opcode : Nat)

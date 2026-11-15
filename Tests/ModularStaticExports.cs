@@ -186,10 +186,11 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
       .ok (.next 1 [.reference (.address reference)] frame result) := by
     rw [step_memory_eq, addressed]
     rfl
-  have second : step Extracted.method0 .load64 1 [] frame [.reference (.address reference)] result =
+  have second : step Extracted.method0 (.ldind .i8) 1 [] frame [.reference (.address reference)] result =
       .ok (.next 2 [.scalar (.i64 17)] frame result) := by
-    rw [step_load64_eq]
-    simp only [instructionStep, instruction, load, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    rw [step_ldind_eq]
+    simp only [instructionStep, instruction, CIL.NumericKind.width, CIL.NumericKind.signed, load,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
     rfl
   have returned : step Extracted.method0 .ret 2 [] frame [.scalar (.i64 17)] result =
       .ok (.returned [.scalar (.i64 17)] result) := rfl

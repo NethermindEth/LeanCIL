@@ -88,6 +88,76 @@ theorem step_ldarg_home_eq (index : Nat) (stack : List Value) (slot : Nat)
 
 #print axioms step_ldarg_home_eq
 
+/-- Expose an argument store without expanding the instruction dispatcher; the write itself is
+    `storeArgument`. Stepping uses this form only while the method's argument access is unknown,
+    and the two equations below once it is known. -/
+theorem step_starg_eq (index : Nat) (value : Value) (rest : List Value) :
+    step body (.starg index) pc args frame (value :: rest) memory = do
+      let (frame, memory) ← storeArgument body index value frame memory
+      return FrameAction.next (pc + 1) rest frame memory :=
+  id rfl
+
+attribute [cil_step] storeArgument
+
+/-- A homed argument store writes its frame slot, as `stloc` of that slot does. -/
+theorem step_starg_home_eq (index : Nat) (value : Value) (rest : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.starg index) pc args frame (value :: rest) memory = do
+      let some home := frame.locals[slot]? | .error .invalidState
+      let (home, memory) ← storeLocal memory home value
+      return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set slot home }
+        memory := by
+  simp only [step_starg_eq, storeArgument, access]
+  cases frame.locals[slot]? with
+  | none => rfl
+  | some home =>
+    dsimp only
+    cases storeLocal memory home value <;> rfl
+
+#print axioms step_starg_home_eq
+
+/-- A store to an argument without a home faults as unsupported. -/
+theorem step_starg_value_eq (index : Nat) (value : Value) (rest : List Value)
+    (narrow : Option CIL.NarrowKind) (access : body.argumentAccess index = .value narrow) :
+    step body (.starg index) pc args frame (value :: rest) memory =
+      .error (.unsupported "Store to an argument without a home") := by
+  simp only [step_starg_eq, storeArgument, access]
+  rfl
+
+#print axioms step_starg_value_eq
+
+/-- Expose an argument address without expanding the instruction dispatcher; the address itself
+    is `addressArgument`. Stepping uses this form only while the method's argument access is
+    unknown, and the two equations below once it is known. -/
+theorem step_ldarga_eq (index : Nat) (stack : List Value) :
+    step body (.ldarga index) pc args frame stack memory = do
+      return FrameAction.next (pc + 1) ((← addressArgument body index frame memory) :: stack)
+        frame memory :=
+  id rfl
+
+attribute [cil_step] addressArgument
+
+/-- A homed argument's address is its frame slot's, as `ldloca` of that slot takes it. -/
+theorem step_ldarga_home_eq (index : Nat) (stack : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.ldarga index) pc args frame stack memory = do
+      let some home := frame.locals[slot]? | .error .invalidState
+      return FrameAction.next (pc + 1) ((← localAddress memory home) :: stack) frame memory := by
+  simp only [step_ldarga_eq, addressArgument, access]
+  cases frame.locals[slot]? <;> rfl
+
+#print axioms step_ldarga_home_eq
+
+/-- The address of an argument without a home faults as unsupported. -/
+theorem step_ldarga_value_eq (index : Nat) (stack : List Value) (narrow : Option CIL.NarrowKind)
+    (access : body.argumentAccess index = .value narrow) :
+    step body (.ldarga index) pc args frame stack memory =
+      .error (.unsupported "Address of an argument without a home") := by
+  simp only [step_ldarga_eq, addressArgument, access]
+  rfl
+
+#print axioms step_ldarga_value_eq
+
 /-- Expose return validation without expanding the instruction dispatcher. -/
 @[cil_step] theorem step_ret_eq (stack : List Value) :
     step body .ret pc args frame stack memory =
@@ -270,16 +340,18 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
 @[cil_step] theorem step_ldc_i8_eq {value} (stack : List Value) :
     step body (.ldc_i8 value) pc args frame stack memory =
       instructionStep (.ldc_i8 value) pc frame stack memory := id rfl
-@[cil_step] theorem step_load64_eq (stack : List Value) :
-    step body .load64 pc args frame stack memory =
-      instructionStep .load64 pc frame stack memory := by
+@[cil_step] theorem step_ldind_eq {kind} (stack : List Value) :
+    step body (.ldind kind) pc args frame stack memory =
+      instructionStep (.ldind kind) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 1 stack <;> rfl
-@[cil_step] theorem step_store64_eq (stack : List Value) :
-    step body .store64 pc args frame stack memory =
-      instructionStep .store64 pc frame stack memory := by
+@[cil_step] theorem step_stind_eq {kind} (stack : List Value) :
+    step body (.stind kind) pc args frame stack memory =
+      instructionStep (.stind kind) pc frame stack memory := by
   simp only [step, instructionStep, instruction, observerCount, pureArity]
   cases observed : unspecifiedOperands 2 stack <;> rfl
+-- A stepped `ldind` or `stind` of a known kind shows its width and sign as literals.
+attribute [cil_step, cil_instruction_step] CIL.NumericKind.width CIL.NumericKind.signed
 @[cil_step] theorem step_dup_eq (stack : List Value) :
     step body .dup pc args frame stack memory =
       instructionStep .dup pc frame stack memory := id rfl
@@ -309,6 +381,33 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       let (slot, memory) ← storeLocal memory slot value
       return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }
         memory := id rfl
+
+/-- A homed argument load steps as `ldloc` of its home slot. -/
+theorem step_ldarg_home_ldloc (index : Nat) (stack : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.ldarg index) pc args frame stack memory =
+      step body (.ldloc slot) pc args frame stack memory := by
+  rw [step_ldarg_home_eq body pc args frame memory index stack slot access, step_ldloc_eq]
+
+#print axioms step_ldarg_home_ldloc
+
+/-- A homed argument store steps as `stloc` of its home slot. -/
+theorem step_starg_home_stloc (index : Nat) (value : Value) (rest : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.starg index) pc args frame (value :: rest) memory =
+      step body (.stloc slot) pc args frame (value :: rest) memory := by
+  rw [step_starg_home_eq body pc args frame memory index value rest slot access, step_stloc_eq]
+
+#print axioms step_starg_home_stloc
+
+/-- A homed argument's address steps as `ldloca` of its home slot. -/
+theorem step_ldarga_home_ldloca (index : Nat) (stack : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.ldarga index) pc args frame stack memory =
+      step body (.ldloca slot) pc args frame stack memory := by
+  rw [step_ldarga_home_eq body pc args frame memory index stack slot access, step_ldloca_eq]
+
+#print axioms step_ldarga_home_ldloca
 
 /-- A constructor checks its arguments and replaces its typed local at the call instruction. -/
 @[cil_step] theorem step_initializeSpanLocal_eq (index : Nat)

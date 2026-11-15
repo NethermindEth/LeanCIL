@@ -380,9 +380,9 @@ open CIL.Safety
 @[cil_code] def sum : CIL.Method := {
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
-  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldloc 1, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldloc 1, .ldc_i4 1,
-    .memory (.spanSlice false), .stloc 1, .ldloc 1, .memory .spanLength, .brtrue 4,
+  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldarg 0, .ldc_i4 0,
+    .memory (.spanItem 8), .ldind .i8, .add, .stloc 0, .ldarg 0, .ldc_i4 1,
+    .memory (.spanSlice false), .starg 0, .ldarg 0, .memory .spanLength, .brtrue 4,
     .ldloc 0, .ret] }
 
 /-- The program holding only `sum`. -/
@@ -504,9 +504,9 @@ theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.
 @[cil_code] def sumByAddress : CIL.Method := {
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
-  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldloca 1, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldloca 1, .ldc_i4 1,
-    .memory (.spanSlice false), .stloc 1, .ldloca 1, .memory .spanLength, .brtrue 4,
+  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldarga 0, .ldc_i4 0,
+    .memory (.spanItem 8), .ldind .i8, .add, .stloc 0, .ldarga 0, .ldc_i4 1,
+    .memory (.spanSlice false), .starg 0, .ldarga 0, .memory .spanLength, .brtrue 4,
     .ldloc 0, .ret] }
 
 /-- The program holding only `sumByAddress`. -/

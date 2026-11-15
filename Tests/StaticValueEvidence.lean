@@ -69,7 +69,8 @@ private def rawStatic (opcode : Nat) : RawMethod := {
   token := 0, owner := "Fixture", hasThis := false, explicitThis := false
   callingConvention := 0, attributes := 0, implementation := 0, returnType := .void
   parameters := [], locals := [], initLocals := true, maxStack := 1, genericParameters := []
-  code := [⟨0, opcode, .field (.atom "Fixture" "Holder") 0 (.atom "Fixture" "Pair") true⟩] }
+  code := [⟨0, opcode, .field (.atom "Fixture" "Holder") 0 (.atom "Fixture" "Pair")
+    name!"Value" true⟩] }
 
 /-- Constructor-initialized addresses retain their original raw opcode. -/
 theorem static_address_opcode :

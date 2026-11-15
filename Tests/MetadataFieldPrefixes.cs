@@ -123,14 +123,16 @@ uint[] FieldRows(string metadata)
 
 var partial = Collect(cells[2]);
 Require(FieldRows(partial.Metadata).SequenceEqual(cells[..3]), "Partial field evidence includes the wrong rows.");
-static string Bytes(IEnumerable<byte> values) => "[" + string.Join(", ", values) + "]";
-static bool HasName(string metadata, string name) =>
+// The extractor's own byte literal, so a carried entry matches whatever form the extractor writes it in.
+var bytesLiteral = sliceType.GetMethod("Bytes", BindingFlags.Static | BindingFlags.NonPublic)!;
+string Bytes(byte[] values) => (string)bytesLiteral.Invoke(null, [values])!;
+bool HasName(string metadata, string name) =>
     metadata.Contains(Bytes([.. System.Text.Encoding.UTF8.GetBytes(name), 0]), StringComparison.Ordinal);
 Require(HasName(partial.Metadata, "Field2") && !HasName(partial.Metadata, "Field0") &&
     !HasName(partial.Metadata, "Field1") && !HasName(partial.Metadata, "Field3"),
     "Prefix-only field rows must not carry unrequested names.");
-Require(partial.Metadata.Contains("[2, 6, 8]", StringComparison.Ordinal) &&
-    !partial.Metadata.Contains("[2, 6, 10]", StringComparison.Ordinal),
+Require(partial.Metadata.Contains(Bytes([2, 6, 8]), StringComparison.Ordinal) &&
+    !partial.Metadata.Contains(Bytes([2, 6, 10]), StringComparison.Ordinal),
     "Prefix-only field rows must not carry unrequested signatures.");
 var repeated = Collect(cells[2], cells[0], cells[2]);
 Require(FieldRows(repeated.Metadata).SequenceEqual(cells[..3]), "Repeated fields extend the carried prefix.");
@@ -150,7 +152,7 @@ Require(inheritedAll.Metadata == inheritedReverse.Metadata && inheritedAll.Table
 var enumEvidence = Collect(choice.MetadataToken.ToUInt32());
 Require(FieldRows(enumEvidence.Metadata).SequenceEqual(choice.Fields.Select(field => field.MetadataToken.ToUInt32())),
     "Enum evidence omits field rows.");
-Require(enumEvidence.Metadata.Contains("[2, 6, 8]", StringComparison.Ordinal) &&
+Require(enumEvidence.Metadata.Contains(Bytes([2, 6, 8]), StringComparison.Ordinal) &&
     enumEvidence.Metadata.Contains(Bytes([3, 6, 17, (byte)(choice.MetadataToken.RID << 2)]),
         StringComparison.Ordinal) && !HasName(enumEvidence.Metadata, "value__") &&
     !HasName(enumEvidence.Metadata, "Item"),
@@ -199,6 +201,6 @@ static void Require(bool condition, string message)
 
 partial class Program
 {
-    [System.Text.RegularExpressions.GeneratedRegex(@"\((\d+), \[")]
+    [System.Text.RegularExpressions.GeneratedRegex(@"\((\d+), \(CIL\.Extraction\.fixedBytes ")]
     private static partial System.Text.RegularExpressions.Regex FieldRowPattern();
 }

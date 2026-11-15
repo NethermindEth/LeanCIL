@@ -398,7 +398,7 @@ theorem invoke_bound {lib : CIL.Program} {fuel method : Nat} {args : List Value}
 
 /-- A raised exception is raised by the relocated method. -/
 theorem Raises.relocate {lib linked : CIL.Program} {f : Nat → Nat} {method : Nat}
-    {args : List Value} {memory : Memory} {exception : String}
+    {args : List Value} {memory : Memory} {exception : ExceptionType}
     (raised : Raises lib method args memory exception)
     (closed : Closed lib) (relocates : RelocatesInto lib linked f) :
     Raises linked (f method) args memory exception := by
