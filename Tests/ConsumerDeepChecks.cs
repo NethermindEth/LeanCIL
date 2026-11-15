@@ -373,7 +373,9 @@ try
     Console.WriteLine("PASS statement-view mutation precedes every successful support publication");
 
     var portableModule = Path.Combine(package, "PortableSupport.lean");
-    File.WriteAllText(portableModule, "theorem portableSupport : True := True.intro\n#print axioms portableSupport\n");
+    // Normalization receipts persist in this test's cache, so only a module new to this run must be serialized.
+    File.WriteAllText(portableModule, "theorem portableSupport : True := True.intro\n#print axioms portableSupport\n" +
+        "def portableToken : String := \"" + Guid.NewGuid().ToString("N") + "\"\n");
     File.AppendAllText(configuration, "\n[[lean_lib]]\nname = \"PortableSupport\"\n");
     File.WriteAllText(proof, "import PortableSupport\n" + originalProof);
     var portableVariables = new[] { "LEANCIL_EXPORT_CONSUMER_SUPPORT", "LEANCIL_CONSUMER_SUPPORT",
