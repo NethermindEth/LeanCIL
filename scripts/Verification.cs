@@ -2868,6 +2868,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         return fixtureVerification.CheckoutPackage();
     }
 
+    /// <summary>Builds Lean test libraries in the checkout package and fails when one depends on sorryAx.</summary>
+    static void BuildLeanTestLibraries(string progress, params string[] modules)
+    {
+        if (Run(["lake", "build", .. modules], FixturePackage(), progress: progress)
+            .Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "A Lean test library depends on sorryAx: " + string.Join(' ', modules));
+    }
+
     /// <summary>The Lean search path for static test helpers: checkout outputs, then the certified library.</summary>
     static string FixtureLeanPath()
     {
