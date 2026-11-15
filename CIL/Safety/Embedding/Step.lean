@@ -286,6 +286,8 @@ theorem step_relabel_ldarg (index : Nat) : StepRelabel (.ldarg index) := by
     simp only [loadArgument, context.arguments]]
   lockstep
 
+#print axioms step_relabel_ldarg
+
 theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases
   lookup_lockstep
