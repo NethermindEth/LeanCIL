@@ -1,4 +1,5 @@
 import CIL.Extraction.Parameters
+import Lean.Elab.Tactic.BuiltinTactic
 
 /-!
 # Storage from metadata types
@@ -24,15 +25,77 @@ def integerVectorWidth : TypeExpr → Option Nat
     else none
   | _ => none
 
-/-- The field type of a primitive runtime type, by full name. -/
-private def primitiveField : String → Option FieldType
-  | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
-  | "System.Boolean" => some .boolean | "System.Int16" => some .signed16
-  | "System.UInt16" => some .unsigned16 | "System.Char" => some .character
-  | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
-  | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
-  | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
-  | _ => none
+/-- The exact primitive runtime names and their field storage. -/
+private def primitiveFields : List (Prod String FieldType) :=
+  [("System.SByte", .signed8), ("System.Byte", .unsigned8), ("System.Boolean", .boolean),
+    ("System.Int16", .signed16), ("System.UInt16", .unsigned16), ("System.Char", .character),
+    ("System.Int32", .signed32), ("System.UInt32", .unsigned32), ("System.Int64", .signed64),
+    ("System.UInt64", .unsigned64), ("System.IntPtr", .nativeInt), ("System.UIntPtr", .nativeUInt)]
+
+/-- Reversed UTF-8 bytes preserve every character and expose primitive-name suffixes first. -/
+private def storageNameBytes (name : String) : List UInt8 := name.toByteArray.data.toList.reverse
+
+/-- Byte-name equality uses structural decisions without order-package proof dependencies. -/
+private def storageBytesEqual (left right : List UInt8) : Bool :=
+  @decide (left = right) (@List.hasDecEq UInt8 UInt8.decEq left right)
+
+/-- Primitive name bytes are materialized so a lookup never encodes the fixed names. -/
+private def primitiveNameBytes : List (List UInt8) := by
+  run_tac do
+    let expression <- Lean.Elab.Term.elabTerm
+      (<- `(primitiveFields.map fun entry => storageNameBytes entry.1)) none
+    Lean.Elab.Term.synthesizeSyntheticMVarsNoPostponing
+    let expression <- Lean.instantiateMVars expression
+    let values <- unsafe Lean.Meta.evalExpr (List (List UInt8))
+      (<- Lean.Meta.inferType expression) expression
+    Lean.Elab.Tactic.closeMainGoal `primitiveNameBytes (Lean.toExpr values)
+
+/-- The materialized bytes spell exactly the primitive field names. -/
+private theorem primitiveNameBytes_eq :
+    primitiveNameBytes = primitiveFields.map (fun entry => storageNameBytes entry.1) := by
+  decide +kernel
+#print axioms primitiveNameBytes_eq
+
+/-- Byte equality agrees with string equality for all metadata names. -/
+private theorem storageNameBytes_beq (left right : String) :
+    storageBytesEqual (storageNameBytes left) (storageNameBytes right) = (left == right) := by
+  apply Bool.eq_iff_iff.mpr
+  simp only [storageBytesEqual, storageNameBytes, decide_eq_true_eq, beq_iff_eq,
+    List.reverse_inj, Array.toList_inj]
+  constructor
+  . intro equal
+    exact String.toByteArray_inj.mp (ByteArray.ext equal)
+  . intro equal
+    cases equal
+    rfl
+#print axioms storageNameBytes_beq
+
+/-- The field type of a primitive runtime type, by its exact UTF-8 name. -/
+private def primitiveField (name : String) : Option FieldType :=
+  ((primitiveNameBytes.zip (primitiveFields.map Prod.snd)).find?
+    fun entry => storageBytesEqual (storageNameBytes name) entry.1).map Prod.snd
+
+/--
+info: '_private.CIL.Extraction.TypeStorage.0.CIL.Extraction.primitiveField'
+does not depend on any axioms
+-/
+#guard_msgs in
+#print axioms primitiveField
+
+/-- Primitive byte lookup gives exactly the field selected by the runtime name. -/
+private theorem primitiveField_eq (name : String) : primitiveField name = (match name with
+    | "System.SByte" => some .signed8 | "System.Byte" => some .unsigned8
+    | "System.Boolean" => some .boolean | "System.Int16" => some .signed16
+    | "System.UInt16" => some .unsigned16 | "System.Char" => some .character
+    | "System.Int32" => some .signed32 | "System.UInt32" => some .unsigned32
+    | "System.Int64" => some .signed64 | "System.UInt64" => some .unsigned64
+    | "System.IntPtr" => some .nativeInt | "System.UIntPtr" => some .nativeUInt
+    | _ => none) := by
+  simp only [primitiveField, primitiveNameBytes_eq, primitiveFields, List.map_cons,
+    List.map_nil, List.zip_cons_cons, List.zip_nil_left, List.find?_cons, List.find?_nil,
+    storageNameBytes_beq]
+  repeat' (split <;> simp_all)
+#print axioms primitiveField_eq
 
 /-- The integer types an enum may have as its underlying type. -/
 private def enumField : FieldType → Bool
