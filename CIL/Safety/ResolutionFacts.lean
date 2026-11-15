@@ -15,7 +15,8 @@ so a method's facts cost time linear in its arguments and homes.
 namespace CIL.Safety.ResolutionFacts
 
 open Lean Meta Elab Command
-open CIL.InstructionEquations (Body listElements listLiteral declareSuffixes suffixBlock)
+open CIL.InstructionEquations
+  (Body listElements declareSuffixes suffixBlock suffixFrom foundAt)
 
 /-- A recognized runtime primitive, checked by its complete scope and type name. -/
 def primitive? (type : Expr) : Option Name := do
@@ -186,15 +187,6 @@ def readSignature (body : Body) : MetaM Signature := withDefault do
     localCount := kinds.size
   return { receiver, parameters, homes := keys, localCount }
 
-/-- The suffix of a list from `position` on as a literal: the rest of its block, then the next
-    named suffix `body{stem}{start}` or `[]`. -/
-def suffixFrom (body : Body) (stem : String) (elementType : Expr) (elements : Array Expr)
-    (position : Nat) : Expr :=
-  let stop := min (position - position % suffixBlock + suffixBlock) elements.size
-  let rest := if stop < elements.size then body.constant s!"{stem}{stop}" else
-    mkApp (mkConst ``List.nil [.zero]) elementType
-  listLiteral elementType (elements.extract position stop) rest
-
 /-- `list.drop position = suffix`, from the named suffix that starts the position's block, with
     the suffix `suffixFrom` gives; the proof walks at most one block. -/
 def placedAt (body : Body) (stem : String) (elementType list : Expr) (elements : Array Expr)
@@ -205,16 +197,6 @@ def placedAt (body : Body) (stem : String) (elementType list : Expr) (elements :
   (mkApp8 (mkConst ``CIL.CodeSuffix.advance) elementType list (body.constant s!"{stem}{start}")
     next (mkNatLit start) (mkNatLit offset) (body.constant s!"{stem}{start}_placed")
     (mkApp2 (mkConst ``Eq.refl [.one]) (mkApp (mkConst ``List [.zero]) elementType) next), next)
-
-/-- `list[position]? = some element`, from the named suffix that starts the position's block. -/
-def foundAt (body : Body) (stem : String) (elementType list : Expr) (elements : Array Expr)
-    (position : Nat) : MetaM Expr := do
-  let offset := position % suffixBlock
-  let start := position - offset
-  let element := elements[position]!
-  return mkApp8 (mkConst ``CIL.CodeSuffix.lookup) elementType list
-    (body.constant s!"{stem}{start}") (mkNatLit start) element (mkNatLit offset)
-    (body.constant s!"{stem}{start}_placed") (← mkEqRefl (← mkAppM ``Option.some #[element]))
 
 /-- Declares `body_argumentAccess{index}` for every argument of the method `body` names and adds
     each to `cil_code`. One pass walks the parameter types and the homes together; each fact

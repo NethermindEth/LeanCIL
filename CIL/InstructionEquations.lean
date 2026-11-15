@@ -102,6 +102,26 @@ def listLiteral (elementType : Expr) (elements : Array Expr) (rest : Expr) : Exp
 def suffixStarts (length : Nat) : List Nat :=
   (List.range ((length + suffixBlock - 1) / suffixBlock)).map (· * suffixBlock)
 
+/-- The suffix of a list of `elements` from `position` on as a literal: the rest of its block,
+    then the next named suffix `body{stem}{start}` or `[]`. -/
+def suffixFrom (body : Body) (stem : String) (elementType : Expr) (elements : Array Expr)
+    (position : Nat) : Expr :=
+  let stop := min (position - position % suffixBlock + suffixBlock) elements.size
+  let rest := if stop < elements.size then body.constant s!"{stem}{stop}" else
+    mkApp (mkConst ``List.nil [.zero]) elementType
+  listLiteral elementType (elements.extract position stop) rest
+
+/-- A proof of `list[position]? = some element` from the named suffix that starts the
+    position's block; it walks at most one block. -/
+def foundAt (body : Body) (stem : String) (elementType list : Expr) (elements : Array Expr)
+    (position : Nat) : MetaM Expr := do
+  let offset := position % suffixBlock
+  let start := position - offset
+  let element := elements[position]!
+  return mkApp8 (mkConst ``CIL.CodeSuffix.lookup) elementType list
+    (body.constant s!"{stem}{start}") (mkNatLit start) element (mkNatLit offset)
+    (body.constant s!"{stem}{start}_placed") (← mkEqRefl (← mkAppM ``Option.some #[element]))
+
 /-- Declares `body{stem}{start}`, the elements of `list` from each block boundary on, and
     `body{stem}{start}_placed : list.drop start = body{stem}{start} xs`, each proved from the
     suffix one block earlier; `describe start` names what the suffix at `start` holds. -/
@@ -113,11 +133,7 @@ def declareSuffixes (body : Body) (elementType : Expr) (stem : String)
   let starts := suffixStarts elements.size
   -- Each suffix is its block followed by the next suffix, so the last one is declared first.
   for start in starts.reverse do
-    let stop := min (start + suffixBlock) elements.size
-    let rest := if stop < elements.size then suffix stop else
-      mkApp (mkConst ``List.nil [.zero]) elementType
-    let value ← mkLambdaFVars body.parameters <|
-      listLiteral elementType (elements.extract start stop) rest
+    let value ← mkLambdaFVars body.parameters (suffixFrom body stem elementType elements start)
     let name := body.name.appendAfter s!"{stem}{start}"
     body.declare name s!"{describe start}." <| .defnDecl {
       name, levelParams := body.levelParams, value, safety := .safe
@@ -162,16 +178,12 @@ elab_rules : command
         declareSuffixes body (mkConst instructionTypeName) "_suffix"
           (fun start => s!"The code of `{name}` from pc {start} on") code ops
         for inRange : pc in [0:ops.size] do
-          let index := pc % suffixBlock
-          let start := pc - index
           -- A window per equation, so a long body's statements do not exhaust the command's.
           withCurrHeartbeats do
             let found ← mkAppM ``Option.some #[ops[pc]]
             body.prove s!"_instruction{pc}" s!"The instruction at pc {pc} of `{name}`."
               (← mkEq (lookup.beta #[method, mkNatLit pc]) found)
-              (mkApp8 (mkConst ``CIL.CodeSuffix.lookup) (mkConst instructionTypeName) code
-                (body.constant s!"_suffix{start}") (mkNatLit start) ops[pc] (mkNatLit index)
-                (body.constant s!"_suffix{start}_placed") (← mkEqRefl found))
+              (← foundAt body "_suffix" (mkConst instructionTypeName) code ops pc)
             -- Pre-order, as `@[cil_code ↓]`: simp rewrites the lookup before unfolding the body.
             addSimpTheorem simpSet (name.appendAfter s!"_instruction{pc}") (post := false)
               (inv := false) .global (eval_prio default)
