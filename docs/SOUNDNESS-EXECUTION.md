@@ -10,7 +10,7 @@ checked rules; unknown instructions cannot fall through to unchecked accesses.
 
 Successful execution excludes model faults on its path. An `unsupported` fault marks a run the
 model does not cover: stepping stops at it, and the refutation lemmas take only settled outcomes
-(`Settled`), so it refutes no contract either. Under their stated initial premises,
+(`Settled`), so none of them refutes a contract from it. Under their stated initial premises,
 the library proves well-formedness, allocation extension, live values, frame ownership and expiry,
 caller-memory preservation and static-world consistency. `InvocationCertificate` packages these
 properties with execution. Valid initial storage, references and authority are caller obligations.
@@ -73,8 +73,8 @@ an abstract slot, an explicit `MethodImpl`, and generic virtual methods.
 
 The closed world is a checked premise; it is not an assumption: a run that
 reaches the call with an instance of an outside class ends in `outsideDispatchTable`, an
-`unsupported` fault that is neither a return nor a named exception and refutes nothing. Interface
-calls are not modelled.
+`unsupported` fault that is neither a return nor a named exception and that no refutation lemma
+takes. Interface calls are not modelled.
 
 ## Aggregate storage
 

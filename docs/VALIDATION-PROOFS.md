@@ -76,7 +76,7 @@ library and tactic regressions kernel-check the resulting proofs.
   layout environment or call link differs, and names the pc of a differing link.
 - `Tests.OutcomeEmbedding` checks transport of named exceptions and outcome contracts and the
   relocated fault pc, that changed throws, unsupported execution and fuel exhaustion do not
-  transfer, and that a hole's fault is not settled, so it refutes no raise.
+  transfer, and that a hole's fault is not settled, so no lemma refutes a raise from it.
 - `Tests.RetainedNumericLocals` keeps dead numeric declarations before and after a live local,
   transfers exact-memory executions and named exceptions through nested allocating calls, and
   checks that deleting a numeric local changes the allocation watermark and fails ordinary
