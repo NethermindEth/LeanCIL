@@ -86,7 +86,7 @@ def observerCount : CIL.Instruction → Nat
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .bgt _ | .ble _ | .ble_un _
   | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => 2
-  | .brfalse _ | .brtrue _ | .switch _ | .objectTest .. => 1
+  | .brfalse _ | .brtrue _ | .switch _ | .castclass _ | .isinst _ => 1
   -- Memory and fields
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
   | .load64 | .skipInit | .initAggregate _ => 1

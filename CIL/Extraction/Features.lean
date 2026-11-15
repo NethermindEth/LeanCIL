@@ -507,7 +507,8 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Inst
     | .call .. => instruction.opcode == 40 || instruction.opcode == 111
     | .callInstance .. | .callVirtual .. => instruction.opcode == 111
     | .newAggregate .. | .newObject .. => instruction.opcode == 115
-    | .objectTest .. => instruction.opcode ∈ [116, 117]
+    | .castclass _ | .isinst _ =>
+      (typeTestSource emitted).any fun (opcode, _) => opcode == instruction.opcode
     | _ => true
   properCall && match rawFeatureEffect instruction, emittedFeatureEffect emitted returnsValue with
     | some rawEffect, some emittedEffect => rawEffect == emittedEffect

@@ -217,8 +217,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Faulting arithmetic is matched apart from the rest; the native table arms lead this match so
-  -- that the match under its catch-all stays within the 79 alternatives `split` handles.
+  -- Faulting arithmetic and type tests are matched apart from the rest; the native table arms lead
+  -- this match so that the match under its catch-all stays within the 79 alternatives `split`
+  -- handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -270,6 +271,13 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value ← (CIL.convertInteger target.width target.signed true x).mapError
       ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- Class type tests: null and an instance of `type` pass; another object fails the test.
+  | .castclass type, .object value :: rest =>
+    let result ← objectTest m type true value
+    return .next (pc + 1) (.object result :: rest) frame m
+  | .isinst type, .object value :: rest =>
+    let result ← objectTest m type false value
+    return .next (pc + 1) (.object result :: rest) frame m
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m
@@ -373,9 +381,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .brtrue target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then target else pc + 1) rest frame m
-  | .objectTest type throwing, .object value :: rest =>
-    let result ← objectTest m type throwing value
-    return .next (pc + 1) (.object result :: rest) frame m
   | .stackAlloc initLocals, [.scalar size] =>
     let bytes ← match size with
       | .i32 bits => pure bits.toNat

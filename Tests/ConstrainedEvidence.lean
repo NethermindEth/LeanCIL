@@ -596,7 +596,7 @@ private def castRaw : RawMethod := { raw with
   parameters := [dogClass], returnType := dogClass,
   code := [⟨0, 2, .none⟩, ⟨1, 116, .type dogClass⟩, ⟨6, 42, .none⟩] }
 private def castEmitted : Method := {
-  locals := [], returnsValue := true, code := [.ldarg 0, .objectTest dogClass true, .ret] }
+  locals := [], returnsValue := true, code := [.ldarg 0, .castclass dogClass, .ret] }
 
 /-- A cast to a pinned catalog class is a type test of that class. -/
 theorem class_cast_valid :
@@ -623,7 +623,7 @@ theorem root_cast_rejected :
       [⟨[], { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }⟩]
       { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }
       [true, true, true]
-      { castEmitted with code := [.ldarg 0, .objectTest root true, .ret] } := by decide +kernel
+      { castEmitted with code := [.ldarg 0, .castclass root, .ret] } := by decide +kernel
 #print axioms root_cast_rejected
 
 /-- A type test emitted for an instruction that is no cast is rejected. -/

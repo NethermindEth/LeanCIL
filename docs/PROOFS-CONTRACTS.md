@@ -713,7 +713,7 @@ scope; stepping looks the class up in the call's table (`step_callVirtual_eq`,
 fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).
 A class the table omits steps to the model fault `outsideDispatchTable` (`virtualCall_outside`).
 
-`castclass` and `isinst` step on the same fact (`step_objectTest_eq`): with
+`castclass` and `isinst` step on the same fact (`step_castclass_eq`, `step_isinst_eq`): with
 `RuntimeType.lineage` and the definitions of the type, its bases and their scope, stepping
 decides whether the tested class is in the lineage, so the reference passes, becomes null or
 throws `InvalidCastException` ([DogTest](../Examples/Proofs/DogTest.lean),

@@ -162,8 +162,8 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
   | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
-  | .managed _ | .ldarg _ | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
-  | .tailCall ..
+  | .managed _ | .ldarg _ | .call .. | .callInstance .. | .callVirtual .. | .castclass _
+  | .isinst _ | .tailCall ..
   | .throw _ | .ret => .boundary
   | _ => .other
 
@@ -290,17 +290,20 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
-    -- ones; `fixed_fallback` reads the table-offset exclusions and the faulting ones are cleared.
+    -- ones; `fixed_fallback` reads the table-offset exclusions, and the faulting and type-test
+    -- ones are cleared.
     all_goals try (
       rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
-        mulOvfUn div divUn rem remUn convOvf convOvfUn
+        mulOvfUn div divUn rem remUn convOvf convOvfUn castClass isInst
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
       guard_hyp div : ∀ (y x : CIL.Value) (rest : List Value), operation = .div →
         stack = Value.scalar y :: Value.scalar x :: rest → False
+      guard_hyp isInst : ∀ (type : CIL.Extraction.TypeExpr) (value : ManagedReference)
+        (rest : List Value), operation = .isinst type → stack = Value.object value :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
-        convOvfUn
+        convOvfUn castClass isInst
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

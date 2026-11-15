@@ -47,6 +47,13 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue ..
   | .createSpan _ | .spanReference | .spanLength | .isNullRef => (1, 1)
 
+/-- The raw opcode a class type test lowers from, `castclass` (116) or `isinst` (117), and the
+    class it tests; `none` for any other instruction. -/
+def typeTestSource : Instruction → Option (Nat × TypeExpr)
+  | .castclass type => some (116, type)
+  | .isinst type => some (117, type)
+  | _ => none
+
 /-- Successful stack effects for instructions that cannot create a local alias or
 change a local root. Control flow, returns, stores and addresses require exact
 raw-instruction matching instead. No unrecognized instruction is admitted. -/
@@ -64,7 +71,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _
-  | .aggregateFieldAt .. | .objectTest .. => some (1, 1)
+  | .aggregateFieldAt .. | .castclass _ | .isinst _ => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf
