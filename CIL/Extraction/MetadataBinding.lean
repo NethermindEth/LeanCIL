@@ -247,6 +247,40 @@ def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner :
   if !(frame.admits held fieldType) then throw (.operandMismatch token)
   .ok { staticField := isStaticFact }
 
+/-- The typed reference of a `.field` operand whose token reads as `site`: the operand's owner,
+    index and type, with the site's name. `none` for any other operand, and when the site's
+    name bytes are not a metadata name. The opcode, not the reference, says whether the field is
+    static. -/
+def FieldRef.ofSite? (operand : RawOperand) (site : FieldSite) : Option FieldRef :=
+  match operand with
+  | .field owner index type _ =>
+    (MetadataName.ofBytes? site.name).map fun name => { owner, index, type, name }
+  | _ => none
+
+/-- A reference built from an operand and its site has the field operand's owner, index and
+    type, and a name whose bytes are the site's name bytes. -/
+theorem FieldRef.ofSite?_eq_some {operand : RawOperand} {site : FieldSite}
+    {reference : FieldRef} (built : FieldRef.ofSite? operand site = some reference) :
+    (∃ isStatic, operand = .field reference.owner reference.index reference.type isStatic) ∧
+      reference.name.bytes? = some site.name := by
+  unfold FieldRef.ofSite? at built
+  split at built
+  · next owner index type isStatic =>
+    obtain ⟨name, decoded, rfl⟩ := Option.map_eq_some_iff.mp built
+    exact ⟨⟨isStatic, rfl⟩, MetadataName.bytes?_ofBytes? decoded⟩
+  · cases built
+
+#print axioms FieldRef.ofSite?_eq_some
+
+/-- A field operand gives no reference exactly when its site's name bytes are not a name. -/
+theorem FieldRef.ofSite?_field_eq_none {owner type : TypeExpr} {index : Nat} {isStatic : Bool}
+    {site : FieldSite} :
+    FieldRef.ofSite? (.field owner index type isStatic) site = none ↔
+      MetadataName.ofBytes? site.name = none := by
+  simp [FieldRef.ofSite?]
+
+#print axioms FieldRef.ofSite?_field_eq_none
+
 /-! ## Methods and calls -/
 
 /-- A method token read from the slice: its declaring type as the operand names it, its name,
