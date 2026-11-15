@@ -110,7 +110,7 @@ at each address measures 2.6 for plain and 3.4 for prefixed addresses without th
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
 128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
 of stating the same certificate. Integer locals take a constant and are popped after a load or
-after `ldloca`, which also makes each a receiver fold candidate; native-int locals take a method
+after `ldloca`; native-int locals take a method
 address and are consumed by `calli`, which makes each a pointer local. For the pointer locals it
 also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
 exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a

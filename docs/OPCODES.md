@@ -450,12 +450,11 @@ elements, for any primitive integer `T`. As in CoreCLR, which throws `ArgumentEx
 misaligned for `T`, `sizeof(T)` must divide the field's packing; otherwise the call is an
 `unsupported` fault. Roslyn emits each such field with packing `sizeof(T)` at an 8-byte-aligned
 RVA, in a section whose virtual address and file offset are multiples of 512. A caller reads it
-as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store
-and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with
+as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: `stloc`
+stores the typed span view and `ldloca` pushes that view as the receiver. `get_Item` faults with
 `System.IndexOutOfRangeException` at the call when the index, compared unsigned as in .NET, is
-out of range. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a
-single-use receiver with a single-load or constant index; other supported uses keep typed span
-storage. Branches into a folded receiver are rejected.
+out of range. `MemoryMarshal.GetReference` also accepts these spans. Receiver locals retain typed
+span storage for repeated reads and computed indexes.
 
 ### Span reference parameters
 
