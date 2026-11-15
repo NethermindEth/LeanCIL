@@ -643,4 +643,20 @@ theorem isinst_emitted_as_cast_rejected :
       [true, true, true] castEmitted := by decide +kernel
 #print axioms isinst_emitted_as_cast_rejected
 
+/-- `isinst Dog` of the argument, returned. -/
+private def isinstRaw : RawMethod :=
+  { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 117, .type dogClass⟩, ⟨6, 42, .none⟩] }
+
+/-- A raw `isinst` of a pinned catalog class emitted as `isinst` is valid. -/
+theorem class_isinst_valid :
+    ConstrainedCallsValid [dogEntry] [⟨[], isinstRaw⟩] isinstRaw [true, true, true]
+      { castEmitted with code := [.ldarg 0, .isinst dogClass, .ret] } := by decide +kernel
+#print axioms class_isinst_valid
+
+/-- An `isinst` emitted for a raw `castclass` is rejected: the two differ on a failed test. -/
+theorem cast_emitted_as_isinst_rejected :
+    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw⟩] castRaw [true, true, true]
+      { castEmitted with code := [.ldarg 0, .isinst dogClass, .ret] } := by decide +kernel
+#print axioms cast_emitted_as_isinst_rejected
+
 end Tests.ConstrainedEvidence

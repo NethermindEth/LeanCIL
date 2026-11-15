@@ -1,4 +1,5 @@
 import CIL.Extraction.Scalars
+import CIL.Extraction.ValueDecoding
 
 set_option maxRecDepth 4096
 
@@ -205,16 +206,30 @@ theorem class_tests_match :
   decide
 #print axioms class_tests_match
 
-/-- A raw `isinst` emitted as `castclass` is rejected: the two differ on a failed test. -/
+/-- A raw `isinst` emitted as `castclass` is rejected by the scalar check and the decoder: the
+    two differ on a failed test. -/
 theorem isinst_decoded_as_castclass :
-    scalarEmissionMatches #[] none (i 117 (.type dog)) [.object] (.castclass dog) = false := by
+    scalarEmissionMatches #[] none (i 117 (.type dog)) [.object] (.castclass dog) = false ∧
+    valueEncodingMatches (i 117 (.type dog)) (.castclass dog) = false := by
   decide
 #print axioms isinst_decoded_as_castclass
 
-/-- A cast emitted against another class than its raw operand is rejected. -/
+/-- A cast emitted against another class than its raw operand is rejected by the scalar check
+    and the decoder. -/
 theorem cast_other_type :
-    scalarEmissionMatches #[] none (i 116 (.type dog)) [.object] (.castclass bird) = false := by
+    scalarEmissionMatches #[] none (i 116 (.type dog)) [.object] (.castclass bird) = false ∧
+    valueEncodingMatches (i 116 (.type dog)) (.castclass bird) = false := by
   decide
 #print axioms cast_other_type
+
+/-- The feature check ties each type test to its own raw opcode: a raw `castclass` emitted as
+    `isinst` and a raw `isinst` emitted as `castclass` are rejected. -/
+theorem type_test_feature_opcodes :
+    featureOpMatches #[] (raw []) (i 116 (.type dog)) (.castclass dog) = true ∧
+    featureOpMatches #[] (raw []) (i 117 (.type dog)) (.isinst dog) = true ∧
+    featureOpMatches #[] (raw []) (i 116 (.type dog)) (.isinst dog) = false ∧
+    featureOpMatches #[] (raw []) (i 117 (.type dog)) (.castclass dog) = false := by
+  decide +kernel
+#print axioms type_test_feature_opcodes
 
 end Tests.TypeTestEvidence
