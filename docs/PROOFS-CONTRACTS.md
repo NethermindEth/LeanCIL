@@ -297,11 +297,11 @@ reprofiled program, by `rfl` when only the profiles differ.
   "contract": "Public.supported",
   "theorem": "Proof.family",
   "program": "Reference.program",
-  "referenceProfile": "x64-sse2",
+  "referenceProfile": "x64-sse42",
   "profiles": [
-    { "profile": "x64-sse2", "artifact": "extractions/sse2" },
     { "profile": "x64-sse42", "artifact": "extractions/sse42" },
-    { "profile": "x64-v3", "artifact": "extractions/v3" }
+    { "profile": "x64-v3", "artifact": "extractions/v3" },
+    { "profile": "x64-v4", "artifact": "extractions/v4" }
   ]
 }
 ```

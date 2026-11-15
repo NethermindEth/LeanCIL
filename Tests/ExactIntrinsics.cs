@@ -236,7 +236,7 @@ const int ShuffleCases = 12;
 var shuffleRandom = new Random(0x5348);
 foreach ((string name, int width, string profile, string unavailable, string feature) in new[]
 {
-    ("Shuffle256", 32, "x64-v3", "x64-sse42", "Avx2"), ("Shuffle128", 16, "x64-sse42", "x64-sse2", "Ssse3")
+    ("Shuffle256", 32, "x64-v3", "x64-sse42", "Avx2"), ("Shuffle128", 16, "x64-sse42", "scalar", "Ssse3")
 })
 {
     var cases = new List<(byte[] Source, byte[] Control)>();
@@ -660,7 +660,7 @@ foreach ((string name, string theorem, string before, string after, string valid
 }
 rejectedEndian.Check();
 
-// PMULUDQ runs on the host CPU and its x64-sse2 extraction must return the same products.
+// PMULUDQ runs on the host CPU and its x64-sse42 extraction must return the same products.
 // Lanes with set high halves and both 32-bit extremes come first, then seeded random words.
 const int MultiplyCases = 12;
 var multiplyRandom = new Random(0x4d55);
@@ -723,7 +723,7 @@ File.WriteAllText(multiplyProof, $$"""
     #print axioms correctness
     end ExampleProof
     """);
-pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse2",
+pending.Add((new(selectors["MultiplyEven128"], multiplyProof, multiplyOutput), "x64-sse42",
     () => Console.WriteLine($"PASS MultiplyEven128 matches the host CPU on {multiplyClaims.Length} inputs")));
 Flush();
 // Without SSE2 the reachable call is rejected before any evidence is written.
