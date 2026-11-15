@@ -111,7 +111,7 @@ if (suite is "all" or "core")
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
-        "Tests/Objects.cs", "Tests/Strings.cs", "Tests/Guards.cs"]);
+        "Tests/Objects.cs", "Tests/Guards.cs"]);
 if (suite is "all" or "dispatch")
     projects.AddRange(["Tests/ConstrainedResolution.cs", "Tests/ConstrainedCalls.cs", "Tests/ManagedDispatch.cs",
         "Tests/NativeManagedDispatch.cs", "Tests/StackAllocation.cs", "Tests/CompilerCoverage.cs",
@@ -121,7 +121,9 @@ if (suite is "all" or "evidence")
         "Tests/PreparedLeanFixturesTests.cs", "Tests/RejectedEvidenceTests.cs", "Tests/LayoutEvidence.cs",
         "Tests/ParameterEvidence.cs", "Tests/GenericEvidence.cs", "Tests/FeatureEvidence.cs", "Tests/TypeTests.cs",
         "Tests/Throws.cs", "Tests/SpanTables.cs", "Tests/StaticValues.cs", "Tests/StaticScalarValues.cs",
-        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs", "Tests/Identities.cs"]);
+        "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs"]);
+if (suite is "all" or "identity") projects.Add("Tests/Identities.cs");
+if (suite is "all" or "primitive") projects.Add("Tests/Strings.cs");
 if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
@@ -240,7 +242,7 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ResolutionFacts", "Tests.ReplayDiagnostics", "Tests.BodyLiteral", "Tests.ReturnOpcode",
     "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields", "Tests.RetainedNumericLocals",
     "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto", "Tests.MetadataAssemblies",
-    "Tests.PinnedIndexScaling"],
+    "Tests.PinnedIndexScaling", "Tests.FieldRef"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
@@ -248,7 +250,8 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "buffer contents, linking, "
     + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity, method body "
     + "decoding, declared narrowing, replay diagnostic, literal body evidence, return metadata, object array, "
-    + "embedding retention and profile, full transfer, SHA-1, assembly index and pin index scaling tests");
+    + "embedding retention and profile, full transfer, SHA-1, assembly index and pin index scaling and field "
+    + "reference tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
 
