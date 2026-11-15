@@ -58,7 +58,7 @@ def descriptor : StaticDescriptor := ⟨0, "Field", [0], none, some false, "", 1
 
 /-- The matching raw static field load. -/
 def load : RawInstruction :=
-  ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") true⟩
+  ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") name!"Value" true⟩
 
 /-- An emitted scalar load with caller-provided static metadata. -/
 def body (sites : List (Nat × StaticDescriptor)) : Method := {

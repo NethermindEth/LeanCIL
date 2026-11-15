@@ -147,11 +147,18 @@ theorem platform_encoding (raw : RawMethod) :
 
 /-- A raw static Boolean load from `owner` in `scope`. -/
 def staticBoolean (scope owner : String) : RawInstruction :=
-  ⟨0, 126, .field (.atom scope owner) 0 (.atom runtimeScope "System.Boolean") true⟩
+  ⟨0, 126, .field (.atom scope owner) 0 (.atom runtimeScope "System.Boolean")
+    name!"IsLittleEndian" true⟩
 
 /-- A static `BitConverter` field of another type, which is not the endianness constant. -/
 def integerField : RawOperand :=
-  .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Int32") true
+  .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Int32")
+    name!"IsLittleEndian" true
+
+/-- A static `BitConverter` Boolean with another name, which is not the endianness constant. -/
+def otherBoolean : RawOperand :=
+  .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean")
+    name!"IsBigEndian" true
 
 /-- Only the runtime's `BitConverter` Boolean is the little-endian constant, bound exactly. -/
 theorem platform_field (raw : RawMethod) :
@@ -161,11 +168,12 @@ theorem platform_field (raw : RawMethod) :
     platformField (staticBoolean runtimeScope "System.BitConverterX") = none ∧
     platformField { endian with opcode := 127 } = none ∧
     platformField { endian with operand := integerField } = none ∧
+    platformField { endian with operand := otherBoolean } = none ∧
     featureOpMatches #[] raw endian (.ldc_i4 1) = true ∧
     featureOpMatches #[] raw endian (.ldc_i4 0) = false ∧
     featureOpMatches #[] raw (staticBoolean "forged" "System.BitConverter") (.ldc_i4 1) =
       false := by
-  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
+  exact ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 #print axioms platform_field
 
 /-- A reference-content query retains its independently serialized generic argument. -/

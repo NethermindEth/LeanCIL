@@ -807,9 +807,9 @@ foreach (var outcome in new[] { "equal", "unequal" })
 }
 MetadataNameCosts();
 
-// The heartbeats `decide +kernel` adds to the two metadata name computations every call and field operand check
-// reduces: the call check's name clause, which reads a typed name back and compares its bytes with the row's, and
-// `MetadataName.ofBytes?`, which encodes a field row's bytes as a name. Names of 20, 80 and 320 bytes share all but
+// The heartbeats `decide +kernel` adds to the two metadata name computations: the name clause of the call and field
+// operand checks, which reads a typed name back and compares its bytes with the row's, and `MetadataName.ofBytes?`,
+// the encoder `MetadataName.spells_iff` states that clause by. Names of 20, 80 and 320 bytes share all but
 // their last byte. Both read one byte per step, so the cost per byte may grow at most `AllowedGrowth` times from one
 // length to the next; an encoder that indexes an array literal reads byte i in i kernel steps and grows 3 to 4 times.
 void MetadataNameCosts()

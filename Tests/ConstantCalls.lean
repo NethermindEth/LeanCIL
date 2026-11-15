@@ -61,7 +61,8 @@ private def andCode : List Instruction :=
 
 /-- Bodies that never fold: a static read, an `Int32` constant, a parameterized constant, two
     `ret`s with different words, a `ret`-free body, and a Boolean slot returning 2. -/
-private def staticLoad := i 126 (.field (.atom "Fixture" "Fixture.Flags") 0 boolean true)
+private def staticLoad :=
+  i 126 (.field (.atom "Fixture" "Fixture.Flags") 0 boolean name!"Enabled" true)
 private def staticBody := raw [staticLoad, i 42] boolean
 private def ignored : List MethodEvidence := [
   method staticBody [state [], state [none]],

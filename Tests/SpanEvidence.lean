@@ -124,7 +124,8 @@ example : FeatureFlowValid #[] (fun _ => none) (raw [words] loadCode) .scalar lo
     (List.replicate 4 true) loadOps := by decide
 
 -- `ldtoken` of a field is static data; only a type handle belongs to a type test.
-example : ¬ typeTestInstruction (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType true)) ∧
+example : ¬ typeTestInstruction
+      (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType name!"Data" true)) ∧
     typeTestInstruction (i 208 (.type intType)) := by decide
 
 /-- The exact writable int32 span member used by whole-region initialization. -/

@@ -683,10 +683,9 @@ and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
 `ldsfld BitConverter.IsLittleEndian` produces `true`, since every valid profile is
 little-endian. The extractor checks the exact System.Runtime field and that it is
 `static readonly`, and rejects same-named types and fields from other assemblies and other
-`BitConverter` fields. The certificate binds the raw call signature, or the raw field owner, type
-and static load, and the emitted value. Raw field operands carry no member name, so the
-certificate relies on
-`IsLittleEndian` being the only static Boolean field of System.Runtime's `BitConverter`.
+`BitConverter` fields. The certificate binds the raw call signature, or the raw field owner, name,
+type and static load, and the emitted value; the body check requires a field operand's name to
+spell the name of the field row its token names.
 
 These constants feed the feature-flow analysis. Known int32 words propagate through bitwise
 operations and `ceq`, `cgt`, `cgt.un`, `clt` and `clt.un`.

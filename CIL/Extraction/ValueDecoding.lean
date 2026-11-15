@@ -55,7 +55,7 @@ theorem substituteOperand_mentionsType {arguments : List TypeExpr} {layouts : Li
     simp only [substituteOperand, Option.map_eq_map, Option.map_eq_some_iff] at substituted
     obtain ⟨_, _, rfl⟩ := substituted
     exact ⟨rfl, nofun⟩
-  | field owner index type isStatic =>
+  | field owner index type name isStatic =>
     simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure,
       Option.some.injEq] at substituted
     obtain ⟨_, _, _, _, rfl⟩ := substituted
