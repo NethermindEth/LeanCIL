@@ -14,6 +14,9 @@ partial class Program
     /// <summary>The most a carried key byte may cost more, per byte, when the carried key grows fourfold.</summary>
     const double MaximumPerByteGrowth = 1.25;
 
+    /// <summary>The most a carried row may cost more, per row, when the carried rows grow fourfold.</summary>
+    const double MaximumPerRowGrowth = 1.5;
+
     /// <summary>
     /// The body check costs time linear in the number of claims and independent of the image size per claim. The
     /// 1272 claims of Examples.dll (98 KB) are repeated to 5088, which the page cap lays out in eight pages of
@@ -38,6 +41,7 @@ partial class Program
         Run(["lake", "build", "StrictBinding.Evidence"], package, progress: "Building the strict binding library");
         CheckGeneratedBodiesModuleElaborates(root, package);
         CheckAssemblyBlockScaling(root, package);
+        CheckSliceRowsScaling(root, package);
         var examples = File.ReadAllBytes(At("Examples/Assembly/bin/Examples.dll"));
         var larger = new byte[examples.Length + 770 * 1024];
         examples.CopyTo(larger, 0);
@@ -113,25 +117,85 @@ partial class Program
         }));
         var path = Path.Combine(root, "AssemblyBlocks.lean");
         File.WriteAllText(path, $"import StrictBinding.Rows\n\n{cases}");
+        var measured = RequireGrowth(sizes, CheckHeartbeats(path, package, sizes.Length, "carried Assembly blocks"),
+            MaximumPerByteGrowth, "carried Assembly block check", "byte");
+        Console.WriteLine($"PASS the carried Assembly block check is linear in its key bytes ({measured})");
+    }
+
+    /// <summary>
+    /// The rows check sorts the heap cells of the carried rows once per heap and reads each row and entry once, so
+    /// its kernel heartbeats grow as n log n in the rows. Images with 64, 256 and 1024 MethodDef rows, each with its
+    /// own name and all with one signature, are checked against a slice of all their rows, and the heartbeats of
+    /// preparing each image are subtracted. A row added from 256 to 1024 may cost at most 1.5 times a row added
+    /// from 64 to 256, where n log n gives at most 1.23 and a numbering quadratic in the rows about four.
+    /// </summary>
+    static void CheckSliceRowsScaling(string root, string package)
+    {
+        const string report = "#eval show IO Nat from IO.getNumHeartbeats";
+        int[] sizes = [64, 256, 1024];
+        var cases = string.Concat(sizes.Select(size =>
+        {
+            var file = SyntheticMethods(size);
+            var pinned = $"{{ identity := \"{StrictBindingFacts.Identity(file)}\", image := image }}";
+            return $$"""
+                namespace Rows{{size}}
+                {{BindingImage.Definitions(file)}}
+                def pinned : StrictBinding.PinnedImage := {{pinned}}
+                def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
+                  {{StrictBindingFacts.AssemblyBlock(file)}}
+                -- A list literal of a thousand rows elaborates deeper than the default limit.
+                set_option maxRecDepth 65536 in
+                def slice : CIL.Extraction.MetadataSlice :=
+                  {{StrictBindingFacts.Slice(file)}}
+                {{report}}
+                theorem prepared : StrictBinding.ok (StrictBinding.prepareOne pinned) = true := by decide +kernel
+                {{report}}
+                theorem checked : StrictBinding.ok (StrictBinding.prepareOne pinned >>= fun image =>
+                    StrictBinding.rowsBound image slice.rows slice.strings slice.blobs) = true := by
+                  decide +kernel
+                {{report}}
+                end Rows{{size}}
+
+                """;
+        }));
+        var path = Path.Combine(root, "SliceRows.lean");
+        File.WriteAllText(path, $"import StrictBinding.Rows\n\n{cases}");
+        var measured = RequireGrowth(sizes, CheckHeartbeats(path, package, sizes.Length, "carried rows"),
+            MaximumPerRowGrowth, "rows check", "row");
+        Console.WriteLine($"PASS the rows check grows as n log n in the carried rows ({measured})");
+    }
+
+    /// <summary>
+    /// The kernel heartbeats of each case's check above preparing its image, from a module that reports the count
+    /// before preparing, after preparing, and after a check that prepares the image again.
+    /// </summary>
+    static long[] CheckHeartbeats(string path, string package, int cases, string subject)
+    {
         // Without the flag the kernel checks on another thread and its heartbeats go uncounted.
         var output = Run(["lake", "env", "lean", "-DElab.async=false", "-M", "8192", path], cwd: package);
         var counts = output.Split('\n').Select(line => line.Trim())
             .Where(line => line.Length > 0 && line.All(char.IsAsciiDigit))
             .Select(line => long.Parse(line, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
-        if (counts.Length != 3 * sizes.Length || output.Contains("sorryAx", StringComparison.Ordinal))
-            throw new InvalidOperationException($"Unchecked carried Assembly blocks:\n{output}");
-        // The check theorem also prepares the image, so the cost of the check is the excess over preparing.
-        var checks = sizes.Select((_, index) =>
-            counts[3 * index + 2] - 2 * counts[3 * index + 1] + counts[3 * index]).ToArray();
+        if (counts.Length != 3 * cases || output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException($"Unchecked {subject}:\n{output}");
+        return [.. Enumerable.Range(0, cases).Select(index =>
+            counts[3 * index + 2] - 2 * counts[3 * index + 1] + counts[3 * index])];
+    }
+
+    /// <summary>
+    /// A unit added from the second size to the third costs at most `bound` times a unit added from the first to
+    /// the second; returns the measurements as text.
+    /// </summary>
+    static string RequireGrowth(int[] sizes, long[] checks, double bound, string subject, string unit)
+    {
         var smaller = (double)(checks[1] - checks[0]) / (sizes[1] - sizes[0]);
         var larger = (double)(checks[2] - checks[1]) / (sizes[2] - sizes[1]);
-        var measured = string.Join(", ", sizes.Zip(checks, (size, cost) => $"{cost} heartbeats at {size} bytes"));
+        var measured = string.Join(", ", sizes.Zip(checks, (size, cost) => $"{cost} heartbeats at {size}"));
         var growth = (larger / smaller).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-        if (smaller <= 0 || larger / smaller > MaximumPerByteGrowth)
-            throw new InvalidOperationException($"The carried Assembly block check costs {measured}; a byte costs " +
-                $"{growth} times as much from {sizes[1]} to {sizes[2]} bytes as from {sizes[0]} to {sizes[1]}");
-        Console.WriteLine($"PASS the carried Assembly block check is linear in its key bytes ({measured}; " +
-            $"{growth} times per byte)");
+        if (smaller <= 0 || larger / smaller > bound)
+            throw new InvalidOperationException($"The {subject} costs {measured}; a {unit} costs {growth} times as " +
+                $"much from {sizes[1]} to {sizes[2]} as from {sizes[0]} to {sizes[1]}");
+        return $"{measured}; {growth} times per {unit}";
     }
 
     /// <summary>
@@ -152,6 +216,32 @@ partial class Program
             default);
         metadata.AddTypeDefinition(default, default, metadata.GetOrAddString("<Module>"), default,
             MetadataTokens.FieldDefinitionHandle(1), MetadataTokens.MethodDefinitionHandle(1));
+        var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(), new MetadataRootBuilder(metadata),
+            new BlobBuilder());
+        var image = new BlobBuilder();
+        builder.Serialize(image);
+        return image.ToArray();
+    }
+
+    /// <summary>
+    /// A library named Synthetic with `count` MethodDef rows without bodies, each named for its row and all with one
+    /// signature.
+    /// </summary>
+    static byte[] SyntheticMethods(int count)
+    {
+        var metadata = new MetadataBuilder();
+        var name = metadata.GetOrAddString("Synthetic");
+        metadata.AddAssembly(name, new Version(1, 2, 3, 4), default, default, default, AssemblyHashAlgorithm.Sha1);
+        metadata.AddModule(0, metadata.GetOrAddString("Synthetic.dll"), metadata.GetOrAddGuid(Guid.Empty), default,
+            default);
+        metadata.AddTypeDefinition(default, default, metadata.GetOrAddString("<Module>"), default,
+            MetadataTokens.FieldDefinitionHandle(1), MetadataTokens.MethodDefinitionHandle(1));
+        var signature = new BlobBuilder();
+        new BlobEncoder(signature).MethodSignature().Parameters(0, returnType => returnType.Void(), _ => { });
+        var shared = metadata.GetOrAddBlob(signature);
+        for (var index = 0; index < count; index++)
+            metadata.AddMethodDefinition(MethodAttributes.Public | MethodAttributes.Static, default,
+                metadata.GetOrAddString("M" + index), shared, -1, MetadataTokens.ParameterHandle(1));
         var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(), new MetadataRootBuilder(metadata),
             new BlobBuilder());
         var image = new BlobBuilder();

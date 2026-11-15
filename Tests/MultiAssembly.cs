@@ -457,12 +457,17 @@ RejectedExtract("import and reference", "An assembly cannot be both a typed impo
 Console.WriteLine("PASS pinned referenced assemblies: proofs, missing, duplicate, substituted, misattributed");
 
 // Generic structs and generic class statics run in the same job with their own Lib and App.
-CheckGenericAssemblies();
+var generic = CheckGenericAssemblies();
 
 // The strict binding library decodes images as an independent reader does, and its own tests pass.
 Run(["lake", "build", "StrictBinding", "Tests.StrictBinding"], FixturePackage(),
     progress: "Building strict binding tests");
 Console.WriteLine("PASS strict binding library: SHA-256, SHA-1, container and table decoding tests");
 CheckBindingDecoding(Path.Combine(root, "binding"));
+// The slices the extractor carries for every method of the fixture and of both assembly pairs.
+string strictFixture = Path.Combine(root, "StrictFixture.dll");
+File.WriteAllBytes(strictFixture, StrictBindingFacts.ReadImage(File.ReadAllText(Fixture)));
+CheckExtractedSlices(Path.Combine(root, "binding-slices"), (strictFixture, []), (app, [lib]), (lib, []),
+    (generic.App, [generic.Lib]), (generic.Lib, []));
 CheckBindingScaling(Path.Combine(root, "binding-scaling"));
 CheckDeepBinding(root, cli, Artifact("Direct"), app, lib, libName, Verify(Artifact("Direct")));
