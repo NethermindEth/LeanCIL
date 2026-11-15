@@ -32,7 +32,7 @@ example : ¬ ({ architecture := .arm64, x86Base64 := true } : FeatureProfile).Va
 example : ¬ ({ architecture := .arm64, vector128Accelerated := true } : FeatureProfile).Valid := by decide
 -- .NET 11 x64 reports SSE2 only with SSSE3, SSE4.1 and SSE4.2; EnableHWIntrinsic=0 turns all off.
 example : ¬ ({ architecture := .x64, x86Base64 := true, sse2 := true,
-    vector128Accelerated := true } : FeatureProfile).Valid := by decide
+               vector128Accelerated := true } : FeatureProfile).Valid := by decide
 example : ({ architecture := .x64 } : FeatureProfile).Valid := by decide
 
 private def v3 : FeatureProfile := {
