@@ -338,7 +338,7 @@ theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOpera
     | (cases unchanged rfl <;> rfl)
     | (cases operand <;> first
         | exact absurd sameKind Bool.false_ne_true
-        | exact absurd sameType Bool.true_ne_false
+        | exact absurd sameType.symm Bool.false_ne_true
         | rfl)
 
 #print axioms Instruction.ofRaw?_substitute
