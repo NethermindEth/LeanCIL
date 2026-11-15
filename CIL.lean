@@ -205,6 +205,7 @@ import CIL.SIMD.UnspecifiedLanes
 import CIL.Safety.IntrinsicExecution
 import CIL.Safety.Segment
 import CIL.Safety.SegmentLocals
+import CIL.Safety.SegmentContract
 import CIL.Safety.LocalCalls
 
 /-!
