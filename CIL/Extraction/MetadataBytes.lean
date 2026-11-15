@@ -242,7 +242,7 @@ structure AssemblyMetadata where
   /-- The public key token the pin writes, as sixteen lowercase hexadecimal digits, when the
       `Assembly` row has a public key; empty otherwise. -/
   keyToken : List Nat := []
-  /-- The table stream bytes from the version fields through the last row count. -/
+  /-- The table stream bytes from the reserved word through the last row count. -/
   tableHeader : List Nat := []
   /-- The header `tableHeader` decodes to, which every method of the assembly reads its rows
       by; `AssemblyIdentified` proves it once per assembly. -/

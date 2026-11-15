@@ -7,6 +7,8 @@ import StrictBinding.Identity
 import StrictBinding.Dump
 import StrictBinding.Bind
 import StrictBinding.Evidence
+import StrictBinding.Reads
+import StrictBinding.Rows
 
 /-!
 # Deep verification
