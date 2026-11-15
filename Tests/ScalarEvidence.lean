@@ -340,85 +340,92 @@ example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.set 2 .su
 example : ¬ ScalarFlowValid #[] { mixedRaw with parameters := [nativeType, word] } addFeatures mixedStates mixedCode := by decide
 
 private def site : CallSite := {
-  declaringType := .atom scope.identity "Fixture",
-  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
-  returnsValue := true, returnType := word, parameterTypes := [word, word] }
+  method := {
+    owner := .atom scope.identity "Fixture", name := name!"", hasThis := false, genericArity := 0,
+    returnType := word, parameters := [word, word] },
+  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call { site with returnType := intType })) true (.call 0 2) = false := by decide
+example : validateManagedCall [⟨[], addRaw⟩] []
+    (i 40 (.call { site with method.returnType := intType })) true (.call 0 2) = false := by decide
 example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] [] (i 40 (.call site)) true (.call 0 2) = false := by decide
-example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0, parameterTypes := [], returnType := word })) [] = some [.other] := by decide +kernel
-theorem external_call_validated : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M()", parameterCount := 0, parameterTypes := [] })) [] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with
+    target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0,
+    method.parameters := [], method.returnType := word })) [] = some [.other] := by decide +kernel
+theorem external_call_validated : scalarTransfer addRaw (i 40 (.call { site with
+    target := .external "Scope::System.UInt64 Owner::M()", parameterCount := 0,
+    method.parameters := [] })) [] = some [.word64] := by decide +kernel
 
 /-- Generic return kinds agree with the substituted method argument. -/
 private theorem generic_return_cases :
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::!!0 Owner::M()",
         parameterCount := 0,
-        parameterTypes := [],
+        method.parameters := [],
         typeArguments := [word] })) [] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::!!0 Owner::M()",
         parameterCount := 0,
-        parameterTypes := [],
+        method.parameters := [],
         typeArguments := [intType] })) [] = some [.other]) := by
   decide +kernel
 
 #print axioms generic_return_cases
 
 example : validateManagedCall [⟨[], addRaw⟩] []
-    (i 40 (.call { site with parameterTypes := [intType, word] })) true (.call 0 2) = false := by decide
+    (i 40 (.call { site with method.parameters := [intType, word] })) true (.call 0 2) =
+      false := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.word64, .word64] = some [.word64] := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.other, .word64] = none := by decide
 /-- Call signatures retain parameter order, receiver kinds and generic substitutions. -/
 private theorem call_signature_cases :
     (scalarTransfer addRaw (i 40 (.call { site with
-        parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
+        method.parameters := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        parameterTypes := [intType, word] })) [.word32, .word64] = none) ∧
+        method.parameters := [intType, word] })) [.word32, .word64] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        hasThis := true,
-        parameterTypes := [intType, word] })) [.word64, .word32, .reference] = some [.word64]) ∧
+        method.hasThis := true,
+        method.parameters := [intType, word] })) [.word64, .word32, .reference] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        hasThis := true,
-        parameterTypes := [intType, word] })) [.word64, .word32, .other] = none) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with
-        target := .external "Scope::System.UInt64 Owner::M(System.Int32)",
-        parameterCount := 1,
-        parameterTypes := [intType] })) [.word32] = some [.word64]) ∧
+        method.hasThis := true,
+        method.parameters := [intType, word] })) [.word64, .word32, .other] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(System.Int32)",
         parameterCount := 1,
-        parameterTypes := [word] })) [.word64] = none) ∧
+        method.parameters := [intType] })) [.word32] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::System.UInt64 Owner::M(System.Int32)",
+        parameterCount := 1,
+        method.parameters := [word] })) [.word64] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(!!0)",
         typeArguments := [intType],
         parameterCount := 1,
-        parameterTypes := [intType] })) [.word32] = some [.word64]) ∧
+        method.parameters := [intType] })) [.word32] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(!!0)",
         typeArguments := [intType],
         parameterCount := 1,
-        parameterTypes := [word] })) [.word64] = none) ∧
+        method.parameters := [word] })) [.word64] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        declaringType := .apply (.constructor "Scope" "Owner`1") intType,
+        method.owner := .apply (.constructor "Scope" "Owner`1") intType,
         target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)",
         parameterCount := 1,
-        parameterTypes := [intType],
-        returnType := intType })) [.word32] = some [.word32]) ∧
+        method.parameters := [intType],
+        method.returnType := intType })) [.word32] = some [.word32]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        declaringType := .apply (.constructor "Scope" "Owner`1") intType,
+        method.owner := .apply (.constructor "Scope" "Owner`1") intType,
         target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)",
         parameterCount := 1,
-        parameterTypes := [word],
-        returnType := intType })) [.word64] = none) ∧
+        method.parameters := [word],
+        method.returnType := intType })) [.word64] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        declaringType := .aggregate "Scope::Owner`2<System.Int32,System.UInt64>" 0,
+        method.owner := .aggregate "Scope::Owner`2<System.Int32,System.UInt64>" 0,
         target := .external "Scope::!1 Owner`2<System.Int32,System.UInt64>::M(!0,!1)",
-        parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
+        method.parameters := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external
           "Scope::System.UInt64 Owner::M(Container`2<System.Int32,System.UInt64>,System.Int32)",
-        parameterTypes := [.aggregate "Scope::Container`2<System.Int32,System.UInt64>" 0,
+        method.parameters := [.aggregate "Scope::Container`2<System.Int32,System.UInt64>" 0,
           intType] })) [.word32, .other] = some [.word64]) := by
   decide +kernel
 
@@ -537,8 +544,10 @@ theorem local_slot_sites :
 
 /-- A static method of no parameters whose address `ldftn` takes and `calli` calls. -/
 private def handler : CallSite :=
-  { target := .managed 2, typeArguments := [], parameterCount := 0, hasThis := false,
-    returnsValue := false }
+  { method := {
+      owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+      parameters := [] },
+    target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
 private def handlerSignature : ManagedSignature := ⟨.void, []⟩
 
 /-- `ldftn; stloc store; ldloc.1; calli; ret` over two native-int locals, of which `calli`
@@ -593,10 +602,14 @@ theorem pointer_local_storage :
 
 private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte")
 private def byteSpanSite : CallSite := {
-  declaringType := byteSpanType, name := ".ctor", target := .external
-    (runtime ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)"),
-  typeArguments := [], parameterCount := 2, parameterTypes := [.pointer .void, intType],
-  hasThis := true, returnsValue := false, returnType := .void }
+  method := {
+    owner := byteSpanType, name := name!".ctor", hasThis := true, genericArity := 0,
+    returnType := .void, parameters := [.pointer .void, intType] },
+  name := ".ctor",
+  target := .external
+    (runtime ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,\
+    System.Int32)"),
+  typeArguments := [], parameterCount := 2, returnsValue := false }
 private def byteSpanRaw := { raw [i 2, i 31 (.integer 16), i 115 (.call byteSpanSite), i 42] [.byref word] with returnType := byteSpanType }
 private def byteSpanFeatures : FeatureCertificate := [unknown 0, unknown 1, state [some 16, none], unknown 1]
 private def byteSpanStates : ScalarCertificate := [some [], some [.reference], some [.word32, .reference], some [.other]]
@@ -615,9 +628,9 @@ private theorem span_constructor_cases :
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
         name := "Other" })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
-        declaringType := .atom runtime "Other" })) [.word32, .reference] = none) ∧
+        method.owner := .atom runtime "Other" })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
-        parameterTypes := [.pointer word, intType] })) [.word32, .reference] = none) ∧
+        method.parameters := [.pointer word, intType] })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .reference] =
       some []) ∧
     (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .other] =
@@ -629,16 +642,19 @@ private theorem span_constructor_cases :
 private def tupleType : TypeExpr := .aggregate
   (runtime ++ "::System.ValueTuple`2<System.UInt64,System.UInt64>") 0
 private def tupleSite : CallSite := {
-  declaringType := .atom
-    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-    "System.Runtime.Intrinsics.X86.X86Base/X64",
-  name := "DivRem", target := .external
+  method := {
+    owner := .atom
+      "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
+        PublicKeyToken=cc7b13ffcd2ddd51"
+      "System.Runtime.Intrinsics.X86.X86Base/X64", name := name!"DivRem", hasThis := false,
+    genericArity := 0, returnType := tupleType, parameters := [word, word, word] },
+  name := "DivRem",
+  target := .external
     "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
       PublicKeyToken=cc7b13ffcd2ddd51::System.ValueTuple`2<System.UInt64,System.UInt64> \
       System.Runtime.Intrinsics.X86.X86Base/X64::DivRem\
-      (System.UInt64,System.UInt64,System.UInt64)",
-  typeArguments := [], parameterCount := 3, parameterTypes := [word, word, word],
-  hasThis := false, returnsValue := true, returnType := tupleType }
+      (System.UInt64,System.UInt64,System.UInt64)", typeArguments := [], parameterCount := 3,
+  returnsValue := true }
 private def tupleRaw := { raw [i 2, i 3, i 4, i 40 (.call tupleSite), i 42] [word, word, word] with
   returnType := tupleType, maxStack := 3 }
 /-- Tuple results retain their declared input kinds. -/
@@ -647,7 +663,7 @@ private theorem tuple_result_cases :
       some [.word64], some [.word64, .word64], some [.word64, .word64, .word64], some [.other]]
       [.ldarg 0, .ldarg 1, .ldarg 2, .intrinsic (.x86Base .divRem64) 3, .ret]) ∧
     (scalarTransfer tupleRaw (i 40 (.call { tupleSite with
-        parameterTypes := [word, intType, word] })) [.word64, .word32, .word64] = none) := by
+        method.parameters := [word, intType, word] })) [.word64, .word32, .word64] = none) := by
   decide +kernel
 
 #print axioms tuple_result_cases
@@ -665,10 +681,15 @@ private theorem tuple_field_cases :
 
 private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.UInt32")
 private def spanSite : CallSite := {
-  declaringType := spanType, name := "get_Item", target := .external
-    (runtime ++ "::!0& modreq(System.Runtime.InteropServices.InAttribute) System.ReadOnlySpan`1<System.UInt32>::get_Item(System.Int32)"),
-  typeArguments := [], parameterCount := 1, parameterTypes := [intType], hasThis := true, returnsValue := true,
-  returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)" }
+  method := {
+    owner := spanType, name := name!"get_Item", hasThis := true, genericArity := 0,
+    returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
+    parameters := [intType] },
+  name := "get_Item",
+  target := .external
+    (runtime ++ "::!0& modreq(System.Runtime.InteropServices.InAttribute) \
+    System.ReadOnlySpan`1<System.UInt32>::get_Item(System.Int32)"),
+  typeArguments := [], parameterCount := 1, returnsValue := true }
 private def spanRaw := { raw [i 2, i 3, i 40 (.call spanSite), i 113 (.type intType), i 42] [.byref spanType, intType] with returnType := intType }
 /-- Span and external signatures reject malformed metadata and distinguish Unicode names. -/
 private theorem span_signature_cases :
@@ -676,19 +697,20 @@ private theorem span_signature_cases :
       some [.reference], some [.word32, .reference], some [.reference], some [.word32]] [.ldarg 0,
       .ldarg 1, .memory (.spanItem 4), .loadScalar 4, .ret]) ∧
     (scalarTransfer spanRaw (i 40 (.call { spanSite with
-        parameterTypes := [word] })) [.word64, .reference] = none) ∧
+        method.parameters := [word] })) [.word64, .reference] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(garbage(System.Int32)",
         parameterCount := 1,
-        parameterTypes := [intType] })) [.word32] = none) ∧
+        method.parameters := [intType] })) [.word32] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(Container\u0394)",
         parameterCount := 1,
-        parameterTypes := [.aggregate "Scope::Container\u0394" 0] })) [.other] = some [.word64]) ∧
+        method.parameters := [.aggregate "Scope::Container\u0394" 0] })) [.other] =
+          some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(Container\u0394)",
         parameterCount := 1,
-        parameterTypes := [.aggregate "Scope::Container\u03a9" 0] })) [.other] = none) := by
+        method.parameters := [.aggregate "Scope::Container\u03a9" 0] })) [.other] = none) := by
   decide +kernel
 
 #print axioms span_signature_cases
@@ -716,8 +738,10 @@ example : ¬ ScalarFlowValid #[] { loopRaw with code := [i 22, i 0, i 43 (.targe
 
 -- Defaulted signature fields are accepted only where they are the true signature.
 private def unsignedSite : CallSite := {
-  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
-  returnsValue := true }
+  method := {
+    owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [] },
+  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
 /-- External unsigned signatures retain their exact parameter and return metadata. -/
@@ -891,11 +915,15 @@ example : scalarEmissionMatches #[] none (i 114 (.text "a")) [] .nop = false := 
 private def guardSite (owner methodName suffix : String) (arguments parameters : List TypeExpr) :
     RawInstruction :=
   ⟨0, 40, .call
-    { declaringType := .atom runtimeScope owner, name := methodName,
+    { method := {
+        owner := .atom runtimeScope owner,
+        name := (MetadataName.ofBytes? (bytesOf methodName)).getD ⟨0⟩, hasThis := false,
+        genericArity := arguments.length, returnType := .void, parameters := parameters,
+        methodArguments := arguments },
+      name := methodName,
       target := .external (runtimeScope ++ "::System.Void " ++ owner ++ "::" ++ suffix),
       typeArguments := arguments, ownerArgumentCount := 0, parameterCount := parameters.length,
-      hasThis := false, returnsValue := false, returnType := .void,
-      parameterTypes := parameters }⟩
+      returnsValue := false }⟩
 
 private def parameterName : TypeExpr := .object runtimeScope "System.String"
 private def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
@@ -948,10 +976,14 @@ private def sizeCode (bits : W32) : List Instruction := [.ldc_i4 bits, .pop, .ld
 private def sizeAt (instruction : RawInstruction) (bits : W32) : Bool :=
   decide (ScalarFlowValid #[] (sizeRaw instruction) pushHoleFeatures sizeStates (sizeCode bits))
 private def sizeOfSite (type : TypeExpr) : CallSite := {
-  declaringType := .atom runtime "System.Runtime.CompilerServices.Unsafe", name := "SizeOf",
-  target := .external (runtime ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf()"),
-  typeArguments := [type], parameterCount := 0, hasThis := false, returnsValue := true,
-  returnType := intType, parameterTypes := [] }
+  method := {
+    owner := .atom runtime "System.Runtime.CompilerServices.Unsafe", name := name!"SizeOf",
+    hasThis := false, genericArity := 1, returnType := intType, parameters := [],
+    methodArguments := [type] },
+  name := "SizeOf",
+  target := .external (runtime ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf(\
+    )"),
+  typeArguments := [type], parameterCount := 0, returnsValue := true }
 private def vector128 : TypeExpr := .apply
   (.constructor
     "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
@@ -977,7 +1009,7 @@ private def otherSite : CallSite := { sizeOfSite intType with
 private theorem size_identity_cases :
     (sizeAt (i 40 (.call otherSite)) 4 = false) ∧
     (sizeAt (i 40 (.call { sizeOfSite intType with
-        declaringType := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" }))
+        method.owner := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" }))
       4 = false) := by
   decide +kernel
 
@@ -1026,13 +1058,15 @@ example (valid : ScalarFlowValid #[] addRaw addFeatures addStates addCode) :
 theorem closed_generic_fill_signature :
     let element := TypeExpr.aggregate ("Scope::Pair`1<" ++ runtime ++ "::System.UInt64>") 0
     let site : CallSite := {
-      declaringType := .apply (.constructor runtime "System.Span`1") element,
-      name := "Fill", target := .external (runtime ++
-        "::System.Void System.Span`1<Pair`1<System.UInt64>>::Fill(!0)"),
-      typeArguments := [], parameterCount := 1, hasThis := true,
-      returnsValue := false, returnType := .void, parameterTypes := [element] }
+      method := {
+        owner := .apply (.constructor runtime "System.Span`1") element, name := name!"Fill",
+        hasThis := true, genericArity := 0, returnType := .void, parameters := [element] },
+      name := "Fill",
+      target := .external (runtime ++
+        "::System.Void System.Span`1<Pair`1<System.UInt64>>::Fill(!0)"), typeArguments := [],
+      parameterCount := 1, returnsValue := false }
     scalarTransfer (raw []) (i 40 (.call site)) [.other, .reference] = some [] ∧
-      scalarTransfer (raw []) (i 40 (.call { site with parameterTypes := [word] }))
+      scalarTransfer (raw []) (i 40 (.call { site with method.parameters := [word] }))
         [.word64, .reference] = none := by decide +kernel
 #print axioms closed_generic_fill_signature
 
@@ -1042,7 +1076,7 @@ theorem no_implicit_native_coercion :
     let unsignedNative : TypeExpr := .atom runtime "System.UIntPtr"
     ([nativeType, unsignedNative].all fun home =>
       let method := { addRaw with locals := [home], parameters := [home], returnType := home }
-      let call := i 40 (.call { site with parameterCount := 1, parameterTypes := [home] })
+      let call := i 40 (.call { site with parameterCount := 1, method.parameters := [home] })
       scalarTransfer method (i 10) [.word32] == none &&
         scalarTransfer method (i 10) [.native] == some [] &&
         scalarTransfer method (i 16 (.argument 0)) [.word32] == none &&

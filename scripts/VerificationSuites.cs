@@ -138,7 +138,8 @@ internal static class VerificationSuites
             "feature certificate of local loads, stores and addresses, at a per-instruction cost that does " +
             "not grow with the method or with locals holding no known word and grows linearly with the known " +
             "facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with " +
-            "the calls, type identity equality at a cost that does not grow with the name, and one native " +
+            "the calls, type identity equality at a cost that does not grow with the name, the method name " +
+            "clause of the call operand check at a per-byte cost that does not grow with the name, and one native " +
             "method table step and one load of its first entry at a kernel cost that does not grow with the " +
             "table's entries; the managed-call check of a body with many call sites at a per-site cost that " +
             "does not grow with the call sites; the argument facts of cil_resolution_facts and the reads " +

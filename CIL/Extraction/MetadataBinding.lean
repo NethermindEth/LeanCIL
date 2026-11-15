@@ -430,11 +430,15 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
     | some head => pure head
     | none => throw (.unresolvedType token)
   if bytesOf call.name != site.name then throw (.operandMismatch token)
+  if !call.method.name.spells site.name then throw (.operandMismatch token)
   let expected := site.methodArguments.getD [] ++ (if extracted then ownerList else [])
   if call.typeArguments.length != expected.length || !(expected.zip call.typeArguments).all
       (fun (type, claimed) => frame.admits type claimed) then
     throw (.genericMismatch token)
   if call.ownerArgumentCount != (if extracted then ownerList.length else 0) then
+    throw (.genericMismatch token)
+  if call.method.genericArity != site.genericArity ||
+      call.method.methodArguments != siteMethodArguments call then
     throw (.genericMismatch token)
   if call.declaringType.headScope.any (bytesOf · != head.scope) then
     throw (.scopeMismatch token)

@@ -37,6 +37,11 @@ if (args.Contains("--return-step-only", StringComparer.Ordinal))
     ReturnResolutionCosts(stepOnly: true);
     return;
 }
+if (args.Contains("--call-name-only", StringComparer.Ordinal))
+{
+    CallNameCosts();
+    return;
+}
 if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
 {
     IndirectTargetCosts();
@@ -683,6 +688,48 @@ foreach (var outcome in new[] { "equal", "unequal" })
             $"Deciding {outcome} type identities costs {measured}; the limits are {TypeDecisionLimit} heartbeats " +
             $"and {AllowedNameGrowth} times as many at 80 characters."));
     Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
+}
+CallNameCosts();
+
+// The heartbeats `decide +kernel` adds to the call check's name clause, which tests that a call's typed method name
+// spells its row's name bytes, for names of 20 and 80 bytes that share all but their last byte. Reading the name back
+// costs about 0.8 times as much per byte at 80 bytes as at 20; encoding the bytes with `MetadataName.ofBytes?`, whose
+// kernel reduction indexes an array literal once per byte, costs about 3 times as much.
+void CallNameCosts()
+{
+    var nameDirectory = At("artifacts/LookupScaling/CallNames");
+    Directory.CreateDirectory(nameDirectory);
+    const string Prefix = "WriteLineToTheConsoleOfTheRuntimeEachValueThatTheCallerPassesAsAnIntegerOfThirtyTwoBits";
+    int[] lengths = [20, 80];
+    string Statement(int length)
+    {
+        var name = Prefix[..(length - 1)] + "0";
+        var bytes = string.Join(", ", Encoding.UTF8.GetBytes(name));
+        return $$"""
+            /-- The {{length}} bytes of a row name. -/
+            def bytes{{length}} : List Nat := [{{bytes}}]
+            #kernel_cost "call name {{length}}" ((name!"{{name}}").spells bytes{{length}} = true)
+            """;
+    }
+    var path = Path.Combine(nameDirectory, "CallNames.lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Identity
+        open CIL Lean Elab Command
+        {{KernelCostCommand}}
+        {{string.Join("\n", lengths.Select(Statement))}}
+        """);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.CallNameCheck().Matches(output).ToDictionary(
+        match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != lengths.Length) throw new InvalidOperationException("Missing call name costs:\n" + output);
+    double PerByte(int length) => (double)costs[length] / length;
+    var measured = string.Create(CultureInfo.InvariantCulture,
+        $"{costs[20]} heartbeats at 20 bytes and {costs[80]} at 80");
+    if (Math.Min(costs[20], costs[80]) < KernelDecisionFloor || PerByte(80) > PerByte(20) * AllowedGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"The call name clause costs {measured}; per byte, the limit is {AllowedGrowth} times the cost at 20."));
+    Console.WriteLine($"PASS the call name clause costs {measured}");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -1434,8 +1481,10 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         open CIL CIL.Extraction
         def slotType : TypeExpr := .atom runtimeScope "{{slotType}}"
         def handler : CallSite :=
-          { target := .managed 2, typeArguments := [], parameterCount := 0, hasThis := false,
-            returnsValue := false }
+          { method := {
+              owner := .void, name := name!"", hasThis := false, genericArity := 0,
+              returnType := .void, parameters := [] },
+            target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
         def signature : ManagedSignature := ⟨.void, []⟩
         def kind : ScalarKind := {{kind}}
         def segment (index : Nat) : List RawInstruction :=
@@ -1664,6 +1713,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex TypeDecision();
+
+    [GeneratedRegex(@"\bcall name ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex CallNameCheck();
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex NativeTableStep();

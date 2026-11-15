@@ -162,13 +162,16 @@ def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := [
   | .call site => do
     let declaringType ← substituteType arguments site.declaringType
     return .call { site with
-      declaringType,
+      method := { site.method with
+        owner := declaringType,
+        returnType := ← substituteStorageType layouts arguments site.returnType,
+        parameters := ← site.parameterTypes.mapM (substituteStorageType layouts arguments),
+        methodArguments :=
+          ← site.method.methodArguments.mapM (substituteStorageType layouts arguments) },
       target := ← if mentionsParameter site.declaringType then
         substituteTarget methodArity site.declaringType declaringType site.target
         else pure site.target,
-      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments),
-      returnType := ← substituteStorageType layouts arguments site.returnType,
-      parameterTypes := ← site.parameterTypes.mapM (substituteStorageType layouts arguments) }
+      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments) }
   | .indirectCall returnType parameters hasThis explicitThis convention => do
     return .indirectCall (← substituteStorageType layouts arguments returnType)
       (← parameters.mapM (substituteStorageType layouts arguments)) hasThis explicitThis convention
@@ -684,8 +687,8 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
   obtain ⟨offset, opcode, operand⟩ := raw
   cases operand with
   | call site =>
-    obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue,
-      returnType, parameterTypes, ownerArgumentCount⟩ := site
+    obtain ⟨methodRef, name, method, typeArguments, parameterCount, returnsValue,
+      ownerArgumentCount⟩ := site
     cases method with
     | managed token =>
       have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside
