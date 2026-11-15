@@ -17,6 +17,11 @@ if (args.Contains("--exception-types-only", StringComparer.Ordinal))
     ExceptionDecisionCosts();
     return;
 }
+if (args.Contains("--closed-arguments-only", StringComparer.Ordinal))
+{
+    ClosedArgumentsCosts();
+    return;
+}
 if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
 {
     ArgumentResolutionCosts();
@@ -74,6 +79,7 @@ if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 CallCheckCosts();
 DecodeCosts();
 MethodDecodeCosts();
+ClosedArgumentsCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
@@ -710,6 +716,64 @@ void MethodDecodeCosts()
             $"Decoding a method costs {measured} heartbeats per instruction; the limit is " +
             $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
     Console.WriteLine($"PASS decoding a method costs {measured} heartbeats per instruction");
+}
+
+// Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.
+void ClosedArgumentsCosts()
+{
+    var storageDirectory = At("artifacts/LookupScaling/ClosedArguments");
+    Directory.CreateDirectory(storageDirectory);
+    const long PerParameterLimit = 150_000;
+    const double LayoutGrowthLimit = 1.05;
+    var samples = new List<(int Parameters, int Layouts, long Cost)>();
+    foreach (var parameters in new[] { 1, 4, 16 })
+    foreach (var layouts in new[] { 8, 32, 128 })
+    {
+        var path = Path.Combine(storageDirectory, $"Parameters{parameters}Layouts{layouts}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.Generics
+            import Lean
+            /-! Kernel cost of closed primitive arguments with unrelated aggregate layouts. -/
+            set_option maxRecDepth 10000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            {{KernelCostCommand}}
+            /-- Every parameter is the exact scoped uint32 type. -/
+            def raw : RawMethod := {
+              token := 0, owner := "Scaling", hasThis := false, explicitThis := false,
+              callingConvention := 0, attributes := 150, implementation := 0, returnType := .void,
+              parameters := List.replicate {{parameters}} (.atom runtimeScope "System.UInt32"),
+              locals := [], initLocals := false, maxStack := 1, genericParameters := [],
+              code := [.mk 0 42 .none] }
+            /-- Primitive argument storage does not inspect unrelated layouts. -/
+            def layouts : List RawLayout := List.replicate {{layouts}} {
+              identity := "Unrelated", explicit := false, packing := 0, declaredSize := 4,
+              fields := [.mk .unsigned32 none] }
+            #kernel_cost "closed arguments {{parameters}} {{layouts}}"
+              closedArguments layouts raw = some
+                (.mk (List.replicate {{parameters}} (.field .unsigned32)) [] [.other])
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var cost = LookupPatterns.ClosedArguments().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the closed argument cost:\n{output}");
+        samples.Add((parameters, layouts, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    foreach (var sample in samples)
+    {
+        var firstLayout = samples.Single(row => row.Parameters == sample.Parameters && row.Layouts == 8);
+        var firstParameter = samples.Single(row => row.Parameters == 1 && row.Layouts == sample.Layouts);
+        var perParameter = (double)sample.Cost / sample.Parameters;
+        if (sample.Cost < KernelDecisionFloor || perParameter > PerParameterLimit ||
+            sample.Cost > firstLayout.Cost * LayoutGrowthLimit ||
+            perParameter > firstParameter.Cost * AllowedLocalGrowth)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"Closed arguments cost {perParameter:F1} heartbeats per parameter at " +
+                $"{sample.Parameters} parameters and {sample.Layouts} layouts; limit {PerParameterLimit}, " +
+                $"layout growth {LayoutGrowthLimit}, parameter growth {AllowedLocalGrowth}."));
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"PASS closed arguments {sample.Parameters} parameters {sample.Layouts} layouts: " +
+            $"{sample.Cost} heartbeats, {perParameter:F1} per parameter"));
+    }
 }
 
 // The heartbeats `decide +kernel` adds to one `add` of an int32 offset to a native method table of 16, 64 and 256
@@ -1939,6 +2003,9 @@ enum LocalSlots
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
+    [GeneratedRegex(@"closed arguments [0-9]+ [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex ClosedArguments();
+
     [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
     internal static partial Regex ReturnResolution();
 

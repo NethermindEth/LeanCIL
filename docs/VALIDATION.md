@@ -145,6 +145,10 @@ partition.
 
 ## Proof cost
 
+The `lookups` closed-argument row checks primitive storage at 1, 4 and 16 parameters with
+8, 32 and 128 unrelated layouts. It bounds the cost per parameter and rejects growth with
+unrelated layouts. The row accepts `--closed-arguments-only` for isolated measurement.
+
 For a change to shared tactics or the library, also compare what each proof costs with the base.
 Measure both checkouts on one machine:
 
