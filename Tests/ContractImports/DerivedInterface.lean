@@ -9,8 +9,8 @@ open CIL.Safety
 
 /-- The exception `Percent` throws for an input: none up to 100, otherwise
     `ArgumentOutOfRangeException`. -/
-def percentRaises (value : CIL.W64) : Option String :=
-  if value ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+def percentRaises (value : CIL.W64) : Option CIL.ExceptionType :=
+  if value ≤ 100 then none else some .argumentOutOfRange
 
 /-- Public `Percent`: inputs above 100 throw `ArgumentOutOfRangeException`; a returned result
     is only promised to be at most 100, not equal to the input. -/

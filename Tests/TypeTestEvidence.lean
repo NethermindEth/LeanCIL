@@ -1,4 +1,5 @@
 import CIL.Extraction.Scalars
+import CIL.Extraction.ValueDecoding
 
 set_option maxRecDepth 4096
 
@@ -15,16 +16,22 @@ private def word : TypeExpr := .atom runtime "System.UInt64"
 private def marker : TypeExpr := .aggregate (owner ++ "::Fixture.Marker") 0
 private def other : TypeExpr := .aggregate (owner ++ "::Fixture.Other") 1
 
-private def typeCall (name signature : String) (parameters : Nat) : RawOperand := .call {
-  declaringType := .atom runtime "System.Type", name,
-  target := .external (runtime ++ "::" ++ signature),
-  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true,
-  returnType := .atom runtime (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
-  parameterTypes := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"]
-    else [.atom runtime "System.Type", .atom runtime "System.Type"] }
-private def fromHandle := typeCall "GetTypeFromHandle" "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
-private def equality := typeCall "op_Equality" "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2
-private def inequality := typeCall "op_Inequality" "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2
+private def typeCall (name : String) (methodName : MetadataName) (signature : String)
+    (parameters : Nat) : RawOperand := .call {
+  method := {
+    owner := .atom runtime "System.Type", name := methodName, hasThis := false, genericArity := 0,
+    returnType := .atom runtime
+      (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+    parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"]
+      else [.atom runtime "System.Type", .atom runtime "System.Type"] },
+  name, target := .external (runtime ++ "::" ++ signature),
+  typeArguments := [], parameterCount := parameters, returnsValue := true }
+private def fromHandle := typeCall "GetTypeFromHandle" name!"GetTypeFromHandle"
+  "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
+private def equality := typeCall "op_Equality" name!"op_Equality"
+  "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2
+private def inequality := typeCall "op_Inequality" name!"op_Inequality"
+  "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2
 
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
 private def test (left right : TypeExpr) (comparison := equality) : List RawInstruction :=
@@ -187,5 +194,42 @@ theorem reference_type_results :
         (code.set 4 (.ldc_i4 (if same then 0 else 1))))) = true := by
   decide +kernel
 #print axioms reference_type_results
+
+private def dog : TypeExpr := .object owner "Fixture.Dog"
+private def bird : TypeExpr := .object owner "Fixture.Bird"
+
+/-- `castclass` and `isinst` of a class match their own raw opcode and class on an object or
+    null. -/
+theorem class_tests_match :
+    scalarEmissionMatches #[] none (i 116 (.type dog)) [.object] (.castclass dog) = true ∧
+    scalarEmissionMatches #[] none (i 117 (.type dog)) [.nullObject] (.isinst dog) = true := by
+  decide
+#print axioms class_tests_match
+
+/-- A raw `isinst` emitted as `castclass` is rejected by the scalar check and the decoder: the
+    two differ on a failed test. -/
+theorem isinst_decoded_as_castclass :
+    scalarEmissionMatches #[] none (i 117 (.type dog)) [.object] (.castclass dog) = false ∧
+    valueEncodingMatches (i 117 (.type dog)) (.castclass dog) = false := by
+  decide
+#print axioms isinst_decoded_as_castclass
+
+/-- A cast emitted against another class than its raw operand is rejected by the scalar check
+    and the decoder. -/
+theorem cast_other_type :
+    scalarEmissionMatches #[] none (i 116 (.type dog)) [.object] (.castclass bird) = false ∧
+    valueEncodingMatches (i 116 (.type dog)) (.castclass bird) = false := by
+  decide
+#print axioms cast_other_type
+
+/-- The feature check ties each type test to its own raw opcode: a raw `castclass` emitted as
+    `isinst` and a raw `isinst` emitted as `castclass` are rejected. -/
+theorem type_test_feature_opcodes :
+    featureOpMatches #[] (raw []) (i 116 (.type dog)) (.castclass dog) = true ∧
+    featureOpMatches #[] (raw []) (i 117 (.type dog)) (.isinst dog) = true ∧
+    featureOpMatches #[] (raw []) (i 116 (.type dog)) (.isinst dog) = false ∧
+    featureOpMatches #[] (raw []) (i 117 (.type dog)) (.castclass dog) = false := by
+  decide +kernel
+#print axioms type_test_feature_opcodes
 
 end Tests.TypeTestEvidence

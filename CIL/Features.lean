@@ -10,7 +10,9 @@ it for feature tests and intrinsic availability.
 
 Supported deployment policy: .NET 10 CoreCLR on 64-bit little-endian hosts.
 IsSupported includes OS support and runtime disabling, not just CPU capability.
-The runtime enables SSE4.2, AVX2/BMI and AVX-512 capabilities in whole groups;
+On x64 the .NET 11 runtime requires x86-64-v2: its X86Base group holds SSE through SSE4.2 and
+POPCNT, so SSE2 is never reported without SSSE3, SSE4.1 and SSE4.2.
+The runtime enables AVX2/BMI and AVX-512 capabilities in whole groups;
 AVX-512 VBMI is its own group, which requires AVX-512 and lies outside x86-64-v4.
 AES is its own group on each architecture, requiring only X86Base or ArmBase; no x86-64 level
 includes it.
@@ -21,6 +23,7 @@ Pinned runtime sources, measured x64/ARM64 versions, and migration guidance:
 docs/RUNTIME-PROFILES.md
 https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/vm/codeman.cpp
 https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt
+https://github.com/dotnet/runtime/blob/v11.0.0/src/native/minipal/cpufeatures.c
 `FeatureProfile.valid_iff_prerequisites` spells out every operation prerequisite `Valid` implies.
 -/
 
@@ -116,8 +119,9 @@ def FeatureProfile.Valid (p : FeatureProfile) : Prop :=
   (p.avx512Vbmi = true → p.avx512F = true) ∧
   -- AES is a separate group on each architecture, but some hosts and switches disable it.
   (p.aes = true → p.x86Base64 = true) ∧ (p.armAes = true → p.armBase64 = true) ∧
-  -- .NET 10 CoreCLR runtime groups; see docs/RUNTIME-PROFILES.md.
-  p.sse2 = p.x86Base64 ∧ p.ssse3 = p.sse41 ∧ p.sse41 = p.sse42 ∧
+  -- The .NET 11 X86Base group: a process has all of SSE2 through SSE4.2 or none of them.
+  p.sse2 = p.x86Base64 ∧ p.ssse3 = p.x86Base64 ∧ p.sse41 = p.x86Base64 ∧ p.sse42 = p.x86Base64 ∧
+  -- CoreCLR runtime groups; see docs/RUNTIME-PROFILES.md.
   p.avx2 = p.bmi1 ∧ p.avx2 = p.bmi2 ∧
   p.avx512F = p.avx512FVL ∧ p.avx512F = p.avx512DQ ∧ p.avx512F = p.avx512DQVL ∧
   p.advSimd = p.armBase64 ∧ p.vector128Accelerated = (p.sse2 || p.advSimd) ∧
@@ -153,8 +157,8 @@ theorem FeatureProfile.valid_iff_prerequisites (p : FeatureProfile) : p.Valid �
     (p.armBase64 = true → p.architecture = .arm64) ∧
     (p.advSimd = true → p.armBase64 = true) ∧
     (p.armAes = true → p.armBase64 = true) ∧
-    -- .NET 10 CoreCLR runtime groups; see docs/RUNTIME-PROFILES.md.
-    p.sse2 = p.x86Base64 ∧ p.ssse3 = p.sse41 ∧ p.sse41 = p.sse42 ∧
+    -- The .NET 11 X86Base group and the other CoreCLR runtime groups.
+    p.sse2 = p.x86Base64 ∧ p.ssse3 = p.x86Base64 ∧ p.sse41 = p.x86Base64 ∧ p.sse42 = p.x86Base64 ∧
     p.avx2 = p.bmi1 ∧ p.avx2 = p.bmi2 ∧
     p.avx512F = p.avx512FVL ∧ p.avx512F = p.avx512DQ ∧ p.avx512F = p.avx512DQVL ∧
     p.advSimd = p.armBase64 ∧ p.vector128Accelerated = (p.sse2 || p.advSimd) ∧

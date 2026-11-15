@@ -32,7 +32,7 @@ theorem allocation_returns_array :
 
 /-- A negative length throws `OverflowException`; an unaffordable one is a model fault. -/
 theorem allocation_faults :
-    newReferenceArray budgeted node (.i32 (-1)) = .error (.thrown "System.OverflowException") ∧
+    newReferenceArray budgeted node (.i32 (-1)) = .error (.thrown .overflow) ∧
     newReferenceArray budgeted node (.i64 5) = .error (.allocationFailure 40 32) ∧
     newReferenceArray budgeted node (.i64 0x80000000) =
       .error (.unsupported "Array length outside supported extent") := ⟨rfl, rfl, rfl⟩
@@ -68,30 +68,30 @@ theorem length_of_fresh :
 
 /-- `ldlen`, `ldelem.ref` and `stelem.ref` of a null array throw `NullReferenceException`. -/
 theorem null_array_throws :
-    runs [.memory .nullObject, .memory .referenceArrayLength, .ret] [] budgeted =
-      .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ ∧
-    runs [.memory .nullObject, .ldc_i4 0, .memory .referenceArrayLoad, .ret] [] budgeted =
-      .error ⟨0, 2, .thrown "System.NullReferenceException"⟩ ∧
-    runs [.memory .nullObject, .ldc_i4 0, .memory .nullObject, .memory .referenceArrayStore,
+    runs [.ldnull, .memory .referenceArrayLength, .ret] [] budgeted =
+      .error ⟨0, 1, .thrown .nullReference⟩ ∧
+    runs [.ldnull, .ldc_i4 0, .memory .referenceArrayLoad, .ret] [] budgeted =
+      .error ⟨0, 2, .thrown .nullReference⟩ ∧
+    runs [.ldnull, .ldc_i4 0, .ldnull, .memory .referenceArrayStore,
       .ldc_i4 0, .ret] [] budgeted =
-      .error ⟨0, 3, .thrown "System.NullReferenceException"⟩ := ⟨rfl, rfl, rfl⟩
+      .error ⟨0, 3, .thrown .nullReference⟩ := ⟨rfl, rfl, rfl⟩
 #print axioms null_array_throws
 
 /-- An index at the length, or a negative one read unsigned, throws `IndexOutOfRangeException`
     before a stored value's class is checked. -/
 theorem index_out_of_range :
     runs [.ldc_i4 2, .newReferenceArray node, .ldc_i4 2, .memory .referenceArrayLoad,
-      .ret] [] budgeted = .error ⟨0, 3, .thrown "System.IndexOutOfRangeException"⟩ ∧
+      .ret] [] budgeted = .error ⟨0, 3, .thrown .indexOutOfRange⟩ ∧
     runs [.ldc_i4 2, .newReferenceArray circle, .ldc_i4 (-1), .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .ret] [squareObject] holdingSquare =
-      .error ⟨0, 4, .thrown "System.IndexOutOfRangeException"⟩ := ⟨rfl, rfl⟩
+      .error ⟨0, 4, .thrown .indexOutOfRange⟩ := ⟨rfl, rfl⟩
 #print axioms index_out_of_range
 
 /-- A fresh element is null, and null is storable into any array of class references. -/
 theorem null_elements :
     (runs [.ldc_i4 1, .newReferenceArray node, .ldc_i4 0, .memory .referenceArrayLoad,
       .ret] [] budgeted).map Prod.snd = .ok [.object .null] ∧
-    (runs [.ldc_i4 1, .newReferenceArray circle, .dup, .ldc_i4 0, .memory .nullObject,
+    (runs [.ldc_i4 1, .newReferenceArray circle, .dup, .ldc_i4 0, .ldnull,
       .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret] []
       budgeted).map Prod.snd = .ok [.object .null] := ⟨rfl, rfl⟩
 #print axioms null_elements
@@ -108,7 +108,7 @@ theorem covariant_store :
 theorem mismatched_store :
     runs [.ldc_i4 1, .newReferenceArray circle, .ldc_i4 0, .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .ret] [squareObject] holdingSquare =
-      .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ := rfl
+      .error ⟨0, 4, .thrown .arrayTypeMismatch⟩ := rfl
 #print axioms mismatched_store
 
 /-- Storing an array, whose class is no admitted class, is outside the model rather than an
@@ -140,10 +140,10 @@ theorem opaque_store :
 theorem opaque_mismatch :
     runs [.ldc_i4 1, .newReferenceArray text, .ldc_i4 0, .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .ret] [.object (.address ⟨1, 0⟩)]
-      holdingText = .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ ∧
+      holdingText = .error ⟨0, 4, .thrown .arrayTypeMismatch⟩ ∧
     runs [.ldc_i4 1, .newReferenceArray shape, .ldc_i4 0, .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .ret] [.object (.address ⟨0, 0⟩)]
-      holdingText = .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ := ⟨rfl, rfl⟩
+      holdingText = .error ⟨0, 4, .thrown .arrayTypeMismatch⟩ := ⟨rfl, rfl⟩
 #print axioms opaque_mismatch
 
 end Tests.ReferenceArrays

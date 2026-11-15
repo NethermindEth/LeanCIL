@@ -351,7 +351,9 @@ Selection runs `dotnet run --file scripts/CheckDocReferences.cs`, which needs no
   functions: `step`, `run`, `invoke`, `pureArity`, `scalars`, `instructionStep`,
   `staticInstruction`, `checkedIntrinsic`, `checkedValue`, `numericValue`, `checkedAt`,
   `formValue`, `storeValue`, `instruction`, `memoryInstruction`, `otherMemoryInstruction`,
-  `observerCount`, `unspecifiedOperands` or `hasUnspecified`, or the monad plumbing
+  `observerCount`, `unspecifiedOperands`, `hasUnspecified`, the runtime model runner `runModel`
+  and its helpers `observedCall`, `intrinsicCall`, `featureCall`, `referenceCompareCall`,
+  `referenceSubtractCall`, `typedTransferCall` and `skipInitCall`, or the monad plumbing
   `Except.mapError`, `Bind.bind`, `Except.bind`, `Pure.pure` or `Except.pure`, by any suffix of its
   full name. Such a proof runs the method by unfolding the interpreter; step with
   `cil_checked_steps` and pass a fact about the operation instead. A name the block binds with

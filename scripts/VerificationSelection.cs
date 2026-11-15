@@ -118,8 +118,10 @@ internal static class VerificationSelection
             "Tests/InvocationCertificates.lean", "Tests/ValidCallTransport.lean",
             "Tests/BufferContents.lean", "Tests/Linking.lean", "Tests/StepFlow.lean", "Tests/RegionRun.lean",
             "Tests/StoreFacts.lean", "Tests/BatchVerification.cs", "Tests/VerificationCache.cs",
-            "Tests/VerificationReuse.cs", "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
+            "Tests/VerificationReuse.cs", "Tests/SupportExtractionCache.cs",
+            "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
             "Tests/InstructionEquations.lean", "Tests/CodeAt.lean", "Tests/SimdLanes.lean",
+            "Tests/SegmentContract.lean",
             "Tests/OperationFacts.lean", "Tests/VectorLocalCalls.lean", "Tests/SimdCarryCalls.lean",
             "Tests/OperationFactAdapters.lean", "Tests/AggregateMemorySteps.lean", "Tests/BodyDecoding.lean",
             "Tests/Identity.lean", "Tests/MetadataDecoding.lean",
@@ -129,14 +131,16 @@ internal static class VerificationSelection
             "Tests/ReturnMetadataBinding.lean", "Tests/ReferenceArrays.lean", "Tests/ArrayFields.lean",
             "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",
             "Tests/Crypto.lean", "Tests/MetadataAssemblies.lean", "Tests/PinnedIndexScaling.lean",
-            "Tests/FieldRef.lean"
+            "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean"
         };
-        inputs["core"].UnionWith(new[] { "Add", "AddModel", "Choose", "Calls", "Alias", "Struct", "StructCopy",
-            "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }.Select(name => $"Examples/Proofs/{name}.lean"));
+        inputs["core"].UnionWith(new[] { "Add", "AddModel", "DecodedAdd", "Choose", "Calls", "Alias", "Struct",
+            "StructCopy", "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }
+            .Select(name => $"Examples/Proofs/{name}.lean"));
         inputs["core"].Add("Tests/ModularStatics.lean");
         inputs["docs"].UnionWith(WalkthroughInputs(root));
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
-            "Throws", "SpanTables", "StaticValues", "StaticScalarValues", "TranslationAudit", "MetadataDifferential" }
+            "Throws", "SpanTables", "StaticValues", "StaticScalarValues", "TranslationAudit", "MetadataDifferential",
+            "Guards" }
             .Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "ScalarEvidence", "TypeTestEvidence",
             "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence", "ImportedLayouts", "AssemblyPins",
@@ -149,6 +153,7 @@ internal static class VerificationSelection
         inputs["stepping"].Add("scripts/ProofCost.lean");
         // Self-admission scans the extractor itself, so every source compiled into it can change the result.
         inputs["blockers"].Add("Tests/SelfAdmissionBaseline.txt");
+        inputs["blockers"].UnionWith(["Tests/HoleCorpus.cs", "Tests/HoleCorpusBaseline.txt"]);
         inputs["blockers"].UnionWith(Matches(File.ReadAllText(Path.Combine(root, "Extractor/Extractor.csproj")),
             @"<Compile Include=""\.\./([^""]+\.cs)""").Select(path => path.Replace('\\', '/')));
 

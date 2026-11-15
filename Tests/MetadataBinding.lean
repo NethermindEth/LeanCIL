@@ -63,7 +63,7 @@ theorem accepts_indirect :
 theorem accepts_fields :
     passes own.1 lib tokens.totalField
       (.field (.atom "T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null" "Program")
-        1 int32 true) = true ∧
+        1 int32 name!"total" true) = true ∧
     passes own.1 lib tokens.countField countOperand = true := by decide +kernel
 /-! ## Operands whose metadata or claim changed -/
 
@@ -117,19 +117,26 @@ private def olderConsole : TypeExpr :=
     "System.Console"
 
 theorem rejects_an_owner_scope_with_another_version :
-    rejects own.1 lib tokens.writeLine (.call { writeLineSite with declaringType := olderConsole })
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.owner := olderConsole })
       (.scopeMismatch tokens.writeLine) = true := by decide +kernel
 #print axioms rejects_an_owner_scope_with_another_version
 
 theorem rejects_a_field_index_the_metadata_does_not_give :
     rejects own.1 lib tokens.countField
-      (.field (.atom ownIdentity "Program") 1 int32 false)
+      (.field (.atom ownIdentity "Program") 1 int32 name!"count" false)
       (.fieldIndexMismatch tokens.countField 1 0) = true := by decide +kernel
 #print axioms rejects_a_field_index_the_metadata_does_not_give
 
+/-- The count field's token with the operand naming `total`, the static field after it. -/
+theorem rejects_a_field_operand_named_for_another_row :
+    rejects own.1 lib tokens.countField
+      (.field (.atom ownIdentity "Program") 0 int32 name!"total" false)
+      (.operandMismatch tokens.countField) = true := by decide +kernel
+#print axioms rejects_a_field_operand_named_for_another_row
+
 theorem rejects_a_static_field_claimed_as_an_instance_field :
     rejects own.1 lib tokens.totalField
-      (.field (.atom ownIdentity "Program") 1 int32 false)
+      (.field (.atom ownIdentity "Program") 1 int32 name!"total" false)
       (.operandMismatch tokens.totalField) = true := by decide +kernel
 #print axioms rejects_a_static_field_claimed_as_an_instance_field
 
@@ -192,11 +199,62 @@ theorem rejects_another_string_than_the_user_string :
   decide +kernel
 #print axioms rejects_another_string_than_the_user_string
 
+/-! ## Method names -/
+
+/-- A call site's typed fields read its method, so they keep the values the fixtures state. -/
+theorem call_site_fields_read_the_method :
+    writeLineSite.declaringType = .atom runtimeScope "System.Console" ∧
+      writeLineSite.hasThis = false ∧ writeLineSite.returnType = .void ∧
+      writeLineSite.parameterTypes = [int32] ∧ writeLineSite.method.argumentCount = 1 ∧
+    getSite.declaringType = .atom libScope "Lib.Box" ∧ getSite.returnType = int32 ∧
+      getSite.parameterTypes = [] ∧
+    idSite.method.methodArguments = idSite.typeArguments ∧ idSite.method.genericArity = 1 := by
+  decide
+#print axioms call_site_fields_read_the_method
+
+/-- The method a call operand names is the row's name read as a metadata name; a site whose
+    display name still matches the row but whose typed name does not is refused. -/
+theorem rejects_a_method_name_other_than_the_row :
+    rejects own.1 lib tokens.writeLine
+      (.call { writeLineSite with method.name := name!"WriteLin" })
+      (.operandMismatch tokens.writeLine) = true ∧
+    rejects own.1 lib tokens.getRef (.call { getSite with method.name := name!"Set" })
+      (.operandMismatch tokens.getRef) = true ∧
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.name := name!"Ids" })
+      (.operandMismatch tokens.idSpec) = true := by decide +kernel
+#print axioms rejects_a_method_name_other_than_the_row
+
+/-- A typed name whose code spells no byte list, the empty code or one whose leading digit is
+    not 1, names no row. -/
+theorem rejects_a_method_name_that_spells_no_bytes :
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.name := ⟨0⟩ })
+      (.operandMismatch tokens.writeLine) = true ∧
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.name := ⟨767⟩ })
+      (.operandMismatch tokens.writeLine) = true := by decide +kernel
+#print axioms rejects_a_method_name_that_spells_no_bytes
+
+/-- A call's typed method states the row's generic arity and the method arguments the site
+    instantiates; a site that disagrees on either names another method. -/
+theorem rejects_a_method_with_another_arity_or_arguments :
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.genericArity := 0 })
+      (.genericMismatch tokens.idSpec) = true ∧
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.methodArguments := [int32] })
+      (.genericMismatch tokens.idSpec) = true := by decide +kernel
+#print axioms rejects_a_method_with_another_arity_or_arguments
+
+/-- A string heap entry that holds a value above a byte is refused when the slice is indexed,
+    so every row name the call check reads is a metadata name. -/
+theorem rejects_a_row_name_that_is_not_bytes :
+    rejects { own.1 with strings := own.1.strings.map fun (offset, bytes) =>
+        (offset, if bytes == bytesOf "WriteLine" ++ [0] then 256 :: bytes else bytes) } lib
+      tokens.writeLine (.call writeLineSite) .invalidByte = true := by decide +kernel
+#print axioms rejects_a_row_name_that_is_not_bytes
+
 /-! ## Calls into a pinned assembly -/
 
 theorem rejects_a_pinned_callee_with_another_name :
     rejects (borrow own.1 tokens.getRef tokens.writeLine 2) lib
-      tokens.getRef (.call { getSite with name := "WriteLine" })
+      tokens.getRef (.call { getSite with name := "WriteLine", method.name := name!"WriteLine" })
       (.unresolvedMember tokens.getRef) = true := by decide +kernel
 #print axioms rejects_a_pinned_callee_with_another_name
 
@@ -269,8 +327,10 @@ theorem decides_a_struct_without_the_corlib_number :
 /-- A field of a struct in a pinned assembly is read from that assembly's slice: without the
     slice it is refused, not taken for a platform field. -/
 theorem rejects_a_pinned_struct_field_whose_slice_is_missing :
-    passes own.1 lib tokens.firstRef (.field (.atom libScope "Lib.Pair") 0 int32 false) = true ∧
-    rejectsWithoutLibSlice tokens.firstRef (.field (.atom libScope "Lib.Pair") 0 int32 false)
+    passes own.1 lib tokens.firstRef (.field (.atom libScope "Lib.Pair") 0 int32 name!"first" false)
+      = true ∧
+    rejectsWithoutLibSlice tokens.firstRef
+      (.field (.atom libScope "Lib.Pair") 0 int32 name!"first" false)
       (.missingSlice tokens.pairRef) = true := by decide +kernel
 #print axioms rejects_a_pinned_struct_field_whose_slice_is_missing
 
@@ -280,7 +340,7 @@ theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :
     passes own.1 lib tokens.sumRef (.call sumSite) = true ∧
     passes own.1 libWithoutCorlib tokens.sumRef (.call sumSite) = true ∧
     rejects own.1 libWithoutCorlib tokens.sumRef
-      (.call { sumSite with declaringType := .object libScope "Lib.Pair" })
+      (.call { sumSite with method.owner := .object libScope "Lib.Pair" })
       (.operandMismatch tokens.sumRef) = true := by decide +kernel
 #print axioms rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number
 
@@ -295,16 +355,24 @@ private def lazyOfMethodParameter : TypeExpr :=
     generic class and for a field of an external generic class. -/
 theorem reads_a_field_parameter_against_the_declaring_instance :
     passes own.1 lib tokens.holderValueRef
-      (.field holderOfMethodParameter 0 (.parameter 0) true) (arity := 1) = true ∧
+      (.field holderOfMethodParameter 0 (.parameter 0) name!"Value" true) (arity := 1) = true ∧
     rejects own.1 lib tokens.holderValueRef
-      (.field holderOfMethodParameter 0 (.parameter 1) true)
+      (.field holderOfMethodParameter 0 (.parameter 1) name!"Value" true)
       (.operandMismatch tokens.holderValueRef) (arity := 1) = true ∧
     passes own.1 lib tokens.lazyValueRef
-      (.field lazyOfMethodParameter 0 (.parameter 0) false) (arity := 1) = true ∧
+      (.field lazyOfMethodParameter 0 (.parameter 0) name!"Value" false) (arity := 1) = true ∧
     rejects own.1 lib tokens.lazyValueRef
-      (.field lazyOfMethodParameter 0 (.parameter 1) false)
+      (.field lazyOfMethodParameter 0 (.parameter 1) name!"Value" false)
       (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
 #print axioms reads_a_field_parameter_against_the_declaring_instance
+
+/-- A member reference into an unpinned type gives every field index 0, so the operand's name is
+    what tells `System.Lazy<!!0>.Value` from another field of the type: another name is refused. -/
+theorem rejects_an_unpinned_field_reference_with_another_name :
+    rejects own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 0 (.parameter 0) name!"Other" false)
+      (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
+#print axioms rejects_an_unpinned_field_reference_with_another_name
 
 /-- The own slice without the row of the static field between the first and the second instance
     field of `Program`: the carried rows of the type leave a gap. -/
@@ -315,10 +383,10 @@ private def ownWithGappedFields : MetadataSlice :=
     the type's fields with a missing row cannot give the count of instance fields before it, so
     the token is refused, not read as the first instance field. -/
 theorem rejects_a_field_after_a_gap_in_the_carried_field_rows :
-    passes own.1 lib tokens.secondField (.field (.atom ownIdentity "Program") 1 int32 false) =
-      true ∧
+    passes own.1 lib tokens.secondField
+      (.field (.atom ownIdentity "Program") 1 int32 name!"second" false) = true ∧
     rejects ownWithGappedFields lib tokens.secondField
-      (.field (.atom ownIdentity "Program") 1 int32 false)
+      (.field (.atom ownIdentity "Program") 1 int32 name!"second" false)
       (.unresolvedMember tokens.secondField) = true := by decide +kernel
 #print axioms rejects_a_field_after_a_gap_in_the_carried_field_rows
 
@@ -329,9 +397,9 @@ theorem rejects_a_field_access_that_disagrees_with_the_field_row :
     checkSite 0x7B { staticField := some true } countOperand = false ∧
     checkSite 0x7B { staticField := some false } countOperand = true ∧
     checkSite 0x7B { staticField := some false }
-      (.field (.atom ownIdentity "Program") 0 int32 false) = true ∧
+      (.field (.atom ownIdentity "Program") 0 int32 name!"count" false) = true ∧
     checkSite 0x7E { staticField := some true }
-      (.field (.atom ownIdentity "Program") 1 int32 true) = true := by decide +kernel
+      (.field (.atom ownIdentity "Program") 1 int32 name!"total" true) = true := by decide +kernel
 #print axioms rejects_a_field_access_that_disagrees_with_the_field_row
 
 /-! ## The method definition -/
@@ -726,16 +794,20 @@ private def pairTuple : TypeExpr :=
   .aggregate (runtimeScope ++ "::System.ValueTuple`2<Lib.Pair,Lib.Pair>") 0
 private def pairAtom : TypeExpr := .atom libScope "Lib.Pair"
 
+/-- The pair's instance field at `index` with `name`. -/
+private def pairField (index : Nat) (name : MetadataName) : RawOperand :=
+  .field pairTuple index pairAtom name false
+
 /-- `Item2` of the pair is its second field whatever the slice's core-library number says: the
     pair is known from its own reference to `System.Runtime`, so `Item2` claimed at index 0 is
     refused with the number right, missing or naming no reference. -/
 theorem reads_the_pair_from_its_own_reference :
-    passes (tupleSlice 1).1 lib (tupleSlice 1).2.2 (.field pairTuple 1 pairAtom false) = true ∧
-    passes (tupleSlice 0).1 lib (tupleSlice 0).2.2 (.field pairTuple 1 pairAtom false) = true ∧
-    passes (tupleSlice 0).1 lib (tupleSlice 0).2.1 (.field pairTuple 0 pairAtom false) = true ∧
-    rejects (tupleSlice 1).1 lib (tupleSlice 1).2.2 (.field pairTuple 0 pairAtom false)
+    passes (tupleSlice 1).1 lib (tupleSlice 1).2.2 (pairField 1 name!"Item2") = true ∧
+    passes (tupleSlice 0).1 lib (tupleSlice 0).2.2 (pairField 1 name!"Item2") = true ∧
+    passes (tupleSlice 0).1 lib (tupleSlice 0).2.1 (pairField 0 name!"Item1") = true ∧
+    rejects (tupleSlice 1).1 lib (tupleSlice 1).2.2 (pairField 0 name!"Item2")
       (.fieldIndexMismatch (tupleSlice 1).2.2 0 1) = true ∧
-    rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (.field pairTuple 0 pairAtom false)
+    rejects (tupleSlice 0).1 lib (tupleSlice 0).2.2 (pairField 0 name!"Item2")
       (.fieldIndexMismatch (tupleSlice 0).2.2 0 1) = true := by decide +kernel
 #print axioms reads_the_pair_from_its_own_reference
 
@@ -875,7 +947,7 @@ private def programExtends (coded : Nat) : MetadataSlice :=
     bytes.take 8 ++ [coded, 0] ++ bytes.drop 10
 
 private def objectFieldOperand : RawOperand :=
-  .field (.object ownIdentity "Program") 0 int32 false
+  .field (.object ownIdentity "Program") 0 int32 name!"count" false
 
 theorem refuses_a_base_class_chain_that_does_not_end_at_object :
     passes own.1 lib tokens.countField objectFieldOperand = true ∧

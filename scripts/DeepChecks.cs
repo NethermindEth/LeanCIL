@@ -193,24 +193,24 @@ partial class Program
     /// <summary>Hashes the exact compiled module families, enumerating each containing directory once.</summary>
     static SortedDictionary<string, string> BindingArtifactHashes(IEnumerable<string> artifacts)
     {
-        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        var families = artifacts.Select(Path.GetFullPath).GroupBy(Path.GetDirectoryName, comparer);
+        var families = artifacts.Select(Path.GetFullPath)
+            .GroupBy(artifact => Path.GetDirectoryName(artifact)!, LocationComparer);
         List<(string Name, string Path)> files = [];
         foreach (var family in families)
         {
-            var expected = family.ToHashSet(comparer);
+            var expected = family.ToHashSet(LocationComparer);
             foreach (var artifact in expected)
                 if (!File.Exists(artifact))
                     throw new InvalidDataException("Deep-check artifact changed: missing " + artifact);
-            foreach (var path in Directory.EnumerateFiles(family.Key!))
+            foreach (var path in Directory.EnumerateFiles(family.Key))
             {
                 var filename = Path.GetFileName(path);
-                var marker = filename.IndexOf(".olean", OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+                // Any case finds a candidate; the directory's case rule then decides whether it is an expected file.
+                var marker = filename.IndexOf(".olean", StringComparison.OrdinalIgnoreCase);
                 if (marker < 0) continue;
                 var end = marker + ".olean".Length;
                 if ((end == filename.Length || filename[end] == '.') &&
-                    expected.Contains(Path.Combine(family.Key!, filename[..end])))
+                    expected.Contains(Path.Combine(family.Key, filename[..end])))
                     files.Add((path, path));
             }
         }
@@ -330,9 +330,8 @@ partial class Program
     /// <summary>Builds and replays StrictBinding in the caller's selected, certified library session.</summary>
     void PrepareBindingLibrary(string package)
     {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (session is null || library is null || libraryKey is null || certifiedModules is null ||
-            !string.Equals(Path.GetFullPath(package), Path.GetFullPath(session), comparison))
+            !SameLocation(package, session))
             throw new InvalidOperationException("StrictBinding requires the selected certified library session");
         RequireUnchangedLibrary();
         if (bindingPreparation is not null)

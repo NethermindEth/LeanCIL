@@ -41,9 +41,9 @@ def method9Signature : String :=
   [.ldarg 0, .call 1 1, .ldc_i4 1, .conv_i8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
   [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
-    .throw "System.ArgumentOutOfRangeException", .ldarg 0, .ret] }
+    .throw .argumentOutOfRange, .ldarg 0, .ret] }
 @[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 2, .ldarg 0, .load64, .ldarg 1, .load64, .add, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ret] }
 @[cil_code] def method3 : Method := { returnsValue := false, locals := [], code :=
   [.ldarg 0, .ldarg 1, .ldarg 2, .call 2 3, .ret] }
 /-- `SumSwapped`: loads its arguments in the order `AddTo` takes them. -/
@@ -69,7 +69,7 @@ def method9Signature : String :=
 @[cil_code] def method8 : Method := {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
   returnsValue := true, locals := [], code :=
-  [.ldarg 2, .ldarg 0, .load64, .ldarg 1, .load64, .add, .store64, .ldc_i4 1,
+  [.ldarg 2, .ldarg 0, .ldind .i8, .ldarg 1, .ldind .i8, .add, .stind .i8, .ldc_i4 1,
     .ret] }
 /-- `IsZeroIgnoring`: forwards its first argument and never loads its second. -/
 @[cil_code] def method9 : Method := {
@@ -166,7 +166,7 @@ def percentExact : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 
 def percentBounded : OutcomeContract CIL.W64 CIL.W64 :=
   { percentExact with post := fun _ _ _ out => out ≤ 100 }
@@ -691,7 +691,7 @@ def sampleInput : AddInput := ⟨⟨0, 0⟩, ⟨0, 8⟩, ⟨0, 16⟩, ⟨0, 0⟩
 theorem sample_pre : addPre sampleInput sample := ⟨rfl, rfl, rfl⟩
 
 theorem raises_unique {program : CIL.Program} {method : Nat} {args : List Value} {memory : Memory}
-    {one other : String} (first : Raises program method args memory one)
+    {one other : CIL.ExceptionType} (first : Raises program method args memory one)
     (second : Raises program method args memory other) : one = other := by
   obtain ⟨_, fault, ran, thrown⟩ := first
   obtain ⟨_, fault', ran', thrown'⟩ := second
@@ -700,8 +700,9 @@ theorem raises_unique {program : CIL.Program} {method : Nat} {args : List Value}
   cases thrown'
   rfl
 
-theorem raises_not_returns {program : CIL.Program} {method fuel : Nat} {args : List Value} {memory : Memory}
-    {exception : String} {result : Memory × List Value} (raised : Raises program method args memory exception)
+theorem raises_not_returns {program : CIL.Program} {method fuel : Nat} {args : List Value}
+    {memory : Memory} {exception : CIL.ExceptionType} {result : Memory × List Value}
+    (raised : Raises program method args memory exception)
     (returned : invoke program fuel method args memory = .ok result) : False := by
   obtain ⟨_, fault, ran, thrown⟩ := raised
   cases invoke_unique (second := .ok result) (by simp [Settled, thrown]) trivial ran returned
@@ -743,7 +744,8 @@ theorem weaker_pre_not_refines : ¬ percentInRange.Refines percentUnguarded := f
 
 theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program percent := fun holds => by
   obtain ⟨fuel, ⟨final, values⟩, invoked, -⟩ := holds 101 sample trivial
-  exact raises_not_returns (percent_exact.raising (input := 101) (exception := "System.ArgumentOutOfRangeException") trivial (by decide)) invoked
+  exact raises_not_returns (percent_exact.raising (input := 101)
+    (exception := .argumentOutOfRange) trivial (by decide)) invoked
 
 /-- A smaller footprint: `AddTo` changes `res`, which an empty footprint keeps. -/
 def addUnframed : MethodContract AddInput := { addInternal with footprint := fun _ => [] }
@@ -766,15 +768,16 @@ theorem smaller_footprint_rejected : ¬ addUnframed.Holds Extracted.program addT
 
 /-- A changed exception type: `Percent(101)` throws `ArgumentOutOfRangeException`. -/
 def percentRenamed : OutcomeContract CIL.W64 CIL.W64 :=
-  { percentBounded with raises := fun v _ => if v ≤ 100 then none else some "System.ArgumentException" }
+  { percentBounded with raises := fun v _ => if v ≤ 100 then none else some .argument }
 
 theorem changed_exception_not_refines : ¬ percentExact.Refines percentRenamed := fun refines =>
   absurd (refines.raises 101 sample trivial) (by decide)
 
 theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program percent := fun holds => by
-  have renamed : Raises Extracted.program percent [.scalar (.i64 101)] sample "System.ArgumentException" :=
+  have renamed : Raises Extracted.program percent [.scalar (.i64 101)] sample .argument :=
     holds.raising (input := 101) trivial (by decide)
-  exact absurd (raises_unique renamed (percent_exact.raising (input := 101) (exception := "System.ArgumentOutOfRangeException") trivial (by decide))) (by decide)
+  exact absurd (raises_unique renamed (percent_exact.raising (input := 101)
+    (exception := .argumentOutOfRange) trivial (by decide))) (by decide)
 
 /-- The callee contract over the first word of the pair. -/
 def firstZero : MethodContract (CIL.W64 × CIL.W64) Bool :=

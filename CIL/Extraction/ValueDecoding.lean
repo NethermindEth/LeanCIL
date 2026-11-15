@@ -4,13 +4,16 @@ import CIL.Extraction.Generics
 # Value opcodes decoded from raw instructions
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
-shuffling, return, constants, locals, branches, integer arithmetic, conversions and comparisons,
-with every short and macro form folded into its constructor. `valueEncodingMatches` accepts an
-emitted instruction exactly when it is that decoded instruction, and `Instruction.valueOpcode` is
-the set of opcodes `ofRaw?` decodes for some operand. Instantiation leaves every decoded value
-unchanged (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original.
-`Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw opcode,
-exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
+shuffling, return, constants, `ldnull`, arguments, locals, branches, integer arithmetic,
+conversions, comparisons, integer indirect loads and stores, dynamic frame storage and the class
+type tests `castclass` and `isinst`, with every short and macro form folded into its constructor.
+`valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded instruction,
+and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand.
+Instantiation changes a decoded instruction only in the type a type test names
+(`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original with each
+type test at the instantiated type. `Instruction.ofRaw` is the total decoding: it writes a hole,
+`.unadmitted` of the raw opcode, exactly where `ofRaw?` admits nothing
+(`Instruction.ofRaw_eq_unadmitted_iff`).
 -/
 
 namespace CIL.Extraction
@@ -40,42 +43,47 @@ def operandIndexBound (opcode : Nat) : Nat :=
 def encodedLocal (instruction : RawInstruction) : Option Nat :=
   (localIndex instruction).filter (· < operandIndexBound instruction.opcode)
 
-/-- Operand kinds that instantiation rewrites; no value opcode takes one. -/
+/-- Operand kinds that instantiation rewrites; of these, value opcodes take only a type. -/
 def RawOperand.mentionsType : RawOperand → Bool
   | .type _ | .field .. | .call _ | .indirectCall .. => true
+  | _ => false
+
+/-- Whether an operand is a type, the operand of the class type tests. -/
+def RawOperand.isType : RawOperand → Bool
+  | .type _ => true
   | _ => false
 
 /-- Substitution keeps an operand's kind, and leaves an operand that mentions no type unchanged. -/
 theorem substituteOperand_mentionsType {arguments : List TypeExpr} {layouts : List RawLayout}
     {arity : Nat} {original operand : RawOperand}
     (substituted : substituteOperand arguments layouts arity original = some operand) :
-    operand.mentionsType = original.mentionsType ∧
+    operand.mentionsType = original.mentionsType ∧ operand.isType = original.isType ∧
       (original.mentionsType = false → operand = original) := by
   cases original with
   | type type =>
     simp only [substituteOperand, Option.map_eq_map, Option.map_eq_some_iff] at substituted
     obtain ⟨_, _, rfl⟩ := substituted
-    exact ⟨rfl, nofun⟩
-  | field owner index type isStatic =>
+    exact ⟨rfl, rfl, nofun⟩
+  | field owner index type name isStatic =>
     simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure,
       Option.some.injEq] at substituted
     obtain ⟨_, _, _, _, rfl⟩ := substituted
-    exact ⟨rfl, nofun⟩
+    exact ⟨rfl, rfl, nofun⟩
   | call site =>
     simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure]
       at substituted
     obtain ⟨_, _, substituted⟩ := substituted
     split at substituted <;>
       simp only [Option.bind_eq_some_iff, Option.some.injEq] at substituted <;>
-      obtain ⟨_, _, _, _, _, _, _, _, rfl⟩ := substituted <;> exact ⟨rfl, nofun⟩
+      obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := substituted <;> exact ⟨rfl, rfl, nofun⟩
   | indirectCall returnType parameters hasThis explicitThis convention =>
     simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure,
       Option.some.injEq] at substituted
     obtain ⟨_, _, _, _, rfl⟩ := substituted
-    exact ⟨rfl, nofun⟩
+    exact ⟨rfl, rfl, nofun⟩
   | _ =>
     simp only [substituteOperand, Option.some.injEq] at substituted
-    exact ⟨by rw [substituted], fun _ => substituted.symm⟩
+    exact ⟨by rw [substituted], by rw [substituted], fun _ => substituted.symm⟩
 
 #print axioms substituteOperand_mentionsType
 
@@ -87,20 +95,43 @@ open Extraction
 
 /-- The opcodes `Instruction.ofRaw?` decodes for some operand. -/
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
-  opcode == 0 || (2 <= opcode && opcode <= 14) || (17 <= opcode && opcode <= 19) ||
-    (21 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
-    (42 <= opcode && opcode <= 69) || (88 <= opcode && opcode <= 106) ||
-    opcode == 109 || opcode == 110 || (130 <= opcode && opcode <= 139) ||
-    (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 224 ||
-    (65025 <= opcode && opcode <= 65029) || opcode == 65033 ||
-    (65036 <= opcode && opcode <= 65038)
+  opcode == 0 || (2 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
+    (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
+    (88 <= opcode && opcode <= 106) || opcode == 109 || opcode == 110 || opcode == 116 ||
+    opcode == 117 || (130 <= opcode && opcode <= 139) || (179 <= opcode && opcode <= 186) ||
+    (209 <= opcode && opcode <= 219) || opcode == 223 || opcode == 224 ||
+    (65025 <= opcode && opcode <= 65029) || (65033 <= opcode && opcode <= 65039)
+
+/-- The class type test `opcode` denotes on `type`: `castclass` (116) or `isinst` (117). -/
+def Instruction.typeTest? (opcode : Nat) (type : TypeExpr) : Option Instruction :=
+  if opcode == 116 then some (.castclass type) else if opcode == 117 then some (.isinst type)
+  else none
+
+/-- Only `castclass` (116) and `isinst` (117) denote a type test. -/
+theorem Instruction.typeTest?_opcode {opcode : Nat} {type : TypeExpr} {instruction : Instruction}
+    (tested : Instruction.typeTest? opcode type = some instruction) :
+    opcode = 116 ∨ opcode = 117 := by
+  unfold Instruction.typeTest? at tested
+  revert tested
+  cases castclass : opcode == 116
+  · cases isinst : opcode == 117
+    · intro tested
+      first | cases tested | simp at tested
+    · exact fun _ => .inr (beq_iff_eq.mp isinst)
+  · exact fun _ => .inl (beq_iff_eq.mp castclass)
+
+#print axioms Instruction.typeTest?_opcode
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
-    with short and macro forms folded into it. Any other opcode, an operand kind that
-    instantiation rewrites, or a malformed or out-of-range operand gives `none`. A hole is never
-    a decoding, so `Instruction.ofRaw` can write one where this admits nothing. -/
+    with short and macro forms folded into it. A type operand gives the type test its opcode
+    names; any other opcode, another operand kind that instantiation rewrites, or a malformed or
+    out-of-range operand gives `none`. A hole is never a decoding, so `Instruction.ofRaw` can
+    write one where this admits nothing. -/
 def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|
+  match raw.operand with
+  | .type type => Instruction.typeTest? raw.opcode type
+  | _ =>
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
   match raw.opcode, raw.operand with
   -- Stack shuffling and return.
@@ -109,6 +140,7 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   | 38, .none => some .pop
   | 42, .none => some .ret
   -- Constants, with the operand ranges ECMA-335 gives each form.
+  | 20, .none => some .ldnull
   | 21, .none => some (.ldc_i4 (BitVec.ofInt 32 (-1)))
   | 31, .integer value =>
     if -128 <= value && value < 128 then some (.ldc_i4 (BitVec.ofInt 32 value)) else none
@@ -118,11 +150,15 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
     if -(2^63) <= value && value < 2^63 then some (.ldc_i8 (BitVec.ofInt 64 value)) else none
   | 22, .none | 23, .none | 24, .none | 25, .none | 26, .none | 27, .none | 28, .none
   | 29, .none | 30, .none => some (.ldc_i4 (BitVec.ofNat 32 (raw.opcode - 22)))
-  -- Argument loads; `ldarga` and `starg` (15, 16, 65034, 65035) decode to nothing.
+  -- Argument loads, addresses and stores; an index wider than its form encodes gives `none`.
   | 2, .none => some (.ldarg 0) | 3, .none => some (.ldarg 1)
   | 4, .none => some (.ldarg 2) | 5, .none => some (.ldarg 3)
   | 14, .argument index | 65033, .argument index =>
     if index < operandIndexBound raw.opcode then some (.ldarg index) else none
+  | 15, .argument index | 65034, .argument index =>
+    if index < operandIndexBound raw.opcode then some (.ldarga index) else none
+  | 16, .argument index | 65035, .argument index =>
+    if index < operandIndexBound raw.opcode then some (.starg index) else none
   -- Locals; `encodedLocal` validates the operand of every form and its width.
   | 6, _ | 7, _ | 8, _ | 9, _ | 17, _ | 65036, _ => Instruction.ldloc <$> encodedLocal raw
   | 10, _ | 11, _ | 12, _ | 13, _ | 19, _ | 65038, _ => Instruction.stloc <$> encodedLocal raw
@@ -142,6 +178,14 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   | 54, .target target | 67, .target target => some (.ble_un target)
   | 55, .target target | 68, .target target => some (.blt_un target)
   | 69, .targets targets => some (.switch targets)
+  -- Integer indirect loads and stores; the floating and reference kinds decode to nothing.
+  | 70, .none => some (.ldind .i1) | 71, .none => some (.ldind .u1)
+  | 72, .none => some (.ldind .i2) | 73, .none => some (.ldind .u2)
+  | 74, .none => some (.ldind .i4) | 75, .none => some (.ldind .u4)
+  | 76, .none => some (.ldind .i8) | 77, .none => some (.ldind .i)
+  | 82, .none => some (.stind .i1) | 83, .none => some (.stind .i2)
+  | 84, .none => some (.stind .i4) | 85, .none => some (.stind .i8)
+  | 223, .none => some (.stind .i)
   -- Arithmetic, bitwise operations and shifts.
   | 88, .none => some .add | 89, .none => some .sub | 90, .none => some .mul
   | 91, .none => some .div | 92, .none => some .div_un
@@ -174,6 +218,8 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   -- Comparisons.
   | 65025, .none => some .ceq | 65026, .none => some .cgt | 65027, .none => some .cgt_un
   | 65028, .none => some .clt | 65029, .none => some .clt_un
+  -- Dynamic frame storage; whether it is zeroed is the method's localsinit flag, not an operand.
+  | 65039, .none => some .localloc
   | _, _ => none
 
 /-- `ofRaw?` decodes only the opcodes of `Instruction.valueOpcode`. -/
@@ -182,9 +228,13 @@ theorem Instruction.valueOpcode_of_ofRaw? {raw : RawInstruction} {instruction : 
     Instruction.valueOpcode raw.opcode = true := by
   cases opcodeValue : Instruction.valueOpcode raw.opcode
   · unfold Instruction.ofRaw? at decoded
-    rw [opcodeValue, Bool.not_false, Bool.or_true,
-      ite_eq_left_of_eq_true _ _ (eq_true rfl)] at decoded
-    cases decoded
+    split at decoded
+    · rcases Instruction.typeTest?_opcode (Option.filter_eq_some_iff.mp decoded).1
+        with opcodeIs | opcodeIs <;>
+        rw [opcodeIs] at opcodeValue <;> exact absurd opcodeValue (by decide)
+    · rw [opcodeValue, Bool.not_false, Bool.or_true,
+        ite_eq_left_of_eq_true _ _ (eq_true rfl)] at decoded
+      cases decoded
   · rfl
 
 #print axioms Instruction.valueOpcode_of_ofRaw?
@@ -257,7 +307,10 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   -- Constants, arguments and locals compare their operand.
   | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
   | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
+  | .ldnull => (emitted matches .ldnull)
   | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
+  | .ldarga expected => match emitted with | .ldarga actual => expected == actual | _ => false
+  | .starg expected => match emitted with | .starg actual => expected == actual | _ => false
   | .ldloc expected => match emitted with | .ldloc actual => expected == actual | _ => false
   | .stloc expected => match emitted with | .stloc actual => expected == actual | _ => false
   | .ldloca expected => match emitted with | .ldloca actual => expected == actual | _ => false
@@ -276,6 +329,9 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ble_un expected => match emitted with | .ble_un actual => expected == actual | _ => false
   | .blt_un expected => match emitted with | .blt_un actual => expected == actual | _ => false
   | .switch expected => match emitted with | .switch actual => expected == actual | _ => false
+  -- Indirect loads and stores compare their kind.
+  | .ldind expected => match emitted with | .ldind actual => expected == actual | _ => false
+  | .stind expected => match emitted with | .stind actual => expected == actual | _ => false
   -- Arithmetic, bitwise operations and shifts.
   | .add => (emitted matches .add)
   | .sub => (emitted matches .sub)
@@ -318,6 +374,12 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .cgt_un => (emitted matches .cgt_un)
   | .clt => (emitted matches .clt)
   | .clt_un => (emitted matches .clt_un)
+  -- Type tests compare the class they test.
+  | .castclass expected =>
+    match emitted with | .castclass actual => expected == actual | _ => false
+  | .isinst expected => match emitted with | .isinst actual => expected == actual | _ => false
+  -- Dynamic frame storage.
+  | .localloc => (emitted matches .localloc)
   -- Constructors outside the value family are never a decoded value.
   | _ => false
 
@@ -331,20 +393,36 @@ theorem Instruction.sameValue_eq {decoded emitted : Instruction}
 
 #print axioms Instruction.sameValue_eq
 
-/-- Instantiation leaves every value operand unchanged, so a closed body decodes like its
-    original. -/
+/-- Instantiation changes a decoded instruction only in the type a type test names: an operand
+    that is not a type decodes as before, and a type test decodes exactly when the original does,
+    to the test of the same opcode on the substituted type. -/
 theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOperand}
     {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
     (substituted : substituteOperand arguments layouts arity raw.operand = some operand) :
-    Instruction.ofRaw? { raw with operand } = Instruction.ofRaw? raw := by
-  obtain ⟨sameKind, unchanged⟩ := substituteOperand_mentionsType substituted
-  cases typed : raw.operand.mentionsType
-  · rw [unchanged typed]
-  · have typedNow : ({ raw with operand } : RawInstruction).operand.mentionsType = true := by
-      rw [show ({ raw with operand } : RawInstruction).operand = operand from rfl, sameKind, typed]
-    unfold Instruction.ofRaw?
-    rw [ite_eq_left_of_eq_true _ _ (eq_true (by rw [typedNow, Bool.true_or])),
-      ite_eq_left_of_eq_true _ _ (eq_true (by rw [typed, Bool.true_or]))]
+    Instruction.ofRaw? { raw with operand } =
+      match raw.operand, operand with
+      | .type _, .type type =>
+        (Instruction.ofRaw? raw).bind fun _ => Instruction.typeTest? raw.opcode type
+      | _, _ => Instruction.ofRaw? raw := by
+  obtain ⟨sameKind, sameType, unchanged⟩ := substituteOperand_mentionsType substituted
+  obtain ⟨offset, opcode, original⟩ := raw
+  cases original
+  case type before =>
+    cases operand
+    case type type =>
+      show Option.filter _ (Instruction.typeTest? opcode type) =
+        (Option.filter _ (Instruction.typeTest? opcode before)).bind fun _ =>
+          Instruction.typeTest? opcode type
+      unfold Instruction.typeTest?
+      cases opcode == 116 <;> cases opcode == 117 <;> rfl
+    all_goals exact absurd sameType Bool.false_ne_true
+  -- Any other original either is unchanged or, like its substitute, is refused by the guard.
+  all_goals first
+    | (cases unchanged rfl <;> rfl)
+    | (cases operand <;> first
+        | exact absurd sameKind Bool.false_ne_true
+        | exact absurd sameType.symm Bool.false_ne_true
+        | rfl)
 
 #print axioms Instruction.ofRaw?_substitute
 

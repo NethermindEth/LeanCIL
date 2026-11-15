@@ -26,8 +26,8 @@ var mutations = new (string Name, string Helper, string Before, string After)[]
 {
     ("ReadBig", "ReadInt16BigEndian", ".binaryRead 2 true true false", ".binaryRead 2 false true false"),
     ("ReadBig", "ReadIntPtrBigEndian",
-        "returnType := .atom Extraction.runtimeScope \"System.IntPtr\", parameterTypes :=",
-        "returnType := .atom Extraction.runtimeScope \"System.UIntPtr\", parameterTypes :="),
+        "returnType := .atom Extraction.runtimeScope \"System.IntPtr\", parameters :=",
+        "returnType := .atom Extraction.runtimeScope \"System.UIntPtr\", parameters :="),
     ("ReadLittle", "ReadIntPtrLittleEndian", "ReadIntPtrLittleEndian", "ReadInt32LittleEndian"),
     ("TryReadBig", "TryReadUIntPtrBigEndian", "TryReadUIntPtrBigEndian", "TryReadIntPtrBigEndian"),
     ("ReadBig", "ReadInt16BigEndian", ".binaryRead 2 true true false", ".binaryRead 2 true false false"),
@@ -74,7 +74,7 @@ foreach (var method in methods)
     {
         foreach (var (length, storage, fault) in new[]
         {
-            (1, "memory", ".thrown \"System.ArgumentOutOfRangeException\""),
+            (1, "memory", ".thrown .argumentOutOfRange"),
             (8, "uninitialized", ".memory .uninitialized _ _")
         })
             claims.Add("(match CIL.Safety.invoke Extracted.program 512 0 " +

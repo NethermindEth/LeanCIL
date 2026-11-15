@@ -11,6 +11,7 @@
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../scripts/BatchVerification.cs
+#:include ExceptionMembers.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -62,24 +63,29 @@ foreach (var (name, selector, inputs) in new (string, string, int[][])[]
         try { return Claim(assembly, name, input, $".ok [{Scalar(runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!)}]"); }
         catch (TargetInvocationException error) when (site is not null)
         {
-            return Claim(assembly, name, input, $".error ⟨{site.Method}, {site.Pc}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩");
+            string member = ExceptionMember(error.InnerException!);
+            return Claim(assembly, name, input, $".error ⟨{site.Method}, {site.Pc}, .thrown .{member}⟩");
         }
     }).ToList();
     // The RVA descriptor carries the declared packing Roslyn aligned the table to.
     var packing = name is "Word" or "Count" ? 4 : 8;
     if (!source.Contains($"alignment := {packing} }})", StringComparison.Ordinal))
         throw new InvalidOperationException($"{name}: missing static data alignment {packing}");
-    var folded = instructions.FirstOrDefault(instruction => instruction.Op == ".nop");
-    var obligation = $"method{folded?.Method}_features_validated";
-    var control = folded is not null
-        ? CheckedEvidenceControl(source, NarrowEvidence(source, obligation), [obligation], 0) : "";
+    var store = instructions.FirstOrDefault(instruction => instruction.Op == ".stloc 0");
+    if (name != "First" && (store is null ||
+            !instructions.Any(instruction => instruction.Method == store.Method &&
+                instruction.Pc == store.Pc + 1 && instruction.Op == ".ldloca 0")))
+        throw new InvalidOperationException($"{name}: missing span receiver store and address");
+    var obligation = $"method{store?.Method}_features_validated";
+    var control = store is null ? "" :
+        CheckedEvidenceControl(source, NarrowEvidence(source, obligation), [obligation], 0);
     Prove(assembly, selector, name + "-Verified", claims,
         () => Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons"), control);
 
-    // The receiver fold is bound by the feature certificate, independently of the instruction lemmas.
-    if (folded is null) continue;
+    // The feature certificate binds each receiver instruction to its raw opcode.
+    if (store is null) continue;
     var forged = Path.Combine(root, name + "-forged.lean");
-    File.WriteAllText(forged, NarrowEvidence(source.Replace(".nop", ".ldloca 0"), obligation));
+    File.WriteAllText(forged, NarrowEvidence(source.Replace(".stloc 0", ".nop"), obligation));
     rejected.Add(forged, $"PASS {name}: forged span receiver rejected by the feature certificate",
         diagnostic => Regex.IsMatch(diagnostic,
             @"Extraction\.FeatureFlowValid rawLayouts\.toArray \(Extraction\.evidenceConstants methodEvidence\) " +
@@ -101,13 +107,8 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 Prove(tampered, "SpanTables::Word(int)", "Tampered",
     [Claim(tampered, "Word", [0], ".ok [.scalar (.i32 1891)]")],
     () => Console.WriteLine("PASS tampered RVA blob changes the proved word"));
-// Reused locals and computed indexes retain storage; entering an erased receiver is invalid.
-foreach (var (mutation, marker) in new[]
-{
-    ("second-read", ""),
-    ("computed-index", ""),
-    ("interior-branch", "Branch into a folded span receiver")
-})
+// Reused locals and computed indexes retain typed span storage.
+foreach (var mutation in new[] { "second-read", "computed-index" })
 {
     var output = Path.Combine(root, "Reject-" + mutation);
     Directory.CreateDirectory(output);
@@ -130,24 +131,13 @@ foreach (var (mutation, marker) in new[]
                 il.InsertAfter(code[3], il.Create(OpCodes.Ldc_I4_0));
                 il.InsertAfter(code[4], il.Create(OpCodes.Add));
                 break;
-            case "interior-branch":
-                il.InsertBefore(code[1], il.Create(OpCodes.Br, code[2]));
-                break;
         }
         module.Write(dll);
     }
-    if (marker.Length == 0)
-    {
-        var expected = Scalar(runtime.GetMethod("Word")!.Invoke(null, [0])!);
-        Prove(dll, "SpanTables::Word(int)", "Supported-" + mutation,
-            [Claim(dll, "Word", [0], $".ok [{expected}]")],
-            () => Console.WriteLine("PASS stored static span: " + mutation));
-        continue;
-    }
-    var result = Execute(Extract("extract", dll, "Examples", "SpanTables::Word(int)", output));
-    if (result.Code == 0 || File.Exists(Path.Combine(output, "Extracted.lean")) || !result.Output.Contains(marker))
-        throw new InvalidOperationException("Incorrect span rejection: " + mutation + "\n" + result.Output);
-    Console.WriteLine("PASS rejection: " + mutation);
+    var expected = Scalar(runtime.GetMethod("Word")!.Invoke(null, [0])!);
+    Prove(dll, "SpanTables::Word(int)", "Supported-" + mutation,
+        [Claim(dll, "Word", [0], $".ok [{expected}]")],
+        () => Console.WriteLine("PASS stored static span: " + mutation));
 }
 // CoreCLR's CreateSpan<uint> throws on data not 4-byte aligned; packing 2 promises only 2 bytes.
 const string misalignedSpan = "Typed span element width does not divide the field alignment";

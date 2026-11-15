@@ -18,7 +18,8 @@ open CIL.Embedding
 /-- A named exception raised by an invocation of `expected` is raised by `actual`. -/
 theorem Raises.of_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
     (refines : ProgramRefines expected actual maps) {method : Nat} {args : List Value}
-    {memory : Memory} {exception : String} (raised : Raises expected method args memory exception) :
+    {memory : Memory} {exception : ExceptionType}
+    (raised : Raises expected method args memory exception) :
     Raises actual method args memory exception := by
   obtain ⟨fuel, fault, invoked, thrown⟩ := raised
   exact ⟨fuel, _, invoke_raise_refines refines invoked thrown, thrown⟩
@@ -27,7 +28,7 @@ theorem Raises.of_refines {expected actual : CIL.Program} {maps : Nat → Nat �
     the renamed pc. -/
 theorem RunRaises.of_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
     (refines : ProgramRefines expected actual maps) {method pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {memory : Memory} {exception : String}
+    {frame : Frame} {stack : List Value} {memory : Memory} {exception : ExceptionType}
     (raised : RunRaises expected method pc args frame stack memory exception) :
     RunRaises actual method (maps method pc) args frame stack memory exception := by
   obtain ⟨fuel, fault, ran, thrown⟩ := raised
@@ -74,7 +75,7 @@ theorem _root_.CIL.MethodEmbeds.method_holds {Input Output : Type}
     `program`. -/
 theorem _root_.CIL.MethodEmbeds.raises {program : CIL.Program} {index : Nat}
     {expected : CIL.Method} (embeds : MethodEmbeds program index expected) {method : Nat}
-    {args : List Value} {memory : Memory} {exception : String}
+    {args : List Value} {memory : Memory} {exception : ExceptionType}
     (raised : Raises (program.set index expected) method args memory exception) :
     Raises program method args memory exception := by
   obtain ⟨_, refines⟩ := embeds.refines

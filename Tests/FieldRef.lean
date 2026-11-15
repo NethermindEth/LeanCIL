@@ -6,8 +6,8 @@ import Tests.MetadataWorld
 
 Pins `FieldRef`, the typed field operand: a literal elaborates and equality decides on it, a
 reference that differs from another in any one of owner, index, type or name is unequal to it,
-and `FieldRef.ofSite?` reads the count field of the metadata world's `T.Program` into the
-reference its operand and its row name, refusing name bytes that are not a metadata name.
+and `FieldRef.ofOperand?` reads the operand of the metadata world's `T.Program.count` into the
+reference with the operand's owner, index, type and name.
 -/
 
 namespace Tests.FieldRef
@@ -44,26 +44,14 @@ theorem another_name_is_another_field :
     countField ≠ { countField with name := name!"total" } := by decide +kernel
 #print axioms another_name_is_another_field
 
-/-- The site the count field's token reads as in the metadata world. -/
-private def countSite : Option FieldSite :=
-  (do
-    let env := MetadataEnv.ofSlices [← own.1.index, ← lib.index]
-    env.fieldSite tokens.countField).toOption
-
-/-- The count field's operand and site give the count field. -/
+/-- The count field's operand gives the count field. -/
 theorem builds_the_count_field :
-    countSite.bind (FieldRef.ofSite? countOperand) = some countField := by decide +kernel
+    FieldRef.ofOperand? countOperand = some countField := by decide +kernel
 #print axioms builds_the_count_field
 
-/-- A site whose name holds an entry above 255 names no field. -/
-theorem refuses_a_name_that_is_not_bytes :
-    countSite.bind (fun site => FieldRef.ofSite? countOperand { site with name := [99, 256] }) =
-      none := by decide +kernel
-#print axioms refuses_a_name_that_is_not_bytes
-
-/-- An operand other than a field gives no reference, whatever the site. -/
+/-- An operand other than a field gives no reference. -/
 theorem refuses_an_operand_that_is_not_a_field :
-    countSite.bind (FieldRef.ofSite? (.type int32)) = none := by decide +kernel
+    FieldRef.ofOperand? (.type int32) = none := by decide +kernel
 #print axioms refuses_an_operand_that_is_not_a_field
 
 end Tests.FieldRef

@@ -177,12 +177,13 @@ def step (op : Instruction) (returns : Bool)
   | .cgt_un, b :: a :: rest
   | .ceq, b :: a :: rest =>
     return .next (pc + 1) ((← binary op a b) :: rest) memory
-  -- 64-bit loads and stores through a reference.
-  | .load64, .ref a :: rest =>
+  -- Eight-byte integer loads and stores through a reference.
+  | .ldind .i8, .ref a :: rest | .ldind .i, .ref a :: rest =>
     match ← read64 memory a with
     | .i64 w => return .next (pc + 1) (.i64 w :: rest) memory
     | _ => none
-  | .store64, .i64 w :: .ref a :: rest => return .next (pc + 1) rest (← write64 memory a w)
+  | .stind .i8, .i64 w :: .ref a :: rest | .stind .i, .i64 w :: .ref a :: rest =>
+    return .next (pc + 1) rest (← write64 memory a w)
   -- Unconditional and truth-tested branches.
   | .br target, _ => return .next target stack memory
   | .switch targets, .i32 index :: rest =>

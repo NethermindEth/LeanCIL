@@ -12,26 +12,26 @@ mapping, and the lemmas mirror the call-composition lemmas of `CIL.Safety.Outcom
 namespace CIL.Safety
 
 /-- The CLR exception a fault surfaces as, if any; other faults are not exceptions. -/
-def ExecutionFault.clrException : ExecutionFault → Option String
+def ExecutionFault.clrException : ExecutionFault → Option ExceptionType
   | .thrown exception => some exception
-  | .arithmetic .overflow => some "System.OverflowException"
-  | .arithmetic .divideByZero => some "System.DivideByZeroException"
+  | .arithmetic .overflow => some .overflow
+  | .arithmetic .divideByZero => some .divideByZero
   | _ => none
 
 /-- Some invocation fails with a fault that surfaces as exactly `exception`. -/
 def RaisesCLR (program : CIL.Program) (method : Nat) (args : List Value)
-    (memory : Memory) (exception : String) : Prop :=
+    (memory : Memory) (exception : ExceptionType) : Prop :=
   ∃ fuel fault, invoke program fuel method args memory = .error fault ∧
     fault.fault.clrException = some exception
 
 /-- `RaisesCLR` for a run already in progress at `pc`. -/
 def RunRaisesCLR (program : CIL.Program) (method pc : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) (memory : Memory) (exception : String) : Prop :=
+    (frame : Frame) (stack : List Value) (memory : Memory) (exception : ExceptionType) : Prop :=
   ∃ fuel fault, run program fuel method pc args frame stack memory = .error fault ∧
     fault.fault.clrException = some exception
 
 /-- A fault that names a CLR exception is not fuel exhaustion, so more fuel cannot change it. -/
-theorem settled_of_clrException {fault : LocatedFault} {exception : String}
+theorem settled_of_clrException {fault : LocatedFault} {exception : ExceptionType}
     (named : fault.fault.clrException = some exception) :
     Settled (.error fault : Except LocatedFault α) := by
   cases fault with
@@ -39,14 +39,14 @@ theorem settled_of_clrException {fault : LocatedFault} {exception : String}
     cases fault <;> simp_all [ExecutionFault.clrException, Settled]
 
 theorem RaisesCLR.of_raises {program : CIL.Program} {method : Nat} {args : List Value}
-    {memory : Memory} {exception : String}
+    {memory : Memory} {exception : ExceptionType}
     (raised : Raises program method args memory exception) :
     RaisesCLR program method args memory exception := by
   obtain ⟨fuel, fault, invoked, thrown⟩ := raised
   exact ⟨fuel, fault, invoked, by simp [thrown, ExecutionFault.clrException]⟩
 
 theorem RaisesCLR.of_invoke {program : CIL.Program} {fuel method : Nat} {args : List Value}
-    {memory : Memory} {fault : LocatedFault} {exception : String}
+    {memory : Memory} {fault : LocatedFault} {exception : ExceptionType}
     (invoked : invoke program fuel method args memory = .error fault)
     (named : fault.fault.clrException = some exception) :
     RaisesCLR program method args memory exception :=
@@ -55,7 +55,7 @@ theorem RaisesCLR.of_invoke {program : CIL.Program} {fuel method : Nat} {args : 
 /-- A settled invocation result that names a different exception, or none, refutes
     `RaisesCLR`. An `unsupported` fault is not settled, so it refutes no expected exception. -/
 theorem RaisesCLR.not_of_invoke {program : CIL.Program} {fuel method : Nat} {args : List Value}
-    {memory : Memory} {fault : LocatedFault} {exception : String}
+    {memory : Memory} {fault : LocatedFault} {exception : ExceptionType}
     (settled : Settled (.error fault : Except LocatedFault (Memory × List Value)))
     (invoked : invoke program fuel method args memory = .error fault)
     (different : fault.fault.clrException ≠ some exception) :
@@ -79,7 +79,8 @@ def OutcomeContract.HoldsCLR {Input Output : Type} (c : OutcomeContract Input Ou
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values
 
 theorem OutcomeContract.HoldsCLR.raising {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory} {exception : String}
+    {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory}
+    {exception : ExceptionType}
     (holds : c.HoldsCLR program method) (permitted : c.pre input initial)
     (raised : c.raises input initial = some exception) :
     RaisesCLR program method (c.args input) initial exception := by
@@ -108,7 +109,7 @@ theorem OutcomeContract.Holds.clr {Input Output : Type} {c : OutcomeContract Inp
   | some exception => exact RaisesCLR.of_raises (holds.raising permitted named)
 
 theorem raisesCLR_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
-    {args : List Value} {frame : Frame} {memory entered : Memory} {exception : String}
+    {args : List Value} {frame : Frame} {memory entered : Memory} {exception : ExceptionType}
     (found : program[method]? = some body)
     (checked : args.mapM (checkedValue memory) = .ok args)
     (setup : enterFrame body args memory = .ok (frame, entered))
@@ -121,7 +122,7 @@ theorem raisesCLR_of_run {program : CIL.Program} {method : Nat} {body : CIL.Meth
 
 theorem run_next_raisesCLR {program : CIL.Program} {method pc target : Nat}
     {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
-    {frame nextFrame : Frame} {memory updated : Memory} {exception : String}
+    {frame nextFrame : Frame} {memory updated : Memory} {exception : ExceptionType}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =
       .ok (.next target values nextFrame updated))
@@ -134,7 +135,7 @@ theorem run_next_raisesCLR {program : CIL.Program} {method pc target : Nat}
 theorem run_fault_raisesCLR {program : CIL.Program} {method pc : Nat}
     {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value} {frame : Frame}
     {memory : Memory}
-    {fault : ExecutionFault} {exception : String}
+    {fault : ExecutionFault} {exception : ExceptionType}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .error fault)
     (named : fault.clrException = some exception) :
@@ -147,7 +148,7 @@ theorem run_fault_raisesCLR {program : CIL.Program} {method pc : Nat}
 theorem run_call_raisesCLR_of_contract {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
-    {exception : String}
+    {exception : ExceptionType}
     (holds : c.HoldsCLR program callee) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =

@@ -216,11 +216,11 @@ theorem found : program[1]? = some double := by cil_body
 
 An extracted method also carries its declared signature (`declared`), the layout tables shared by
 the whole extraction (`environment`) and a call-link table (`links`), and an equality or an
-embedding compares all of them with the extraction's. A bare literal such as `double` has no
-signature, so it binds only to a method with none. Start from the extraction's method and replace
-its code with `Method.withCode`, which keeps `declared`, `environment` and the other fields, gives
-the body the links its new code implies and resets the static sites, which are keyed by pc like the
-links:
+embedding compares all of them with the extraction's. A bare literal such as `double` has the
+default signature, with no parameters, a void return and localsinit, so it binds only to a method
+declared that way. Start from the extraction's method and replace its code with `Method.withCode`,
+which keeps `declared`, `environment` and the other fields, gives the body the links its new code
+implies and resets the static sites, which are keyed by pc like the links:
 
 ```lean extracted
 import Extracted
@@ -536,7 +536,8 @@ initializer and this proof before the remaining declarations. It admits valid sc
 aggregate values, null managed slots and unmodeled values. Private initialized
 homes are written outside the entire mapped allocation image, preserving caller bytes and
 permissions. `MethodRenaming` checks the target code's relocated local operands; method indices,
-call targets, profiles, return metadata and static sites stay exact. `ProgramRenaming` supplies this
+call targets, profiles, return metadata, layout environments and static sites stay exact.
+`ProgramRenaming` supplies this
 correspondence for every source method. The target is the extraction with the additional dead
 declarations.
 
@@ -556,7 +557,7 @@ reference, while a field holding a fresh object may name another identity in the
 initial memory to the target's final memory. `ProgramRenaming.raises` transfers a named exception
 and additionally requires valid initial arguments. These theorems use the proved complete
 dispatcher internally. The allocation relation extends through local setup, nested calls,
-constructors, static allocation and `stackAlloc`; frame ownership and expiry remain checked.
+constructors, static allocation and `localloc`; frame ownership and expiry remain checked.
 
 `MethodContract.Holds.of_allocationRenaming` transfers the original complete contract, including its
 precondition and footprint. Supply proofs that the precondition establishes well-formed memory,
@@ -658,3 +659,27 @@ declares `body_suffix{start}`, the code from every 16th pc on, and `body_suffix{
 proves each equation from the suffix that starts its block, so the equations cost time linear in
 the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
 [instruction lookups](performance/InstructionLookups.md) records.
+
+### Field and value shapes
+
+An extraction states once how its methods resolve each distinct operand of a reachable `ldfld`,
+`ldflda` or `stfld`, and of a reachable `ldobj`, `stobj`, `initobj`, `cpobj` or `sizeof`.
+`Extracted.fieldRef{k}` holds a field operand as a `CIL.Extraction.FieldRef` and
+`Extracted.valueType{k}` a type operand. `cil_field_shape` and `cil_value_shape` (from
+`CIL.Safety.ResolutionFacts`) declare `Extracted.fieldRef{k}_shape` and
+`Extracted.valueType{k}_shape`, which give `CIL.Method.fieldShape` or `CIL.Method.valueShape` of
+the operand for every method whose environment is `Extracted.environment`. Each fact costs one
+kernel check, however many sites and methods use the operand, and the `cil_code` simprocs
+`reduceFieldShape` and `reduceValueShape` read a method's shape of the operand from it.
+`CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
+checked layout entry when the operand holds the field's declared type, and a class instance
+field to the model slot of its index; `valueShape` gives a vector, including a floating-point
+one, its width.
+
+The first fact of an environment names suffixes of its layout lists,
+`Extracted.environment_rawLayoutSuffix{start}` and `Extracted.environment_layoutSuffix{start}`
+with their `_placed` lemmas, as `cil_instruction_equations` does for code. A struct field, a
+class field holding an array of a struct and a struct type operand are then checked from their
+layout entries alone, read from the suffix that starts the entry's block, so the facts of an
+extraction cost time linear in its layouts and distinct operands. The compiled resolver proposes
+each shape and the kernel checks it; a fact that misstates a shape fails to elaborate.

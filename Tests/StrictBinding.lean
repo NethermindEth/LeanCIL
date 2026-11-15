@@ -2,6 +2,7 @@ import StrictBinding
 import Tests.StrictBinding.Container
 import Tests.StrictBinding.Bodies
 import Tests.StrictBinding.Rows
+import Tests.StrictBinding.Slice
 
 /-!
 # Strict binding tests: digests

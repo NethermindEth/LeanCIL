@@ -1,4 +1,5 @@
 import CIL.Extraction.Dispatch
+import CIL.Extraction.FeatureEffects
 
 /-! Checked constrained-call instruction windows and direct-call lowering. -/
 
@@ -41,8 +42,8 @@ def constrainedSiteWindow (resolve : TypeExpr → CallSite → Option Constraine
     (emitted : Option Instruction) (targeted : Nat → Bool) (pc : Nat) : Bool :=
   if live != some true then true else
   -- A type test stays in the opcode it lowers, against a class its lineage decides.
-  if let some (.objectTest type _) := emitted then
-    castable type && current.any fun instruction => instruction.opcode ∈ [116, 117] else
+  if let some (opcode, type) := emitted.bind typeTestSource then
+    castable type && current.any fun instruction => instruction.opcode == opcode else
   match current with
   | some ⟨_, 65046, .type _⟩ =>
     (match emitted with | some .nop => true | _ => false) &&
@@ -220,7 +221,7 @@ def constrainedTargetSite (receiver : TypeExpr) (site : CallSite) (target : Cons
     CallSite :=
   { site with
     target := .managed target.method.token,
-    declaringType := target.declaringType receiver,
+    method.owner := target.declaringType receiver,
     typeArguments := siteMethodArguments site ++ target.method.ownerArguments,
     ownerArgumentCount := target.method.ownerArguments.length }
 

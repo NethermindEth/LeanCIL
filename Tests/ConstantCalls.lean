@@ -29,9 +29,11 @@ private def raw (code : List RawInstruction) (returnType : TypeExpr := integer)
 
 /-- A parameterless static Boolean slot, as a call to a flag getter names it. -/
 private def slot : CallSite := {
-  declaringType := .atom "Fixture" "Fixture.IFlag", name := "get_IsActive",
-  target := .managed 7, typeArguments := [], parameterCount := 0, hasThis := false,
-  returnsValue := true, returnType := boolean }
+  method := {
+    owner := .atom "Fixture" "Fixture.IFlag", name := name!"get_IsActive", hasThis := false,
+    genericArity := 0, returnType := boolean, parameters := [] },
+  name := "get_IsActive", target := .managed 7, typeArguments := [], parameterCount := 0,
+  returnsValue := true }
 
 private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, []⟩
 
@@ -59,7 +61,8 @@ private def andCode : List Instruction :=
 
 /-- Bodies that never fold: a static read, an `Int32` constant, a parameterized constant, two
     `ret`s with different words, a `ret`-free body, and a Boolean slot returning 2. -/
-private def staticLoad := i 126 (.field (.atom "Fixture" "Fixture.Flags") 0 boolean true)
+private def staticLoad :=
+  i 126 (.field (.atom "Fixture" "Fixture.Flags") 0 boolean name!"Enabled" true)
 private def staticBody := raw [staticLoad, i 42] boolean
 private def ignored : List MethodEvidence := [
   method staticBody [state [], state [none]],

@@ -532,6 +532,53 @@ theorem stamps_returns_count (memory : Memory) (count : W32) (buffer : Reference
 #guard_msgs (whitespace := lax) in
 #print axioms stamps_returns_count
 
+/-- A theorem may name its own memory `stored`, as the loop tactics name a store's memory: the
+    walk clears a restated fact only at a memory it introduced, so the caller's write authority
+    at `stored` stays in scope after the index store restates it at the store's memory. -/
+theorem stamps_keep_caller_facts (stored : Memory) (count : W32) (buffer : Reference)
+    (wellFormed : stored.WellFormed) (formed : form stored buffer = .ok buffer)
+    (small : count.toNat < 2 ^ 31) (writable : Writable stored buffer 4 0 count.toNat) :
+    ∃ fuel final, invoke stampsProgram fuel 0
+        [.scalar (.i32 count), .reference (.address buffer)] stored =
+      .ok (final, [.scalar (.i32 count)]) ∧
+      Confined [(buffer, 4 * count.toNat)] stored final := by
+  obtain ⟨home, entered, enter⟩ :=
+    stampsEntry.checked stored count buffer wellFormed
+  refine invoke_loop_induction (by rfl) ?_ enter.setup (stampsHeader stored count buffer home)
+    (StampingInvariant count buffer) (fun state => count.toNat - state.values.toNat)
+    (fun start => ?_) ?_
+  · simp [cil_checked, formed]
+  · cil_loop_recurse start 0
+    exact ⟨by simp, by simpa using writable⟩
+  rintro ⟨index, current, frame⟩ ⟨bounded, rest⟩ recurse
+  dsimp only at bounded rest
+  by_cases done : index = count
+  · subst done
+    cil_loop_finish
+  · have lower : index.toNat < count.toNat := by
+      have := BitVec.toNat_ne.mp done
+      omega
+    have offset := writable.add_int wellFormed formed (index := index) (by omega) (by omega)
+      (by omega)
+    have slot := rest.sub (index := index.toNat) (length := 1) (by omega) (by omega)
+    cil_loop_advance
+    cil_loop_call stamp_holds (buffer.element 4 index.toNat, index)
+    have next : (index + 1).toNat = index.toNat + 1 := by bv_omega
+    cil_loop_recurse recurse (index + 1)
+    case invariant =>
+      have _ : Writable stored buffer 4 0 count.toNat := by assumption
+      refine ⟨show (index + 1).toNat ≤ count.toNat by omega, ?_⟩
+      have later := (Writable.append (left := 1)).mp
+        (show Writable _ buffer 4 index.toNat (1 + (count.toNat - (index.toNat + 1))) by
+          rwa [show 1 + (count.toNat - (index.toNat + 1)) = count.toNat - index.toNat by omega])
+      rw [next]
+      simpa [Nat.add_comm] using later.2
+    case measure =>
+      dsimp only
+      omega
+
+#print axioms stamps_keep_caller_facts
+
 -- Without the `Unsafe.Add` result the advance stops at the add, naming that fact.
 /-- error: cil_loop_advance: cannot step pc 5 (CIL.Instruction.memory (CIL.MemoryOp.add 4 true)) -/
 #guard_msgs (whitespace := lax, substring := true) in
@@ -1079,10 +1126,11 @@ theorem factListTraversal (_tail : List (Option Nat)) : True := by
           throwError "fact-list traversal lost entries in a deep list"
         entriesTimes := entriesTimes.push (middle - start)
         indicesTimes := indicesTimes.push (stop - middle)
-      return ((entriesTimes.qsort (· < ·))[1]!, (indicesTimes.qsort (· < ·))[1]!)
+      return ((entriesTimes.qsort (fun left right => left < right))[0]!,
+        (indicesTimes.qsort (fun left right => left < right))[0]!)
     let shorter ← measureCopies 16384
     let longer ← measureCopies 65536
-    logInfo m!"fact-list median milliseconds: {shorter}, {longer}"
+    logInfo m!"fact-list minimum milliseconds: {shorter}, {longer}"
     -- Heartbeats count small allocations; array copying also needs an elapsed-time check.
     unless longer.1 < shorter.1 * 8 + 20 && longer.2 < shorter.2 * 8 + 20 do
       throwError "fact-list copying costs grew too quickly"

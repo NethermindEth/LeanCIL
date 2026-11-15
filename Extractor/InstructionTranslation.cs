@@ -23,12 +23,6 @@ internal static class InstructionTranslation
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
-        if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
-        {
-            if (i.OpCode.Code == Code.Ldind_I && dispatchStack.LastOrDefault() is
-                { Kind: NativeOperands.Kind.NativeMethodTable, Metadata: LocalKind.NativeMethodTable nativeTable })
-                return new TableLoad(nativeTable.Signature);
-        }
         if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
         {
             var tail = i.Previous?.OpCode.Code == Code.Tail;
@@ -106,7 +100,7 @@ internal static class InstructionTranslation
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
             return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
-        if (throws.Raises.TryGetValue(i, out string? raised)) return new Throw(raised);
+        if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
         var spans = Spans.Analyze(m, profile);
         if (spans.Constructors.TryGetValue(i, out var constructor)) return constructor;
         if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return StackOperation.Nop;
@@ -115,17 +109,12 @@ internal static class InstructionTranslation
         Operation LoadLocal(int index) => new Local(index);
         Operation StoreLocal(int index) => new SetLocal(index);
         Operation AddressLocal(int index) => new LocalAddress(index);
-        Operation LoadArgument(int index)
-        {
-            var home = parameterHomes.GetValueOrDefault(index, -1);
-            return home < 0 ? new Arg(index) :
-                new Local(m.Body.Variables.Count + home);
-        }
+        // A store or address names the argument, which must have a home; the step reaches the home's slot.
         Operation Parameter(Func<int, Operation> operation)
         {
-            var home = parameterHomes.GetValueOrDefault(MethodArguments.Index(m, (ParameterDefinition)i.Operand), -1);
-            if (home < 0) throw new InvalidDataException("Missing parameter storage");
-            return operation(m.Body.Variables.Count + home);
+            var argument = MethodArguments.Index(m, (ParameterDefinition)i.Operand);
+            if (!parameterHomes.ContainsKey(argument)) throw new InvalidDataException("Missing parameter storage");
+            return operation(argument);
         }
         int Layout(TypeReference type) => layouts?.Size(type) ??
             MetadataValidation.Layout(type, m.Module, profile.Architecture);
@@ -202,19 +191,19 @@ internal static class InstructionTranslation
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => StackOperation.Nop,
-            Code.Localloc => new StackAlloc(m.Body.InitLocals),
+            Code.Localloc => new Localloc(),
             Code.Cpblk => MemoryOperation.Other($"(.copyBlock {MemoryPrefixes.BlockAlignment(i)})"),
             Code.Initblk => MemoryOperation.Other($"(.initBlock {MemoryPrefixes.BlockAlignment(i)})"),
-            Code.Starg or Code.Starg_S => Parameter(index => new SetLocal(index)),
+            Code.Starg or Code.Starg_S => Parameter(index => new Starg(index)),
             Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
                 ObjectTypes.Candidate(m.DeclaringType) =>
                 throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S when ObjectTypes.Rooted(((ParameterDefinition)i.Operand).ParameterType) =>
                 throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
-            Code.Ldarga or Code.Ldarga_S => Parameter(index => new LocalAddress(index)),
+            Code.Ldarga or Code.Ldarga_S => Parameter(index => new Ldarga(index)),
             Code.Conv_I => new StackOperation(StackOpcode.ConvI),
-            Code.Ldind_I => new StackOperation(StackOpcode.Load64),
-            Code.Stind_I => new StackOperation(StackOpcode.Store64),
+            Code.Ldind_I => new IndirectAccess(NumericKind.I, false),
+            Code.Stind_I => new IndirectAccess(NumericKind.I, true),
             Code.Conv_Ovf_I1 => new CheckedConvert(ConvTarget.I1, false),
             Code.Conv_Ovf_I1_Un => new CheckedConvert(ConvTarget.I1, true),
             Code.Conv_Ovf_U1 => new CheckedConvert(ConvTarget.U1, false),
@@ -250,19 +239,20 @@ internal static class InstructionTranslation
                 TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts), true),
             Code.Cpobj => new AggregateTransfer(AggregateAccess.Copy,
                 TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)),
-            Code.Ldind_I1 => new LoadScalar(1, true),
-            Code.Ldind_U1 => new LoadScalar(1, false),
-            Code.Ldind_I2 => new LoadScalar(2, true),
-            Code.Ldind_U2 => new LoadScalar(2, false),
-            Code.Ldind_I4 or Code.Ldind_U4 => new LoadScalar(4, false),
-            Code.Stind_I1 => new StoreScalar(1),
-            Code.Stind_I2 => new StoreScalar(2),
-            Code.Stind_I4 => new StoreScalar(4),
+            Code.Ldind_I1 => new IndirectAccess(NumericKind.I1, false),
+            Code.Ldind_U1 => new IndirectAccess(NumericKind.U1, false),
+            Code.Ldind_I2 => new IndirectAccess(NumericKind.I2, false),
+            Code.Ldind_U2 => new IndirectAccess(NumericKind.U2, false),
+            Code.Ldind_I4 => new IndirectAccess(NumericKind.I4, false),
+            Code.Ldind_U4 => new IndirectAccess(NumericKind.U4, false),
+            Code.Stind_I1 => new IndirectAccess(NumericKind.I1, true),
+            Code.Stind_I2 => new IndirectAccess(NumericKind.I2, true),
+            Code.Stind_I4 => new IndirectAccess(NumericKind.I4, true),
             Code.Conv_I1 => new StackOperation(StackOpcode.ConvI1),
             Code.Conv_I2 => new StackOperation(StackOpcode.ConvI2),
             Code.Conv_U2 => new StackOperation(StackOpcode.ConvU2),
             Code.Neg => new StackOperation(StackOpcode.Neg),
-            Code.Ldnull => MemoryOperation.Of(new NullObject()),
+            Code.Ldnull => new LoadNull(),
             Code.Castclass or Code.Isinst => ObjectTypes.Test(i),
             Code.Ldstr => StringOperation((string)i.Operand),
             Code.Cgt => new StackOperation(StackOpcode.Cgt),
@@ -293,11 +283,11 @@ internal static class InstructionTranslation
             Code.Stobj => new StoreScalar(MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)),
             Code.Initobj => new AggregateTransfer(AggregateAccess.Initialize,
                 MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)),
-            Code.Ldarg_0 => LoadArgument(0),
-            Code.Ldarg_1 => LoadArgument(1),
-            Code.Ldarg_2 => LoadArgument(2),
-            Code.Ldarg_3 => LoadArgument(3),
-            Code.Ldarg or Code.Ldarg_S => LoadArgument(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
+            Code.Ldarg_0 => new Arg(0),
+            Code.Ldarg_1 => new Arg(1),
+            Code.Ldarg_2 => new Arg(2),
+            Code.Ldarg_3 => new Arg(3),
+            Code.Ldarg or Code.Ldarg_S => new Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LoadLocal(0),
             Code.Ldloc_1 => LoadLocal(1),
             Code.Ldloc_2 => LoadLocal(2),
@@ -347,8 +337,8 @@ internal static class InstructionTranslation
             Code.Clt_Un => new StackOperation(StackOpcode.CltUn),
             Code.Cgt_Un => new StackOperation(StackOpcode.CgtUn),
             Code.Ceq => new StackOperation(StackOpcode.Ceq),
-            Code.Ldind_I8 => new StackOperation(StackOpcode.Load64),
-            Code.Stind_I8 => new StackOperation(StackOpcode.Store64),
+            Code.Ldind_I8 => new IndirectAccess(NumericKind.I8, false),
+            Code.Stind_I8 => new IndirectAccess(NumericKind.I8, true),
             Code.Dup => new StackOperation(StackOpcode.Dup),
             Code.Pop => new StackOperation(StackOpcode.Pop),
             Code.Br or Code.Br_S => JumpTo(JumpKind.Always),

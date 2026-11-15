@@ -18,11 +18,11 @@ namespace Tests.BodyDecoding
 open CIL CIL.Extraction Tests.BodyEncoding Tests.MetadataBuilder Tests.MetadataWorld
 
 /-- The assembly whose metadata the bodies are checked against. -/
-private def pin : AssemblyPin := { identity := ownIdentity }
+def pin : AssemblyPin := { identity := ownIdentity }
 
 /-- A decoded method with the given body fields: the world's `Main`, a public static method
     with no parameters. -/
-private def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
+def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
     (code : List RawInstruction) : RawMethod :=
   { token := tokens.main, owner := ownIdentity ++ "::Program", hasThis := false,
     explicitThis := false, callingConvention := 0, attributes := 0x96, implementation := 0,
@@ -36,7 +36,7 @@ private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := 
   evidenceOf bytes operands { own := own.1, others := [lib] } (method 8 false [] [])
 
 /-- One decoded instruction. -/
-private def instr (offset opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
+def instr (offset opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
   { offset := offset, opcode := opcode, operand := operand }
 
 /-- The four little-endian bytes of a token. -/
@@ -116,7 +116,7 @@ private def tokenBytes : List Nat :=
     token tokens.objectRef ++ [0x22, 0x00, 0x00, 0x80, 0xBF, 0x23, 0, 0, 0, 0, 0, 0, 0, 0xC0, 0x2A]
 
 /-- The system type `ldtoken` names in `tokenBytes`. -/
-private def objectType : TypeExpr := .atom runtimeScope "System.Object"
+def objectType : TypeExpr := .atom runtimeScope "System.Object"
 
 /-- The token table of `tokenBytes`: a method, a user string and a type. -/
 private def tokenOperands : List (Nat × RawOperand) :=
@@ -145,7 +145,8 @@ private def formsBytes : List Nat :=
 private def someField : RawOperand := countOperand
 
 /-- The static field `ldtoken` names in `formsBytes`. -/
-private def staticField : RawOperand := .field (.atom ownIdentity "Program") 1 int32 true
+private def staticField : RawOperand :=
+  .field (.atom ownIdentity "Program") 1 int32 name!"total" true
 
 /-- The signature `calli` names in `formsBytes`. -/
 private def someSignature : RawOperand := .indirectCall .void [int32] false false 0
@@ -289,6 +290,14 @@ theorem rejects_token_with_different_operand :
          (tokens.hello, .text "hi"), (tokens.objectRef, .type objectType)])
       (.metadata (.operandMismatch tokens.writeLine)) = true := by decide +kernel
 #print axioms rejects_token_with_different_operand
+
+/-- A field operand that names another field than the row its token names: `ldfld` of the count
+    field with the name `total`. -/
+theorem rejects_a_field_operand_named_for_another_row :
+    failsWith (evidence ([0x16, 0x7B] ++ token tokens.countField)
+        [(tokens.countField, .field (.atom ownIdentity "Program") 0 int32 name!"total" false)])
+      (.metadata (.operandMismatch tokens.countField)) = true := by decide +kernel
+#print axioms rejects_a_field_operand_named_for_another_row
 
 /-- A token missing from the table fails the check. -/
 theorem rejects_missing_token :

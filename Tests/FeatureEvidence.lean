@@ -9,10 +9,13 @@ private def intType : TypeExpr := .atom
   "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
   "System.Int32"
 private def getter : CallSite := {
+  method := {
+    owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [] },
   target := .external "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
     PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean \
-    System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()"
-  typeArguments := [], parameterCount := 0, hasThis := false, returnsValue := true }
+    System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()", typeArguments := [],
+  parameterCount := 0, returnsValue := true }
 private def intrinsic (member : String) : CallSite :=
   { getter with target := .external ("System.Runtime.Intrinsics, Version=11.0.0.0, \
     Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean \
@@ -27,6 +30,12 @@ example : ¬ ({ architecture := .x64, bmi2 := true } : FeatureProfile).Valid := 
 example : ¬ ({ architecture := .x64, bmi2 := true, x86Base64 := true } : FeatureProfile).Valid := by decide
 example : ¬ ({ architecture := .arm64, x86Base64 := true } : FeatureProfile).Valid := by decide
 example : ¬ ({ architecture := .arm64, vector128Accelerated := true } : FeatureProfile).Valid := by decide
+-- .NET 11 x64 reports SSE2 only with SSSE3, SSE4.1 and SSE4.2; EnableHWIntrinsic=0 turns all off.
+/-- An x64 process with SSE2 and without SSSE3, SSE4.1 and SSE4.2, which .NET 11 never starts. -/
+private def belowBaseline : FeatureProfile := {
+  architecture := .x64, x86Base64 := true, sse2 := true, vector128Accelerated := true }
+example : ¬ belowBaseline.Valid := by decide
+example : ({ architecture := .x64 } : FeatureProfile).Valid := by decide
 
 private def v3 : FeatureProfile := {
   architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true, sse42 := true
@@ -189,15 +198,23 @@ example : featureOpMatches #[] booleanRaw (i 10) (.stloc 0) = true := by decide 
 example : featureOpMatches #[] booleanRaw (i 6) (.ldloc 1) = false := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 10) (.ldloc 0) = false := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 6) (.stloc 0) = false := by decide +kernel
--- Taking the address of a span local or of an argument home binds only the address instruction,
--- whose step pushes the span's view; a load in its place is rejected.
+-- Taking the address of a span local or of a span argument binds only the address instruction of
+-- the same local or argument, whose step pushes the span's view; a load in its place is rejected.
 private def spanRaw := raw [i 18 (.local 0), i 15 (.argument 0)]
   [.apply (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.UInt32")] .void
 example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloca 0) = true := by decide +kernel
 example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloc 0) = false := by decide +kernel
-example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloca 1) = true := by
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarga 0) = true := by
   decide +kernel
-example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloc 1) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarga 1) = false := by
+  decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloca 1) = false := by
+  decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarg 0) = false := by decide +kernel
+-- An argument store binds only `starg` of the same argument, not a store to its home slot.
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.starg 0) = true := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.stloc 1) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.starg 1) = false := by decide +kernel
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/

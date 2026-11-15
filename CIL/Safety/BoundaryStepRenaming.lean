@@ -192,40 +192,44 @@ private theorem Memory.Renamed.objectTest {mapping : AllocationRenaming}
       · exact .ok rfl
 #print axioms Memory.Renamed.objectTest
 
-/-- A type test transports as a step to the next pc: renaming keeps null, the tested runtime
-    class and the cast's exception. -/
-private theorem Memory.Renamed.stepObjectTest {indices : LocalIndexMap}
+/-- A `castclass` (`throwing`) or `isinst` transports as a step to the next pc: renaming keeps
+    null, the tested runtime class and the cast's exception. -/
+private theorem Memory.Renamed.stepTypeTest {indices : LocalIndexMap}
     {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
     {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceBody targetBody : CIL.Method) (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+    (sourceBody targetBody : CIL.Method) (operation : CIL.Instruction)
+    (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+    (tests : operation = .castclass type ∧ throwing = true ∨
+      operation = .isinst type ∧ throwing = false)
     (pc : Nat) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.objectTest type throwing) pc arguments sourceFrame stack source)
-      (step targetBody (.objectTest type throwing) pc (arguments.map mapping.value)
+      (step sourceBody operation pc arguments sourceFrame stack source)
+      (step targetBody operation pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands]
-  by_cases guard : unspecifiedOperands (observerCount (.objectTest type throwing)) stack = true
-  · simp only [guard, ite_true]
-    exact .error _
-  · simp only [guard, Bool.false_eq_true, ite_false]
-    match stack, bounds with
-    | .object reference :: rest, bounds =>
-      have below : reference.Below mapping.sourceLimit := bounds _ List.mem_cons_self
-      simp only [List.map_cons, AllocationRenaming.value]
-      refine (related.objectTest reference below type throwing).bind _ _ ?_
-      intro left right same
-      subst same
-      exact .ok (.next related frames)
-    | [], _ => exact .error _
-    | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
-    | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
-    | .bufferSpan _ :: _, _ | .array _ :: _, _ =>
-      dsimp only [pureArity, CIL.Safety.instruction]
-      simp only [mapping.unspecifiedOperands]
-      split <;> exact .error _
-#print axioms Memory.Renamed.stepObjectTest
+  rcases tests with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (
+    simp only [step, observerCount, mapping.unspecifiedOperands]
+    by_cases guard : unspecifiedOperands 1 stack = true
+    · simp only [guard, ite_true]
+      exact .error _
+    · simp only [guard, Bool.false_eq_true, ite_false]
+      match stack, bounds with
+      | .object reference :: rest, bounds =>
+        have below : reference.Below mapping.sourceLimit := bounds _ List.mem_cons_self
+        simp only [List.map_cons, AllocationRenaming.value]
+        refine (related.objectTest reference below type _).bind _ _ ?_
+        intro left right same
+        subst same
+        exact .ok (.next related frames)
+      | [], _ => exact .error _
+      | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
+      | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
+      | .bufferSpan _ :: _, _ | .array _ :: _, _ =>
+        dsimp only [pureArity, CIL.Safety.instruction]
+        simp only [mapping.unspecifiedOperands]
+        split <;> exact .error _)
+#print axioms Memory.Renamed.stepTypeTest
 
 /-- A virtual call transports as a call: renaming keeps a receiver null exactly when it was and
     keeps a live receiver's class, so both runs throw, fault alike or enter the same body. -/
@@ -314,7 +318,48 @@ theorem Memory.Renamed.loadArgument {mapping : AllocationRenaming}
         exact related.checkedValue _ trivial
 #print axioms Memory.Renamed.loadArgument
 
-/-- Argument loads, calls and returns preserve their checked values and control flow. -/
+/-- The source body reads every argument as it arrives, so `starg` has no home to write. -/
+theorem StepMetadata.storeArgument_source {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (index : Nat) (value : Value) (frame : Frame)
+    (memory : Memory) :
+    storeArgument sourceBody index value frame memory =
+      .error (.unsupported "Store to an argument without a home") := by
+  obtain ⟨_, sourceAccess, -⟩ := metadata.arguments index
+  simp only [storeArgument, sourceAccess]
+#print axioms StepMetadata.storeArgument_source
+
+/-- The source body reads every argument as it arrives, so `ldarga` has no home to address. -/
+theorem StepMetadata.addressArgument_source {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (index : Nat) (frame : Frame)
+    (memory : Memory) :
+    addressArgument sourceBody index frame memory =
+      .error (.unsupported "Address of an argument without a home") := by
+  obtain ⟨_, sourceAccess, -⟩ := metadata.arguments index
+  simp only [addressArgument, sourceAccess]
+#print axioms StepMetadata.addressArgument_source
+
+/-- The target body reads every argument as it arrives, so `starg` has no home to write. -/
+theorem StepMetadata.storeArgument_target {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (index : Nat) (value : Value) (frame : Frame)
+    (memory : Memory) :
+    storeArgument targetBody index value frame memory =
+      .error (.unsupported "Store to an argument without a home") := by
+  obtain ⟨_, -, targetAccess⟩ := metadata.arguments index
+  simp only [storeArgument, targetAccess]
+#print axioms StepMetadata.storeArgument_target
+
+/-- The target body reads every argument as it arrives, so `ldarga` has no home to address. -/
+theorem StepMetadata.addressArgument_target {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (index : Nat) (frame : Frame)
+    (memory : Memory) :
+    addressArgument targetBody index frame memory =
+      .error (.unsupported "Address of an argument without a home") := by
+  obtain ⟨_, -, targetAccess⟩ := metadata.arguments index
+  simp only [addressArgument, targetAccess]
+#print axioms StepMetadata.addressArgument_target
+
+/-- Argument loads, calls and returns preserve their checked values and control flow; argument
+    stores and addresses cannot succeed or throw without a home. -/
 theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
@@ -346,17 +391,27 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
   by_cases dispatched : ∃ targets argc, operation = .callVirtual targets argc
   · rcases dispatched with ⟨targets, argc, rfl⟩
     exact related.stepCallVirtual sourceBody targetBody targets argc pc arguments stack bounds
-  by_cases tested : ∃ type throwing, operation = .objectTest type throwing
-  · rcases tested with ⟨type, throwing, rfl⟩
-    exact related.stepObjectTest frames sourceBody targetBody type throwing pc arguments stack
-      bounds
+  by_cases casting : ∃ type, operation = .castclass type
+  · rcases casting with ⟨type, rfl⟩
+    exact related.stepTypeTest frames sourceBody targetBody _ type true (.inl ⟨rfl, rfl⟩) pc
+      arguments stack bounds
+  by_cases testing : ∃ type, operation = .isinst type
+  · rcases testing with ⟨type, rfl⟩
+    exact related.stepTypeTest frames sourceBody targetBody _ type false (.inr ⟨rfl, rfl⟩) pc
+      arguments stack bounds
   ·
     allocation_fixed_step (
       first
       | exact False.elim (isManaged ⟨_, rfl⟩)
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
-      | exact False.elim (tested ⟨_, _, rfl⟩)
+      | exact False.elim (casting ⟨_, rfl⟩)
+      | exact False.elim (testing ⟨_, rfl⟩)
+      -- Both bodies read every argument without a home, so a store or an address faults alike.
+      | (simp only [metadata.storeArgument_source, metadata.storeArgument_target,
+           metadata.addressArgument_source, metadata.addressArgument_target, Bind.bind,
+           Except.bind]
+         exact .error _)
       | (rename_i position
          obtain ⟨_, sourceAccess, targetAccess⟩ := metadata.arguments position
          apply (related.loadArgument sourceAccess targetAccess arguments argumentBounds).bind

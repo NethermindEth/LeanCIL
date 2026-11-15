@@ -36,9 +36,11 @@ private def declared : DispatchType := {
   interfaces := [], methods := [slot], assembly := fixturePin }
 private def types := [concrete, declared]
 private def site : CallSite := {
-  declaringType := interface, name := "Read", target := .managed 5, typeArguments := [],
-  parameterCount := 0, hasThis := true, returnsValue := true,
-  returnType := integer, parameterTypes := [] }
+  method := {
+    owner := interface, name := name!"Read", hasThis := true, genericArity := 0,
+    returnType := integer, parameters := [] },
+  name := "Read", target := .managed 5, typeArguments := [], parameterCount := 0,
+  returnsValue := true }
 private def raw : RawMethod := {
   token := 1, owner := "Fixture::Caller", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
@@ -103,7 +105,7 @@ private def staticImplementation : DispatchMethod := {
   staticSlot with token := 31, isAbstract := false, isVirtual := false, hasBody := true }
 private def staticTypes : List DispatchType :=
   [{ concrete with methods := [staticImplementation] }, { declared with methods := [staticSlot] }]
-private def staticSite : CallSite := { site with target := .managed 6, hasThis := false }
+private def staticSite : CallSite := { site with target := .managed 6, method.hasThis := false }
 private def staticRaw : RawMethod := { raw with
   parameters := [], code := [⟨0, 65046, .type receiver⟩, ⟨6, 40, .call staticSite⟩, ⟨11, 42, .none⟩] }
 private def staticTarget : SpecializedMethod := ⟨[], { raw with
@@ -140,7 +142,7 @@ theorem static_slot_mismatches_rejected :
     resolveConstrained [concrete, { declared with methods := [staticSlot] }]
       receiver staticSite = none ∧
     resolveConstrained [{ concrete with methods := [{ staticImplementation with token := 6 }] }]
-      receiver { staticSite with declaringType := receiver } = none := by decide +kernel
+      receiver { staticSite with method.owner := receiver } = none := by decide +kernel
 #print axioms static_slot_mismatches_rejected
 
 /-- An instance default interface method slot is rejected even when the struct implements it:
@@ -179,10 +181,11 @@ private def overrideTypes :=
   [{ defaultConcrete with methods := [genericOverride] }, defaultDeclared]
 /-- `constrained. Allowance; call bool IAllowance<Allowance>::Spend<Price>(TSelf&)`. -/
 private def defaultSite : CallSite := {
-  declaringType := allowanceInterface, name := "Spend", target := .managed 40,
-  typeArguments := [price, allowance], ownerArgumentCount := 1, parameterCount := 1,
-  hasThis := false, returnsValue := true, returnType := boolean,
-  parameterTypes := [.byref allowance] }
+  method := {
+    owner := allowanceInterface, name := name!"Spend", hasThis := false, genericArity := 1,
+    returnType := boolean, parameters := [.byref allowance], methodArguments := [price] },
+  name := "Spend", target := .managed 40, typeArguments := [price, allowance],
+  ownerArgumentCount := 1, parameterCount := 1, returnsValue := true }
 private def defaultRaw : RawMethod := { raw with
   parameters := [.byref allowance],
   code := [⟨0, 2, .none⟩, ⟨1, 65046, .type allowance⟩, ⟨7, 40, .call defaultSite⟩,
@@ -329,7 +332,7 @@ private def scaledEntry (interfaces : List TypeExpr) : DispatchType := {
   identity := scaled, valueType := true, interfaceType := false, interfaces, methods := [],
   assembly := fixturePin }
 private def scaleSite : CallSite := {
-  staticSite with declaringType := scaleInterface, name := "Scale", target := .managed 60 }
+  staticSite with method.owner := scaleInterface, name := "Scale", target := .managed 60 }
 private def scaleRaw : RawMethod := { staticRaw with
   code := [⟨0, 65046, .type scaled⟩, ⟨6, 40, .call scaleSite⟩, ⟨11, 42, .none⟩] }
 /-- The program body of the interface-level method `token` declared by `owner`. -/
@@ -455,7 +458,7 @@ theorem lowered_default_exact :
       some ⟨7, 40, .call defaultSite⟩ ∧
     (lowerConstrainedRaw overrideTypes defaultRaw).code[2]? =
       some ⟨7, 40, .call { defaultSite with
-        target := .managed 41, declaringType := allowance, typeArguments := [price],
+        target := .managed 41, method.owner := allowance, typeArguments := [price],
         ownerArgumentCount := 0 }⟩ := by decide +kernel
 #print axioms lowered_default_exact
 
@@ -491,7 +494,7 @@ theorem prefix_target_valid :
 theorem lowered_call_exact :
     (lowerConstrainedRaw types raw).code =
       [⟨0, 2, .none⟩, ⟨1, 0, .none⟩,
-        ⟨7, 40, .call { site with target := .managed 21, declaringType := receiver }⟩,
+        ⟨7, 40, .call { site with target := .managed 21, method.owner := receiver }⟩,
         ⟨12, 42, .none⟩] := by decide +kernel
 #print axioms lowered_call_exact
 
@@ -522,7 +525,7 @@ theorem indexed_type_identity :
     (DispatchIndex.ofTypes [concrete, declared]).resolve
       (.aggregate "Fixture::Counter" 1) site = none ∧
     (DispatchIndex.ofTypes [concrete, declared]).resolve receiver
-      { site with declaringType := .atom "Other" "IValue" } = none := by decide +kernel
+      { site with method.owner := .atom "Other" "IValue" } = none := by decide +kernel
 #print axioms indexed_type_identity
 
 /-- Repeated override tokens do not duplicate one implementation; explicit still wins. -/
@@ -596,7 +599,7 @@ private def castRaw : RawMethod := { raw with
   parameters := [dogClass], returnType := dogClass,
   code := [⟨0, 2, .none⟩, ⟨1, 116, .type dogClass⟩, ⟨6, 42, .none⟩] }
 private def castEmitted : Method := {
-  locals := [], returnsValue := true, code := [.ldarg 0, .objectTest dogClass true, .ret] }
+  locals := [], returnsValue := true, code := [.ldarg 0, .castclass dogClass, .ret] }
 
 /-- A cast to a pinned catalog class is a type test of that class. -/
 theorem class_cast_valid :
@@ -623,7 +626,7 @@ theorem root_cast_rejected :
       [⟨[], { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }⟩]
       { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }
       [true, true, true]
-      { castEmitted with code := [.ldarg 0, .objectTest root true, .ret] } := by decide +kernel
+      { castEmitted with code := [.ldarg 0, .castclass root, .ret] } := by decide +kernel
 #print axioms root_cast_rejected
 
 /-- A type test emitted for an instruction that is no cast is rejected. -/
@@ -632,5 +635,28 @@ theorem misplaced_test_rejected :
       { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 0, .none⟩, ⟨2, 42, .none⟩] }
       [true, true, true] castEmitted := by decide +kernel
 #print axioms misplaced_test_rejected
+
+/-- A cast emitted for a raw `isinst` is rejected: a type test stays in the opcode it lowers. -/
+theorem isinst_emitted_as_cast_rejected :
+    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw⟩]
+      { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 117, .type dogClass⟩, ⟨6, 42, .none⟩] }
+      [true, true, true] castEmitted := by decide +kernel
+#print axioms isinst_emitted_as_cast_rejected
+
+/-- `isinst Dog` of the argument, returned. -/
+private def isinstRaw : RawMethod :=
+  { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 117, .type dogClass⟩, ⟨6, 42, .none⟩] }
+
+/-- A raw `isinst` of a pinned catalog class emitted as `isinst` is valid. -/
+theorem class_isinst_valid :
+    ConstrainedCallsValid [dogEntry] [⟨[], isinstRaw⟩] isinstRaw [true, true, true]
+      { castEmitted with code := [.ldarg 0, .isinst dogClass, .ret] } := by decide +kernel
+#print axioms class_isinst_valid
+
+/-- An `isinst` emitted for a raw `castclass` is rejected: the two differ on a failed test. -/
+theorem cast_emitted_as_isinst_rejected :
+    ¬ ConstrainedCallsValid [dogEntry] [⟨[], castRaw⟩] castRaw [true, true, true]
+      { castEmitted with code := [.ldarg 0, .isinst dogClass, .ret] } := by decide +kernel
+#print axioms cast_emitted_as_isinst_rejected
 
 end Tests.ConstrainedEvidence

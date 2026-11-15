@@ -17,14 +17,19 @@ theorem home_slots : (argumentHomeIndex [2, 0, 2] 5)[2]? = some 5 ∧
     (argumentHomeIndex [2, 0, 2] 5)[1]? = none := by decide +kernel
 #print axioms home_slots
 
-/-- Indexed argument validation rejects missing arguments, incorrect slots and short masks. -/
+/-- Indexed argument validation accepts a store to a homed argument and rejects missing
+    arguments, incorrect indexes, a store to the home slot and short masks. -/
 theorem argument_bounds :
+    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
+      [true] [.starg 0] = true ∧
     argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 1]⟩ [1]
+      [true] [.starg 1] = false ∧
+    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
+      [true] [.starg 1] = false ∧
+    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
       [true] [.stloc 0] = false ∧
     argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
-      [true] [.stloc 1] = false ∧
-    argumentInstructionsValid ⟨[.field .unsigned64], [], [.store 0]⟩ [0]
-      [] [.stloc 0] = false := by decide +kernel
+      [] [.starg 0] = false := by decide +kernel
 #print axioms argument_bounds
 
 /-- Pruned instructions must be holes, even when their indexes are invalid. -/
@@ -58,7 +63,7 @@ def descriptor : StaticDescriptor := ⟨0, "Field", [0], none, some false, "", 1
 
 /-- The matching raw static field load. -/
 def load : RawInstruction :=
-  ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") true⟩
+  ⟨0, 126, .field .void 0 (.atom runtimeScope "System.Byte") name!"Value" true⟩
 
 /-- An emitted scalar load with caller-provided static metadata. -/
 def body (sites : List (Nat × StaticDescriptor)) : Method := {

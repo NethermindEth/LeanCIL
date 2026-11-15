@@ -102,7 +102,7 @@ private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstructio
   | some instruction, some descriptor =>
     if instruction.opcode != opcode then false else
     match instruction.operand with
-    | .field _ _ type _ =>
+    | .field _ _ type _ _ =>
       match staticScalarType type with
       | some (width, signed) => descriptor.bytes.length == width && descriptor.scalar == some signed
       | none => descriptor.scalar.isNone
@@ -136,13 +136,15 @@ theorem methodShapeInstructions_eq_scan (closed : RawMethod)
   simp only [methodShapeInstructions, FlowIndex.get?_ofList, firstEntryIndex_get]
 
 #print axioms methodShapeInstructions_eq_scan
-/-- The declared signature a closed raw method implies: its receiver kind, parameter types and
-    return type. -/
+/-- The declared signature a closed raw method implies: its receiver kind, parameter types,
+    return type and localsinit flag. Instantiation and metadata binding refuse explicit receiver
+    signatures. -/
 def _root_.CIL.DeclaredSignature.ofRaw (closed : RawMethod) : DeclaredSignature where
   receiver :=
     if closed.hasThis then some (if closed.objectReceiver then .object else .reference) else none
   parameters := closed.parameters
   returnType := closed.returnType
+  initLocals := closed.initLocals
 
 /-- Bind non-instruction method fields that affect frame setup and return behavior. -/
 def MethodShapeValid (closed : RawMethod) (method : Method) : Prop :=

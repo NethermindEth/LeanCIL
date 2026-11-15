@@ -80,13 +80,13 @@ foreach (var accessorsByType in accessors.GroupBy(accessor => accessor.Type))
                 theorem null_array_fault :
                     (match CIL.Safety.invoke Extracted.program 64 0
                       [.object .null, .scalar (.i32 0)] inputMemory with
-                     | .error fault => fault.fault == .thrown "System.NullReferenceException"
+                     | .error fault => fault.fault == .thrown .nullReference
                      | .ok _ => false) = true := by decide +kernel
                 #print axioms null_array_fault
                 theorem array_bounds_fault :
                     (match CIL.Safety.invoke Extracted.program 64 0
                       [.array ⟨.address ⟨0, 0⟩, 2, .signed32⟩, .scalar (.i32 2)] inputMemory with
-                     | .error fault => fault.fault == .thrown "System.IndexOutOfRangeException"
+                     | .error fault => fault.fault == .thrown .indexOutOfRange
                      | .ok _ => false) = true := by decide +kernel
                 #print axioms array_bounds_fault
                 """);
@@ -229,7 +229,7 @@ foreach (var (name, element, width) in allocations)
             #print axioms empty_array_is_live
             theorem negative_array_overflows :
                 (match CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 (-1))] inputMemory with
-                 | .error fault => fault.fault == .thrown "System.OverflowException"
+                 | .error fault => fault.fault == .thrown .overflow
                  | .ok _ => false) = true := by decide +kernel
             #print axioms negative_array_overflows
             """);
@@ -361,12 +361,12 @@ foreach (var (name, _, element, width, counted) in fills)
                   match CIL.Safety.invoke Extracted.program 128 0
                     [.array ⟨.address ⟨0, 4⟩, 4, .signed32⟩, .scalar (.i32 7),
                       .scalar (.i32 start), .scalar (.i32 count)] fillMemory with
-                  | .error fault => fault.fault == .thrown "System.ArgumentOutOfRangeException"
+                  | .error fault => fault.fault == .thrown .argumentOutOfRange
                   | .ok _ => false) = true ∧
                 ([.object .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
                   match CIL.Safety.invoke Extracted.program 128 0
                     [input, .scalar (.i32 7), .scalar (.i32 (-1)), .scalar (.i32 (-1))] fillMemory with
-                  | .error fault => fault.fault == .thrown "System.ArgumentNullException"
+                  | .error fault => fault.fault == .thrown .argumentNull
                   | .ok _ => false) = true ∧
                 (match CIL.Safety.invoke Extracted.program 128 0
                   [.array ⟨.address ⟨0, 4⟩, 4, .signed32⟩, .scalar (.i32 7),
@@ -446,7 +446,7 @@ foreach (var (name, _, element, width, counted) in fills)
                  | .ok result => result.2 == [] | .error _ => false) = true ∧
                 ([.object .null, .array ⟨.null, 0, .signed32⟩].all fun input =>
                   match CIL.Safety.invoke Extracted.program 128 0 [input, .scalar (.i32 7)] fillMemory with
-                  | .error fault => fault.fault == .thrown "System.ArgumentNullException"
+                  | .error fault => fault.fault == .thrown .argumentNull
                   | .ok _ => false) = true ∧
                 (match CIL.Safety.invoke Extracted.program 128 0
                   [.array ⟨.address ⟨0, 8⟩, 2, .signed32⟩, .scalar (.i32 7)]
@@ -464,8 +464,7 @@ foreach (var (name, _, element, width, counted) in fills)
             ("element", ".arrayFill .signed32 false", ".arrayFill .unsigned32 false"),
             ("width", ".arrayFill .signed32 false", ".arrayFill .signed64 false"),
             ("operation", ".arrayFill .signed32 false", ".spanFill 4 false"),
-            ("arity", "parameterCount := 2, hasThis := false, returnsValue := false",
-                "parameterCount := 4, hasThis := false, returnsValue := false"),
+            ("arity", "parameterCount := 2, returnsValue := false", "parameterCount := 4, returnsValue := false"),
             ("scope", ".atom Extraction.runtimeScope \"System.Array\"", ".atom \"Wrong.Scope\" \"System.Array\"")
         })
         {

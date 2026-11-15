@@ -49,9 +49,11 @@ example : substituteType [word] (.apply (.constructor "scope" "Box`1") (.paramet
 
 /-- A call whose scoped signature and generic arguments match the selected closed method. -/
 def caller (parameter : TypeExpr) : RawMethod := { closed with code := [⟨0, 40, .call {
-  declaringType := .atom "Test" "Owner", name := "Call", target := .managed 1,
-  typeArguments := [word], parameterCount := 1, hasThis := false, returnsValue := true,
-  returnType := word, parameterTypes := [.byref parameter] }⟩] }
+  method := {
+    owner := .atom "Test" "Owner", name := name!"Call", hasThis := false, genericArity := 1,
+    returnType := word, parameters := [.byref parameter], methodArguments := [word] },
+  name := "Call", target := .managed 1, typeArguments := [word], parameterCount := 1,
+  returnsValue := true }⟩] }
 
 /-- The emitted target and argument count are independently checked against the call site. -/
 def callCode : Method := { locals := [], returnsValue := true, code := [.call 0 1] }
@@ -113,8 +115,11 @@ def counter : TypeExpr := .object "Test" "Counter"
 def tallyConstructor : RawMethod := { closed with
   hasThis := true, objectReceiver := true, objectFieldCount := 2, objectBases := [counter] }
 def construction : CallSite := {
-  declaringType := tally, name := ".ctor", target := .managed 0,
-  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := false }
+  method := {
+    owner := tally, name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
+    parameters := [] },
+  name := ".ctor", target := .managed 0, typeArguments := [], parameterCount := 1,
+  returnsValue := false }
 
 -- A construction allocates the call site's class, with its constructor's class's bases, at one
 -- slot per field of that class.
@@ -127,7 +132,7 @@ theorem construction_owner_and_size :
       (.newObject 0 1 tally [counter, tally] 16) ∧
     ¬ constructedOwnerMatches construction tallyConstructor
       (.newObject 0 1 (.object "Test" "Other") [counter] 16) ∧
-    ¬ constructedOwnerMatches { construction with declaringType := word }
+    ¬ constructedOwnerMatches { construction with method.owner := word }
       { tallyConstructor with objectReceiver := false } (.newObject 0 1 word [counter] 16) ∧
     ¬ constructedOwnerMatches construction { tallyConstructor with objectReceiver := false }
       (.newObject 0 1 tally [counter] 16) := by decide +kernel
@@ -137,9 +142,11 @@ theorem construction_owner_and_size :
 def deposit : RawMethod := { closed with
   owner := "Test::Tally", hasThis := true, objectReceiver := true, parameters := [word] }
 def depositSite : CallSite := {
-  declaringType := tally, name := "Deposit", target := .managed closed.token,
-  typeArguments := [], parameterCount := 1, hasThis := true, returnsValue := true,
-  returnType := word, parameterTypes := [word] }
+  method := {
+    owner := tally, name := name!"Deposit", hasThis := true, genericArity := 0, returnType := word,
+    parameters := [word] },
+  name := "Deposit", target := .managed closed.token, typeArguments := [], parameterCount := 1,
+  returnsValue := true }
 
 -- Only `callvirt` emits a receiver-checked call, counting the receiver, and only into a method
 -- whose receiver is an object; a `callvirt` that skips the null check as a plain call is rejected.

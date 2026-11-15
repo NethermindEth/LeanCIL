@@ -40,7 +40,7 @@ internal abstract record Operation
 internal enum StackOpcode
 {
     Nop, Pop, Dup, Add, Sub, Mul, And, Or, Xor, Not, Neg, Shl, Shr, ShrUn, Ceq, Clt, Cgt, CltUn, CgtUn,
-    ConvI1, ConvI2, ConvU2, ConvI4, ConvI8, ConvI, ConvU, ConvU1, ConvU4, ConvU8, Load64, Store64, SkipInit
+    ConvI1, ConvI2, ConvU2, ConvI4, ConvI8, ConvI, ConvU, ConvU1, ConvU4, ConvU8, SkipInit
 }
 
 internal sealed record StackOperation(StackOpcode Kind) : Operation
@@ -88,8 +88,6 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
         StackOpcode.ConvU1 => ".conv_u1",
         StackOpcode.ConvU4 => ".conv_u4",
         StackOpcode.ConvU8 => ".conv_u8",
-        StackOpcode.Load64 => ".load64",
-        StackOpcode.Store64 => ".store64",
         StackOpcode.SkipInit => ".skipInit",
         _ => throw new ArgumentOutOfRangeException(nameof(Kind))
     };
@@ -163,10 +161,10 @@ internal sealed record Return : Operation
     internal override string Render(Func<int, string> calleeName) => ".ret";
 }
 
-/// <summary>A fault of the named CLR exception type.</summary>
-internal sealed record Throw(string Exception) : Operation
+/// <summary>A fault of the modelled CLR exception type.</summary>
+internal sealed record Throw(ExceptionType Exception) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".throw \"{Exception}\"";
+    internal override string Render(Func<int, string> calleeName) => $".throw {Exception.ToLean()}";
 }
 
 /// <summary>The width and signedness a narrow integer is truncated to when it is read.</summary>
@@ -189,21 +187,48 @@ internal sealed record Arg(int Index) : Operation
     internal override string Render(Func<int, string> calleeName) => $".ldarg {Index}";
 }
 
+/// <summary>An argument assigned from the stack into its home, whose kind gives any narrowing.</summary>
+internal sealed record Starg(int Index) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".starg {Index}";
+}
+
+/// <summary>The address of an argument's home.</summary>
+internal sealed record Ldarga(int Index) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".ldarga {Index}";
+}
+
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
 internal sealed record Local(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".ldloc {Index}";
+    /// <summary>The load of the argument homed in this slot when the body names the argument, as diagnostics show it.
+    /// </summary>
+    internal Arg? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".ldloc {Index}";
 }
 
 /// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
 internal sealed record SetLocal(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".stloc {Index}";
+    /// <summary>The store to the argument homed in this slot when the body names the argument, as diagnostics show it.
+    /// </summary>
+    internal Starg? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".stloc {Index}";
 }
 
 internal sealed record LocalAddress(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".ldloca {Index}";
+    /// <summary>The address of the argument homed in this slot when the body names the argument, as diagnostics show
+    /// it.</summary>
+    internal Ldarga? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".ldloca {Index}";
 }
 
 /// <summary>
@@ -394,9 +419,34 @@ internal sealed record StoreScalar(int Width) : Operation
     internal override string Render(Func<int, string> calleeName) => $".storeScalar {Width}";
 }
 
-internal sealed record StackAlloc(bool Zeroed) : Operation
+/// <summary>The integer element an <c>ldind</c> or <c>stind</c> opcode names; <c>I</c> is native-sized.</summary>
+internal enum NumericKind { I1, U1, I2, U2, I4, U4, I8, I }
+
+/// <summary>An <c>ldind</c> or <c>stind</c> of <paramref name="Kind"/>, rendered as its constructor.</summary>
+internal sealed record IndirectAccess(NumericKind Kind, bool Store) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".stackAlloc {LeanText.Bool(Zeroed)}";
+    /// <summary>Bytes the access moves; native int is eight bytes on every admitted profile.</summary>
+    internal int Width => Kind switch
+    {
+        NumericKind.I1 or NumericKind.U1 => 1,
+        NumericKind.I2 or NumericKind.U2 => 2,
+        NumericKind.I4 or NumericKind.U4 => 4,
+        _ => 8
+    };
+
+    /// <summary>A load sign-extends: only the one- and two-byte signed kinds.</summary>
+    internal bool Signed => Kind is NumericKind.I1 or NumericKind.I2;
+
+    /// <summary>The Lean term of the kind, such as <c>.i4</c>.</summary>
+    internal string KindTerm => "." + Kind.ToString().ToLowerInvariant();
+
+    internal override string Render(Func<int, string> calleeName) => $".{(Store ? "stind" : "ldind")} {KindTerm}";
+}
+
+/// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>
+internal sealed record Localloc : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => ".localloc";
 }
 
 /// <summary>The target of an overflow-checked conversion; <c>I</c> and <c>U</c> are native-sized.</summary>
@@ -444,10 +494,22 @@ internal sealed record NewReferenceArray(string Scope, string Name) : Operation
         $".newReferenceArray ({GenericEvidence.ObjectType(Scope, Name)})";
 }
 
-/// <summary>A cast or test of the top reference against the class <paramref name="Type"/>.</summary>
-internal sealed record ObjectTest(string Type, bool Throwing) : Operation
+/// <summary>An <c>ldnull</c>: the null object reference.</summary>
+internal sealed record LoadNull : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".objectTest ({Type}) {LeanText.Bool(Throwing)}";
+    internal override string Render(Func<int, string> calleeName) => ".ldnull";
+}
+
+/// <summary>A <c>castclass</c> of the top reference to the class <paramref name="Type"/>.</summary>
+internal sealed record CastClass(string Type) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".castclass ({Type})";
+}
+
+/// <summary>An <c>isinst</c> test of the top reference against the class <paramref name="Type"/>.</summary>
+internal sealed record IsInstance(string Type) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".isinst ({Type})";
 }
 
 /// <summary>An initialisation of a span local from the span operation that constructs it.</summary>
@@ -470,12 +532,6 @@ internal abstract record ManagedPointer : Operation
 internal sealed record TableLength : ManagedPointer
 {
     protected override string Body(Func<int, string> calleeName) => ".tableLength";
-}
-
-/// <summary>A load of the callable pointer in a native method table of the given signature.</summary>
-internal sealed record TableLoad(string Signature) : ManagedPointer
-{
-    protected override string Body(Func<int, string> calleeName) => $"(.tableLoad {Signature})";
 }
 
 /// <summary>A load of the element of a method table of the given signature.</summary>

@@ -78,7 +78,7 @@ foreach (var method in methods.Where(method => method.IsPublic))
     if (name == "CopyReadOnly")
     {
         claims.Add($"({Run(2, 5, 20, 3, "uninitialized")}).map Prod.snd = " +
-            ".error ⟨0, 2, .thrown \"System.ArgumentException\"⟩");
+            ".error ⟨0, 2, .thrown .argument⟩");
         proofs.Add("by rfl");
     }
     File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """
@@ -115,9 +115,9 @@ foreach (var (name, before, after) in new[]
     ("CopyReadOnly", ".spanCopy 1 false", ".spanFill 1 false"),
     ("TryCopyReadOnly", "target := .external externalIdentity0", "target := .external \"forged\""),
     ("TryCopyEnum", "System.Span\\u00601", "System.ReadOnlySpan\\u00601"),
-    ("TryCopyEnum", "parameterTypes := [.apply (.constructor Extraction.runtimeScope \"System.Span\\u00601\") " +
+    ("TryCopyEnum", "parameters := [.apply (.constructor Extraction.runtimeScope \"System.Span\\u00601\") " +
         "(.enum \"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Examples.CopyCode\"",
-        "parameterTypes := [.apply (.constructor Extraction.runtimeScope \"System.Span\\u00601\") " +
+        "parameters := [.apply (.constructor Extraction.runtimeScope \"System.Span\\u00601\") " +
         "(.enum \"Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null::Examples.OtherCopyCode\"")
 })
 {

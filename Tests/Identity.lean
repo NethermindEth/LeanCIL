@@ -676,23 +676,21 @@ def measureAssemblyMap (keys : Array AssemblyName) : IO Nat := do
     best := min best ((← IO.monoNanosNow) - started)
   return best
 
-/-- Map cost grows with key count and comparison bit length, with no text decoding. -/
+/-- Map cost grows with key count and comparison bit length, with no text decoding. Each bound
+    compares the largest size with the smallest and leaves a factor of 4 for cache misses: 64 times
+    the keys or bytes cost at most 128 times as much here, and 4096 times as much when quadratic. -/
 def checkAssemblyMapCost : IO Unit := do
   for prefixBytes in [4, 4096] do
-    let mut previous := 0
-    for count in [64, 512, 4096] do
-      let elapsed ← measureAssemblyMap (assemblyCostKeys count prefixBytes)
-      if previous > 0 && elapsed > previous * 20 + 2000000 then
-        throw (IO.userError s!"assembly count cost grew too quickly: {previous} -> {elapsed}")
-      IO.println s!"PASS assembly count {count}, prefix bytes {prefixBytes}: {elapsed} ns"
-      previous := elapsed
-  let mut previous := 0
-  for prefixBytes in [4096, 32768, 262144] do
-    let elapsed ← measureAssemblyMap (assemblyCostKeys 64 prefixBytes)
-    if previous > 0 && elapsed > previous * 20 + 2000000 then
-      throw (IO.userError s!"assembly bit cost grew too quickly: {previous} -> {elapsed}")
-    IO.println s!"PASS assembly count 64, prefix bytes {prefixBytes}: {elapsed} ns"
-    previous := elapsed
+    let smallest ← measureAssemblyMap (assemblyCostKeys 64 prefixBytes)
+    let largest ← measureAssemblyMap (assemblyCostKeys 4096 prefixBytes)
+    if largest > smallest * 512 + 2000000 then
+      throw (IO.userError s!"assembly count cost grew too quickly: {smallest} -> {largest}")
+    IO.println s!"PASS assembly counts 64 and 4096, prefix bytes {prefixBytes}: {largest} ns"
+  let smallest ← measureAssemblyMap (assemblyCostKeys 64 4096)
+  let largest ← measureAssemblyMap (assemblyCostKeys 64 262144)
+  if largest > smallest * 256 + 2000000 then
+    throw (IO.userError s!"assembly bit cost grew too quickly: {smallest} -> {largest}")
+  IO.println s!"PASS assembly count 64, prefix bytes 4096 and 262144: {largest} ns"
 
 #eval checkAssemblyMapCost
 

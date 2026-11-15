@@ -172,14 +172,13 @@ Recognised `IsSupported` getters are `X86Base.X64`, `Sse2`, `Ssse3`, `Sse41`, `S
 | Built-in profile | Enabled capabilities |
 | --- | --- |
 | `scalar` | No hardware feature flags |
-| `x64-sse2` | `X86Base64`, `Sse2`, `Vector128Accelerated` |
-| `x64-sse42` | The above plus `Ssse3`, `Sse41`, `Sse42` |
+| `x64-sse42` | `X86Base64`, `Sse2`, `Ssse3`, `Sse41`, `Sse42`, `Vector128Accelerated` |
 | `x64-v3` | The above plus `Avx`, `Avx2`, `Bmi1`, `Bmi2`, `Vector256Accelerated` |
 | `x64-v4` | The above plus `Avx512F`, `Avx512FVL`, `Avx512DQ`, `Avx512DQVL` |
 | `arm64-advsimd` | `ArmBase64`, `AdvSimd`, `Vector128Accelerated` |
 
 Profiles target .NET 10 CoreCLR, and both the extractor and the Lean certificate reject capability
-sets that split its runtime groups. [Runtime profiles](RUNTIME-PROFILES.md) gives the group
+sets that split its runtime groups or, on x64, fall below the .NET 11 baseline (`x86-64-v2`). [Runtime profiles](RUNTIME-PROFILES.md) gives the group
 constraints, the custom-profile rules and the measured x64 and arm64 runtimes. Changing a profile
 requires fresh extraction and proof verification; certificates from another profile do not acquire
 its capabilities.

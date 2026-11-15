@@ -337,43 +337,25 @@ using (var pinned = new PinnedMetadata(extractor, path))
         return leaf;
     }
     long Counter(string name) => (long)signatureType.GetProperty(name, Instance)!.GetValue(signatures)!;
-    bool GrowthAccepted(double previous, double current) => current <= previous * 6 + 1;
-    Require(GrowthAccepted(25, 100) && GrowthAccepted(25, 125) && !GrowthAccepted(25, 400),
-        "Growth predicate does not distinguish linear and quadratic work");
     var orderedQuery = signatureType.GetMethod("Ordered", Instance)!;
     var rootSets = new[] { 64, 256, 1024 }.Select(size => Enumerable.Range(0, size)
         .Select(_ => (TypeReference)new RequiredModifierType(split[0], new ArrayType(split[1]))).ToArray()).ToArray();
-    double Batch(TypeReference[] roots, int repetitions)
-    {
-        long start = Stopwatch.GetTimestamp();
-        for (int repeat = 0; repeat < repetitions; repeat++) orderedQuery.Invoke(signatures, [roots]);
-        return Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-    }
-    foreach (var roots in rootSets) Batch(roots, 16);
-    int repetitions = 1;
-    while (Batch(rootSets[0], repetitions) < 25) repetitions *= 2;
-    var samples = rootSets.Select(_ => new List<double>()).ToArray();
-    for (int round = 0; round < 9; round++)
-        for (int position = 0; position < rootSets.Length; position++)
-        {
-            int index = round % 2 == 0 ? position : rootSets.Length - 1 - position;
-            samples[index].Add(Batch(rootSets[index], repetitions));
-        }
-    double previousMedian = 0;
+    foreach (var roots in rootSets) orderedQuery.Invoke(signatures, [roots]);
+    long previousWork = 0;
     long previousAllocation = 0;
     for (int index = 0; index < rootSets.Length; index++)
     {
-        double median = samples[index].Order().ElementAt(4);
+        long nodes = Counter("NodeVisits"), edges = Counter("EdgeVisits"), probes = Counter("TrieProbes");
         long start = GC.GetAllocatedBytesForCurrentThread();
         orderedQuery.Invoke(signatures, [rootSets[index]]);
         long allocated = GC.GetAllocatedBytesForCurrentThread() - start;
-        Require(previousMedian == 0 || GrowthAccepted(previousMedian, median),
-            "Independent ordered signatures have superlinear CPU growth");
+        long work = Counter("NodeVisits") - nodes + Counter("EdgeVisits") - edges + Counter("TrieProbes") - probes;
+        Require(previousWork == 0 || work <= previousWork * 6,
+            "Independent ordered signatures have superlinear traversal growth");
         Require(previousAllocation == 0 || allocated <= previousAllocation * 5 + 16384,
             "Independent ordered signatures have superlinear allocation growth");
-        Console.WriteLine($"Ordered {rootSets[index].Length}: median batch {median:F3} ms, " +
-            $"{repetitions} passes, {allocated} bytes/pass");
-        previousMedian = median;
+        Console.WriteLine($"Ordered {rootSets[index].Length}: {work} visits and probes, {allocated} bytes/pass");
+        previousWork = work;
         previousAllocation = allocated;
     }
     foreach (int size in new[] { 64, 256, 1024 })
