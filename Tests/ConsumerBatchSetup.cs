@@ -9,6 +9,7 @@
 #:include ConsumerTraceDirectory.cs
 #:include ConsumerBatchOutcomes.cs
 
+// Standalone timing runner for the mixed-outcome batch that core checks; no suite runs it.
 using System.Text.Json;
 
 var separate = args.Contains("--separate", StringComparer.Ordinal);

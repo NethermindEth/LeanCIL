@@ -11,6 +11,7 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
+// Standalone runner for the argument guard proofs; no suite runs it.
 // Framework argument guards as checked runtime contracts: proofs that each raises its exception exactly when its .NET
 // condition holds, a proof that fails once the guard is swapped, and named rejection of uncatalogued guard overloads.
 using var verification = new Program();
@@ -18,14 +19,15 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Guards");
 Directory.CreateDirectory(root);
 
-foreach (var (proof, entry) in new[]
+foreach (var (source, entry) in new[]
 {
-    ("GuardCount", "Guards::Count(System.Int32)"),
-    ("GuardIndex", "Guards::Index(System.UInt32,System.UInt32)"),
-    ("GuardRequired", "Guards::Required(System.String)")
+    ("Examples/Proofs/GuardCount.lean", "Guards::Count(System.Int32)"),
+    ("Examples/Proofs/GuardIndex.lean", "Guards::Index(System.UInt32,System.UInt32)"),
+    ("Examples/Proofs/GuardRequired.lean", "Guards::Required(System.String)")
 })
 {
-    verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
+    var proof = Path.GetFileNameWithoutExtension(source);
+    verification.Verify(assembly, "Examples", entry, At(source), Path.Combine(root, proof));
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 

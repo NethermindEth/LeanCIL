@@ -53,13 +53,13 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 
 | Suite | Checks |
 | --- | --- |
-| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, binding catalogs and certified integer binding families, gate plans and required results, method selectors, caches, batched extraction and joint kernel replay |
+| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, replay diagnostics, return narrowing and metadata restrictions, object array steps, embedding retention and profiles, full transfer, SHA-1 and assembly and pin index scaling, binding catalogs and certified integer binding families, gate plans and required results, method selectors, caches, batched extraction and joint kernel replay |
 | `templates` | shared profile templates, exact instruction equations and checked bindings |
 | `workspace` | per-method editor extractions, watch refresh and ordinary fresh certification |
 | `imports` | implementation-bound contract imports and conditional caller verification |
 | `exceptionlint` | diagnostic XML exception drift without proof claims |
 | `contracts` | universal checked contracts, caller memory preservation and incorrect implementations |
-| `evidence` | independent extraction certificates, malformed evidence rejection, and the metadata decoder's method names against Cecil's |
+| `evidence` | independent extraction certificates, malformed evidence rejection, the metadata decoder's method names against Cecil's, strings as opaque references, typed identity display, and the certificate index, feature getter, layout accumulation and projection, extraction home and generic owner index libraries |
 | `dispatch` | constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage |
 | `loops` | cyclic control-flow validation, universal termination, negative contracts and class/word-array composition |
 | `outlines-control` | generated outlines for control flow, arithmetic and value types, completed proofs and rejection checks |
@@ -73,7 +73,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `blocks` | block memory, alignment prefixes, runtime comparisons and safety faults |
 | `unsafe` | layout-based Unsafe sizes, reference offsets and metadata validation |
 | `math` | integer Math helpers, BigMul, runtime faults and universal minimum |
-| `intrinsics` | exact SIMD call signatures, byte shuffles, AES rounds, unspecified lanes, opaque locals and profile rejection |
+| `intrinsics` | exact SIMD call signatures, byte shuffles, AES rounds, unspecified lanes, opaque locals, profile rejection and the library of generated runtime comparisons |
 | `divrem` | X86Base.X64.DivRem and Math.DivRem through ValueTuple fields, divide faults and layout rejection |
 | `fsharp` | F# arithmetic, branches, calls, references and struct construction |
 | `constructors` | struct construction, initialized temporaries and constructor faults |
@@ -105,7 +105,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
 | `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses and faulting bodies with per-instruction heartbeat, proof-size and latency budgets |
-| `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, and the strict binding library and audit |
+| `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal and self-admission |
 | `audit` | theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge |
