@@ -384,7 +384,7 @@ deriving instance Lean.ToExpr for CIL.FieldShape
 deriving instance Lean.ToExpr for CIL.ValueShape
 
 /-- The literal shape `resolution` evaluates to under the compiled resolver. The kernel still
-    checks the fact that states it, so a wrong evaluation fails the declaration, never proves it. -/
+    checks the fact that states it, so a wrong evaluation fails the declaration. -/
 unsafe def evaluateShape (α : Type) [ToExpr α] (shapeType : Name) (resolution : Expr) :
     MetaM Expr :=
   return toExpr (← evalExpr α (mkConst shapeType) resolution)
