@@ -2349,6 +2349,16 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
                         RemoveClosure(cacheRoot, libraryKey);
                     }
                     finally { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+                    // Consumer cache keys bind the library directory: read the entry later runs open, unless
+                    // this run writes into the library, which only its private build allows.
+                    if (!writes)
+                    {
+                        libraryStamps = HashedCacheEntry(cached, manifest)
+                            ?? throw new InvalidOperationException("Certified cache changed while copying");
+                        Directory.Delete(library, true);
+                        library = cached;
+                        ownsLibrary = false;
+                    }
                 }
             }
         }
