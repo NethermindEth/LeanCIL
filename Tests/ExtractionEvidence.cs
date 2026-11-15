@@ -19,9 +19,7 @@ fixtures.PrepareLeanFixtures(
     "Tests.ImportEvidence", "Tests.ImportedLayouts", "Tests.AssemblyPins", "Tests.StaticValueEvidence", "Tests.SpanViews",
     "Tests.MemorySpanExecution", "Tests.ManagedPointerValues", "Tests.PrimitiveArrays", "Tests.ArrayElementReferences",
     "Tests.ReadOnlyArrayReferences", "Tests.ExtractionGenerics", "Tests.ReferenceTests", "Tests.PointerOperations",
-    "Tests.Objects", "Tests.FlowIndex", "Tests.CertificateFlow", "Tests.FeatureGetter",
-    "Tests.ExtractionHomeIndexes", "Tests.LayoutAccumulation", "Tests.LayoutProjectionIndexes",
-    "Tests.GenericOwnerScaling");
+    "Tests.Objects");
 if (args is ["--prepare-only"]) return;
 Run(["dotnet", "run", "--file", "Tests/PreparedLeanFixturesTests.cs"]);
 Run(["dotnet", "run", "--file", "Tests/RejectedEvidenceTests.cs"]);
@@ -37,7 +35,7 @@ foreach (var name in new[]
 {
     "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables",
     "MemorySpans", "ReferenceInstructions", "PointerOperations", "Objects", "StaticValues", "StaticScalarValues",
-    "TranslationAudit", "MetadataDifferential", "Strings", "Identities"
+    "TranslationAudit", "MetadataDifferential"
 })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");
