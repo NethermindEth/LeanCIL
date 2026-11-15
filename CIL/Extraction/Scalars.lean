@@ -309,7 +309,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
   else if instruction.opcode == 65054 then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
-    instruction.operand == .none && match emitted with | .memory .nullObject => true | _ => false
+    instruction.operand == .none && match emitted with | .ldnull => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
     match instruction.operand, stack, emitted with
     | .target target, value :: _, .brfalse actual =>
@@ -461,20 +461,19 @@ private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInst
   | 114, .text text, .memory (.stringLiteral actual) => role == none && text == actual
   | _, _, _ => false
 
-/-- Covered opcodes emit exactly their encoding, and a class type test only from `castclass`
-    (throwing) or `isinst` on an object. Elsewhere only a decided type test's word,
-    a size constant or an exact runtime query may emit a scalar operation. -/
+/-- Covered opcodes emit exactly their encoding, and a class type test only from the raw
+    `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's
+    word, a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Instruction) : Bool :=
   if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
     match emitted with | .ldc_i4 bits => bits == if value then 1 else 0 | _ => false
-  else if let .objectTest type throwing := emitted then
+  else if let some (opcode, type) := typeTestSource emitted then
     match instruction.operand, stack with
     | .type target, value :: _ =>
-      instruction.opcode ∈ [116, 117] && throwing == (instruction.opcode == 116) &&
-        type == target && value ∈ [.object, .nullObject]
+      instruction.opcode == opcode && type == target && value ∈ [.object, .nullObject]
     | _, _ => false
   else if (match instruction.operand with
     | .call site => referenceContentQuery site | _ => false) then

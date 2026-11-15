@@ -494,10 +494,22 @@ internal sealed record NewReferenceArray(string Scope, string Name) : Operation
         $".newReferenceArray ({GenericEvidence.ObjectType(Scope, Name)})";
 }
 
-/// <summary>A cast or test of the top reference against the class <paramref name="Type"/>.</summary>
-internal sealed record ObjectTest(string Type, bool Throwing) : Operation
+/// <summary>An <c>ldnull</c>: the null object reference.</summary>
+internal sealed record LoadNull : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".objectTest ({Type}) {LeanText.Bool(Throwing)}";
+    internal override string Render(Func<int, string> calleeName) => ".ldnull";
+}
+
+/// <summary>A <c>castclass</c> of the top reference to the class <paramref name="Type"/>.</summary>
+internal sealed record CastClass(string Type) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".castclass ({Type})";
+}
+
+/// <summary>An <c>isinst</c> test of the top reference against the class <paramref name="Type"/>.</summary>
+internal sealed record IsInstance(string Type) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".isinst ({Type})";
 }
 
 /// <summary>An initialisation of a span local from the span operation that constructs it.</summary>

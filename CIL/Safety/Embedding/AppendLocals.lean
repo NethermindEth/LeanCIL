@@ -629,6 +629,18 @@ theorem step_appendLocals_ldc_i8 (value : W64) :
 
 #print axioms step_appendLocals_ldc_i8
 
+/-- `ldnull` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldnull :
+    StepAppendLocals .ldnull := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  exact fallback_appendLocals body.profile .ldnull pc stack frame extra memory
+
+#print axioms step_appendLocals_ldnull
+
 /-- `conv_i1` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_conv_i1 :
     StepAppendLocals .conv_i1 := by
@@ -1020,18 +1032,31 @@ theorem step_appendLocals_brtrue (target : Nat) :
 
 #print axioms step_appendLocals_brtrue
 
-/-- `objectTest` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
-    StepAppendLocals (.objectTest type throwing) := by
+/-- `castclass` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_castclass (type : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.castclass type) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
   append_stack_cases using
-    fallback_appendLocals body.profile (.objectTest type throwing) pc _ frame extra memory
+    fallback_appendLocals body.profile (.castclass type) pc _ frame extra memory
 
-#print axioms step_appendLocals_objectTest
+#print axioms step_appendLocals_castclass
+
+/-- `isinst` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_isinst (type : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.isinst type) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  append_stack_cases using
+    fallback_appendLocals body.profile (.isinst type) pc _ frame extra memory
+
+#print axioms step_appendLocals_isinst
 
 /-- `blt_un` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_blt_un (target : Nat) :
@@ -1368,6 +1393,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_ldc_i4 value
     case ldc_i8 value =>
       exact step_appendLocals_ldc_i8 value
+    case ldnull =>
+      exact step_appendLocals_ldnull
     case conv_i1 =>
       exact step_appendLocals_conv_i1
     case conv_i2 =>
@@ -1432,8 +1459,10 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_brfalse target
     case brtrue target =>
       exact step_appendLocals_brtrue target
-    case objectTest type throwing =>
-      exact step_appendLocals_objectTest type throwing
+    case castclass type =>
+      exact step_appendLocals_castclass type
+    case isinst type =>
+      exact step_appendLocals_isinst type
     case blt_un target =>
       exact step_appendLocals_blt_un target
     case bge_un target =>

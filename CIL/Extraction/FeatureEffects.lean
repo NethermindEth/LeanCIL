@@ -37,7 +37,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .arrayStore _ => (3, 0)
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _ => (0, 1)
+  | .staticAddress _ | .staticValue _ | .nullRef | .stringLiteral _ => (0, 1)
   | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => (1, 1)
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => (2, 0)
   | .referenceArrayLoad => (2, 1)
@@ -47,6 +47,13 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .add .. | .spanCreate | .spanItem _ => (2, 1)
   | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue ..
   | .createSpan _ | .spanReference | .spanLength | .isNullRef => (1, 1)
+
+/-- The raw opcode a class type test lowers from, `castclass` (116) or `isinst` (117), and the
+    class it tests; `none` for any other instruction. -/
+def typeTestSource : Instruction → Option (Nat × TypeExpr)
+  | .castclass type => some (116, type)
+  | .isinst type => some (117, type)
+  | _ => none
 
 /-- Successful stack effects for instructions that cannot create a local alias or
 change a local root. Control flow, returns, stores and addresses require exact
@@ -61,11 +68,11 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .localloc | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
-  | .ldc_i4 _ | .ldc_i8 _ | .ldarg _ | .ldloc .. => some (0, 1)
+  | .ldc_i4 _ | .ldc_i8 _ | .ldnull | .ldarg _ | .ldloc .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
   | .loadAggregate _ | .loadScalar .. | .ldind _ | .fieldAt .. | .fieldAddress _
-  | .aggregateFieldAt .. | .objectTest .. => some (1, 1)
+  | .aggregateFieldAt .. | .castclass _ | .isinst _ => some (1, 1)
   -- Two-operand arithmetic and comparisons, plain or with a widened native operand.
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .div | .div_un | .rem | .rem_un | .add_ovf

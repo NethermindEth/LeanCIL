@@ -143,7 +143,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
   | .managed _ | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callInstance .. | .callVirtual ..
-  | .objectTest .. | .tailCall ..
+  | .castclass _ | .isinst _ | .tailCall ..
   | .throw _ | .ret => .boundary
   | _ => .other
 
@@ -278,7 +278,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       rename_i addressHome localAllocation unadmitted offsetBeforeTable tableBeforeOffset addOvf
         addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual
         objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue
-        objectTested storeHome
+        castClass isInst storeHome
       guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
       guard_hyp localAllocation : operation = .localloc → False
       guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
@@ -291,9 +291,11 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         stack = Value.scalar y :: Value.scalar x :: rest → False
       guard_hyp objectsEqual : ∀ (right left : ManagedReference) (rest : List Value),
         operation = .ceq → stack = Value.object right :: Value.object left :: rest → False
+      guard_hyp isInst : ∀ (type : CIL.Extraction.TypeExpr) (value : ManagedReference)
+        (rest : List Value), operation = .isinst type → stack = Value.object value :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
-        objectBranchFalse objectBranchTrue objectTested storeHome addressHome localAllocation
+        objectBranchFalse objectBranchTrue castClass isInst storeHome addressHome localAllocation
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

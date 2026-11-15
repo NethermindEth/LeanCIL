@@ -373,8 +373,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Native table offsets, faulting arithmetic, object identity, argument homes and `localloc`
-  -- are matched apart, so that neither match exceeds the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic, object identity, type tests, argument homes and
+  -- `localloc` are matched apart, so neither match exceeds the 79 alternatives `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -445,8 +445,12 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .brtrue target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then target else pc + 1) rest frame m
-  | .objectTest type throwing, .object value :: rest =>
-    let result ← objectTest m type throwing value
+  -- Class type tests: null and an instance of `type` pass; another object fails the test.
+  | .castclass type, .object value :: rest =>
+    let result ← objectTest m type true value
+    return .next (pc + 1) (.object result :: rest) frame m
+  | .isinst type, .object value :: rest =>
+    let result ← objectTest m type false value
     return .next (pc + 1) (.object result :: rest) frame m
   -- An argument's home is written and addressed as the local slot it is.
   | .starg index, value :: rest =>

@@ -499,9 +499,9 @@ theorem step_relabel_brtrue (target : Nat) : StepRelabel (.brtrue target) := by
 
 #print axioms step_relabel_brtrue
 
-/-- A type test continues at the next pc with the tested reference or null. -/
-theorem step_relabel_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
-    StepRelabel (.objectTest type throwing) := by
+/-- A cast continues at the next pc with the tested reference. -/
+theorem step_relabel_castclass (type : CIL.Extraction.TypeExpr) :
+    StepRelabel (.castclass type) := by
   stack_cases =>
     first
         | exact fallback_relabel (profile := expected.profile) _ rfl
@@ -511,7 +511,21 @@ theorem step_relabel_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Boo
            cases h
            simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
 
-#print axioms step_relabel_objectTest
+#print axioms step_relabel_castclass
+
+/-- A type test continues at the next pc with the tested reference or null. -/
+theorem step_relabel_isinst (type : CIL.Extraction.TypeExpr) :
+    StepRelabel (.isinst type) := by
+  stack_cases =>
+    first
+        | exact fallback_relabel (profile := expected.profile) _ rfl
+            (fun absent => absurd rfl absent) (fun _ _ ran => ⟨ran, context.next rfl⟩)
+            context.next h
+        | (repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found, ok_bind_eq])
+           cases h
+           simp only [FrameAction.relabel, apply_ite, context.next rfl, Pure.pure, Except.pure])
+
+#print axioms step_relabel_isinst
 
 /-- Relabel scalar or reference observations while preserving their result. -/
 theorem step_relabel_beq (target : Nat) : StepRelabel (.beq target) := by
@@ -708,7 +722,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case ceq => exact step_relabel_ceq
   case brfalse target => exact step_relabel_brfalse target
   case brtrue target => exact step_relabel_brtrue target
-  case objectTest type throwing => exact step_relabel_objectTest type throwing
+  case castclass type => exact step_relabel_castclass type
+  case isinst type => exact step_relabel_isinst type
   case beq target => exact step_relabel_beq target
   case bne_un target => exact step_relabel_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
@@ -717,7 +732,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | ldind | stind | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | ldind | stind | dup | pop | skipInit =>
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
@@ -1054,15 +1069,24 @@ theorem step_raise_brtrue (target : Nat) : StepRaise (.brtrue target) := by
 #print axioms step_raise_brtrue
 
 /-- A failed cast raises `InvalidCastException` at the same relabelled location. -/
-theorem step_raise_objectTest (type : CIL.Extraction.TypeExpr) (throwing : Bool) :
-    StepRaise (.objectTest type throwing) := by
+theorem step_raise_castclass (type : CIL.Extraction.TypeExpr) : StepRaise (.castclass type) := by
   stack_cases =>
     first
         | exact fallback_raise (profile := expected.profile) _ rfl
             (fun absent => absurd rfl absent) (fun _ ran => ran) context.next h
         | raise_lockstep
 
-#print axioms step_raise_objectTest
+#print axioms step_raise_castclass
+
+/-- A throwing `isinst` step throws the same at the relabelled location. -/
+theorem step_raise_isinst (type : CIL.Extraction.TypeExpr) : StepRaise (.isinst type) := by
+  stack_cases =>
+    first
+        | exact fallback_raise (profile := expected.profile) _ rfl
+            (fun absent => absurd rfl absent) (fun _ ran => ran) context.next h
+        | raise_lockstep
+
+#print axioms step_raise_isinst
 
 /-- Reference observations preserve exceptional outcomes under relabeling. -/
 theorem step_raise_beq (target : Nat) : StepRaise (.beq target) := by
@@ -1287,7 +1311,8 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case ceq => exact step_raise_ceq
   case brfalse target => exact step_raise_brfalse target
   case brtrue target => exact step_raise_brtrue target
-  case objectTest type throwing => exact step_raise_objectTest type throwing
+  case castclass type => exact step_raise_castclass type
+  case isinst type => exact step_raise_isinst type
   case beq target => exact step_raise_beq target
   case bne_un target => exact step_raise_bne_un target
   case nop | neg | cgt | bgt | ble | conv_i1 | conv_i2 | conv_u2 | conv_i8 | conv_i4 | conv_u1
@@ -1296,7 +1321,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | ldind | stind | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | ldind | stind | dup | pop | skipInit =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)
 
 #print axioms step_raise

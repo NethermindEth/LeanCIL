@@ -191,6 +191,8 @@ inductive Instruction where
   -- Constants, conversions, arithmetic and stack shuffling.
   | ldc_i4 (value : W32)
   | ldc_i8 (value : W64)
+  /-- `ldnull`: the null object reference. -/
+  | ldnull
   | conv_i1 | conv_i2 | conv_u2
   | conv_i8 | conv_i4 | conv_u1 | conv_u4 | conv_u8 | conv_u | conv_i | not | add | sub | mul
   | and | or
@@ -221,10 +223,11 @@ inductive Instruction where
       `constructor` as its receiver ahead of `argc` arguments and pushed once it returns. -/
   | newObject (constructor : Nat) (argc : Nat) (owner : Extraction.TypeExpr)
       (bases : List Extraction.TypeExpr) (size : Nat)
-  /-- `castclass` (`throwing`) or `isinst` of class `type`: an object whose runtime class or one
-      of its bases is `type` stays on the stack, as does null; any other object becomes null,
-      or throws `System.InvalidCastException` for `castclass`. -/
-  | objectTest (type : Extraction.TypeExpr) (throwing : Bool)
+  /-- `castclass`: the object unchanged when it is null or an instance of `type`;
+      `InvalidCastException` otherwise. -/
+  | castclass (type : Extraction.TypeExpr)
+  /-- `isinst`: the object when it is null or an instance of `type`; null otherwise. -/
+  | isinst (type : Extraction.TypeExpr)
   | skipInit
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)

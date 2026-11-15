@@ -252,7 +252,7 @@ internal static class InstructionTranslation
             Code.Conv_I2 => new StackOperation(StackOpcode.ConvI2),
             Code.Conv_U2 => new StackOperation(StackOpcode.ConvU2),
             Code.Neg => new StackOperation(StackOpcode.Neg),
-            Code.Ldnull => MemoryOperation.Of(new NullObject()),
+            Code.Ldnull => new LoadNull(),
             Code.Castclass or Code.Isinst => ObjectTypes.Test(i),
             Code.Ldstr => StringOperation((string)i.Operand),
             Code.Cgt => new StackOperation(StackOpcode.Cgt),
