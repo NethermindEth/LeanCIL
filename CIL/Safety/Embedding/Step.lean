@@ -255,15 +255,17 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
--- Each faulting case reduces `step` through every arm of its first match, argument homes included.
-set_option maxHeartbeats 400000 in
 /-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
 theorem step_relabel_faulting (op : Instruction)
     (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
   cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
     Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
-  all_goals stack_cases =>
-    first | fallback_vacuous | lockstep
+  -- One goal per arm of the dispatcher's first match, so its cost does not grow with the values.
+  all_goals
+    explicit_intro
+    (try rw [context.profile])
+    split at h
+    all_goals first | contradiction | lockstep | fallback_vacuous
 
 #print axioms step_relabel_faulting
 
