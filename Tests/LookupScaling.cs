@@ -84,15 +84,14 @@ const int MoreFeatureLocals = 64;
 const int ManyFeatureLocals = 256;
 const int FeatureLocalSegments = 256;
 const int FeatureLocalInstructions = 8 * FeatureLocalSegments + 1;
-// Bodies over `ManyKnownFacts` int32 locals that store a constant into the first few, more or many of them and then
-// store into and load each of those in turn for `KnownFactRounds` rounds. Every loop state holds all the stored
-// facts, so the loop costs the facts times the rounds.
+// Bodies over `ManyKnownFacts` int32 locals that store zero into the first few, more or many of them, then store a
+// new word into each in turn and load it back for `KnownFactRounds` rounds; every loop state holds every fact.
 const int FewKnownFacts = 4;
 const int MoreKnownFacts = 16;
 const int ManyKnownFacts = 64;
-const int KnownFactRounds = 512;
-// The increment from 16 to 64 facts is four times the increment from 4 to 16 when each state costs time linear in
-// its facts; a logarithmic factor makes it about 5.7 times and a quadratic state check sixteen times.
+const int KnownFactRounds = 128;
+// Linear growth makes the increment from 16 to 64 facts four times the one from 4 to 16; at about 400 heartbeats per
+// fact, a quadratic term of one heartbeat per fact pair in each state exceeds this ratio.
 const double AllowedFactIncrementRatio = 4.5;
 
 var directory = At("artifacts/LookupScaling");
@@ -1189,10 +1188,36 @@ if (perFeatureInstruction.Skip(1).Any(run => run.Cost > perFeatureInstruction[0]
 Console.WriteLine($"PASS checking the feature certificate of {FeatureLocalInstructions} instructions costs " +
     featureLocalsMeasured);
 
-// The kernel heartbeats of the feature certificate of a body over `ManyKnownFacts` int32 locals that stores zero
-// into the first `facts` of them and then, `rounds` times, stores a small constant into one of those locals in turn
-// and loads it back, less those of stating the same certificate. Each round changes a word, so no two loop states
-// hold the same facts and the kernel cannot reuse a check of one state for another.
+// One literal certificate state, written as the extractor writes states, so a fact costs only what the check costs.
+static string KnownFactState(IEnumerable<int> stack, IEnumerable<int> words) =>
+    $"some ⟨[{string.Join(", ", stack.Select(word => $"some {word}"))}], " +
+    $"[{string.Join(", ", words.Select((word, index) => $"({index}, {word})"))}]⟩";
+
+// The literal certificate of the body `KnownFactCost` checks: round `round` stores the word `round + 1`.
+static string KnownFactCertificate(int facts, int rounds)
+{
+    var states = new List<string>();
+    for (var index = 0; index < facts; index++)
+    {
+        var stored = new int[index];
+        states.Add(KnownFactState([], stored));
+        states.Add(KnownFactState([0], stored));
+    }
+    var words = new int[facts];
+    for (var round = 0; round < rounds; round++)
+    {
+        states.Add(KnownFactState([], words));
+        states.Add(KnownFactState([round + 1], words));
+        words[round % facts] = round + 1;
+        states.Add(KnownFactState([], words));
+        states.Add(KnownFactState([round + 1], words));
+    }
+    states.Add(KnownFactState([], words));
+    return string.Join(",\n  ", states);
+}
+
+// The kernel heartbeats of the certificate of a body storing zero into `facts` of `ManyKnownFacts` int32 locals and
+// then running `rounds` rounds that each store into one of them in turn and load it, less those of stating it.
 long KnownFactCost(int facts, int rounds)
 {
     var header = $$"""
@@ -1204,30 +1229,22 @@ long KnownFactCost(int facts, int rounds)
         def intType : TypeExpr := .atom runtimeScope "System.Int32"
         def facts : Nat := {{facts}}
         def rounds : Nat := {{rounds}}
-        /-- The word of local `index` before round `round`: that of its last store. -/
-        def word (round index : Nat) : W32 :=
-          if index < round then BitVec.ofNat 32 ((index + facts * ((round - 1 - index) / facts)) % 9) else 0
-        def before (round : Nat) : List (Nat × W32) := (List.range facts).map fun index => (index, word round index)
-        def stored (count : Nat) : List (Nat × W32) := (List.range count).map fun index => (index, 0)
         def raw : RawMethod := {
           token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
           callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
           parameters := [], locals := List.replicate {{ManyKnownFacts}} intType, initLocals := true,
           maxStack := 1, genericParameters := [],
           code := (List.range facts).flatMap (fun index => [⟨0, 22, .none⟩, ⟨0, 19, .local index⟩]) ++
-            (List.range rounds).flatMap (fun round => [⟨0, 22 + round % 9, .none⟩,
+            (List.range rounds).flatMap (fun round => [⟨0, 32, .integer (round + 1 : Nat)⟩,
               ⟨0, 19, .local (round % facts)⟩, ⟨0, 17, .local (round % facts)⟩, ⟨0, 38, .none⟩]) ++
             [⟨0, 42, .none⟩] }
-        def features : FeatureCertificate :=
-          (List.range facts).flatMap (fun index => [some ⟨[], stored index⟩, some ⟨[some 0], stored index⟩]) ++
-            (List.range rounds).flatMap (fun round =>
-              [some ⟨[], before round⟩, some ⟨[some (BitVec.ofNat 32 (round % 9))], before round⟩,
-                some ⟨[], before (round + 1)⟩, some ⟨[some (BitVec.ofNat 32 (round % 9))], before (round + 1)⟩]) ++
-            [some ⟨[], before rounds⟩]
+        def features : FeatureCertificate := [
+          {{KnownFactCertificate(facts, rounds)}}]
         def code : List Instruction :=
           (List.range facts).flatMap (fun index => [.ldc_i4 0, .stloc index]) ++
             (List.range rounds).flatMap (fun round =>
-              [.ldc_i4 (round % 9), .stloc (round % facts), .ldloc (round % facts), .pop]) ++ [.ret]
+              [.ldc_i4 (BitVec.ofNat 32 (round + 1)), .stloc (round % facts), .ldloc (round % facts), .pop]) ++
+            [.ret]
         """ + "\n";
     var statement = $"FeatureFlowValid #[] (fun _ => none) raw .scalar features " +
         $"(List.replicate {2 * facts + 4 * rounds + 1} true) code";

@@ -94,18 +94,19 @@ well. Each segment loads, stores and addresses a local, then addresses the argum
 constant into it. A feature state lists only the locals that hold a known word, as (local index,
 word) pairs in increasing index order, so none of these states holds a local fact. The suite fails
 when the cost per instruction at 64 or 256 locals exceeds 1.25 times the cost at 16; it measures
-1.01 at 64 and 1.02 at 256, where a state with one entry per local measures 1.23 and 2.26.
+1.01 at 64 and 1.02 at 256.
 
 A last body over 64 `int32` locals stores zero into the first 4, 16 or 64 of them. Then, in each
-of 512 rounds, it stores a constant from 0 to 8 into one of those locals in turn and loads it back,
-so each of the 2,048 loop states holds every stored fact and no two hold the same words. The suite
-subtracts the cost of the stores alone, whose states together hold about the square of the facts,
-and fails when the increment from 16 to 64 facts exceeds 4.5 times the increment from 4 to 16:
-linear growth in the facts gives four, a logarithmic factor about 5.7 and a quadratic state check
-sixteen. Reads, stores and weakening walk the known facts, and each fact's eligibility is a lookup
-in a balanced index built once per body. The ratio measures 4.02, about 3,200 kernel heartbeats
-per fact per state including the computation of the generated words, or about 420 million for 64
-facts over 2,048 states.
+of 128 rounds, it stores a new word into one of those locals in turn and loads it back, so each of
+the 512 loop states holds every stored fact. Its certificate is written out as literal states, as
+the extractor writes them. The suite subtracts the cost of the stores alone, whose states together
+hold about the square of the facts, and fails when the increment from 16 to 64 facts exceeds 4.5
+times the increment from 4 to 16. Linear growth in the facts gives four; at the measured cost per
+fact, a quadratic term of one heartbeat per pair of facts in each state exceeds 4.5, and a check
+that also compares every pair of facts in each state measures 10.6. Reads, stores and weakening
+walk the known facts, and each fact's eligibility is a lookup in a balanced index built once per
+body. The ratio measures 4.05, about 400 kernel heartbeats per fact per state, or about 13 million
+for 64 facts over 512 states.
 
 The suite embeds a hand-written body built with `Method.withCode`, one call per segment, into an
 extraction with a dead block after each return, at 512 and 2,048 calls, and reads the kernel
