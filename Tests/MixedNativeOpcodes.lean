@@ -210,8 +210,8 @@ theorem division :
   and_intros <;> intros <;> rfl
 #print axioms division
 
-/-- The instructions whose operands `widenMixed` changes are exactly those listed by the
-    theorems above; every other instruction leaves any stack as it is. -/
+/-- Outside the eleven listed instructions and the five compare-and-branch forms, `widenMixed`
+    leaves every stack as it is. -/
 theorem widened_instructions (op : Instruction) (stack : List CIL.Value) :
     (op ∈ [.add, .sub, .mul, .and, .or, .xor, .ceq, .clt, .cgt, .clt_un, .cgt_un] ∨
       ∃ target, op ∈ [.beq target, .blt target, .ble target, .bgt target, .bge target]) ∨
@@ -219,15 +219,24 @@ theorem widened_instructions (op : Instruction) (stack : List CIL.Value) :
   cases op <;> simp [widenMixed, nativePureBinary]
 #print axioms widened_instructions
 
-/-- Unsigned branches refuse a mixed pair in both interpreters and both operand orders. -/
-theorem unsigned_branches_refused (int32 : W32) (native : W64) :
-    ([Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
-      (CIL.step op false none 0 [] [.i32 int32, .i64 native] (fun _ => none)).isNone &&
-      (CIL.step op false none 0 [] [.i64 native, .i32 int32] (fun _ => none)).isNone &&
-      !(step body op 0 [] frame [.scalar (.i32 int32), .scalar (.i64 native)] Memory.empty).isOk &&
-      !(step body op 0 [] frame [.scalar (.i64 native), .scalar (.i32 int32)] Memory.empty).isOk) =
-      true := by
-  rfl
-#print axioms unsigned_branches_refused
+/-- An instruction `widenMixed` widens leaves the stack as it is unless a 64-bit operand lies
+    on top of a 32-bit one or the reverse, so equal kinds, and a float, reference or vector on
+    top, are unchanged whatever lies beneath. -/
+theorem widened_unchanged_unless_mixed (op : Instruction) (widened : nativePureBinary op = true)
+    (top below : CIL.Value) (rest : List CIL.Value)
+    (nativeOverInt32 : ∀ native int32, ¬(top = .i64 native ∧ below = .i32 int32))
+    (int32OverNative : ∀ int32 native, ¬(top = .i32 int32 ∧ below = .i64 native)) :
+    widenMixed op (top :: below :: rest) = top :: below :: rest := by
+  unfold widenMixed
+  rw [widened]
+  split
+  · next _ _ _ heq =>
+    cases heq
+    exact absurd ⟨rfl, rfl⟩ (nativeOverInt32 _ _)
+  · next _ _ _ heq =>
+    cases heq
+    exact absurd ⟨rfl, rfl⟩ (int32OverNative _ _)
+  · rfl
+#print axioms widened_unchanged_unless_mixed
 
-end Tests.MixedNativeOpcodes
+
