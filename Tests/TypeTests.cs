@@ -93,6 +93,29 @@ foreach (var (name, expected, offset) in new[] { ("Marker", new[] { "1" }, 1), (
             "method1Closed", "is false");
 }
 
+// A two-byte opcode at a pruned pc is written as 0xFE00 plus its second byte, here the long form of ldarg.
+const int TwoBytePrefix = 0xFE00, LdargSecondByte = 0x09;
+var longFolder = Path.Combine(root, "LongOpcode");
+Directory.CreateDirectory(longFolder);
+var longDll = Path.Combine(longFolder, "Examples.dll");
+var markerOps = Ops(File.ReadAllText(Path.Combine(root, "Marker", "Extracted.lean")), 1);
+int longPc;
+using (var module = ModuleDefinition.ReadModule(assembly))
+{
+    var method = module.GetType("Examples.TypeTests").Methods.Single(m => m.Name == "Classify");
+    var code = method.Body.Instructions;
+    longPc = Enumerable.Range(0, code.Count).First(pc =>
+        code[pc].OpCode.Code == Code.Ldarg_0 && markerOps[pc].StartsWith(".unadmitted ", StringComparison.Ordinal));
+    code[longPc].OpCode = OpCodes.Ldarg;
+    code[longPc].Operand = method.Parameters[0];
+    module.Write(longDll);
+}
+Run(Extract("extract", longDll, "Examples", "TypeTests::Marker(int)", longFolder));
+var longOps = Ops(File.ReadAllText(Path.Combine(longFolder, "Extracted.lean")), 1);
+if (longOps.Length != markerOps.Length || longOps[longPc] != $".unadmitted {TwoBytePrefix + LdargSecondByte}")
+    throw new InvalidOperationException($"Two-byte opcode hole at pc {longPc}: {string.Join(" | ", longOps)}");
+Console.WriteLine($"PASS two-byte opcode hole: pc {longPc} carries {TwoBytePrefix + LdargSecondByte}");
+
 var referenceFolder = Path.Combine(root, "ReferenceCases");
 Run(Extract("extract", assembly, "Examples", "TypeTests::ReferenceCases(int)", referenceFolder));
 var referenceSource = File.ReadAllText(Path.Combine(referenceFolder, "Extracted.lean"));
