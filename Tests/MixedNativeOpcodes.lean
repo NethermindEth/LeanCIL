@@ -239,4 +239,15 @@ theorem widened_unchanged_unless_mixed (op : Instruction) (widened : nativePureB
   · rfl
 #print axioms widened_unchanged_unless_mixed
 
+/-- Unsigned branches refuse a mixed pair in both interpreters and both operand orders. -/
+theorem unsigned_branches_refused (int32 : W32) (native : W64) :
+    ([Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
+      (CIL.step op false none 0 [] [.i32 int32, .i64 native] (fun _ => none)).isNone &&
+      (CIL.step op false none 0 [] [.i64 native, .i32 int32] (fun _ => none)).isNone &&
+      !(step body op 0 [] frame [.scalar (.i32 int32), .scalar (.i64 native)] Memory.empty).isOk &&
+      !(step body op 0 [] frame [.scalar (.i64 native), .scalar (.i32 int32)] Memory.empty).isOk) =
+      true := by
+  rfl
+#print axioms unsigned_branches_refused
 
+end Tests.MixedNativeOpcodes
