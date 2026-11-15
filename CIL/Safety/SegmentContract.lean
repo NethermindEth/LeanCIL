@@ -92,20 +92,21 @@ theorem ReachesRun.wp {program : CIL.Program} {method start finish cost : Nat}
 
 #print axioms ReachesRun.wp
 
-/-- A returning callee reaches the caller continuation with the callee's results pushed. -/
+/-- A returning callee reaches the caller continuation with its results pushed.
+    The checked step supplies the callee arguments independently of the caller stack. -/
 theorem ReachesRun.call {program : CIL.Program} {method pc callee : Nat}
     {body child : CIL.Method} {op : CIL.Instruction}
-    {arguments values rest results : List Value} {frame childFrame : Frame}
+    {arguments stack values rest results : List Value} {frame childFrame : Frame}
     {memory updated entered final : Memory} {calleeFuel : Nat}
     (found : program[method]? = some body) (instruction : body.code[pc]? = some op)
-    (stepped : step body op pc arguments frame (values ++ rest) memory =
+    (stepped : step body op pc arguments frame stack memory =
       .ok (.call callee values rest updated))
     (calleeFound : program[callee]? = some child)
     (enter : enterFrame child values updated = .ok (childFrame, entered))
     (returned : run program calleeFuel callee 0 values childFrame [] entered =
       .ok (final, results)) :
     ReachesRun program method pc (pc + 1) 1 arguments
-      { frame := frame, stack := values ++ rest, memory := memory }
+      { frame := frame, stack := stack, memory := memory }
       { frame := frame, stack := results ++ rest, memory := final } := by
   constructor
   next =>

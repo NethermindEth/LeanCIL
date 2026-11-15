@@ -384,6 +384,8 @@ divergence requires exhaustion at every fuel budget. Returns compare the memory 
 release. `SegmentState.localFootprint` names the byte homes and widths of directly stored locals.
 
 `ReachesRun` relates settled outcomes before and after a prefix, including prefixes with calls.
+`ReachesRun.call` takes the caller stack and the callee arguments separately. Its checked step
+premise establishes argument order and the retained stack, including a constructor's receiver.
 A reaching exit supplies continuation equivalence and a positive fuel lower bound. Its boundary
 state need not be an observed execution state, and any promised state invariant belongs in the
 postcondition. `SegmentContract.Holds.wp` requires a successful continuation or return to prove

@@ -102,6 +102,93 @@ theorem scalar_return (arguments : List Value) (frame : Frame) (memory : Memory)
 
 #print axioms scalar_return
 
+/-- A terminating scalar body cannot exhibit a positive-cost return to its unchanged entry. -/
+theorem empty_region_refused (arguments : List Value) (frame : Frame) (memory : Memory)
+    (value : CIL.W32) :
+    Not ((CIL.Safety.SegmentContract.continuing 0
+      ((scalarState frame memory value).exact arguments)
+      (fun _ before after => after = before) (fun _ _ => [])).Holds [returning] 0 0) := by
+  intro holds
+  cases holds arguments (scalarState frame memory value) (And.intro rfl rfl)
+  rename_i exit witness
+  have exhibited := witness.1
+  have post := witness.2.2
+  cases exit with
+  | reaches pc after =>
+    rcases post.1 with rfl
+    rcases post.2 with rfl
+    cases exhibited
+    rename_i cost progress
+    have positive := progress.1
+    have reached := progress.2
+    have returned : run [returning] 3 0 0 arguments frame [.scalar (.i32 value)] memory =
+        .ok (leaveFrame frame memory, [.scalar (.i32 (value + 1))]) := by rfl
+    have spent := reached.spends 3
+      (.ok (leaveFrame frame memory, [.scalar (.i32 (value + 1))])) trivial returned
+    have bound := spent.1
+    have continued := spent.2
+    have remaining : 3 - cost = 0 \/ 3 - cost = 1 \/ 3 - cost = 2 := by omega
+    rcases remaining with zero | one | two
+    all_goals simp only [*] at continued; cases continued
+  | returns memory values => exact post
+  | faults fault => exact post
+  | diverges => exact post
+
+#print axioms empty_region_refused
+
+namespace DistinctArguments
+
+/-- The caller increments the result of a two-argument call. -/
+def caller : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.call 1 2, .ldc_i4 1, .add, .ret] }
+
+/-- Subtraction distinguishes the callee's argument order. -/
+def callee : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.ldarg 0, .ldarg 1, .sub, .ret] }
+
+/-- The top-first stack places the second argument above the first argument. -/
+def before (frame : Frame) (memory : Memory) : SegmentState :=
+  { frame := frame, stack := [.scalar (.i32 2), .scalar (.i32 7)], memory := memory }
+
+/-- The call reaches its continuation with first minus second on the stack. -/
+theorem call_region (arguments : List Value) (frame : Frame) (memory : Memory) :
+    (CIL.Safety.SegmentContract.continuing 1 ((before frame memory).exact arguments)
+      (fun actual _ after => (scalarState frame memory 5).exact arguments actual after)
+      (fun _ _ => [])).Holds [caller, callee] 0 0 := by
+  intro actual state permitted
+  rcases permitted.1 with rfl
+  rcases permitted.2 with rfl
+  have reached : ReachesRun [caller, callee] 0 0 1 1 actual
+      (before frame memory) (scalarState frame memory 5) := by
+    refine ReachesRun.call (program := [caller, callee]) (method := 0) (pc := 0) (callee := 1)
+      (body := caller) (child := callee) (op := .call 1 2)
+      (values := [.scalar (.i32 7), .scalar (.i32 2)]) (results := [.scalar (.i32 5)])
+      (rest := []) (childFrame := { activation := memory.nextIdentity, locals := [], owned := [] })
+      (updated := memory) (entered := memory) (calleeFuel := 4) ?_ ?_ ?_ ?_ ?_ ?_
+    all_goals rfl
+  exact Exists.intro (.reaches 1 (scalarState frame memory 5))
+    (And.intro (Exists.intro 1 (And.intro (by decide) reached))
+      (And.intro (Confined.refl [] memory) (And.intro rfl (And.intro rfl rfl))))
+
+#print axioms call_region
+
+/-- A call summary composes with its arithmetic continuation without repeating the callee proof. -/
+theorem call_composition (arguments : List Value) (frame : Frame) (memory : Memory) :
+    (CIL.Safety.SegmentContract.continuing 3 ((before frame memory).exact arguments)
+      (fun actual _ final => Exists fun after =>
+        And ((scalarState frame memory 5).exact arguments actual after)
+          ((scalarState frame memory (5 + 1)).exact arguments actual final))
+      (fun _ _ => [])).Holds [caller, callee] 0 0 := by
+  exact (call_region arguments frame memory).then
+    (scalar_region (program := [caller, callee]) (method := 0) (start := 1)
+      (by rfl) (by rfl) arguments frame memory 5)
+    (by intro actual state after _ satisfied; exact satisfied)
+    (by intro actual state after _ _; exact And.intro (by simp) (by simp))
+
+#print axioms call_composition
+
+end DistinctArguments
+
 /-- A backward branch retains the same boundary state for every iteration. -/
 def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 
@@ -346,6 +433,21 @@ theorem holds : contract.Holds [body] 0 0 := by
     (And.intro (Exists.intro 2 returned) (And.intro confined rfl))
 
 #print axioms holds
+
+/-- A returning store cannot satisfy a contract that omits the written caller home. -/
+theorem empty_footprint_refused :
+    Not (({ contract with footprint := fun _ _ => [] } :
+      CIL.Safety.SegmentContract).Holds [body] 0 0) := by
+  intro holds
+  cases holds [] before (And.intro rfl rfl)
+  rename_i exit witness
+  have framed := witness.2.1
+  have post := witness.2.2
+  change exit = .returns finalMemory [] at post
+  subst exit
+  exact not_empty framed
+
+#print axioms empty_footprint_refused
 
 /-- Sequence preserves a returning head's actual footprint when no successor is reachable. -/
 theorem composed_return : contract.Holds [body] 0 0 := by
