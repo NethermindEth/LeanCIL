@@ -19,9 +19,10 @@ def methods : List SpecializedMethod := [⟨[], callee⟩]
 def slot : ImportSlot := { identity := addToIdentity, closureDigest := "digest", parameterCount := 3, hasThis := false, returnsValue := false }
 def imports : List ImportSlot := [slot]
 def site : CallSite := {
-  method := { owner := .atom "Library, Version=1.0.0.0, Culture=neutral, \
-      PublicKeyToken=null" "Library.Adder",
-    name := name!"AddTo", hasThis := false, genericArity := 0, returnType := .void,
+  method := {
+    owner := .atom "Library, Version=1.0.0.0, Culture=neutral, \
+      PublicKeyToken=null" "Library.Adder", name := name!"AddTo", hasThis := false,
+    genericArity := 0, returnType := .void,
     parameters := [.byref word, .byref word, .byref word] },
   name := "AddTo", target := .external addToIdentity, typeArguments := [], parameterCount := 3,
   returnsValue := false }

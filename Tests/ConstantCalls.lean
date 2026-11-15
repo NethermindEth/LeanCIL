@@ -29,8 +29,9 @@ private def raw (code : List RawInstruction) (returnType : TypeExpr := integer)
 
 /-- A parameterless static Boolean slot, as a call to a flag getter names it. -/
 private def slot : CallSite := {
-  method := { owner := .atom "Fixture" "Fixture.IFlag", name := name!"get_IsActive",
-    hasThis := false, genericArity := 0, returnType := boolean, parameters := [] },
+  method := {
+    owner := .atom "Fixture" "Fixture.IFlag", name := name!"get_IsActive", hasThis := false,
+    genericArity := 0, returnType := boolean, parameters := [] },
   name := "get_IsActive", target := .managed 7, typeArguments := [], parameterCount := 0,
   returnsValue := true }
 

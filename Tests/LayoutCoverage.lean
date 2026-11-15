@@ -36,8 +36,9 @@ example : instructionLayoutUses layouts 0
 example : instructionLayoutUses layouts 0
     ⟨0, 0x7b, .field packet 0 packet false⟩ = none := by decide
 example : instructionLayoutUses layouts 0
-    ⟨0, 0x73, .call { method := { owner := packet, name := name!".ctor", hasThis := true,
-                        genericArity := 0, returnType := .void, parameters := [] },
+    ⟨0, 0x73, .call { method := {
+                        owner := packet, name := name!".ctor", hasThis := true, genericArity := 0,
+                        returnType := .void, parameters := [] },
                       target := .managed 1, name := ".ctor", typeArguments := [],
                       parameterCount := 0, returnsValue := false }⟩ =
       some [.size 0 0 .construct] := by decide

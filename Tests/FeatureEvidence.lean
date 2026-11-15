@@ -9,8 +9,9 @@ private def intType : TypeExpr := .atom
   "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
   "System.Int32"
 private def getter : CallSite := {
-  method := { owner := .void, name := name!"", hasThis := false, genericArity := 0,
-    returnType := .void, parameters := [] },
+  method := {
+    owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [] },
   target := .external "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
     PublicKeyToken=cc7b13ffcd2ddd51::System.Boolean \
     System.Runtime.Intrinsics.X86.Sse2::get_IsSupported()", typeArguments := [],

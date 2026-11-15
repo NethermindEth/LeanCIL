@@ -192,11 +192,53 @@ theorem rejects_another_string_than_the_user_string :
   decide +kernel
 #print axioms rejects_another_string_than_the_user_string
 
+/-! ## Method names -/
+
+/-- A call site's typed fields read its method, so they keep the values the fixtures state. -/
+theorem call_site_fields_read_the_method :
+    writeLineSite.declaringType = .atom runtimeScope "System.Console" ∧
+      writeLineSite.hasThis = false ∧ writeLineSite.returnType = .void ∧
+      writeLineSite.parameterTypes = [int32] ∧ writeLineSite.method.argumentCount = 1 ∧
+    getSite.declaringType = .atom libScope "Lib.Box" ∧ getSite.returnType = int32 ∧
+      getSite.parameterTypes = [] ∧
+    idSite.method.methodArguments = idSite.typeArguments ∧ idSite.method.genericArity = 1 := by
+  decide
+#print axioms call_site_fields_read_the_method
+
+/-- The method a call operand names is the row's name read as a metadata name; a site whose
+    display name still matches the row but whose typed name does not is refused. -/
+theorem rejects_a_method_name_other_than_the_row :
+    rejects own.1 lib tokens.writeLine
+      (.call { writeLineSite with method.name := name!"WriteLin" })
+      (.operandMismatch tokens.writeLine) = true ∧
+    rejects own.1 lib tokens.getRef (.call { getSite with method.name := name!"Set" })
+      (.operandMismatch tokens.getRef) = true ∧
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.name := name!"Ids" })
+      (.operandMismatch tokens.idSpec) = true := by decide +kernel
+#print axioms rejects_a_method_name_other_than_the_row
+
+/-- A typed name whose code spells no byte list, the empty code or one whose leading digit is
+    not 1, names no row. -/
+theorem rejects_a_method_name_that_spells_no_bytes :
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.name := ⟨0⟩ })
+      (.operandMismatch tokens.writeLine) = true ∧
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.name := ⟨767⟩ })
+      (.operandMismatch tokens.writeLine) = true := by decide +kernel
+#print axioms rejects_a_method_name_that_spells_no_bytes
+
+/-- A string heap entry that holds a value above a byte is refused when the slice is indexed,
+    so every row name the call check reads is a metadata name. -/
+theorem rejects_a_row_name_that_is_not_bytes :
+    rejects { own.1 with strings := own.1.strings.map fun (offset, bytes) =>
+        (offset, if bytes == bytesOf "WriteLine" ++ [0] then 256 :: bytes else bytes) } lib
+      tokens.writeLine (.call writeLineSite) .invalidByte = true := by decide +kernel
+#print axioms rejects_a_row_name_that_is_not_bytes
+
 /-! ## Calls into a pinned assembly -/
 
 theorem rejects_a_pinned_callee_with_another_name :
     rejects (borrow own.1 tokens.getRef tokens.writeLine 2) lib
-      tokens.getRef (.call { getSite with name := "WriteLine" })
+      tokens.getRef (.call { getSite with name := "WriteLine", method.name := name!"WriteLine" })
       (.unresolvedMember tokens.getRef) = true := by decide +kernel
 #print axioms rejects_a_pinned_callee_with_another_name
 
@@ -570,14 +612,15 @@ private def pairFrame : Frame :=
   { corlib := some (bytesOf "C"), anchor := bytesOf "A", arity := 1, ownerArity := 1 }
 
 /-- The type `name` of scope `scope` with the given kind. -/
-private def namedIn (scope name : String) (kind : TypeKind) (pinned := false) : NamedType :=
+private def namedIn (scope name : String) (kind : Extraction.TypeKind) (pinned := false) :
+    NamedType :=
   { scope := bytesOf scope, name := bytesOf name, parts := [], kind := kind, pinned := pinned }
 
 /-- `System.Int32` of the primitive assembly. -/
 private def int32Atom : TypeExpr := .atom "C" "System.Int32"
 
 /-- `L.G<int>`, with `L.G` of the given kind and pinning. -/
-private def instanceOf (kind : TypeKind) (pinned := false) : ResolvedType :=
+private def instanceOf (kind : Extraction.TypeKind) (pinned := false) : ResolvedType :=
   .genericInst (namedIn "L" "G`1" kind pinned) (.cons (.primitive 8) .nil)
 
 /-- One pairing for each way `typeAdmits` accepts, by resolved and extractor constructor. -/
@@ -815,7 +858,7 @@ theorem tells_nested_types_apart_by_their_namespace_columns :
 /-! ## Kinds against the extractor's constructors -/
 
 /-- `System.Int32` of the runtime scope as a type of the given kind. -/
-private def runtimeInt32 (kind : TypeKind) : ResolvedType :=
+private def runtimeInt32 (kind : Extraction.TypeKind) : ResolvedType :=
   .named (namedIn runtimeScope "System.Int32" kind)
 
 /-- A type that cannot be a value type is never admitted as the runtime's primitive atom, which

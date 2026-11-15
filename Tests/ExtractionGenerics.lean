@@ -49,9 +49,9 @@ example : substituteType [word] (.apply (.constructor "scope" "Box`1") (.paramet
 
 /-- A call whose scoped signature and generic arguments match the selected closed method. -/
 def caller (parameter : TypeExpr) : RawMethod := { closed with code := [⟨0, 40, .call {
-  method := { owner := .atom "Test" "Owner", name := name!"Call", hasThis := false,
-    genericArity := 1, returnType := word, parameters := [.byref parameter],
-    methodArguments := [word] },
+  method := {
+    owner := .atom "Test" "Owner", name := name!"Call", hasThis := false, genericArity := 1,
+    returnType := word, parameters := [.byref parameter], methodArguments := [word] },
   name := "Call", target := .managed 1, typeArguments := [word], parameterCount := 1,
   returnsValue := true }⟩] }
 
@@ -115,8 +115,9 @@ def counter : TypeExpr := .object "Test" "Counter"
 def tallyConstructor : RawMethod := { closed with
   hasThis := true, objectReceiver := true, objectFieldCount := 2, objectBases := [counter] }
 def construction : CallSite := {
-  method := { owner := tally, name := name!".ctor", hasThis := true, genericArity := 0,
-    returnType := .void, parameters := [] },
+  method := {
+    owner := tally, name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
+    parameters := [] },
   name := ".ctor", target := .managed 0, typeArguments := [], parameterCount := 1,
   returnsValue := false }
 
@@ -141,8 +142,9 @@ theorem construction_owner_and_size :
 def deposit : RawMethod := { closed with
   owner := "Test::Tally", hasThis := true, objectReceiver := true, parameters := [word] }
 def depositSite : CallSite := {
-  method := { owner := tally, name := name!"Deposit", hasThis := true, genericArity := 0,
-    returnType := word, parameters := [word] },
+  method := {
+    owner := tally, name := name!"Deposit", hasThis := true, genericArity := 0, returnType := word,
+    parameters := [word] },
   name := "Deposit", target := .managed closed.token, typeArguments := [], parameterCount := 1,
   returnsValue := true }
 

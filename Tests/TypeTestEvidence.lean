@@ -15,19 +15,22 @@ private def word : TypeExpr := .atom runtime "System.UInt64"
 private def marker : TypeExpr := .aggregate (owner ++ "::Fixture.Marker") 0
 private def other : TypeExpr := .aggregate (owner ++ "::Fixture.Other") 1
 
-private def typeCall (name signature : String) (parameters : Nat) : RawOperand := .call {
-  method := { owner := .atom runtime "System.Type",
-    name := (MetadataName.ofBytes? (bytesOf name)).getD ⟨0⟩, hasThis := false,
-    genericArity := 0,
+private def typeCall (name : String) (methodName : MetadataName) (signature : String)
+    (parameters : Nat) : RawOperand := .call {
+  method := {
+    owner := .atom runtime "System.Type", name := methodName, hasThis := false, genericArity := 0,
     returnType := .atom runtime
       (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
     parameters := if name == "GetTypeFromHandle" then [.atom runtime "System.RuntimeTypeHandle"]
       else [.atom runtime "System.Type", .atom runtime "System.Type"] },
   name, target := .external (runtime ++ "::" ++ signature),
   typeArguments := [], parameterCount := parameters, returnsValue := true }
-private def fromHandle := typeCall "GetTypeFromHandle" "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
-private def equality := typeCall "op_Equality" "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2
-private def inequality := typeCall "op_Inequality" "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2
+private def fromHandle := typeCall "GetTypeFromHandle" name!"GetTypeFromHandle"
+  "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
+private def equality := typeCall "op_Equality" name!"op_Equality"
+  "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2
+private def inequality := typeCall "op_Inequality" name!"op_Inequality"
+  "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2
 
 private def i (opcode : Nat) (operand : RawOperand := .none) : RawInstruction := ⟨0, opcode, operand⟩
 private def test (left right : TypeExpr) (comparison := equality) : List RawInstruction :=

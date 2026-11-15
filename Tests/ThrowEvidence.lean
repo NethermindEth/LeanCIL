@@ -13,7 +13,8 @@ private def owner := "Fixture, Version=1.0.0.0, Culture=neutral, PublicKeyToken=
 private def intType : TypeExpr := .atom runtime "System.Int32"
 
 private def ctor (scope type : String) (parameters : Nat) : RawOperand := .call {
-  method := { owner := .atom scope type, name := name!".ctor", hasThis := true, genericArity := 0,
+  method := {
+    owner := .atom scope type, name := name!".ctor", hasThis := true, genericArity := 0,
     returnType := .void,
     parameters := List.replicate parameters (.object runtime "System.String") },
   name := ".ctor",
@@ -62,8 +63,9 @@ theorem rejects_missing_constructor :
 #print axioms rejects_missing_constructor
 
 private def wrongParameter : RawOperand := .call {
-  method := { owner := .atom runtime "System.DivideByZeroException", name := name!".ctor",
-    hasThis := true, genericArity := 0, returnType := .void, parameters := [] },
+  method := {
+    owner := .atom runtime "System.DivideByZeroException", name := name!".ctor", hasThis := true,
+    genericArity := 0, returnType := .void, parameters := [] },
   name := ".ctor",
   target := .external (runtime ++ "::System.Void System.DivideByZeroException::.ctor(\
     System.Int32)"),

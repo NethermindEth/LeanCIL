@@ -9,20 +9,23 @@ private def scope :=
 private def unsafeType : TypeExpr := .atom scope "System.Runtime.CompilerServices.Unsafe"
 private def word : TypeExpr := .atom scope "System.UInt64"
 private def call : CallSite := {
-  method := { owner := unsafeType, name := name!"SkipInit", hasThis := false, genericArity := 1,
+  method := {
+    owner := unsafeType, name := name!"SkipInit", hasThis := false, genericArity := 1,
     returnType := .void, parameters := [], methodArguments := [word] },
   name := "SkipInit",
   target := .external (scope ++ "::System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(\
     !!0&)"),
   typeArguments := [word], parameterCount := 1, returnsValue := false }
 private def nullCall : CallSite := {
-  method := { owner := unsafeType, name := name!"NullRef", hasThis := false, genericArity := 1,
+  method := {
+    owner := unsafeType, name := name!"NullRef", hasThis := false, genericArity := 1,
     returnType := .void, parameters := [], methodArguments := [word] },
   name := "NullRef",
   target := .external (scope ++ "::!!0& System.Runtime.CompilerServices.Unsafe::NullRef()"),
   typeArguments := [word], parameterCount := 0, returnsValue := true }
 private def testCall : CallSite := {
-  method := { owner := unsafeType, name := name!"IsNullRef", hasThis := false, genericArity := 1,
+  method := {
+    owner := unsafeType, name := name!"IsNullRef", hasThis := false, genericArity := 1,
     returnType := .void, parameters := [], methodArguments := [word] },
   name := "IsNullRef",
   target := .external (scope ++ "::System.Boolean System.Runtime.CompilerServices.Unsafe::\
@@ -94,8 +97,9 @@ theorem local_reference_helper_name :
 
 /-- The `System.Object` constructor a class constructor calls on its receiver. -/
 private def objectConstructor : CallSite := {
-  method := { owner := .atom scope "System.Object", name := name!".ctor", hasThis := true,
-    genericArity := 0, returnType := .void, parameters := [] },
+  method := {
+    owner := .atom scope "System.Object", name := name!".ctor", hasThis := true, genericArity := 0,
+    returnType := .void, parameters := [] },
   name := ".ctor", target := .external (scope ++ "::System.Void System.Object::.ctor()"),
   typeArguments := [], parameterCount := 0, returnsValue := false }
 

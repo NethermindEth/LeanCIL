@@ -30,8 +30,9 @@ def types (count : Nat) : List DispatchType :=
     interfaces := [], methods := [slot], assembly := pin}]
 /-- Call site selecting the shared interface slot. -/
 def site : CallSite := {
-  method := { owner := iface, name := name!"Read", hasThis := true, genericArity := 0,
-    returnType := .void, parameters := [] },
+  method := {
+    owner := iface, name := name!"Read", hasThis := true, genericArity := 0, returnType := .void,
+    parameters := [] },
   name := "Read", target := .managed 5, typeArguments := [], parameterCount := 0,
   returnsValue := false }
 /-- Resolve one call per concrete type using the list specification. -/

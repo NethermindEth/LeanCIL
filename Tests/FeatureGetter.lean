@@ -13,9 +13,11 @@ open CIL CIL.Extraction
 
 /-- A static feature getter with independently constructed raw metadata. -/
 def getter (owner member : String) : CallSite := {
-  method := { owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner),
-    name := (MetadataName.ofBytes? (bytesOf member)).getD ⟨0⟩, hasThis := false,
-    genericArity := 0, returnType := .atom runtimeScope "System.Boolean", parameters := [] }
+  method := {
+    owner := .atom intrinsicsScope ("System.Runtime.Intrinsics." ++ owner),
+    name := (MetadataName.ofBytes? (member.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩,
+    hasThis := false, genericArity := 0,
+    returnType := .atom runtimeScope "System.Boolean", parameters := [] }
   name := member
   target := .external (intrinsicsScope ++ "::System.Boolean System.Runtime.Intrinsics." ++
     owner ++ "::" ++ member ++ "()")
@@ -106,9 +108,11 @@ theorem wrong_call_shape :
 
 /-- Raw process-width calls retain their exact owner, result and external identity. -/
 def platform (owner member result : String) : CallSite := {
-  method := { owner := .atom runtimeScope owner,
-    name := (MetadataName.ofBytes? (bytesOf member)).getD ⟨0⟩, hasThis := false,
-    genericArity := 0, returnType := .atom runtimeScope result, parameters := [] }
+  method := {
+    owner := .atom runtimeScope owner,
+    name := (MetadataName.ofBytes? (member.toUTF8.toList.map UInt8.toNat)).getD ⟨0⟩,
+    hasThis := false, genericArity := 0, returnType := .atom runtimeScope result,
+    parameters := [] }
   name := member
   target := .external (runtimeScope ++ "::" ++ result ++ " " ++ owner ++ "::" ++ member ++ "()")
   parameterCount := 0, returnsValue := true, typeArguments := [] }
@@ -166,7 +170,8 @@ theorem platform_field (raw : RawMethod) :
 
 /-- A reference-content query retains its independently serialized generic argument. -/
 def referenceQuery (type : TypeExpr) : CallSite := {
-  method := { owner := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers",
+  method := {
+    owner := .atom runtimeScope "System.Runtime.CompilerServices.RuntimeHelpers",
     name := name!"IsReferenceOrContainsReferences", hasThis := false, genericArity := 1,
     returnType := .atom runtimeScope "System.Boolean", parameters := [],
     methodArguments := [type] },

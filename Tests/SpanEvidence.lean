@@ -17,7 +17,8 @@ private def span (scope element : String) : TypeExpr :=
 private def words := span runtime "System.UInt32"
 
 private def getItem : RawOperand := .call {
-  method := { owner := words, name := name!"get_Item", hasThis := true, genericArity := 0,
+  method := {
+    owner := words, name := name!"get_Item", hasThis := true, genericArity := 0,
     returnType := .void, parameters := [] },
   name := "get_Item",
   target := .external (runtime ++ "::!0& modreq(System.Runtime.InteropServices.InAttribute) \
@@ -47,7 +48,8 @@ theorem primitive_span_widths :
 
 /-- A closed int32 array extension call with its exact defining assembly. -/
 private def arraySpanCall : CallSite := {
-  method := { owner := .atom spanMemoryScope "System.MemoryExtensions", name := name!"AsSpan",
+  method := {
+    owner := .atom spanMemoryScope "System.MemoryExtensions", name := name!"AsSpan",
     hasThis := false, genericArity := 1,
     returnType := .apply (.constructor runtime "System.Span`1") intType,
     parameters := [.array intType, intType], methodArguments := [intType] },
@@ -127,7 +129,8 @@ example : ¬ typeTestInstruction (i 208 (.field (.atom owner "<PrivateImplementa
 
 /-- The exact writable int32 span member used by whole-region initialization. -/
 private def fillCall : CallSite := {
-  method := { owner := .apply (.constructor runtime "System.Span`1") intType, name := name!"Fill",
+  method := {
+    owner := .apply (.constructor runtime "System.Span`1") intType, name := name!"Fill",
     hasThis := true, genericArity := 0, returnType := .void, parameters := [intType] },
   name := "Fill",
   target := .external (runtime ++ "::System.Void System.Span`1<System.Int32>::Fill(!0)"),
@@ -154,8 +157,9 @@ theorem exact_span_fill_call :
 
 /-- Exact array constructor used by an in-place local initialization. -/
 private def localConstructor : CallSite := {
-  method := { owner := words, name := name!".ctor", hasThis := true, genericArity := 0,
-    returnType := .void, parameters := [.array (.atom runtime "System.UInt32")] },
+  method := {
+    owner := words, name := name!".ctor", hasThis := true, genericArity := 0, returnType := .void,
+    parameters := [.array (.atom runtime "System.UInt32")] },
   name := ".ctor",
   target := .external (runtime ++
     "::System.Void System.ReadOnlySpan`1<System.UInt32>::.ctor(!0[])"), typeArguments := [],
@@ -198,9 +202,10 @@ theorem constructor_forgery_rejected :
 #print axioms constructor_forgery_rejected
 /-- A readonly cast binds both element types and the exact runtime overload. -/
 private def reinterpretCall : CallSite := {
-  method := { owner := .atom runtime "System.Runtime.InteropServices.MemoryMarshal",
-    name := name!"Cast", hasThis := false, genericArity := 2,
-    returnType := span runtime "System.Int32", parameters := [span runtime "System.Byte"],
+  method := {
+    owner := .atom runtime "System.Runtime.InteropServices.MemoryMarshal", name := name!"Cast",
+    hasThis := false, genericArity := 2, returnType := span runtime "System.Int32",
+    parameters := [span runtime "System.Byte"],
     methodArguments := [.atom runtime "System.Byte", intType] },
   name := "Cast",
   target := .external (runtime ++ "::System.ReadOnlySpan`1<!!1> " ++

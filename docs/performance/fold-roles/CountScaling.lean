@@ -8,7 +8,8 @@ def span : TypeExpr := .apply (.constructor runtimeScope "System.Span`1")
   (.atom runtimeScope "System.Byte")
 /-- A receiver call that completes a span fold. -/
 def spanLength : RawInstruction := ⟨0, 40, .call {
-  method := { owner := span, name := name!"get_Length", hasThis := true, genericArity := 0,
+  method := {
+    owner := span, name := name!"get_Length", hasThis := true, genericArity := 0,
     returnType := .void, parameters := [] },
   name := "get_Length", target := .external "", typeArguments := [], parameterCount := 0,
   returnsValue := true }⟩

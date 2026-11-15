@@ -36,7 +36,8 @@ private def declared : DispatchType := {
   interfaces := [], methods := [slot], assembly := fixturePin }
 private def types := [concrete, declared]
 private def site : CallSite := {
-  method := { owner := interface, name := name!"Read", hasThis := true, genericArity := 0,
+  method := {
+    owner := interface, name := name!"Read", hasThis := true, genericArity := 0,
     returnType := integer, parameters := [] },
   name := "Read", target := .managed 5, typeArguments := [], parameterCount := 0,
   returnsValue := true }
@@ -180,9 +181,9 @@ private def overrideTypes :=
   [{ defaultConcrete with methods := [genericOverride] }, defaultDeclared]
 /-- `constrained. Allowance; call bool IAllowance<Allowance>::Spend<Price>(TSelf&)`. -/
 private def defaultSite : CallSite := {
-  method := { owner := allowanceInterface, name := name!"Spend", hasThis := false,
-    genericArity := 1, returnType := boolean, parameters := [.byref allowance],
-    methodArguments := [price] },
+  method := {
+    owner := allowanceInterface, name := name!"Spend", hasThis := false, genericArity := 1,
+    returnType := boolean, parameters := [.byref allowance], methodArguments := [price] },
   name := "Spend", target := .managed 40, typeArguments := [price, allowance],
   ownerArgumentCount := 1, parameterCount := 1, returnsValue := true }
 private def defaultRaw : RawMethod := { raw with

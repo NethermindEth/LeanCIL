@@ -321,8 +321,9 @@ example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.set 2 .su
 example : ¬ ScalarFlowValid #[] { mixedRaw with parameters := [nativeType, word] } addFeatures mixedStates mixedCode := by decide
 
 private def site : CallSite := {
-  method := { owner := .atom scope.identity "Fixture", name := name!"", hasThis := false,
-    genericArity := 0, returnType := word, parameters := [word, word] },
+  method := {
+    owner := .atom scope.identity "Fixture", name := name!"", hasThis := false, genericArity := 0,
+    returnType := word, parameters := [word, word] },
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
 example : validateManagedCall [⟨[], addRaw⟩] []
@@ -524,8 +525,9 @@ theorem local_slot_sites :
 
 /-- A static method of no parameters whose address `ldftn` takes and `calli` calls. -/
 private def handler : CallSite :=
-  { method := { owner := .void, name := name!"", hasThis := false, genericArity := 0,
-      returnType := .void, parameters := [] },
+  { method := {
+      owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+      parameters := [] },
     target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
 private def handlerSignature : ManagedSignature := ⟨.void, []⟩
 
@@ -581,7 +583,8 @@ theorem pointer_local_storage :
 
 private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte")
 private def byteSpanSite : CallSite := {
-  method := { owner := byteSpanType, name := name!".ctor", hasThis := true, genericArity := 0,
+  method := {
+    owner := byteSpanType, name := name!".ctor", hasThis := true, genericArity := 0,
     returnType := .void, parameters := [.pointer .void, intType] },
   name := ".ctor",
   target := .external
@@ -620,9 +623,11 @@ private theorem span_constructor_cases :
 private def tupleType : TypeExpr := .aggregate
   (runtime ++ "::System.ValueTuple`2<System.UInt64,System.UInt64>") 0
 private def tupleSite : CallSite := {
-  method := { owner := .atom
-    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-    "System.Runtime.Intrinsics.X86.X86Base/X64", name := name!"DivRem", hasThis := false,
+  method := {
+    owner := .atom
+      "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
+        PublicKeyToken=cc7b13ffcd2ddd51"
+      "System.Runtime.Intrinsics.X86.X86Base/X64", name := name!"DivRem", hasThis := false,
     genericArity := 0, returnType := tupleType, parameters := [word, word, word] },
   name := "DivRem",
   target := .external
@@ -657,7 +662,8 @@ private theorem tuple_field_cases :
 
 private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.UInt32")
 private def spanSite : CallSite := {
-  method := { owner := spanType, name := name!"get_Item", hasThis := true, genericArity := 0,
+  method := {
+    owner := spanType, name := name!"get_Item", hasThis := true, genericArity := 0,
     returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
     parameters := [intType] },
   name := "get_Item",
@@ -713,8 +719,9 @@ example : ¬ ScalarFlowValid #[] { loopRaw with code := [i 22, i 0, i 43 (.targe
 
 -- Defaulted signature fields are accepted only where they are the true signature.
 private def unsignedSite : CallSite := {
-  method := { owner := .void, name := name!"", hasThis := false, genericArity := 0,
-    returnType := .void, parameters := [] },
+  method := {
+    owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [] },
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
@@ -889,7 +896,8 @@ example : scalarEmissionMatches #[] none (i 114 (.text "a")) [] .nop = false := 
 private def guardSite (owner methodName suffix : String) (arguments parameters : List TypeExpr) :
     RawInstruction :=
   ⟨0, 40, .call
-    { method := { owner := .atom runtimeScope owner,
+    { method := {
+        owner := .atom runtimeScope owner,
         name := (MetadataName.ofBytes? (bytesOf methodName)).getD ⟨0⟩, hasThis := false,
         genericArity := arguments.length, returnType := .void, parameters := parameters,
         methodArguments := arguments },
@@ -949,9 +957,10 @@ private def sizeCode (bits : W32) : List Instruction := [.ldc_i4 bits, .pop, .ar
 private def sizeAt (instruction : RawInstruction) (bits : W32) : Bool :=
   decide (ScalarFlowValid #[] (sizeRaw instruction) pushHoleFeatures sizeStates (sizeCode bits))
 private def sizeOfSite (type : TypeExpr) : CallSite := {
-  method := { owner := .atom runtime "System.Runtime.CompilerServices.Unsafe",
-    name := name!"SizeOf", hasThis := false, genericArity := 1, returnType := intType,
-    parameters := [], methodArguments := [type] },
+  method := {
+    owner := .atom runtime "System.Runtime.CompilerServices.Unsafe", name := name!"SizeOf",
+    hasThis := false, genericArity := 1, returnType := intType, parameters := [],
+    methodArguments := [type] },
   name := "SizeOf",
   target := .external (runtime ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf(\
     )"),
@@ -1030,9 +1039,9 @@ example (valid : ScalarFlowValid #[] addRaw addFeatures addStates addCode) :
 theorem closed_generic_fill_signature :
     let element := TypeExpr.aggregate ("Scope::Pair`1<" ++ runtime ++ "::System.UInt64>") 0
     let site : CallSite := {
-      method := { owner := .apply (.constructor runtime "System.Span`1") element,
-        name := name!"Fill", hasThis := true, genericArity := 0, returnType := .void,
-        parameters := [element] },
+      method := {
+        owner := .apply (.constructor runtime "System.Span`1") element, name := name!"Fill",
+        hasThis := true, genericArity := 0, returnType := .void, parameters := [element] },
       name := "Fill",
       target := .external (runtime ++
         "::System.Void System.Span`1<Pair`1<System.UInt64>>::Fill(!0)"), typeArguments := [],

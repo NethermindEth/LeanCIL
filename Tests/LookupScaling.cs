@@ -1177,8 +1177,10 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         open CIL CIL.Extraction
         def slotType : TypeExpr := .atom runtimeScope "{{slotType}}"
         def handler : CallSite :=
-          { target := .managed 2, typeArguments := [], parameterCount := 0, hasThis := false,
-            returnsValue := false }
+          { method := {
+              owner := .void, name := name!"", hasThis := false, genericArity := 0,
+              returnType := .void, parameters := [] },
+            target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
         def signature : ManagedSignature := ⟨.void, []⟩
         def kind : ScalarKind := {{kind}}
         def segment (index : Nat) : List RawInstruction :=
