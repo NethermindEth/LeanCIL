@@ -136,7 +136,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $"hasThis := {Bool(reference.HasThis)}, genericArity := {genericArity}, returnType := {returnType}, " +
             $"parameters := {parameters}, methodArguments := {methodArguments} }}";
         return $"{{ method := {method}, name := {Quote(name)}, target := {target}, " +
-            $"typeArguments := {typeArguments}, ownerArgumentCount := {owners.Length}, parameterCount := {reference.Parameters.Count}, " +
+            $"typeArguments := {typeArguments}, ownerArgumentCount := {owners.Length}, " +
+            $"parameterCount := {reference.Parameters.Count}, " +
             $"returnsValue := {Bool(Returned(reference).FullName != "System.Void")} }}";
     }
 
