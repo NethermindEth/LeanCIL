@@ -187,9 +187,16 @@ private def bigMul : MethodRef :=
   { owner := runtimeType "System.Math", name := name!"BigMul", hasThis := false,
     genericArity := 0, returnType := word, parameters := [word, word, .byref word] }
 
+private def long : TypeExpr := runtimeType "System.Int64"
+
 /-- `Math.DivRem(Int64, Int64, out Int64)`, whose model the table below does not hold. -/
 private def divRem : MethodRef :=
-  { bigMul with name := name!"DivRem", returnType := runtimeType "System.Int64" }
+  { bigMul with
+    name := name!"DivRem", returnType := long, parameters := [long, long, .byref long] }
+
+/-- The signed overload `Math.BigMul(Int64, Int64, out Int64)`, which the table does not model. -/
+private def signedBigMul : MethodRef :=
+  { bigMul with returnType := long, parameters := [long, long, .byref long] }
 
 /-- `Span<element>.get_Length`. -/
 private def spanLength (element : TypeExpr) : MethodRef :=
@@ -197,12 +204,15 @@ private def spanLength (element : TypeExpr) : MethodRef :=
     name := name!"get_Length", hasThis := true, genericArity := 0,
     returnType := runtimeType "System.Int32", parameters := [] }
 
-/-- BigMul by its exact reference, and `get_Length` of every span instance. -/
-private def entries : List ModelEntry := [
-  ModelEntry.exact .call bigMul (.memory (.bigMul64 false)),
+/-- `get_Length` of every span instance, an instance method of no parameters. -/
+private def spanLengthEntry : ModelEntry :=
   { opcode := .call, owner := .constructor runtimeScope "System.Span`1", name := name!"get_Length",
     resolve := fun _ method =>
-      if method.hasThis && method.parameters.isEmpty then some (.memory .spanLength) else none }]
+      if method.hasThis && method.parameters.isEmpty then some (.memory .spanLength) else none }
+
+/-- BigMul by its exact reference, and `get_Length` of every span instance. -/
+private def entries : List ModelEntry :=
+  [ModelEntry.exact .call bigMul (.memory (.bigMul64 false)), spanLengthEntry]
 
 /-- The table of `entries`, accounting for the wide arithmetic and span length emissions. -/
 private def catalog : ModelCatalog where
@@ -228,6 +238,22 @@ example : catalog.siteAgrees {} (site bigMul) (.memory (.bigMul64 false)) = true
 example : catalog.siteAgrees {} (site bigMul) (.memory (.divRemOut 64)) = false := by
   decide +kernel
 example : catalog.siteAgrees {} (site bigMul) (.call 7 3) = false := by decide +kernel
+example : catalog.siteAgrees {} (site bigMul) (.memory (.bigMul64 true)) = false := by
+  decide +kernel
+
+-- An entry reached by name, opcode and owner still refuses a reference its resolve rejects.
+example : catalog.table.find {} .call signedBigMul = none := by decide +kernel
+example : catalog.siteAgrees {} (site signedBigMul) (.memory (.bigMul64 false)) = false := by
+  decide +kernel
+example : catalog.table.find {} .call { spanLength word with hasThis := false } = none := by
+  decide +kernel
+
+-- An entry filed under another name's key is not selected for that name.
+/-- A tree that files the span length entry under the key of `get_IsEmpty`. -/
+private def misfiled : ModelTable := .node .leaf (name!"get_IsEmpty").code [spanLengthEntry] .leaf
+private def spanIsEmpty : MethodRef :=
+  { spanLength word with name := name!"get_IsEmpty", returnType := runtimeType "System.Boolean" }
+example : misfiled.find {} .call spanIsEmpty = none := by decide +kernel
 
 -- A call the table does not model keeps its call and may emit no model.
 example : catalog.siteAgrees {} (site divRem) (.call 7 3) = true := by decide +kernel

@@ -7,7 +7,8 @@ import CIL.Extraction.MetadataBytes
 # Runtime model tables
 
 A model table gives the runtime model a `call` or `newobj` of a typed `MethodRef` stands for,
-from model entries searched by the method's name code and compared in full at the leaf.
+from model entries searched by the method's name code. At the leaf the entry's name, opcode and
+owner head are compared, and the entry resolves the whole reference.
 `model_table%` writes a table as a literal balanced tree, so a lookup costs the depth of the tree
 and the comparison of one reference, never the size of the table. `ModelsAgree` requires that
 each live call site emits the model a catalog's table gives it. Modules that define entries import
@@ -47,12 +48,13 @@ def ModelEntry.sameSlot (left right : ModelEntry) : Bool :=
 abbrev ModelTable := SearchTree (List ModelEntry)
 
 /-- The model of a call under `opcode` to `method`: the entry of its name, opcode and owner
-    head resolves the whole reference. -/
+    head resolves the whole reference. The name is compared as well as the key, so an entry
+    filed under another name's key is never selected. -/
 def ModelTable.find (table : ModelTable) (environment : LayoutEnvironment)
     (opcode : CallOpcode) (method : MethodRef) : Option RuntimeModel := do
   let entries ← table.find? method.name.code
   let entry ← entries.find? fun entry =>
-    entry.opcode == opcode && entry.owner == method.owner.genericHead
+    entry.name == method.name && entry.opcode == opcode && entry.owner == method.owner.genericHead
   entry.resolve environment method
 
 /-- `groups` with `entry` added at the end of the group of its key. -/

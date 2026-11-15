@@ -74,10 +74,13 @@ Agreement between the permitted consumers and the actual JIT remains a runtime a
 See [intrinsic semantics and coverage](SIMD.md) and the [runtime-call inventory](COMPILER-COVERAGE.md).
 
 `runtimeModel` resolves the typed method reference of a `call` or `newobj` through a table of
-model entries, searched by method name and compared in full at the leaf. `RuntimeModelsAgree`
-requires each live call site to emit exactly the model the table gives its reference, and a site
-the table does not model to emit none of the models the table accounts for. The table is empty;
-the per-family certificates above tie each model emission to its call.
+model entries, searched by method name; at the leaf the entry's name, opcode and owner head are
+compared and the entry resolves the whole reference. `RuntimeModelsAgree` requires each live call
+site to emit exactly the model the table gives its reference, and a site the table does not model
+to emit none of the models the table accounts for. The table is empty. The per-family
+certificates tie most model emissions to their call; `bigMul64`, `divRemOut`, `bitcastByteBool`,
+`bitcastValue`, `createSpan`, `spanReference` and the intrinsics outside the exact intrinsic
+certificate are tied to their call by stack effect only.
 
 ### Arrays, views and bulk memory
 

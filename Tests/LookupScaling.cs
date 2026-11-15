@@ -751,7 +751,8 @@ void MetadataNameCosts()
 }
 
 // `runtimeModel` searches a literal tree of model entries by name code and compares one method reference at the leaf,
-// so a lookup in 256 entries costs the four extra tree levels over 16 and no more. The agreement check runs one
+// so a lookup in 256 entries costs the four extra tree levels over 16 and no more, whether it queries the first, the
+// middle or the last entry; a scan of the entries would make the last cost more. The agreement check runs one
 // lookup per live call site, so its cost per site stays flat over 8, 32 and 128 sites. Each site calls a distinct
 // method, so the kernel cannot reuse one site's lookup for another.
 void ModelTableCosts()
@@ -760,7 +761,8 @@ void ModelTableCosts()
     Directory.CreateDirectory(tableDirectory);
     int[] tableSizes = [16, 256];
     int[] siteCounts = [8, 32, 128];
-    const int Queried = 13;
+    string[] positions = ["first", "middle", "last"];
+    int Queried(string position, int size) => position switch { "first" => 0, "middle" => size / 2, _ => size - 1 };
     string Entries(int size) => string.Join(",\n  ", Enumerable.Range(0, size).Select(index =>
         $"ModelEntry.exact .call (method name!\"Model{index:D4}\") (.memory (.divRemOut {index}))"));
     string Table(int size) => $$"""
@@ -769,8 +771,12 @@ void ModelTableCosts()
           {{Entries(size)}}]
         /-- Their literal table. -/
         def table{{size}} : ModelTable := model_table% entries{{size}}
-        #kernel_cost "model lookup {{size}}"
-          (table{{size}}.find {} .call (method name!"Model{{Queried:D4}}") = some (.memory (.divRemOut {{Queried}})))
+        {{string.Join("\n", positions.Select(position => Lookup(position, size)))}}
+        """;
+    string Lookup(string position, int size) => $$"""
+        #kernel_cost "model lookup {{position}} {{size}}"
+          (table{{size}}.find {} .call (method name!"Model{{Queried(position, size):D4}}") =
+            some (.memory (.divRemOut {{Queried(position, size)}})))
         """;
     string Emitted(int index) => $".memory (.divRemOut {index})";
     string Site(int index) =>
@@ -813,17 +819,20 @@ void ModelTableCosts()
     var costs = LookupPatterns.ModelTableCost().Matches(output).ToDictionary(
         match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
         match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
-    if (costs.Count != tableSizes.Length + siteCounts.Length ||
+    if (costs.Count != positions.Length * tableSizes.Length + siteCounts.Length ||
         costs.Values.Min() < KernelDecisionFloor)
         throw new InvalidOperationException("Missing model table costs:\n" + output);
-    var lookups = tableSizes.Select(size => costs[("lookup", size)]).ToArray();
-    var lookupMeasure = string.Join(", ", tableSizes.Select(size =>
-        string.Create(CultureInfo.InvariantCulture, $"{costs[("lookup", size)]} at {size} entries")));
-    if (lookups[1] > lookups[0] * AllowedModelLookupGrowth)
-        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"A model lookup costs {lookupMeasure} heartbeats; the limit is {AllowedModelLookupGrowth} times " +
-            $"the cost in the smaller table."));
-    Console.WriteLine($"PASS a model lookup costs {lookupMeasure} heartbeats");
+    foreach (var position in positions)
+    {
+        var lookups = tableSizes.Select(size => costs[("lookup " + position, size)]).ToArray();
+        var lookupMeasure = string.Join(", ", tableSizes.Select(size =>
+            string.Create(CultureInfo.InvariantCulture, $"{costs[("lookup " + position, size)]} at {size} entries")));
+        if (lookups[1] > lookups[0] * AllowedModelLookupGrowth)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"A model lookup of the {position} entry costs {lookupMeasure} heartbeats; the limit is " +
+                $"{AllowedModelLookupGrowth} times the cost in the smaller table."));
+        Console.WriteLine($"PASS a model lookup of the {position} entry costs {lookupMeasure} heartbeats");
+    }
     double PerSite(int count) => (double)costs[("agreement", count)] / count;
     var agreementMeasure = string.Join(", ", siteCounts.Select(count =>
         string.Create(CultureInfo.InvariantCulture, $"{costs[("agreement", count)]} at {count} sites")));
@@ -1895,7 +1904,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\bname (spells|encodes) ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex MetadataNameCost();
 
-    [GeneratedRegex(@"\bmodel (lookup|agreement) ([0-9]+) (-?[0-9]+) heartbeats")]
+    [GeneratedRegex(@"\bmodel (lookup first|lookup middle|lookup last|agreement) ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex ModelTableCost();
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
