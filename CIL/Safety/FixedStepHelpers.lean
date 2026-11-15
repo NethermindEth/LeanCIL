@@ -312,9 +312,8 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     cases observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
-    -- Past the table-offset and faulting-arithmetic arms, the catch-all holds every other arm.
-    -- Its exclusions are named so the arms' own names stay the newest inaccessible ones;
-    -- `fixed_fallback` reads the table-offset ones and the faulting ones are cleared.
+    -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
+    -- ones; `fixed_fallback` reads the table-offset exclusions and the faulting ones are cleared.
     all_goals try (
       rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
         mulOvfUn div divUn rem remUn convOvf convOvfUn
