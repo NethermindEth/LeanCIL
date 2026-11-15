@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ExceptionMembers.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -50,18 +51,18 @@ var pending = new GeneratedQueue(verification, assembly, "RuntimeFaults");
 
 foreach ((string name, string selector, string values, string fault, int pc, object[] inputs) in cases)
 {
-    string exception = fault == "overflow" ? "System.OverflowException" : "System.DivideByZeroException";
-    string wrong = fault == "overflow" ? "System.DivideByZeroException" : "System.OverflowException";
-    bool observed = false;
+    Type expected = fault == "overflow" ? typeof(OverflowException) : typeof(DivideByZeroException);
+    string wrong = fault == "overflow" ? "divideByZero" : "overflow";
+    string? exception = null;
     try
     {
         runtimeType.GetMethod(name)!.Invoke(null, inputs);
     }
-    catch (TargetInvocationException error) when (error.InnerException?.GetType().FullName == exception)
+    catch (TargetInvocationException error) when (error.InnerException?.GetType() == expected)
     {
-        observed = true;
+        exception = ExceptionMember(error.InnerException);
     }
-    if (!observed) throw new InvalidOperationException($"{name} did not raise {exception}");
+    if (exception is null) throw new InvalidOperationException($"{name} did not raise {expected.FullName}");
 
     string proof = Path.Combine(root, name + ".lean");
     File.WriteAllText(proof, $$"""
@@ -69,7 +70,7 @@ import Extracted
 import CIL.Safety.RuntimeExceptions
 open CIL.Safety
 namespace ExampleProof
-def contract (exception : String) : OutcomeContract Unit where
+def contract (exception : CIL.ExceptionType) : OutcomeContract Unit where
   args _ := {{values}}
   pre _ _ := True
   footprint _ := []
@@ -80,8 +81,8 @@ def empty : Memory := {
 theorem invoked (memory : Memory) : invoke Extracted.program 4 0 {{values}} memory =
     .error ⟨0, {{pc}}, .arithmetic .{{fault}}⟩ := rfl
 theorem correctness :
-    (contract "{{exception}}").HoldsCLR Extracted.program 0 ∧
-    ¬ (contract "{{wrong}}").HoldsCLR Extracted.program 0 := by
+    (contract .{{exception}}).HoldsCLR Extracted.program 0 ∧
+    ¬ (contract .{{wrong}}).HoldsCLR Extracted.program 0 := by
   constructor
   · intro _ memory _
     exact ⟨4, ⟨0, {{pc}}, .arithmetic .{{fault}}⟩, invoked memory, rfl⟩

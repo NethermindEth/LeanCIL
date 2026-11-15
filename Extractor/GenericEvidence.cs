@@ -164,55 +164,13 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         _ => type.FullName
     };
 
-    string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
-        Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)
+    /// <summary>
+    /// The declaring type, model index, held type and static flag of a field operand, which the raw operand and the
+    /// typed field reference both state.
+    /// </summary>
+    (string Owner, int Index, string Held, bool IsStatic) FieldOperand(Instruction instruction, FieldReference field)
     {
-        switch (instruction.Operand)
-        {
-            case null: return ".none";
-            case Instruction target: return $".target {instructions.Position(target)}";
-            case Instruction[] targets:
-                return $".targets {List(targets.Select(target =>
-                    instructions.Position(target).ToString(CultureInfo.InvariantCulture)))}";
-            case ParameterDefinition parameter:
-                var argument = parameter.Index < 0 && method.HasThis ? 0 : parameter.Index + (method.HasThis ? 1 : 0);
-                if (argument < 0) throw new InvalidDataException("Invalid raw argument index");
-                return $".argument {argument}";
-            case VariableDefinition local: return $".local {local.Index}";
-            case TypeReference type when instruction.OpCode.Code == Code.Newarr && ReferenceArrays.Element(type):
-                return $".type ({ObjectType(type)})";
-            case TypeReference type: return $".type ({Type(type)})";
-            case MethodReference callee: return $".call {Call(callee, admittedInstruction, reachable)}";
-            case Mono.Cecil.CallSite site when instruction.OpCode.Code == Code.Calli:
-                return $".indirectCall ({Type(site.ReturnType)}) "+
-                    $"{List(site.Parameters.Select(parameter => Type(parameter.ParameterType)))} "+
-                    $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
-            case FieldReference field:
-                var operand = FieldOperand(instruction, field);
-                return $".field ({operand.Owner}) {operand.Index} ({operand.Type}) {Bool(IsStaticField(instruction))}";
-            case string text: return $".text {Quote(text)}";
-            case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
-            case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";
-            case sbyte or byte or short or ushort or int or uint or long or ulong:
-                return $".integer ({Convert.ToString(instruction.Operand, CultureInfo.InvariantCulture)})";
-            default: throw new InvalidDataException("Unsupported raw CIL operand: " + instruction.Operand.GetType().Name);
-        }
-    }
-
-    static bool IsStaticField(Instruction instruction) =>
-        instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
-
-    /// <summary>The field operand of a static field instruction of <paramref name="method"/>, as its raw operand
-    /// names it, so the decoded instruction and the raw one name one field.</summary>
-    internal FieldRef StaticField(MethodDefinition method, Instruction instruction)
-    {
-        methodParameterCount = method.GenericParameters.Count;
-        return FieldOperand(instruction, (FieldReference)instruction.Operand);
-    }
-
-    FieldRef FieldOperand(Instruction instruction, FieldReference field)
-    {
-        var isStatic = IsStaticField(instruction);
+        var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
         var index = 0;
         // A field signature's `!n` is the declaring type's parameter: the declaring instance's argument.
         var fieldType = field.FieldType.ContainsGenericParameter &&
@@ -240,7 +198,63 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // A class field of a type outside the model holds an object reference like an admitted one.
         var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType)
             ? ObjectType(fieldType) : Type(fieldType);
-        return new(Type(field.DeclaringType), index, heldType, MetadataName.OfText(field.Name));
+        return (Type(field.DeclaringType), index, heldType, isStatic);
+    }
+
+    /// <summary>
+    /// The typed reference of the field operand of <paramref name="instruction"/> in <paramref name="method"/>, the
+    /// owner, index and held type its raw operand states and its name.
+    /// </summary>
+    internal FieldRef FieldReferenceOf(MethodDefinition method, Instruction instruction)
+    {
+        methodParameterCount = method.GenericParameters.Count;
+        var field = (FieldReference)instruction.Operand;
+        var (owner, index, held, _) = FieldOperand(instruction, field);
+        return new(owner, index, held, MetadataName.OfText(field.Name));
+    }
+
+    /// <summary>The type operand of <paramref name="instruction"/> in <paramref name="method"/>, as its raw operand
+    /// states it.</summary>
+    internal string TypeOperandOf(MethodDefinition method, Instruction instruction)
+    {
+        methodParameterCount = method.GenericParameters.Count;
+        return Type((TypeReference)instruction.Operand);
+    }
+
+    string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
+        Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)
+    {
+        switch (instruction.Operand)
+        {
+            case null: return ".none";
+            case Instruction target: return $".target {instructions.Position(target)}";
+            case Instruction[] targets:
+                return $".targets {List(targets.Select(target =>
+                    instructions.Position(target).ToString(CultureInfo.InvariantCulture)))}";
+            case ParameterDefinition parameter:
+                var argument = parameter.Index < 0 && method.HasThis ? 0 : parameter.Index + (method.HasThis ? 1 : 0);
+                if (argument < 0) throw new InvalidDataException("Invalid raw argument index");
+                return $".argument {argument}";
+            case VariableDefinition local: return $".local {local.Index}";
+            case TypeReference type when instruction.OpCode.Code == Code.Newarr && ReferenceArrays.Element(type):
+                return $".type ({ObjectType(type)})";
+            case TypeReference type: return $".type ({Type(type)})";
+            case MethodReference callee: return $".call {Call(callee, admittedInstruction, reachable)}";
+            case Mono.Cecil.CallSite site when instruction.OpCode.Code == Code.Calli:
+                return $".indirectCall ({Type(site.ReturnType)}) "+
+                    $"{List(site.Parameters.Select(parameter => Type(parameter.ParameterType)))} "+
+                    $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
+            case FieldReference field:
+                var (owner, index, held, isStatic) = FieldOperand(instruction, field);
+                var name = MetadataName.OfText(field.Name).ToLean();
+                return $".field ({owner}) {index} ({held}) {name} {Bool(isStatic)}";
+            case string text: return $".text {Quote(text)}";
+            case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
+            case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";
+            case sbyte or byte or short or ushort or int or uint or long or ulong:
+                return $".integer ({Convert.ToString(instruction.Operand, CultureInfo.InvariantCulture)})";
+            default: throw new InvalidDataException("Unsupported raw CIL operand: " + instruction.Operand.GetType().Name);
+        }
     }
 
     internal static string ConstraintType(TypeReference type) => type is RequiredModifierType modifier
@@ -287,7 +301,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (instruction.Offset != selected.Offset || instruction.OpCode.Value != selected.OpCode.Value)
                 throw new InvalidDataException("Specialization instruction mapping changed an offset or opcode.");
             var operand = Operand(method, instructions, instruction, selected, reachable);
-            return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
+            return $"{{ offset := {instruction.Offset}, opcode := {Unadmitted.RawOpcode(instruction)}, " +
                 $"operand := {operand} }}";
         });
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
@@ -413,7 +427,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Each closed instantiation carries its own bytes and metadata slice, built from the open definition and the
         // assembly, so a method's component names no other method and does not depend on which instantiations the
         // extraction holds or in which order.
-        var data = List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        var data = MetadataSlices.Bytes(bytes);
         var classOwner = original.HasThis && ObjectTypes.Is(original.DeclaringType);
         var (rows, tables, assemblies) = (metadata ?? throw new InvalidOperationException(
             "Method evidence requires the pinned assemblies.")).Method(original,
@@ -496,7 +510,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := " +
                 slices.AssemblyBlock(module));
             lean.AppendLine($"def assembly{index}Identity : List Nat := " +
-                MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(identity)));
+                MetadataSlices.Bytes(Encoding.UTF8.GetBytes(identity)));
             // The assembly's header bytes decode to the stated header, its bytes spell this identity, and it is the
             // string the block states: one proof for every method of the assembly.
             lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +

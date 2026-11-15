@@ -80,12 +80,44 @@ theorem ldarg_reads_home :
       .ok [.scalar (.i32 9)] := rfl
 #print axioms ldarg_reads_home
 
+/-- A method whose one argument is homed: it stores 7 to the argument and returns the argument. -/
+private def storedParameter : CIL.Method :=
+  { homedParameter with code := [.ldc_i4 7, .starg 0, .ldarg 0, .ret] }
+
+/-- `starg` of a homed argument writes the home that `ldarg` reads back. -/
+theorem starg_writes_home :
+    (invoke [storedParameter] 8 0 [.scalar (.i32 5)] Memory.empty).map Prod.snd =
+      .ok [.scalar (.i32 7)] := rfl
+#print axioms starg_writes_home
+
+/-- A method that writes 11 through the address of its homed argument, then returns it. -/
+private def addressedParameter : CIL.Method :=
+  { homedParameter with code := [.ldarga 0, .ldc_i4 11, .storeScalar 4, .ldarg 0, .ret] }
+
+/-- `ldarga` of a homed argument is the address of the home that `ldarg` reads. -/
+theorem ldarga_addresses_home :
+    (invoke [addressedParameter] 8 0 [.scalar (.i32 5)] Memory.empty).map Prod.snd =
+      .ok [.scalar (.i32 11)] := rfl
+#print axioms ldarga_addresses_home
+
+/-- An argument without a home has no slot to write, so a store to it faults. -/
+theorem starg_without_home_unsupported :
+    step byteParameter (.starg 0) 0 [.scalar (.i32 1)] scalarFrame [.scalar (.i32 3)]
+      Memory.empty = .error (.unsupported "Store to an argument without a home") := rfl
+#print axioms starg_without_home_unsupported
+
+/-- An argument without a home has no address, so taking one faults. -/
+theorem ldarga_without_home_unsupported :
+    step byteParameter (.ldarga 0) 0 [.scalar (.i32 1)] scalarFrame [] Memory.empty =
+      .error (.unsupported "Address of an argument without a home") := rfl
+#print axioms ldarga_without_home_unsupported
+
 theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsic)
     (disabled : operation.available body.profile = false) (argc pc : Nat)
     (args stack : List Value) (frame : Frame) (memory : Memory) :
     step body (.intrinsic operation argc) pc args frame stack memory =
       .error (.unsupported "Intrinsic unavailable in target profile") := by
-  simp [step, disabled, observerCount, unspecifiedOperands]
+  simp [step, intrinsicCall, disabled, observerCount, unspecifiedOperands]
 
 theorem checked_avx2_enabled :
     step { scalarBody with profile := { avx2 := true } } (.intrinsic (.avx2 .add64) 2)
@@ -142,6 +174,17 @@ theorem narrow_conversions_reject_references :
 theorem narrow_read_bounds :
     loadValue Tests.caller (.address ⟨0, 7⟩) 2 true =
       .error (.memory .outsideAllocation (.address ⟨0, 7⟩) 2) := rfl
+
+/-- An eight-byte `stind` refuses an int32 value rather than zero-extending it into eight bytes,
+    and a four-byte `stind` refuses a native value. -/
+theorem stind_value_width_mismatch :
+    instruction (.stind .i8) [.scalar (.i32 0xFFFFFFFF), Tests.reference] Tests.caller =
+      .error .invalidState ∧
+    instruction (.stind .i) [.scalar (.i32 0xFFFFFFFF), Tests.reference] Tests.caller =
+      .error .invalidState ∧
+    instruction (.stind .i4) [.scalar (.i64 7), Tests.reference] Tests.caller =
+      .error (.unsupported "Not a memory instruction") := ⟨rfl, rfl, rfl⟩
+#print axioms stind_value_width_mismatch
 
 theorem scalar_load_rejects_snapshot :
     (instruction (.loadScalar 2) [.scalar (.aggregate [1, 2])] Tests.caller).isOk = false := rfl
@@ -238,7 +281,14 @@ theorem gc_slot_rejected :
       ⟨0, 0⟩ 8 1 = .error .unsupportedLayout := rfl
 
 theorem unknown_instruction_rejected :
-    (instruction (.unsupported "test") [] Memory.empty).isOk = false := rfl
+    (instruction (.unadmitted 0) [] Memory.empty).isOk = false := rfl
+
+/-- A hole faults on every stack, so no frame, memory or operand makes it a step. -/
+theorem unadmitted_faults (body : CIL.Method) (pc : Nat) (args stack : List Value)
+    (frame : Frame) (memory : Memory) :
+    CIL.Safety.step body (.unadmitted 123) pc args frame stack memory =
+      .error (.unsupported "Opcode not admitted") := rfl
+#print axioms unadmitted_faults
 
 -- Generic round-trip theorem now covers arbitrary bounded aggregate lengths.
 theorem aggregate_roundtrip {memory : Memory} {reference : Reference}
@@ -380,11 +430,11 @@ theorem null_test_requires_reference :
 
 -- Every load and store through `NullRef` faults as a null dereference.
 theorem null_reference_accesses_fault :
-    instructions [.memory .nullRef, .load64] [] Memory.empty =
+    instructions [.memory .nullRef, .ldind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 8) ∧
     instructions [.memory .nullRef, .loadScalar 4 true] [] Memory.empty =
       .error (.memory .nullDereference .null 4) ∧
-    instructions [.memory .nullRef, .ldc_i8 7, .store64] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i8 7, .stind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .ldc_i4 7, .storeScalar 4] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
@@ -459,7 +509,7 @@ theorem checked_conversion_bad_width :
 
 /-- Memory operations do not widen scalar operands. -/
 theorem native_memory_unchanged :
-    CIL.widenMixed .load64 [.i32 0, .i64 0] = [.i32 0, .i64 0] := rfl
+    CIL.widenMixed (.ldind .i8) [.i32 0, .i64 0] = [.i32 0, .i64 0] := rfl
 #print axioms native_memory_unchanged
 
 /-- Reference operands do not qualify for integer widening. -/

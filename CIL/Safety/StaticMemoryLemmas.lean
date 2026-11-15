@@ -171,12 +171,6 @@ theorem staticReference_reference_valid (descriptor : CIL.StaticDescriptor) (m r
       simp [form, liveAllocation, lookup, validPosition, nativeLimit, position,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
 
-theorem formValue_reference_valid (m : Memory) (r : ManagedReference) (value : Value)
-    (h : formValue m r = .ok value) : (Value.reference r).Valid m := by
-  have valid := formValue_result_valid _ _ _ h
-  rw [formValue_returns_input _ _ _ h] at valid
-  exact valid
-
 /-- What a successful static instruction guarantees: its memory effect is an allowed
     `StaticInstructionEffect`, and the values it leaves are valid whenever its input stack was. -/
 structure StaticInstructionContract (body : CIL.Method) (m result : Memory)
@@ -214,25 +208,7 @@ theorem staticInstruction_contract (body : CIL.Method) (pc : Nat) (operation : C
     (h : staticInstruction body pc operation stack m = .ok (result, values)) :
     StaticInstructionContract body m result stack values := by
   unfold staticInstruction at h
-  split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
-  all_goals repeat' first
-    | solve | exact .ordinary (memoryInstruction_contract _ _ _ _ _ (by assumption))
-    | solve |
-        refine StaticInstructionContract.of_effect ?_ ?_
-        · first | exact .ordinary (.unchanged _) | exact .reference (by assumption) (by assumption)
-        · intro retained
-          apply ValuesValid.cons
-          · first
-            | exact True.intro
-            | rfl
-            | exact retained.tail.head
-            | exact retained.head
-            | apply staticReference_reference_valid; assumption
-            | apply formValue_reference_valid; assumption
-            | apply staticLoadedValue_valid; assumption
-          · first | exact retained | exact retained.tail | exact retained.tail.tail
-    | cases h
-    | split at h
+  exact .ordinary (memoryInstruction_contract _ _ _ _ _ h)
 
 theorem staticInstruction_effect (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp)
     (stack values : List Value) (m result : Memory)

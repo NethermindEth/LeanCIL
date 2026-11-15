@@ -34,7 +34,7 @@ theorem stamp_holds : stampContract.Holds Extracted.program stamp := by
   rintro ⟨slot, value⟩ memory writable
   obtain ⟨after, wrote, formed, confined, filled⟩ := writable.write_one value
   refine MethodContract.Holds.intro after () ?_ confined filled
-  cil_checked_steps [step_storeScalar_of_write wrote, formed]
+  cil_checked_steps [step_stind_narrow_of_write .i4 wrote, formed]
 
 /-- The words copied: those before the first zero, or all of them. -/
 def copied (values : List W32) : List W32 := values.takeWhile (· ≠ 0#32)

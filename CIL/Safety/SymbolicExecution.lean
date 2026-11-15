@@ -47,6 +47,81 @@ elab "cil_strict " tactic:tactic : tactic =>
     evalTactic tactic
     if errors (← Core.getMessageLog) > earlier then throwError "Checked step candidate failed"
 
+open Lean Elab Tactic in
+/-- `term` with each `by` block replaced by a named hole, and the blocks in order of
+    appearance. -/
+private partial def holesForByBlocks (term : Syntax) :
+    StateT (Array (Name × Syntax)) TacticM Syntax := do
+  if term.isOfKind ``Lean.Parser.Term.byTactic then
+    -- A named hole refers to an existing hole of that name, so each block's name is fresh.
+    let name := Name.mkSimple s!"cilBlock{← mkFreshId}"
+    modify (·.push (name, term[1]))
+    return (← `(term| ?$(mkIdent name))).raw
+  match term with
+  | .node info kind arguments => return .node info kind (← arguments.mapM holesForByBlocks)
+  | other => return other
+
+open Lean Elab Tactic Meta in
+/-- Elaborates `term` against `expectedType?` and runs each `by` block of it as a tactic on its
+    own goal after the rest elaborates. A `by` block inside a term makes Lean rebuild the whole
+    local context before it runs, so its cost grows with the hypotheses in scope; a goal does
+    not. Returns the proof and the goals left, which are the holes `?_` and `?name` of `term`;
+    any other unassigned hole is an error, as in `refine`. -/
+def elabTermRunningBlocks (term : Syntax) (expectedType? : Option Expr) :
+    TacticM (Expr × List MVarId) := do
+  let (replaced, blocks) ← (holesForByBlocks term).run #[]
+  let holeCount := Id.run do
+    let mut count := 0
+    let mut pending := #[replaced]
+    while let some next := pending.back? do
+      pending := pending.pop
+      -- A hole that refers to an existing metavariable has a hygienic name and is no new goal.
+      if next.isOfKind ``Lean.Parser.Term.syntheticHole &&
+          !(next[1].isIdent && next[1].getId.hasMacroScopes) then count := count + 1
+      pending := pending ++ next.getArgs
+    return count
+  let (proof, holes) ← elabTermWithHoles replaced expectedType? `refine
+    (allowNaturalHoles := true)
+  for (name, tactics) in blocks do
+    let some hole ← holes.findM? fun hole => return (← hole.getTag) == name
+      | throwError "a `by` block was not elaborated: {name}"
+    let unsolved ← Tactic.run hole (evalTactic tactics)
+    unless unsolved.isEmpty do
+      throwError "a `by` block left goals{goalsToMessageData unsolved}"
+  let pending ← holes.filterM fun hole => return !(← hole.isAssigned)
+  unless pending.length == holeCount - blocks.size do
+    throwError "expected {holeCount - blocks.size} goals, found{goalsToMessageData pending}"
+  return (proof, pending)
+
+open Lean Elab Tactic Meta in
+/-- `refine term`, with each `by` block of `term` run as a tactic on its own goal
+    (`elabTermRunningBlocks`). -/
+elab "cil_refine_by " term:term : tactic => withMainContext do
+  let (proof, pending) ← elabTermRunningBlocks term.raw (← getMainTarget)
+  (← getMainGoal).assign (← instantiateMVars proof)
+  replaceMainGoal pending
+
+open Lean Elab Tactic Meta in
+/-- `have name := term`, with each `by` block of `term` run as a tactic on its own goal
+    (`elabTermRunningBlocks`). -/
+elab "cil_have_by " name:ident " := " term:term : tactic => withMainContext do
+  let (proof, pending) ← elabTermRunningBlocks term.raw none
+  unless pending.isEmpty do throwError "cil_have_by: the term leaves goals"
+  let proof ← instantiateMVars proof
+  let type ← instantiateMVars (← inferType proof)
+  replaceMainGoal [(← addFact (← getMainGoal) name.getId type proof).2]
+
+open Lean Elab Tactic Meta in
+/-- `have name : type := by steps`, with the steps run as a tactic on a goal of their own. -/
+elab "cil_have_proved " name:ident " : " type:term " := " "by " steps:tacticSeq : tactic =>
+    withMainContext do
+  let statement ← Term.withSynthesize <| Term.elabType type
+  let hole ← mkFreshExprSyntheticOpaqueMVar statement
+  let unsolved ← Tactic.run hole.mvarId! (evalTactic steps)
+  unless unsolved.isEmpty do
+    throwError "cil_have_proved: the proof left goals{goalsToMessageData unsolved}"
+  replaceMainGoal [(← addFact (← getMainGoal) name.getId statement (← instantiateMVars hole)).2]
+
 /-- The projections of a method contract that stepping unfolds in a goal: its argument and
     result encodings, precondition, footprint and postcondition. -/
 def contractProjections : List Lean.Name :=
@@ -306,8 +381,7 @@ def normaliseStepFacts (config : TSyntax `Lean.Parser.Tactic.optConfig)
             | some eq => mkEqMP eq instanceProof
             | none => mkExpectedTypeHint instanceProof result.expr
           let name ← mkFreshUserName base
-          let (_, goal) ← (← (← getMainGoal).assert name result.expr normalisedProof).intro1P
-          replaceMainGoal [goal]
+          replaceMainGoal [(← addFact (← getMainGoal) name result.expr normalisedProof).2]
           names := names.push (mkIdent name)
       return names
     if !locals.isEmpty then
@@ -406,43 +480,48 @@ elab "cil_lookup_equation" : tactic => withMainContext do
   unless goals.isEmpty do throwError "The instruction equation left premises"
   replaceMainGoal []
 
-/-- Close a lookup goal `lookup = result` with a hypothesis, up to reducible unfolding, trying
-    only hypotheses that are equations whose left side has the goal's head; fails otherwise. -/
+/-- Close a lookup goal `lookup = result`, possibly quantified, with a hypothesis, up to reducible
+    unfolding, trying only equation hypotheses whose left side may unify with `lookup`; fails
+    otherwise. -/
 syntax "cil_lookup_assumption" : tactic
 
-open Lean in
-/-- The head of the left side of the equation `type` states, under any quantifiers. -/
-private def equationHead? : Expr → Option Expr
-  | .forallE _ _ body _ => equationHead? body
-  | .mdata _ body => equationHead? body
-  | type => type.eq?.map fun (_, lhs, _) => lhs.consumeMData.getAppFn
-
 open Lean Elab Tactic Meta in
-/-- The hypotheses that state an equation, in context order, with the head of each left side.
-    A stepping step reads the list the record holds for its local context, which is found once
-    per record; any other call scans the context. -/
-private def equationHypotheses : TacticM (Array (FVarId × Expr)) := do
-  let usable ← usableNormalNodes
-  if let some record := usable then
-    if let some found := record.equations then return found
+/-- The equation hypotheses that may state the goal `goal`, in context order. Inside a step of a
+    stepping driver they come from the index the driver keeps, which the step's start brought up
+    to date; any other call scans the context for hypotheses whose head `headsMayMeet` the
+    goal's, which costs less than building an index for one lookup. -/
+private def equationCandidates (goal : Expr) : TacticM (Array FVarId) := do
+  let record ← getNormalNodes
+  let context ← getLCtx
+  if record.driven && cil.stepping.record.get (← getOptions) then
+    if let some locals := record.equationLocals then
+      if ← contextKeeps locals context then
+        let index ← record.equations.extend context
+        -- The index may still name a hypothesis that a store cleared.
+        return (← index.candidates goal).filter context.contains
+  let some wanted := equationHead? goal | return #[]
+  let wantedUnfolds ← headUnfolds wanted
   let mut found := #[]
-  for declaration in ← getLCtx do
+  -- Hypotheses in a row often share a head, so the last head's verdict is kept.
+  let mut seen := wanted
+  let mut seenMeets := true
+  for declaration in context do
     if declaration.isImplementationDetail then continue
-    if let some head := equationHead? (← instantiateMVars declaration.type) then
-      found := found.push (declaration.fvarId, head)
-  if let some record := usable then
-    setNormalNodes { record with equations := some found }
+    let some head ← instantiatedEquationHead? declaration.type | continue
+    unless head == seen do
+      seen := head
+      seenMeets ← headsMayMeet wanted wantedUnfolds head
+    if seenMeets then found := found.push declaration.fvarId
   return found
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
   | `(tactic| cil_lookup_assumption) => withMainContext do
     let goal ← getMainGoal
-    let some wanted := equationHead? (← instantiateMVars (← goal.getType))
-      | throwError "cil_lookup_assumption: the goal is not an equation"
-    for (hypothesis, found) in ← equationHypotheses do
-      -- A head that is not a constant may unify with anything, so every hypothesis is tried.
-      unless !wanted.isConst || !found.isConst || found == wanted do continue
+    let statement ← instantiateMVars (← goal.getType)
+    unless (equationHead? statement).isSome do
+      throwError "cil_lookup_assumption: the goal is not an equation"
+    for hypothesis in ← equationCandidates statement do
       let declaration ← hypothesis.getDecl
       let saved ← saveState
       if declaration.type.isForall then
@@ -1239,11 +1318,53 @@ def numericValueFacts (facts : Array Term) : TacticM (Array Term) := withMainCon
     catch _ => saved.restore
   return restated
 
+open Lean Meta in
+/-- Whether a body the goal or its hypotheses reach may hold `stind.i`: some `stind` there names
+    `.i` or a kind that is not a literal, or a body is a variable or has no definition to read.
+    Reads each reached body once, so the cost is linear in the code it reaches. -/
+def mayStoreNativeInt (roots : Array Expr) : MetaM Bool := do
+  let bodyType (type : Expr) : MetaM Bool := forallTelescopeReducing type fun _ result => do
+    let result ← whnfR result
+    let element := if result.isAppOfArity ``List 1 then result.appArg! else result
+    return element.isConstOf ``CIL.Method || element.isConstOf ``CIL.Instruction
+  let narrowKinds := [``CIL.NumericKind.i1, ``CIL.NumericKind.u1, ``CIL.NumericKind.i2,
+    ``CIL.NumericKind.u2, ``CIL.NumericKind.i4, ``CIL.NumericKind.u4, ``CIL.NumericKind.i8]
+  let mut pending := roots
+  let mut seen : NameSet := {}
+  while !pending.isEmpty do
+    let term ← instantiateMVars pending.back!
+    pending := pending.pop
+    if term.hasMVar then return true
+    let masked := term.replace fun part =>
+      if part.isAppOfArity ``CIL.Instruction.stind 1 &&
+          narrowKinds.any part.appArg!.isConstOf then some (mkConst ``Unit.unit) else none
+    if (masked.find? (·.isConstOf ``CIL.Instruction.stind)).isSome then return true
+    for free in (Lean.collectFVars {} term).fvarIds do
+      if ← bodyType (← free.getType) then return true
+    for name in term.getUsedConstants do
+      if seen.contains name then continue
+      seen := seen.insert name
+      let info ← getConstInfo name
+      unless ← bodyType info.type do continue
+      match info with
+      | .ctorInfo _ | .recInfo _ | .inductInfo _ | .quotInfo _ => continue
+      | .defnInfo definition => pending := pending.push definition.value
+      | _ => return true
+  return false
+
 open Lean Elab Tactic Meta in
 /-- Derive checked load and store facts from byte operations once, before stepping. The
-    byte width selects the existing bridge; quantified facts retain their binders. A numeric
-    value test of an opaque value is also stated in its unfolded form (`numericValueFacts`). -/
+    byte width selects the existing bridge; quantified facts retain their binders. An eight-byte
+    write gives a `stind.i` step only when a reached body may hold one (`mayStoreNativeInt`). A
+    numeric value test of an opaque value is also stated in its unfolded form
+    (`numericValueFacts`). -/
 def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMainContext do
+  let roots := (← getLCtx).foldl (init := #[← getMainTarget]) fun roots declaration =>
+    if declaration.isImplementationDetail then roots else roots.push declaration.type
+  let nativeStores ← mayStoreNativeInt roots
+  let narrowStores (kind : Name) (written : Expr) : Array (Name × Array Expr) :=
+    #[(``step_storeScalar_of_write, #[written]),
+      (``step_stind_narrow_of_write, #[mkConst kind, written])]
   let operationEquation (operation : Expr) :=
     operation.isAppOfArity ``CIL.Safety.read 4 ||
       operation.isAppOfArity ``CIL.Safety.readSnapshot 4 ||
@@ -1292,18 +1413,22 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
                   candidates := candidates ++ #[(``load_scalar_of_read, #[scalar, applied]),
                     (``load_scalar_signed_of_read, #[scalar, applied])]
                 else
-                  let bridge := match reading, width with
-                    | true, 8 => ``load_word64_of_read
-                    | true, 16 => ``load_vector128_of_read
-                    | true, 32 => ``load_vector256_of_read
-                    | true, 64 => ``load_vector512_of_read
-                    | false, 8 => ``step_store64_of_write
-                    | false, 1 | false, 2 | false, 4 => ``step_storeScalar_of_write
-                    | false, 16 => ``step_store128_of_write
-                    | false, 32 => ``step_store256_of_write
-                    | false, 64 => ``step_store512_of_write
-                    | _, _ => Name.anonymous
-                  unless bridge.isAnonymous do candidates := candidates.push (bridge, #[applied])
+                  let bridges : Array (Name × Array Expr) := match reading, width with
+                    | true, 8 => #[(``load_word64_of_read, #[applied])]
+                    | true, 16 => #[(``load_vector128_of_read, #[applied])]
+                    | true, 32 => #[(``load_vector256_of_read, #[applied])]
+                    | true, 64 => #[(``load_vector512_of_read, #[applied])]
+                    | false, 8 => #[(``step_stind_i8_of_write, #[applied])] ++
+                        if nativeStores then #[(``step_stind_i_of_write, #[applied])] else #[]
+                    -- A narrow write steps a runtime-model store or the one `stind` of its width.
+                    | false, 1 => narrowStores ``CIL.NumericKind.i1 applied
+                    | false, 2 => narrowStores ``CIL.NumericKind.i2 applied
+                    | false, 4 => narrowStores ``CIL.NumericKind.i4 applied
+                    | false, 16 => #[(``step_store128_of_write, #[applied])]
+                    | false, 32 => #[(``step_store256_of_write, #[applied])]
+                    | false, 64 => #[(``step_store512_of_write, #[applied])]
+                    | _, _ => #[]
+                  candidates := candidates ++ bridges
           let mut results := #[]
           for (bridge, arguments) in candidates do
             let before ← getMCtx
@@ -1361,7 +1486,7 @@ syntax "cil_checked_steps_normalized" "[" term,* "]" : tactic
 macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    cil_strict refine Eq.trans (CIL.Safety.run_return $methodFound $instructionFound
+    cil_strict cil_refine_by Eq.trans (CIL.Safety.run_return $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by cil_checked_side [$[$facts:term],*])) ?_
     try simp only [CIL.Safety.leaveFrame, List.foldl_nil, List.nil_append, List.append_nil,
@@ -1377,7 +1502,7 @@ macro "cil_checked_return_at " methodFound:term:max instructionFound:term:max
 macro "cil_checked_next_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    cil_strict refine Eq.trans (CIL.Safety.run_next $methodFound $instructionFound
+    cil_strict cil_refine_by Eq.trans (CIL.Safety.run_next $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])) ?_
     cil_stack_cleanup))
 
@@ -1385,7 +1510,7 @@ macro "cil_checked_next_at " methodFound:term:max instructionFound:term:max
     located fault fixes the fault the step must raise. -/
 macro "cil_checked_fault_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
-  `(tactic| cil_strict exact CIL.Safety.run_fault $methodFound $instructionFound
+  `(tactic| cil_strict cil_refine_by CIL.Safety.run_fault $methodFound $instructionFound
     (by cil_checked_step_normalized [$[$facts:term],*]))
 
 /-- Close a child invocation with supplied exact-run or invocation-certificate evidence. -/
@@ -1446,7 +1571,7 @@ elab_rules : tactic
 macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
     "[" facts:term,* "]" : tactic =>
   `(tactic| (
-    cil_strict refine CIL.Safety.run_call_of_invoke $methodFound $instructionFound
+    cil_strict cil_refine_by CIL.Safety.run_call_of_invoke $methodFound $instructionFound
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by first | cil_checked_child [$[$facts:term],*]
                 | (cil_checked_steps_normalized [$[$facts:term],*]; done)) ?_
@@ -1549,7 +1674,7 @@ open Lean Elab Tactic Meta in
     and a `ValidCall` at its current memory are considered; permissions remain real premises. -/
 def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
     (facts : Array Term) : TacticM (Array Term) := withMainContext do
-  unless [``CIL.Instruction.store64, ``CIL.Instruction.storeScalar,
+  unless [``CIL.Instruction.stind, ``CIL.Instruction.storeScalar,
       ``CIL.Instruction.setFieldAt].contains operation do
     return facts
   unless (← getEnv).contains `CIL.Safety.ValidCall.store_word do return facts
@@ -1574,6 +1699,10 @@ def cilPrepareOutputStore (instructionFound : Term) (operation : Name)
   if operation == ``CIL.Instruction.storeScalar then
     let some width := lastArgument? opcode | return facts
     unless ← isDefEq width (mkNatLit 8) do return facts
+  if operation == ``CIL.Instruction.stind then
+    let some kind := lastArgument? opcode | return facts
+    unless (← isDefEq kind (mkConst ``CIL.NumericKind.i8)) ||
+        (← isDefEq kind (mkConst ``CIL.NumericKind.i)) do return facts
   if operation == ``CIL.Instruction.setFieldAt then
     let some width := lastArgument? opcode | return facts
     unless ← isDefEq width (mkNatLit 8) do return facts

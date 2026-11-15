@@ -22,6 +22,8 @@ structure StepMetadata (source target : CIL.Method) : Prop where
     target.argumentAccess index = .value narrow
   /-- Both bodies declare one signature, so `localloc` zeroes storage alike. -/
   declared : target.declared = source.declared
+  /-- Both bodies resolve types and layouts in the same environment. -/
+  environment : target.environment = source.environment
 
 /-- One observable checked step transports frames, values and fresh allocation correspondence. -/
 def StepTransport : Prop :=

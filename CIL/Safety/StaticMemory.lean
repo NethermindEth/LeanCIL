@@ -7,9 +7,8 @@ import CIL.Safety.InstructionMemory
 it on first use and revalidating a cached binding on every later use. An opaque field's value
 is not extracted, so it must already be bound by the caller and is never created. `staticLoad`
 and `staticAddress` run `ldsfld`, `ldsflda` and a field `ldtoken` through the descriptor
-bound to their pc. `staticInstruction` runs the span constructors over static storage and hands
-every other memory instruction to `memoryInstruction`. `staticSpanAligned` is the element
-alignment a typed static span needs.
+bound to their pc. `staticInstruction` hands every memory instruction, static spans included, to
+`memoryInstruction`.
 -/
 
 namespace CIL.Safety
@@ -91,37 +90,9 @@ def staticAddress (body : CIL.Method) (pc : Nat) (memory : Memory) :
   let (memory, reference) ← staticReference descriptor memory
   return (memory, .reference (.address reference))
 
-/-- CoreCLR's `CreateSpan<T>` throws unless the field data is aligned to `sizeof(T)`, so a typed
-    span needs `width` to divide the allocation's guaranteed alignment. -/
-def staticSpanAligned (allocation : Allocation) (width : Nat) : Bool :=
-  0 < width && allocation.layout.alignment % width == 0
-
-/-- Runs a memory instruction, reading neither the method nor the pc; span constructors over raw
-    pointers are accepted only inside extracted static data. -/
+/-- Runs a memory instruction, reading neither the method nor the pc. -/
 def staticInstruction (_body : CIL.Method) (_pc : Nat) (operation : CIL.MemoryOp)
-    (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) := do
-  match operation, stack with
-  | .spanCreate, .scalar (.i32 length) :: .reference (.address reference) :: rest =>
-    if length.toInt < 0 then .error .invalidState else pure ()
-    let allocation ← checkedAt (.address reference) length.toNat
-      (liveAllocation m reference.allocation)
-    if allocation.kind == .immutableStatic then pure () else
-      .error (.unsupported "Span pointer constructor outside extracted static data")
-    let _ ← formValue m (.address reference)
-    if reference.offset + length.toNat ≤ allocation.layout.size then pure () else
-      .error (.memory .outsideAllocation (.address reference) length.toNat)
-    return (m, .span (.address reference) length.toNat :: rest)
-  | .createSpan width, .reference (.address reference) :: rest =>
-    let allocation ← checkedAt (.address reference) 0 (liveAllocation m reference.allocation)
-    if allocation.kind == .immutableStatic && reference.offset == 0 && 0 < width &&
-        allocation.layout.size % width == 0 then
-      if staticSpanAligned allocation width then
-        return (m, .span (.address reference) (allocation.layout.size / width) :: rest)
-      else .error (.unsupported "Typed span element width does not divide the field alignment")
-    else .error (.unsupported "Typed span outside a whole extracted static field")
-  | .spanCreate, .scalar (.i32 length) :: .reference .null :: rest =>
-    if length == 0 then return (m, .span .null 0 :: rest)
-    else .error (.memory .nullDereference .null length.toNat)
-  | _, _ => memoryInstruction operation stack m
+    (stack : List Value) (m : Memory) : ExecutionResult (Memory × List Value) :=
+  memoryInstruction operation stack m
 
 end CIL.Safety

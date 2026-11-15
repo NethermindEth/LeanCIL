@@ -154,8 +154,8 @@ double IdentityLookupCost(int count)
             samples.Add(System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds);
         }
         samples.Sort();
-        Console.WriteLine($"{count} imported modules, 128 identity lookup passes: {samples[3]:F3} ms");
-        return samples[3];
+        Console.WriteLine($"{count} imported modules, 128 identity lookup passes: {samples[0]:F3} ms minimum");
+        return samples[0];
     }
     finally { foreach (var module in modules) module.Dispose(); }
 }

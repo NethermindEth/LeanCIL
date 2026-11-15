@@ -8,32 +8,50 @@ namespace Nethermind.LeanCIL;
 internal static class Throws
 {
     const int ArgumentLimit = 4;
-    internal sealed record Analysis(Dictionary<Instruction, string> Raises, HashSet<Instruction> Operands, HashSet<Instruction> Interior);
+    internal sealed record Analysis(
+        Dictionary<Instruction, ExceptionType> Raises, HashSet<Instruction> Operands, HashSet<Instruction> Interior);
 
-    // Keep the same constructor allowlist in CIL.Extraction.exceptionConstructor.
-    static bool StringConstructor(string type, int count) =>
-        (count <= 1 && type is "System.Exception" or "System.SystemException" or "System.ApplicationException" or
-            "System.ArithmeticException" or "System.DivideByZeroException" or "System.OverflowException" or
-            "System.InvalidOperationException" or "System.NotSupportedException" or "System.NotImplementedException" or
-            "System.ArgumentException" or "System.ArgumentNullException" or "System.ArgumentOutOfRangeException" or
-            "System.IndexOutOfRangeException" or "System.NullReferenceException" or "System.FormatException") ||
-        (count == 2 && type is "System.ArgumentException" or "System.ArgumentNullException" or "System.ArgumentOutOfRangeException");
+    const string Message = "System.String";
+    const string Inner = "System.Exception";
+    const string Actual = "System.Object";
 
-    static bool ExceptionConstructor(MethodReference constructor)
+    // Keep the same parameter lists in CIL.Extraction.admittedParameters.
+    static string[][] AdmittedParameters(ExceptionType exception) => exception switch
     {
-        var type = constructor.DeclaringType.FullName;
+        ExceptionType.BaseException or ExceptionType.InvalidOperation => [[], [Message], [Message, Inner]],
+        ExceptionType.SystemException or ExceptionType.ApplicationException or ExceptionType.Arithmetic or
+            ExceptionType.DivideByZero or ExceptionType.Overflow or ExceptionType.NotSupported or
+            ExceptionType.NotImplemented or ExceptionType.IndexOutOfRange or ExceptionType.NullReference or
+            ExceptionType.Format => [[], [Message]],
+        ExceptionType.Argument =>
+            [[], [Message], [Message, Message], [Message, Inner], [Message, Message, Inner]],
+        ExceptionType.ArgumentNull => [[], [Message], [Message, Message]],
+        ExceptionType.ArgumentOutOfRange =>
+            [[], [Message], [Message, Message], [Message, Inner], [Message, Actual, Message]],
+        ExceptionType.InvalidCast or ExceptionType.ArrayTypeMismatch => [],
+        _ => throw new ArgumentOutOfRangeException(nameof(exception))
+    };
+
+    /// <summary>The member whose runtime type <paramref name="type"/> names, or null for any other type.</summary>
+    internal static ExceptionType? Owner(TypeReference type)
+    {
+        if (type is TypeSpecification || type.IsNested || type.Namespace != "System" ||
+            LayoutEvidence.Scope(type) != TypeTests.RuntimeScope) return null;
+        foreach (ExceptionType exception in ExceptionTypeText.All)
+            if (type.Name == exception.MetadataName()) return exception;
+        return null;
+    }
+
+    static bool AdmittedConstructor(MethodReference constructor, ExceptionType exception)
+    {
         var parameters = constructor.Parameters.Select(parameter => parameter.ParameterType).ToArray();
         if (parameters.Any(parameter => parameter is TypeSpecification ||
             LayoutEvidence.Scope(parameter) != TypeTests.RuntimeScope)) return false;
         var names = parameters.Select(parameter => parameter.FullName).ToArray();
-        return names.All(name => name == "System.String") && StringConstructor(type, names.Length) ||
-            names is ["System.String", "System.Exception"] && type is "System.Exception" or
-                "System.InvalidOperationException" or "System.ArgumentException" or "System.ArgumentOutOfRangeException" ||
-            type == "System.ArgumentException" && names is ["System.String", "System.String", "System.Exception"] ||
-            type == "System.ArgumentOutOfRangeException" && names is ["System.String", "System.Object", "System.String"];
+        return AdmittedParameters(exception).Any(admitted => admitted.SequenceEqual(names, StringComparer.Ordinal));
     }
 
-    static string? Raised(Instruction instruction, IList<Instruction> code, int start, int count) =>
+    static ExceptionType? Raised(Instruction instruction, IList<Instruction> code, int start, int count) =>
         instruction.OpCode.Code == Code.Newobj && instruction.Operand is MethodReference constructor &&
         constructor is not GenericInstanceMethod && constructor.Name == ".ctor" && constructor.HasThis &&
         !constructor.ExplicitThis && constructor.CallingConvention == MethodCallingConvention.Default && !constructor.HasGenericParameters &&
@@ -42,8 +60,8 @@ internal static class Throws
             parameter.ParameterType.MetadataType == MetadataType.String ||
             code[start + index].OpCode.Code == Code.Ldnull).All(valid => valid) &&
         constructor.DeclaringType is not TypeSpecification && !constructor.DeclaringType.IsValueType &&
-        ExceptionConstructor(constructor) &&
-        LayoutEvidence.Scope(constructor.DeclaringType) == TypeTests.RuntimeScope ? constructor.DeclaringType.FullName : null;
+        Owner(constructor.DeclaringType) is ExceptionType owner && AdmittedConstructor(constructor, owner)
+            ? owner : null;
 
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<MethodDefinition, Analysis> cache = new();
 
@@ -56,12 +74,12 @@ internal static class Throws
         for (int at = 0; at < code.Count; at++)
         {
             int raise;
-            string name;
+            ExceptionType raised;
             if (code[at].OpCode.Code == Code.Ldnull && at + 1 < code.Count &&
                 code[at + 1].OpCode.Code == Code.Throw)
             {
                 raise = at + 1;
-                name = "System.NullReferenceException";
+                raised = ExceptionType.NullReference;
             }
             else
             {
@@ -71,13 +89,13 @@ internal static class Throws
                     code[at + count].OpCode.Code is Code.Ldstr or Code.Ldnull) count++;
                 raise = at + count + 1;
                 if (count == ArgumentLimit || raise >= code.Count || code[raise].OpCode.Code != Code.Throw ||
-                    Raised(code[at + count], code, at, count) is not string constructed)
+                    Raised(code[at + count], code, at, count) is not ExceptionType constructed)
                     continue;
-                name = constructed;
+                raised = constructed;
             }
             for (int k = at; k < raise; k++) analysis.Operands.Add(code[k]);
             for (int k = at + 1; k <= raise; k++) analysis.Interior.Add(code[k]);
-            analysis.Raises.Add(code[raise], name);
+            analysis.Raises.Add(code[raise], raised);
             at = raise;
         }
         return analysis;

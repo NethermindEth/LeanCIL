@@ -157,7 +157,7 @@ theorem Memory.Renamed.arrayElement {mapping : AllocationRenaming}
     | null =>
       simp only [AllocationRenaming.managedReference, reference, BEq.beq,
         decide_true, ite_true]
-      exact .error (.thrown "System.NullReferenceException")
+      exact .error (.thrown .nullReference)
     | address address =>
       simp only [AllocationRenaming.managedReference, reference, BEq.beq,
         reduceCtorEq, decide_false, Bool.false_eq_true, ite_false]
@@ -165,7 +165,7 @@ theorem Memory.Renamed.arrayElement {mapping : AllocationRenaming}
       · simpa only [inside, ite_true, Bind.bind, Except.bind, reference,
           AllocationRenaming.arrayView, AllocationRenaming.managedReference] using positions
       · simp only [inside, ite_false, Bind.bind, Except.bind]
-        exact .error (.thrown "System.IndexOutOfRangeException")
+        exact .error (.thrown .indexOutOfRange)
 #print axioms Memory.Renamed.arrayElement
 
 end CIL.Safety

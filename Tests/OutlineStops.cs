@@ -224,7 +224,7 @@ var read = Outline("WrongWidth",
     var load = method.Body.Instructions.Single(instruction => instruction.OpCode == OpCodes.Ldind_U4);
     load.OpCode = OpCodes.Ldind_I8;
 });
-if (read.Code != 0 || !read.Proof.Contains("not outlined: `.load64`", StringComparison.Ordinal))
+if (read.Code != 0 || !read.Proof.Contains("not outlined: `.ldind .i8`", StringComparison.Ordinal))
     throw new Exception("A read wider than the span's elements was outlined as a read of its element:\n" +
         read.Output + read.Proof);
 Console.WriteLine("PASS a span read of another width than its elements is a hole");

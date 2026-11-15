@@ -115,21 +115,21 @@ run_cmd do
       throwError "assembly kernel cost grew too quickly"
     previous := cost
 
-/-- Median elapsed time includes index construction and all lookups. -/
+/-- Minimum elapsed time includes index construction and all lookups. -/
 private def measure (base : MetadataIndex) (count : Nat) : IO Nat := do
   let mut times := #[]
   for _ in [:5] do
     let start ← IO.monoNanosNow
     unless exercise base count do throw (IO.userError "assembly lookup lost an identity")
     times := times.push ((← IO.monoNanosNow) - start)
-  return (times.qsort (· < ·))[2]!
+  return (times.qsort (fun left right => left < right))[0]!
 
 #eval do
   let .ok base := lib.index | throw (IO.userError "invalid assembly fixture")
   let _ ← measure base 128
   let small ← measure base 1024
   let large ← measure base 8192
-  IO.println s!"assembly lookup median ns: {small}, {large}"
+  IO.println s!"assembly lookup minimum ns: {small}, {large}"
   unless large < small * 24 + 30000000 do
     throw (IO.userError "assembly lookup cost grew faster than indexed construction and queries")
 

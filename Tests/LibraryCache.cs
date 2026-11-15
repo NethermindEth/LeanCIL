@@ -1,6 +1,7 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include DirectoryLinks.cs
 #:include ../scripts/DeepChecks.cs
 #:include ../scripts/FailureReports.cs
 #:include ../scripts/LeanDiagnostics.cs
@@ -478,19 +479,6 @@ try
     List<string> EvictLibraries(string root, int? limit = null, string? current = null, double retentionDays = 7) =>
         EvictUnused(root, KeyName(), LibraryStaging(), TimeSpan.FromDays(retentionDays), limit, current, library: true);
     TimeSpan Days(double days) => TimeSpan.FromDays(days);
-    bool TryLink(string link, string target)
-    {
-        try { Directory.CreateSymbolicLink(link, target); return true; }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException) { }
-        if (!OperatingSystem.IsWindows()) return false;
-        // A junction needs no privilege.
-        using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe",
-            $"/c mklink /J \"{link}\" \"{target}\"")
-        { CreateNoWindow = true, RedirectStandardOutput = true, UseShellExecute = false })!;
-        mklink.StandardOutput.ReadToEnd();
-        mklink.WaitForExit();
-        return mklink.ExitCode == 0 && Directory.Exists(link);
-    }
 
     var retained = NewEvictionRoot();
     var stale = PlantEntry(retained, LibraryKeyOf('1'), Days(8));
@@ -518,7 +506,7 @@ try
     foreach (var file in new[] { "cache-manifest.json", "cache-receipt.hmac" })
         File.WriteAllText(Path.Combine(elsewhere, file), "published");
     var linkedEntry = Path.Combine(retained, LibraryKeyOf('c'));
-    var linked = TryLink(linkedEntry, elsewhere);
+    var linked = TryLinkDirectory(linkedEntry, elsewhere);
     if (linked) Directory.SetLastWriteTimeUtc(linkedEntry, DateTime.UtcNow - Days(30));
     var removed = EvictLibraries(retained, current: Path.GetFileName(inUse));
     if (removed.Count != 4 || Directory.Exists(stale) || Directory.Exists(killedPublisher) ||
@@ -543,7 +531,7 @@ try
     File.WriteAllText(Path.Combine(linkTarget, "keep.txt"), "outside the entry");
     var holdsLink = NewEvictionRoot();
     var withLink = PlantEntry(holdsLink, LibraryKeyOf('a'), Days(30));
-    if (TryLink(Path.Combine(withLink, ".lake", "link"), linkTarget))
+    if (TryLinkDirectory(Path.Combine(withLink, ".lake", "link"), linkTarget))
     {
         if (EvictLibraries(holdsLink).Count != 1 || Directory.Exists(withLink) ||
             !File.Exists(Path.Combine(linkTarget, "keep.txt")))
@@ -849,7 +837,7 @@ try
     var spelledEntry = PlantEntry(spelledRoot, LibraryKeyOf('a'), Days(30));
     var spelledLink = Path.Combine(evictionRoots, "link-to-" + Path.GetFileName(spelledRoot));
     var spelledOwner = Path.Combine(packageOwner, "spelled");
-    var reachedByLink = TryLink(spelledLink, spelledRoot);
+    var reachedByLink = TryLinkDirectory(spelledLink, spelledRoot);
     var entryThroughLink = Path.Combine(reachedByLink ? spelledLink : spelledRoot, LibraryKeyOf('a'));
     Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", reachedByLink ? spelledLink : spelledRoot);
     try { FrameworkPackage(spelledOwner, entryThroughLink, pin: true); }
@@ -954,18 +942,41 @@ try
         if (singleRead.Elapsed > TimeSpan.FromSeconds(30) || slowEntries.Any(path => !Directory.Exists(path)) ||
             !single.SequenceEqual(new[] { Path.GetFileName(unpinnedStale) }))
             throw new Exception("A lakefile that never answers delayed the pass, or its entries were removed");
-        // The whole pass is bounded too: it stops reading, stops removing, and says so.
+        // The whole pass is bounded too: a read under way when the limit comes is cut off there rather than at
+        // the read limit, and the pass then stops reading and removing, and says so. The pass sees only its own
+        // clock: the first reading fixes the limit, the second, taken by the first read, leaves it a moment,
+        // and every later one lies past it, so machine load cannot change what the pass does.
         PlantEntry(slowRoot, LibraryKeyOf('f'), Days(30));
-        packageReadLimit = TimeSpan.FromSeconds(30);
-        passLimit = TimeSpan.FromMilliseconds(500);
-        var wholePass = System.Diagnostics.Stopwatch.StartNew();
+        var passStart = DateTime.UtcNow;
+        var passReadings = 0;
+        var clockBefore = passClock;
+        packageReader = _ => { neverAnswers.Wait(TimeSpan.FromSeconds(10)); return ""; };
+        packageReadLimit = TimeSpan.FromHours(1);
+        passLimit = TimeSpan.FromHours(1);
+        passClock = () => Interlocked.Increment(ref passReadings) switch
+        {
+            1 => passStart,
+            2 => passStart + passLimit - TimeSpan.FromMilliseconds(200),
+            _ => passStart + passLimit + passLimit
+        };
         var gaveUp = new PassReport();
-        var stopped = EvictUnused(slowRoot, KeyName(), LibraryStaging(), Days(7), null, null, null, true, gaveUp);
-        if (wholePass.Elapsed > TimeSpan.FromSeconds(20) || !gaveUp.GaveUp || stopped.Count != 0 ||
-            !Directory.Exists(Path.Combine(slowRoot, LibraryKeyOf('f'))))
-            throw new Exception("The pass was not bounded, or did not say that it gave up");
+        List<string> stopped;
+        try { stopped = EvictUnused(slowRoot, KeyName(), LibraryStaging(), Days(7), null, null, null, true, gaveUp); }
+        finally { passClock = clockBefore; }
+        // A read waited for until the read limit would have answered after ten seconds and been judged.
+        if (!gaveUp.GaveUp || gaveUp.Unjudged != 1 || stopped.Count != 0 ||
+            !Directory.Exists(Path.Combine(slowRoot, LibraryKeyOf('f'))) ||
+            slowEntries.Any(path => !Directory.Exists(path)))
+            throw new Exception("The pass was not bounded, or did not say that it gave up: " +
+                $"gave up {gaveUp.GaveUp}, unjudged {gaveUp.Unjudged}, removed [{string.Join(", ", stopped)}]");
+        // A clock that lies past the limit after its first reading makes the pass give up whatever the load.
+        var stageReadings = 0;
+        passClock = () =>
+            Interlocked.Increment(ref stageReadings) == 1 ? passStart : passStart + passLimit + passLimit;
         libraryEvicted = 0;
-        var gaveUpStage = Captured(() => EvictUnusedLibraries(slowRoot, LibraryKeyOf('9')));
+        string gaveUpStage;
+        try { gaveUpStage = Captured(() => EvictUnusedLibraries(slowRoot, LibraryKeyOf('9'))); }
+        finally { passClock = clockBefore; }
         if (!gaveUpStage.Contains("END ") || !gaveUpStage.Contains("s limit") || !gaveUpStage.Contains("(exit 0, ") ||
             WithoutStageProgress(gaveUpStage).Length != 0)
             throw new Exception("A pass that gave up did not report it: " + gaveUpStage);

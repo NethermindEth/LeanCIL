@@ -67,7 +67,7 @@ theorem index_out_of_range (memory : Memory) (tagged tags : Reference) (length :
     (live : ReferenceArray.Live memory tags textType length) (outside : length ≤ index.toNat) :
     ∃ fuel, invoke Extracted.program fuel take
         [.object (.address tagged), .object (.address tags), .scalar (.i32 index)] memory =
-      .error ⟨take, 3, .thrown "System.IndexOutOfRangeException"⟩ := by
+      .error ⟨take, 3, .thrown .indexOutOfRange⟩ := by
   cil_checked_steps [live.slot_outside outside]
 
 #print axioms index_out_of_range

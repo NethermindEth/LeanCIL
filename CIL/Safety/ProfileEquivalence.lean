@@ -23,7 +23,7 @@ theorem step_profile_eq (body : CIL.Method) (op : CIL.Instruction) (p q : CIL.Fe
     (frame : Frame) (stack : List Value) (memory : Memory) :
     step { body with profile := p } op pc args frame stack memory =
       step { body with profile := q } op pc args frame stack memory := by
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   split <;> try rfl
   all_goals split <;> try rfl
   all_goals split <;> try rfl

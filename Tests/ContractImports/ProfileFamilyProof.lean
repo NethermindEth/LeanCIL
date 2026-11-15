@@ -7,7 +7,7 @@ import CIL.Safety.SymbolicExecution
 namespace FamilyProof
 open CIL CIL.Safety
 
-/-- The reference extraction's methods all use the selected SSE2 profile. -/
+/-- The reference extraction's methods all use the selected SSE4.2 profile. -/
 theorem uniform : ∀ body ∈ Reference.program, body.profile = Reference.profile := by decide
 #print axioms uniform
 

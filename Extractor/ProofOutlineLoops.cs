@@ -510,7 +510,7 @@ internal static partial class ProofOutline
                     : inputs.Any(input => input.Object is not null) ? "it takes an object, whose fields need facts"
                     : output is null ? "it returns nothing to state"
                     : !extraction.Emitted[index].Frame.HasNoLocals ? "it has locals"
-                    : Unstepped(callee, extraction.Emitted[index].Operations, []);
+                    : Unstepped(callee, SlotOperations(extraction.Emitted[index]), []);
                 lean.Noted("  ", "sorry", $"{NotOutlined}{callee.Name}'s body against the contract, since " +
                     reason);
             }
@@ -522,7 +522,7 @@ internal static partial class ProofOutline
         (int Slot, int Value, int Width, Operation Op)? Stores(int index)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
+            var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
             if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
                 !extraction.Emitted[index].Frame.HasNoLocals || ops[3] is not Return) return null;
             if (ops[0] is not Arg { Index: var reference } || ops[1] is not Arg { Index: var word } ||
@@ -530,9 +530,7 @@ internal static partial class ProofOutline
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
                 ElementWidth(target.ElementType) is not { } width ||
                 ElementWidth(callee.Parameters[word].ParameterType) != width) return null;
-            var stores = width == 4 ? ops[2] is StoreScalar { Width: 4 }
-                : ops[2] is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 8 };
-            return stores ? (reference, word, width, ops[2]) : null;
+            return width is 4 or 8 && StoredWidth(ops[2]) == width ? (reference, word, width, ops[2]) : null;
         }
 
         /// <summary>Whether a callee without locals only computes, so one checked run steps its body.</summary>
@@ -540,7 +538,8 @@ internal static partial class ProofOutline
         {
             var plainReturn = LeanEmitter.Narrow(extraction.Methods[index].ReturnType) is null;
             return extraction.Emitted[index].Frame.HasNoLocals &&
-                extraction.Emitted[index].Operations.All(op => Body.Pure(op, extraction.Methods[index], plainReturn));
+                SlotOperations(extraction.Emitted[index])
+                    .All(op => Body.Pure(op, extraction.Methods[index], plainReturn));
         }
 
         /// <summary>The `Holds` proof of a callee of words that `Computes` or `Branches`, its inputs bound by
@@ -567,7 +566,7 @@ internal static partial class ProofOutline
         internal static bool Branches(Extraction extraction, int index)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Operations;
+            var ops = SlotOperations(extraction.Emitted[index]);
             var plainReturn = LeanEmitter.Narrow(callee.ReturnType) is null;
             return !callee.HasThis &&
                 callee.Parameters.All(parameter => ElementWidth(parameter.ParameterType) is not null) &&
@@ -602,7 +601,7 @@ internal static partial class ProofOutline
         static bool ReadsWidth(Operation operation, int width) => operation switch
         {
             LoadScalar { Signed: false } load => load.Width == width,
-            StackOperation { Kind: StackOpcode.Load64 } => width == 8,
+            IndirectAccess { Store: false, Signed: false } load => load.Width == width,
             _ => false
         };
 
@@ -619,7 +618,7 @@ internal static partial class ProofOutline
             string indent, ref int sides, bool kept)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Operations;
+            var ops = SlotOperations(extraction.Emitted[index]);
             string Where() => facts.Count == 0 ? "" : " where " + string.Join(" and ", facts.Select(fact => fact.Text));
             while (true)
             {
@@ -1631,11 +1630,10 @@ internal static partial class ProofOutline
             else if (op is Jump) return Event.Branch;
             else if (op is Call { Kind: CallKind.Static or CallKind.Instance }) return Event.Call;
             else if (op is Return) return Event.Return;
-            else if (op is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 4 or 8 }
-                && stack.Count >= 2 &&
+            else if (StoredWidth(op) is 4 or 8 && stack.Count >= 2 &&
                 stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })
             {
-                var width = op is StoreScalar { Width: 4 } ? 4 : 8;
+                var width = StoredWidth(op)!.Value;
                 if (state.Moved || state.Called)
                     return Stop("a span store after another store or a call of the iteration, whose memory the " +
                         "span's checks are not carried to");
@@ -1646,11 +1644,10 @@ internal static partial class ProofOutline
                 state.Facts.AddRange(SpanWrite(state, written.Component, stored.Term, StoreLemma(op)));
                 state.Moved = true;
             }
-            else if (op is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 4 or 8 }
-                && stack.Count >= 2 &&
+            else if (StoredWidth(op) is 4 or 8 && stack.Count >= 2 &&
                 stack[^2] is AddedReference added && !state.Moved)
             {
-                var width = op is StoreScalar { Width: 4 } ? 4 : 8;
+                var width = StoredWidth(op)!.Value;
                 if (stack[^1] is not Number { Narrow: false } stored || stored.Width != width || added.Width != width)
                     return Stop("a store through `Unsafe.Add` of a value the outline cannot name at the " +
                         "element's width");

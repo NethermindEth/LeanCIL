@@ -1,4 +1,5 @@
 import Std
+import CIL.Identity
 
 /-!
 # Metadata type expressions
@@ -30,6 +31,12 @@ theorem runtimeScope_eq :
       "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" := by
   rfl
 #print axioms runtimeScope_eq
+
+/-- The .NET 11 reference assembly that holds the `TypeDef` rows of the primitive types and of the
+    modelled exceptions; `runtimeScope` is its display name. -/
+def runtimeAssembly : AssemblyName :=
+  { name := name!"System.Runtime", version := ⟨11, 0, 0, 0⟩, culture := name!"",
+    publicKeyToken := some 0xb03f5f7f11d50a3a }
 
 /-- Scoped metadata types shared by extraction and typed import slots. -/
 inductive TypeExpr where
@@ -95,6 +102,19 @@ theorem groupIndex_get {α κ : Type} [Ord κ] [Std.TransOrd κ] [Std.LawfulEqOr
 
 /-- Linked UTF-8 bytes avoid indexed string decoding while comparing type keys. -/
 def keyBytes (text : String) : List UInt8 := text.toByteArray.data.toList
+
+/-- `runtimeScope` is the display name of `runtimeAssembly`, compared in bytes because display
+    text does not reduce in the kernel; a version or token changed in only one of them fails it. -/
+theorem runtimeScope_spells_runtimeAssembly :
+    runtimeAssembly.culture = name!"" ∧
+      (runtimeAssembly.name.bytes?.getD []).map Nat.toUInt8 ++
+          keyBytes (", Version=" ++ runtimeAssembly.version.display ++
+            ", Culture=neutral, PublicKeyToken=" ++
+            publicKeyTokenText runtimeAssembly.publicKeyToken) =
+        keyBytes runtimeScope := by
+  decide +kernel
+
+#print axioms runtimeScope_spells_runtimeAssembly
 
 /-- Constructor-delimited type buckets retain scopes and aggregate positions. Lookups through
     these keys still compare full identities, in case two encodings were to share a bucket. -/

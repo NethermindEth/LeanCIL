@@ -28,27 +28,27 @@ theorem address_cannot_grant_write :
 /-- The end position is not an array element, even though it can be a valid pointer position. -/
 theorem end_address_rejected :
     memoryInstruction (.arrayAddress .signed32) [.scalar (.i32 2), .array array] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms end_address_rejected
 
 /-- A null array has no element address. -/
 theorem null_address_rejected :
     memoryInstruction (.arrayAddress .signed32) [.scalar (.i32 0), .object .null] memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 #print axioms null_address_rejected
 
 /-- Negative indices cannot wrap back into the allocation. -/
 theorem negative_address_rejected :
     memoryInstruction (.arrayAddress .signed32)
       [.scalar (.i32 (BitVec.ofInt 32 (-1))), .array array] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms negative_address_rejected
 
 /-- Empty arrays have no element, including at their valid end position. -/
 theorem empty_address_rejected :
     memoryInstruction (.arrayAddress .signed32)
       [.scalar (.i32 0), .array ⟨.address ⟨0, 8⟩, 0, .signed32⟩] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms empty_address_rejected
 
 /-- A returned element reference becomes invalid when its backing allocation expires. -/

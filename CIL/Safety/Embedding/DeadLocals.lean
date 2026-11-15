@@ -501,7 +501,7 @@ theorem _root_.CIL.MethodEmbedsDeadLocals.invoke {program : CIL.Program} {index 
 theorem _root_.CIL.EmbedsDeadLocals.invoke_raise {program : CIL.Program} {index : Nat}
     {expected actual : CIL.Method} {map : List Nat} (found : program[index]? = some actual)
     (embeds : EmbedsDeadLocals expected actual map) {fuel method : Nat} {args : List Value}
-    {memory : Memory} {fault : LocatedFault} {exception : String}
+    {memory : Memory} {fault : LocatedFault} {exception : ExceptionType}
     (invoked : invoke (program.set index expected) fuel method args memory = .error fault)
     (thrown : fault.fault = .thrown exception) :
     invoke program fuel method args memory =
@@ -514,7 +514,7 @@ theorem _root_.CIL.EmbedsDeadLocals.invoke_raise {program : CIL.Program} {index 
     `program`. -/
 theorem _root_.CIL.MethodEmbedsDeadLocals.raises {program : CIL.Program} {index : Nat}
     {expected : CIL.Method} (embeds : MethodEmbedsDeadLocals program index expected)
-    {method : Nat} {args : List Value} {memory : Memory} {exception : String}
+    {method : Nat} {args : List Value} {memory : Memory} {exception : ExceptionType}
     (raised : Raises (program.set index expected) method args memory exception) :
     Raises program method args memory exception := by
   obtain ⟨_, _, found, embedded⟩ := embeds

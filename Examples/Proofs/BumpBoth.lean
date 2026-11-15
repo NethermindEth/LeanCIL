@@ -95,7 +95,7 @@ theorem correctness : bumpBothContract.Holds Extracted.program bumpBoth :=
 /-- `Bump` on a null account throws `NullReferenceException` at its field load. -/
 theorem bump_null_throws (memory : Memory) (amount : W64) :
     ∃ fuel, invoke Extracted.program fuel bump [.object .null, .scalar (.i64 amount)] memory =
-      .error ⟨bump, 2, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨bump, 2, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms bump_null_throws
@@ -115,7 +115,7 @@ def bumpOutcome : OutcomeContract (ManagedReference × W64) where
     | .address account =>
       Account.Balance.Holds final account (Account.Balance.of initial account + amount)
   raises := fun (account, _) _ => match account with
-    | .null => some "System.NullReferenceException"
+    | .null => some .nullReference
     | .address _ => none
 
 /-- `Bump` meets its outcome contract: the runtime exception for null, the update otherwise. -/

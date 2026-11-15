@@ -231,12 +231,15 @@ def MetadataEnv.expectedField (env : MetadataEnv) (token : Nat) (site : FieldSit
       | _ => .ok (0, held, none)
     | _ => .ok (0, held, none)
 
-/-- Check a `.field` operand: the owner, the field's model index and the type it holds. -/
+/-- Check a `.field` operand: the owner, the field's model index, the type it holds and the
+    name, which must spell the name of the row the token names. -/
 def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner : TypeExpr)
-    (index : Nat) (fieldType : TypeExpr) (isStatic : Bool) : Except MetadataError TokenFacts := do
+    (index : Nat) (fieldType : TypeExpr) (name : MetadataName) (isStatic : Bool) :
+    Except MetadataError TokenFacts := do
   if metadataTableOf token != Table.field && metadataTableOf token != Table.memberRef then
     throw (.unsupportedTable token)
   let site ← env.fieldSite token
+  if !name.spells site.name then throw (.operandMismatch token)
   let classOwner := match owner with
     | .object .. => true
     | _ => false
@@ -246,40 +249,6 @@ def checkFieldOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (owner :
   if index != expected then throw (.fieldIndexMismatch token index expected)
   if !(frame.admits held fieldType) then throw (.operandMismatch token)
   .ok { staticField := isStaticFact }
-
-/-- The typed reference of a `.field` operand whose token reads as `site`: the operand's owner,
-    index and type, with the site's name. `none` for any other operand, and when the site's
-    name bytes are not a metadata name. The opcode, not the reference, says whether the field is
-    static. -/
-def FieldRef.ofSite? (operand : RawOperand) (site : FieldSite) : Option FieldRef :=
-  match operand with
-  | .field owner index type _ =>
-    (MetadataName.ofBytes? site.name).map fun name => { owner, index, type, name }
-  | _ => none
-
-/-- A reference built from an operand and its site has the field operand's owner, index and
-    type, and a name whose bytes are the site's name bytes. -/
-theorem FieldRef.ofSite?_eq_some {operand : RawOperand} {site : FieldSite}
-    {reference : FieldRef} (built : FieldRef.ofSite? operand site = some reference) :
-    (∃ isStatic, operand = .field reference.owner reference.index reference.type isStatic) ∧
-      reference.name.bytes? = some site.name := by
-  unfold FieldRef.ofSite? at built
-  split at built
-  · next owner index type isStatic =>
-    obtain ⟨name, decoded, rfl⟩ := Option.map_eq_some_iff.mp built
-    exact ⟨⟨isStatic, rfl⟩, MetadataName.bytes?_ofBytes? decoded⟩
-  · cases built
-
-#print axioms FieldRef.ofSite?_eq_some
-
-/-- A field operand gives no reference exactly when its site's name bytes are not a name. -/
-theorem FieldRef.ofSite?_field_eq_none {owner type : TypeExpr} {index : Nat} {isStatic : Bool}
-    {site : FieldSite} :
-    FieldRef.ofSite? (.field owner index type isStatic) site = none ↔
-      MetadataName.ofBytes? site.name = none := by
-  simp [FieldRef.ofSite?]
-
-#print axioms FieldRef.ofSite?_field_eq_none
 
 /-! ## Methods and calls -/
 
@@ -493,8 +462,8 @@ def checkEntryIn (env : MetadataEnv) (frame : Frame) (token : Nat) (operand : Ra
     if metadataTableOf token == Table.typeRef || metadataTableOf token == Table.typeDef ||
         metadataTableOf token == Table.typeSpec then checkTypeOperand env frame token expr
     else .error (.unsupportedTable token)
-  | .field owner index fieldType isStatic =>
-    checkFieldOperand env frame token owner index fieldType isStatic
+  | .field owner index fieldType name isStatic =>
+    checkFieldOperand env frame token owner index fieldType name isStatic
   | .call site => checkCallOperand env frame token site
   | .indirectCall result parameters hasThis explicitThis convention =>
     checkIndirectOperand env frame token result parameters hasThis explicitThis convention
@@ -513,7 +482,7 @@ def checkEntry (env : MetadataEnv) (arity : Nat) (token : Nat) (operand : RawOpe
 /-- The facts that depend on the opcode using a token: a static field access names a static
     field, an instance access an instance field, and `ldtoken` of a field takes the static form. -/
 def checkSite (opcode : Nat) (facts : TokenFacts) : RawOperand → Bool
-  | .field _ _ _ isStatic =>
+  | .field _ _ _ _ isStatic =>
     if opcode == 0x7E || opcode == 0x7F || opcode == 0x80 then
       isStatic && facts.staticField != some false
     else if opcode == 0x7B || opcode == 0x7C || opcode == 0x7D then
@@ -679,7 +648,8 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
   if row.implFlags / runtimeAsyncFlag % 2 == 1 then throw (.runtimeAsync method.token)
   let signature ← decodeMethodSig (← index.blob row.signature)
   let convention := signature.convention
-  if method.hasThis != (convention / hasThisFlag % 2 == 1) ||
+  -- EXPLICITTHIS puts the receiver in the parameter list, outside the implicit receiver model.
+  if method.explicitThis || method.hasThis != (convention / hasThisFlag % 2 == 1) ||
       method.explicitThis != (convention / explicitThisFlag % 2 == 1) ||
       method.callingConvention != convention % 0x20 then throw (.methodMismatch method.token)
   let ownerToken ← env.declaringType 0 method.token

@@ -108,7 +108,7 @@ external enum dependencies are not supported.
 | `call` | Partial | Acyclic calls to supported static methods, reference-free struct instance methods (including direct constructor calls) or instance methods and constructors of admitted classes, which run the named body on an object-reference `this` ([class instances](SOUNDNESS-RUNTIME.md#class-instances)), in the same assembly or a pinned `--reference` assembly ([CLI](CLI.md#extract-from-referenced-assemblies)), concrete generic-method specializations, or exact runtime/intrinsic signatures in the allowlist, including integer BinaryPrimitives byte-span transfers and no-read span/array accessors. Closed generic declaring types are admitted for static calls, including nested owners; validated closed sequential structs also admit direct instance methods and constructors. No arbitrary external calls, instance methods of classes that are not admitted or virtual dispatch through `call`. |
 | `newobj` | Partial | Same-assembly constructors of validated reference-free structs: zero-initialize caller-owned storage, invoke the constructor with managed-reference `this`, then return a checked value snapshot. Also admitted `Span<T>` and `ReadOnlySpan<T>` constructors over checked existing storage for supported integer, enum, aggregate and integer-vector elements, from a single reference, `(void*, int)`, an array, or `(array, start, length)`. Also constructors of admitted non-abstract classes, which allocate a fresh [class instance](SOUNDNESS-RUNTIME.md#class-instances) charged to `Memory.heapBudget` (`allocationFailure` when short) and push it once the constructor returns; the constructor's `System.Object::.ctor()` call only pops its receiver. Unsupported generic constructors and cyclic dependencies are rejected. |
 | `ldtoken` | Partial | A type token as an operand of a decided closed type test, which emits a no-op, or a static data field token for `RuntimeHelpers.CreateSpan<T>`, which emits the field's address (see below). Other tokens are rejected. |
-| `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `thrown "E"` fault. Adjacent `ldnull; throw` raises `System.NullReferenceException`. Other throws are rejected. |
+| `throw` | Partial | Exact `throw new E(...)` with `ldstr`/`ldnull` arguments raises a located `.thrown raised` fault, where `raised` is the `CIL.ExceptionType` member for `E`. Adjacent `ldnull; throw` raises `.nullReference`. Other throws are rejected. |
 | `constrained.`, `callvirt` | Partial | Adjacent prefix and `callvirt` (instance slot) or `call` (static interface slot) resolving to a concrete struct implementation or, for a static slot, the most specific interface-level body, within the extracted and pinned assemblies; see [constrained struct calls](#constrained-struct-calls). No boxing. Without the prefix, `callvirt` of a non-virtual method of an admitted class calls it after a receiver null check that throws `System.NullReferenceException` ([class instances](SOUNDNESS-RUNTIME.md#class-instances)); `callvirt` of a virtual method of an admitted class dispatches on the receiver's runtime type through a table Lean rechecks ([virtual dispatch](SOUNDNESS-EXECUTION.md#virtual-dispatch)). Interface calls and slots declared outside the extracted assemblies are rejected by name. |
 | `castclass`, `isinst` | Partial | Test an object reference against an admitted class other than `System.Object`: null passes, and an instance whose lineage lacks the class gives null (`isinst`) or throws `System.InvalidCastException` (`castclass`); see [class instances](SOUNDNESS-RUNTIME.md#class-instances). Interfaces, `System.Object`, value types and classes that are not admitted are rejected by name. |
 | `ldftn` | Partial | Exact static same-assembly managed method addresses, retaining scoped identity and closed signature. Callable values have no numeric address representation. See typed indirect dispatch below. |
@@ -280,13 +280,14 @@ outside this subset.
 
 `throw new E(...)` compiles to one `ldstr` or `ldnull` per constructor argument, `newobj` of
 `E`'s constructor and `throw`. For an exact allowlisted `System.Runtime` constructor, the loads
-and `newobj` emit `nop` and `throw` emits `.throw "E"`, which ends execution with a fault located
-at the `throw`. A `[DoesNotReturn]` helper containing only this pattern is an ordinary call.
+and `newobj` emit `nop` and `throw` emits `.throw raised`, with `raised` the `CIL.ExceptionType`
+member for `E`, which ends execution with a fault located at the `throw`. A `[DoesNotReturn]`
+helper containing only this pattern is an ordinary call.
 Other arguments, any instruction between the parts, a branch past the first part, rethrowing a
 stored exception and exception handlers are rejected.
 
 The adjacent `ldnull; throw` form emits `nop` followed by the same named-fault operation for
-`System.NullReferenceException`, located at the raw `throw`. A branch may target the null load,
+`.nullReference`, located at the raw `throw`. A branch may target the null load,
 but cannot enter at the throw. Nulls passed through locals, arguments or intervening instructions
 do not satisfy this exact fold.
 
@@ -450,12 +451,11 @@ elements, for any primitive integer `T`. As in CoreCLR, which throws `ArgumentEx
 misaligned for `T`, `sizeof(T)` must divide the field's packing; otherwise the call is an
 `unsupported` fault. Roslyn emits each such field with packing `sizeof(T)` at an 8-byte-aligned
 RVA, in a section whose virtual address and file offset are multiples of 512. A caller reads it
-as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: the store
-and address emit `nop`, so the span stays on the stack as the receiver. `get_Item` faults with
+as `stloc s; ldloca s; [index;] call get_Item` or `stloc s; ldloca s; call get_Length`: `stloc`
+stores the typed span view and `ldloca` pushes that view as the receiver. `get_Item` faults with
 `System.IndexOutOfRangeException` at the call when the index, compared unsigned as in .NET, is
-out of range. `MemoryMarshal.GetReference` also accepts these spans. The fold is used only for a
-single-use receiver with a single-load or constant index; other supported uses keep typed span
-storage. Branches into a folded receiver are rejected.
+out of range. `MemoryMarshal.GetReference` also accepts these spans. Receiver locals retain typed
+span storage for repeated reads and computed indexes.
 
 ### Span reference parameters
 
@@ -683,10 +683,9 @@ and `true` ([runtime assumptions](SOUNDNESS-RUNTIME.md#runtime-assumptions)).
 `ldsfld BitConverter.IsLittleEndian` produces `true`, since every valid profile is
 little-endian. The extractor checks the exact System.Runtime field and that it is
 `static readonly`, and rejects same-named types and fields from other assemblies and other
-`BitConverter` fields. The certificate binds the raw call signature, or the raw field owner, type
-and static load, and the emitted value. Raw field operands carry no member name, so the
-certificate relies on
-`IsLittleEndian` being the only static Boolean field of System.Runtime's `BitConverter`.
+`BitConverter` fields. The certificate binds the raw call signature, or the raw field owner, name,
+type and static load, and the emitted value; the body check requires a field operand's name to
+spell the name of the field row its token names.
 
 These constants feed the feature-flow analysis. Known int32 words propagate through bitwise
 operations and `ceq`, `cgt`, `cgt.un`, `clt` and `clt.un`.

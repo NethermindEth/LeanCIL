@@ -6,7 +6,7 @@ import CIL.Safety.Embedding.Simulation
 When the expected body is dead (`Instruction.live = false`) before pc `lower` and its code from
 `lower` on appears relabeled at pc `start` of the actual body, the actual body refines it
 under `suffixRename`. Branch targets must stay inside the suffix. A proof about a region,
-with the code outside it masked as `.unsupported`, then transfers to the real method
+with the code outside it masked as holes (`.unadmitted`), then transfers to the real method
 through `Embedding.Simulation`.
 -/
 

@@ -29,6 +29,9 @@ private def otherOwner : FieldRef := { field with owner := .atom "Fixture" "Othe
 /-- The field's holder and index with another stored type. -/
 private def otherType : FieldRef := { field with type := .atom "Fixture" "Word" }
 
+/-- The field's holder, index and type under another name. -/
+private def otherName : FieldRef := { field with name := name!"Other" }
+
 private def loader (bytes : List (BitVec 8)) (init : Option StaticInitializer) : Method :=
   { code := [.ldsfld field, .ret], locals := [], returnsValue := true,
     staticSites := [(0, descriptor bytes init)] }
@@ -95,7 +98,7 @@ private def rawStatic (opcode : Nat) (isStatic : Bool := true)
   token := 0, owner := "Fixture", hasThis := false, explicitThis := false
   callingConvention := 0, attributes := 0, implementation := 0, returnType := .void
   parameters := [], locals := [], initLocals := true, maxStack := 1, genericParameters := []
-  code := before ++ [⟨0, opcode, .field field.owner field.index field.type isStatic⟩] }
+  code := before ++ [⟨0, opcode, .field field.owner field.index field.type field.name isStatic⟩] }
 
 /-- Constructor-initialized addresses retain their original raw opcode. -/
 theorem static_address_opcode :
@@ -104,14 +107,16 @@ theorem static_address_opcode :
     methodShapeInstructions (rawStatic 126) address = false := by decide +kernel
 #print axioms static_address_opcode
 
-/-- A static instruction names the field of its raw instruction: another index, owner or stored
-    type, an instance operand or another opcode is rejected, for loads, addresses and tokens. -/
+/-- A static instruction names the field of its raw instruction: another index, owner, stored
+    type or name, an instance operand or another opcode is rejected, for loads, addresses and
+    tokens. -/
 theorem static_field_named :
     let method (code : List Instruction) := { loader zeros (some ⟨1, [], none, false⟩) with code }
     methodShapeInstructions (rawStatic 126) (method [.ldsfld field]) = true ∧
     methodShapeInstructions (rawStatic 126) (method [.ldsfld otherField]) = false ∧
     methodShapeInstructions (rawStatic 126) (method [.ldsfld otherOwner]) = false ∧
     methodShapeInstructions (rawStatic 126) (method [.ldsfld otherType]) = false ∧
+    methodShapeInstructions (rawStatic 126) (method [.ldsfld otherName]) = false ∧
     methodShapeInstructions (rawStatic 126 false) (method [.ldsfld field]) = false ∧
     methodShapeInstructions (rawStatic 127) (method [.ldsflda otherField]) = false ∧
     methodShapeInstructions (rawStatic 208) (method [.ldtoken (.field field)]) = true ∧

@@ -21,11 +21,11 @@ theorem correctness (memory : Memory) (literal : Reference) (index length : CIL.
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 index), .scalar (.i32 length)]
         memory =
       if length.toNat ≤ index.toNat then
-        .error ⟨0, 3, .thrown "System.ArgumentOutOfRangeException"⟩
+        .error ⟨0, 3, .thrown .argumentOutOfRange⟩
       else .ok (memory, [.scalar (.i32 index)]) := by
   have outcome : comparisonGuardOutcome .greaterThanOrEqual 32 false (.i32 index)
       (.i32 length) = if length.toNat <= index.toNat then
-        .error (.thrown "System.ArgumentOutOfRangeException") else .ok () := by
+        .error (.thrown .argumentOutOfRange) else .ok () := by
     by_cases outside : length.toNat <= index.toNat <;>
       simp [comparisonGuardOutcome, CIL.guardOperand, CIL.ComparisonGuard.throws, outside]
   by_cases outside : length.toNat ≤ index.toNat
@@ -52,7 +52,7 @@ theorem equal_raises (memory : Memory) (literal : Reference) (index : CIL.W32)
     (bound : memory.literals.lookup "index" = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 index), .scalar (.i32 index)] memory =
-      .error ⟨0, 3, .thrown "System.ArgumentOutOfRangeException"⟩ := by
+      .error ⟨0, 3, .thrown .argumentOutOfRange⟩ := by
   simpa using correctness memory literal index index bound formed
 
 #print axioms equal_raises

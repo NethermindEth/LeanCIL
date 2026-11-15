@@ -44,7 +44,7 @@ theorem correctness (memory : Memory) (bucket items : Reference) (length : Nat)
 theorem null_bucket (memory : Memory) (items : Reference) (length : Nat)
     (live : ReferenceArray.Live memory items nodeType length) :
     ∃ fuel, invoke Extracted.program fuel refill [.object .null, .object (.address items)]
-        memory = .error ⟨refill, 2, .thrown "System.NullReferenceException"⟩ := by
+        memory = .error ⟨refill, 2, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms null_bucket

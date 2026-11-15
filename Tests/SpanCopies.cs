@@ -78,7 +78,7 @@ foreach (var method in methods.Where(method => method.IsPublic))
     if (name == "CopyReadOnly")
     {
         claims.Add($"({Run(2, 5, 20, 3, "uninitialized")}).map Prod.snd = " +
-            ".error ⟨0, 2, .thrown \"System.ArgumentException\"⟩");
+            ".error ⟨0, 2, .thrown .argument⟩");
         proofs.Add("by rfl");
     }
     File.WriteAllText(proof, "import Extracted\nimport CIL.Safety.Execution\nnamespace ExampleProof\n" + """

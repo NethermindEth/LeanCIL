@@ -6,14 +6,14 @@ import CIL.Safety.StaticMemoryLemmas
 # Static instruction simulation under allocation renaming
 
 Extraction-bound static identities stay exact. A first lookup extends the allocation map,
-while cached fields and span construction preserve their existing allocation correspondence.
+while cached fields preserve their existing allocation correspondence.
 -/
 
 namespace CIL.Safety
 
 /-- Static resolution reports model or memory faults, never a named CLR exception. -/
 theorem staticReference_not_thrown (descriptor : CIL.StaticDescriptor) (memory : Memory)
-    (exception : String) :
+    (exception : ExceptionType) :
     staticReference descriptor memory ≠ .error (.thrown exception) := by
   intro raised
   unfold staticReference at raised
@@ -41,38 +41,7 @@ theorem Memory.Renamed.staticInstructionResult {mapping : AllocationRenaming}
         (staticInstruction body pc operation stack source)
         (staticInstruction body pc operation (stack.map mapping.value) target) := by
   unfold CIL.Safety.staticInstruction at observable ⊢
-  split at observable
-  all_goals try simp only [List.map_cons, AllocationRenaming.value,
-    AllocationRenaming.managedReference]
-  -- Only the fallback arm keeps `operation` as a variable to case on.
-  any_goals first
-    | (refine ⟨mapping, .refl mapping, ?_⟩
-       cases operation <;> first
-         | exact related.memoryInstructionResult _ sourceFormed _ bounds observable
-         | (unfold CIL.Safety.memoryInstruction at observable
-            repeat' first
-              | contradiction
-              | cases observable
-              | split at observable
-              | simp only [Bind.bind, Except.bind, SuccessOrThrow] at observable))
-    | fail "not the fallback arm"
-  all_goals refine ⟨mapping, .refl mapping, ?_⟩
-  all_goals try exact related.memoryInstructionResult _ sourceFormed _ bounds observable
-  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below,
-    ManagedReference.Below] at bounds
-  all_goals repeat' rcases bounds with ⟨_, bounds⟩
-  all_goals repeat first
-    | exact .ok ⟨related, rfl⟩
-    | exact .error _
-    | (apply ((related.liveAllocation _ (by assumption)).checkedAt _ _).bindWithSuccess
-       intro first second sourceStep descriptors
-       rw [← descriptors.layout, ← descriptors.kind.immutable]
-       try (unfold staticSpanAligned; rw [← descriptors.layout]))
-    | (apply (related.formValue _ (by assumption)).bindWithSuccess
-       intro first second sourceStep same
-       subst second)
-    | dsimp +instances only [AllocationRenaming.reference]
-    | (split <;> try simp only [*, Bind.bind, Except.bind])
+  exact ⟨mapping, .refl mapping, related.memoryInstructionResult _ sourceFormed _ bounds observable⟩
 
 #print axioms Memory.Renamed.staticInstructionResult
 

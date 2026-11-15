@@ -216,6 +216,10 @@ internal static class LeanEmitter
         // One shared constant, so a method literal names the tables instead of repeating them.
         lean.AppendLine($"@[cil_code] def {FrameMetadata.EnvironmentLean} : LayoutEnvironment := " +
             "{ rawLayouts := rawLayouts, layouts := computedLayouts }");
+        // The shape facts are written here once every method has been translated, so admission reports its own
+        // refusals first, and every method's components see them.
+        var shapeFactsAt = lean.Length;
+        var operandShapes = new OperandShapes();
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
         genericEvidence.EmitAssemblyMetadata(lean);
         var fieldAccesses = new List<ClassViews.Access>();
@@ -245,8 +249,8 @@ internal static class LeanEmitter
                 ops.Add(reachable.Contains(i)
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                         scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets,
-                        access => genericEvidence.StaticField(m, access))
-                    : new Unsupported("Unreachable under selected profile"));
+                        access => genericEvidence.FieldReferenceOf(m, access))
+                    : Unadmitted.At(i));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
             var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);
@@ -271,7 +275,8 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
             callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
-            if (collectTemplates) templates.Add(new(m.FullName, frame, [.. ops]));
+            if (collectTemplates)
+                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             // Each link's text is written once, as a definition the table, the index and its facts name.
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
             foreach (var (pc, link) in linkEntries)
@@ -293,6 +298,7 @@ internal static class LeanEmitter
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
+            operandShapes.Add(m, reachable, genericEvidence);
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
             lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
                 $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
@@ -320,6 +326,7 @@ internal static class LeanEmitter
                     $"Extraction.linkAt_of_entry (position := {position}) method{n}_linkIndex_valid rfl");
             }
         }
+        lean.Insert(shapeFactsAt, operandShapes.Lean());
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
@@ -402,5 +409,48 @@ internal static class LeanEmitter
         }
         lean.AppendLine("end Extracted");
         return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts);
+    }
+
+    /// <summary>
+    /// The distinct field and type operands of the reachable field and value-type instructions of every method, each
+    /// written once as a definition beside the fact that states how every method of the extraction resolves it.
+    /// </summary>
+    internal sealed class OperandShapes
+    {
+        readonly Dictionary<FieldRef, int> fields = [];
+        // TypeExpr has no typed C# form, so a type operand is keyed by its rendered term.
+        readonly Dictionary<string, int> types = new(StringComparer.Ordinal);
+        readonly StringBuilder text = new();
+
+        /// <summary>
+        /// Records the operands of <paramref name="method"/>'s reachable instructions not seen before.
+        /// </summary>
+        internal void Add(MethodDefinition method, IReadOnlySet<Instruction> reachable, GenericEvidence evidence)
+        {
+            foreach (var instruction in method.Body.Instructions)
+            {
+                if (!reachable.Contains(instruction)) continue;
+                if (instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld)
+                {
+                    var field = evidence.FieldReferenceOf(method, instruction);
+                    if (!fields.TryAdd(field, fields.Count)) continue;
+                    var name = $"fieldRef{fields[field]}";
+                    text.AppendLine($"def {name} : Extraction.FieldRef := {field.ToLean()}");
+                    text.AppendLine($"cil_field_shape {FrameMetadata.EnvironmentLean} {name}");
+                }
+                else if (instruction.OpCode.Code is
+                    Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj or Code.Sizeof)
+                {
+                    var type = evidence.TypeOperandOf(method, instruction);
+                    if (!types.TryAdd(type, types.Count)) continue;
+                    var name = $"valueType{types[type]}";
+                    text.AppendLine($"def {name} : Extraction.TypeExpr := {type}");
+                    text.AppendLine($"cil_value_shape {FrameMetadata.EnvironmentLean} {name}");
+                }
+            }
+        }
+
+        /// <summary>The definitions and facts of every recorded operand, in the order first seen.</summary>
+        internal string Lean() => text.ToString();
     }
 }

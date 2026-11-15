@@ -222,8 +222,7 @@ def assertLoopFact (base : Name) (fact : Term) (known : Array Expr) :
       saved.restore
       return none
     let name ← mkFreshUserName base
-    let (_, goal) ← (← (← getMainGoal).assert name type proof).intro1P
-    replaceMainGoal [goal]
+    replaceMainGoal [(← addFact (← getMainGoal) name type proof).2]
     return some (mkIdent name, type)
   catch _ =>
     saved.restore
