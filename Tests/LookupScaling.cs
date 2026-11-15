@@ -752,7 +752,8 @@ void MetadataNameCosts()
 
 // `runtimeModel` searches a literal tree of model entries by name code and compares one method reference at the leaf,
 // so a lookup in 256 entries costs the four extra tree levels over 16 and no more. The agreement check runs one
-// lookup per live call site, so its cost per site stays flat over 8, 32 and 128 sites.
+// lookup per live call site, so its cost per site stays flat over 8, 32 and 128 sites. Each site calls a distinct
+// method, so the kernel cannot reuse one site's lookup for another.
 void ModelTableCosts()
 {
     var tableDirectory = At("artifacts/LookupScaling/ModelTables");
@@ -771,12 +772,12 @@ void ModelTableCosts()
         #kernel_cost "model lookup {{size}}"
           (table{{size}}.find {} .call (method name!"Model{{Queried:D4}}") = some (.memory (.divRemOut {{Queried}})))
         """;
-    string Emitted(int index) => $".memory (.divRemOut {index % 16})";
+    string Emitted(int index) => $".memory (.divRemOut {index})";
     string Site(int index) =>
-        $"⟨{index}, 40, .call {{ method := method name!\"Model{index % 16:D4}\", target := .external \"\", " +
+        $"⟨{index}, 40, .call {{ method := method name!\"Model{index:D4}\", target := .external \"\", " +
         "typeArguments := [], parameterCount := 0, returnsValue := true }⟩";
     string Sites(int count) => $$"""
-        /-- {{count}} live calls of the modelled methods, the call at index i to method i mod 16. -/
+        /-- {{count}} live calls of distinct modelled methods, the call at index i to method i. -/
         def raw{{count}} : RawMethod := { shell with code := [
           {{string.Join(",\n  ", Enumerable.Range(0, count).Select(Site))}}] }
         /-- The model each call emits. -/
@@ -795,9 +796,9 @@ void ModelTableCosts()
           { owner := .atom "Tests" "Models", name, hasThis := false, genericArity := 0, returnType := .void,
             parameters := [] }
         {{string.Join("\n", tableSizes.Select(Table))}}
-        /-- The sixteen-entry table, accounting for every `divRemOut` emission. -/
+        /-- The larger table, accounting for every `divRemOut` emission. -/
         def catalog : ModelCatalog where
-          table := table16
+          table := table256
           lowered
             | .memory (.divRemOut width) => some (.memory (.divRemOut width))
             | _ => none
