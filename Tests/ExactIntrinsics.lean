@@ -230,8 +230,9 @@ theorem unspecified_call (body : Method) (memory : Safety.Memory) (frame : Safet
       .error (.unsupported "Instruction observes unspecified vector bits") := rfl
 #print axioms unspecified_call
 
-theorem unspecified_call_rest (body : Method) (memory : Safety.Memory) (frame : Safety.Frame) :
-    Safety.step body (.call 1 1) 0 [] frame [.scalar (.i64 3), .scalar (.v128Low64 7)] memory =
+theorem unspecified_call_rest (memory : Safety.Memory) (frame : Safety.Frame) :
+    Safety.step (body [.call 1 1]) (.call 1 1) 0 [] frame
+      [.scalar (.i64 3), .scalar (.v128Low64 7)] memory =
       .ok (.call 1 [.scalar (.i64 3)] [.scalar (.v128Low64 7)] memory) := rfl
 #print axioms unspecified_call_rest
 

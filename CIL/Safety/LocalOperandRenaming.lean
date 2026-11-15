@@ -32,6 +32,19 @@ theorem LocalIndexMap.operation_pureArity (indices : LocalIndexMap) (operation :
   cases operation <;> rfl
 #print axioms LocalIndexMap.operation_pureArity
 
+/-- Relocation keeps every instruction's link. -/
+theorem LocalIndexMap.operation_link (indices : LocalIndexMap) (operation : CIL.Instruction) :
+    (indices.operation operation).link? = operation.link? := by
+  cases operation <;> rfl
+#print axioms LocalIndexMap.operation_link
+
+/-- Relocated code implies the same link table, so its calls enter the same methods. -/
+theorem LocalIndexMap.linksOfCode_map (indices : LocalIndexMap) (code : List CIL.Instruction) :
+    CIL.linksOfCode (code.map indices.operation) = CIL.linksOfCode code := by
+  simp only [CIL.linksOfCode, List.length_map, List.zip_map_left, List.filterMap_map,
+    Function.comp_def, Prod.map_fst, Prod.map_snd, id, indices.operation_link]
+#print axioms LocalIndexMap.linksOfCode_map
+
 /-- A successful local lookup identifies a bounded source operand and its mapped target slot. -/
 theorem Frame.Renamed.localFound {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Frame}

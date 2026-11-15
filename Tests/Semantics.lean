@@ -422,12 +422,12 @@ theorem nested_expired :
       .error (.memory .expiredLifetime (.address ⟨0, 0⟩) 0) := rfl
 
 theorem constructor_zero_size :
-    step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 0 0)
-      0 [] ⟨0, [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
+    step { returnsValue := true, locals := [], code := [.newAggregate 1 0 0] }
+      (.newAggregate 1 0 0) 0 [] ⟨0, [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
 
 theorem constructor_stack_underflow :
-    step { returnsValue := true, locals := [], code := [] } (.newAggregate 1 1 3)
-      0 [] ⟨0, [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
+    step { returnsValue := true, locals := [], code := [.newAggregate 1 1 3] }
+      (.newAggregate 1 1 3) 0 [] ⟨0, [], [], 0⟩ [] Memory.empty = .error .invalidState := rfl
 
 def constructorCaller : CIL.Method := {
   returnsValue := true, locals := [], code := [.newAggregate 1 0 3, .ret] }

@@ -43,7 +43,8 @@ def targetBody (code : List CIL.Instruction) : CIL.Method := {
 /-- Retained local operands, all method metadata and exact frame declarations match. -/
 theorem bodies_related (code : List CIL.Instruction) :
     Nonempty (MethodRenaming (sourceBody code) (targetBody code)) := by
-  refine ⟨⟨indices, ⟨rfl, rfl, rfl, rfl, fun _ => ⟨_, rfl, rfl⟩⟩,
+  refine ⟨⟨indices, ⟨rfl, rfl, rfl, rfl, fun _ => ⟨_, rfl, rfl⟩,
+      indices.linksOfCode_map code⟩,
     .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
       (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil)))), ?_, ?_, rfl⟩⟩
   all_goals constructor <;> first
@@ -274,7 +275,8 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
   cases method with
   | zero =>
     cases found
-    refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil, ⟨rfl, rfl, rfl, rfl, fun _ => ⟨_, rfl, rfl⟩⟩,
+    refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil, ⟨rfl, rfl, rfl, rfl, fun _ => ⟨_, rfl, rfl⟩,
+      rfl⟩,
       .skip kind initial fits .nil, ?_, inserted_ready kind initial fits, rfl⟩⟩⟩
     exact ⟨rfl, rfl, by intro selected member; cases member⟩
   | succ method => cases found
