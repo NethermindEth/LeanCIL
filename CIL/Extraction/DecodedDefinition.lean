@@ -1,5 +1,6 @@
 import Lean
 import CIL.Extraction.DecodedMethod
+import CIL.SymbolicExecution
 
 /-!
 # Methods defined by evaluating the decoder
