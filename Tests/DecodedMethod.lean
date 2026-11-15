@@ -90,6 +90,20 @@ theorem locals_initialized_by_the_bytes :
   constructor <;> cil_kernel_rfl
 #print axioms locals_initialized_by_the_bytes
 
+/-- The add bytes against the add definition with one parameter, and the local body against its
+    definition with a `uint64` local, fail the body check, so neither has a method. -/
+theorem refused_body_has_no_method :
+    ((encodeBody pin addArgumentsRaw).map fun body =>
+        (checkBody body { addArgumentsRaw with parameters := [uint64] } []).toBool) = some false ∧
+      (decoded (encodeBody pin addArgumentsRaw)
+        { addArgumentsRaw with parameters := [uint64] }).isNone = true ∧
+      ((encodeBody pin (localRaw true)).map fun body =>
+        (checkBody body { localRaw true with locals := [uint64] } []).toBool) = some false ∧
+      (decoded (encodeBody pin (localRaw true)) { localRaw true with locals := [uint64] }).isNone =
+        true := by
+  decide +kernel
+#print axioms refused_body_has_no_method
+
 /-- `ldc.i4.1; newarr object; pop; ret`, with the type token of the world's `System.Object`. -/
 private def newarrBytes : List Nat :=
   [0x22, 0x17, 0x8D] ++ littleEndian 4 tokens.objectRef ++ [0x26, 0x2A]
