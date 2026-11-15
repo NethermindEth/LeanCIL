@@ -54,7 +54,7 @@ theorem stepTransport : StepTransport := by
         sourceBody targetBody element pc arguments stack bounds observable
     case newObject.refl callee argc owner bases size =>
       exact memories.stepNewObject sourceFormed targetFormed staticBounds sourceBody targetBody
-        callee argc owner bases size pc arguments stack bounds observable
+        callee argc owner bases size pc (metadata.linkAt pc) arguments stack bounds observable
     all_goals dsimp only [LocalIndexMap.operation]
     all_goals first
     | exact ⟨mapping, .refl mapping,
@@ -65,7 +65,7 @@ theorem stepTransport : StepTransport := by
     | exact memories.stepStackAlloc frames sourceFormed targetFormed staticBounds
         sourceBody targetBody _ pc arguments stack observable
     | exact memories.stepNewAggregate frames sourceFormed targetFormed staticBounds
-        sourceBody targetBody _ _ pc _ arguments stack bounds
+        sourceBody targetBody _ _ pc _ (metadata.linkAt pc) arguments stack bounds
     | exact ⟨mapping, .refl mapping,
         frames.stepLdloc memories sourceBody targetBody _ pc arguments stack⟩
     | exact ⟨mapping, .refl mapping,

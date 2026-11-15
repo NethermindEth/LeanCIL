@@ -32,8 +32,8 @@ theorem add_holds : addContract.Holds addProgram 0 := by
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Calls.Extracted.program [addLib]
 
-/-- The entry fills import slot 0 at index 2 and its call to the helper is renamed from 1 to 3. -/
-example : linked.map (fun body => body.code.flatMap Instruction.callees) =
+/-- The entry fills import slot 0 at index 2 and its link to the helper is renamed from 1 to 3. -/
+example : linked.map (fun body => body.links.flatMap (·.2.callees)) =
     [[2, 1], [], [3], []] := by decide
 
 /-- `Root`'s conditional proof, discharged by the library proved alone and relocated. -/
@@ -113,7 +113,7 @@ theorem percent_holds : percentContract.Holds percentProgram 0 := by
 
 @[cil_code] def linked : CIL.Program := link Tests.Imports.Outcomes.Extracted.program [percentLib]
 
-example : linked.map (fun body => body.code.flatMap Instruction.callees) =
+example : linked.map (fun body => body.links.flatMap (·.2.callees)) =
     [[1], [2], [3], []] := by decide
 
 theorem root_composed : rootContract.Holds linked root :=
@@ -144,7 +144,7 @@ example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "Sys
 
 /-- Two libraries: entries fill slots 0 and 1, then each library's helpers follow in order. -/
 example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map
-    (fun body => body.code.flatMap Instruction.callees) =
+    (fun body => body.links.flatMap (·.2.callees)) =
     [[2], [3], [], []] := by decide
 
 #print axioms check_holds
@@ -154,7 +154,7 @@ example : (link [] [Tests.Linking.Calls.addLib, percentLib]).map
 
 end Tests.Linking.Outcomes
 
-/-! A relocated body's link table is renamed with its code. -/
+/-! A relocated body renames its link table and keeps its code. -/
 namespace Tests.Linking.Links
 
 open CIL
@@ -176,11 +176,8 @@ example : (body.relocate (· + 10)).linkAt 1 = some (.direct 11) := rfl
 example (identity : ManagedIdentity) :
     (Link.indirect [⟨identity, 2⟩]).relocate (· + 5) = .indirect [⟨identity, 7⟩] := rfl
 
-/-- A body made with `withCode` has implied links, and so does its relocation. -/
-example (f : Nat → Nat) (method : Method) (code : List Instruction) :
-    let relocated := (method.withCode code).relocate f
-    relocated.links = linksOfCode relocated.code :=
-  Method.relocate_links_implied f _ rfl
+/-- The code, operands included, is unchanged, since a call reads its target from the table. -/
+example : (body.relocate (· + 10)).code = body.code := rfl
 
 end Tests.Linking.Links
 

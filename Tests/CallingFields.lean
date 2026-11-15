@@ -187,7 +187,7 @@ theorem composed (subtract : Bool) : Composed subtract := by
   apply WP.load_call_store (helper_checked subtract rfl)
     ((⟨left, 8⟩ : ArgumentView).word memory 0,
       (⟨right, 8⟩ : ArgumentView).word memory 0) id left right output
-    rfl (by rfl) (fun _ _ => rfl) call rfl trivial (fun _ => rfl)
+    rfl (by rfl) rfl (fun _ _ => rfl) call rfl trivial (fun _ => rfl)
   intro middle value after result written
   have readback := write_readback _ _ _ _ _ written
   simp only [numberBytes, List.length_map, List.length_range] at readback
@@ -253,7 +253,7 @@ theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind
         (by simp [valid] <;> rfl) trivial) (by simp [valid] <;> rfl)
     exact ⟨Confined.refl [] memory, (), rfl, rfl⟩
   exact helperHolds.forward (loads := [0, 1]) (narrow := narrow)
-    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl,
+    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl, rfl,
       by cases narrow with | none => rfl | some kind => cases kind <;> rfl⟩ (fun _ => rfl)
     (fun _ _ _ => plainLoads_unchanged (fun _ _ => rfl) _)
     (fun _ _ _ _ member => .inl member)

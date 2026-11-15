@@ -145,7 +145,7 @@ theorem escaped_home_rejected :
 
 /-- Changing the selected helper to a missing method fails at the actual call instruction. -/
 theorem wrong_helper_rejected :
-    invoke [{ callerBody with code := callerBody.code.set 3 (.call 2 3) }, multiplyBody]
+    invoke [callerBody.withCode (callerBody.code.set 3 (.call 2 3)), multiplyBody]
       4 0 [.scalar (.i64 2), .scalar (.i64 3)] Memory.empty =
       .error ⟨0, 3, .invalidState⟩ := by
   rfl

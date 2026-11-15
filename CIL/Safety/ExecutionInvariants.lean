@@ -245,10 +245,10 @@ theorem StepContract.arrayAllocation {body : CIL.Method} {operation : CIL.Instru
 theorem StepContract.objectAllocation {body : CIL.Method} {frame : Frame}
     {stack arguments : List Value} {memory result : Memory} {object : Reference}
     {owner : CIL.Extraction.TypeExpr} {bases : List CIL.Extraction.TypeExpr}
-    {size callee argc : Nat}
+    {size target callee argc : Nat}
     (checked : (stack.take argc).reverse.mapM (checkedValue memory) = .ok arguments)
     (success : allocateObject memory ⟨owner, bases⟩ size = .ok (object, result)) :
-    StepContract body (.newObject callee argc owner bases size) frame stack memory
+    StepContract body (.newObject target argc owner bases size) frame stack memory
       (.call callee (.object (.address object) :: arguments)
         (.object (.address object) :: stack.drop argc) result) := by
   have effect := allocateObject_effect success
@@ -312,9 +312,9 @@ theorem StepContract.initializeSpanLocal {body : CIL.Method} {operation : CIL.In
 
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
 theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
-    (operation : CIL.ManagedOp) (pc : Nat)
+    (operation : CIL.ManagedOp) (link : Option CIL.Link) (pc : Nat)
     (frame : Frame) (stack : List Value) (memory : Memory) (action : FrameAction)
-    (executed : managedStep operation pc frame stack memory = .ok action) :
+    (executed : managedStep operation link pc frame stack memory = .ok action) :
     StepContract body dispatched frame stack memory action := by
   unfold managedStep at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed

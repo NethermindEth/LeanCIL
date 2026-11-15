@@ -108,31 +108,36 @@ theorem step_ldarg_home_eq (index : Nat) (stack : List Value) (slot : Nat)
 
 #print axioms returnFrom_none_eq
 
-/-- A call checks its `argc` arguments, deepest first, and leaves the rest of the stack for the
-    caller's continuation. -/
-@[cil_step] theorem step_call_eq (callee argc : Nat) (stack : List Value) :
-    step body (.call callee argc) pc args frame stack memory =
+/-- A call enters the method its link names, after checking its `argc` arguments, deepest
+    first; the rest of the stack waits for the caller's continuation. -/
+@[cil_step] theorem step_call_eq (target argc : Nat) (stack : List Value) :
+    step body (.call target argc) pc args frame stack memory =
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length < argc then .error .invalidState
-      else do
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-        return FrameAction.call callee arguments (stack.drop argc) memory := by
+      else match body.linkAt pc with
+        | some (.direct callee) =>
+          if stack.length < argc then .error .invalidState
+          else do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            return FrameAction.call callee arguments (stack.drop argc) memory
+        | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl
 
 #print axioms step_call_eq
 
-/-- An indirect call through a method pointer enters the body `indirectTarget` selects; a fact
-    for that selection, which the kernel checks, decides it without comparing identities here. -/
+/-- An indirect call through a method pointer enters the body `indirectTarget` selects from the
+    catalog its link gives; a fact for that selection, which the kernel checks, decides it without
+    comparing identities here. -/
 @[cil_step] theorem step_managed_call_eq (signature : CIL.ManagedSignature)
-    (catalog : List CIL.ManagedTarget) (tail : Bool) (pointer : CIL.MethodPointer)
+    (stated : List CIL.ManagedTarget) (tail : Bool) (pointer : CIL.MethodPointer)
     (values : List Value) :
-    step body (.managed (.call signature catalog tail)) pc args frame
+    step body (.managed (.call signature stated tail)) pc args frame
         (.methodPointer pointer :: values) memory =
       if unspecifiedOperands (signature.parameters.length + 1) (.methodPointer pointer :: values)
       then .error (.unsupported "Instruction observes unspecified vector bits")
       else do
+        let some (.indirect catalog) := body.linkAt pc | .error unlinkedCall
         let some method := indirectTarget signature catalog pointer | .error .invalidState
         let count := signature.parameters.length
         if (if tail then values.length != count else values.length < count) then
@@ -140,7 +145,7 @@ theorem step_ldarg_home_eq (index : Nat) (stack : List Value) (slot : Nat)
         let arguments ← (values.take count).reverse.mapM (checkedValue memory)
         if tail then return .tailCall method arguments memory
         else return .call method arguments (values.drop count) memory := by
-  simp only [step, observerCount, Bool.or_false, managedStep]
+  simp only [step, observerCount, managedStep]
   rfl
 
 #print axioms step_managed_call_eq

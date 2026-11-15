@@ -20,6 +20,15 @@ structure StepMetadata (source target : CIL.Method) : Prop where
   /-- Both bodies read every argument from the incoming list, narrowed alike. -/
   arguments : ∀ index, ∃ narrow, source.argumentAccess index = .value narrow ∧
     target.argumentAccess index = .value narrow
+  /-- Both bodies enter the same methods, since each call reads its target from this table. -/
+  links : target.links = source.links
+
+/-- Related bodies give every call site the same link. -/
+theorem StepMetadata.linkAt {source target : CIL.Method} (metadata : StepMetadata source target)
+    (pc : Nat) : target.linkAt pc = source.linkAt pc := by
+  unfold CIL.Method.linkAt
+  rw [metadata.links]
+#print axioms StepMetadata.linkAt
 
 /-- One observable checked step transports frames, values and fresh allocation correspondence. -/
 def StepTransport : Prop :=

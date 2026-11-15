@@ -354,8 +354,8 @@ private def overlapArguments : List CIL.Safety.Value :=
 
 /-- This incorrect caller overwrites the first input before taking its snapshot. -/
 @[cil_code] private def earlyStoreBody : Method :=
-  { storedBody with code := [.ldarg 0, .ldc_i8 0, .intrinsic (.vector (.create64 256)) 1,
-      .memory .store256] ++ storedBody.code }
+  storedBody.withCode ([.ldarg 0, .ldc_i8 0, .intrinsic (.vector (.create64 256)) 1,
+      .memory .store256] ++ storedBody.code)
 
 /-- Observe the output bytes only after the real checked invocation returns. -/
 private def observedStore (body : Method) :=

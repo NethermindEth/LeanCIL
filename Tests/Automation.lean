@@ -1196,11 +1196,11 @@ open CIL.Safety in
 /-- The same fact passes an opaque numeric value to a call. -/
 theorem opaque_numeric_call (body : CIL.Method) (frame : Frame) (argument : CIL.Value)
     (memory : Memory) (numeric : numericValue argument = true)
-    (known : argument.hasUnspecified = false) :
+    (known : argument.hasUnspecified = false) (linked : body.linkAt 0 = some (.direct 1)) :
     step body (.call 1 1) 0 [] frame [.scalar argument] memory =
       .ok (.call 1 [.scalar argument] [] memory) := by
-  fail_if_success cil_checked_step [known]
-  cil_checked_step [numeric, known]
+  fail_if_success cil_checked_step [known, linked]
+  cil_checked_step [numeric, known, linked]
 
 #print axioms opaque_numeric_call
 

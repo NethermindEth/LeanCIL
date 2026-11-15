@@ -68,19 +68,24 @@ section ObjectEquations
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
 
 /-- `newobj` of a class checks its `argc` arguments, allocates the instance and calls the
-    constructor with it as the receiver; the instance waits under the rest of the stack. -/
-@[cil_step] theorem step_newObject_eq (callee argc : Nat) (owner : CIL.Extraction.TypeExpr)
+    constructor its link names with it as the receiver; the instance waits under the rest of the
+    stack. -/
+@[cil_step] theorem step_newObject_eq (target argc : Nat) (owner : CIL.Extraction.TypeExpr)
     (bases : List CIL.Extraction.TypeExpr) (size : Nat) (stack : List Value) :
-    step body (.newObject callee argc owner bases size) pc args frame stack memory =
+    step body (.newObject target argc owner bases size) pc args frame stack memory =
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length < argc then .error .invalidState
-      else do
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-        let (object, allocated) ← allocateObject memory ⟨owner, bases⟩ size
-        return FrameAction.call callee (.object (.address object) :: arguments)
-          (.object (.address object) :: stack.drop argc) allocated := by
+      else match body.linkAt pc with
+        | some (.object callee _ _) =>
+          if stack.length < argc then .error .invalidState
+          else do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            let (object, allocated) ← allocateObject memory ⟨owner, bases⟩ size
+            return FrameAction.call callee (.object (.address object) :: arguments)
+              (.object (.address object) :: stack.drop argc) allocated
+        | _ => .error unlinkedCall := by
   simp only [step, observerCount]
+  rfl
 
 #print axioms step_newObject_eq
 
@@ -94,16 +99,19 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
   | .object .null :: _ => .error (.thrown "System.NullReferenceException")
   | _ => .error .invalidState
 
-/-- `callvirt` of a non-virtual method checks its `argc` arguments and calls with a live receiver;
-    a null receiver throws `NullReferenceException` before the call. -/
-@[cil_step] theorem step_callInstance_eq (callee argc : Nat) (stack : List Value) :
-    step body (.callInstance callee argc) pc args frame stack memory =
+/-- `callvirt` of a non-virtual method checks its `argc` arguments and calls the method its link
+    names with a live receiver; a null receiver throws `NullReferenceException` before the call. -/
+@[cil_step] theorem step_callInstance_eq (target argc : Nat) (stack : List Value) :
+    step body (.callInstance target argc) pc args frame stack memory =
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length < argc then .error .invalidState
-      else (do
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-        receiverCall callee arguments (stack.drop argc) memory) := by
+      else match body.linkAt pc with
+        | some (.direct callee) =>
+          if stack.length < argc then .error .invalidState
+          else (do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            receiverCall callee arguments (stack.drop argc) memory)
+        | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl
 
@@ -135,17 +143,21 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
   | .object .null :: _ => .error (.thrown "System.NullReferenceException")
   | _ => .error .invalidState
 
-/-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its table
-    selects for the receiver; a null receiver throws `NullReferenceException` before the call. -/
-@[cil_step] theorem step_callVirtual_eq (targets : List (CIL.Extraction.TypeExpr × Nat))
+/-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its link's
+    table selects for the receiver; a null receiver throws `NullReferenceException` before the
+    call. -/
+@[cil_step] theorem step_callVirtual_eq (stated : List (CIL.Extraction.TypeExpr × Nat))
     (argc : Nat) (stack : List Value) :
-    step body (.callVirtual targets argc) pc args frame stack memory =
+    step body (.callVirtual stated argc) pc args frame stack memory =
       if unspecifiedOperands argc stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
-      else if stack.length < argc then .error .invalidState
-      else (do
-        let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-        virtualCall targets arguments (stack.drop argc) memory) := by
+      else match body.linkAt pc with
+        | some (.virtual targets) =>
+          if stack.length < argc then .error .invalidState
+          else (do
+            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
+            virtualCall targets arguments (stack.drop argc) memory)
+        | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl
 
