@@ -293,10 +293,10 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
     -- ones; `fixed_fallback` reads the table-offset ones and the others are cleared.
     all_goals try (
-      rename_i localAllocation loadsStatic addressesStatic tokensStatic storesStatic offsetBeforeTable
-        tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
-        convOvf convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
-        objectBranchFalse objectBranchTrue objectTested
+      rename_i localAllocation loadsStatic addressesStatic tokensStatic storesStatic
+        offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div
+        divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal
+        objectAbove objectBranchFalse objectBranchTrue objectTested
       guard_hyp localAllocation : operation = .localloc → False
       guard_hyp loadsStatic : ∀ field, operation = .ldsfld field → False
       guard_hyp addressesStatic : ∀ field, operation = .ldsflda field → False
