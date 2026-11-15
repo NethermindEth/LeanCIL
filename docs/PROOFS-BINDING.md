@@ -691,12 +691,13 @@ method that `decoder`, a closed `Option Method` term such as `Method.ofRaw? prof
 original typeArguments`, gives. Compiled code evaluates the decoder, and the command writes the
 result as constructors over numerals, except that a field whose type is that of a constant passed
 to the decoder, such as the profile and the environment, is written as that constant. The kernel
-then checks `name_decoded : decoder = some name` by reduction, and the `@[cil_code]` facts
-`name_profile`, `name_locals`, `name_localKinds`, `name_returnsValue`, `name_staticSites`,
-`name_declared`, `name_environment`, `name_links`, `name_opaqueVectorLocals` and
-`name_parameterHomes`. A decoder with a hole, a decoder that gives `none`, and a value the kernel
-does not reduce to the evaluated method are errors, so a file builds only when the kernel confirms
-what compiled code computed.
+then checks by reduction the theorem, named with the suffix `_decoded`, that
+`decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
+`_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
+`_opaqueVectorLocals` and `_parameterHomes`; for an extraction's first method they are
+`Extracted.method0_decoded`, `Extracted.method0_profile` and so on. A decoder with a hole, a
+decoder that gives `none`, and a value the kernel does not reduce to the evaluated method are
+errors, so a file builds only when the kernel confirms what compiled code computed.
 
 The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs and
 every pc is reachable under the profile; a method with a pc the reachability certificate rules out

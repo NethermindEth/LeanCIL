@@ -1043,8 +1043,9 @@ partial class Program
             var name = Component(string.Join("\n", imports.Select(module => "import " + module)) +
                 "\n\n" + context + body + "\nend Extracted\n");
             modules.Add(name);
+            // A decoded method is declared by `cil_decoded_method`, so later components that name it import it.
             foreach (Match declaration in Regex.Matches(body,
-                @"(?m)^(?:@\[[^\r\n]*\]\s+)?(?:def|theorem) ([A-Za-z_][A-Za-z0-9_]*)"))
+                @"(?m)^(?:@\[[^\r\n]*\]\s+)?(?:def|theorem|cil_decoded_method) ([A-Za-z_][A-Za-z0-9_]*)"))
                 declarations.Add(declaration.Groups[1].Value, modules.Count - 1);
         }
         return new(ContentKey(source), string.Join("\n", modules.Select(module => "import " + module)) +

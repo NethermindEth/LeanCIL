@@ -63,10 +63,17 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 
 evidence.Check();
-var baseline = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
-void Reject(string name, string mutated)
+// Overwrite decodes in full, so its code and homes come from its decoder; Alias reads through its home with
+// ldind, which the decoder leaves a hole, so its extraction writes the literal the code mutations below edit.
+var decoded = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
+var baseline = File.ReadAllText(Path.Combine(output, "1", "Extracted.lean"));
+if (!decoded.Contains("\ncil_decoded_method method0 := ", StringComparison.Ordinal) ||
+    !baseline.Contains("\ndef method0 : Method := ", StringComparison.Ordinal))
+    throw new InvalidOperationException("Overwrite must be defined from its decoder and Alias by its literal");
+void Reject(string name, string mutated, string? source = null)
 {
-    if (mutated == baseline) throw new InvalidOperationException("Mutation did not change generated source: " + name);
+    if (mutated == (source ?? baseline))
+        throw new InvalidOperationException("Mutation did not change generated source: " + name);
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, mutated);
     rejected.Add(path, "PASS parameter evidence rejects " + name, "decide");
@@ -79,6 +86,8 @@ Reject("wrong-argument", baseline.Replace(".starg 0", ".starg 1"));
 Reject("home-slot-store", baseline.Replace(".starg 0", ".stloc 0"));
 Reject("home-slot-load", baseline.Replace(".ldarg 0", ".ldloc 0"));
 Reject("wrong-home-type", baseline.Replace("[(0, .word32)]", "[(0, .word64)]"));
-Reject("omitted-raw-site", baseline.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"));
+// The homes the decoder computes are checked against the raw argument sites as a literal's are.
+Reject("omitted-raw-site",
+    decoded.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"), decoded);
 rejected.Check();
 Console.WriteLine("PASS complete parameter-home mapping, argument types, instance indices and long/short encodings");

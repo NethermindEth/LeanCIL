@@ -1027,17 +1027,26 @@ long Checked(string path, string text, string binder, string method, string equa
 
 // The three places `cil_instruction_equations` states lookup equations for one method: its extraction, a
 // hand-written body with a parameter, and the shared template of the extraction.
+// The three places `cil_instruction_equations` states lookup equations for one method: its extraction, a
+// hand-written body with a parameter, and the shared template of the extraction.
 (int Instructions, long[] Heartbeats) Measure(string name)
 {
     var output = Path.Combine(directory, name);
     Run(Extract("extract", assembly, "Lookups", $"Lookups::{name}(ulong,ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    const string Header = "def method0 : Method := { profile := profile,";
-    // The definition lists one instruction per line after its header.
-    var definition = Regex.Match(extracted, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
+    var shared = Path.Combine(output, "Shared");
+    Run(["dotnet", ExtractorPath, "templates", shared, output]);
+    var templates = File.ReadAllText(Path.Combine(shared, "Templates.lean"));
+    // The body decodes in full, so the extraction defines it from its decoder; the template still lists one
+    // instruction per line after its header, and the hand-written body copies that code.
+    const string Header =
+        "@[cil_code] def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := ";
+    var definition = Regex.Match(templates, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
     var depth = Regex.Match(extracted, @"(?m)^set_option maxRecDepth [0-9]+");
     if (!definition.Success || !depth.Success ||
-        !Regex.IsMatch(extracted, @"(?m)^cil_instruction_equations method0\r?$"))
+        !Regex.IsMatch(extracted, @"(?m)^cil_decoded_method method0 := Method\.ofRaw\? ") ||
+        !Regex.IsMatch(extracted, @"(?m)^cil_instruction_equations method0\r?$") ||
+        !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
         throw new InvalidOperationException($"Missing the definition, equations or recursion depth of {name}.");
     var instructions = definition.Groups[1].Captures.Count;
     var last = instructions - 1;
@@ -1045,8 +1054,7 @@ long Checked(string path, string text, string binder, string method, string equa
         extracted + $"\n#print axioms Extracted.method0_instruction{last}\n",
         "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
     const string Binder = "(profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) ";
-    var body = "def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method :=" +
-        " { profile := profile," +
+    var body = "def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := " +
         definition.Value[Header.Length..];
     var command = Checked(Path.Combine(output, "Body.lean"), $"""
         import CIL.InstructionEquations
@@ -1060,12 +1068,6 @@ long Checked(string path, string text, string binder, string method, string equa
         end Body
         """, Binder, "(Body.method0 profile environment)",
         $"Body.method0_instruction{last} profile environment", last);
-
-    var shared = Path.Combine(output, "Shared");
-    Run(["dotnet", ExtractorPath, "templates", shared, output]);
-    var templates = File.ReadAllText(Path.Combine(shared, "Templates.lean"));
-    if (!templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
-        throw new InvalidOperationException($"The template of {name} has no instruction equations.");
     var template = Checked(Path.Combine(shared, "Measured.lean"), templates,
         Binder, "(Templates.method0 profile environment)",
         $"Templates.method0_instruction{last} profile environment", last);

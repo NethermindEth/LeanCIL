@@ -76,11 +76,12 @@ string Extracted(string assembly, string selector, string name)
     Run([.. Extract("extract", assembly, "Incremental", selector, output), "--assume-initialized", "Workspace.Wide"]);
     return File.ReadAllText(Path.Combine(output, "Extracted.lean"));
 }
-// The assembly block and every definition and theorem of one method's component.
+// The assembly block and every definition and theorem of one method's component, the decoded definition included.
 string Component(string text, int method, string name)
 {
-    var lines = Regex.Matches(text, @"(?m)^(?:def assembly\d+Metadata |(?:@\[[^\r\n]*\] )?(?:def|theorem) method" +
-            method + @"(?![0-9]))[^\n]*$").Select(match => match.Value.TrimEnd('\r'))
+    var lines = Regex.Matches(text, @"(?m)^(?:def assembly\d+Metadata |(?:@\[[^\r\n]*\] )?" +
+            @"(?:def|theorem|cil_decoded_method) method" + method + @"(?![0-9]))[^\n]*$")
+        .Select(match => match.Value.TrimEnd('\r'))
         // The composed theorem names the method's position in the whole program, which is not part of its component.
         .Where(line => !line.Contains("_evidence_validated", StringComparison.Ordinal)).ToArray();
     // A closed instantiation of a generic method shares its open definition's slice, which another component holds.

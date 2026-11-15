@@ -72,9 +72,13 @@ foreach (var name in new[]
         """ + "\n" + control);
     evidence.Add(proof, "PASS runtime, certificate and checked pointer execution: " + name);
     if (name != "Difference") continue;
-    if (!source.Contains(".sub", StringComparison.Ordinal)) throw new Exception("Missing difference mutation target");
+    // The method is defined from its decoder, so the forgery changes its raw sub (89) to add (88).
+    const string rawSubtraction = "opcode := 89,";
+    if (!source.Contains("cil_decoded_method method0 := ", StringComparison.Ordinal) ||
+        !source.Contains(rawSubtraction, StringComparison.Ordinal))
+        throw new Exception("Missing difference mutation target");
     var forged = Path.Combine(root, "ForgedDifference.lean");
-    File.WriteAllText(forged, differenceEvidence!.Replace(".sub", ".add", StringComparison.Ordinal));
+    File.WriteAllText(forged, differenceEvidence!.Replace(rawSubtraction, "opcode := 88,", StringComparison.Ordinal));
     rejected.Add(forged, "PASS independent forged pointer difference rejection", "ScalarFlowValid");
 }
 
