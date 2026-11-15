@@ -927,9 +927,9 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
   have sitesEqual (allKnown : AllKnown raw certificate) := all3_map
     (Option.map (FeatureState.expand raw.locals.length))
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code
-    fun site state emitted member => checkFeatureSiteWith_known_eq_list layouts constants raw profile
-      certificate (fun target => (foldRoles raw.locals raw.code)[target]?) allKnown site state
-      emitted member
+    fun site state emitted member => checkFeatureSiteWith_known_eq_list layouts constants raw
+      profile certificate (fun target => (foldRoles raw.locals raw.code)[target]?) allKnown site
+      state emitted member
   constructor
   · rintro ⟨length, codeLength, mask, entry, sites⟩
     have allKnown : AllKnown raw certificate := by
