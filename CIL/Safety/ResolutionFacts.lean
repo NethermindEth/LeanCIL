@@ -10,6 +10,11 @@ Primitive and non-candidate heads use storage lemmas, without evaluating code or
 how the method reads it (`CIL.Method.argumentAccess`). The argument facts walk the parameter
 types and the parameter homes once through named suffixes, as `CIL.CodeSuffix` does for code,
 so a method's facts cost time linear in its arguments and homes.
+
+`cil_field_shape` and `cil_value_shape` declare how every method of an extraction resolves one
+distinct field or type operand, against the environment those methods share, so an operand used
+at many sites of many methods costs one kernel evaluation. The `cil_code` simprocs
+`reduceFieldShape` and `reduceValueShape` read a method's shape of such an operand from its fact.
 -/
 
 namespace CIL.Safety.ResolutionFacts
@@ -369,5 +374,89 @@ elab_rules : command
       addSimpTheorem simpSet (name.appendAfter "_returnNarrow") (post := false)
         (inv := false) .global (eval_prio default)
       declareArgumentFacts body simpSet
+
+/-! ## Field and value shapes -/
+
+/-- The constructor form of `value`: kernel reduction to a constructor, then the same for each
+    of its fields after the type parameters. Fails on a term that is stuck before a constructor
+    or a literal. -/
+partial def kernelValue (value : Expr) : MetaM Expr := do
+  let reduced ← ofExceptKernelException (Kernel.whnf (← getEnv) (← getLCtx) value)
+  if reduced.isLit then return reduced
+  let .const name levels := reduced.getAppFn
+    | throwError "cil_shape_facts: {value} does not reduce to a constructor"
+  let some (.ctorInfo info) := (← getEnv).find? name
+    | throwError "cil_shape_facts: {value} does not reduce to a constructor"
+  let arguments := reduced.getAppArgs
+  let fields ← (arguments.extract info.numParams arguments.size).mapM kernelValue
+  return mkAppN (mkConst name levels) (arguments.extract 0 info.numParams ++ fields)
+
+/-- Declares `{operand}_shape`: every method whose environment is `environment` resolves the
+    operand as the kernel computes, read through `methodResolver` and proved from the
+    environment's `environmentResolver` by `sharedLemma`. -/
+def declareShapeFact (environmentName operandName : Name) (methodResolver environmentResolver
+    sharedLemma shapeType : Name) (describe : String) : TermElabM Unit := do
+  let environment := mkConst environmentName
+  let operand := mkConst operandName
+  let shape ← kernelValue (mkApp2 (mkConst environmentResolver) environment operand)
+  let resolved := mkApp2 (mkConst ``Eq.refl [.one]) (mkConst shapeType) shape
+  let (statement, proof) ← withLocalDecl `body .implicit (mkConst ``CIL.Method) fun body => do
+    let environmentOf := mkApp (mkConst ``CIL.Method.environment) body
+    withLocalDeclD `shared (← mkEq environmentOf environment) fun shared => do
+      let lhs := mkApp2 (mkConst methodResolver) body operand
+      let proof := mkAppN (mkConst sharedLemma) #[body, environment, operand, shape, shared,
+        resolved]
+      return (← mkForallFVars #[body, shared] (← mkEq lhs shape),
+        ← mkLambdaFVars #[body, shared] proof)
+  let name := operandName.appendAfter "_shape"
+  withCurrHeartbeats do
+    addDecl (.thmDecl { name, levelParams := [], type := statement, value := proof })
+  addDocStringCore name s!"How every method sharing `{environmentName}` resolves {describe}."
+
+/-- `cil_field_shape environment field` declares `field_shape`: how every method whose
+    environment is `environment` resolves the field operand `field` (`CIL.Method.fieldShape`). -/
+syntax "cil_field_shape " ident ident : command
+
+/-- `cil_value_shape environment type` declares `type_shape`: how every method whose
+    environment is `environment` resolves the type operand `type` (`CIL.Method.valueShape`). -/
+syntax "cil_value_shape " ident ident : command
+
+elab_rules : command
+  | `(cil_field_shape $environment:ident $field:ident) => liftTermElabM do
+    declareShapeFact (← realizeGlobalConstNoOverloadWithInfo environment)
+      (← realizeGlobalConstNoOverloadWithInfo field) ``CIL.Method.fieldShape
+      ``CIL.LayoutEnvironment.fieldShape ``CIL.Method.fieldShape_of_environment ``CIL.FieldShape
+      s!"the field operand `{field.getId}`"
+  | `(cil_value_shape $environment:ident $type:ident) => liftTermElabM do
+    declareShapeFact (← realizeGlobalConstNoOverloadWithInfo environment)
+      (← realizeGlobalConstNoOverloadWithInfo type) ``CIL.Method.valueShape
+      ``CIL.LayoutEnvironment.valueShape ``CIL.Method.valueShape_of_environment ``CIL.ValueShape
+      s!"the type operand `{type.getId}`"
+
+/-- The shape of `resolver body operand` from `operand_shape`, when `operand` is a constant with
+    that fact and `body`'s environment unfolds to the fact's environment. The fact's premise is
+    proved by reflexivity, which the kernel checks by unfolding `body` once. -/
+def sharedShape? (resolver : Name) (expression : Expr) : MetaM (Option Simp.Step) := do
+  let (name, #[body, operand]) := expression.getAppFnArgs | return none
+  unless name == resolver do return none
+  let .const operandName _ := operand | return none
+  let fact := operandName.appendAfter "_shape"
+  let some info := (← getEnv).find? fact | return none
+  let .forallE _ _ (.forallE _ shared _ _) _ := info.type | return none
+  let some (_, _, environment) := shared.eq? | return none
+  if environment.hasLooseBVars then return none
+  unless ← withDefault (isDefEq (mkApp (mkConst ``CIL.Method.environment) body) environment) do
+    return none
+  let proof := mkApp2 (mkConst fact) body (← mkEqRefl environment)
+  let some (_, _, shape) := (← inferType proof).eq? | return none
+  return some (.done { expr := shape, proof? := some proof })
+
+/-- A method's field shape, from the shared fact of a field operand that has one. -/
+simproc ↓ [cil_code] reduceFieldShape (CIL.Method.fieldShape _ _) := fun expression => do
+  return (← sharedShape? ``CIL.Method.fieldShape expression).getD .continue
+
+/-- A method's value shape, from the shared fact of a type operand that has one. -/
+simproc ↓ [cil_code] reduceValueShape (CIL.Method.valueShape _ _) := fun expression => do
+  return (← sharedShape? ``CIL.Method.valueShape expression).getD .continue
 
 end CIL.Safety.ResolutionFacts
