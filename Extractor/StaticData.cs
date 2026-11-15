@@ -113,8 +113,6 @@ internal static class StaticData
     /// <summary>The guaranteed alignment of validated static data: its declared packing.</summary>
     internal static int Alignment(FieldDefinition field) => field.FieldType.Resolve().PackingSize;
 
-    internal static string LeanBytes(FieldDefinition field) => LeanBytes(field.InitialValue);
-
     internal static string LeanBytes(IEnumerable<byte> bytes) =>
         "[" + string.Join(", ", bytes.Select(b => $"(BitVec.ofNat 8 {b})")) + "]";
 }
