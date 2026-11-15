@@ -171,12 +171,6 @@ theorem staticReference_reference_valid (descriptor : CIL.StaticDescriptor) (m r
       simp [form, liveAllocation, lookup, validPosition, nativeLimit, position,
         Bind.bind, Except.bind, Pure.pure, Except.pure]
 
-theorem formValue_reference_valid (m : Memory) (r : ManagedReference) (value : Value)
-    (h : formValue m r = .ok value) : (Value.reference r).Valid m := by
-  have valid := formValue_result_valid _ _ _ h
-  rw [formValue_returns_input _ _ _ h] at valid
-  exact valid
-
 /-- What a successful static instruction guarantees: its memory effect is an allowed
     `StaticInstructionEffect`, and the values it leaves are valid whenever its input stack was. -/
 structure StaticInstructionContract (body : CIL.Method) (m result : Memory)

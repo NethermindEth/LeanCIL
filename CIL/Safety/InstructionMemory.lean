@@ -855,8 +855,8 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
   | .isNullRef, .reference r :: rest | .isNullRef, .readOnlyReference r :: rest =>
     return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
-  | .staticAddress _, _ | .staticValue _, _ | .createSpan _, _ | .spanCreate, _ =>
-    .error (.unsupported "Extraction-bound static/span allocation metadata")
+  | .staticAddress _, _ | .staticValue _, _ =>
+    .error (.unsupported "Extraction-bound static field metadata")
   | _, _ => .error .invalidState
 
 /-- Constructs a one-element view over checked existing storage without reading its bytes. -/
@@ -1078,9 +1078,44 @@ def comparisonGuardInstruction (guard : ComparisonGuard) (width : Nat) (signed :
     | _, _ => .error .invalidState
   | _ => .error .invalidState
 
+/-- CoreCLR's `CreateSpan<T>` throws unless the field data is aligned to `sizeof(T)`, so a typed
+    span needs `width` to divide the allocation's guaranteed alignment. -/
+def staticSpanAligned (allocation : Allocation) (width : Nat) : Bool :=
+  0 < width && allocation.layout.alignment % width == 0
+
+/-- Spans over extracted static data. A byte span from a pointer must lie in a live immutable
+    static allocation, or be empty over null; a typed span covers a whole static field whose
+    alignment its element width divides. Memory is never changed. -/
+def staticSpanInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match operation, stack with
+  | .spanCreate, .scalar (.i32 length) :: .reference (.address reference) :: rest =>
+    if length.toInt < 0 then .error .invalidState else pure ()
+    let allocation ← checkedAt (.address reference) length.toNat
+      (liveAllocation memory reference.allocation)
+    if allocation.kind == .immutableStatic then pure () else
+      .error (.unsupported "Span pointer constructor outside extracted static data")
+    let _ ← formValue memory (.address reference)
+    if reference.offset + length.toNat ≤ allocation.layout.size then pure () else
+      .error (.memory .outsideAllocation (.address reference) length.toNat)
+    return (memory, .span (.address reference) length.toNat :: rest)
+  | .createSpan width, .reference (.address reference) :: rest =>
+    let allocation ← checkedAt (.address reference) 0
+      (liveAllocation memory reference.allocation)
+    if allocation.kind == .immutableStatic && reference.offset == 0 && 0 < width &&
+        allocation.layout.size % width == 0 then
+      if staticSpanAligned allocation width then
+        return (memory, .span (.address reference) (allocation.layout.size / width) :: rest)
+      else .error (.unsupported "Typed span element width does not divide the field alignment")
+    else .error (.unsupported "Typed span outside a whole extracted static field")
+  | .spanCreate, .scalar (.i32 length) :: .reference .null :: rest =>
+    if length == 0 then return (memory, .span .null 0 :: rest)
+    else .error (.memory .nullDereference .null length.toNat)
+  | _, _ => .error .invalidState
+
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
-    Operands with unspecified bits are rejected first. The static-field and span-construction
-    operations need extracted metadata, so `staticInstruction` runs them and they are
+    Operands with unspecified bits are rejected first. The static-field operations need the
+    extracted descriptor at their pc, so `staticInstruction` runs them and they are
     unsupported here; any other operand shape is `invalidState`. -/
 def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -1103,6 +1138,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .spanFill width clear => spanFillInstruction width clear stack memory
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
+  | .spanCreate | .createSpan _ => staticSpanInstruction operation stack memory
   | .objectField .. | .setObjectField ..
   | .objectReferenceField .. | .setObjectReferenceField ..
   | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore

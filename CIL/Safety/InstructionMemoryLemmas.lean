@@ -1063,6 +1063,37 @@ theorem vector128StoreAt_eq_add_store128 (offset : CIL.W64) (bits : BitVec 128)
       Except.bind, Pure.pure, Except.pure]
 #print axioms vector128StoreAt_eq_add_store128
 
+/-- A reference that forms is a valid stack value in that memory. -/
+theorem formValue_reference_valid (m : Memory) (r : ManagedReference) (value : Value)
+    (h : formValue m r = .ok value) : (Value.reference r).Valid m := by
+  have valid := formValue_result_valid _ _ _ h
+  rw [formValue_returns_input _ _ _ h] at valid
+  exact valid
+
+/-- A static span leaves memory unchanged and pushes a span whose base is valid. -/
+theorem staticSpanInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
+    (memory result : Memory)
+    (constructed : staticSpanInstruction operation stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold staticSpanInstruction at constructed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at constructed
+  repeat' first
+    | solve |
+        cases constructed
+        refine InstructionContract.of_effect (.unchanged _) ?_
+        intro retained
+        apply ValuesValid.cons
+        · first
+          | exact True.intro
+          | rfl
+          | exact retained.tail.head
+          | exact retained.head
+          | apply formValue_reference_valid; assumption
+        · first | exact retained | exact retained.tail | exact retained.tail.tail
+    | cases constructed
+    | split at constructed
+#print axioms staticSpanInstruction_contract
+
 /-- Checked memory dispatch preserves the effects and stack validity of its selected family. -/
 theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : List Value)
     (m result : Memory) (h : memoryInstruction operation stack m = .ok (result, values)) :
@@ -1084,6 +1115,8 @@ theorem memoryInstruction_contract (operation : CIL.MemoryOp) (stack values : Li
     · exact arrayFillInstruction_contract _ _ _ _ _ _ h
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
     · exact wideArithmeticInstruction_contract _ _ _ _ _ h
+    · exact staticSpanInstruction_contract _ _ _ _ _ h
+    · exact staticSpanInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h
     · exact objectFieldInstruction_contract _ _ _ _ _ h

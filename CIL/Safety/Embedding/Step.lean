@@ -57,9 +57,6 @@ theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
     simp only [staticInstruction]
     cases h1 : actual.staticSites.find? (fun site => site.1 == q) <;>
       cases h2 : expected.staticSites.find? (fun site => site.1 == pc) <;> simp_all
-  case spanCreate | createSpan =>
-    unfold staticInstruction
-    split <;> first | contradiction | rfl
   all_goals unfold staticInstruction; rfl
 
 /-- The shared tail of `step` for instructions without a dedicated case. -/
