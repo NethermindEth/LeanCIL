@@ -4,8 +4,10 @@ import CIL.Extraction.Scalars
 /-!
 # Mixed native arithmetic
 
-Bare decoded arithmetic instructions widen admitted mixed operands. Scalar admission keeps
-native integers distinct from fixed-width integers and rejects mixed unsigned branches.
+Bare decoded arithmetic instructions widen admitted mixed operands. The reference step and the
+checked step agree on every instruction `widenMixed` widens, in both operand orders, and on
+overflow-checked arithmetic. Scalar admission keeps native integers distinct from fixed-width
+integers and rejects mixed unsigned branches.
 -/
 
 namespace Tests.MixedNativeOpcodes
@@ -83,5 +85,131 @@ theorem addition_admission :
     scalarOpMatches ⟨0, 88, .none⟩ [.word64, .word32] .add = false := by
   decide
 #print axioms addition_admission
+
+/-- The reference step and the checked step both replace `right` over `left` with `result`
+    and resume at the next instruction, whatever lies beneath the pair. -/
+def Agree (op : Instruction) (left right result : CIL.Value) : Prop :=
+  (∀ (pc : Nat) (rest : List CIL.Value) (memory : CIL.Memory),
+    CIL.step op false none pc [] (right :: left :: rest) memory =
+      some (.next (pc + 1) (result :: rest) memory)) ∧
+  ∀ (body : Method) (pc : Nat) (args : List Safety.Value) (frame : Frame)
+    (rest : List Safety.Value) (memory : Safety.Memory),
+    step body op pc args frame (.scalar right :: .scalar left :: rest) memory =
+      .ok (.next (pc + 1) (.scalar result :: rest) frame memory)
+
+/-- The reference step and the checked step of the compare-and-branch `op` both jump to its
+    target exactly when `taken` holds for `right` over `left`, consuming the pair. -/
+def Branches (op : Nat → Instruction) (left right : CIL.Value) (taken : Prop) [Decidable taken] :
+    Prop :=
+  (∀ (target pc : Nat) (rest : List CIL.Value) (memory : CIL.Memory),
+    CIL.step (op target) false none pc [] (right :: left :: rest) memory =
+      some (.next (if taken then target else pc + 1) rest memory)) ∧
+  ∀ (body : Method) (target pc : Nat) (args : List Safety.Value) (frame : Frame)
+    (rest : List Safety.Value) (memory : Safety.Memory),
+    step body (op target) pc args frame (.scalar right :: .scalar left :: rest) memory =
+      .ok (.next (if taken then target else pc + 1) rest frame memory)
+
+/-- Wrapping arithmetic and bitwise operations sign-extend the int32 operand of a mixed pair in
+    either stack position and compute at native width (ECMA-335 III.1.5, table 2 and table 5). -/
+theorem signed_arithmetic (int32 : W32) (native : W64) :
+    Agree .add (.i32 int32) (.i64 native) (.i64 (int32.signExtend 64 + native)) ∧
+    Agree .add (.i64 native) (.i32 int32) (.i64 (native + int32.signExtend 64)) ∧
+    Agree .sub (.i32 int32) (.i64 native) (.i64 (int32.signExtend 64 - native)) ∧
+    Agree .sub (.i64 native) (.i32 int32) (.i64 (native - int32.signExtend 64)) ∧
+    Agree .mul (.i32 int32) (.i64 native) (.i64 (int32.signExtend 64 * native)) ∧
+    Agree .mul (.i64 native) (.i32 int32) (.i64 (native * int32.signExtend 64)) ∧
+    Agree .and (.i32 int32) (.i64 native) (.i64 (int32.signExtend 64 &&& native)) ∧
+    Agree .and (.i64 native) (.i32 int32) (.i64 (native &&& int32.signExtend 64)) ∧
+    Agree .or (.i32 int32) (.i64 native) (.i64 (int32.signExtend 64 ||| native)) ∧
+    Agree .or (.i64 native) (.i32 int32) (.i64 (native ||| int32.signExtend 64)) ∧
+    Agree .xor (.i32 int32) (.i64 native) (.i64 (int32.signExtend 64 ^^^ native)) ∧
+    Agree .xor (.i64 native) (.i32 int32) (.i64 (native ^^^ int32.signExtend 64)) := by
+  unfold Agree
+  and_intros <;> intros <;> rfl
+#print axioms signed_arithmetic
+
+/-- Signed comparisons compare the sign-extended int32 operand with the native operand. -/
+theorem signed_comparisons (int32 : W32) (native : W64) :
+    Agree .ceq (.i32 int32) (.i64 native)
+      (.i32 (if int32.signExtend 64 = native then 1 else 0)) ∧
+    Agree .ceq (.i64 native) (.i32 int32)
+      (.i32 (if native = int32.signExtend 64 then 1 else 0)) ∧
+    Agree .clt (.i32 int32) (.i64 native)
+      (.i32 (if (int32.signExtend 64).toInt < native.toInt then 1 else 0)) ∧
+    Agree .clt (.i64 native) (.i32 int32)
+      (.i32 (if native.toInt < (int32.signExtend 64).toInt then 1 else 0)) ∧
+    Agree .cgt (.i32 int32) (.i64 native)
+      (.i32 (if native.toInt < (int32.signExtend 64).toInt then 1 else 0)) ∧
+    Agree .cgt (.i64 native) (.i32 int32)
+      (.i32 (if (int32.signExtend 64).toInt < native.toInt then 1 else 0)) := by
+  unfold Agree
+  and_intros <;> intros <;> rfl
+#print axioms signed_comparisons
+
+/-- Unsigned comparisons also sign-extend the int32 operand, then compare unsigned. -/
+theorem unsigned_comparisons (int32 : W32) (native : W64) :
+    Agree .clt_un (.i32 int32) (.i64 native)
+      (.i32 (if int32.signExtend 64 < native then 1 else 0)) ∧
+    Agree .clt_un (.i64 native) (.i32 int32)
+      (.i32 (if native < int32.signExtend 64 then 1 else 0)) ∧
+    Agree .cgt_un (.i32 int32) (.i64 native)
+      (.i32 (if native < int32.signExtend 64 then 1 else 0)) ∧
+    Agree .cgt_un (.i64 native) (.i32 int32)
+      (.i32 (if int32.signExtend 64 < native then 1 else 0)) := by
+  unfold Agree
+  and_intros <;> intros <;> rfl
+#print axioms unsigned_comparisons
+
+/-- Signed compare-and-branch instructions compare the sign-extended int32 operand. -/
+theorem signed_branches (int32 : W32) (native : W64) :
+    Branches .beq (.i32 int32) (.i64 native) (int32.signExtend 64 = native) ∧
+    Branches .beq (.i64 native) (.i32 int32) (native = int32.signExtend 64) ∧
+    Branches .blt (.i32 int32) (.i64 native) ((int32.signExtend 64).toInt < native.toInt) ∧
+    Branches .blt (.i64 native) (.i32 int32) (native.toInt < (int32.signExtend 64).toInt) ∧
+    Branches .ble (.i32 int32) (.i64 native) ((int32.signExtend 64).toInt ≤ native.toInt) ∧
+    Branches .ble (.i64 native) (.i32 int32) (native.toInt ≤ (int32.signExtend 64).toInt) ∧
+    Branches .bgt (.i32 int32) (.i64 native) (native.toInt < (int32.signExtend 64).toInt) ∧
+    Branches .bgt (.i64 native) (.i32 int32) ((int32.signExtend 64).toInt < native.toInt) ∧
+    Branches .bge (.i32 int32) (.i64 native) (native.toInt ≤ (int32.signExtend 64).toInt) ∧
+    Branches .bge (.i64 native) (.i32 int32) ((int32.signExtend 64).toInt ≤ native.toInt) := by
+  unfold Branches
+  and_intros <;> intros <;> rfl
+#print axioms signed_branches
+
+/-- Overflow-checked arithmetic sign-extends the int32 operand of a mixed pair for the signed
+    forms and zero-extends it for the unsigned forms; both interpreters agree in either order. -/
+theorem checked_arithmetic :
+    Agree .add_ovf (.i32 0xFFFFFFFF) (.i64 5) (.i64 4) ∧
+    Agree .add_ovf (.i64 5) (.i32 0xFFFFFFFF) (.i64 4) ∧
+    Agree .add_ovf_un (.i32 0xFFFFFFFF) (.i64 5) (.i64 0x100000004) ∧
+    Agree .add_ovf_un (.i64 5) (.i32 0xFFFFFFFF) (.i64 0x100000004) ∧
+    Agree .sub_ovf (.i32 0xFFFFFFFF) (.i64 5) (.i64 0xFFFFFFFFFFFFFFFA) ∧
+    Agree .sub_ovf (.i64 5) (.i32 0xFFFFFFFF) (.i64 6) ∧
+    Agree .sub_ovf_un (.i32 0xFFFFFFFF) (.i64 5) (.i64 0xFFFFFFFA) ∧
+    Agree .sub_ovf_un (.i64 0x100000005) (.i32 0xFFFFFFFF) (.i64 6) ∧
+    Agree .mul_ovf (.i32 0xFFFFFFFF) (.i64 5) (.i64 0xFFFFFFFFFFFFFFFB) ∧
+    Agree .mul_ovf (.i64 5) (.i32 0xFFFFFFFF) (.i64 0xFFFFFFFFFFFFFFFB) ∧
+    Agree .mul_ovf_un (.i32 0xFFFFFFFF) (.i64 5) (.i64 0x4FFFFFFFB) ∧
+    Agree .mul_ovf_un (.i64 5) (.i32 0xFFFFFFFF) (.i64 0x4FFFFFFFB) := by
+  unfold Agree
+  and_intros <;> intros <;> rfl
+#print axioms checked_arithmetic
+
+/-- The instructions whose operands `widenMixed` changes are exactly those listed by the
+    theorems above; every other instruction leaves any stack as it is. -/
+theorem widened_instructions (op : Instruction) (stack : List CIL.Value) :
+    (op ∈ [.add, .sub, .mul, .and, .or, .xor, .ceq, .clt, .cgt, .clt_un, .cgt_un] ∨
+      ∃ target, op ∈ [.beq target, .blt target, .ble target, .bgt target, .bge target]) ∨
+    widenMixed op stack = stack := by
+  cases op <;> simp [widenMixed, nativePureBinary]
+#print axioms widened_instructions
+
+/-- Unsigned branches refuse a mixed pair in both interpreters. -/
+theorem unsigned_branches_refused (int32 : W32) (native : W64) :
+    ([Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
+      (CIL.step op false none 0 [] [.i32 int32, .i64 native] (fun _ => none)).isNone &&
+      (CIL.step op false none 0 [] [.i64 native, .i32 int32] (fun _ => none)).isNone) = true := by
+  rfl
+#print axioms unsigned_branches_refused
 
 end Tests.MixedNativeOpcodes

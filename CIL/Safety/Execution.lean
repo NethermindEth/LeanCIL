@@ -5,7 +5,6 @@ import CIL.Safety.StaticMemory
 import CIL.Safety.ReferenceObservations
 import CIL.Safety.HeapObjects
 import CIL.Safety.NativeMethodTables
-import CIL.NativeEvaluation
 import CIL.Resolution
 
 /-!
@@ -451,7 +450,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       if stack.length < argc then .error .invalidState else
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false none pc [] (CIL.widenMixed op values) (fun _ => none) body.profile
+          CIL.step op false none pc [] values (fun _ => none) body.profile
             | .error .invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue m)
         return .next target (result ++ stack.drop argc) frame m

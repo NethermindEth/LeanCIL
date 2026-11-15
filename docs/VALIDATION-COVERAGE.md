@@ -633,7 +633,7 @@ These tests cover preparation:
 | Native signatures, locals, calls, fields, references, arithmetic, shifts, casts and `sizeof`, plus exact mixed native/int32 operations in both operand orders | 2,511 comparisons against .NET results or arithmetic exceptions and corresponding Lean proofs; all 60 ambiguous mixed unsigned-branch forms rejected unless explicitly widened |
 | Extracted native addition on the admitted 64-bit target | Universal modular-addition proof |
 | Required-32-bit assembly, forged native type identity, native field overrun, native/int64 operands and 32-bit execution profile | Five intended extraction rejections |
-| Native widening wrapper with memory instructions, nested wrappers or references | Semantic rejection tests; unsigned branch/comparison widening differences checked explicitly |
+| Mixed native/int32 operands of every widened instruction, overflow-checked arithmetic, memory instructions, unsigned branches or references | Both interpreters give the sign- or zero-extended result in both operand orders; memory instructions and references keep their operands; unsigned branches refused; a test proves the widened instruction list complete |
 | Argument assignment/addressing, both full and short encodings, all admitted integer storage types, aliases, calls, byref reassignment and structs | 639 runtime/memory cases, including 636 .NET comparisons |
 | Overwriting an argument with a replacement value | Universal proof for arbitrary inputs; assignment to the wrong parameter rejected |
 | Returning an address into a parameter home | Lifetime fault proved for every input; successful execution ruled out for every fuel budget |

@@ -26,16 +26,19 @@ awaited result and the runtime builds the declared task.
 ## Translated opcodes
 
 Ranges include every numbered form between the endpoints, and `.s` is the short encoding of the
-same operation. Native `nint`/`nuint` values use `i64` on the validated 64-bit target. For mixed
-native/int32 arithmetic and comparisons, extraction tracks stack types and emits an explicit
-widening wrapper that sign-extends the int32 operand, except that unsigned checked arithmetic
-zero-extends it; scalar `clt.un`/`cgt.un` sign-extend it too, matching the admitted runtime. The
-wrapper preserves arithmetic faults and branch targets and cannot dispatch memory or calls.
-Invalid native/int64 mixtures are rejected. Mixed native/int32 unsigned branches (`bne.un`,
-`blt.un`, `bgt.un`, `ble.un`, `bge.un`, including short forms) are rejected because CoreCLR
-widening depends on operand provenance; insert an explicit `conv.i` or `conv.u` to select
-same-width semantics. The rows below describe scalar operands after this widening; other mixed
-widths are unsupported.
+same operation. Native `nint`/`nuint` values use `i64` on the validated 64-bit target. Extraction
+tracks stack types and emits mixed native/int32 operations unchanged. For mixed wrapping
+arithmetic, bitwise operations, comparisons and signed compare-and-branch, `CIL.step`
+sign-extends the int32 operand before it evaluates the instruction (`CIL.widenMixed`), and the
+checked interpreter reaches that widening only through `CIL.step`; scalar `clt.un`/`cgt.un`
+sign-extend it too, matching the admitted runtime. Division and remainder sign-extend the int32
+operand; overflow-checked arithmetic sign-extends it for the signed forms and zero-extends it for
+the unsigned forms. Memory operations and calls never widen their operands, and arithmetic faults
+and branch targets are those of the same-width instruction. Invalid native/int64 mixtures are
+rejected. Mixed native/int32 unsigned branches (`bne.un`, `blt.un`, `bgt.un`, `ble.un`, `bge.un`,
+including short forms) are rejected because CoreCLR widening depends on operand provenance; insert
+an explicit `conv.i` or `conv.u` to select same-width semantics. The rows below describe scalar
+operands after this widening; other mixed widths are unsupported.
 
 `i32` and `i64` refer to the model's 32- and 64-bit integer stack values; managed references are
 separate values and are not integer addresses.
@@ -71,8 +74,8 @@ external enum dependencies are not supported.
 | `add` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. Also accepts a checked reference and an int32 or native integer byte offset in either operand order, preserving allocation identity and its readonly restriction and checking lifetime and bounds when forming the result. Supplied immutable native handler tables also admit checked byte-offset addition. No floating-point operands or arbitrary numeric address fabrication. |
 | `sub` | Partial | Wrapping scalar subtraction; also subtract an int32/native byte offset from a checked reference, preserving its readonly restriction, or compute the native byte difference of two live references within one allocation. Null, cross-allocation differences and invalid resulting positions fail. |
 | `mul` | Partial | Wrapping arithmetic on two `i32` values or two `i64` values, plus the mixed native/int32 cases described above. No floating-point or reference/pointer operands. |
-| `div`, `div.un`, `rem`, `rem.un` | Partial | Same-width `i32`/`i64` quotient or remainder. Signed quotient truncates toward zero; signed remainder follows the dividend sign. Zero divisors fault. Signed minimum with divisor -1 faults for both signed operations under the admitted runtime assumption. No floating-point, mixed-width operands or exception handlers. |
-| `add.ovf`, `sub.ovf`, `mul.ovf`, `add.ovf.un`, `sub.ovf.un`, `mul.ovf.un` | Partial | Checked signed/unsigned arithmetic on same-width `i32`/`i64`. Compute the mathematical integer result, then reject values outside the destination range with a located overflow fault. No floating-point, reference arithmetic or exception handlers. |
+| `div`, `div.un`, `rem`, `rem.un` | Partial | Same-width `i32`/`i64` quotient or remainder. Signed quotient truncates toward zero; signed remainder follows the dividend sign. Zero divisors fault. Signed minimum with divisor -1 faults for both signed operations under the admitted runtime assumption. Also the mixed native/int32 cases described above. No floating-point operands, other mixed widths or exception handlers. |
+| `add.ovf`, `sub.ovf`, `mul.ovf`, `add.ovf.un`, `sub.ovf.un`, `mul.ovf.un` | Partial | Checked signed/unsigned arithmetic on same-width `i32`/`i64`, plus the mixed native/int32 cases described above. Compute the mathematical integer result, then reject values outside the destination range with a located overflow fault. No floating-point, reference arithmetic or exception handlers. |
 | `and`, `or`, `xor`, `not` | Partial | Bitwise operations on `i32`/`i64`; binary operands must have the same width. |
 | `shl`, `shr`, `shr.un` | Partial | Shift an `i32`, `i64` or native integer by an `i32` or native integer count, masked modulo the value width under the admitted runtime. `shr` is arithmetic; `shr.un` is logical. Native counts normalize to their low 32 bits; ordinary `int64` counts and reference operands are rejected by extraction and its certificate. |
 | `conv.ovf.i1`, `conv.ovf.u1`, `conv.ovf.i2`, `conv.ovf.u2`, `conv.ovf.i4`, `conv.ovf.u4`, `conv.ovf.i8`, `conv.ovf.u8`, `conv.ovf.i`, `conv.ovf.u`, and each corresponding `.un` form | Partial | Checked conversion from `i32`/`i64`, preserving the mathematical value or producing a located overflow fault. `.un` interprets the input as unsigned; the destination controls the accepted range. Narrow results occupy `i32`; native destinations use the validated 64-bit profile. No floating-point or reference conversions. |
