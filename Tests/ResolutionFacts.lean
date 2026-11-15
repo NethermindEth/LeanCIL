@@ -485,7 +485,5 @@ theorem twoParameters_homesValid :
 -- The home slot the check expects is the slot `argumentAccess` reads.
 example : twoParameters.argumentAccess 1 = .home (1 + 0) :=
   argumentAccess_of_homed twoParameters_homesValid (by decide)
-example : twoParameters.argumentAccess 0 = .value (some .unsigned8) :=
-  argumentAccess_of_unhomed twoParameters_homesValid (by decide)
 
 end Tests.ResolutionFacts

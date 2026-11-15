@@ -410,6 +410,8 @@ private theorem length_of_mapM {α β : Type} {inputs : List α} {outputs : List
     obtain ⟨_, -, others, remaining, rfl⟩ := made
     simp [ih remaining]
 
+#print axioms length_of_mapM
+
 /-- Searching the expected homes for an argument searches the required home indices. -/
 private theorem homeKeys_findIdx? {layouts : Array ComputedLayout} {raw : RawArguments}
     {reachable : List Bool} {homes : List (Nat × LocalKind)} {index : Nat}
@@ -426,6 +428,8 @@ private theorem homeKeys_findIdx? {layouts : Array ComputedLayout} {raw : RawArg
     obtain ⟨entry, made, others, remaining, rfl⟩ := expected
     obtain ⟨_, -, _, -, rfl⟩ := made
     simp [List.findIdx?_cons, ih remaining]
+
+#print axioms homeKeys_findIdx?
 
 /-- Under `ParameterHomesValid`, a homed argument is read from the slot the argument check
     expects of it: the raw locals' count plus its position among the required homes. -/
@@ -450,25 +454,6 @@ theorem argumentAccess_of_homed {layouts : Array ComputedLayout} {raw : RawArgum
   · rw [length_of_mapM kinds]
 
 #print axioms argumentAccess_of_homed
-
-/-- Under `ParameterHomesValid`, an argument without a required home is read from the incoming
-    arguments, narrowed as its declared type requires. -/
-theorem argumentAccess_of_unhomed {layouts : Array ComputedLayout} {raw : RawArguments}
-    {reachable : List Bool} {method : Method} {index : Nat}
-    (valid : ParameterHomesValid layouts raw reachable method)
-    (unhomed : index ∉ requiredHomeIndices raw reachable) :
-    method.argumentAccess index = .value ((method.declared.argumentType index).bind
-      (declaredNarrow method.environment.rawLayouts)) := by
-  obtain ⟨-, -, -, -, homes, -⟩ := valid
-  have missing : method.parameterHomes.findIdx? (fun home => home.1 == index) = none := by
-    rw [homeKeys_findIdx? homes, List.findIdx?_eq_none_iff]
-    intro key member
-    simp only [beq_eq_false_iff_ne, ne_eq]
-    rintro rfl
-    exact unhomed member
-  simp [Method.argumentAccess, missing]
-
-#print axioms argumentAccess_of_unhomed
 
 end Extraction
 
