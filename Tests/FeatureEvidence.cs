@@ -319,8 +319,7 @@ foreach (var obligation in new[] { featureObligation, "method0_scalars_validated
         ("byref", "typeArguments := [.atom Extraction.runtimeScope \"System.Int32\"]",
             "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Int32\")]"),
         ("layout", aggregate, Regex.Replace(aggregate, "\"[^\"]+\"", "\"forged\"")),
-        ("signature", "parameterCount := 0, hasThis := false, returnsValue := true",
-            "parameterCount := 1, hasThis := false, returnsValue := true")
+        ("signature", "parameterCount := 0, returnsValue := true", "parameterCount := 1, returnsValue := true")
     })
     {
         var changed = narrowed.Replace(before, after, StringComparison.Ordinal);

@@ -194,29 +194,37 @@ def libScope : String := "Lib, Version=1.0.0.0, Culture=neutral, PublicKeyToken=
 
 /-- `System.Console.WriteLine(int)`: an external static call. -/
 def writeLineSite : CallSite :=
-  { declaringType := .atom runtimeScope "System.Console", name := "WriteLine",
+  { method := {
+      owner := .atom runtimeScope "System.Console", name := name!"WriteLine", hasThis := false,
+      genericArity := 0, returnType := .void, parameters := [int32] },
+    name := "WriteLine",
     target := .external (runtimeScope ++ "::System.Void System.Console::WriteLine(System.Int32)"),
-    typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := false,
-    returnType := .void, parameterTypes := [int32] }
+    typeArguments := [], parameterCount := 1, returnsValue := false }
 
 /-- `Lib.Box.Get()`: a managed call into the other assembly. -/
 def getSite : CallSite :=
-  { declaringType := .atom libScope "Lib.Box", name := "Get", target := .managed 0x06000001,
-    typeArguments := [], parameterCount := 0, hasThis := false, returnsValue := true,
-    returnType := int32, parameterTypes := [] }
+  { method := {
+      owner := .atom libScope "Lib.Box", name := name!"Get", hasThis := false, genericArity := 0,
+      returnType := int32, parameters := [] },
+    name := "Get", target := .managed 0x06000001, typeArguments := [], parameterCount := 0,
+    returnsValue := true }
 
 /-- `Lib.Pair.Sum()`: a managed call to a static method of a struct in the other assembly. -/
 def sumSite : CallSite :=
-  { declaringType := .atom libScope "Lib.Pair", name := "Sum", target := .managed 0x06000002,
-    typeArguments := [], parameterCount := 0, hasThis := false, returnsValue := true,
-    returnType := int32, parameterTypes := [] }
+  { method := {
+      owner := .atom libScope "Lib.Pair", name := name!"Sum", hasThis := false, genericArity := 0,
+      returnType := int32, parameters := [] },
+    name := "Sum", target := .managed 0x06000002, typeArguments := [], parameterCount := 0,
+    returnsValue := true }
 
 /-- `System.Console.Id<uint>(!!0)`: an external generic method. -/
 def idSite : CallSite :=
-  { declaringType := .atom runtimeScope "System.Console", name := "Id",
-    target := .external (runtimeScope ++ "::!!0 System.Console::Id(!!0)"),
-    typeArguments := [uint32], parameterCount := 1, hasThis := false, returnsValue := true,
-    returnType := uint32, parameterTypes := [uint32] }
+  { method := {
+      owner := .atom runtimeScope "System.Console", name := name!"Id", hasThis := false,
+      genericArity := 1, returnType := uint32, parameters := [uint32],
+      methodArguments := [uint32] },
+    name := "Id", target := .external (runtimeScope ++ "::!!0 System.Console::Id(!!0)"),
+    typeArguments := [uint32], parameterCount := 1, returnsValue := true }
 
 /-- The count and total fields of `T.Program`. -/
 def countOperand : RawOperand := .field (.atom "T, Version=1.0.0.0, Culture=neutral, \

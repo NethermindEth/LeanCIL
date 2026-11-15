@@ -17,6 +17,16 @@ if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
     ArgumentResolutionCosts();
     return;
 }
+if (args.Contains("--indirect-access-only", StringComparer.Ordinal))
+{
+    IndirectAccessCosts();
+    return;
+}
+if (args.Contains("--call-check-only", StringComparer.Ordinal))
+{
+    CallCheckCosts();
+    return;
+}
 if (args.Contains("--decode-only", StringComparer.Ordinal))
 {
     DecodeCosts();
@@ -37,6 +47,16 @@ if (args.Contains("--return-step-only", StringComparer.Ordinal))
     ReturnResolutionCosts(stepOnly: true);
     return;
 }
+if (args.Contains("--call-name-only", StringComparer.Ordinal))
+{
+    CallNameCosts();
+    return;
+}
+if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
+{
+    IndirectTargetCosts();
+    return;
+}
 NativeTableCosts();
 if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
 CheckNarrowedResolution();
@@ -44,6 +64,7 @@ if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
 ArgumentResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
+CallCheckCosts();
 DecodeCosts();
 MethodDecodeCosts();
 DecodedDefinitionCosts();
@@ -308,6 +329,65 @@ void ArgumentResolutionCosts()
     }
 }
 
+// Decides the managed-call check on bodies of call and nop pairs with the extractor's literal table; a per-pc table
+// scan costs the square of the call sites.
+void CallCheckCosts()
+{
+    var checkDirectory = At("artifacts/LookupScaling/CallCheck");
+    Directory.CreateDirectory(checkDirectory);
+    var samples = new List<(int Sites, long Cost)>();
+    foreach (var sites in new[] { 64, 256, 1024 })
+    {
+        var pcs = Enumerable.Range(0, sites).Select(site => 2 * site).ToArray();
+        var raw = string.Join(", ", pcs.Select(_ => "site, ⟨0, 0, .none⟩"));
+        var code = string.Join(", ", pcs.Select(_ => ".call 0 0, .nop"));
+        var links = string.Join(", ", pcs.Select(pc => $"({pc}, .direct 0)"));
+        var statement = $"ManagedCallsValid [⟨[], callee⟩] [] raw (List.replicate {2 * sites} true) body";
+        var source = $$"""
+            import CIL.Extraction.Generics
+            open CIL CIL.Extraction Lean Elab Command
+            set_option maxRecDepth 65536
+            set_option maxHeartbeats 0
+            /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+            elab "#call_check_cost " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              logInfo m!"call check {after - before} heartbeats"
+            def callee : RawMethod := {
+              token := 1, owner := "Tests::Scaling", hasThis := false, explicitThis := false,
+              callingConvention := 0, attributes := 0, implementation := 0,
+              returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
+              genericParameters := [], code := [] }
+            def site : RawInstruction := ⟨0, 40, .call {
+              declaringType := .atom "Tests" "Scaling", target := .managed 1, typeArguments := [],
+              parameterCount := 0, hasThis := false, returnsValue := false, returnType := .void,
+              parameterTypes := [] }⟩
+            def raw : RawMethod := { callee with code := [{{raw}}] }
+            def body : Method := { locals := [], returnsValue := false, code := [{{code}}], links := [{{links}}] }
+            #call_check_cost
+            theorem checked : {{statement}} := by decide +kernel
+            #print axioms checked
+            """ + "\n";
+        var path = Path.Combine(checkDirectory, $"Sites{sites}.lean");
+        File.WriteAllText(path, source);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("The call check cost fixture introduced an unproved theorem.");
+        var cost = LookupPatterns.CallCheck().Match(output);
+        if (!cost.Success) throw new InvalidOperationException("Missing the call check cost: " + output);
+        samples.Add((sites, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perSite = samples.Select(sample => (double)sample.Cost / sample.Sites).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{sample.Sites} = {(double)sample.Cost / sample.Sites:F0}")));
+    if (perSite.Skip(1).Zip(perSite).Any(pair => pair.First > pair.Second * AllowedCallGrowth))
+        throw new InvalidOperationException(
+            $"The managed-call check costs {measured} heartbeats per call site; the limit is {AllowedCallGrowth} " +
+            "times the cost per call site at the size before.");
+    Console.WriteLine($"PASS the managed-call check costs {measured} heartbeats per call site");
+}
+
 // Isolating one validator must also remove generated facts whose signature premises were removed.
 void CheckNarrowedResolution()
 {
@@ -412,8 +492,8 @@ void DecodeCosts()
 }
 
 // The heartbeats `decide +kernel` adds to deciding that `Method.ofRaw?` of a value-only body of 500, 2000 and 8000
-// instructions with four locals gives the emitted code, the initialized locals and no homes or links. Each
-// instruction is decoded and instantiated once, so four times the instructions may cost at most
+// instructions with four parameters and four locals gives the emitted code, the initialized locals and no homes or
+// links. Each instruction is decoded and instantiated once, so four times the instructions may cost at most
 // `AllowedLocalGrowth` more per instruction.
 void MethodDecodeCosts()
 {
@@ -431,27 +511,30 @@ void MethodDecodeCosts()
             open CIL CIL.Extraction Lean Elab Command
             {{KernelCostCommand}}
             namespace DecodedMethodCost
-            /-- The raw instructions of one segment: short and long constants, locals, arithmetic, a checked
-                conversion, a branch, a four-target switch and a return. -/
+            /-- The raw instructions of one segment: short and long constants, locals, an argument,
+                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
             def segment (index : Nat) : List RawInstruction :=
               let start := {{SegmentLength}} * index
               [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
                 ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
-                ⟨start + 4, 6, .none⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
                 ⟨start + 7, 58, .target index⟩,
                 ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
             /-- The instructions the translator emits for one segment. -/
             def codeSegment (index : Nat) : List Instruction :=
               [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
-                .ldloc (index % 4), .stloc (index % 4), .ldloc 0, .add, .conv_ovf_un .i1, .brtrue index,
-                .switch [index, index + 1, index + 2, index + 3], .ret]
+                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1,
+                .brtrue index, .switch [index, index + 1, index + 2, index + 3], .ret]
             /-- The {{instructions}} emitted instructions of the body. -/
             def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
-            /-- A static method with four zero-initialized `uint32` locals and {{instructions}} raw instructions. -/
+            /-- The type of every parameter and local. -/
+            def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
+            /-- A static method with four parameters, four zero-initialized locals and {{instructions}} raw
+                instructions. -/
             def source : RawMethod :=
               { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
-                attributes := 0, implementation := 0, returnType := .void, parameters := [],
-                locals := List.replicate 4 (.atom runtimeScope "System.UInt32"), initLocals := true,
+                attributes := 0, implementation := 0, returnType := .void, parameters := List.replicate 4 uint32,
+                locals := List.replicate 4 uint32, initLocals := true,
                 maxStack := 8, genericParameters := [],
                 code := (List.range {{instructions / SegmentLength}}).flatMap segment }
             #kernel_cost "decoded method {{instructions}}"
@@ -680,6 +763,48 @@ foreach (var outcome in new[] { "equal", "unequal" })
             $"Deciding {outcome} type identities costs {measured}; the limits are {TypeDecisionLimit} heartbeats " +
             $"and {AllowedNameGrowth} times as many at 80 characters."));
     Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
+}
+CallNameCosts();
+
+// The heartbeats `decide +kernel` adds to the call check's name clause, which tests that a call's typed method name
+// spells its row's name bytes, for names of 20 and 80 bytes that share all but their last byte. Reading the name back
+// costs about 0.8 times as much per byte at 80 bytes as at 20; encoding the bytes with `MetadataName.ofBytes?`, whose
+// kernel reduction indexes an array literal once per byte, costs about 3 times as much.
+void CallNameCosts()
+{
+    var nameDirectory = At("artifacts/LookupScaling/CallNames");
+    Directory.CreateDirectory(nameDirectory);
+    const string Prefix = "WriteLineToTheConsoleOfTheRuntimeEachValueThatTheCallerPassesAsAnIntegerOfThirtyTwoBits";
+    int[] lengths = [20, 80];
+    string Statement(int length)
+    {
+        var name = Prefix[..(length - 1)] + "0";
+        var bytes = string.Join(", ", Encoding.UTF8.GetBytes(name));
+        return $$"""
+            /-- The {{length}} bytes of a row name. -/
+            def bytes{{length}} : List Nat := [{{bytes}}]
+            #kernel_cost "call name {{length}}" ((name!"{{name}}").spells bytes{{length}} = true)
+            """;
+    }
+    var path = Path.Combine(nameDirectory, "CallNames.lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Identity
+        open CIL Lean Elab Command
+        {{KernelCostCommand}}
+        {{string.Join("\n", lengths.Select(Statement))}}
+        """);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.CallNameCheck().Matches(output).ToDictionary(
+        match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != lengths.Length) throw new InvalidOperationException("Missing call name costs:\n" + output);
+    double PerByte(int length) => (double)costs[length] / length;
+    var measured = string.Create(CultureInfo.InvariantCulture,
+        $"{costs[20]} heartbeats at 20 bytes and {costs[80]} at 80");
+    if (Math.Min(costs[20], costs[80]) < KernelDecisionFloor || PerByte(80) > PerByte(20) * AllowedGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"The call name clause costs {measured}; per byte, the limit is {AllowedGrowth} times the cost at 20."));
+    Console.WriteLine($"PASS the call name clause costs {measured}");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -1211,6 +1336,47 @@ for (var step = 1; step < spellingLengths.Length; step++)
             FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
 }
 
+// `indirectTarget` selects the body of a `calli` by comparing the pointer's owner with each catalog entry's, and a
+// proof decides it by `cil_kernel_rfl`: the kernel's cost grows with the owner's length and no faster.
+void IndirectTargetCosts()
+{
+    var targetDirectory = At("artifacts/LookupScaling/IndirectTarget");
+    Directory.CreateDirectory(targetDirectory);
+    int[] ownerLengths = [64, 256, 1024];
+    long Selection(int length, bool proved)
+    {
+        var owner = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
+        var identity = $$"""⟨"{{owner}}", 6, []⟩""";
+        var proof = proved ? "by cil_kernel_rfl" : "sorry";
+        var text = $$"""
+            import CIL.Safety.Execution
+            import CIL.Extraction.KernelEquation
+            def signature : CIL.ManagedSignature :=
+              ⟨.atom CIL.Extraction.runtimeScope "System.Int32", [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
+            theorem selected : CIL.Safety.indirectTarget signature [⟨⟨"other", 6, []⟩, 2⟩, ⟨{{identity}}, 1⟩]
+                ⟨signature, some {{identity}}⟩ = some 1 := {{proof}}
+            """;
+        var path = Path.Combine(targetDirectory, $"Owner{length}{(proved ? "Checked" : "Open")}.lean");
+        return Heartbeats(path, text, equations: false);
+    }
+    var costs = ownerLengths.Select(length => (double)(Selection(length, true) - Selection(length, false))).ToArray();
+    for (var step = 1; step < ownerLengths.Length; step++)
+    {
+        var lengthRatio = ownerLengths[step] / (double)ownerLengths[step - 1];
+        var growth = costs[step] / costs[step - 1];
+        Console.WriteLine(FormattableString.Invariant(
+            $"PASS selecting a calli body for an owner of {ownerLengths[step - 1]} and {ownerLengths[step]} bytes: ") +
+            FormattableString.Invariant($"{costs[step - 1]:F0} and {costs[step]:F0} heartbeats, ") +
+            FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
+        if (growth > AllowedSpellingGrowth * lengthRatio)
+            throw new Exception(FormattableString.Invariant(
+                $"Selecting a calli body for an owner of {ownerLengths[step]} bytes costs {growth:F2} times ") +
+                FormattableString.Invariant($"as much as for {ownerLengths[step - 1]}; ") +
+                FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+    }
+}
+IndirectTargetCosts();
+
 // A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
 // its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from
 // depth 8 to 16 is twice the increment from 4 to 8; a quadratic walk makes it four times.
@@ -1309,6 +1475,82 @@ foreach (var prefixed in new[] { false, true })
             $"times the cost per address at {FewAddresses}."));
     Console.WriteLine($"PASS checking the scalar certificate of {label} costs {addressesMeasured}");
 }
+IndirectAccessCosts();
+
+// The kernel heartbeats of the feature and scalar certificates of a body whose segments each copy a block, with or
+// without an `unaligned.` prefix, and branch to the next segment, less those of stating them. The indirect access
+// rule reads the instructions next to each site from an index built once per body.
+void IndirectAccessCosts()
+{
+    var accessDirectory = At("artifacts/LookupScaling/IndirectAccess");
+    Directory.CreateDirectory(accessDirectory);
+    long Cost(bool prefixed, int sites)
+    {
+        var flag = prefixed ? "true" : "false";
+        var header = $$"""
+            import CIL.Extraction.Scalars
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            namespace IndirectAccesses
+            open CIL CIL.Extraction
+            def word : TypeExpr := .atom runtimeScope "System.UInt64"
+            def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
+            def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
+              [⟨0, 2, .none⟩, ⟨0, 2, .none⟩, ⟨0, 2, .none⟩] ++
+                (if prefixed then [⟨0, 65042, .integer 1⟩] else []) ++
+                [⟨0, 65047, .none⟩, ⟨0, 43, .target ((index + 1) * width prefixed)⟩]
+            def raw (prefixed : Bool) (sites : Nat) : RawMethod := {
+              token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+              callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+              parameters := [word], locals := [], initLocals := true, maxStack := 3,
+              genericParameters := [],
+              code := (List.range sites).flatMap (segment prefixed) ++ [⟨0, 42, .none⟩] }
+            def featureSegment (prefixed : Bool) : FeatureCertificate :=
+              [some ⟨[], []⟩, some ⟨[none], []⟩, some ⟨[none, none], []⟩] ++
+                (if prefixed then [some ⟨[none, none, none], []⟩] else []) ++
+                [some ⟨[none, none, none], []⟩, some ⟨[], []⟩]
+            def features (prefixed : Bool) (sites : Nat) : FeatureCertificate :=
+              (List.replicate sites (featureSegment prefixed)).flatten ++ [some ⟨[], []⟩]
+            def stateSegment (prefixed : Bool) : ScalarCertificate :=
+              [some [], some [.word64], some [.word64, .word64]] ++
+                (if prefixed then [some [.word64, .word64, .word64]] else []) ++
+                [some [.word64, .word64, .word64], some []]
+            def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
+              (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
+            def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
+              [.ldarg 0, .ldarg 0, .ldarg 0] ++ (if prefixed then [.nop] else []) ++
+                [.memory (.copyBlock (if prefixed then 1 else 8)), .br ((index + 1) * width prefixed)]
+            def code (prefixed : Bool) (sites : Nat) : List Instruction :=
+              (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
+            """ + "\n";
+        var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {flag} {sites}) .scalar " +
+            $"(features {flag} {sites}) ((features {flag} {sites}).map Option.isSome) (code {flag} {sites}) ∧ " +
+            $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
+            $"(code {flag} {sites})";
+        var path = Path.Combine(accessDirectory, $"Blocks{(prefixed ? "Prefixed" : "")}{sites}.lean");
+        var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend IndirectAccesses\n",
+            equations: false);
+        var decided = Heartbeats(path, header + $"""
+            theorem valid : {statement} := by decide +kernel
+            #print axioms valid
+            end IndirectAccesses
+            """ + "\n", equations: false);
+        return decided - stated;
+    }
+    foreach (var prefixed in new[] { false, true })
+    {
+        var label = prefixed ? "unaligned block copies" : "block copies";
+        var perSite = new[] { FewAddresses, MoreAddresses, ManyAddresses }
+            .Select(sites => (Sites: sites, Cost: (double)Cost(prefixed, sites) / sites)).ToArray();
+        var measured = string.Join("; ", perSite.Select(run =>
+            string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per copy at {run.Sites}")));
+        if (perSite.Skip(1).Any(run => run.Cost > perSite[0].Cost * AllowedGrowth))
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"Checking the feature and scalar certificates of {label} costs {measured}; the limit is " +
+                $"{AllowedGrowth} times the cost per copy at {FewAddresses}."));
+        Console.WriteLine($"PASS checking the feature and scalar certificates of {label} costs {measured}");
+    }
+}
 
 // The kernel heartbeats of the feature certificate of a body that loads, stores and addresses four int32 locals in
 // turn, popping each address, less those of stating the same certificate. A local load, store or address checks
@@ -1390,8 +1632,10 @@ long LocalSlotCost(LocalSlots slots, int count, bool storage = false)
         open CIL CIL.Extraction
         def slotType : TypeExpr := .atom runtimeScope "{{slotType}}"
         def handler : CallSite :=
-          { target := .managed 2, typeArguments := [], parameterCount := 0, hasThis := false,
-            returnsValue := false }
+          { method := {
+              owner := .void, name := name!"", hasThis := false, genericArity := 0,
+              returnType := .void, parameters := [] },
+            target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
         def signature : ManagedSignature := ⟨.void, []⟩
         def kind : ScalarKind := {{kind}}
         def segment (index : Nat) : List RawInstruction :=
@@ -1606,6 +1850,9 @@ static partial class LookupPatterns
     [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
     internal static partial Regex ReturnResolution();
 
+    [GeneratedRegex(@"call check ([0-9]+) heartbeats")]
+    internal static partial Regex CallCheck();
+
     [GeneratedRegex(@"([0-9]+) lemmas rechecked, ([0-9]+) kernel heartbeats")]
     internal static partial Regex EmbeddingRecheck();
 
@@ -1617,6 +1864,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex TypeDecision();
+
+    [GeneratedRegex(@"\bcall name ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex CallNameCheck();
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex NativeTableStep();

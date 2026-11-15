@@ -65,7 +65,7 @@ theorem substituteOperand_mentionsType {arguments : List TypeExpr} {layouts : Li
     obtain ⟨_, _, substituted⟩ := substituted
     split at substituted <;>
       simp only [Option.bind_eq_some_iff, Option.some.injEq] at substituted <;>
-      obtain ⟨_, _, _, _, _, _, _, _, rfl⟩ := substituted <;> exact ⟨rfl, nofun⟩
+      obtain ⟨_, _, _, _, _, _, _, _, _, _, rfl⟩ := substituted <;> exact ⟨rfl, nofun⟩
   | indirectCall returnType parameters hasThis explicitThis convention =>
     simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure,
       Option.some.injEq] at substituted
