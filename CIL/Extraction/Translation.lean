@@ -76,6 +76,10 @@ private def initialLocal : LocalKind → Value
   | .vector512 => .v512 0
   | .aggregate size => .aggregate (List.replicate size.val 0)
 
+/-- The value a local of `kind` starts with: its zero when the body initializes locals. -/
+def _root_.CIL.LocalKind.initialValue (initLocals : Bool) (kind : LocalKind) : Value :=
+  if initLocals then initialLocal kind else .unmodeled
+
 /-- Integer static-field storage and its narrow-load signedness. -/
 private def staticScalarType : TypeExpr → Option (Nat × Bool)
   | .enum _ underlying => staticScalarType underlying
@@ -144,8 +148,7 @@ def _root_.CIL.DeclaredSignature.ofRaw (closed : RawMethod) : DeclaredSignature 
 def MethodShapeValid (closed : RawMethod) (method : Method) : Prop :=
   method.profile.Valid ∧ method.returnsValue = (closed.returnType != .void) ∧
   method.declared = DeclaredSignature.ofRaw closed ∧
-  method.locals = method.localKinds.map (fun kind =>
-    if closed.initLocals then initialLocal kind else .unmodeled) ∧
+  method.locals = method.localKinds.map (LocalKind.initialValue closed.initLocals) ∧
   methodShapeInstructions closed method = true
 
 instance (closed : RawMethod) (method : Method) :
