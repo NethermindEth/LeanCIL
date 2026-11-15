@@ -201,6 +201,8 @@ macro "fixed_fallback" : tactic => `(tactic| (
   | (have referenceCases := referenceStepOperation operation family
      cases referenceCases)
   | (cases operation <;> try cases family)
+  -- A hole has its own faulting arm, so the fallback arm excludes it.
+  all_goals try exact False.elim (unadmitted _ rfl)
   all_goals try exact fallback
   all_goals cases stack with
   | nil =>
@@ -290,10 +292,12 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
-    -- ones; `fixed_fallback` reads the table-offset exclusions and the faulting ones are cleared.
+    -- ones; `fixed_fallback` reads the hole and table-offset exclusions, the faulting ones are
+    -- cleared.
     all_goals try (
-      rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
-        mulOvfUn div divUn rem remUn convOvf convOvfUn
+      rename_i unadmitted offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn
+        mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn
+      guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
