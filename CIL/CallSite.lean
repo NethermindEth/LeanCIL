@@ -59,6 +59,10 @@ abbrev CallSite.returnType (site : CallSite) : TypeExpr := site.method.returnTyp
 /-- The declared parameter types of the method a site calls, receiver excluded. -/
 abbrev CallSite.parameterTypes (site : CallSite) : List TypeExpr := site.method.parameters
 
+/-- The method type arguments of a call: the prefix of `typeArguments` before the owner's. -/
+def siteMethodArguments (site : CallSite) : List TypeExpr :=
+  site.typeArguments.take (site.typeArguments.length - site.ownerArgumentCount)
+
 /-- The number of values a call at `site` consumes: its parameters and, for an instance
     method, the receiver. -/
 def CallSite.argumentCount (site : CallSite) : Nat :=

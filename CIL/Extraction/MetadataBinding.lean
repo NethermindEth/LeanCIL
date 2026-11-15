@@ -437,6 +437,9 @@ def checkCallOperand (env : MetadataEnv) (frame : Frame) (token : Nat) (call : C
     throw (.genericMismatch token)
   if call.ownerArgumentCount != (if extracted then ownerList.length else 0) then
     throw (.genericMismatch token)
+  if call.method.genericArity != site.genericArity ||
+      call.method.methodArguments != siteMethodArguments call then
+    throw (.genericMismatch token)
   if call.declaringType.headScope.any (bytesOf · != head.scope) then
     throw (.scopeMismatch token)
   let located := { frame with anchor := head.scope }

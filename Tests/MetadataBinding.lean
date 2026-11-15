@@ -226,6 +226,15 @@ theorem rejects_a_method_name_that_spells_no_bytes :
       (.operandMismatch tokens.writeLine) = true := by decide +kernel
 #print axioms rejects_a_method_name_that_spells_no_bytes
 
+/-- A call's typed method states the row's generic arity and the method arguments the site
+    instantiates; a site that disagrees on either names another method. -/
+theorem rejects_a_method_with_another_arity_or_arguments :
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.genericArity := 0 })
+      (.genericMismatch tokens.idSpec) = true ∧
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.methodArguments := [int32] })
+      (.genericMismatch tokens.idSpec) = true := by decide +kernel
+#print axioms rejects_a_method_with_another_arity_or_arguments
+
 /-- A string heap entry that holds a value above a byte is refused when the slice is indexed,
     so every row name the call check reads is a metadata name. -/
 theorem rejects_a_row_name_that_is_not_bytes :
