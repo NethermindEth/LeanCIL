@@ -108,7 +108,7 @@ theorem size_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvi
       [{ profile := profile, code := [.ldc_i4 size, .ret], locals := [], returnsValue := true,
          declared := declared, environment := environment }]
       8 0 [] memory).map Prod.snd = .ok [.scalar (.i32 size)] := by
-  rcases declared with ⟨receiver, parameters, returnType⟩
+  rcases declared with ⟨receiver, parameters, returnType, initLocals⟩
   cases returnedType
   rfl
 

@@ -5,6 +5,7 @@ import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.GuardCalls
+import CIL.Resolution
 
 /-!
 # Scalar flow
@@ -396,14 +397,6 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
-/-- The width and sign extension of a class instance field of `type`: integer, Boolean, Char
-    and enum fields only, each fitting one `objectFieldSlot`. -/
-private def objectFieldShape (type : TypeExpr) : Option (Nat × Bool) :=
-  match typeStorage [] type with
-  | some (.field kind) => (primitiveFieldWidth kind).map fun width =>
-    (width, kind == .signed8 || kind == .signed16)
-  | _ => none
-
 /-- An instance field instruction on a class, or an emitted class field operation. -/
 private def objectFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
@@ -414,19 +407,6 @@ private def objectFieldSite (instruction : RawInstruction) (emitted : Instructio
   | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..)
   | .memory (.arrayField ..) | .memory (.setArrayField ..) => true
   | _ => false
-
-/-- A class instance field whose slot holds an object reference: one typed as an admitted class
-    or as an array of one, which is itself an object on the heap. -/
-private def referenceFieldType : TypeExpr → Bool
-  | .object _ _ | .array (.object _ _) => true
-  | _ => false
-
-/-- The element of a class instance field typed as an array of a value type, as the evaluation
-    stack records it: a struct element by its identity alone. -/
-private def valueArrayFieldElement (type : TypeExpr) : Option ArrayElement :=
-  match type with
-  | .array element => arrayElementType element
-  | _ => none
 
 /-- An emitted field element is the declared one; a struct element's width is the layout's,
     which `MethodLayoutsValid` checks at the layout use naming the field access. -/
@@ -1075,7 +1055,7 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Instruction → Bool
-  | _, none, none, .unsupported _ => true
+  | _, none, none, .unadmitted _ => true
   | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (match role with

@@ -24,7 +24,7 @@ def expected : Method := {
   locals := [.unmodeled, .nullRef, .unmodeled]
   localKinds := [.word32, .reference, .word64]
   returnsValue := true
-  code := [.br 3, .unsupported "dead", .unsupported "dead",
+  code := [.br 3, .unadmitted 0, .unadmitted 0,
     .ldloc 1, .pop, .call 1 0, .ret] }
 
 /-- A separately specified body moves the live block past extra unreachable instructions. -/
@@ -71,7 +71,7 @@ def removed : Method := {
   locals := [.nullRef, .unmodeled]
   localKinds := [.reference, .word64]
   returnsValue := true
-  code := [.br 3, .unsupported "dead", .unsupported "dead",
+  code := [.br 3, .unadmitted 0, .unadmitted 0,
     .ldloc 0, .pop, .call 1 0, .ret] }
 
 /-- Deleting a dead numeric local changes later allocation identities despite equal scalars. -/
@@ -93,7 +93,7 @@ def thrower : Method := {
   locals := [.unmodeled]
   localKinds := [.word64]
   returnsValue := true
-  code := [.throw "System.InvalidOperationException"] }
+  code := [.throw .invalidOperation] }
 
 /-- The same parent embedding also transports calls to a throwing child. -/
 theorem throwing_embeds : MethodEmbeds [actual, thrower] 0 expected := by cil_embed
@@ -101,13 +101,13 @@ theorem throwing_embeds : MethodEmbeds [actual, thrower] 0 expected := by cil_em
 
 /-- The expected invocation raises from the allocated child frame. -/
 theorem expected_raises :
-    Safety.Raises [expected, thrower] 0 [] empty "System.InvalidOperationException" :=
-  ⟨10, ⟨1, 0, .thrown "System.InvalidOperationException"⟩, rfl, rfl⟩
+    Safety.Raises [expected, thrower] 0 [] empty .invalidOperation :=
+  ⟨10, ⟨1, 0, .thrown .invalidOperation⟩, rfl, rfl⟩
 #print axioms expected_raises
 
 /-- Named exceptions transfer with the retained numeric allocation layout. -/
 theorem actual_raises :
-    Safety.Raises [actual, thrower] 0 [] empty "System.InvalidOperationException" :=
+    Safety.Raises [actual, thrower] 0 [] empty .invalidOperation :=
   throwing_embeds.raises expected_raises
 #print axioms actual_raises
 

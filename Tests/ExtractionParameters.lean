@@ -10,7 +10,7 @@ def raw : RawArguments := {
   code := [.load 0, .store 3, .address 1, .load 3] }
 def reachable : List Bool := [true, true, true, true]
 def method : Method := {
-  code := [.ldarg 0, .stloc 2, .ldloca 1, .ldloc 2]
+  code := [.ldarg 0, .starg 3, .ldarga 1, .ldarg 3]
   locals := [.i64 0], localKinds := [.word64]
   parameterHomes := [(1, .word32), (3, .word32)]
   returnsValue := true }
@@ -20,10 +20,17 @@ example : ParameterHomesValid #[] raw reachable method := by decide
 example : validateParameterHomes #[] raw reachable { method with parameterHomes := [] } = false := by decide
 example : validateParameterHomes #[] raw reachable
     { method with parameterHomes := [(3, .word32), (1, .word32)] } = false := by decide
+-- A homed argument is stored, addressed and loaded by its own index, never as its home slot.
 example : validateParameterHomes #[] raw reachable
-    { method with code := [.ldarg 0, .stloc 2, .ldloca 1, .ldarg 3] } = false := by decide
+    { method with code := [.ldarg 0, .stloc 2, .ldarga 1, .ldarg 3] } = false := by decide
 example : validateParameterHomes #[] raw reachable
-    { method with code := [.ldarg 0, .stloc 1, .ldloca 1, .ldloc 2] } = false := by decide
+    { method with code := [.ldarg 0, .starg 3, .ldloca 1, .ldarg 3] } = false := by decide
+example : validateParameterHomes #[] raw reachable
+    { method with code := [.ldarg 0, .starg 3, .ldarga 1, .ldloc 2] } = false := by decide
+example : validateParameterHomes #[] raw reachable
+    { method with code := [.ldarg 0, .starg 1, .ldarga 1, .ldarg 3] } = false := by decide
+example : validateParameterHomes #[] raw reachable
+    { method with code := [.ldarg 0, .starg 3, .ldarga 3, .ldarg 3] } = false := by decide
 example : validateParameterHomes #[] raw reachable
     { method with localKinds := [.word32] } = false := by decide
 example : validateParameterHomes #[] raw reachable
@@ -31,6 +38,8 @@ example : validateParameterHomes #[] raw reachable
 example : validateParameterHomes #[] raw [true, true, true] method = false := by decide
 example : validateArgumentOp raw reachable .other true (.ldloc 2) = false := by decide
 example : validateArgumentOp raw reachable .other true (.ldarg 0) = false := by decide
+example : validateArgumentOp raw reachable .other true (.starg 3) = false := by decide
+example : validateArgumentOp raw reachable .other true (.ldarga 1) = false := by decide
 -- A local operand must name one of the declared locals: two locals admit index 1 and reject 2.
 def twoLocals : RawArguments := { raw with locals := [.field .unsigned64, .field .unsigned64] }
 example : validateArgumentOpIn twoLocals [] .other true (.ldloc 1) = true := by decide
@@ -39,29 +48,37 @@ example : validateParameterHomes #[] { raw with code := [.load 0, .store 9, .add
     reachable method = false := by decide
 
 -- A Byte parameter is loaded by `ldarg` of its own index: the step narrows it from the declared
--- signature, so the evidence compares no narrowing. A homed or misnumbered load is rejected.
+-- signature, so the evidence compares no narrowing. A homed parameter is loaded the same way,
+-- and a misnumbered load is rejected.
 def byteArgument : RawArguments :=
   { arguments := [.field .unsigned32, .field .unsigned8], locals := [], code := [.load 1] }
 example : validateArgumentOpIn byteArgument [] (.load 1) true (.ldarg 1) = true := by decide
 example : validateArgumentOpIn byteArgument [] (.load 1) true (.ldarg 0) = false := by decide
-example : validateArgumentOpIn byteArgument [1] (.load 1) true (.ldarg 1) = false := by decide
+example : validateArgumentOpIn byteArgument [1] (.load 1) true (.ldarg 1) = true := by decide
+example : validateArgumentOpIn byteArgument [1] (.load 1) true (.ldloc 0) = false := by decide
+example : validateArgumentOpIn byteArgument [] (.store 1) true (.starg 1) = false := by decide
 
--- The address of a span parameter's home is the address instruction, whose step pushes the
--- view the home holds; a load of the home in its place is rejected.
+-- The address of a span parameter is `ldarga` of the parameter, whose step pushes the view its
+-- home holds; the address of the home slot or a load in its place is rejected.
 def spanArgument : RawArguments :=
   { arguments := [.span 4 true], locals := [], code := [.address 0] }
-example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldloca 0) = true := by
+example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldarga 0) = true := by
   decide
-example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldloc 0) = false := by
+example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldloca 0) = false := by
+  decide
+example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldarg 0) = false := by
+  decide
+-- An argument without a home has no address to take.
+example : validateArgumentOpIn spanArgument [] (.address 0) true (.ldarga 0) = false := by
   decide
 
--- Dead argument stores create no home; their emitted site must actually be unsupported.
+-- Dead argument stores create no home; their emitted site must be a hole.
 def pruned : RawArguments := {
   arguments := [.field .unsigned32], locals := [], code := [.store 0, .load 0] }
 example : ParameterHomesValid #[] pruned [false, true]
-    { code := [.unsupported "pruned", .ldarg 0], locals := [], returnsValue := true } := by decide
+    { code := [.unadmitted 0x10, .ldarg 0], locals := [], returnsValue := true } := by decide
 example : validateParameterHomes #[] pruned [false, true]
-    { code := [.stloc 0, .ldarg 0], locals := [], returnsValue := true } = false := by decide
+    { code := [.starg 0, .ldarg 0], locals := [], returnsValue := true } = false := by decide
 
 /-- An `Option` `mapM` relates each output entry to the input entry at the same index. -/
 private theorem mapM_entry {α β : Type} {f : α → Option β} :

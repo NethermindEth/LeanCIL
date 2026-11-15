@@ -85,8 +85,25 @@ internal sealed class MetadataSlices(PinnedAssemblies pinned)
         return (metadata, collection.Tables(), collection.Assemblies());
     }
 
-    internal static string Bytes(IEnumerable<byte> bytes) =>
-        "[" + string.Join(", ", bytes.Select(value => value.ToString(CultureInfo.InvariantCulture))) + "]";
+    /// <summary>The most bytes one numeral of a byte literal holds: the elaborator parses a numeral in time quadratic
+    /// in its digits.</summary>
+    const int LiteralChunkBytes = 256;
+
+    /// <summary>
+    /// A Lean byte list as <c>CIL.Extraction.fixedBytes</c> literals of at most <see cref="LiteralChunkBytes"/> bytes,
+    /// each its length and one big-endian hexadecimal numeral, joined by <c>++</c>. The elaborator reads one numeral
+    /// where a list literal costs a numeral and a constructor per byte; the qualified name resolves wherever the text
+    /// is pasted.
+    /// </summary>
+    internal static string Bytes(IEnumerable<byte> bytes)
+    {
+        var data = bytes.ToArray();
+        if (data.Length == 0) return "[]";
+        var chunks = data.Chunk(LiteralChunkBytes)
+            .Select(chunk => $"CIL.Extraction.fixedBytes {chunk.Length} 0x{Convert.ToHexString(chunk)}").ToArray();
+        // `++` associates to the left, which copies every prefix again; nesting to the right copies each chunk once.
+        return "(" + string.Join(" ++ (", chunks) + new string(')', chunks.Length);
+    }
 
     /// <summary>The reserved offset for a heap entry omitted from the carried evidence.</summary>
     internal static uint OmittedHeapOffset(int width) => width switch

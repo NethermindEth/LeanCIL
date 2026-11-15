@@ -74,7 +74,7 @@ foreach (var method in methods)
     {
         foreach (var (length, storage, fault) in new[]
         {
-            (1, "memory", ".thrown \"System.ArgumentOutOfRangeException\""),
+            (1, "memory", ".thrown .argumentOutOfRange"),
             (8, "uninitialized", ".memory .uninitialized _ _")
         })
             claims.Add("(match CIL.Safety.invoke Extracted.program 512 0 " +

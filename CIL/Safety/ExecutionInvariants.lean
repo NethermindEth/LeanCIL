@@ -136,6 +136,29 @@ theorem loadArgument_result_valid (body : CIL.Method) (index : Nat) (args : List
     | split at h
 #print axioms loadArgument_result_valid
 
+/-- A successful argument store writes its home's frame slot, as `stloc` of that slot does. -/
+theorem storeArgument_stores {body : CIL.Method} {index : Nat} {value : Value} {frame : Frame}
+    {m : Memory} {stored : Frame × Memory}
+    (h : storeArgument body index value frame m = .ok stored) :
+    ∃ slot home final, frame.locals[slot]? = some home ∧
+      storeLocal m home value = .ok (final, stored.2) ∧
+      stored.1 = { frame with locals := frame.locals.set slot final } := by
+  unfold storeArgument at h
+  split at h
+  · rename_i slot _
+    cases found : frame.locals[slot]? with
+    | none => simp only [found] at h; cases h
+    | some home =>
+      simp only [found, Bind.bind, Except.bind, Pure.pure, Except.pure] at h
+      cases written : storeLocal m home value with
+      | error _ => simp only [written] at h; cases h
+      | ok result =>
+        simp only [written, Except.ok.injEq] at h
+        subst h
+        exact ⟨slot, home, result.1, found, by rw [written], rfl⟩
+  · cases h
+#print axioms storeArgument_stores
+
 theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
     (h : localAddress m slot = .ok value) : value.Valid m := by
   cases slot with
@@ -146,6 +169,18 @@ theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value
   | array _ _ => cases h
   | methodPointer _ _ | methodTable _ _ | object _ => cases h
   | bytes kind r => exact formValue_result_valid m (.address r) value h
+
+/-- An argument address is valid in the memory it was taken in, as its home's address is. -/
+theorem addressArgument_result_valid (body : CIL.Method) (index : Nat) (frame : Frame)
+    (m : Memory) (value : Value) (h : addressArgument body index frame m = .ok value) :
+    value.Valid m := by
+  unfold addressArgument at h
+  split at h
+  · split at h
+    · exact localAddress_result_valid _ _ _ h
+    · cases h
+  · cases h
+#print axioms addressArgument_result_valid
 
 theorem ValuesValid.drop {m : Memory} {values : List Value}
     (valid : ValuesValid m values) (count : Nat) : ValuesValid m (values.drop count) :=
@@ -195,6 +230,19 @@ theorem StepContract.of_effect {body : CIL.Method} {operation : CIL.Instruction}
       ValuesValid action.memory stack → action.LiveValues) :
     StepContract body operation frame stack m action :=
   ⟨effect, fun hm valid => preserve hm effect.allocations (valid.preserve hm effect.allocations)⟩
+
+/-- A successful argument store has the effect of a local store to the argument's home. -/
+theorem StepContract.storeArgument {body : CIL.Method} {index : Nat} {frame : Frame}
+    {value : Value} {rest : List Value} {m : Memory} {stored : Frame × Memory} {pc : Nat}
+    (h : storeArgument body index value frame m = .ok stored) :
+    StepContract body (.starg index) frame (value :: rest) m
+      (.next pc rest stored.1 stored.2) := by
+  obtain ⟨slot, home, final, found, written, same⟩ := storeArgument_stores h
+  rw [same]
+  refine StepContract.of_effect (.store found written) ?_
+  intro _ _ retained
+  exact retained.tail
+#print axioms StepContract.storeArgument
 
 theorem StepContract.instruction {body : CIL.Method} {operation : CIL.Instruction} {frame : Frame}
     {stack values : List Value}
@@ -335,6 +383,8 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     | split at executed
 #print axioms managedStep_contract
 
+-- The walk splits every arm of both dispatcher matches, argument homes included.
+set_option maxHeartbeats 400000 in
 /-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
     so it is the place that breaks when an instruction is added without an effect. -/
 theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
@@ -345,7 +395,9 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply managedStep_contract; assumption
+    | solve | exact StepContract.storeArgument (by assumption)
     | unfold returnFrom at h
+    | unfold localAllocation at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
     | solve |
         apply StepContract.initializeSpanLocal
@@ -399,6 +451,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
                   | exact (referenceSubtract_valid _ _ _ _ (by assumption)).2
                   | apply loadLocal_result_valid; assumption
                   | apply loadArgument_result_valid; assumption
+                  | apply addressArgument_result_valid; assumption
                   | apply localAddress_result_valid; assumption
                   | apply allocated_store_reference_valid; exact hm; assumption; assumption
                   | apply allocated_storeLocal_reference_valid; exact hm; assumption; assumption

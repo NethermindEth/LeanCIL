@@ -33,7 +33,7 @@ Four suites fail when cost grows faster than the size of the input. Run one with
 
 | Suite | Fails when |
 | --- | --- |
-| `lookups` | Heartbeats per instruction grow more than 1.15 times from about 500 to about 2,000 instructions, kernel heartbeats per array element address grow more than 1.15 times from 128 to 512 addresses, kernel heartbeats per instruction of the scalar certificate or closed argument storage of bodies of 128 to 512 loaded, addressed or `calli` pointer locals grow more than 1.25 times, kernel heartbeats per instruction of the feature certificate of local loads, stores and addresses grow more than 1.25 times from 256 to 4,096 instructions or from 16 to 256 locals at a fixed length, the feature certificate's cost grows more than 4.5 times as much from 16 to 64 known local facts as from 4 to 16, the kernel heartbeats of one native method table step or one load of its first entry at 64 or 256 entries exceed 1.15 times those at 16 entries, the kernel heartbeats per index of a load of its last entry grow more than 1.15 times from 16 to 256 entries, the kernel heartbeats per byte of the call check's method name clause grow more than 1.15 times from 20 to 80 bytes, the kernel heartbeats per call of an embedding grow more than 1.15 times at four times the calls, or the heartbeats per call site of the managed-call check grow more than 1.35 times at four times the call sites; see [instruction lookups](InstructionLookups.md) |
+| `lookups` | Heartbeats per instruction grow more than 1.15 times from about 500 to about 2,000 instructions, kernel heartbeats per array element address grow more than 1.15 times from 128 to 512 addresses, kernel heartbeats per instruction of the scalar certificate or closed argument storage of bodies of 128 to 512 loaded, addressed or `calli` pointer locals grow more than 1.25 times, kernel heartbeats per instruction of the feature certificate of local loads, stores and addresses grow more than 1.25 times from 256 to 4,096 instructions or from 16 to 256 locals at a fixed length, the feature certificate's cost grows more than 4.5 times as much from 16 to 64 known local facts as from 4 to 16, the kernel heartbeats of one native method table step or one load of its first entry at 64 or 256 entries exceed 1.15 times those at 16 entries, the kernel heartbeats per index of a load of its last entry grow more than 1.15 times from 16 to 256 entries, the kernel heartbeats per byte of the call check's method name clause or of a metadata name's encoding grow more than 1.15 times from 20 to 80 or from 80 to 320 bytes, the kernel heartbeats per call of an embedding grow more than 1.15 times at four times the calls, or the heartbeats per call site of the managed-call check grow more than 1.35 times at four times the call sites; see [instruction lookups](InstructionLookups.md) |
 | `stepping` | Checked stepping exceeds its per-instruction growth budgets; see [validation](../VALIDATION.md#proof-cost) |
 | `scaling` | The certificate of a six-method call graph exceeds the default heartbeat limit, kernel heartbeats per layout of the header struct layout check over nested or over generic structs, or of a method's layout check over nested structs, grow more than 1.5 times from 64 to 512 structs, or 512 structs of either kind do not check within 8 GiB |
 | `excluded` | Certificates with hundreds of excluded and live sites exceed the default heartbeat limit |
@@ -53,25 +53,18 @@ A job's summary and each suite's transcript report the suite's verification time
 
 ## Fold discovery
 
-Two files measure the kernel evaluating `foldRoles`, which
-[fold discovery](../VALIDATION-EXPORTS.md#fold-discovery) keeps from scanning the whole body once
-per local or per message load. Each proves its statement by `decide +kernel`:
+`docs/performance/fold-roles/ThrowScaling.lean` measures the kernel evaluating `foldRoles` on
+4,096 message loads with no admitted throw fold. The statement uses `decide +kernel`;
+[fold discovery](../VALIDATION-EXPORTS.md#fold-discovery) bounds the scan at each message load.
 
-| File | Workload |
-| --- | --- |
-| `docs/performance/fold-roles/CountScaling.lean` | 256 span locals, each stored once and loaded by address once before a receiver call; includes building the local-use index |
-| `docs/performance/fold-roles/ThrowScaling.lean` | 4,096 message loads with no admitted throw fold |
-
-Build the module they import, then time each file:
+Build the imported module, then time the file:
 
 ```sh
 lake build CIL.Extraction.Folds
-lake env lean -Dprofiler=true docs/performance/fold-roles/CountScaling.lean
 lake env lean -Dprofiler=true docs/performance/fold-roles/ThrowScaling.lean
 ```
 
-To check scaling, double the size (`256` or `4096`, at each occurrence in the file) in a scratch
-copy and compare. The time of `ThrowScaling.lean` should about double; a fourfold increase means
-a scan per load has returned. The time of `CountScaling.lean` should also about double, since
-each local's type is read from an index built once. There are no reference figures for these
-files; the `lookups` suite checks addressed locals with a failing limit.
+To check scaling, double the size (`4096`, at each occurrence in the file) in a scratch copy
+and compare. The time should about double; a fourfold increase indicates an unbounded scan per
+load. There are no reference figures for this file. The `lookups` suite checks addressed locals
+with a failing limit.

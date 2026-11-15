@@ -57,7 +57,7 @@ private def andBody := raw [i 40 (.call slot), i 44 (.target 4), i 40 (.call slo
 private def andStates : FeatureCertificate :=
   [state [], state [some 1], state [], state [some 1], none, none]
 private def andCode : List Instruction :=
-  [.call 1 0, .brfalse 4, .call 1 0, .ret, .unsupported "pruned", .unsupported "pruned"]
+  [.call 1 0, .brfalse 4, .call 1 0, .ret, .unadmitted 22, .unadmitted 42]
 
 /-- Bodies that never fold: a static read, an `Int32` constant, a parameterized constant, two
     `ret`s with different words, a `ret`-free body, and a Boolean slot returning 2. -/
@@ -84,14 +84,14 @@ private def callerOff : FeatureCertificate :=
   [state [], state [some 0], none, none, state [], state [some 1]]
 
 private def callerOffCode (index : Nat) : List Instruction :=
-  [.call index 0, .brfalse 4, .unsupported "pruned", .unsupported "pruned", .ldc_i4 1, .ret]
+  [.call index 0, .brfalse 4, .unadmitted 29, .unadmitted 42, .ldc_i4 1, .ret]
 
 /-- The certificate that prunes the block a false flag would run. -/
 private def callerOn : FeatureCertificate :=
   [state [], state [some 1], state [], state [some 7], none, none]
 
 private def callerOnCode (index : Nat) : List Instruction :=
-  [.call index 0, .brfalse 4, .ldc_i4 7, .ret, .unsupported "pruned", .unsupported "pruned"]
+  [.call index 0, .brfalse 4, .ldc_i4 7, .ret, .unadmitted 23, .unadmitted 42]
 
 /-- The table reads the off, on and computed getters, and nothing else, including any index past
     the program, where a contract import would be. -/

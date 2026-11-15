@@ -1815,6 +1815,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         public int Removed;
         public int Unjudged;
+        /// <summary>The pass reached its limit; from then on it read and removed nothing.</summary>
         public bool GaveUp;
         public string? Failure;
     }
@@ -1859,18 +1860,19 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// <summary>
     /// Reads the lakefile in `package` on a background thread that is never waited for beyond the limit, since
     /// a network mount that does not answer, or a named pipe, blocks a read without end. Finished is false
-    /// when the read was not attempted because the pass limit had passed, or did not complete in time, and the
-    /// caller must then keep what it cannot judge; with Finished, the text is null when the read failed.
+    /// when the read was not attempted because the pass had reached its limit, or did not complete in time, and
+    /// the caller must then keep what it cannot judge; with Finished, the text is null when the read failed.
+    /// A read that does not complete within the rest of the pass limit ends the pass.
     /// </summary>
-    static (bool Finished, string? Text) ReadPackageLakefile(string package, DateTime deadline, PassReport? report)
+    static (bool Finished, string? Text) ReadPackageLakefile(string package, DateTime deadline, PassReport report)
     {
-        var wait = deadline - passClock();
-        if (wait > packageReadLimit) wait = packageReadLimit;
-        if (wait <= TimeSpan.Zero)
+        var remaining = report.GaveUp ? TimeSpan.Zero : deadline - passClock();
+        if (remaining <= TimeSpan.Zero)
         {
-            if (report is not null) report.GaveUp = true;
+            report.GaveUp = true;
             return (false, null);
         }
+        var wait = remaining < packageReadLimit ? remaining : packageReadLimit;
         string? text = null;
         var worker = new Thread(() =>
         {
@@ -1879,7 +1881,9 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         }) { IsBackground = true };
         worker.Start();
         if (worker.Join(wait)) return (true, text);
-        if (report is not null) report.Unjudged++;
+        report.Unjudged++;
+        // The wait is rounded down to whole milliseconds, so the clock can still read before the deadline here.
+        if (wait == remaining) report.GaveUp = true;
         return (false, null);
     }
 
@@ -1903,7 +1907,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// every `workspace` run renews it. Whatever reading the pin or the lakefile raises counts as unreadable.
     /// </summary>
     static bool PinLive(FileInfo pin, string key, TimeSpan retention, DateTime now, DateTime deadline,
-        PassReport? report)
+        PassReport report)
     {
         var age = now - pin.LastWriteTimeUtc;
         if (age <= RecentUse) return true;
@@ -1947,10 +1951,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// <summary>
     /// Deletes a pin that no longer protects its entry. The pin is renamed to a name no pin pattern matches,
     /// and its age and liveness are read again from the renamed file; a pin that was renewed meanwhile is
-    /// renamed back, and one that cannot be renamed is left where it is. True when the pin is gone.
+    /// renamed back, and one that cannot be renamed is left where it is. True when the pin is gone. A pass that
+    /// has reached its limit retires no pin.
     /// </summary>
-    static bool RetirePin(FileInfo pin, string key, TimeSpan retention, DateTime deadline, PassReport? report)
+    static bool RetirePin(FileInfo pin, string key, TimeSpan retention, DateTime deadline, PassReport report)
     {
+        if (PassStopped(deadline, report)) return false;
         beforePinRetired(pin.FullName);
         var aside = pin.FullName + ".dead-" + Guid.NewGuid().ToString("N");
         try { File.Move(pin.FullName, aside); }
@@ -1987,11 +1993,12 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// with it, and so do download archives and unfinished pins a killed publisher left for a day. A pin
     /// that a pass set aside and did not finish with is put back and judged again.
     /// `removing` is told how many directories are chosen, before the first is deleted, when there are any.
-    /// With `library` the pass stops choosing, reading and removing once <see cref="passLimit"/> has passed,
-    /// and a lakefile outside the cache is waited for at most <see cref="packageReadLimit"/>. A pin whose
-    /// lakefile was not read, for either reason, keeps its entry, so past the limit the pass removes no pin
-    /// and no entry; a deletion already under way finishes. `report` says what happened. Reads each
-    /// directory's name and write time once. Returns the names of the directories removed.
+    /// With `library` the pass stops choosing, reading and removing once <see cref="passLimit"/> has passed
+    /// or a lakefile read has waited out the rest of it, and a lakefile outside the cache is waited for at most
+    /// <see cref="packageReadLimit"/>. A pin whose lakefile was not read, for either reason, keeps its entry,
+    /// so once the pass has reached its limit it removes no pin, entry or closure record; a deletion under way
+    /// finishes. `report` says what happened. Reads each directory's name and write time once. Returns the
+    /// names of the directories removed.
     /// </summary>
     static List<string> EvictUnused(string root, Regex entries, Regex staging, TimeSpan retention, int? limit = null,
         string? protectedName = null, Action<int>? removing = null, bool library = false,
@@ -1999,6 +2006,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         var now = DateTime.UtcNow;
         var deadline = passClock() + passLimit;
+        report ??= new PassReport();
         var items = new DirectoryInfo(root).EnumerateFileSystemInfos().ToList();
         var restoredPins = new List<FileInfo>();
         if (library)
@@ -2042,25 +2050,30 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         var removed = new List<string>();
         foreach (var (entry, unused) in doomed)
         {
-            if (library && passClock() > deadline)
-            {
-                if (report is not null) report.GaveUp = true;
-                break;
-            }
+            if (library && PassStopped(deadline, report)) break;
             if (!Evict(entry, library && entries.IsMatch(entry.Name), unused)) continue;
             removed.Add(entry.Name);
-            if (report is not null) report.Removed++;
+            report.Removed++;
         }
-        if (library && passClock() <= deadline)
+        if (library && !PassStopped(deadline, report))
             RemoveSidecars(sidecars, directories.Select(entry => entry.Name).ToHashSet(), removed, retention,
                 deadline, report);
-        else if (library && report is not null) report.GaveUp = true;
         return removed;
+    }
+
+    /// <summary>
+    /// Whether a library pass has reached its limit, by the clock or by a read that waited out the rest of it.
+    /// Once true it stays true for the pass, and `report` says so.
+    /// </summary>
+    static bool PassStopped(DateTime deadline, PassReport report)
+    {
+        if (!report.GaveUp && passClock() > deadline) report.GaveUp = true;
+        return report.GaveUp;
     }
 
     /// <summary>Whether a package still requires `entry` by path; pins of packages that do not are retired.</summary>
     static bool PinnedByPackage(DirectoryInfo entry, IEnumerable<FileInfo> pins, TimeSpan retention,
-        DateTime deadline, PassReport? report)
+        DateTime deadline, PassReport report)
     {
         var live = false;
         foreach (var pin in pins)
@@ -2099,13 +2112,15 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     /// Deletes the pins of removed entries and the closure records that name an entry that is absent or was
     /// removed. A pin renewed since the pass listed it stays. The `.use` and `.lock` files stay: a lock on a
     /// file that was deleted excludes nothing, because the next process locks a new file of the same name.
+    /// Nothing is deleted once the pass has reached its limit.
     /// </summary>
     static void RemoveSidecars(List<FileInfo> sidecars, HashSet<string> present, List<string> removed,
-        TimeSpan retention, DateTime deadline, PassReport? report)
+        TimeSpan retention, DateTime deadline, PassReport report)
     {
         var gone = removed.ToHashSet(StringComparer.Ordinal);
         foreach (var file in sidecars)
         {
+            if (PassStopped(deadline, report)) return;
             var match = LibrarySidecar().Match(file.Name);
             var key = match.Groups["key"].Value;
             if (match.Groups["kind"].Value == "closure")
@@ -4452,6 +4467,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // are not built yet, a conservative source snapshot safely widens the key.
             var supportSources = SupportInputs(session, support, before);
             var supportKey = ContentKey("support-audit-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" +
+                extraction.Sha256 + "\n" +
                 string.Join("\n", support.Order(StringComparer.Ordinal)) + "\n" + JsonSerializer.Serialize(supportSources));
             if (!preparedSupport.Contains(supportKey))
             {

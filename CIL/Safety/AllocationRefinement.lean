@@ -53,7 +53,8 @@ theorem ProgramRenaming.raises
     {initial : Memory} (formed : initial.WellFormed) (statics : initial.StaticBindingsBounded)
     (literals : initial.LiteralsBounded) {method : Nat} {arguments : List Value}
     (argumentValues : ValuesValid initial arguments)
-    {exception : String} (raised : Raises sourceProgram method arguments initial exception) :
+    {exception : ExceptionType}
+    (raised : Raises sourceProgram method arguments initial exception) :
     Raises targetProgram method arguments initial exception :=
   raised.rename StepRenaming.stepTransport programs formed statics literals argumentValues
 #print axioms ProgramRenaming.raises

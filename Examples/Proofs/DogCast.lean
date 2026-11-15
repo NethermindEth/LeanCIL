@@ -38,7 +38,7 @@ theorem bird_throws (memory : CIL.Safety.Memory) (animal : Reference)
     (formed : formObject memory (.address animal) = .ok (.object (.address animal)))
     (typed : runtimeTypeOf memory animal = .ok bird) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object (.address animal)] memory =
-      .error ⟨0, 1, .thrown "System.InvalidCastException"⟩ := by
+      .error ⟨0, 1, .thrown .invalidCast⟩ := by
   cil_checked_steps [formed, typed, bird, scope, animalType, RuntimeType.lineage]
 
 #print axioms bird_throws
@@ -59,7 +59,7 @@ theorem correctness (memory : CIL.Safety.Memory) (animal : Reference)
         .ok (memory, [.object (.address animal)])) ∧
     (runtimeTypeOf memory animal = .ok bird → ∃ fuel,
       invoke Extracted.program fuel 0 [.object (.address animal)] memory =
-        .error ⟨0, 1, .thrown "System.InvalidCastException"⟩) ∧
+        .error ⟨0, 1, .thrown .invalidCast⟩) ∧
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
       .ok (memory, [.object .null]) :=
   ⟨dog_casts memory animal formed, bird_throws memory animal formed, null_casts memory⟩

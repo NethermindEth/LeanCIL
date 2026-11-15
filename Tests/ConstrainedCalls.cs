@@ -219,7 +219,7 @@ foreach (var name in new[] { "TraceOff", "CountOn" })
     var output = Path.Combine(root, "Flags-" + name);
     Run(["dotnet", ExtractorPath, "extract", assembly, $"ConstantFlags::{name}(ulong)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    if (!source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+    if (!source.Contains("  .unadmitted ", StringComparison.Ordinal))
         throw new Exception("Constant flag block was not pruned: " + name);
     var claims = new[] { 0UL, 5UL, ulong.MaxValue, 1UL << 63 }
         .Select(input => (input, result: (ulong)constantFlags.GetMethod(name)!.Invoke(null, [input])!))
@@ -253,7 +253,7 @@ foreach (var (type, name, pruned, assume) in new (string, string, bool?, bool)[]
         .. assume ? new[] { "--assume-initialized", "Examples.StaticScalars" } : []]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     if (pruned is bool expected && expected !=
-        source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        source.Contains("  .unadmitted ", StringComparison.Ordinal))
         throw new Exception("Unexpected flag pruning: " + name);
     if (name == "WidthNarrow") widthNarrow = source;
     var entry = staticInterfaces.Assembly.GetType("Examples." + type)!.GetMethod(name)!;
@@ -458,7 +458,7 @@ foreach (var (owner, name) in new[]
     Run(["dotnet", ExtractorPath, "extract", assembly, $"{owner}::{name}(ulong)", output]);
     var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
     if (name == "TraceQuiet" &&
-        !source.Contains(".unsupported \"Unreachable under selected profile\"", StringComparison.Ordinal))
+        !source.Contains("  .unadmitted ", StringComparison.Ordinal))
         throw new Exception("Derived constant flag block was not pruned: " + name);
     mostSpecificSources[name] = source;
     var method = examples.GetType("Examples." + owner)!.GetMethod(name)!;

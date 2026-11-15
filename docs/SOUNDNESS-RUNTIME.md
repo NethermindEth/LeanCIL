@@ -487,7 +487,7 @@ surrogate, backspace or form feed, which a Lean string literal cannot carry exac
 `ThrowIfEqual`, `ThrowIfNotEqual`, `ThrowIfGreaterThan`, `ThrowIfGreaterThanOrEqual`,
 `ThrowIfLessThan` and `ThrowIfLessThanOrEqual` run as checked operations
 ([CIL/ArgumentGuards.lean](../CIL/ArgumentGuards.lean)). Each ends in the named outcome
-`.thrown "System.ArgumentNullException"` or `.thrown "System.ArgumentOutOfRangeException"` exactly
+`.thrown .argumentNull` or `.thrown .argumentOutOfRange` exactly
 when its condition holds, and otherwise pops its operands and leaves memory unchanged
 ([GuardCount](../Examples/Proofs/GuardCount.lean), [GuardIndex](../Examples/Proofs/GuardIndex.lean),
 [GuardRequired](../Examples/Proofs/GuardRequired.lean)). The contracts follow the .NET 10 sources:
