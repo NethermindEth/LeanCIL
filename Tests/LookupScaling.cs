@@ -296,9 +296,8 @@ void ArgumentResolutionCosts()
     }
 }
 
-// The managed-call check of a body with `sites` call sites, each followed by a nop, and the literal link table the
-// extractor emits for it. The check reads every pc's link by one walk beside the code; a table scan per pc costs the
-// square of the call sites.
+// Decides the managed-call check on bodies of call and nop pairs with the extractor's literal table; a per-pc table
+// scan costs the square of the call sites.
 void CallCheckCosts()
 {
     var checkDirectory = At("artifacts/LookupScaling/CallCheck");
