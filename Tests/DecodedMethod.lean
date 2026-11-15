@@ -1,6 +1,5 @@
 import CIL.Extraction.DecodedMethod
-import Tests.BodyEncoding
-import Tests.MetadataWorld
+import Tests.BodyDecoding
 
 /-!
 # Decoded method tests
@@ -14,22 +13,7 @@ gives no method, and neither does a program with such a body.
 
 namespace Tests.DecodedMethod
 
-open CIL CIL.Extraction Tests.BodyEncoding Tests.MetadataWorld
-
-/-- The assembly whose metadata the bodies are checked against. -/
-private def pin : AssemblyPin := { identity := ownIdentity }
-
-/-- The world's `Main`, a public static method with no parameters, with the given body fields. -/
-private def method (initLocals : Bool) (locals : List TypeExpr) (code : List RawInstruction) :
-    RawMethod :=
-  { token := tokens.main, owner := ownIdentity ++ "::Program", hasThis := false,
-    explicitThis := false, callingConvention := 0, attributes := 0x96, implementation := 0,
-    returnType := .void, parameters := [], locals := locals, initLocals := initLocals,
-    maxStack := 8, genericParameters := [], code := code }
-
-/-- One raw instruction. -/
-private def instr (offset opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
-  { offset := offset, opcode := opcode, operand := operand }
+open CIL CIL.Extraction Tests.BodyEncoding Tests.BodyDecoding Tests.MetadataWorld
 
 /-- The method of the bytes of `body` against the definition `original`, with no layouts. -/
 private def decoded (body : Option BodyEvidence) (original : RawMethod) : Option Method :=
@@ -37,11 +21,11 @@ private def decoded (body : Option BodyEvidence) (original : RawMethod) : Option
 
 /-- `ldc.i4.1; ldc.i4.2; add; ret`. -/
 private def addRaw : RawMethod :=
-  method false [] [instr 0 0x17, instr 1 0x18, instr 2 0x58, instr 3 0x2A]
+  method 8 false [] [instr 0 0x17, instr 1 0x18, instr 2 0x58, instr 3 0x2A]
 
 /-- `ldc.i4.1; ldc.i4.2; sub; ret`. -/
 private def subRaw : RawMethod :=
-  method false [] [instr 0 0x17, instr 1 0x18, instr 2 0x59, instr 3 0x2A]
+  method 8 false [] [instr 0 0x17, instr 1 0x18, instr 2 0x59, instr 3 0x2A]
 
 /-- The frame both bodies declare: no locals, no homes, no arguments, no return value. -/
 private def frame (code : List Instruction) : Method :=
@@ -63,7 +47,7 @@ theorem code_read_from_bytes :
 
 /-- `ldarg.0; ldarg.1; add; ret` over two `uint64` parameters, returning `uint64`. -/
 private def addArgumentsRaw : RawMethod :=
-  { method false [] [instr 0 0x02, instr 1 0x03, instr 2 0x58, instr 3 0x2A] with
+  { method 8 false [] [instr 0 0x02, instr 1 0x03, instr 2 0x58, instr 3 0x2A] with
     parameters := [uint64, uint64], returnType := uint64 }
 
 /-- The bytes `12 02 03 58 2A` decode to the two argument loads, the add and the return. -/
@@ -78,7 +62,7 @@ theorem add_arguments_decode :
 
 /-- `ldc.i4.1; stloc.0; ldloc.0; ret` over one `uint32` local, with the given init flag. -/
 private def localRaw (initLocals : Bool) : RawMethod :=
-  method initLocals [uint32] [instr 0 0x17, instr 1 0x0A, instr 2 0x06, instr 3 0x2A]
+  method 8 initLocals [uint32] [instr 0 0x17, instr 1 0x0A, instr 2 0x06, instr 3 0x2A]
 
 /-- The locals start at zero exactly when the bytes set the init flag, whatever the definition
     says. -/
@@ -108,12 +92,9 @@ theorem refused_body_has_no_method :
 private def newarrBytes : List Nat :=
   [0x22, 0x17, 0x8D] ++ littleEndian 4 tokens.objectRef ++ [0x26, 0x2A]
 
-/-- The system type `newarr` names. -/
-private def objectType : TypeExpr := .atom runtimeScope "System.Object"
-
 /-- The definition `newarrBytes` decode to. -/
 private def newarrRaw : RawMethod :=
-  method false [] [instr 0 0x17, instr 1 0x8D (.type objectType), instr 6 0x26, instr 7 0x2A]
+  method 8 false [] [instr 0 0x17, instr 1 0x8D (.type objectType), instr 6 0x26, instr 7 0x2A]
 
 /-- `newarrBytes` with its token table and the world's metadata. -/
 private def newarrBody : BodyEvidence :=

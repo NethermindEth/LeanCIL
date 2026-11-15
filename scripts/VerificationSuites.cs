@@ -30,7 +30,7 @@ internal static class VerificationSuites
         [Core] =
         [
             "Add", "AddModel", "Alias", "Calls", "CertificateReuse", "Choose", "ConsumerBatchA", "ConsumerBatchB",
-            "ConsumerSupportUnion", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
+            "ConsumerSupportUnion", "DecodedAdd", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
             "ProofBindingFamilies",
             "StaticData", "Struct", "StructCopy", "VerificationReuse", "WrongAdd"
         ],
