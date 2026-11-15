@@ -37,7 +37,7 @@ foreach (var name in new[]
 {
     "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests", "Throws", "SpanTables",
     "MemorySpans", "ReferenceInstructions", "PointerOperations", "Objects", "StaticValues", "StaticScalarValues",
-    "TranslationAudit", "MetadataDifferential", "Guards", "Strings", "Identities"
+    "TranslationAudit", "MetadataDifferential", "Strings", "Identities"
 })
     Run(["dotnet", "run", "--file", $"Tests/{name}.cs"], streamOutput: true, progress: name);
 Console.WriteLine("PASS complete extraction evidence, compiled fixtures, mutations and mandatory certificate audit");

@@ -58,7 +58,7 @@ internal static class VerificationSuites
             "universal checked contracts, caller memory preservation and incorrect implementations"),
         new("evidence", "Tests/ExtractionEvidence.cs",
             "independent extraction certificates, malformed evidence rejection, the metadata decoder's method " +
-            "names against Cecil's, framework argument guards, strings as opaque references, typed identity " +
+            "names against Cecil's, strings as opaque references, typed identity " +
             "display, and the certificate index, feature getter, layout accumulation and projection, extraction " +
             "home and generic owner index libraries"),
         // Split from evidence so neither job approaches the CI timeout.

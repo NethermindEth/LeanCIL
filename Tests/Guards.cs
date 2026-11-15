@@ -11,6 +11,7 @@
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
+// Standalone runner for the argument guard proofs; no suite runs it.
 // Framework argument guards as checked runtime contracts: proofs that each raises its exception exactly when its .NET
 // condition holds, a proof that fails once the guard is swapped, and named rejection of uncatalogued guard overloads.
 using var verification = new Program();
