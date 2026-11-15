@@ -433,6 +433,7 @@ void CheckEntryType()
 
 void ReferenceScaling()
 {
+    const int QueryPasses = 3;
     (long Registration, long Decoding, long Queries) MeasureReferences(int count, int nameBytes, int keyBytes)
     {
         var requests = new AssemblyNameReference[count];
@@ -458,12 +459,19 @@ void ReferenceScaling()
             .GetValue(metadata)!;
         Require(cache.Count == count + 1, "Raw identities were not cached once per requested row.");
         var cached = cache.Values.Cast<object>().ToArray();
-        allocated = GC.GetAllocatedBytesForCurrentThread();
-        started = System.Diagnostics.Stopwatch.GetTimestamp();
-        for (int repeat = 0; repeat < 64; repeat++)
-            foreach (var reference in module.AssemblyReferences) reject(reference);
-        double queryMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-        long queries = GC.GetAllocatedBytesForCurrentThread() - allocated;
+        // One pass can carry bytes the runtime allocated on this thread for itself; an allocation
+        // per query appears in every pass, so the least pass is the cost of the queries.
+        double queryMs = double.MaxValue;
+        long queries = long.MaxValue;
+        for (int pass = 0; pass < QueryPasses; pass++)
+        {
+            allocated = GC.GetAllocatedBytesForCurrentThread();
+            started = System.Diagnostics.Stopwatch.GetTimestamp();
+            for (int repeat = 0; repeat < 64; repeat++)
+                foreach (var reference in module.AssemblyReferences) reject(reference);
+            queryMs = Math.Min(queryMs, System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            queries = Math.Min(queries, GC.GetAllocatedBytesForCurrentThread() - allocated);
+        }
         Require(cache.Count == cached.Length && cache.Values.Cast<object>().Zip(cached)
             .All(pair => ReferenceEquals(pair.First, pair.Second)), "Repeated resolution rebuilt raw identities.");
         Console.WriteLine($"{count} refs, name/key {nameBytes}/{keyBytes}: registration {registrationMs:F2} ms " +
