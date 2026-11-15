@@ -74,7 +74,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false none pc [] (CIL.widenMixed op values) (fun _ => none) profile with
+        match CIL.step op false none pc [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -87,7 +87,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false none q [] (CIL.widenMixed (op.relabel r) values) (fun _ => none) profile with
+        match CIL.step (op.relabel r) false none q [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -97,7 +97,6 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       Pure.pure (FrameAction.next (q + 1) __x.snd frame __x.fst)) =
         Except.ok (action.relabel r) := by
   rw [arity]
-  simp only [widenMixed_relabel]
   cases hp : pureArity op with
   | none =>
     rw [hp] at h
@@ -125,7 +124,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
         simp only at h ⊢
         split at h
         · rename_i target result memory found
-          rw [base (by simp [hp]) r pc q (CIL.widenMixed op values) profile target result memory next found]
+          rw [base (by simp [hp]) r pc q values profile target result memory next found]
           simp only at h ⊢
           cases hc : List.mapM (checkedValue m) (List.map Value.scalar result) with
           | error _ => rw [hc] at h; cases h
@@ -787,7 +786,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false none pc [] (CIL.widenMixed op values) (fun _ => none) profile with
+        match CIL.step op false none pc [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -801,7 +800,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false none q [] (CIL.widenMixed (op.relabel r) values) (fun _ => none) profile with
+        match CIL.step (op.relabel r) false none q [] values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -811,7 +810,6 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       Pure.pure (FrameAction.next (q + 1) __x.snd frame __x.fst)) =
         Except.error (.thrown exception) := by
   rw [arity]
-  simp only [widenMixed_relabel]
   cases hp : pureArity op with
   | none =>
     rw [hp] at h
@@ -837,7 +835,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
         simp only at h ⊢
         split at h
         · rename_i target result memory found
-          rw [base (by simp [hp]) r pc q (CIL.widenMixed op values) profile target result memory next found]
+          rw [base (by simp [hp]) r pc q values profile target result memory next found]
           simp only at h ⊢
           cases hc : List.mapM (checkedValue m) (List.map Value.scalar result) with
           | error _ => rw [hc] at h; cases h; rfl
