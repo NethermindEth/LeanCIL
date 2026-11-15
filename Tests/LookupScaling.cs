@@ -1889,7 +1889,7 @@ long FeatureLocalCost(int count)
             some ⟨[some 0], unknown⟩]).flatten ++ [some ⟨[], unknown⟩]
         def codeSegment (index : Nat) : List Instruction :=
           [.ldloc (index % localCount), .stloc ((index + 1) % localCount),
-            .ldloca ((index + 2) % localCount), .pop, .ldloca localCount, .pop, .ldc_i4 0, .stloc localCount]
+            .ldloca ((index + 2) % localCount), .pop, .ldarga 0, .pop, .ldc_i4 0, .starg 0]
         def code (segments : Nat) : List Instruction := (List.range segments).flatMap codeSegment ++ [.ret]
         """ + "\n";
     var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
