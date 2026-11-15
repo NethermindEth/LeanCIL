@@ -1090,7 +1090,7 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
       scalarEmissionMatches layouts role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted locals ||
       match scalarTransfer raw instruction stack role context locals,
-          featureSuccessors role pc instruction feature with
+          featureSuccessors role pc instruction feature.stack with
       | some after, some successors =>
         successors.all (successor after)
       | _, _ => false)
