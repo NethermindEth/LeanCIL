@@ -858,7 +858,7 @@ private def expandCertificate (raw : RawMethod) (certificate : FeatureCertificat
 
 /-- On a certificate of known-fact states, each site check agrees with the list check of the
     expanded certificate. -/
-private theorem checkFeatureSite_expand (layouts : Array RawLayout)
+private theorem checkFeatureSiteWith_known_eq_list (layouts : Array RawLayout)
     (constants : Nat → Option W32) (raw : RawMethod) (profile : FeatureProfile)
     (certificate : FeatureCertificate) (roles : Nat → Option (Option FoldRole))
     (allKnown : AllKnown raw certificate)
@@ -881,12 +881,12 @@ private theorem checkFeatureSite_expand (layouts : Array RawLayout)
     simp only [checkFeatureSiteWith, knownLocals, Option.map_some,
       wellShaped_expand (featureLocalEligible_none raw), known, Bool.true_and, transfer.1,
       FeatureState.expand_stack]
-    cases after : featureTransferAtWith layouts raw
+    cases transferred : featureTransferAtWith layouts raw
         (LocalFacts.known raw.locals.length (featureLocalEligible raw)) profile
         (calleeConstant constants emitted) role instruction state with
     | none => rfl
-    | some after' =>
-      have afterKnown := transfer.2 after' after
+    | some after =>
+      have afterKnown := transfer.2 after transferred
       cases featureSuccessors role pc instruction state.stack with
       | none => rfl
       | some successors =>
@@ -904,7 +904,7 @@ private theorem checkFeatureSite_expand (layouts : Array RawLayout)
             exact (weakens_expand afterKnown
               (allKnown incoming (List.mem_of_getElem? found))).symm
 
-#print axioms checkFeatureSite_expand
+#print axioms checkFeatureSiteWith_known_eq_list
 
 @[simp] private theorem expandKnown_nil (count : Nat) :
     expandKnown count [] = List.replicate count none := by
@@ -927,7 +927,7 @@ private theorem FeatureFlowValid_iff_expand (layouts : Array RawLayout)
   have sitesEqual (allKnown : AllKnown raw certificate) := all3_map
     (Option.map (FeatureState.expand raw.locals.length))
     (raw.code.zip (foldRoles raw.locals raw.code)).zipIdx certificate code
-    fun site state emitted member => checkFeatureSite_expand layouts constants raw profile
+    fun site state emitted member => checkFeatureSiteWith_known_eq_list layouts constants raw profile
       certificate (fun target => (foldRoles raw.locals raw.code)[target]?) allKnown site state
       emitted member
   constructor
@@ -1019,8 +1019,8 @@ private theorem expandCertificate_inj {raw : RawMethod} :
           FeatureFacts.mk.injEq] at expanded
         have locals := expandKnown_inj (firstKnown state (List.mem_cons_self ..))
           (secondKnown next (List.mem_cons_self ..)) expanded.1.2
-        obtain ⟨stack, _⟩ := state
-        obtain ⟨stack', _⟩ := next
+        obtain ⟨firstStack, _⟩ := state
+        obtain ⟨secondStack, _⟩ := next
         simp only at locals expanded
         rw [expanded.1.1, locals]
 

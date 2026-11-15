@@ -132,7 +132,8 @@ def storeKnown (index : Nat) (fact : Option W32) : List (Nat × W32) → List (N
 def expandKnown (count : Nat) (locals : List (Nat × W32)) : List (Option W32) :=
   (List.range count).map fun index => locals.lookup index
 
-/-- The known facts of a full per-local list, numbered from `start`. -/
+/-- The known facts of a full per-local list whose first entry is the local the first argument
+    numbers. -/
 def compressKnown : Nat → List (Option W32) → List (Nat × W32)
   | _, [] => []
   | index, none :: rest => compressKnown (index + 1) rest
@@ -223,9 +224,7 @@ theorem storeKnown_spec {count next index : Nat} {fact : Option W32} {locals : L
         simp [storeKnown, List.lookup_cons, differs, same]
   | cons head rest ih =>
     obtain ⟨other, word⟩ := head
-    have known' := known
-    rw [knownBelow_cons] at known'
-    obtain ⟨otherLow, otherHigh, tail⟩ := known'
+    obtain ⟨otherLow, otherHigh, tail⟩ := knownBelow_cons.mp known
     by_cases before : other < index
     · have inner := ih tail (by omega)
       simp only [storeKnown, before, ↓reduceIte]
@@ -317,14 +316,14 @@ theorem knownBelow_sublist {count : Nat} :
   | (index, word) :: source, [], _, _, _, _, _ => List.nil_sublist _
   | (index, word) :: source, (other, value) :: target, sourceNext, targetNext,
       sourceKnown, targetKnown, subset => by
-    have sourceKnown' := knownBelow_cons.mp sourceKnown
-    have targetKnown' := knownBelow_cons.mp targetKnown
+    have sourceSplit := knownBelow_cons.mp sourceKnown
+    have targetSplit := knownBelow_cons.mp targetKnown
     have head := subset (List.mem_cons_self ..)
     by_cases same : (other, value) = (index, word)
     · cases same
       apply List.Sublist.cons_cons
-      refine knownBelow_sublist sourceKnown'.2.2 targetKnown'.2.2 fun entry member => ?_
-      have bound := (knownBelow_mem targetKnown'.2.2 member).1
+      refine knownBelow_sublist sourceSplit.2.2 targetSplit.2.2 fun entry member => ?_
+      have bound := (knownBelow_mem targetSplit.2.2 member).1
       rcases List.mem_cons.mp (subset (List.mem_cons_of_mem _ member)) with equal | later
       · subst equal; omega
       · exact later
@@ -332,14 +331,14 @@ theorem knownBelow_sublist {count : Nat} :
         rcases List.mem_cons.mp head with equal | later
         · exact absurd equal same
         · exact later
-      have above := (knownBelow_mem sourceKnown'.2.2 later).1
+      have above := (knownBelow_mem sourceSplit.2.2 later).1
       apply List.Sublist.cons
-      refine knownBelow_sublist sourceKnown'.2.2 targetKnown fun entry member => ?_
+      refine knownBelow_sublist sourceSplit.2.2 targetKnown fun entry member => ?_
       have bound := (knownBelow_mem targetKnown member).1
       rcases List.mem_cons.mp (subset member) with equal | inner
       · rcases List.mem_cons.mp member with first | rest
         · subst first; exact absurd equal same
-        · have := (knownBelow_mem targetKnown'.2.2 rest).1
+        · have := (knownBelow_mem targetSplit.2.2 rest).1
           subst equal; simp only at above this; omega
       · exact inner
 #print axioms knownBelow_sublist
