@@ -30,6 +30,8 @@ example : validateParameterHomes #[] raw reachable
 example : validateParameterHomes #[] raw reachable
     { method with code := [.ldarg 0, .starg 1, .ldarga 1, .ldarg 3] } = false := by decide
 example : validateParameterHomes #[] raw reachable
+    { method with code := [.ldarg 0, .starg 3, .ldarga 3, .ldarg 3] } = false := by decide
+example : validateParameterHomes #[] raw reachable
     { method with localKinds := [.word32] } = false := by decide
 example : validateParameterHomes #[] raw reachable
     { method with locals := [] } = false := by decide
@@ -54,6 +56,7 @@ example : validateArgumentOpIn byteArgument [] (.load 1) true (.ldarg 1) = true 
 example : validateArgumentOpIn byteArgument [] (.load 1) true (.ldarg 0) = false := by decide
 example : validateArgumentOpIn byteArgument [1] (.load 1) true (.ldarg 1) = true := by decide
 example : validateArgumentOpIn byteArgument [1] (.load 1) true (.ldloc 0) = false := by decide
+example : validateArgumentOpIn byteArgument [] (.store 1) true (.starg 1) = false := by decide
 
 -- The address of a span parameter is `ldarga` of the parameter, whose step pushes the view its
 -- home holds; the address of the home slot or a load in its place is rejected.
