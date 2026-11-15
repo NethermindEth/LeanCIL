@@ -78,14 +78,15 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
         }
         il.Emit(OpCodes.Ret);
     }
+    // A volatile load is a hole to the decoder, so these bodies keep the literal the forged additions below edit.
     foreach (var (name, native, pointer) in additions)
         AddOffset(name, native ? module.TypeSystem.IntPtr : module.TypeSystem.Int32,
-            pointer, OpCodes.Add);
+            pointer, OpCodes.Add, volatileLoad: true);
     AddOffset("InvalidInt64Offset", module.TypeSystem.Int64, true, OpCodes.Add);
     AddOffset("InvalidReferenceSum", new ByReferenceType(module.TypeSystem.Int64), false, OpCodes.Add);
     AddOffset("InvalidReversedSubtract", module.TypeSystem.Int32, true, OpCodes.Sub);
 
-    void AddOffset(string name, TypeReference offset, bool pointer, OpCode operation)
+    void AddOffset(string name, TypeReference offset, bool pointer, OpCode operation, bool volatileLoad = false)
     {
         var method = new MethodDefinition(name,
             Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
@@ -97,6 +98,7 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
         body.Emit(OpCodes.Ldarg_0);
         body.Emit(OpCodes.Ldarg_1);
         body.Emit(operation);
+        if (volatileLoad) body.Emit(OpCodes.Volatile);
         body.Emit(OpCodes.Ldind_U1);
         body.Emit(OpCodes.Ret);
     }

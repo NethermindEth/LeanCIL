@@ -121,19 +121,24 @@ foreach (var (name, forged) in new[]
         "Extraction.ConstrainedCallsValid method0DispatchTypes");
 }
 // Lean binds a type test to its raw opcode and class, so an emitted test of another class or with
-// the other outcome for a failed cast fails the scalar flow check.
+// the other outcome for a failed cast fails the scalar flow check. The method is defined from its decoder, so
+// the forgery edits the decoder's input and leaves the closed definition the check reads.
 var cast = File.ReadAllText(Path.Combine(root, "DogCast", "Extracted.lean"));
-var castTest = $".castclass ({dogEntry.TrimStart('(').TrimEnd(',', ' ')})";
-if (!cast.Contains(castTest, StringComparison.Ordinal))
+var castTest = $"opcode := 116, operand := .type ({dogEntry.TrimStart('(').TrimEnd(',', ' ')})";
+var original = cast.Split('\n')
+    .SingleOrDefault(line => line.StartsWith("def method0Original ", StringComparison.Ordinal));
+if (!cast.Contains("\ncil_decoded_method method0 := ", StringComparison.Ordinal) || original is null ||
+    !original.Contains(castTest, StringComparison.Ordinal))
     throw new InvalidOperationException("The extraction does not test the cast against Dog: " + castTest);
 foreach (var (name, forged) in new[]
 {
     ("class", castTest.Replace("Examples.Dog", "Examples.Bird", StringComparison.Ordinal)),
-    ("outcome", castTest.Replace(".castclass", ".isinst", StringComparison.Ordinal))
+    ("outcome", castTest.Replace("opcode := 116", "opcode := 117", StringComparison.Ordinal))
 })
 {
     var path = Path.Combine(root, $"ForgedCast-{name}.lean");
-    File.WriteAllText(path, cast.Replace(castTest, forged, StringComparison.Ordinal));
+    File.WriteAllText(path, cast.Replace(original, original.Replace(castTest, forged, StringComparison.Ordinal),
+        StringComparison.Ordinal));
     forgedViews.Add(path, $"PASS forged type test rejected: {name}", "Extraction.ScalarFlowValid");
 }
 forgedViews.Check();

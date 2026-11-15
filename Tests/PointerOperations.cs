@@ -158,8 +158,9 @@ foreach (var (name, parameters) in new[]
         {
             const string target = "System.Int16";
             var lines = returnEvidence.Split('\n');
+            // The method is defined from its decoder, so the closed definition DeclaredValid reads is forged.
             var definition = Array.FindIndex(lines, line =>
-                line.StartsWith("def method0 ", StringComparison.Ordinal));
+                line.StartsWith("def method0Closed ", StringComparison.Ordinal));
             if (definition < 0 || !lines[definition].Contains(target, StringComparison.Ordinal))
                 throw new InvalidOperationException("Missing enum return declaration");
             var returned = lines[definition].IndexOf("returnType :=", StringComparison.Ordinal);
