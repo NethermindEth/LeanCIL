@@ -358,19 +358,19 @@ void DecodeCosts()
             open CIL CIL.Extraction Lean Elab Command
             {{KernelCostCommand}}
             namespace ValueDecodingCost
-            /-- The raw instructions of one segment: short and long constants, locals, arithmetic, a checked
-                conversion, a branch, a four-target switch and a return. -/
+            /-- The raw instructions of one segment: short and long constants, locals, an argument,
+                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
             def segment (index : Nat) : List RawInstruction :=
               let start := {{SegmentLength}} * index
               [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
                 ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
-                ⟨start + 4, 6, .none⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
                 ⟨start + 7, 58, .target index⟩,
                 ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
             /-- The instructions the translator emits for one segment. -/
             def codeSegment (index : Nat) : List Instruction :=
               [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
-                .ldloc (index % 4), .stloc (index % 4), .ldloc 0, .add, .conv_ovf_un .i1, .brtrue index,
+                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1, .brtrue index,
                 .switch [index, index + 1, index + 2, index + 3], .ret]
             /-- A body of {{instructions}} raw instructions. -/
             def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment

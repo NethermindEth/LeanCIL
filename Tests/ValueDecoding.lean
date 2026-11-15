@@ -31,6 +31,10 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 33, .integer (-1)⟩, .ldc_i8 (-1)),
   (⟨0, 33, .integer (-9223372036854775808)⟩, .ldc_i8 (-9223372036854775808)),
   (⟨0, 33, .integer 9223372036854775807⟩, .ldc_i8 9223372036854775807),
+  -- Arguments.
+  (⟨0, 2, .none⟩, .ldarg 0), (⟨0, 3, .none⟩, .ldarg 1), (⟨0, 4, .none⟩, .ldarg 2),
+  (⟨0, 5, .none⟩, .ldarg 3), (⟨0, 14, .argument 5⟩, .ldarg 5),
+  (⟨0, 14, .argument 255⟩, .ldarg 255), (⟨0, 65033, .argument 300⟩, .ldarg 300),
   -- Locals.
   (⟨0, 6, .none⟩, .ldloc 0), (⟨0, 7, .none⟩, .ldloc 1), (⟨0, 8, .none⟩, .ldloc 2),
   (⟨0, 9, .none⟩, .ldloc 3), (⟨0, 17, .local 4⟩, .ldloc 4), (⟨0, 17, .local 255⟩, .ldloc 255),
@@ -82,14 +86,13 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 65025, .none⟩, .ceq), (⟨0, 65026, .none⟩, .cgt), (⟨0, 65027, .none⟩, .cgt_un),
   (⟨0, 65028, .none⟩, .clt), (⟨0, 65029, .none⟩, .clt_un)]
 
-/-- Constructors no opcode decodes to: the families outside the value opcodes, and `arg`, whose
-    narrowing the raw instruction does not determine. -/
+/-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
   ``Instruction.stackAlloc, ``Instruction.newArray, ``Instruction.newReferenceArray,
   ``Instruction.loadAggregate, ``Instruction.copyObject, ``Instruction.storeAggregate,
   ``Instruction.initAggregate, ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
-  ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt, ``Instruction.arg,
+  ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
   ``Instruction.initializeSpanLocal, ``Instruction.tailCall, ``Instruction.managed,
   ``Instruction.load64, ``Instruction.store64, ``Instruction.call, ``Instruction.callInstance,
   ``Instruction.callVirtual, ``Instruction.newAggregate, ``Instruction.newObject,
@@ -127,7 +130,7 @@ theorem ofRaw?_exact :
     its form's range, another operand, or another constructor with the same stack effect. -/
 def mutations : List (RawInstruction × Instruction) := [
   -- Constants just past the range of their form, far past it, or of another width.
-  (⟨0, 31, .integer 128⟩, .ldc_i4 128), (⟨0, 31, .integer 300⟩, .ldc_i4 300),
+  (⟨0, 31, .integer 128⟩, .ldc_i4 128),
   (⟨0, 32, .integer (-(2^31) - 1)⟩, .ldc_i4 (BitVec.ofInt 32 (-(2^31) - 1))),
   (⟨0, 33, .integer (-(2^63) - 1)⟩, .ldc_i8 (BitVec.ofInt 64 (-(2^63) - 1))),
   (⟨0, 31, .integer (-129)⟩, .ldc_i4 (BitVec.ofInt 32 (-129))),
@@ -144,11 +147,12 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 18, .local 4⟩, .ldloc 4), (⟨0, 58, .target 1⟩, .brfalse 1),
   (⟨0, 138, .none⟩, .conv_ovf_un .i8), (⟨0, 211, .none⟩, .conv_i8),
   (⟨0, 130, .none⟩, .conv_ovf .i1), (⟨0, 215, .none⟩, .add_ovf), (⟨0, 65027, .none⟩, .cgt),
-  -- A local index wider than its form encodes.
+  -- A local or argument index wider than its form encodes.
   (⟨0, 17, .local 256⟩, .ldloc 256), (⟨0, 65036, .local 65536⟩, .ldloc 65536),
-  -- A malformed operand, an argument opcode, or an opcode outside the value family.
+  (⟨0, 14, .argument 256⟩, .ldarg 256), (⟨0, 65033, .argument 65536⟩, .ldarg 65536),
+  -- A malformed operand, another argument, an argument address, or an opcode outside the family.
   (⟨0, 42, .integer 0⟩, .ret), (⟨0, 17, .argument 4⟩, .ldloc 4), (⟨0, 6, .local 0⟩, .ldloc 0),
-  (⟨0, 43, .targets [1]⟩, .br 1), (⟨0, 2, .none⟩, .arg 0), (⟨0, 14, .argument 1⟩, .arg 1),
+  (⟨0, 43, .targets [1]⟩, .br 1), (⟨0, 2, .none⟩, .ldarg 1), (⟨0, 15, .argument 1⟩, .ldarg 1),
   (⟨0, 107, .none⟩, .conv_i4)]
 
 /-- No mutation matches its raw instruction. -/
@@ -202,7 +206,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 61, undecoded 32 of 93 constructors -/
+/-- info: decoded 62, undecoded 31 of 93 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors
