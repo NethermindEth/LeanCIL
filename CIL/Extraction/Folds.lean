@@ -1,4 +1,4 @@
-import CIL.Extraction.Generics
+import CIL.Extraction.ValueDecoding
 import CIL.Extraction.SpanCalls
 import Std.Data.TreeMap.Lemmas
 
@@ -46,19 +46,23 @@ private def typeHandle : RawInstruction → Option TypeExpr
   | ⟨_, 208, .type type⟩ => some type
   | _ => none
 
-/-- The exact call site of a static `System.Type` method with `parameters` parameters. -/
-private def typeMethod (name signature : String) (parameters : Nat) : CallSite := {
-  declaringType := .atom runtimeScope "System.Type", name,
-  target := .external (runtimeScope ++ "::" ++ signature),
-  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true,
-  returnType := .atom runtimeScope
-    (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
-  parameterTypes := if name == "GetTypeFromHandle" then
-      [.atom runtimeScope "System.RuntimeTypeHandle"]
-    else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] }
+/-- The exact call site of a static `System.Type` method with `parameters` parameters;
+    `methodName` is the metadata name spelling `name`. -/
+private def typeMethod (name : String) (methodName : MetadataName) (signature : String)
+    (parameters : Nat) : CallSite := {
+  method := {
+    owner := .atom runtimeScope "System.Type", name := methodName, hasThis := false,
+    genericArity := 0,
+    returnType := .atom runtimeScope
+      (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+    parameters := if name == "GetTypeFromHandle" then
+        [.atom runtimeScope "System.RuntimeTypeHandle"]
+      else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] },
+  name, target := .external (runtimeScope ++ "::" ++ signature),
+  typeArguments := [], parameterCount := parameters, returnsValue := true }
 
 private def getTypeFromHandle : CallSite :=
-  typeMethod "GetTypeFromHandle"
+  typeMethod "GetTypeFromHandle" name!"GetTypeFromHandle"
     "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
 
 /-- Exactly `call Type.GetTypeFromHandle`. -/
@@ -74,9 +78,9 @@ private def typeComparison (instruction : RawInstruction) : Option Bool :=
     | .target _ => some (instruction.opcode == 46 || instruction.opcode == 59)
     | _ => none
   else if instruction.opcode != 40 then none
-  else if instruction.operand == .call (typeMethod "op_Equality"
+  else if instruction.operand == .call (typeMethod "op_Equality" name!"op_Equality"
       "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2) then some true
-  else if instruction.operand == .call (typeMethod "op_Inequality"
+  else if instruction.operand == .call (typeMethod "op_Inequality" name!"op_Inequality"
       "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2) then some false
   else none
 
@@ -99,19 +103,6 @@ def typeTestInstruction (instruction : RawInstruction) : Bool :=
           site.name == "op_Inequality"
       | _ => false
     | _ => false
-
-/-- The local a `ldloc`, `stloc` or `ldloca` instruction names, in any of its forms. -/
-def localIndex (instruction : RawInstruction) : Option Nat :=
-  match instruction.opcode, instruction.operand with
-  -- `ldloc.0` to `ldloc.3` and `stloc.0` to `stloc.3`.
-  | 6, .none | 10, .none => some 0
-  | 7, .none | 11, .none => some 1
-  | 8, .none | 12, .none => some 2
-  | 9, .none | 13, .none => some 3
-  -- `ldloc`, `ldloca` and `stloc`, short and long forms.
-  | 17, .local n | 18, .local n | 19, .local n
-  | 65036, .local n | 65037, .local n | 65038, .local n => some n
-  | _, _ => none
 
 /-- Whether `instruction` names a typed span local, with each local's type given by `localAt`. -/
 def spanLocalOp (localAt : Nat → Option TypeExpr) (instruction : RawInstruction) : Bool :=

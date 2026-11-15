@@ -168,13 +168,32 @@ example : TranslationValid [] #[] [] [addEvidence] [] [addMethod] := by decide +
 example : ¬ TranslationValid [] #[] [] [addEvidence] []
     [{ addMethod with code := addCode.set 2 .sub }] := by decide +kernel
 -- The declared signature and the layout environment are conjuncts of their own.
-example : ¬ MethodShapeValid addRaw { addMethod with declared := {} } := by decide
+example : ¬ DeclaredValid addRaw { addMethod with declared := {} } := by decide
 example : ¬ TranslationValid [] #[] [] [addEvidence] [] [{ addMethod with declared := {} }] := by
   decide +kernel
 example : ¬ MethodEnvironmentValid [] #[]
     { addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } } := by decide
 example : ¬ TranslationValid [] #[] [] [addEvidence] []
     [{ addMethod with environment := { layouts := #[⟨⟨4, []⟩, 4⟩] } }] := by decide +kernel
+
+/-- `addMethod` declaring `signature` instead of the `wordPair` its metadata implies. -/
+private def declaring (signature : DeclaredSignature) : Method :=
+  { addMethod with declared := signature }
+/-- Only `DeclaredValid` reads the declared signature: the shape check accepts the method, and the
+    evidence check rejects it through that conjunct alone. -/
+private def declaredRejectedAlone (signature : DeclaredSignature) : Prop :=
+  MethodShapeValid addRaw (declaring signature) ∧ ¬ DeclaredValid addRaw (declaring signature) ∧
+    ¬ MethodEvidenceValid [] #[] [] [addEvidence] [] addEvidence (declaring signature)
+instance (signature : DeclaredSignature) : Decidable (declaredRejectedAlone signature) :=
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _))
+
+-- One component of the signature differs in each case.
+example : declaredRejectedAlone { wordPair with returnType := intType } := by decide +kernel
+example : declaredRejectedAlone { wordPair with parameters := [word, intType] } := by
+  decide +kernel
+example : declaredRejectedAlone { wordPair with receiver := some .reference } := by decide +kernel
+example : declaredRejectedAlone { wordPair with parameters := [word] } := by decide +kernel
+
 example : ¬ TranslationValid [] #[] []
     [{ addEvidence with scalarStates := addStates.set 2 (some [.native, .word32]) }] []
     [addMethod] := by decide +kernel
@@ -321,85 +340,92 @@ example : ¬ ScalarFlowValid #[] addRaw addFeatures addStates (addCode.set 2 .su
 example : ¬ ScalarFlowValid #[] { mixedRaw with parameters := [nativeType, word] } addFeatures mixedStates mixedCode := by decide
 
 private def site : CallSite := {
-  declaringType := .atom scope.identity "Fixture",
-  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
-  returnsValue := true, returnType := word, parameterTypes := [word, word] }
+  method := {
+    owner := .atom scope.identity "Fixture", name := name!"", hasThis := false, genericArity := 0,
+    returnType := word, parameters := [word, word] },
+  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call { site with returnType := intType })) true (.call 0 2) = false := by decide
+example : validateManagedCall [⟨[], addRaw⟩] []
+    (i 40 (.call { site with method.returnType := intType })) true (.call 0 2) = false := by decide
 example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] [] (i 40 (.call site)) true (.call 0 2) = false := by decide
-example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0, parameterTypes := [], returnType := word })) [] = some [.other] := by decide +kernel
-theorem external_call_validated : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M()", parameterCount := 0, parameterTypes := [] })) [] = some [.word64] := by decide +kernel
+example : scalarTransfer addRaw (i 40 (.call { site with
+    target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0,
+    method.parameters := [], method.returnType := word })) [] = some [.other] := by decide +kernel
+theorem external_call_validated : scalarTransfer addRaw (i 40 (.call { site with
+    target := .external "Scope::System.UInt64 Owner::M()", parameterCount := 0,
+    method.parameters := [] })) [] = some [.word64] := by decide +kernel
 
 /-- Generic return kinds agree with the substituted method argument. -/
 private theorem generic_return_cases :
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::!!0 Owner::M()",
         parameterCount := 0,
-        parameterTypes := [],
+        method.parameters := [],
         typeArguments := [word] })) [] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::!!0 Owner::M()",
         parameterCount := 0,
-        parameterTypes := [],
+        method.parameters := [],
         typeArguments := [intType] })) [] = some [.other]) := by
   decide +kernel
 
 #print axioms generic_return_cases
 
 example : validateManagedCall [⟨[], addRaw⟩] []
-    (i 40 (.call { site with parameterTypes := [intType, word] })) true (.call 0 2) = false := by decide
+    (i 40 (.call { site with method.parameters := [intType, word] })) true (.call 0 2) =
+      false := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.word64, .word64] = some [.word64] := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.other, .word64] = none := by decide
 /-- Call signatures retain parameter order, receiver kinds and generic substitutions. -/
 private theorem call_signature_cases :
     (scalarTransfer addRaw (i 40 (.call { site with
-        parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
+        method.parameters := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        parameterTypes := [intType, word] })) [.word32, .word64] = none) ∧
+        method.parameters := [intType, word] })) [.word32, .word64] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        hasThis := true,
-        parameterTypes := [intType, word] })) [.word64, .word32, .reference] = some [.word64]) ∧
+        method.hasThis := true,
+        method.parameters := [intType, word] })) [.word64, .word32, .reference] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        hasThis := true,
-        parameterTypes := [intType, word] })) [.word64, .word32, .other] = none) ∧
-    (scalarTransfer addRaw (i 40 (.call { site with
-        target := .external "Scope::System.UInt64 Owner::M(System.Int32)",
-        parameterCount := 1,
-        parameterTypes := [intType] })) [.word32] = some [.word64]) ∧
+        method.hasThis := true,
+        method.parameters := [intType, word] })) [.word64, .word32, .other] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(System.Int32)",
         parameterCount := 1,
-        parameterTypes := [word] })) [.word64] = none) ∧
+        method.parameters := [intType] })) [.word32] = some [.word64]) ∧
+    (scalarTransfer addRaw (i 40 (.call { site with
+        target := .external "Scope::System.UInt64 Owner::M(System.Int32)",
+        parameterCount := 1,
+        method.parameters := [word] })) [.word64] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(!!0)",
         typeArguments := [intType],
         parameterCount := 1,
-        parameterTypes := [intType] })) [.word32] = some [.word64]) ∧
+        method.parameters := [intType] })) [.word32] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(!!0)",
         typeArguments := [intType],
         parameterCount := 1,
-        parameterTypes := [word] })) [.word64] = none) ∧
+        method.parameters := [word] })) [.word64] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        declaringType := .apply (.constructor "Scope" "Owner`1") intType,
+        method.owner := .apply (.constructor "Scope" "Owner`1") intType,
         target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)",
         parameterCount := 1,
-        parameterTypes := [intType],
-        returnType := intType })) [.word32] = some [.word32]) ∧
+        method.parameters := [intType],
+        method.returnType := intType })) [.word32] = some [.word32]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        declaringType := .apply (.constructor "Scope" "Owner`1") intType,
+        method.owner := .apply (.constructor "Scope" "Owner`1") intType,
         target := .external "Scope::!0 Owner`1<System.Int32>::M(!0)",
         parameterCount := 1,
-        parameterTypes := [word],
-        returnType := intType })) [.word64] = none) ∧
+        method.parameters := [word],
+        method.returnType := intType })) [.word64] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
-        declaringType := .aggregate "Scope::Owner`2<System.Int32,System.UInt64>" 0,
+        method.owner := .aggregate "Scope::Owner`2<System.Int32,System.UInt64>" 0,
         target := .external "Scope::!1 Owner`2<System.Int32,System.UInt64>::M(!0,!1)",
-        parameterTypes := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
+        method.parameters := [intType, word] })) [.word64, .word32] = some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external
           "Scope::System.UInt64 Owner::M(Container`2<System.Int32,System.UInt64>,System.Int32)",
-        parameterTypes := [.aggregate "Scope::Container`2<System.Int32,System.UInt64>" 0,
+        method.parameters := [.aggregate "Scope::Container`2<System.Int32,System.UInt64>" 0,
           intType] })) [.word32, .other] = some [.word64]) := by
   decide +kernel
 
@@ -467,7 +493,7 @@ private def nativeReturnEvidence : MethodEvidence := withBody {
 private def nativeReturnMethod : Method := {
   locals := [], returnsValue := true,
   declared := { parameters := [.byref word], returnType := word },
-  code := [.ldarg 0, .loadScalar 8, .ret] }
+  code := [.ldarg 0, .load64, .ret] }
 example : TranslationValid [] #[] [] [nativeReturnEvidence] [] [nativeReturnMethod] := by
   decide +kernel
 example : scalarTransfer nativeReturnRaw (i 42) [.native] = some [] := by decide
@@ -518,8 +544,10 @@ theorem local_slot_sites :
 
 /-- A static method of no parameters whose address `ldftn` takes and `calli` calls. -/
 private def handler : CallSite :=
-  { target := .managed 2, typeArguments := [], parameterCount := 0, hasThis := false,
-    returnsValue := false }
+  { method := {
+      owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+      parameters := [] },
+    target := .managed 2, typeArguments := [], parameterCount := 0, returnsValue := false }
 private def handlerSignature : ManagedSignature := ⟨.void, []⟩
 
 /-- `ldftn; stloc store; ldloc.1; calli; ret` over two native-int locals, of which `calli`
@@ -574,10 +602,14 @@ theorem pointer_local_storage :
 
 private def byteSpanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.Byte")
 private def byteSpanSite : CallSite := {
-  declaringType := byteSpanType, name := ".ctor", target := .external
-    (runtime ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,System.Int32)"),
-  typeArguments := [], parameterCount := 2, parameterTypes := [.pointer .void, intType],
-  hasThis := true, returnsValue := false, returnType := .void }
+  method := {
+    owner := byteSpanType, name := name!".ctor", hasThis := true, genericArity := 0,
+    returnType := .void, parameters := [.pointer .void, intType] },
+  name := ".ctor",
+  target := .external
+    (runtime ++ "::System.Void System.ReadOnlySpan`1<System.Byte>::.ctor(System.Void*,\
+    System.Int32)"),
+  typeArguments := [], parameterCount := 2, returnsValue := false }
 private def byteSpanRaw := { raw [i 2, i 31 (.integer 16), i 115 (.call byteSpanSite), i 42] [.byref word] with returnType := byteSpanType }
 private def byteSpanFeatures : FeatureCertificate := [unknown 0, unknown 1, state [some 16, none], unknown 1]
 private def byteSpanStates : ScalarCertificate := [some [], some [.reference], some [.word32, .reference], some [.other]]
@@ -596,9 +628,9 @@ private theorem span_constructor_cases :
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
         name := "Other" })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
-        declaringType := .atom runtime "Other" })) [.word32, .reference] = none) ∧
+        method.owner := .atom runtime "Other" })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 115 (.call { byteSpanSite with
-        parameterTypes := [.pointer word, intType] })) [.word32, .reference] = none) ∧
+        method.parameters := [.pointer word, intType] })) [.word32, .reference] = none) ∧
     (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .reference] =
       some []) ∧
     (scalarTransfer byteSpanRaw (i 40 (.call byteSpanSite)) [.word32, .reference, .other] =
@@ -610,16 +642,19 @@ private theorem span_constructor_cases :
 private def tupleType : TypeExpr := .aggregate
   (runtime ++ "::System.ValueTuple`2<System.UInt64,System.UInt64>") 0
 private def tupleSite : CallSite := {
-  declaringType := .atom
-    "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
-    "System.Runtime.Intrinsics.X86.X86Base/X64",
-  name := "DivRem", target := .external
+  method := {
+    owner := .atom
+      "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
+        PublicKeyToken=cc7b13ffcd2ddd51"
+      "System.Runtime.Intrinsics.X86.X86Base/X64", name := name!"DivRem", hasThis := false,
+    genericArity := 0, returnType := tupleType, parameters := [word, word, word] },
+  name := "DivRem",
+  target := .external
     "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
       PublicKeyToken=cc7b13ffcd2ddd51::System.ValueTuple`2<System.UInt64,System.UInt64> \
       System.Runtime.Intrinsics.X86.X86Base/X64::DivRem\
-      (System.UInt64,System.UInt64,System.UInt64)",
-  typeArguments := [], parameterCount := 3, parameterTypes := [word, word, word],
-  hasThis := false, returnsValue := true, returnType := tupleType }
+      (System.UInt64,System.UInt64,System.UInt64)", typeArguments := [], parameterCount := 3,
+  returnsValue := true }
 private def tupleRaw := { raw [i 2, i 3, i 4, i 40 (.call tupleSite), i 42] [word, word, word] with
   returnType := tupleType, maxStack := 3 }
 /-- Tuple results retain their declared input kinds. -/
@@ -628,7 +663,7 @@ private theorem tuple_result_cases :
       some [.word64], some [.word64, .word64], some [.word64, .word64, .word64], some [.other]]
       [.ldarg 0, .ldarg 1, .ldarg 2, .intrinsic (.x86Base .divRem64) 3, .ret]) ∧
     (scalarTransfer tupleRaw (i 40 (.call { tupleSite with
-        parameterTypes := [word, intType, word] })) [.word64, .word32, .word64] = none) := by
+        method.parameters := [word, intType, word] })) [.word64, .word32, .word64] = none) := by
   decide +kernel
 
 #print axioms tuple_result_cases
@@ -646,10 +681,15 @@ private theorem tuple_field_cases :
 
 private def spanType : TypeExpr := .apply (.constructor runtime "System.ReadOnlySpan`1") (.atom runtime "System.UInt32")
 private def spanSite : CallSite := {
-  declaringType := spanType, name := "get_Item", target := .external
-    (runtime ++ "::!0& modreq(System.Runtime.InteropServices.InAttribute) System.ReadOnlySpan`1<System.UInt32>::get_Item(System.Int32)"),
-  typeArguments := [], parameterCount := 1, parameterTypes := [intType], hasThis := true, returnsValue := true,
-  returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)" }
+  method := {
+    owner := spanType, name := name!"get_Item", hasThis := true, genericArity := 0,
+    returnType := .atom runtime "!0& modreq(System.Runtime.InteropServices.InAttribute)",
+    parameters := [intType] },
+  name := "get_Item",
+  target := .external
+    (runtime ++ "::!0& modreq(System.Runtime.InteropServices.InAttribute) \
+    System.ReadOnlySpan`1<System.UInt32>::get_Item(System.Int32)"),
+  typeArguments := [], parameterCount := 1, returnsValue := true }
 private def spanRaw := { raw [i 2, i 3, i 40 (.call spanSite), i 113 (.type intType), i 42] [.byref spanType, intType] with returnType := intType }
 /-- Span and external signatures reject malformed metadata and distinguish Unicode names. -/
 private theorem span_signature_cases :
@@ -657,19 +697,20 @@ private theorem span_signature_cases :
       some [.reference], some [.word32, .reference], some [.reference], some [.word32]] [.ldarg 0,
       .ldarg 1, .memory (.spanItem 4), .loadScalar 4, .ret]) ∧
     (scalarTransfer spanRaw (i 40 (.call { spanSite with
-        parameterTypes := [word] })) [.word64, .reference] = none) ∧
+        method.parameters := [word] })) [.word64, .reference] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(garbage(System.Int32)",
         parameterCount := 1,
-        parameterTypes := [intType] })) [.word32] = none) ∧
+        method.parameters := [intType] })) [.word32] = none) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(Container\u0394)",
         parameterCount := 1,
-        parameterTypes := [.aggregate "Scope::Container\u0394" 0] })) [.other] = some [.word64]) ∧
+        method.parameters := [.aggregate "Scope::Container\u0394" 0] })) [.other] =
+          some [.word64]) ∧
     (scalarTransfer addRaw (i 40 (.call { site with
         target := .external "Scope::System.UInt64 Owner::M(Container\u0394)",
         parameterCount := 1,
-        parameterTypes := [.aggregate "Scope::Container\u03a9" 0] })) [.other] = none) := by
+        method.parameters := [.aggregate "Scope::Container\u03a9" 0] })) [.other] = none) := by
   decide +kernel
 
 #print axioms span_signature_cases
@@ -697,8 +738,10 @@ example : ¬ ScalarFlowValid #[] { loopRaw with code := [i 22, i 0, i 43 (.targe
 
 -- Defaulted signature fields are accepted only where they are the true signature.
 private def unsignedSite : CallSite := {
-  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
-  returnsValue := true }
+  method := {
+    owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+    parameters := [] },
+  target := .managed 0x06000001, typeArguments := [], parameterCount := 2, returnsValue := true }
 example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
 /-- External unsigned signatures retain their exact parameter and return metadata. -/
@@ -747,23 +790,204 @@ private def unaryHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unk
 private def unaryHoleStates : ScalarCertificate := [some [], some [.word64], some [.other], some [], some [.word64]]
 private def unaryHoleCode (emitted : Instruction) : List Instruction :=
   [.ldarg 0, emitted, .pop, .ldarg 0, .ret]
-example : ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates (unaryHoleCode (.loadScalar 8)) := by decide
+-- An access form is reserved for the opcodes that decide its width, so no conversion emits one.
+example : ¬ ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates
+    (unaryHoleCode (.loadScalar 8)) := by decide
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .conv_i8) := by decide
--- `conv.r4` is uncovered: the site admits a load, but no conversion or faulting arithmetic.
+-- `conv.r4` is uncovered: the site admits no access form, conversion or faulting arithmetic.
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .conv_i) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.conv_ovf .i)) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.conv_ovf_un .u)) := by decide +kernel
-example : ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
+example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.loadScalar 8)) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .rem_un) := by decide +kernel
 example : ([Instruction.div, .div_un, .rem, .add_ovf, .add_ovf_un, .sub_ovf, .sub_ovf_un, .mul_ovf,
     .mul_ovf_un].all fun emitted => !decide (ScalarFlowValid #[] (unaryHoleRaw 107)
       unaryHoleFeatures unaryHoleStates (unaryHoleCode emitted))) = true := by decide +kernel
+
+/-! ## Indirect accesses
+
+A body pushes `pops` copies of its argument, runs the access after its prefixes, pops what the
+access pushed and returns the argument. Each raw `ldind`, `stind`, `ldobj`, `stobj`, `cpblk`
+and `initblk` admits exactly the emission its opcode, operand type and prefix give. -/
+
+/-- One access with its prefixes and the emission a certificate claims for it. -/
+private structure IndirectCase where
+  pops : Nat
+  /-- The kind the access pushes, or `none` for a store or block operation. -/
+  pushed : Option ScalarKind
+  prefixes : List RawInstruction := []
+  access : RawInstruction
+  emitted : Instruction
+
+private def IndirectCase.pushes (access : IndirectCase) : Nat :=
+  if access.pushed.isSome then 1 else 0
+private def IndirectCase.middle (access : IndirectCase) : List RawInstruction :=
+  access.prefixes ++ [access.access]
+private def IndirectCase.rawMethod (access : IndirectCase) : RawMethod :=
+  { raw (List.replicate access.pops (i 2) ++ access.middle ++
+      List.replicate access.pushes (i 38) ++ [i 2, i 42]) [word] with maxStack := 3 }
+private def IndirectCase.code (access : IndirectCase) : List Instruction :=
+  List.replicate access.pops (.ldarg 0) ++ access.prefixes.map (fun _ => .nop) ++
+    [access.emitted] ++ List.replicate access.pushes .pop ++ [.ldarg 0, .ret]
+private def IndirectCase.features (access : IndirectCase) : FeatureCertificate :=
+  (List.range access.pops).map unknown ++ access.middle.map (fun _ => unknown access.pops) ++
+    List.replicate access.pushes (unknown 1) ++ [unknown 0, unknown 1]
+private def IndirectCase.states (access : IndirectCase) : ScalarCertificate :=
+  (List.range access.pops).map (fun depth => some (List.replicate depth .word64)) ++
+    access.middle.map (fun _ => some (List.replicate access.pops .word64)) ++
+    access.pushed.toList.map (fun kind => some [kind]) ++ [some [], some [.word64]]
+private def IndirectCase.reachable (access : IndirectCase) : List Bool :=
+  List.replicate access.rawMethod.code.length true
+private def IndirectCase.uses (access : IndirectCase) : List ArgumentOp :=
+  List.replicate access.pops (.load 0) ++ access.middle.map (fun _ => .other) ++
+    List.replicate access.pushes .other ++ [.load 0, .other]
+private def IndirectCase.evidence (access : IndirectCase) : MethodEvidence := withBody {
+  body := noBody, original := access.rawMethod, arguments := [], closed := access.rawMethod,
+  parameterInput := { arguments := [.field .unsigned64], locals := [], code := access.uses },
+  reachable := access.reachable, featureStates := access.features,
+  scalarStates := access.states, layoutUses := [], assembly := scope }
+private def IndirectCase.method (access : IndirectCase) : Method :=
+  { locals := [], returnsValue := true, declared := { parameters := [word], returnType := word },
+    code := access.code }
+/-- Whether the feature and scalar checks accept the claimed emission. -/
+private def IndirectCase.flows (access : IndirectCase) : Bool :=
+  decide (FeatureFlowValid #[] (fun _ => none) access.rawMethod .scalar access.features
+      access.reachable access.code) &&
+    decide (ScalarFlowValid #[] access.rawMethod access.features access.states access.code)
+/-- Whether the indirect access rule accepts the emission at the access itself. -/
+private def IndirectCase.window (access : IndirectCase) : Bool :=
+  indirectSiteWindow (access.rawMethod.code[·]?) (access.pops + access.prefixes.length)
+    access.access access.emitted
+/-- Whether every check of the method's evidence accepts it. -/
+private def IndirectCase.translates (access : IndirectCase) : Bool :=
+  decide (MethodEvidenceValid [] #[] [] [access.evidence] [] access.evidence access.method)
+
+private def load (opcode : Nat) (emitted : Instruction) (kind : ScalarKind := .word32)
+    (prefixes : List RawInstruction := []) (operand : RawOperand := .none) : IndirectCase :=
+  { pops := 1, pushed := some kind, prefixes, access := i opcode operand, emitted }
+private def store (opcode : Nat) (emitted : Instruction) (prefixes : List RawInstruction := [])
+    (operand : RawOperand := .none) : IndirectCase :=
+  { pops := 2, pushed := none, prefixes, access := i opcode operand, emitted }
+private def block (opcode : Nat) (emitted : Instruction) (prefixes : List RawInstruction := []) :
+    IndirectCase :=
+  { pops := 3, pushed := none, prefixes, access := i opcode, emitted }
+private def unaligned (alignment : Int) : RawInstruction := i 65042 (.integer alignment)
+private def sbyteType : TypeExpr := .atom runtime "System.SByte"
+private def aggregateType : TypeExpr := .aggregate "S" 0
+private def enumType : TypeExpr := .enum "E" (.atom runtime "System.Int16")
+private def vectorType : TypeExpr :=
+  .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") intType
+/-- An `ldobj` (113) or `stobj` (129) of `type`, pushing the kind the scalar check gives it. -/
+private def typed (opcode : Nat) (type : TypeExpr) (emitted : Instruction) : IndirectCase :=
+  if opcode == 113 then load 113 emitted (scalarType type) (operand := .type type)
+  else store 129 emitted (operand := .type type)
+/-- A static call taking one word and returning one, the stack effect of a 64-bit load. -/
+private def loadSite : CallSite :=
+  { target := .managed 0x06000002, typeArguments := [], parameterCount := 1, hasThis := false,
+    returnsValue := true, returnType := word, parameterTypes := [word] }
+/-- A static call taking two words and returning nothing, the stack effect of a 64-bit store. -/
+private def storeSite : CallSite :=
+  { target := .managed 0x06000002, typeArguments := [], parameterCount := 2, hasThis := false,
+    returnsValue := false, parameterTypes := [word, word] }
+
+/-- The emissions extraction gives these accesses, none of which carries a metadata token. -/
+private def indirectEmitted : List IndirectCase := [
+  load 70 (.loadScalar 1 true), load 71 (.loadScalar 1 false), load 72 (.loadScalar 2 true),
+  load 73 (.loadScalar 2 false), load 74 (.loadScalar 4 false), load 75 (.loadScalar 4 false),
+  load 76 .load64 .word64, load 77 .load64 .native, store 82 (.storeScalar 1),
+  store 83 (.storeScalar 2), store 84 (.storeScalar 4), store 85 .store64, store 223 .store64,
+  block 65047 (.memory (.copyBlock 8)), block 65048 (.memory (.initBlock 8)),
+  block 65047 (.memory (.copyBlock 1)) [unaligned 1],
+  block 65048 (.memory (.initBlock 2)) [unaligned 2],
+  block 65047 (.memory (.copyBlock 4)) [unaligned 4],
+  load 74 (.loadScalar 4 false) (prefixes := [unaligned 1]),
+  store 85 .store64 [unaligned 2]]
+
+/-- `ldobj` and `stobj` of primitive, aggregate, enum and vector types, whose type tokens the
+    test encoder cannot write. -/
+private def objectEmitted : List IndirectCase := [
+  load 113 (.loadScalar 4 false) (operand := .type intType),
+  load 113 (.loadScalar 1 true) (operand := .type sbyteType),
+  load 113 (.loadScalar 8 false) .word64 (operand := .type word),
+  store 129 (.storeScalar 4) (operand := .type intType),
+  store 129 (.storeScalar 1) (operand := .type sbyteType),
+  typed 113 aggregateType (.loadAggregate 8), typed 129 aggregateType (.storeAggregate 8),
+  typed 113 enumType (.loadScalar 2 true), typed 113 vectorType (.memory .load128)]
+
+/-- Each accepted before the indirect access rule: a wrong width, sign, alignment or operation,
+    a kind or prefix extraction refuses, and an access form at an unrelated opcode. -/
+private def indirectForged : List IndirectCase := [
+  -- Width.
+  load 70 (.loadScalar 4 true), load 73 (.loadScalar 1 false), load 74 (.loadScalar 8 false),
+  load 74 .load64, load 76 (.loadScalar 4 false) .word64, load 77 (.loadScalar 8 false) .native,
+  load 70 (.memory .load128), store 82 (.storeScalar 4), store 84 .store64,
+  store 85 (.storeScalar 4), store 223 (.storeScalar 2),
+  -- Sign.
+  load 70 (.loadScalar 1 false), load 71 (.loadScalar 1 true), load 72 (.loadScalar 2 false),
+  load 73 (.loadScalar 2 true), load 74 (.loadScalar 4 true), load 75 (.loadScalar 4 true),
+  -- Alignment and operation.
+  block 65047 (.memory (.copyBlock 1)), block 65048 (.memory (.initBlock 4)),
+  block 65047 (.memory (.copyBlock 8)) [unaligned 1],
+  block 65048 (.memory (.initBlock 2)) [unaligned 4],
+  block 65047 (.memory (.initBlock 8)), block 65048 (.memory (.copyBlock 8)),
+  -- Kinds and prefixes extraction refuses.
+  block 65047 (.memory (.copyBlock 3)) [unaligned 3],
+  load 74 (.loadScalar 4 false) (prefixes := [i 65043]),
+  load 78 (.loadScalar 4 false) .other, load 79 (.loadScalar 8 false) .other,
+  load 80 .load64 .other, store 81 .store64, store 86 (.storeScalar 4),
+  store 87 (.storeScalar 8),
+  -- Access forms at other opcodes.
+  load 108 (.loadScalar 8 false) .other, load 107 (.loadAggregate 4) .other]
+
+/-- Forged emissions at operands the test encoder cannot write: wrong widths and signs of `ldobj`
+    and `stobj`, field accesses at operand types extraction refuses, and calls emitting 64-bit
+    accesses. -/
+private def objectForged : List IndirectCase := [
+  load 113 (.loadScalar 2 false) (operand := .type intType),
+  load 113 (.loadScalar 4 true) (operand := .type intType),
+  load 113 (.loadScalar 1 false) (operand := .type sbyteType),
+  load 113 .load64 .word64 (operand := .type word),
+  store 129 (.storeScalar 1) (operand := .type intType),
+  store 129 (.storeScalar 8) (operand := .type sbyteType),
+  typed 113 aggregateType (.loadScalar 4 false), typed 129 aggregateType (.loadAggregate 8),
+  typed 113 enumType (.loadScalar 2 false), typed 113 vectorType (.memory .load256),
+  -- Floating-point and pointer operands, which extraction refuses.
+  typed 113 (.atom runtime "System.Double") (.fieldAt 0 4 false),
+  typed 129 (.atom runtime "System.Single") (.setFieldAt 0 8),
+  typed 113 (.pointer intType) (.fieldAt 0 1 true),
+  load 40 .load64 .word64 (operand := .call loadSite),
+  store 40 .store64 (operand := .call storeSite)]
+
+/-- Every emission extraction gives passes the indirect access rule, both flow checks and, where
+    the body has no token, every check of the method's evidence. -/
+private theorem indirect_emissions_accepted :
+    (indirectEmitted.all fun access => access.window && access.flows && access.translates) ∧
+    (objectEmitted.all fun access => access.window && access.flows) := by
+  decide +kernel
+
+#print axioms indirect_emissions_accepted
+
+/-- Every forged emission fails the indirect access rule, so both flow checks and the method's
+    evidence check reject it. -/
+private theorem indirect_forgeries_rejected :
+    (indirectForged.all fun access => !access.window && !access.flows && !access.translates) ∧
+    (objectForged.all fun access => !access.window && !access.flows) := by
+  decide +kernel
+
+#print axioms indirect_forgeries_rejected
+
+-- `unaligned.` takes only an access, with an alignment of 1, 2 or 4, and emits nothing.
+example : indirectSiteWindow ([unaligned 1, i 105][·]?) 0 (unaligned 1) .nop = false := by decide
+example : indirectSiteWindow ([unaligned 1, i 74][·]?) 0 (unaligned 1) .nop = true := by decide
+example : indirectSiteWindow ([unaligned 8, i 74][·]?) 0 (unaligned 8) .nop = false := by decide
+example : indirectSiteWindow ([unaligned 1][·]?) 0 (unaligned 1) .nop = false := by decide
+example : indirectSiteWindow ([i 65043, i 74][·]?) 0 (i 65043) .nop = false := by decide
 
 private def pushHoleRaw (opcode : Nat) := raw [i opcode, i 38, i 2, i 42] [word]
 private def pushHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1]
@@ -872,11 +1096,15 @@ example : scalarEmissionMatches #[] none (i 114 (.text "a")) [] .nop = false := 
 private def guardSite (owner methodName suffix : String) (arguments parameters : List TypeExpr) :
     RawInstruction :=
   ⟨0, 40, .call
-    { declaringType := .atom runtimeScope owner, name := methodName,
+    { method := {
+        owner := .atom runtimeScope owner,
+        name := (MetadataName.ofBytes? (bytesOf methodName)).getD ⟨0⟩, hasThis := false,
+        genericArity := arguments.length, returnType := .void, parameters := parameters,
+        methodArguments := arguments },
+      name := methodName,
       target := .external (runtimeScope ++ "::System.Void " ++ owner ++ "::" ++ suffix),
       typeArguments := arguments, ownerArgumentCount := 0, parameterCount := parameters.length,
-      hasThis := false, returnsValue := false, returnType := .void,
-      parameterTypes := parameters }⟩
+      returnsValue := false }⟩
 
 private def parameterName : TypeExpr := .object runtimeScope "System.String"
 private def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
@@ -929,10 +1157,14 @@ private def sizeCode (bits : W32) : List Instruction := [.ldc_i4 bits, .pop, .ld
 private def sizeAt (instruction : RawInstruction) (bits : W32) : Bool :=
   decide (ScalarFlowValid #[] (sizeRaw instruction) pushHoleFeatures sizeStates (sizeCode bits))
 private def sizeOfSite (type : TypeExpr) : CallSite := {
-  declaringType := .atom runtime "System.Runtime.CompilerServices.Unsafe", name := "SizeOf",
-  target := .external (runtime ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf()"),
-  typeArguments := [type], parameterCount := 0, hasThis := false, returnsValue := true,
-  returnType := intType, parameterTypes := [] }
+  method := {
+    owner := .atom runtime "System.Runtime.CompilerServices.Unsafe", name := name!"SizeOf",
+    hasThis := false, genericArity := 1, returnType := intType, parameters := [],
+    methodArguments := [type] },
+  name := "SizeOf",
+  target := .external (runtime ++ "::System.Int32 System.Runtime.CompilerServices.Unsafe::SizeOf(\
+    )"),
+  typeArguments := [type], parameterCount := 0, returnsValue := true }
 private def vector128 : TypeExpr := .apply
   (.constructor
     "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
@@ -958,7 +1190,7 @@ private def otherSite : CallSite := { sizeOfSite intType with
 private theorem size_identity_cases :
     (sizeAt (i 40 (.call otherSite)) 4 = false) ∧
     (sizeAt (i 40 (.call { sizeOfSite intType with
-        declaringType := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" }))
+        method.owner := .atom "Forged" "System.Runtime.CompilerServices.Unsafe" }))
       4 = false) := by
   decide +kernel
 
@@ -1007,13 +1239,15 @@ example (valid : ScalarFlowValid #[] addRaw addFeatures addStates addCode) :
 theorem closed_generic_fill_signature :
     let element := TypeExpr.aggregate ("Scope::Pair`1<" ++ runtime ++ "::System.UInt64>") 0
     let site : CallSite := {
-      declaringType := .apply (.constructor runtime "System.Span`1") element,
-      name := "Fill", target := .external (runtime ++
-        "::System.Void System.Span`1<Pair`1<System.UInt64>>::Fill(!0)"),
-      typeArguments := [], parameterCount := 1, hasThis := true,
-      returnsValue := false, returnType := .void, parameterTypes := [element] }
+      method := {
+        owner := .apply (.constructor runtime "System.Span`1") element, name := name!"Fill",
+        hasThis := true, genericArity := 0, returnType := .void, parameters := [element] },
+      name := "Fill",
+      target := .external (runtime ++
+        "::System.Void System.Span`1<Pair`1<System.UInt64>>::Fill(!0)"), typeArguments := [],
+      parameterCount := 1, returnsValue := false }
     scalarTransfer (raw []) (i 40 (.call site)) [.other, .reference] = some [] ∧
-      scalarTransfer (raw []) (i 40 (.call { site with parameterTypes := [word] }))
+      scalarTransfer (raw []) (i 40 (.call { site with method.parameters := [word] }))
         [.word64, .reference] = none := by decide +kernel
 #print axioms closed_generic_fill_signature
 
@@ -1023,7 +1257,7 @@ theorem no_implicit_native_coercion :
     let unsignedNative : TypeExpr := .atom runtime "System.UIntPtr"
     ([nativeType, unsignedNative].all fun home =>
       let method := { addRaw with locals := [home], parameters := [home], returnType := home }
-      let call := i 40 (.call { site with parameterCount := 1, parameterTypes := [home] })
+      let call := i 40 (.call { site with parameterCount := 1, method.parameters := [home] })
       scalarTransfer method (i 10) [.word32] == none &&
         scalarTransfer method (i 10) [.native] == some [] &&
         scalarTransfer method (i 16 (.argument 0)) [.word32] == none &&

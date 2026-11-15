@@ -1,5 +1,5 @@
-import CIL.TypeExpr
 import CIL.Identity
+import CIL.TypeExpr
 
 /-!
 # Call sites and field references
@@ -18,20 +18,50 @@ inductive MethodId where
   | external (identity : String)
   deriving DecidableEq, Repr
 
+/-- A method by declaring type, name and declared signature, with the type arguments of a
+    generic method instance; types are in the closed form the call site states. -/
+structure MethodRef where
+  owner : TypeExpr
+  name : MetadataName
+  hasThis : Bool
+  genericArity : Nat
+  returnType : TypeExpr
+  parameters : List TypeExpr
+  methodArguments : List TypeExpr := []
+  deriving DecidableEq, Repr
+
+/-- The number of values a call to `method` consumes: its parameters and, for an instance
+    method, the receiver. -/
+def MethodRef.argumentCount (method : MethodRef) : Nat :=
+  method.parameters.length + (if method.hasThis then 1 else 0)
+
 /-- The metadata of a `call` or `newobj` operand, as declared at the call site. -/
 structure CallSite where
-  declaringType : TypeExpr := .void
+  method : MethodRef
   name : String := ""
   target : MethodId
   typeArguments : List TypeExpr
   parameterCount : Nat
-  hasThis : Bool
   returnsValue : Bool
-  returnType : TypeExpr := .void
-  parameterTypes : List TypeExpr := []
   /-- The suffix of `typeArguments` belonging to the declaring type, not the method. -/
   ownerArgumentCount : Nat := 0
   deriving DecidableEq, Repr
+
+/-- The type that declares the method a site calls. -/
+abbrev CallSite.declaringType (site : CallSite) : TypeExpr := site.method.owner
+
+/-- Whether the method a site calls takes a receiver. -/
+abbrev CallSite.hasThis (site : CallSite) : Bool := site.method.hasThis
+
+/-- The declared result type of the method a site calls. -/
+abbrev CallSite.returnType (site : CallSite) : TypeExpr := site.method.returnType
+
+/-- The declared parameter types of the method a site calls, receiver excluded. -/
+abbrev CallSite.parameterTypes (site : CallSite) : List TypeExpr := site.method.parameters
+
+/-- The method type arguments of a call: the prefix of `typeArguments` before the owner's. -/
+def siteMethodArguments (site : CallSite) : List TypeExpr :=
+  site.typeArguments.take (site.typeArguments.length - site.ownerArgumentCount)
 
 /-- The number of values a call at `site` consumes: its parameters and, for an instance
     method, the receiver. -/

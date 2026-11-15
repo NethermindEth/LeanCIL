@@ -19,7 +19,7 @@ cannot substitute for it.
 | Scalar flow | Complete stack kinds, raw maximum stack, joins/backedges, call arguments/results, homes and returns | Unknown types remain opaque |
 | Scalar translations | Exact literal values, arithmetic, comparisons, conversion flags and branch targets | Other operations require specialized checks or retain stack-effect fallback |
 | Managed/imported calls | Target slot, scoped identity, full signature, argument count, receiver and result | An import slot does not prove its implementation contract |
-| Call links | The emitted link table is the one the emitted instructions imply, entry by entry | The interpreter does not read the link table, so a link adds no behavioral claim beyond its instruction |
+| Call links | The emitted link table's keys ascend and are pcs of the code, and the link each pc reads from it, by one walk beside the code, is the one the instruction there implies; so the table is the one the emitted instructions imply, entry by entry | The interpreter does not read the link table, so a link adds no behavioral claim beyond its instruction |
 | Declared signature | The method's receiver kind, parameter types and return type equal those of its closed raw method | Faithful raw metadata |
 | Environment | Every method's environment is the program's raw and computed layout tables, which `LayoutsValid` recomputes | Layout correspondence, as for Layouts |
 | Constrained calls | Resolve serialized interface/override declarations to the emitted closed direct target | Complete metadata serialization; no general vtable/boxing model |
@@ -32,6 +32,17 @@ high-bit-set int64 values, conversion width/signedness/checkedness and exact bra
 pass by stack effect alone. Non-covered raw opcodes cannot emit these scalar operations, except
 feature-bound type-test words and size constants bound to exact primitive/vector widths or
 validated layouts.
+
+Indirect accesses are matched exactly too. Each integer `ldind` and `stind`, each `ldobj` and
+`stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit the
+one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
+without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
+emits its aggregate transfer, whose width its layout use binds. A span `ldobj` emits nothing, and
+`ldobj` or `stobj` of any other type, such as a floating-point or pointer type, is rejected. No
+other raw opcode may emit one
+of these forms, except a call, whose Unsafe and runtime-model checks bind it. `volatile.`, an
+`unaligned.` alignment other than 1, 2 or 4, and `unaligned.` before an instruction that does
+not take it are rejected.
 
 Mixed native/int32 operations execute the decoded arithmetic opcode with operand widening.
 Native/int64 arithmetic mixtures are rejected. The 64-bit representation interchange at homes
