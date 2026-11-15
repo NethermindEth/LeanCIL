@@ -8,12 +8,13 @@ import CIL.SymbolicExecution
 `cil_decoded_method name := decoder` evaluates a closed `Option CIL.Method`, such as
 `Method.ofRaw? profile environment original arguments`, defines `name` as the method it gives
 and adds `name_decoded : decoder = some name`, which the kernel checks by evaluating the
-decoder. The value is found by kernel reduction and written as constructors over numerals, so
+decoder. Compiled code computes the value, which is written as constructors over numerals, so
 the definition and the `@[cil_code]` field facts `name_locals`, `name_declared`, ... read as
 literals to `cil_instruction_equations`, `cil_resolution_facts` and stepping, and no text an
-extractor writes supplies any part of the method. A constant passed to the decoder, such as an
-extraction's `profile` and `environment`, stays that constant where it lands in a field. The
-evaluation is not trusted: the kernel checks `name_decoded` and every fact.
+extractor writes supplies any part of the method. A field whose type is that of a constant
+passed to the decoder, such as an extraction's `profile` and `environment`, is written as that
+constant. Neither the compiled evaluation nor that choice is trusted: the kernel checks
+`name_decoded` and every fact.
 -/
 
 namespace CIL.Extraction.DecodedDefinition
@@ -86,6 +87,87 @@ partial def literal (keep : Expr → Bool) (type term : Expr) : MetaM Expr := do
       remaining := body.instantiate1 field
     return mkAppN value.getAppFn written
 
+/-- Writes the runtime scope as its named constant, as an extraction writes it, so fact commands
+    that match the scope by name read a decoded method as they read an extracted one. -/
+local instance : ToExpr String where
+  toExpr text :=
+    if text == Extraction.runtimeScope then mkConst ``Extraction.runtimeScope else mkStrLit text
+  toTypeExpr := mkConst ``String
+
+deriving instance ToExpr for ComparisonGuard
+deriving instance ToExpr for ZeroGuard
+deriving instance ToExpr for EnumStorage
+deriving instance ToExpr for ArrayElement
+deriving instance ToExpr for ArraySpanRange
+deriving instance ToExpr for SnapshotShape
+deriving instance ToExpr for TransferKind
+deriving instance ToExpr for Extraction.TypeExpr
+deriving instance ToExpr for ViewObservation
+deriving instance ToExpr for MemoryOp
+deriving instance ToExpr for Address
+deriving instance ToExpr for ManagedSignature
+deriving instance ToExpr for ArmAESIntrinsic
+deriving instance ToExpr for AESIntrinsic
+deriving instance ToExpr for X86BaseIntrinsic
+deriving instance ToExpr for AVX512DQIntrinsic
+deriving instance ToExpr for ArmBaseIntrinsic
+deriving instance ToExpr for BMI2Intrinsic
+deriving instance ToExpr for BMI1Intrinsic
+deriving instance ToExpr for AVXIntrinsic
+deriving instance ToExpr for AVX512Intrinsic
+deriving instance ToExpr for AVX2Intrinsic
+deriving instance ToExpr for Value
+deriving instance ToExpr for SSEIntrinsic
+deriving instance ToExpr for ManagedIdentity
+deriving instance ToExpr for AdvSimdIntrinsic
+deriving instance ToExpr for StaticInitializer
+deriving instance ToExpr for VectorIntrinsic
+deriving instance ToExpr for ScalarResultWidth
+deriving instance ToExpr for IntegerMath
+deriving instance ToExpr for ScalarIntrinsic
+deriving instance ToExpr for ManagedTarget
+deriving instance ToExpr for Receiver
+deriving instance ToExpr for NarrowKind
+deriving instance ToExpr for Intrinsic
+deriving instance ToExpr for Feature
+deriving instance ToExpr for ManagedOp
+deriving instance ToExpr for SpanConstructor
+deriving instance ToExpr for ConvTarget
+deriving instance ToExpr for Instruction
+deriving instance ToExpr for LocalKind
+deriving instance ToExpr for StaticDescriptor
+deriving instance ToExpr for DeclaredSignature
+deriving instance ToExpr for Link
+
+/-- The value of the closed term `decoder`, computed by compiled code. -/
+unsafe def evaluateUnsafe (decoder : Expr) : MetaM (Option Method) :=
+  evalExpr (Option Method) (mkApp (mkConst ``Option [.zero]) (mkConst ``Method)) decoder
+
+/-- The value of the closed term `decoder`, computed by compiled code. -/
+@[implemented_by evaluateUnsafe]
+opaque evaluate (decoder : Expr) : MetaM (Option Method)
+
+/-- The term `method` denotes, with each field whose type is that of a constant in `passed`
+    written as that constant and every other field as its constructors. -/
+def methodTerm (passed : Array Expr) (method : Method) : MetaM Expr := do
+  let written : List (Name × Expr) := [(`code, toExpr method.code),
+    (`locals, toExpr method.locals), (`localKinds, toExpr method.localKinds),
+    (`staticSites, toExpr method.staticSites),
+    (`opaqueVectorLocals, toExpr method.opaqueVectorLocals),
+    (`parameterHomes, toExpr method.parameterHomes), (`declared, toExpr method.declared),
+    (`links, toExpr method.links), (`returnsValue, toExpr method.returnsValue)]
+  let mut fields := #[]
+  for field in getStructureFields (← getEnv) ``CIL.Method do
+    let fieldType := (← inferType (mkConst (``CIL.Method ++ field))).bindingBody!
+    let mut constant := none
+    for candidate in passed do
+      if (← inferType candidate) == fieldType then constant := some candidate
+    match constant, written.lookup field with
+    | some candidate, _ => fields := fields.push candidate
+    | none, some value => fields := fields.push value
+    | none, none => throwError "cil_decoded_method: no term is written for the field {field}"
+  return mkAppN (mkConst ``CIL.Method.mk) fields
+
 /-- The fields an extraction states as `@[cil_code]` facts; stepping, `cil_resolution_facts`
     and the contract tactics read them by name, as `{method}_{field}`. -/
 def factFields : List Name :=
@@ -97,12 +179,16 @@ def factFields : List Name :=
 def proveByReduction (name : Name) (doc : String) (statement : Expr) : MetaM Unit := do
   let some (type, left, _) := statement.eq?
     | throwError "cil_decoded_method: {statement} is not an equation"
-  -- A window per declaration, so earlier kernel work does not exhaust a later one's.
-  withCurrHeartbeats do
-    addDecl <| .thmDecl {
-      name, levelParams := [], type := statement,
-      value := mkApp2 (mkConst ``Eq.refl [← getLevel type]) type left }
-    addDocStringCore name doc
+  let declaration := Declaration.thmDecl {
+    name, levelParams := [], type := statement,
+    value := mkApp2 (mkConst ``Eq.refl [← getLevel type]) type left }
+  -- Checked before the command goes on, so a refused fact stops it rather than being logged after
+  -- the facts that follow it; a window per declaration keeps earlier work out of its budget.
+  try withOptions (Elab.async.set · false) <| withCurrHeartbeats <| addDecl declaration
+  catch error =>
+    if error.isInterrupt || error.isRuntime then throw error
+    throwError "cil_decoded_method: the kernel does not reduce both sides of {name} to one term"
+  addDocStringCore name doc
 
 /-- `cil_decoded_method name := decoder` defines `name` as the method the closed
     `Option CIL.Method` `decoder` evaluates to, proves `name_decoded : decoder = some name` and
@@ -123,10 +209,9 @@ elab_rules : command
       | throwError "cil_decoded_method: the cil_code simp set is not registered"
     let name := (← getCurrNamespace) ++ nameSyntax.getId
     let passed := decoder.getAppArgs.filter (·.isConst)
-    let decoded ← kernelWhnf decoder
-    unless decoded.isAppOfArity ``Option.some 2 do
-      throwError "cil_decoded_method: the decoder gives no method{indentExpr decoder}"
-    let value ← literal passed.contains methodType decoded.appArg!
+    let some method ← evaluate decoder
+      | throwError "cil_decoded_method: the decoder gives no method{indentExpr decoder}"
+    let value ← literal passed.contains methodType (← methodTerm passed method)
     addAndCompile <| .defnDecl {
       name, levelParams := [], type := methodType, value,
       hints := .regular (getMaxHeight (← getEnv) value + 1), safety := .safe }

@@ -657,3 +657,30 @@ declares `body_suffix{start}`, the code from every 16th pc on, and `body_suffix{
 proves each equation from the suffix that starts its block, so the equations cost time linear in
 the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
 [instruction lookups](performance/InstructionLookups.md) records.
+
+### Methods defined from their decoder
+
+`cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
+method that `decoder`, a closed `Option Method` term such as `Method.ofRaw? profile environment
+original typeArguments`, gives. Compiled code evaluates the decoder, and the command writes the
+result as constructors over numerals, except that a field whose type is that of a constant passed
+to the decoder, such as the profile and the environment, is written as that constant. The kernel
+then checks `name_decoded : decoder = some name` by reduction, and the `@[cil_code]` facts
+`name_profile`, `name_locals`, `name_localKinds`, `name_returnsValue`, `name_staticSites`,
+`name_declared`, `name_environment`, `name_links`, `name_opaqueVectorLocals` and
+`name_parameterHomes`. A decoder with a hole, a decoder that gives `none`, and a value the kernel
+does not reduce to the evaluated method are errors, so a file builds only when the kernel confirms
+what compiled code computed.
+
+An extraction defines a method this way when `Method.ofRaw?` decodes all of it: every opcode is
+one `Instruction.ofRaw?` reads, every instruction is reachable under the profile, and no parameter
+has a home. Its `Extracted.lean` then states the method as
+
+```text
+cil_decoded_method method0 := Method.ofRaw? profile environment method0Original method0TypeArgumentsRaw
+```
+
+in place of a `def method0 : Method` literal, followed by
+`cil_instruction_equations method0` and `cil_resolution_facts method0`. Every other method keeps
+its literal. Stepping reads both forms through the same `cil_code` facts and `Extracted.lookup{n}`
+equations.

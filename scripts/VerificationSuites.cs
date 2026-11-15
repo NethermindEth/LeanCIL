@@ -164,7 +164,7 @@ internal static class VerificationSuites
             "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
             "they reject"),
         new("blockers", "Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
-            "profile-excluded branches and self-admission"),
+            "profile-excluded branches, self-admission and the self-admitted methods defined from their decoder"),
         new("audit", "Tests/OleanAudit.cs",
             "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts " +
             "cannot forge"),

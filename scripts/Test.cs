@@ -107,7 +107,7 @@ if (suite is "all" or "core")
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
         "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/OutlineStops.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
-        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs"]);
+        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs", "Tests/DecodedOpcodes.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
@@ -124,7 +124,7 @@ if (suite is "all" or "evidence")
         "Tests/TranslationAudit.cs", "Tests/MetadataDifferential.cs"]);
 if (suite is "all" or "identity") projects.Add("Tests/Identities.cs");
 if (suite is "all" or "primitive") projects.Add("Tests/Strings.cs");
-if (suite is "all" or "blockers") projects.Add("Tests/SelfAdmission.cs");
+if (suite is "all" or "blockers") projects.AddRange(["Tests/SelfAdmission.cs", "Tests/CanonicalMethods.cs"]);
 if (suite is "all" or "fsharp" or "generics") projects.Add("Examples/FSharp");
 if (suite is "all" or "generics") projects.AddRange(["Tests/GenericOwners.cs", "Tests/GenericLayouts.cs"]);
 if (suite is "all" or "unsafe")
@@ -255,6 +255,8 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "index and pin index scaling and field reference tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
+RunFixture("Tests/DecodedOpcodes.cs", [], streamOutput: true, progress: "Decoded opcode table");
+Passed("the extractor's decoded opcode table against Instruction.valueOpcode");
 
 // Both selectors bind the same full identity; explicit mismatches must still fail.
 const string fullIdentity = "Examples, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null";

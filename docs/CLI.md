@@ -114,7 +114,7 @@ The output directory holds:
 
 | File | Content |
 | --- | --- |
-| `Extracted.lean` | The program: here `arg 0`, `arg 1`, `add`, `ret`, with the exact method signature, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees follow in dependency order. |
+| `Extracted.lean` | The program: here `arg 0`, `arg 1`, `add`, `ret`, with the exact method signature, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees follow in dependency order. A method the Lean decoder reads in full, Add included, is defined from its raw definition by [`cil_decoded_method`](PROOFS-BINDING.md#methods-defined-from-their-decoder); every other method is written as a literal. |
 | `identity.json` | The manifest: assembly path, identity and SHA-256, entry, profile, assumptions, references, imports and extractor hash. |
 | `Symbols.lean` | PDB names and source locations, written only when the assembly has a matching portable PDB. |
 

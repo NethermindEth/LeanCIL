@@ -73,6 +73,8 @@ internal static class Blockers
         int? ReachableMethods, List<Finding> Findings)
     {
         internal string[] TypeArguments { get; init; } = [];
+        /// <summary>The full names of the extracted methods defined from their decoder.</summary>
+        internal string[] DecodedMethods { get; init; } = [];
     }
 
     static string Option(string[] args, ref int index)
@@ -225,13 +227,15 @@ internal static class Blockers
                     rewrites[index].Instruction.Operand = rewrites[index].Operand;
             }
             // `admitted` means exactly that `extract` succeeds, so an entry without blockers is extracted.
+            string[] decoded = [];
             if (blocked.Count == 0 && Extract(batch, assemblyPath, signature, profileName, manifestDirectory,
-                    expectedAssembly, typeArguments, initializedTypes, references, imports) is { } rejected)
+                    expectedAssembly, typeArguments, initializedTypes, references, imports,
+                    names => decoded = names) is { } rejected)
                 blocked.Add(new(methods[0], null, rejected, [methods[0]]));
             if (blocked.Count == 0)
             {
                 outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, [])
-                    { TypeArguments = typeArguments });
+                    { TypeArguments = typeArguments, DecodedMethods = decoded });
                 continue;
             }
             var entryFindings = new List<Finding>();
@@ -284,7 +288,8 @@ internal static class Blockers
             {
                 signature = o.Signature, typeArguments = o.TypeArguments, profile = o.Profile, status = o.Status,
                 method = o.Method, reason = o.Reason,
-                reachableMethods = o.ReachableMethods, blockers = o.Findings.Select(f => f.Id)
+                reachableMethods = o.ReachableMethods, decodedMethods = o.DecodedMethods,
+                blockers = o.Findings.Select(f => f.Id)
             }),
             blockers = ordered.Select(f => new
             {
@@ -299,10 +304,12 @@ internal static class Blockers
         return 0;
     }
 
-    // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any.
+    // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any, and passes
+    // the methods defined from their decoder to `decoded`.
     static Exception? Extract(Program.ExtractionBatch batch, string assemblyPath, string signature, string profileName,
         string manifestDirectory, string? expectedAssembly, string[] typeArguments,
-        IEnumerable<string> initializedTypes, IEnumerable<string> references, ImportOptions imports)
+        IEnumerable<string> initializedTypes, IEnumerable<string> references, ImportOptions imports,
+        Action<string[]> decoded)
     {
         var output = Path.Combine(Path.GetTempPath(), "leancil-blockers-" + Guid.NewGuid().ToString("N"));
         string profile = profileName.StartsWith('@') ? "@" + Path.GetFullPath(profileName[1..], manifestDirectory) :
@@ -313,7 +320,8 @@ internal static class Blockers
                 .. expectedAssembly is null ? Array.Empty<string>() : ["--assembly", expectedAssembly],
                 .. typeArguments.SelectMany(argument => new[] { "--type-argument", argument }),
                 .. initializedTypes.SelectMany(type => new[] { "--assume-initialized", type }),
-                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()], batch);
+                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()], batch,
+                decoded);
             return null;
         }
         catch (Exception error) { return error; }

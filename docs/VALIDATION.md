@@ -53,7 +53,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 
 | Suite | Checks |
 | --- | --- |
-| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, replay diagnostics, return narrowing and metadata restrictions, value opcode decoding, methods decoded from body bytes and defined by evaluating the decoder, object array steps, embedding retention and profiles, full transfer, SHA-1 and assembly and pin index scaling, binding catalogs and certified integer binding families, gate plans and required results, method selectors, caches, batched extraction and joint kernel replay |
+| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, replay diagnostics, return narrowing and metadata restrictions, value opcode decoding and the extractor's table of decoded opcodes, methods decoded from body bytes and defined by evaluating the decoder, Add extracted with no method literal, object array steps, embedding retention and profiles, full transfer, SHA-1 and assembly and pin index scaling, binding catalogs and certified integer binding families, gate plans and required results, method selectors, caches, batched extraction and joint kernel replay |
 | `templates` | shared profile templates, exact instruction equations and checked bindings |
 | `workspace` | per-method editor extractions, watch refresh and ordinary fresh certification |
 | `imports` | implementation-bound contract imports and conditional caller verification |
@@ -107,7 +107,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting and arguments bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
-| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal and self-admission |
+| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission and the self-admitted methods defined from their decoder |
 | `audit` | theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge |
 | `docs` | documentation Lean snippets, cited library names and documented commands against the library and tool |
 | `exports` | contract production, restrictions and caller reuse |

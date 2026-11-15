@@ -7,8 +7,10 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
+    /// <summary>An extraction's Lean source and what it is built from; `Decoded` marks each method defined from
+    /// its decoder rather than written as a literal.</summary>
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts);
+        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts, bool[] Decoded);
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -180,8 +182,10 @@ internal static class LeanEmitter
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var templates = new List<TemplateEmitter.Method>();
         var callDefinitions = new string?[methods.Length];
+        var decoded = new bool[methods.Length];
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
+            import CIL.Extraction.DecodedDefinition
             import CIL.SymbolicExecution
             import CIL.InstructionEquations
             import CIL.Safety.Execution
@@ -277,10 +281,21 @@ internal static class LeanEmitter
                 lean.AppendLine($"@[cil_code] def {LinkName(n, pc)} : Link := {link}");
             var linkTable = "[" + string.Join(", ", linkEntries.Select(entry =>
                 $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]";
-            // Links stay out of the frame: templates share it across profiles, but call indices differ.
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
-                $"links := {linkTable}, code := [");
-            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op.ToLean())) + "] }");
+            layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
+            ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
+            genericEvidence.EmitMethod(lean, m, n, reachable);
+            decoded[n] = GenericEvidence.DecodesInFull(m, reachable, parameterIndices);
+            if (decoded[n])
+                // The decoder's raw definition is the method's only source; the command states its field facts.
+                lean.AppendLine($"cil_decoded_method method{n} := Method.ofRaw? profile " +
+                    $"{FrameMetadata.EnvironmentLean} method{n}Original method{n}TypeArgumentsRaw");
+            else
+            {
+                // Links stay out of the frame: templates share it across profiles, but call indices differ.
+                lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
+                    $"links := {linkTable}, code := [");
+                lean.AppendLine(string.Join(",\n", ops.Select(op => "  " + op.ToLean())) + "] }");
+            }
             if (linkEntries.Count > 0)
             {
                 // The literal index is checked once against the table; each fact then reads it in logarithmic time.
@@ -289,15 +304,18 @@ internal static class LeanEmitter
                 lean.AppendLine($"theorem method{n}_linkIndex_valid : " +
                     $"Extraction.LinkIndexValid method{n}.links method{n}LinkIndex := {Decide}");
             }
-            layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
-            ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
-            genericEvidence.EmitMethod(lean, m, n, reachable);
+            lean.AppendLine($"theorem method{n}_layouts_validated : Extraction.MethodLayoutsValid rawLayouts " +
+                $"computedLayouts method{n} method{n}LayoutUses := {Decide}");
+            lean.AppendLine($"theorem method{n}_parameters_validated : Extraction.ParameterHomesValid " +
+                $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := {Decide}");
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
-            lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
-                $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
+            if (!decoded[n])
+                lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
+                    $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
             ScalarEvidence.Emit(lean, m, n, scalarCertificate);
-            lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
-                $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
+            if (!decoded[n])
+                lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
+                    $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
             // The command states `method{n}_instruction{pc}` for each pc and proves it in time linear in the body.
             lean.AppendLine($"cil_instruction_equations method{n}");
             (string Field, string Value)[] facts =
@@ -307,8 +325,9 @@ internal static class LeanEmitter
                 ("staticSites", $"[{frame.StaticSitesLean}]"), ("declared", frame.Declared),
                 ("environment", FrameMetadata.EnvironmentLean), ("links", linkTable)
             ];
-            foreach (var (field, value) in facts)
-                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
+            if (!decoded[n])
+                foreach (var (field, value) in facts)
+                    lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
             lean.AppendLine($"cil_resolution_facts method{n}");
             // One fact per call site lets a stepping proof read its link without evaluating the table lookup.
             for (var position = 0; position < linkEntries.Count; position++)
@@ -400,6 +419,6 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts, decoded);
     }
 }

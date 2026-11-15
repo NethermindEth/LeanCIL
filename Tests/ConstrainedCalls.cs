@@ -31,7 +31,7 @@ static string Narrowed(string source, out string control)
 {
     var obligations = Regex.Matches(source,
         @"(?m)^theorem method\d+_constrained_validated : [^\r\n]+\r?$");
-    var methodCount = Regex.Matches(source, @"(?m)^def method\d+ : Method :=").Count;
+    var methodCount = Regex.Matches(source, @"(?m)^(def method\d+ : Method|cil_decoded_method method\d+) :=").Count;
     if (methodCount == 0 || obligations.Count != methodCount)
         throw new Exception("Unexpected constrained obligation count");
     var declarations = Regex.Replace(source,

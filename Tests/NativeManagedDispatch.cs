@@ -46,7 +46,7 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
 var output = Path.Combine(root, "extracted");
 Run(["dotnet", ExtractorPath, "extract", dll, selector, output]);
 var source = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-if (Regex.Matches(source, @"(?m)^def method\d+ : Method :=").Count != 2)
+if (Regex.Matches(source, @"(?m)^(def method\d+ : Method|cil_decoded_method method\d+) :=").Count != 2)
     throw new InvalidOperationException("Native dispatch did not retain a bounded cyclic catalog");
 var scalar = NarrowEvidence(source, "method0_scalars_validated");
 var proof = source + "\n" + CheckedEvidenceControl(source, scalar, ["method0_scalars_validated"], 0) + "\n" + """

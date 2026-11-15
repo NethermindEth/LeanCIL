@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -344,6 +345,50 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $" ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, pinned_identities_spelled," +
             " by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩");
     }
+
+    /// <summary>
+    /// The opcodes Lean's `Instruction.ofRaw?` decodes for some operand, the set `Instruction.valueOpcode` holds;
+    /// Tests/DecodedOpcodes.cs compares the two. The table goes when every opcode decodes.
+    /// </summary>
+    internal static readonly FrozenSet<Code> DecodedOpcodes = new[]
+    {
+        // Stack shuffling, return, arguments and locals.
+        Code.Nop, Code.Dup, Code.Pop, Code.Ret,
+        Code.Ldarg_0, Code.Ldarg_1, Code.Ldarg_2, Code.Ldarg_3, Code.Ldarg_S, Code.Ldarg,
+        Code.Ldloc_0, Code.Ldloc_1, Code.Ldloc_2, Code.Ldloc_3, Code.Ldloc_S, Code.Ldloc,
+        Code.Stloc_0, Code.Stloc_1, Code.Stloc_2, Code.Stloc_3, Code.Stloc_S, Code.Stloc,
+        Code.Ldloca_S, Code.Ldloca,
+        // Constants.
+        Code.Ldc_I4_M1, Code.Ldc_I4_0, Code.Ldc_I4_1, Code.Ldc_I4_2, Code.Ldc_I4_3, Code.Ldc_I4_4, Code.Ldc_I4_5,
+        Code.Ldc_I4_6, Code.Ldc_I4_7, Code.Ldc_I4_8, Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8,
+        // Branches.
+        Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
+        Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
+        Code.Br, Code.Brfalse, Code.Brtrue, Code.Beq, Code.Bge, Code.Bgt, Code.Ble, Code.Blt,
+        Code.Bne_Un, Code.Bge_Un, Code.Bgt_Un, Code.Ble_Un, Code.Blt_Un, Code.Switch,
+        // Integer arithmetic, bitwise operations and comparisons.
+        Code.Add, Code.Sub, Code.Mul, Code.Div, Code.Div_Un, Code.Rem, Code.Rem_Un, Code.And, Code.Or, Code.Xor,
+        Code.Shl, Code.Shr, Code.Shr_Un, Code.Neg, Code.Not,
+        Code.Add_Ovf, Code.Add_Ovf_Un, Code.Mul_Ovf, Code.Mul_Ovf_Un, Code.Sub_Ovf, Code.Sub_Ovf_Un,
+        Code.Ceq, Code.Cgt, Code.Cgt_Un, Code.Clt, Code.Clt_Un,
+        // Conversions.
+        Code.Conv_I1, Code.Conv_I2, Code.Conv_I4, Code.Conv_I8, Code.Conv_I,
+        Code.Conv_U1, Code.Conv_U2, Code.Conv_U4, Code.Conv_U8, Code.Conv_U,
+        Code.Conv_Ovf_I1, Code.Conv_Ovf_I2, Code.Conv_Ovf_I4, Code.Conv_Ovf_I8, Code.Conv_Ovf_I,
+        Code.Conv_Ovf_U1, Code.Conv_Ovf_U2, Code.Conv_Ovf_U4, Code.Conv_Ovf_U8, Code.Conv_Ovf_U,
+        Code.Conv_Ovf_I1_Un, Code.Conv_Ovf_I2_Un, Code.Conv_Ovf_I4_Un, Code.Conv_Ovf_I8_Un, Code.Conv_Ovf_I_Un,
+        Code.Conv_Ovf_U1_Un, Code.Conv_Ovf_U2_Un, Code.Conv_Ovf_U4_Un, Code.Conv_Ovf_U8_Un, Code.Conv_Ovf_U_Un
+    }.ToFrozenSet();
+
+    /// <summary>
+    /// Whether Lean's `Method.ofRaw?` decodes all of `method`: every opcode is in <see cref="DecodedOpcodes"/>,
+    /// every pc is in the reachability certificate and no parameter has a home. A wrong answer fails the build at
+    /// the method's `cil_decoded_method` definition.
+    /// </summary>
+    internal static bool DecodesInFull(MethodDefinition method, IReadOnlySet<Instruction> reachable,
+        IReadOnlyCollection<int> parameterHomes) =>
+        parameterHomes.Count == 0 && method.Body.Instructions.All(instruction =>
+            reachable.Contains(instruction) && DecodedOpcodes.Contains(instruction.OpCode.Code));
 
     static readonly HashSet<Instruction> EmptySet = [];
 
