@@ -49,12 +49,12 @@ variable (post : Memory → List Value → Prop) (frame : Frame) (m : Memory)
 
 /-- The hole's fault is not settled, so `loop_outcome_some_refuted` takes no run that reaches
     it. -/
-theorem stuck_refutes_nothing :
+theorem stuck_not_settled :
     run [stuck] 1 0 0 [] frame [] m = .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ ∧
       ¬ Settled (.error ⟨0, 0, .unsupported "Opcode not admitted"⟩ :
         Except LocatedFault (Memory × List Value)) :=
   ⟨rfl, by decide⟩
-#print axioms stuck_refutes_nothing
+#print axioms stuck_not_settled
 
 /-- A pc past the body is invalid state. -/
 example : ¬ LoopOutcome [stuck] 0 [] post (some "System.InvalidOperationException") ⟨1, frame, [], m⟩ :=

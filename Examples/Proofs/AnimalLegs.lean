@@ -12,8 +12,8 @@ each entry against the extraction's catalog. The receiver's runtime class select
 a `Dog` has four legs and a `Bird` two. A null receiver throws
 `NullReferenceException` at the `callvirt`. An instance of any class the table omits, such as a
 class from an assembly outside the extraction, is the model fault `outsideDispatchTable`, an
-`unsupported` fault: no return and no exception is proved for it, and it refutes nothing, so
-every theorem here names the receiver's class.
+`unsupported` fault: no return and no exception is proved for it, and no refutation lemma takes
+it, so every theorem here names the receiver's class.
 -/
 
 open CIL CIL.Safety
@@ -93,11 +93,11 @@ theorem outside_faults (memory : CIL.Safety.Memory) (animal : Reference)
 /-- That fault is not a throw, so it is no named exception, and it is not definite: the model
     does not cover the run, so `invoke_fault_refutes_success` and the contract refutations
     cannot use it. -/
-theorem outside_refutes_nothing :
+theorem outside_not_definite :
     (∀ exception, outsideDispatchTable ≠ .thrown exception) ∧
       outsideDispatchTable.definite = false :=
   ⟨fun _ => by simp [outsideDispatchTable], rfl⟩
 
-#print axioms outside_refutes_nothing
+#print axioms outside_not_definite
 
 end ExampleProof

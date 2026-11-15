@@ -134,12 +134,19 @@ theorem missing_argument_refutes_contract :
 
 /-- The run faults at the hole, and that fault is not definite, so `not_holds_of_fault` cannot
     refute `returnContract` from it. -/
-theorem hole_refutes_nothing :
+theorem hole_not_definite :
     invoke [newarrHole] 4 0 [] Memory.empty = .error ⟨0, 1, .unsupported "Opcode not admitted"⟩ ∧
       (ExecutionFault.unsupported "Opcode not admitted").definite = false :=
   ⟨rfl, rfl⟩
 
-#print axioms hole_refutes_nothing
+#print axioms hole_not_definite
+
+-- So the refutation that works for the missing argument fails at its `definite` hypothesis here.
+/-- error: Tactic `decide` proved that the proposition -/
+#guard_msgs (substring := true) in
+example : ¬ returnContract.Holds [newarrHole] 0 :=
+  returnContract.not_holds_of_fault (input := ()) (initial := Memory.empty) (observed := 4)
+    (fault := ⟨0, 1, .unsupported "Opcode not admitted"⟩) trivial (by decide) rfl
 
 -- Stepping stops at pc 1, the hole, so no proof that the method returns goes through either.
 /-- run [newarrHole] fuel 0 1 [] -/

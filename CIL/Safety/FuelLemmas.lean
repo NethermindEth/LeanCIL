@@ -26,8 +26,8 @@ namespace CIL.Safety
   | .allocationFailure .. => true
 
 /-- An outcome that stands as evidence about the method and that more fuel cannot change: a
-    success, or a definite fault. Every refutation lemma takes it, so a run that reaches an
-    `unsupported` operation refutes nothing. -/
+    success, or a definite fault. Every refutation lemma takes it, so none of them refutes anything
+    from a run that reaches an `unsupported` operation. -/
 def Settled (outcome : Except LocatedFault α) : Prop :=
   match outcome with
   | .ok _ => True

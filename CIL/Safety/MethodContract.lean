@@ -364,7 +364,7 @@ def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
 
 /-- A located definite fault on an input meeting the precondition refutes the contract at
     every fuel budget. Exhaustion does not refute termination, and an `unsupported` fault,
-    where the model stops covering the run, refutes nothing. -/
+    where the model stops covering the run, is not accepted. -/
 theorem MethodContract.not_holds_of_fault {Input Output : Type}
     (contract : MethodContract Input Output) {program : CIL.Program} {method observed : Nat}
     {input : Input} {initial : Memory} {fault : LocatedFault}

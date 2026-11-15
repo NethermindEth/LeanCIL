@@ -102,7 +102,7 @@ theorem memory_faults_never_named (rule : Fault) (reference : ManagedReference) 
 
 /-- A hole's fault names no exception and is not settled, so `RaisesCLR.not_of_invoke` cannot use
     it: a run that reaches a hole neither raises nor refutes an expected exception. -/
-theorem unsupported_refutes_nothing :
+theorem unsupported_not_settled :
     invoke [{ code := [.unadmitted 0], locals := [], returnsValue := false }] 1 0 [] empty =
         .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ ∧
       ExecutionFault.clrException (.unsupported "Opcode not admitted") = none ∧
@@ -123,7 +123,7 @@ theorem thrown_still_named (exception : String) :
 #print axioms named_outcomes
 #print axioms wrong_outcomes
 #print axioms divide_and_mod_zero
-#print axioms unsupported_refutes_nothing
+#print axioms unsupported_not_settled
 #print axioms invalid_state_never_named
 
 end Tests.RuntimeExceptions
