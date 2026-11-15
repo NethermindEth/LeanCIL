@@ -720,7 +720,7 @@ theorem step_appendLocals_sub :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .sub pc _ frame extra memory
@@ -829,7 +829,7 @@ theorem step_appendLocals_clt_un :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .clt_un pc _ frame extra memory
@@ -842,7 +842,7 @@ theorem step_appendLocals_cgt_un :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .cgt_un pc _ frame extra memory
@@ -855,7 +855,7 @@ theorem step_appendLocals_ceq :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .ceq pc _ frame extra memory
@@ -1159,7 +1159,7 @@ theorem step_appendLocals_intrinsic (operation : Intrinsic) (argc : Nat) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall
   frame_natural
 
 #print axioms step_appendLocals_intrinsic

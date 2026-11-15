@@ -341,7 +341,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     (args : List Value) (frame : Frame) (stack : List Value) (m : Memory)
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
     StepContract body operation frame stack m action := by
-  unfold step at h
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply managedStep_contract; assumption

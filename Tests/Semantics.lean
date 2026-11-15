@@ -85,7 +85,7 @@ theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsi
     (args stack : List Value) (frame : Frame) (memory : Memory) :
     step body (.intrinsic operation argc) pc args frame stack memory =
       .error (.unsupported "Intrinsic unavailable in target profile") := by
-  simp [step, disabled, observerCount, unspecifiedOperands]
+  simp [step, intrinsicCall, disabled, observerCount, unspecifiedOperands]
 
 theorem checked_avx2_enabled :
     step { scalarBody with profile := { avx2 := true } } (.intrinsic (.avx2 .add64) 2)

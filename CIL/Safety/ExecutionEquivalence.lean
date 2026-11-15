@@ -225,7 +225,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (frame : Frame) (stack : List Value) :
     ResultEquivalent FrameActionEquivalent (step body op pc args frame stack m)
       (step body op pc args frame stack n) := by
-  unfold CIL.Safety.step
+  unfold CIL.Safety.step intrinsicCall referenceCompareCall referenceSubtractCall
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
     same.loadArgument,

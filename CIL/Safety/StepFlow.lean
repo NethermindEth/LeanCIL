@@ -85,7 +85,7 @@ theorem step_callee {body : CIL.Method} {op : CIL.Instruction} {pc : Nat} {args 
     (enters : action.callee = some callee) : callee ∈ op.callees := by
   cases op
   case callVirtual targets argc => exact step_callVirtual_callee h enters
-  all_goals unfold step at h
+  all_goals unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h
   all_goals dsimp only at h
   all_goals split at h
   all_goals repeat' first
