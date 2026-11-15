@@ -129,6 +129,101 @@ example (memory : CIL.Safety.Memory) (left right : CIL.W32) :
       .ok (memory, [.scalar (.i32 right)]) :=
   scalar_returns _ 0 0 true false rfl rfl memory left right
 
+/-- `return Callee(a);` with the callee index as a parameter: its call site's link is
+    determined by its instruction, so the command states it. -/
+def callingBody (callee : Nat) : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call callee 1, .ret] }
+
+cil_instruction_equations callingBody
+
+/--
+info: Tests.InstructionEquations.callingBody_link1 (callee : Nat) :
+  (callingBody callee).linkAt 1 = some (CIL.Link.direct callee)
+-/
+#guard_msgs (whitespace := lax) in #check callingBody_link1
+
+-- A pc that is not a call site, and a call a feature flag decides, get no link fact.
+/-- error: Unknown identifier `callingBody_link0` -/
+#guard_msgs in #check callingBody_link0
+/-- error: Unknown identifier `dispatchBody_link4` -/
+#guard_msgs in #check dispatchBody_link4
+
+section SealedCall
+
+attribute [local irreducible] callingBody
+
+/-- With the body sealed, the call enters its parameter callee by the link fact alone. -/
+theorem sealed_call (callee : Nat) (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame)
+    (memory : CIL.Safety.Memory) (argument : CIL.W64) :
+    CIL.Safety.step (callingBody callee) (.call callee 1) 1 args frame
+        [.scalar (.i64 argument)] memory =
+      .ok (.call callee [.scalar (.i64 argument)] [] memory) := by
+  cil_checked_step []
+
+/-- info: 'Tests.InstructionEquations.sealed_call' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms sealed_call
+
+end SealedCall
+
+section ExtractedLinks
+
+/-- The links of an extraction's call sites, named and tagged as the extractor writes them. -/
+@[cil_code] def namedDirect : CIL.Link := .direct 1
+/-- The link of a constructor call site, as the extractor writes it. -/
+@[cil_code] def namedAggregate : CIL.Link := .aggregate 1 8
+
+/-- An extracted body: an explicit table and one generated fact per call site. -/
+def linkedBody : CIL.Method :=
+  { returnsValue := true, locals := [],
+    code := [.ldarg 0, .call 1 1, .newAggregate 1 0 8, .ret],
+    links := [(1, namedDirect), (2, namedAggregate)] }
+
+@[cil_code] theorem linkedBody_link1 : linkedBody.linkAt 1 = some namedDirect := rfl
+@[cil_code] theorem linkedBody_link2 : linkedBody.linkAt 2 = some namedAggregate := rfl
+
+-- Sealed, so each step below reads its link from the facts and not by evaluating the table.
+attribute [local irreducible] linkedBody
+
+/-- A call enters the method its site's fact and tagged link name. -/
+theorem linked_call (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame)
+    (memory : CIL.Safety.Memory) (argument : CIL.W64) :
+    CIL.Safety.step linkedBody (.call 1 1) 1 args frame [.scalar (.i64 argument)] memory =
+      .ok (.call 1 [.scalar (.i64 argument)] [] memory) := by
+  cil_checked_step []
+
+/-- A call at a site linked to a constructor faults, which needs the link's constructor form. -/
+theorem constructor_link_faults (args : List CIL.Safety.Value) (frame : CIL.Safety.Frame)
+    (memory : CIL.Safety.Memory) (argument : CIL.W64) :
+    CIL.Safety.step linkedBody (.call 1 1) 2 args frame [.scalar (.i64 argument)] memory =
+      .error CIL.Safety.unlinkedCall := by
+  cil_checked_step []
+
+/-- info: 'Tests.InstructionEquations.linked_call' depends on axioms: [propext, Quot.sound] -/
+#guard_msgs in #print axioms linked_call
+/--
+info: 'Tests.InstructionEquations.constructor_link_faults' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in #print axioms constructor_link_faults
+
+end ExtractedLinks
+
+/-- A call site its table omits. -/
+def unlinkedBody : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call 0 1, .ret], links := [] }
+
+cil_instruction_equations unlinkedBody
+
+/-- The run faults at the call's pc, before any callee runs. -/
+theorem unlinked_call_faults (memory : CIL.Safety.Memory) (argument : CIL.W64) :
+    CIL.Safety.invoke [unlinkedBody] 4 0 [.scalar (.i64 argument)] memory =
+      .error ⟨0, 1, CIL.Safety.unlinkedCall⟩ := by
+  cil_checked_steps []
+
+/--
+info: 'Tests.InstructionEquations.unlinked_call_faults' depends on axioms: [propext, Quot.sound]
+-/
+#guard_msgs in #print axioms unlinked_call_faults
+
 /-- A body composed from a padding block and a helper list, as transcriptions are written. -/
 def composedBody (avx2 : Bool) : CIL.Method :=
   { returnsValue := false, locals := [],

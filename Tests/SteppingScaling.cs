@@ -57,7 +57,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
-    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false)
+    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false), ("calls", [16, 64, 256], true)
 };
 if (selectedWorkloads is not null)
 {
@@ -113,8 +113,11 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // length. The faulting body divides, takes a remainder, adds with an overflow check and converts
 // with one, each from the arguments, so each step reads a fact of constant size. The arguments body
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
+// The calls body passes its argument through one call per cycle to a callee that returns it, so each
+// call reads its target from the body's link table.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
+    "calls" => ([".ldarg 0"], [".call 1 1"], [".ret"]),
     "memory" => ([], [".ldarg 0", ".ldarg 1", ".store64", ".ldarg 0", ".load64", ".pop"],
         [".ldarg 0", ".load64", ".ret"]),
     "reference" or "table" => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"]),
@@ -172,7 +175,11 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
           locals := [], returnsValue := true,{{declaredField}}
           code := [{{string.Join(",\n    ", operations)}}] }
         cil_instruction_equations body
-        """ + "\n" + (workload == "arguments" ? $$"""
+        """ + "\n" + (workload == "calls" ? """
+        /-- The callee every call of the calls body enters; it returns its argument. -/
+        def callee : CIL.Method := { locals := [], returnsValue := true, code := [.ldarg 0, .ret] }
+        cil_instruction_equations callee
+        """ + "\n" : "") + (workload == "arguments" ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
         theorem body_declared : body.declared = {{signature}} := rfl
         cil_resolution_facts body
@@ -303,6 +310,13 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             theorem checked (memory : Memory) (argument : Nat -> CIL.W32) :
                 invoke [body] {{operations.Length + 1}} 0 [{{incoming}}] memory =
                   .ok (memory, [.scalar (.i32 ({{sum}}))]) := by
+              cil_checked_steps
+            """,
+        "calls" => $$"""
+            /-- Each call enters the callee, which returns its argument, so the value passes through. -/
+            theorem checked (memory : Memory) (left : CIL.W64) :
+                invoke [body, callee] {{operations.Length + 3}} 0 [.scalar (.i64 left)] memory =
+                  .ok (memory, [.scalar (.i64 left)]) := by
               cil_checked_steps
             """,
         "locals" => $$"""

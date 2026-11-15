@@ -21,6 +21,12 @@ suffix before it, and proves each equation from the suffix that starts its block
 walks more than one block, so the equations of a body cost time linear in its length. The
 kernel checks every declaration, so the command proves nothing about the body beyond what its
 definition says.
+
+For a body whose link table is the one its code implies, `linksOfCode`, the command also states
+`body_link{pc} : (body xs).linkAt pc = some link`, tagged `@[cil_code ↓]`, at every call site
+whose link its instruction determines, each from that pc's instruction equation through
+`body_links_implied`; a call reads its target from `linkAt`, so stepping one rewrites by this fact
+instead of rebuilding the table. A body with an explicit table, as an extraction writes, gets none.
 -/
 
 namespace CIL.InstructionEquations
@@ -152,9 +158,39 @@ def declareSuffixes (body : Body) (elementType : Expr) (stem : String)
           (suffix start) (mkNatLit previous) (mkNatLit suffixBlock)
           (body.constant s!"{stem}{previous}_placed") (refl (suffix start)))
 
+/-- Whether `method` unfolds to a structure whose link table is `linksOfCode` of its code. -/
+def impliedLinks (method : Expr) : MetaM Bool := do
+  let head ← whnf method
+  unless head.isAppOf ``CIL.Method.mk do return false
+  let some index := (getStructureFields (← getEnv) ``CIL.Method).idxOf? `links | return false
+  let some links := head.getAppArgs[index]? | return false
+  return links.isAppOfArity ``CIL.linksOfCode 1
+
+/-- Declares `body_links_implied` and, at each pc whose instruction reduces to a link,
+    `body_link{pc} : ∀ xs, (body xs).linkAt pc = some link` from its instruction equation. -/
+def declareLinks (body : Body) (simpSet : SimpExtension) (method : Expr) (ops : Array Expr) :
+    TermElabM Unit := do
+  let code := mkApp (mkConst ``CIL.Method.code) method
+  let implied ← mkEq (mkApp (mkConst ``CIL.Method.links) method)
+    (mkApp (mkConst ``CIL.linksOfCode) code)
+  body.prove "_links_implied" s!"The link table of `{body.name}` is the one its code implies."
+    implied (← mkEqRefl (mkApp (mkConst ``CIL.Method.links) method))
+  for inRange : pc in [0:ops.size] do
+    let link ← whnfD (mkApp (mkConst ``CIL.Instruction.link?) ops[pc])
+    unless link.isAppOfArity ``Option.some 2 do continue
+    withCurrHeartbeats do
+      let statement ← mkEq (mkApp2 (mkConst ``CIL.Method.linkAt) method (mkNatLit pc)) link
+      let proof ← mkAppM ``CIL.Method.linkAt_of_instruction
+        #[body.constant "_links_implied", body.constant s!"_instruction{pc}"]
+      body.prove s!"_link{pc}" s!"The link of the call site at pc {pc} of `{body.name}`."
+        statement proof
+      addSimpTheorem simpSet (body.name.appendAfter s!"_link{pc}") (post := false)
+        (inv := false) .global (eval_prio default)
+
 /-- `cil_instruction_equations body` declares `body_instruction{pc}`, the `@[cil_code ↓]`
     equation `∀ xs, (body xs).code[pc]? = some op`, for every pc of the method-valued
-    definition `body`, with the named suffixes `body_suffix{start}` its proofs go through. -/
+    definition `body`, with the named suffixes `body_suffix{start}` its proofs go through, and
+    the link facts `body_link{pc}` when the body's table is the one its code implies. -/
 syntax (name := instructionEquations) "cil_instruction_equations " ident : command
 
 elab_rules : command
@@ -187,5 +223,6 @@ elab_rules : command
             -- Pre-order, as `@[cil_code ↓]`: simp rewrites the lookup before unfolding the body.
             addSimpTheorem simpSet (name.appendAfter s!"_instruction{pc}") (post := false)
               (inv := false) .global (eval_prio default)
+        if ← impliedLinks method then declareLinks body simpSet method ops
 
 end CIL.InstructionEquations

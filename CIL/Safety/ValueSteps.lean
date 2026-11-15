@@ -234,6 +234,29 @@ dsimproc [cil_step] reduceMethodProfile (CIL.Method.profile _) := fun e => do
   return .done (← withReducible <| whnf (mkApp (mkConst ``CIL.Method.profile) head))
 
 open Lean Meta in
+/-- The link `m.linkAt pc` reads, as `none` or `some` of a link constructor, for a method literal
+    `m` and a literal pc, by evaluating its table; a named, opaque or case-split body, or a table a
+    parameter decides, gives nothing. -/
+def literalLink? (read : Expr) : MetaM (Option Expr) := do
+  let_expr CIL.Method.linkAt body pc := read | return none
+  unless (← instantiateMVars body).isAppOf ``CIL.Method.mk do return none
+  unless (← instantiateMVars pc).nat?.isSome do return none
+  let link ← withDefault <| whnf read
+  match_expr link with
+  | Option.none _ => return some link
+  | Option.some _ value =>
+    let value ← withDefault <| whnf value
+    unless value.getAppFn.isConst do return none
+    return some (mkApp2 (mkConst ``Option.some [Level.zero]) (mkConst ``CIL.Link) value)
+  | _ => return none
+
+open Lean Meta in
+/-- `m.linkAt pc` for a method literal and a literal pc, by `literalLink?`. -/
+dsimproc [cil_step] reduceMethodLinkAt (CIL.Method.linkAt _ _) := fun read => do
+  let some link ← literalLink? read | return .continue
+  return .done link
+
+open Lean Meta in
 /-- Known return signatures simplify by checked storage lemmas without traversing method code. -/
 simproc [cil_step] reduceReturnNarrow (CIL.Method.returnNarrow _) := fun expression => do
   let_expr CIL.Method.returnNarrow method := expression | return .continue
