@@ -448,7 +448,8 @@ def sharedShape? (resolver : Name) (expression : Expr) : MetaM (Option Simp.Step
   unless ← withDefault (isDefEq (mkApp (mkConst ``CIL.Method.environment) body) environment) do
     return none
   let proof := mkApp2 (mkConst fact) body (← mkEqRefl environment)
-  let some (_, _, shape) := (← inferType proof).eq? | return none
+  let some (_, resolved, shape) := (← inferType proof).eq? | return none
+  unless resolved == expression do return none
   return some (.done { expr := shape, proof? := some proof })
 
 /-- A method's field shape, from the shared fact of a field operand that has one. -/
