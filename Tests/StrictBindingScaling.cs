@@ -82,7 +82,7 @@ partial class Program
     /// heartbeats grow linearly with them. Images whose name and key take 64, 128 and 256 bytes each are checked,
     /// and the heartbeats of preparing each image, which also spells its identity, are subtracted. A byte added
     /// from 128 to 256 may cost at most 1.25 times a byte added from 64 to 128, where a cost quadratic in the bytes
-    /// would give twice; heartbeats do not vary between runs, so the bound can be tight.
+    /// would give twice; reruns differ by a few heartbeats, far inside that bound.
     /// </summary>
     static void CheckAssemblyBlockScaling(string root, string package)
     {
