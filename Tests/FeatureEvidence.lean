@@ -31,8 +31,10 @@ example : ¬ ({ architecture := .x64, bmi2 := true, x86Base64 := true } : Featur
 example : ¬ ({ architecture := .arm64, x86Base64 := true } : FeatureProfile).Valid := by decide
 example : ¬ ({ architecture := .arm64, vector128Accelerated := true } : FeatureProfile).Valid := by decide
 -- .NET 11 x64 reports SSE2 only with SSSE3, SSE4.1 and SSE4.2; EnableHWIntrinsic=0 turns all off.
-example : ¬ ({ architecture := .x64, x86Base64 := true, sse2 := true,
-    vector128Accelerated := true } : FeatureProfile).Valid := by decide
+/-- An x64 process with SSE2 and without SSSE3, SSE4.1 and SSE4.2, which .NET 11 never starts. -/
+private def belowBaseline : FeatureProfile := {
+  architecture := .x64, x86Base64 := true, sse2 := true, vector128Accelerated := true }
+example : ¬ belowBaseline.Valid := by decide
 example : ({ architecture := .x64 } : FeatureProfile).Valid := by decide
 
 private def v3 : FeatureProfile := {
