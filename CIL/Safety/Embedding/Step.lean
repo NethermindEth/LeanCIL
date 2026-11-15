@@ -32,6 +32,7 @@ structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL
   returnsValue : actual.returnsValue = expected.returnsValue
   declared : actual.declared = expected.declared
   environment : actual.environment = expected.environment
+  arguments : actual.argumentAccess = expected.argumentAccess
   statics : staticAt actual q = staticAt expected pc
   link : actual.linkAt q = expected.linkAt pc
   next : op.continues = true → r (pc + 1) = q + 1
@@ -74,7 +75,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false none pc [] values (fun _ => none) profile with
+        match CIL.step op false none pc values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -87,7 +88,7 @@ theorem fallback_relabel {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfil
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false none q [] values (fun _ => none) profile with
+        match CIL.step (op.relabel r) false none q values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -278,10 +279,12 @@ theorem step_relabel_conv_ovf_un (target : ConvTarget) : StepRelabel (.conv_ovf_
 
 #print axioms step_relabel_conv_ovf_un
 
-theorem step_relabel_arg (index : Nat) (narrow : Option NarrowKind) :
-    StepRelabel (.arg index narrow) := by
+/-- An argument load reads as `Method.argumentAccess` says, which both methods share. -/
+theorem step_relabel_ldarg (index : Nat) : StepRelabel (.ldarg index) := by
   plain_cases
-  cases narrow <;> dsimp only at h ⊢ <;> lookup_lockstep
+  rw [show loadArgument actual index args frame m = loadArgument expected index args frame m by
+    simp only [loadArgument, context.arguments]]
+  lockstep
 
 theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases
@@ -355,7 +358,7 @@ theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall calle
   plain_cases
   by_cases short : (stack.length != argc) = true
   · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
+  · simp only [short] at h ⊢
     lockstep
 
 #print axioms step_relabel_tailCall
@@ -645,7 +648,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     | mul_ovf_un => exact step_relabel_faulting _ rfl
   case conv_ovf target => exact step_relabel_conv_ovf target
   case conv_ovf_un target => exact step_relabel_conv_ovf_un target
-  case arg index narrow => exact step_relabel_arg index narrow
+  case ldarg index => exact step_relabel_ldarg index
   case ldloc index => exact step_relabel_ldloc index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
@@ -786,7 +789,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step op false none pc [] values (fun _ => none) profile with
+        match CIL.step op false none pc values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -800,7 +803,7 @@ theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
       if stack.length < argc then Except.error ExecutionFault.invalidState
       else do
         let values ← scalars (List.take argc stack)
-        match CIL.step (op.relabel r) false none q [] values (fun _ => none) profile with
+        match CIL.step (op.relabel r) false none q values (fun _ => none) profile with
           | some (CIL.Action.next target result _) => do
             let result ← List.mapM (checkedValue m) (List.map Value.scalar result)
             Pure.pure (FrameAction.next target (result ++ List.drop argc stack) frame m)
@@ -1133,7 +1136,7 @@ theorem step_raise_instruction (op : CIL.Instruction)
     (relabels : ∀ r, op.relabel r = op)
     (dispatch : ∀ body pc args frame stack memory,
       step body op pc args frame stack memory =
-        if unspecifiedOperands (observerCount op) stack || false then
+        if unspecifiedOperands (observerCount op) stack then
           .error (.unsupported "Instruction observes unspecified vector bits")
         else do
           let (result, values) ← instruction op stack memory
@@ -1176,9 +1179,11 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     | mul_ovf_un => exact step_raise_faulting _ rfl
   case conv_ovf target => exact step_raise_conv_ovf target
   case conv_ovf_un target => exact step_raise_conv_ovf_un target
-  case arg index narrow =>
+  case ldarg index =>
     plain_cases
-    cases narrow <;> dsimp only at h ⊢ <;> lookup_raise
+    rw [show loadArgument actual index args frame m = loadArgument expected index args frame m by
+      simp only [loadArgument, context.arguments]]
+    raise_lockstep
   case ldloc | ldloca =>
     plain_cases
     lookup_raise

@@ -73,7 +73,7 @@ theorem stepTransport : StepTransport := by
     | (cases stack with
        | nil =>
          simp only [step, observerCount, unspecifiedOperands, List.take_nil, List.any_nil,
-           Bool.false_or, Bool.false_eq_true, ite_false, pureArity, instruction] at observable
+           Bool.false_eq_true, ite_false, pureArity, instruction] at observable
          cases observable
        | cons value rest =>
          exact ⟨mapping, .refl mapping,

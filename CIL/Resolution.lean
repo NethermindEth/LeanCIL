@@ -348,6 +348,15 @@ theorem Method.argumentAccess_undeclared {body : Method} {index : Nat}
 
 #print axioms Method.argumentAccess_undeclared
 
+/-- A method with no parameter homes and no declared receiver or parameters reads every argument
+    as it is; one proof serves every index. -/
+theorem Method.argumentAccess_plain {body : Method} (index : Nat)
+    (homes : body.parameterHomes = []) (parameters : body.declared.parameters = [])
+    (receiver : body.declared.receiver = none) : body.argumentAccess index = .value none := by
+  simp [Method.argumentAccess, homes, DeclaredSignature.argumentType, parameters, receiver]
+
+#print axioms Method.argumentAccess_plain
+
 /-- A homed argument is read from its home's slot, after the declared locals. -/
 theorem Method.argumentAccess_home {body : Method} {index position slot : Nat}
     (homed : body.parameterHomes.findIdx? (fun home => home.1 == index) = some position)

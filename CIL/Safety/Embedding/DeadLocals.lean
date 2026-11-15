@@ -21,16 +21,20 @@ namespace CIL.Safety
 
 open CIL.Embedding
 
-/-- Replacing a body's locals keeps every step that succeeds or throws: steps read the
-    profile, return arity and static sites, never the local declarations. -/
+/-- Replacing the locals of a body without parameter homes keeps every step that succeeds or
+    throws: steps read the profile, return arity, signature and static sites, and only a home's
+    slot depends on the local declarations. -/
 theorem step_withLocalsOf (actual expected : CIL.Method) (op : CIL.Instruction) (pc : Nat)
     (args : List Value) (frame : Frame) (stack : List Value) (memory : Memory)
-    (outcome : ExecutionResult FrameAction)
+    (outcome : ExecutionResult FrameAction) (homes : actual.parameterHomes = [])
     (stepped : step (actual.withLocalsOf expected) op pc args frame stack memory = outcome)
     (kept : StepKept outcome) :
     step actual op pc args frame stack memory = outcome := by
   have context : StepContext (actual.withLocalsOf expected) actual id op pc pc :=
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl, fun _ => rfl⟩
+    ⟨rfl, rfl, rfl, rfl, by
+      funext index
+      simp only [Method.argumentAccess, Method.withLocalsOf, homes, List.findIdx?_nil],
+      rfl, rfl, fun _ => rfl⟩
   cases outcome with
   | ok action =>
     have same := step_relabel op _ actual id pc pc args frame stack memory action context stepped
@@ -439,7 +443,8 @@ theorem _root_.CIL.EmbedsDeadLocals.padded {program : CIL.Program} {index : Nat}
     simp only [bound, ite_true, Option.some.injEq] at fetched
     subst fetched
     refine ⟨actual, found, rfl, fun op pc args frame stack memory outcome stepped kept =>
-      step_withLocalsOf actual expected op pc args frame stack memory outcome stepped kept,
+      step_withLocalsOf actual expected op pc args frame stack memory outcome
+        embeds.parameterHomes stepped kept,
       fun args memory => ?_⟩
     simp only [ite_true]
     exact enterFrame_deadLocals embeds args memory

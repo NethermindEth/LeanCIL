@@ -80,7 +80,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
         let (object, allocated) ← allocateObject memory ⟨owner, bases⟩ size
         return FrameAction.call callee (.object (.address object) :: arguments)
           (.object (.address object) :: stack.drop argc) allocated := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
 
 #print axioms step_newObject_eq
 
@@ -104,7 +104,7 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
       else (do
         let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
         receiverCall callee arguments (stack.drop argc) memory) := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
   rfl
 
 #print axioms step_callInstance_eq
@@ -146,7 +146,7 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
       else (do
         let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
         virtualCall targets arguments (stack.drop argc) memory) := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
   rfl
 
 #print axioms step_callVirtual_eq
@@ -276,7 +276,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
 @[cil_step high] theorem step_nullObject_eq (stack : List Value) :
     step body (.memory .nullObject) pc args frame stack memory =
       .ok (.next (pc + 1) (.object .null :: stack) frame memory) := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+  simp only [step, observerCount, staticInstruction, memoryInstruction,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any]
   rfl
 
@@ -285,7 +285,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.memory (.stringLiteral text)) pc args frame stack memory = do
       let value ← literalObject memory text
       return .next (pc + 1) (value :: stack) frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+  simp only [step, observerCount, staticInstruction, memoryInstruction,
     stringLiteralInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
     List.any, Bool.false_eq_true, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases literalObject memory text <;> rfl

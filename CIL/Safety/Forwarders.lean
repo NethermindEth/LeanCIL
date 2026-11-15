@@ -15,8 +15,8 @@ method's result: overload forwarders and instance-to-static wrappers compile to
 `ldarg*; call callee; ret`. `MethodContract.Holds.forward` gives such a method the callee's
 contract with the forwarder's own argument encoding, from the callee's `Holds` and premises
 that the arguments and the returned value pass through unchanged; the loads are data
-(`loads`: an argument index and the narrowing the extractor attaches to small integer
-parameters), so no forwarder body is stepped by hand. Its frame allocates nothing, so the
+(`loads`: the argument indices, each read as the forwarder's declared signature says), so no
+forwarder body is stepped by hand. Its frame allocates nothing, so the
 callee's precondition, footprint and postcondition carry over verbatim.
 
 `MethodContract.Holds.forward_out` covers `ldarg*; ldloca 0; call callee; ret`, which also
@@ -34,37 +34,48 @@ def ReturnsUnchanged : Option CIL.NarrowKind → List Value → Prop
   | none, _ => True
   | some kind, values => ∃ bits, values = [.scalar (.i32 bits)] ∧ kind.extend bits = bits
 
-/-- What `.arg index narrow` pushes unchanged: any argument for a plain load, and an i32
-    already in the narrow range for a narrowed one. -/
-def LoadsUnchanged : Option CIL.NarrowKind → Value → Prop
-  | none, _ => True
-  | some kind, value => ∃ bits, value = .scalar (.i32 bits) ∧ kind.extend bits = bits
+/-- `body`'s `.ldarg index` pushes `value` unchanged: the argument is read without a home,
+    and either without narrowing or as an i32 already in the declared narrow range. -/
+def LoadsUnchanged (body : CIL.Method) (index : Nat) (value : Value) : Prop :=
+  match body.argumentAccess index with
+  | .value none => True
+  | .value (some kind) => ∃ bits, value = .scalar (.i32 bits) ∧ kind.extend bits = bits
+  | .home _ => False
 
-/-- Plain loads of the arguments at `indices`, as emitted for parameters wider than 16 bits. -/
-def plainLoads (indices : List Nat) : List (Nat × Option CIL.NarrowKind) :=
-  indices.map fun index => (index, none)
+/-- An argument read without a home or narrowing pushes any value unchanged. -/
+theorem LoadsUnchanged.plain {body : CIL.Method} {index : Nat} {value : Value}
+    (access : body.argumentAccess index = .value none) : LoadsUnchanged body index value := by
+  simp only [LoadsUnchanged, access]
 
-/-- Plain loads push every argument unchanged. -/
-theorem plainLoads_unchanged (indices : List Nat) (values : List Value) :
-    ∀ pair ∈ (plainLoads indices).zip values, LoadsUnchanged pair.1.2 pair.2 := by
-  intro ⟨⟨index, narrow⟩, value⟩ member
-  have loaded := (List.of_mem_zip member).1
-  simp only [plainLoads, List.mem_map, Prod.mk.injEq] at loaded
-  obtain ⟨_, _, _, rfl⟩ := loaded
-  trivial
+#print axioms LoadsUnchanged.plain
+
+/-- An argument read narrowed pushes an i32 already in the narrow range unchanged. -/
+theorem LoadsUnchanged.narrow {body : CIL.Method} {index : Nat} {kind : CIL.NarrowKind}
+    {bits : CIL.W32} (access : body.argumentAccess index = .value (some kind))
+    (same : kind.extend bits = bits) : LoadsUnchanged body index (.scalar (.i32 bits)) := by
+  simp only [LoadsUnchanged, access]
+  exact ⟨bits, rfl, same⟩
+
+#print axioms LoadsUnchanged.narrow
+
+/-- Arguments that `body` reads without a home or narrowing, as for parameters wider than 16
+    bits, push every value unchanged. -/
+theorem plainLoads_unchanged {body : CIL.Method} {indices : List Nat}
+    (plain : ∀ index ∈ indices, body.argumentAccess index = .value none) (values : List Value) :
+    ∀ pair ∈ indices.zip values, LoadsUnchanged body pair.1 pair.2 :=
+  fun pair member => .plain (plain pair.1 (List.of_mem_zip member).1)
 
 #print axioms plainLoads_unchanged
 
-/-- The body that performs `loads` in order, calls `callee` with the loaded values and
+/-- The body that loads the arguments at `loads` in order, calls `callee` with them and
     returns its result through `ret`. -/
-def forwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat)
-    : List CIL.Instruction :=
-  loads.map (fun load => .arg load.1 load.2) ++ [.call callee loads.length, .ret]
+def forwarderCode (loads : List Nat) (callee : Nat) : List CIL.Instruction :=
+  loads.map .ldarg ++ [.call callee loads.length, .ret]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
     `calleeBody`, from a frame that allocates nothing, and declares the callee's return
     arity and return storage `narrow`. -/
-structure Forwards (body calleeBody : CIL.Method) (loads : List (Nat × Option CIL.NarrowKind))
+structure Forwards (body calleeBody : CIL.Method) (loads : List Nat)
     (callee : Nat) (narrow : Option CIL.NarrowKind) : Prop where
   code : body.code = forwarderCode loads callee
   locals : body.locals = []
@@ -81,7 +92,7 @@ def MethodContract.withArgs {Input Output : Type} (contract : MethodContract Inp
 
 /-- A frame that allocates nothing: entry keeps memory and the frame owns no allocation. -/
 theorem Forwards.enterFrame {body calleeBody : CIL.Method}
-    {loads : List (Nat × Option CIL.NarrowKind)} {callee : Nat}
+    {loads : List Nat} {callee : Nat}
     {narrow : Option CIL.NarrowKind} (forwards : Forwards body calleeBody loads callee narrow)
     (args : List Value) (memory : Memory) :
     CIL.Safety.enterFrame body args memory =
@@ -98,23 +109,25 @@ theorem Forwards.enterFrame {body calleeBody : CIL.Method}
 
 #print axioms Forwards.enterFrame
 
-/-- A load of a checked argument that its narrowing keeps pushes that argument. -/
+/-- A load of a checked argument that the body's reading keeps pushes that argument. -/
 theorem step_load_unchanged {body : CIL.Method} {index pc : Nat}
-    {narrow : Option CIL.NarrowKind} {args stack : List Value} {frame : Frame}
+    {args stack : List Value} {frame : Frame}
     {memory : Memory} {value : Value} (present : args[index]? = some value)
-    (checked : checkedValue memory value = .ok value) (unchanged : LoadsUnchanged narrow value) :
-    step body (.arg index narrow) pc args frame stack memory =
+    (checked : checkedValue memory value = .ok value)
+    (unchanged : LoadsUnchanged body index value) :
+    step body (.ldarg index) pc args frame stack memory =
       .ok (.next (pc + 1) (value :: stack) frame memory) := by
-  cases narrow with
-  | none =>
-    simp only [step_argument_eq, present, checked, Bind.bind, Except.bind, Pure.pure,
-      Except.pure]
-  | some kind =>
-    obtain ⟨bits, rfl, same⟩ := unchanged
-    simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil, present,
-      Option.map_some, Option.getD_some, Value.hasUnspecified, CIL.Value.hasUnspecified,
-      Bool.false_or, Bool.false_eq_true, ↓reduceIte, same, checked, Bind.bind, Except.bind,
+  unfold LoadsUnchanged at unchanged
+  split at unchanged
+  · rename_i access
+    simp only [step_ldarg_eq, loadArgument, access, present, checked, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
+  · rename_i kind access
+    obtain ⟨bits, rfl, same⟩ := unchanged
+    simp only [step_ldarg_eq, loadArgument, access, present, Value.hasUnspecified,
+      CIL.Value.hasUnspecified, Bool.false_eq_true, ↓reduceIte, same, checked, Bind.bind,
+      Except.bind, Pure.pure, Except.pure]
+  · exact unchanged.elim
 
 #print axioms step_load_unchanged
 
@@ -123,11 +136,11 @@ theorem step_load_unchanged {body : CIL.Method} {index pc : Nat}
 theorem run_load_arguments {program : CIL.Program} {method : Nat} {body : CIL.Method}
     {args : List Value} {frame : Frame} {memory : Memory} {post : Memory → List Value → Prop}
     (found : program[method]? = some body) (valid : ValuesValid memory args) :
-    ∀ (loads : List (Nat × Option CIL.NarrowKind)) (pc : Nat) (stack loaded : List Value),
-      (∀ position load, loads[position]? = some load →
-        body.code[pc + position]? = some (.arg load.1 load.2)) →
-      loads.map (fun load => args[load.1]?) = loaded.map some →
-      (∀ pair ∈ loads.zip loaded, LoadsUnchanged pair.1.2 pair.2) →
+    ∀ (loads : List Nat) (pc : Nat) (stack loaded : List Value),
+      (∀ position index, loads[position]? = some index →
+        body.code[pc + position]? = some (.ldarg index)) →
+      loads.map (fun index => args[index]?) = loaded.map some →
+      (∀ pair ∈ loads.zip loaded, LoadsUnchanged body pair.1 pair.2) →
       (∃ fuel result returned,
         run program fuel method (pc + loads.length) args frame (loaded.reverse ++ stack)
           memory = .ok (result, returned) ∧ post result returned) →
@@ -173,7 +186,7 @@ theorem step_call_loaded {body : CIL.Method} {callee pc : Nat} {args : List Valu
     List.take_of_length_le (by simp)
   have exposed : unspecifiedOperands arguments.length arguments.reverse = false := by
     rw [unspecifiedOperands, taken, List.any_reverse, known]
-  simp only [step, observerCount, exposed, Bool.false_or, Bool.false_eq_true, ↓reduceIte,
+  simp only [step, observerCount, exposed, Bool.false_eq_true, ↓reduceIte,
     List.length_reverse, Nat.lt_irrefl, taken, List.reverse_reverse,
     checkedValues_of_valid valid, Bind.bind, Except.bind, Pure.pure, Except.pure]
   rw [List.drop_of_length_le (by simp)]
@@ -261,22 +274,22 @@ theorem run_forward_call {Input Output : Type} {contract : MethodContract Input 
 
 /-- A forwarder inherits its callee's contract: it meets `pre`, `footprint` and `post`
     unchanged, with arguments encoded by `forwarded`. The callee's arguments must be the
-    forwarder's selected by `loads`, each kept by its load's narrowing; each forwarder
+    forwarder's selected by `loads`, each kept as the forwarder reads it; each forwarder
     argument must reach the callee or be valid under `pre`, since the forwarder checks them
     all; the call must expose no unspecified vector bits; and a narrowed return must not
     change the callee's result. -/
 theorem MethodContract.Holds.forward {Input Output : Type}
     {contract : MethodContract Input Output}
     {program : CIL.Program} {method callee : Nat} {body calleeBody : CIL.Method}
-    {loads : List (Nat × Option CIL.NarrowKind)} {narrow : Option CIL.NarrowKind}
+    {loads : List Nat} {narrow : Option CIL.NarrowKind}
     {forwarded : Input → List Value}
     (holds : contract.Holds program callee)
     (found : program[method]? = some body) (calleeFound : program[callee]? = some calleeBody)
     (forwards : Forwards body calleeBody loads callee narrow)
     (selected : ∀ input,
-      loads.map (fun load => (forwarded input)[load.1]?) = (contract.args input).map some)
+      loads.map (fun index => (forwarded input)[index]?) = (contract.args input).map some)
     (narrowed : ∀ input initial, contract.pre input initial →
-      ∀ pair ∈ loads.zip (contract.args input), LoadsUnchanged pair.1.2 pair.2)
+      ∀ pair ∈ loads.zip (contract.args input), LoadsUnchanged body pair.1 pair.2)
     (covered : ∀ input initial, contract.pre input initial → ∀ value ∈ forwarded input,
       value ∈ contract.args input ∨ value.Valid initial)
     (known : ∀ input initial, contract.pre input initial →
@@ -315,12 +328,10 @@ theorem MethodContract.Holds.forward {Input Output : Type}
 
 #print axioms MethodContract.Holds.forward
 
-/-- The body that performs `loads` in order, loads the address of local 0, calls `callee`
-    with them and returns its result through `ret`. -/
-def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat) :
-    List CIL.Instruction :=
-  loads.map (fun load => .arg load.1 load.2) ++
-    [.ldloca 0, .call callee (loads.length + 1), .ret]
+/-- The body that loads the arguments at `loads` in order, loads the address of local 0,
+    calls `callee` with them and returns its result through `ret`. -/
+def outForwarderCode (loads : List Nat) (callee : Nat) : List CIL.Instruction :=
+  loads.map .ldarg ++ [.ldloca 0, .call callee (loads.length + 1), .ret]
 
 /-- `body` forwards the arguments it loads by `loads` to `callee`, whose body is
     `calleeBody`, with the address of its only local, a byte home of `kind` created from
@@ -329,7 +340,7 @@ def outForwarderCode (loads : List (Nat × Option CIL.NarrowKind)) (callee : Nat
     identities allocate no byte home, so
     `kind` excludes them. Any fitting initializer is accepted; the extractor emits
     `.unmodeled` without `InitLocals` and the kind's zero with it. -/
-structure ForwardsOut (body calleeBody : CIL.Method) (loads : List (Nat × Option CIL.NarrowKind))
+structure ForwardsOut (body calleeBody : CIL.Method) (loads : List Nat)
     (callee : Nat) (narrow : Option CIL.NarrowKind) (kind : CIL.LocalKind) (initial : CIL.Value) :
     Prop where
   code : body.code = outForwarderCode loads callee
@@ -386,7 +397,7 @@ theorem make_fitting_local (memory : Memory) (activation : Nat) (kind : CIL.Loca
 /-- Entering a `ForwardsOut` body creates its local as one fresh writable home holding its
     initializer, keeps the caller's memory below `nextIdentity` and stays well formed. -/
 theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
-    {loads : List (Nat × Option CIL.NarrowKind)} {callee : Nat} {narrow : Option CIL.NarrowKind}
+    {loads : List Nat} {callee : Nat} {narrow : Option CIL.NarrowKind}
     {kind : CIL.LocalKind} {initial : CIL.Value}
     (forwards : ForwardsOut body calleeBody loads callee narrow kind initial)
     (args : List Value) (memory : Memory) (wellFormed : memory.WellFormed) :
@@ -415,8 +426,8 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
 /-- A forwarder that passes a fresh local as a last out argument and drops it meets `outer`
     when its callee meets `inner` at `extend input home`, `home` being that local. Each
     argument must be valid under `outer.pre` (`checked`), since the forwarder checks them
-    all. The callee's arguments must be the forwarder's selected by `loads`, each kept by its
-    load's narrowing, and then `home`; its precondition must follow from `outer.pre` in the
+    all. The callee's arguments must be the forwarder's selected by `loads`, each kept as the
+    forwarder reads it, and then `home`; its precondition must follow from `outer.pre` in the
     memory after frame entry, where `home` is fresh, writable over the local's width and
     holds its initializer; its footprint may name fresh storage or lie inside
     `outer.footprint`; its postcondition must give `outer.post` once the frame has expired;
@@ -425,20 +436,20 @@ theorem ForwardsOut.enterFrame {body calleeBody : CIL.Method}
 theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
     {outer : MethodContract Outer Output} {inner : MethodContract Inner Output}
     {program : CIL.Program} {method callee : Nat} {body calleeBody : CIL.Method}
-    {loads : List (Nat × Option CIL.NarrowKind)} {narrow : Option CIL.NarrowKind}
+    {loads : List Nat} {narrow : Option CIL.NarrowKind}
     {kind : CIL.LocalKind} {initial : CIL.Value}
     (extend : Outer → Reference → Inner)
     (holds : inner.Holds program callee)
     (found : program[method]? = some body) (calleeFound : program[callee]? = some calleeBody)
     (forwards : ForwardsOut body calleeBody loads callee narrow kind initial)
     (selected : ∀ input home,
-      loads.map (fun load => (outer.args input)[load.1]?) ++
+      loads.map (fun index => (outer.args input)[index]?) ++
           [some (.reference (.address home))] =
         (inner.args (extend input home)).map some)
     (checked : ∀ input memory, outer.pre input memory →
       memory.WellFormed ∧ ValuesValid memory (outer.args input))
     (narrowed : ∀ input memory home, outer.pre input memory →
-      ∀ pair ∈ loads.zip (inner.args (extend input home)), LoadsUnchanged pair.1.2 pair.2)
+      ∀ pair ∈ loads.zip (inner.args (extend input home)), LoadsUnchanged body pair.1 pair.2)
     (known : ∀ input memory home, outer.pre input memory →
       (inner.args (extend input home)).any Value.hasUnspecified = false)
     (unchanged : ∀ input memory home entered final out, outer.pre input memory →
@@ -488,7 +499,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
   have fetched : ∀ pc : Nat,
       body.code[pc]? = (outForwarderCode loads callee)[pc]? := by
     rw [forwards.code]; exact fun _ => rfl
-  have loadedNarrowed : ∀ pair ∈ loads.zip loaded, LoadsUnchanged pair.1.2 pair.2 := by
+  have loadedNarrowed : ∀ pair ∈ loads.zip loaded, LoadsUnchanged body pair.1 pair.2 := by
     intro pair member
     refine narrowed input memory home permitted pair ?_
     have same : loads.length = loaded.length := by
@@ -514,7 +525,7 @@ theorem MethodContract.Holds.forward_out {Outer Inner Output : Type}
           entered) := by
     have formedHome := access_reference_valid _ _ _ _ _ writable
     simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-      Bool.false_or, Bool.false_eq_true, ↓reduceIte, frame, List.getElem?_cons_zero,
+      Bool.false_eq_true, ↓reduceIte, frame, List.getElem?_cons_zero,
       localAddress, formValue, checkedAt, formedHome, Except.mapError, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
   refine run_next_exists _ found (by simp [fetched, outForwarderCode]) addressed ?_
