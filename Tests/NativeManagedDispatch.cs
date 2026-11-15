@@ -177,9 +177,7 @@ theorem commuted_native_kind :
 #print axioms commuted_native_kind
 """);
 evidence.Add(commutedProof, "PASS commuted native table extraction, certificate and exact offset kinds");
-var wrongAddition = commutedScalar.Replace("opcode := 88, operand := .none",
-    "opcode := 89, operand := .none", StringComparison.Ordinal);
-if (wrongAddition == commutedScalar) throw new InvalidOperationException("Missing commuted native addition");
+var wrongAddition = ReplaceExactly(commutedScalar, rawAdd, "{ offset := 21, opcode := 89, operand := .none }", 2);
 var wrongAdditionPath = Path.Combine(root, "Rejected-CommutedAddition.lean");
 File.WriteAllText(wrongAdditionPath, wrongAddition);
 rejected.Add(wrongAdditionPath, "PASS independently rejected commuted subtraction evidence",
