@@ -17,6 +17,9 @@ structure StepMetadata (source target : CIL.Method) : Prop where
   returnsValue : target.returnsValue = source.returnsValue
   staticSites : target.staticSites = source.staticSites
   returnNarrow : target.returnNarrow = source.returnNarrow
+  /-- Both bodies read every argument from the incoming list, narrowed alike. -/
+  arguments : ∀ index, ∃ narrow, source.argumentAccess index = .value narrow ∧
+    target.argumentAccess index = .value narrow
 
 /-- One observable checked step transports frames, values and fresh allocation correspondence. -/
 def StepTransport : Prop :=

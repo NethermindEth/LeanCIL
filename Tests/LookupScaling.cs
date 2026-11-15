@@ -244,7 +244,7 @@ void ArgumentResolutionCosts()
             var homes = string.Join(", ", slots.Keys.Order().Select(index => $"({index}, .word32)"));
             var signature = $"{{ parameters := [{string.Join(", ", Enumerable.Repeat(Int32Type, size))}] }}";
             var code = string.Join(", ", Enumerable.Range(0, size).Select(index =>
-                slots.TryGetValue(index, out var slot) ? $".ldloc {slot}, .pop" : $".arg {index}, .pop")) + ", .ret";
+                slots.TryGetValue(index, out var slot) ? $".ldloc {slot}, .pop" : $".ldarg {index}, .pop")) + ", .ret";
             var accesses = string.Join(", ", Enumerable.Range(0, size).Select(index =>
                 slots.TryGetValue(index, out var slot) ? $".home {slot}" : ".value none"));
             var reads = string.Join(", ", Enumerable.Range(0, size).Select(index => $"body.argumentAccess {index}"));
@@ -721,9 +721,9 @@ long EmbeddingCost(string name, string definitions)
 string DeadBlocks(int calls) => $$"""
 /-- What an extraction emits for one call followed by a dead block. -/
 def extractedSegment : List Instruction :=
-  [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
+  [.ldarg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
 /-- The hand-written segment without the dead block. -/
-def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+def writtenSegment : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
@@ -737,9 +737,9 @@ def written : Method :=
 // second block first, so the pc map descends once at every size.
 string Reordered(int segments) => $$"""
 /-- The block after the head. -/
-def first : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+def first : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The block the head branches to. -/
-def second : List Instruction := [.arg 1, .call 2 1, .pop, .ret]
+def second : List Instruction := [.ldarg 1, .call 2 1, .pop, .ret]
 /-- The extraction, with the second block first. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
@@ -819,7 +819,7 @@ long ComputedLookupCost(int cases)
         import CIL.InstructionEquations
         import CIL.Safety.SymbolicExecution
         open CIL.Safety
-        def segment : List CIL.Instruction := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
+        def segment : List CIL.Instruction := [.ldarg 0, .ldarg 1, .add, .nop, .nop, .nop, .nop]
         def body : CIL.Method :=
           { locals := [], returnsValue := true,
             code := [.nop] ++ (List.replicate {{cases}} segment).flatten ++ [.ret] }
@@ -1137,7 +1137,7 @@ long ArrayAddressCost(bool prefixed, int sites)
         def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
           (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
         def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
-          [.arg 0, .arg 1] ++ (if prefixed then [.nop] else []) ++
+          [.ldarg 0, .ldarg 1] ++ (if prefixed then [.nop] else []) ++
             [.memory (.arrayAddress .signed32 !prefixed), .pop, .br ((index + 1) * width prefixed)]
         def code (prefixed : Bool) (sites : Nat) : List Instruction :=
           (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]

@@ -20,7 +20,7 @@ theorem step_unspecified {body : CIL.Method} {operation : CIL.Instruction} {pc :
     (unknown : unspecifiedOperands (observerCount operation) stack = true) :
     step body operation pc args frame stack memory =
       .error (.unsupported "Instruction observes unspecified vector bits") := by
-  simp only [step, unknown, Bool.true_or, ite_true]
+  simp only [step, unknown, ite_true]
 #print axioms step_unspecified
 
 section InstructionEquations
@@ -30,29 +30,63 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 -- Equations that hold by unfolding are closed by `id rfl`: simp applies a lemma proved by `rfl`
 -- without a proof term, so the kernel would reduce `step` again at every use.
 
-/-- Expose an argument load without expanding the instruction dispatcher. -/
-@[cil_step] theorem step_argument_eq (index : Nat) (stack : List Value) :
-    step body (.arg index) pc args frame stack memory = do
-      let some value := args[index]? | .error .invalidState
-      return FrameAction.next (pc + 1) ((← checkedValue memory value) :: stack) frame memory :=
+/-- Expose an argument load without expanding the instruction dispatcher; the read itself is
+    `loadArgument`. Stepping uses this form only while the method's argument access is unknown,
+    and the three equations below once it is known. -/
+theorem step_ldarg_eq (index : Nat) (stack : List Value) :
+    step body (.ldarg index) pc args frame stack memory = do
+      return FrameAction.next (pc + 1) ((← loadArgument body index args frame memory) :: stack)
+        frame memory :=
   id rfl
 
-/-- A narrowed argument load checks that the selected argument has no unspecified bits,
-    then extends an i32 according to the parameter's declared width. -/
-@[cil_step] theorem step_argument_narrow_eq (index : Nat) (kind : CIL.NarrowKind)
-    (stack : List Value) :
-    step body (.arg index (some kind)) pc args frame stack memory =
+#print axioms step_ldarg_eq
+
+attribute [cil_step] loadArgument
+
+/-- An argument read without a home or narrowing pushes the checked incoming value. -/
+theorem step_ldarg_value_eq (index : Nat) (stack : List Value)
+    (access : body.argumentAccess index = .value none) :
+    step body (.ldarg index) pc args frame stack memory = do
+      let some value := args[index]? | .error .invalidState
+      return FrameAction.next (pc + 1) ((← checkedValue memory value) :: stack) frame memory := by
+  simp only [step_ldarg_eq, loadArgument, access]
+  cases args[index]? <;> rfl
+
+#print axioms step_ldarg_value_eq
+
+/-- An argument of a narrow declared type faults on unspecified bits, and otherwise pushes its i32
+    truncated and extended to that type. -/
+theorem step_ldarg_narrow_eq (index : Nat) (stack : List Value) (kind : CIL.NarrowKind)
+    (access : body.argumentAccess index = .value (some kind)) :
+    step body (.ldarg index) pc args frame stack memory =
       if (args[index]?.map Value.hasUnspecified).getD false then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else do
         let some (.scalar (.i32 bits)) := args[index]? | .error .invalidState
         return FrameAction.next (pc + 1)
           ((← checkedValue memory (.scalar (.i32 (kind.extend bits)))) :: stack) frame memory := by
-  simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or]
-  rfl
+  simp only [step_ldarg_eq, loadArgument, access]
+  cases args[index]? with
+  | none => rfl
+  | some value =>
+    cases unknown : value.hasUnspecified
+    · cases value
+      case scalar inner => cases inner <;> rfl
+      all_goals simp_all [Value.hasUnspecified] <;> rfl
+    · simp [unknown]; rfl
 
-#print axioms step_argument_narrow_eq
+#print axioms step_ldarg_narrow_eq
+
+/-- A homed argument reads its frame slot, as `ldloc` of that slot does. -/
+theorem step_ldarg_home_eq (index : Nat) (stack : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.ldarg index) pc args frame stack memory = do
+      let some home := frame.locals[slot]? | .error .invalidState
+      return FrameAction.next (pc + 1) ((← loadLocal memory home) :: stack) frame memory := by
+  simp only [step_ldarg_eq, loadArgument, access]
+  cases frame.locals[slot]? <;> rfl
+
+#print axioms step_ldarg_home_eq
 
 /-- Expose return validation without expanding the instruction dispatcher. -/
 @[cil_step] theorem step_ret_eq (stack : List Value) :
@@ -60,7 +94,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       if unspecifiedOperands 1 stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else returnFrom body.returnNarrow body.returnsValue stack memory := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
+  rfl
 
 #print axioms step_ret_eq
 
@@ -83,7 +118,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       else do
         let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
         return FrameAction.call callee arguments (stack.drop argc) memory := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
+  rfl
 
 #print axioms step_call_eq
 
@@ -239,7 +275,7 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
         let (slot, memory) ← storeLocal memory slot value
         return FrameAction.next (pc + 1) rest
           { frame with locals := frame.locals.set index slot } memory := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
   rfl
 
 #print axioms step_initializeSpanLocal_eq
@@ -252,7 +288,8 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       else do
         let (memory, values) ← staticInstruction body pc operation stack memory
         return FrameAction.next (pc + 1) values frame memory := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
+  rfl
 
 /-- An intrinsic must be available in the method's profile; its `argc` operands are taken
     deepest first. -/

@@ -213,6 +213,13 @@ theorem Memory.Equivalent.newReferenceArray {m n : Memory} (same : m.Equivalent 
     | split
 #print axioms Memory.Equivalent.newReferenceArray
 
+/-- Equivalent memories load every argument alike, from its home or the incoming list. -/
+theorem Memory.Equivalent.loadArgument {m n : Memory} (same : m.Equivalent n)
+    (body : CIL.Method) (index : Nat) (args : List Value) (frame : Frame) :
+    loadArgument body index args frame m = loadArgument body index args frame n := by
+  simp only [CIL.Safety.loadArgument, same.checkedValue, same.loadLocal]
+#print axioms Memory.Equivalent.loadArgument
+
 theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) :
@@ -221,6 +228,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   unfold CIL.Safety.step
   dsimp only
   split <;> try simp only [same.checkedValue, same.checkedValues, same.loadLocal, same.localAddress,
+    same.loadArgument,
     same.referenceNonNull, same.referenceEqual, same.referenceDifference,
     same.referenceLess, same.referenceSubtract, same.objectNonNull, same.objectEqual,
     same.objectAboveNull, same.virtualTarget, same.objectTest]

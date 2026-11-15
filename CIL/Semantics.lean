@@ -147,7 +147,7 @@ def returnFromStack (narrow : Option NarrowKind) (returns : Bool)
     (ECMA-335 III.1.5). `returns` says whether the method returns a value; `profile` decides
     feature tests and intrinsic availability. `narrow` is the method's return storage. -/
 def step (op : Instruction) (returns : Bool)
-    (narrow : Option NarrowKind) (pc : Nat) (args : List Value)
+    (narrow : Option NarrowKind) (pc : Nat)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
   match op, widenMixed op stack with
@@ -157,11 +157,6 @@ def step (op : Instruction) (returns : Bool)
   | .ldc_i8 w, _ => return .next (pc + 1) (.i64 w :: stack) memory
   | .dup, v :: rest => return .next (pc + 1) (v :: v :: rest) memory
   | .pop, _ :: rest => return .next (pc + 1) rest memory
-  -- Arguments; a read must be initialized.
-  | .arg i narrow, _ =>
-    let value ← args[i]?
-    let value ← narrowValue narrow value
-    if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
   -- Arithmetic, through `unary` and `binary`.
   | .neg, v :: rest | .not, v :: rest
   | .conv_ovf _, v :: rest | .conv_ovf_un _, v :: rest

@@ -119,8 +119,8 @@ def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 
 /-- Both source fields are loaded before any output could overwrite them. -/
 @[cil_code] def readPair : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.arg 2, .skipInit,
-      .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 8 8, .add, .ret] }
+  { locals := [], returnsValue := true, code := [.ldarg 2, .skipInit,
+      .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 8 8, .add, .ret] }
 
 /-- Named call validity supplies field reads even when output aliases an entire input. -/
 theorem overlapping_fields (memory : Memory) (left right : Reference)

@@ -15,7 +15,7 @@ theorem vector_lane_add :
       some (.v128 (CIL.Vector.pack128 4 6)) := rfl
 
 theorem disabled_intrinsic :
-    (CIL.step (.intrinsic (.avx2 .add64) 2) false none 0 []
+    (CIL.step (.intrinsic (.avx2 .add64) 2) false none 0
       [.v256 1, .v256 2] (fun _ => none)).isSome = false := rfl
 
 /-- A memory whose every address holds an initialized word, so only the instruction can fail. -/
@@ -23,13 +23,13 @@ private def initializedMemory : CIL.Memory := fun _ => some (.i32 1)
 
 -- Locals have no meaning in `CIL.step`: only the checked step reads and writes their slots.
 theorem local_unstepped :
-    (CIL.step (.ldloc 0) false none 0 [] [] initializedMemory).isSome = false := rfl
+    (CIL.step (.ldloc 0) false none 0 [] initializedMemory).isSome = false := rfl
 #print axioms local_unstepped
 theorem stloc_unstepped :
-    (CIL.step (.stloc 0) false none 0 [] [.i32 1] initializedMemory).isSome = false := rfl
+    (CIL.step (.stloc 0) false none 0 [.i32 1] initializedMemory).isSome = false := rfl
 #print axioms stloc_unstepped
 theorem ldloca_unstepped :
-    (CIL.step (.ldloca 0) false none 0 [] [] initializedMemory).isSome = false := rfl
+    (CIL.step (.ldloca 0) false none 0 [] initializedMemory).isSome = false := rfl
 #print axioms ldloca_unstepped
 
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl
@@ -51,6 +51,35 @@ theorem write_overwrites (m : CIL.Memory) (a : CIL.Address) (x y : CIL.Value) :
 private def scalarBody : CIL.Method := { code := [], locals := [], returnsValue := true }
 private def scalarFrame : Frame := { activation := 0, locals := [], owned := [] }
 
+/-- A method whose one parameter is declared `System.Byte`. -/
+private def byteParameter : CIL.Method :=
+  { code := [.ldarg 0, .ret], locals := [], returnsValue := true,
+    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Byte"] } }
+
+/-- `ldarg` narrows an argument as its declared type requires: a Byte keeps its low 8 bits. -/
+theorem ldarg_narrows_declared_byte :
+    step byteParameter (.ldarg 0) 0 [.scalar (.i32 0x1FF)] scalarFrame [] Memory.empty =
+      .ok (.next 1 [.scalar (.i32 0xFF)] scalarFrame Memory.empty) := rfl
+#print axioms ldarg_narrows_declared_byte
+
+/-- An argument declared narrow whose vector bits are unspecified faults instead of narrowing. -/
+theorem ldarg_rejects_unspecified_narrow (low : CIL.W64) :
+    step byteParameter (.ldarg 0) 0 [.scalar (.v128Low64 low)] scalarFrame [] Memory.empty =
+      .error (.unsupported "Instruction observes unspecified vector bits") := rfl
+#print axioms ldarg_rejects_unspecified_narrow
+
+/-- A method whose one argument lives in a frame home, which the body overwrites with 9. -/
+private def homedParameter : CIL.Method :=
+  { code := [.ldc_i4 9, .stloc 0, .ldarg 0, .ret], locals := [], returnsValue := true,
+    parameterHomes := [(0, .word32)],
+    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Int32"] } }
+
+/-- `ldarg` of a homed argument reads the home, not the value the caller passed. -/
+theorem ldarg_reads_home :
+    (invoke [homedParameter] 8 0 [.scalar (.i32 5)] Memory.empty).map Prod.snd =
+      .ok [.scalar (.i32 9)] := rfl
+#print axioms ldarg_reads_home
+
 theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsic)
     (disabled : operation.available body.profile = false) (argc pc : Nat)
     (args stack : List Value) (frame : Frame) (memory : Memory) :
@@ -69,7 +98,8 @@ theorem checked_avx512_disabled :
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 
 theorem checked_avx512_invocation_disabled (memory : Memory) :
-    invoke [{ code := [.arg 0, .arg 1, .intrinsic (.avx512 .ltu64) 2, .ret], locals := [], returnsValue := true }] 4 0
+    invoke [{ code := [.ldarg 0, .ldarg 1, .intrinsic (.avx512 .ltu64) 2, .ret], locals := [],
+              returnsValue := true }] 4 0
       [.scalar (.v256 1), .scalar (.v256 2)] memory =
       .error ⟨0, 2, .unsupported "Intrinsic unavailable in target profile"⟩ := rfl
 
@@ -158,8 +188,8 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
         Bind.bind, Except.bind, Pure.pure, Except.pure]
   · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
       simp_all [instruction, loadValue, localResult, dereference, ordinaryAccessAlignment,
-        observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
-        Bind.bind, Except.bind, Pure.pure, Except.pure]
+        observerCount, unspecifiedOperands, Value.hasUnspecified, Bind.bind, Except.bind,
+        Pure.pure, Except.pure]
 
 theorem switch_unsigned_default :
     step scalarBody (.switch [10, 20]) 3 [] scalarFrame [.scalar (.i32 4294967295)] Memory.empty =
@@ -451,13 +481,13 @@ theorem native_checked_unsigned_extension :
 /-- The reference step refuses a mixed pair for every unsigned branch. -/
 theorem native_unsigned_branch_family_rejected :
     ([CIL.Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
-      (CIL.step op false none 0 [] [.i32 4294967295, .i64 0] (fun _ => none)).isNone) = true :=
+      (CIL.step op false none 0 [.i32 4294967295, .i64 0] (fun _ => none)).isNone) = true :=
   rfl
 #print axioms native_unsigned_branch_family_rejected
 
 /-- Unsigned scalar comparisons sign-extend int32 before comparing. -/
 theorem native_unsigned_compare_extension :
-    CIL.step .cgt_un false none 0 [] [.i32 4294967295, .i64 18446744073709551615]
+    CIL.step .cgt_un false none 0 [.i32 4294967295, .i64 18446744073709551615]
       (fun _ => none) = some (.next 1 [.i32 0] (fun _ => none)) := rfl
 #print axioms native_unsigned_compare_extension
 

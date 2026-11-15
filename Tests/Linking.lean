@@ -8,9 +8,9 @@ open CIL CIL.Safety
 open Tests.Imports.Calls (addContract AddInput rootContract root root_given)
 
 @[cil_code] def addEntry : Method := { returnsValue := false, locals := [], code :=
-  [.arg 2, .arg 0, .arg 1, .call 1 2, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .ldarg 1, .call 1 2, .store64, .ret] }
 @[cil_code] def sumHelper : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .load64, .arg 1, .load64, .add, .ret] }
+  [.ldarg 0, .load64, .ldarg 1, .load64, .add, .ret] }
 def addLib : Library := { entry := addEntry, helpers := [sumHelper] }
 @[cil_code] def addProgram : CIL.Program := [addEntry, sumHelper]
 
@@ -72,7 +72,7 @@ open CIL CIL.Safety
 open Tests.Imports.Outcomes (percentContract rootContract strictRaises root root_given percentBody)
 
 @[cil_code] def percentEntry : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .ret] }
+  [.ldarg 0, .call 1 1, .ret] }
 def percentLib : Library := { entry := percentEntry, helpers := [percentBody] }
 @[cil_code] def percentProgram : CIL.Program := [percentEntry, percentBody]
 
@@ -160,7 +160,7 @@ namespace Tests.Linking.Links
 open CIL
 
 def body : Method := {
-  code := [.arg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .newAggregate 3 0 8, .ret]
+  code := [.ldarg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .newAggregate 3 0 8, .ret]
   locals := [], returnsValue := false }
 
 /-- Direct, virtual and aggregate entries all move by the renaming. -/
@@ -194,7 +194,7 @@ open CIL
 
 /-- An extraction's method: its table and call-site fact are generated, with the table explicit. -/
 def extracted : Method := {
-  code := [.arg 0, .call 3 1, .pop, .ret], locals := [], returnsValue := false
+  code := [.ldarg 0, .call 3 1, .pop, .ret], locals := [], returnsValue := false
   links := [(1, callLink)] }
 
 /-- The generated fact of the table. -/
@@ -218,13 +218,13 @@ example : extracted.linkAt 2 = none := by
 
 /-- A literal body with its default table: one step from an instruction fact. -/
 def literal : Method :=
-  { code := [.arg 0, .call 3 1, .pop, .ret], locals := [], returnsValue := false }
+  { code := [.ldarg 0, .call 3 1, .pop, .ret], locals := [], returnsValue := false }
 
 /-- The instruction fact of the call, as `cil_instruction_equations` states it. -/
 theorem literal_at1 : literal.code[1]? = some (.call 3 1) := rfl
 
 /-- The instruction fact of a pc without a call. -/
-theorem literal_at0 : literal.code[0]? = some (.arg 0) := rfl
+theorem literal_at0 : literal.code[0]? = some (.ldarg 0) := rfl
 
 example : literal.linkAt 1 = some (.direct 3) := by
   rw [Method.linkAt_of_instruction rfl literal_at1]; rfl
@@ -237,7 +237,7 @@ example : literal.linkAt 1 = some (.direct 3) := rfl
 
 /-- A template body takes its callee as a parameter, so its read stays symbolic. -/
 def template (profile : FeatureProfile) (callee : Nat) : Method :=
-  { profile, code := [.arg 0, .call callee 1, .pop, .ret], locals := [], returnsValue := false }
+  { profile, code := [.ldarg 0, .call callee 1, .pop, .ret], locals := [], returnsValue := false }
 
 example (profile : FeatureProfile) (callee : Nat) :
     (template profile callee).linkAt 1 = some (.direct callee) :=

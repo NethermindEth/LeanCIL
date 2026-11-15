@@ -331,7 +331,7 @@ internal static partial class ProofOutline
                     return true;
                 }
                 if (!visited.Add(pc)) return Stop("a backward jump");
-                if (op is Arg { Narrow: null } argument)
+                if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
                 {
                     var parameter = spec.Parameters[argument.Index];
                     Item? item = parameter.Shape switch
