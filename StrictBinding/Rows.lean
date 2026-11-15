@@ -12,7 +12,7 @@ offsets: each heap column holds a key, 0 for offset 0, the rank of the entry amo
 carried, or `omittedKey` for an entry the extraction does not carry. `RowAt`, `StringAt` and
 `SizedAt` state that carried bytes are the image's under such a numbering, and `AssemblyMatches`
 states it for an assembly block, which also needs an entry for every key of the row other than 0
-and `omittedKey`. `assemblyBound` checks it, taking every position and length it
+and `omittedKey`, and a row cell holding the key of every entry. `assemblyBound` checks it, taking every position and length it
 compares from the image itself, and `assemblyMatches_of_assemblyBound` proves that its success
 means the proposition.
 -/
@@ -20,6 +20,7 @@ means the proposition.
 namespace StrictBinding
 
 open CIL.Extraction (AssemblyMetadata ByteEntry decodeTableHeader stringsHeap blobHeap)
+open CIL.Safety (except_bind_ok)
 
 /-! ## Heap numbering -/
 
@@ -148,14 +149,34 @@ def HeaderAt (image : PreparedImage) (tableHeader : List Nat) : Prop :=
       .ok valid ∧ tableHeader.length = tableHeaderLength valid ∧
     image.view.bytes image.layout.pe.tables.start tableHeader.length = .ok tableHeader
 
+/-- The (image offset, carried key) of each cell of `heap` in two rows of these columns. -/
+def heapPairs (heap : Nat) : List (Column × Nat) → List Nat → List Nat → List (Nat × Nat)
+  | [], _, _ => []
+  | (column, width) :: rest, imageRow, carriedRow =>
+    let tail := heapPairs heap rest (imageRow.drop width) (carriedRow.drop width)
+    if column.heap? == some heap then
+      (littleValue (imageRow.take width), littleValue (carriedRow.take width)) :: tail
+    else tail
+
+/-- The keys the cells of `heap` hold in a carried row of these columns. -/
+def rowKeys (heap : Nat) (columns : List (Column × Nat)) (row : List Nat) : List Nat :=
+  (heapPairs heap columns row row).map (·.2)
+
+/-- Every key the numbering gives is held by a cell of `heap` in the carried row of `token`, so
+    a carried entry cannot be named by a key the row does not hold. -/
+def Held (image : PreparedImage) (heap token : Nat) (row : List Nat)
+    (keyOf : Nat → Option Nat) : Prop :=
+  ∃ columns, columnsOf image (token / 2 ^ 24) = some columns ∧
+    ∀ offset key, keyOf offset = some key → key ∈ rowKeys heap columns row
+
 /-- Every key the numbering gives names a carried entry, so a carried row holds no key other
     than 0 and `omittedKey` without the entry it ranks. -/
 def Covered (keyOf : Nat → Option Nat) (entries : List ByteEntry) : Prop :=
   ∀ offset key, keyOf offset = some key → ∃ entry ∈ entries, entry.1 = key
 
 /-- The assembly block is the image's: its header bytes, the header they decode to, its
-    `Assembly` row under a numbering of its own entries, each of those entries, and an entry for
-    every key of the row other than 0 and `omittedKey`. -/
+    `Assembly` row under a numbering of its own entries, each of those entries, an entry for
+    every key of the row other than 0 and `omittedKey`, and a row key for every entry. -/
 def AssemblyMatches (image : PreparedImage) (assembly : AssemblyMetadata) : Prop :=
   HeaderAt image assembly.tableHeader ∧
     decodeTableHeader assembly.tableHeader = .ok assembly.header ∧
@@ -165,7 +186,9 @@ def AssemblyMatches (image : PreparedImage) (assembly : AssemblyMetadata) : Prop
         StringAt image offset entry.2) ∧
       (∀ entry ∈ assembly.blobs, ∃ offset, Names blobs entry.1 offset ∧
         SizedAt image image.layout.pe.blobs offset entry.2) ∧
-      Covered strings assembly.strings ∧ Covered blobs assembly.blobs
+      Covered strings assembly.strings ∧ Covered blobs assembly.blobs ∧
+      Held image stringsHeap assemblyToken assembly.assemblyRow strings ∧
+      Held image blobHeap assemblyToken assembly.assemblyRow blobs
 
 /-! ## Checks -/
 
@@ -182,15 +205,6 @@ def headerBound (image : PreparedImage) (assembly : AssemblyMetadata) :
     if found && (decodeTableHeader assembly.tableHeader).toOption == some assembly.header then
       pure ()
     else throw (.headerMismatch image.identity)
-
-/-- The (image offset, carried key) of each cell of `heap` in two rows of these columns. -/
-def heapPairs (heap : Nat) : List (Column × Nat) → List Nat → List Nat → List (Nat × Nat)
-  | [], _, _ => []
-  | (column, width) :: rest, imageRow, carriedRow =>
-    let tail := heapPairs heap rest (imageRow.drop width) (carriedRow.drop width)
-    if column.heap? == some heap then
-      (littleValue (imageRow.take width), littleValue (carriedRow.take width)) :: tail
-    else tail
 
 /-- The pairs that number an entry: a nonzero offset with a key other than 0 and the marker. -/
 def numberedPairs (width : Nat) (pairs : List (Nat × Nat)) : List (Nat × Nat) :=
@@ -303,7 +317,7 @@ theorem forM_ok {ε α : Type} {check : α → Except ε Unit} :
   | [], _, _, member => by cases member
   | item :: rest, done, other, member => by
     simp only [List.forM] at done
-    obtain ⟨_, first, later⟩ := bind_ok done
+    obtain ⟨_, first, later⟩ := except_bind_ok done
     cases List.mem_cons.mp member with
     | inl same => subst same; exact first
     | inr inRest => exact forM_ok later other inRest
@@ -316,11 +330,11 @@ theorem header_of_headerBound {image : PreparedImage} {assembly : AssemblyMetada
     HeaderAt image assembly.tableHeader ∧
       decodeTableHeader assembly.tableHeader = .ok assembly.header := by
   unfold headerBound at bound
-  obtain ⟨valid, readValid, bound⟩ := bind_ok bound
+  obtain ⟨valid, readValid, bound⟩ := except_bind_ok bound
   split at bound
   · exact absurd bound throw_ne_ok
   · rename_i sameLength
-    obtain ⟨found, readFound, bound⟩ := bind_ok bound
+    obtain ⟨found, readFound, bound⟩ := except_bind_ok bound
     split at bound
     · rename_i matched
       simp only [Bool.and_eq_true, beq_iff_eq] at matched
@@ -404,26 +418,55 @@ theorem numbering_of_numberingBound {heap width : Nat} {pairs : List (Nat × Nat
 
 #print axioms numbering_of_numberingBound
 
+/-- The carried keys of a row's heap cells do not depend on the image row they are paired with. -/
+theorem heapPairs_keys (heap : Nat) :
+    ∀ (columns : List (Column × Nat)) (imageRow other row : List Nat),
+      (heapPairs heap columns imageRow row).map (·.2) =
+        (heapPairs heap columns other row).map (·.2)
+  | [], _, _, _ => rfl
+  | (column, width) :: rest, imageRow, other, row => by
+    have restKeys :=
+      heapPairs_keys heap rest (imageRow.drop width) (other.drop width) (row.drop width)
+    simp only [heapPairs]
+    split <;> simp_all
+
+#print axioms heapPairs_keys
+
+/-- The keys the checked pairs of a heap give are held by that heap's cells in the carried row. -/
+theorem held_of_pairs {image : PreparedImage} {heap width : Nat} {columns : List (Column × Nat)}
+    {imageRow row : List Nat} (found : columnsOf image (assemblyToken / 2 ^ 24) = some columns) :
+    Held image heap assemblyToken row
+      (keyOfPairs (numberedPairs width (heapPairs heap columns imageRow row))) := by
+  refine ⟨columns, found, fun offset key given => ?_⟩
+  obtain ⟨pair, member, _, pairKey⟩ := pair_of_keyOfPairs given
+  have inPairs := (List.mem_filter.mp member).1
+  rw [rowKeys, ← heapPairs_keys heap columns imageRow row row, ← pairKey]
+  exact List.mem_map_of_mem inPairs
+
+#print axioms held_of_pairs
+
 /-- A successful row check means the carried `Assembly` row is the image's under numberings of
-    the pairs it returns, which are consistent. -/
+    the pairs it returns, which are consistent and held by the row's heap cells. -/
 theorem row_of_assemblyRowBound {image : PreparedImage} {row : List Nat}
     {strings blobs : List (Nat × Nat)} (bounded : image.view.Bounded)
     (bound : assemblyRowBound image row = .ok (strings, blobs)) :
     Numbering (keyOfPairs strings) (stringWidth image) ∧ Consistent strings ∧
       Numbering (keyOfPairs blobs) (blobWidth image) ∧ Consistent blobs ∧
-      RowAt image (keyOfPairs strings) (keyOfPairs blobs) assemblyToken row := by
+      RowAt image (keyOfPairs strings) (keyOfPairs blobs) assemblyToken row ∧
+      Held image stringsHeap assemblyToken row (keyOfPairs strings) ∧
+      Held image blobHeap assemblyToken row (keyOfPairs blobs) := by
   unfold assemblyRowBound at bound
-  obtain ⟨place, placed, bound⟩ := bind_ok bound
+  obtain ⟨place, placed, bound⟩ := except_bind_ok bound
   split at bound
   · exact absurd bound throw_ne_ok
   · rename_i sameLength
     have sameLength : row.length = place.2 := by simpa using sameLength
-    obtain ⟨value, readRow, bound⟩ := bind_ok bound
+    obtain ⟨value, readRow, bound⟩ := except_bind_ok bound
     split at bound
     · exact absurd bound throw_ne_ok
-    · rename_i columns _
-      obtain ⟨_, stringsNumbered, bound⟩ := bind_ok bound
-      obtain ⟨_, blobsNumbered, bound⟩ := bind_ok bound
+    · rename_i columns columnsFound
+      obtain ⟨_, stringsNumbered, bound⟩ := except_bind_ok bound
+      obtain ⟨_, blobsNumbered, bound⟩ := except_bind_ok bound
       split at bound
       · rename_i matched
         injection bound with bound
@@ -433,7 +476,8 @@ theorem row_of_assemblyRowBound {image : PreparedImage} {row : List Nat}
           numbering_of_numberingBound stringsNumbered
         obtain ⟨blobsNumbering, blobsConsistent⟩ := numbering_of_numberingBound blobsNumbered
         refine ⟨stringsNumbering, stringsConsistent, blobsNumbering, blobsConsistent,
-          place.1, valueBytes place.2 value, ?_, ?_, ?_⟩
+          ⟨place.1, valueBytes place.2 value, ?_, ?_, ?_⟩, held_of_pairs columnsFound,
+          held_of_pairs columnsFound⟩
         · rw [placed, sameLength]
         · rw [sameLength]; exact bytes_of_slice bounded readRow
         · revert matched
@@ -453,8 +497,8 @@ theorem entries_of_entriesBound {heap : Nat} {found : Nat → List Nat → Excep
       ∃ offset, Names (keyOfPairs pairs) entry.1 offset ∧ holds offset entry.2 := by
   intro entry member
   have checked := forM_ok bound entry member
-  obtain ⟨offset, located, checked⟩ := bind_ok checked
-  obtain ⟨isFound, foundAt, checked⟩ := bind_ok checked
+  obtain ⟨offset, located, checked⟩ := except_bind_ok checked
+  obtain ⟨isFound, foundAt, checked⟩ := except_bind_ok checked
   split at checked
   · rename_i yes
     subst yes
@@ -496,7 +540,7 @@ theorem sizedAt_of_sizedFound {image : PreparedImage} (bounded : image.view.Boun
     {heap : Stream} {offset : Nat} {bytes : List Nat}
     (found : sizedFound image heap offset bytes = .ok true) : SizedAt image heap offset bytes := by
   unfold sizedFound at found
-  obtain ⟨blob, readPrefix, found⟩ := bind_ok found
+  obtain ⟨blob, readPrefix, found⟩ := except_bind_ok found
   split at found
   · rename_i shape
     simp only [Bool.and_eq_true, beq_iff_eq, decide_eq_true_eq] at shape
@@ -527,13 +571,14 @@ theorem assemblyMatches_of_assemblyBound {image : PreparedImage} {assembly : Ass
     (bounded : image.view.Bounded) (bound : assemblyBound image assembly = .ok ()) :
     AssemblyMatches image assembly := by
   unfold assemblyBound at bound
-  obtain ⟨_, headerChecked, bound⟩ := bind_ok bound
-  obtain ⟨⟨strings, blobs⟩, rowChecked, bound⟩ := bind_ok bound
-  obtain ⟨_, stringsChecked, bound⟩ := bind_ok bound
-  obtain ⟨_, blobsChecked, bound⟩ := bind_ok bound
-  obtain ⟨_, stringsCovered, blobsCovered⟩ := bind_ok bound
+  obtain ⟨_, headerChecked, bound⟩ := except_bind_ok bound
+  obtain ⟨⟨strings, blobs⟩, rowChecked, bound⟩ := except_bind_ok bound
+  obtain ⟨_, stringsChecked, bound⟩ := except_bind_ok bound
+  obtain ⟨_, blobsChecked, bound⟩ := except_bind_ok bound
+  obtain ⟨_, stringsCovered, blobsCovered⟩ := except_bind_ok bound
   obtain ⟨headerAt, decoded⟩ := header_of_headerBound bounded headerChecked
-  obtain ⟨stringsNumbering, stringsConsistent, blobsNumbering, blobsConsistent, rowAt⟩ :=
+  obtain ⟨stringsNumbering, stringsConsistent, blobsNumbering, blobsConsistent, rowAt,
+    stringsHeld, blobsHeld⟩ :=
     row_of_assemblyRowBound bounded rowChecked
   exact ⟨headerAt, decoded, keyOfPairs strings, keyOfPairs blobs, stringsNumbering,
     blobsNumbering, rowAt,
@@ -541,7 +586,8 @@ theorem assemblyMatches_of_assemblyBound {image : PreparedImage} {assembly : Ass
       stringsChecked,
     entries_of_entriesBound (fun _ _ => sizedAt_of_sizedFound bounded) blobsConsistent
       blobsChecked,
-    covered_of_coveredBound stringsCovered, covered_of_coveredBound blobsCovered⟩
+    covered_of_coveredBound stringsCovered, covered_of_coveredBound blobsCovered, stringsHeld,
+    blobsHeld⟩
 
 #print axioms assemblyMatches_of_assemblyBound
 
@@ -549,13 +595,13 @@ theorem assemblyMatches_of_assemblyBound {image : PreparedImage} {assembly : Ass
 theorem prepareOne_bounded {pinned : PinnedImage} {image : PreparedImage}
     (prepared : prepareOne pinned = .ok image) : image.view.Bounded := by
   unfold prepareOne at prepared
-  obtain ⟨view, built, prepared⟩ := bind_ok prepared
-  obtain ⟨_, _, prepared⟩ := bind_ok prepared
-  obtain ⟨_, _, prepared⟩ := bind_ok prepared
+  obtain ⟨view, built, prepared⟩ := except_bind_ok prepared
+  obtain ⟨_, _, prepared⟩ := except_bind_ok prepared
+  obtain ⟨_, _, prepared⟩ := except_bind_ok prepared
   split at prepared
   · exact absurd prepared throw_ne_ok
-  · obtain ⟨_, _, prepared⟩ := bind_ok prepared
-    obtain ⟨_, _, prepared⟩ := bind_ok prepared
+  · obtain ⟨_, _, prepared⟩ := except_bind_ok prepared
+    obtain ⟨_, _, prepared⟩ := except_bind_ok prepared
     injection prepared with prepared
     subst prepared
     exact ofImage_bounded built

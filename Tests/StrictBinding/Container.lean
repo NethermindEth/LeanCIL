@@ -96,12 +96,19 @@ private def shiftStreams (extra : Nat) : Nat → Nat → List Nat → List Nat
     let shifted := writeLittle bytes header 4 (readLittle bytes header 4 + extra)
     shiftStreams extra count (header + 8 + (nameLength + 4) / 4 * 4) shifted
 
-/-- The fixture's metadata root (offset 684, 0x62C bytes, a 12-byte version field), the size field
-    of its CLI header (offset 0x214) and the mapped size of its text section (offset 0x180). -/
+/-- The file offset of the fixture's metadata root. -/
 private def fixtureRoot : Nat := 684
+
+/-- The bytes of the fixture's metadata, from its root. -/
 private def fixtureMetadataSize : Nat := 0x62C
+
+/-- The bytes the fixture's metadata root allocates to its version string. -/
 private def fixtureVersionLength : Nat := 12
+
+/-- The file offset of the metadata size field in the fixture's CLI header. -/
 private def cliMetadataSize : Nat := 0x214
+
+/-- The file offset of the mapped size of the fixture's text section. -/
 private def textVirtualSize : Nat := 0x180
 
 /-- The fixture with `extra` more bytes allocated to its version string. The rest of the root and

@@ -1,4 +1,5 @@
 import StrictBinding.Image
+import CIL.Safety.Embedding.Step
 
 /-!
 # Reads of image bytes
@@ -13,16 +14,6 @@ comparison into the bytes the image holds there.
 namespace StrictBinding
 
 open CIL.Crypto
-
-/-- A successful bind is a successful first step followed by a successful rest. -/
-theorem bind_ok {ε α β : Type} {first : Except ε α} {rest : α → Except ε β} {result : β}
-    (done : (first >>= rest) = .ok result) :
-    ∃ value, first = .ok value ∧ rest value = .ok result := by
-  cases first with
-  | error _ => cases done
-  | ok value => exact ⟨value, rfl, done⟩
-
-#print axioms bind_ok
 
 /-- One step of a big-endian concatenation: the value so far, shifted past the next item. -/
 def joinStep (value : Nat) (item : Nat × Nat) : Nat := value * 2 ^ item.2 + item.1

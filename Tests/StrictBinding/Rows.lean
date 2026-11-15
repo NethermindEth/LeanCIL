@@ -8,9 +8,11 @@ import Tests.StrictBinding.Mutation
 The assembly block an extraction carries for the fixture (`StrictFixture.assemblyBlock`, read by
 System.Reflection.Metadata) is the image's, and `assemblyMatches_of_assemblyBound` turns the check
 into the proposition. A block changed in one place is refused with the error that names the place:
-the header bytes, the decoded header, the `Assembly` row, a key or an entry. Every change is made
-to the carried block, never to the pinned image. The fixture has no public key, so a variant with
-an eight-byte key at `#Blob` offset 1 covers a key entry at a nonzero offset.
+the header bytes, the decoded header, the `Assembly` row, a key or an entry. Two changes are made
+to the image instead, with the fixture's block carried unchanged. The fixture has no culture and
+no public key, so variants whose culture is a suffix of the name, or whose eight-byte key is at
+`#Blob` offset 1, cover two numbered string entries and a key entry at a nonzero offset. A carried
+entry no row cell holds is refused by the check and by the proposition.
 -/
 
 namespace Tests.StrictBinding.Rows
@@ -97,6 +99,38 @@ theorem rejects_a_decoded_header_that_differs_from_the_bytes :
   decide +kernel
 #print axioms rejects_a_decoded_header_that_differs_from_the_bytes
 
+/-- The carried `Sorted` mask, from byte 16, differs. Decoding ignores `Sorted`, so only the
+    comparison with the image bytes refuses it. -/
+theorem rejects_a_changed_sorted_byte :
+    failsWith (checked fixture { block with tableHeader := flipAt block.tableHeader 16 1 })
+      (.headerMismatch StrictFixture.identity) = true := by
+  decide +kernel
+#print axioms rejects_a_changed_sorted_byte
+
+/-- The file offset of the image's `HashAlgId`, the first byte of its `Assembly` row. -/
+private def hashAlgorithmAt : Nat := 1416
+
+/-- The file offset of the image's `Sorted` mask, 16 bytes into its table stream at 792. -/
+private def sortedMaskAt : Nat := 792 + 16
+
+/-- The fixture image with the byte at `offset` changed, prepared under the fixture's identity. -/
+private def changedImage (offset : Nat) : Except AuditError PreparedImage :=
+  prepareOne { identity := StrictFixture.identity, image := flipByte StrictFixture.image offset 1 }
+
+/-- The fixture's carried block against an image whose `HashAlgId` differs. -/
+theorem rejects_an_image_with_a_changed_hash_algorithm :
+    failsWith (checked (changedImage hashAlgorithmAt) block)
+      (.rowMismatch assemblyToken) = true := by
+  decide +kernel
+#print axioms rejects_an_image_with_a_changed_hash_algorithm
+
+/-- The fixture's carried block against an image whose `Sorted` mask differs. -/
+theorem rejects_an_image_with_a_changed_sorted_byte :
+    failsWith (checked (changedImage sortedMaskAt) block)
+      (.headerMismatch StrictFixture.identity) = true := by
+  decide +kernel
+#print axioms rejects_an_image_with_a_changed_sorted_byte
+
 /-- The major version in the `Assembly` row is 0 instead of 1. -/
 theorem rejects_a_changed_assembly_row_byte :
     failsWith
@@ -143,6 +177,98 @@ theorem accepts_zero_keys_without_entries :
       { block with strings := block.strings.filter (·.1 != 0), blobs := [] }) = true := by
   decide +kernel
 #print axioms accepts_zero_keys_without_entries
+
+/-! ## Entries at a suffix of the name -/
+
+/-- The `#Strings` offset of the fixture's name. -/
+private def nameOffset : Nat := 207
+
+/-- The `#Strings` offset of `Fixture`, the suffix of the name. -/
+private def suffixOffset : Nat := 213
+
+/-- `Fixture` with its terminator. -/
+private def suffixBytes : List Nat := [70, 105, 120, 116, 117, 114, 101, 0]
+
+/-- The fixture's name entry. -/
+private def nameBytes : List Nat := (block.strings.getD 1 (0, [])).2
+
+/-- The fixture's block with the name's suffix carried under key 2, which no row cell holds. -/
+private def suffixBlock : AssemblyMetadata :=
+  { block with strings := block.strings ++ [(2, suffixBytes)] }
+
+/-- A carried entry under a key no row cell holds. -/
+theorem rejects_an_entry_no_row_names :
+    failsWith (checked fixture suffixBlock) (.heapNumbering stringsHeap 2) = true := by
+  decide +kernel
+#print axioms rejects_an_entry_no_row_names
+
+/-- The `#Strings` keys of the fixture's carried row: 1 for the name and 0 for the culture. -/
+private theorem fixture_string_keys :
+    (match fixture with
+     | .ok image =>
+       (columnsOf image (assemblyToken / 2 ^ 24)).map (rowKeys stringsHeap · block.assemblyRow)
+     | .error _ => none) = some [1, 0] := by
+  decide +kernel
+
+/-- No numbering makes the suffix block the fixture's, since its key 2 is held by no row cell. -/
+theorem the_suffix_block_does_not_match {image : PreparedImage} (prepared : fixture = .ok image) :
+    ¬ AssemblyMatches image suffixBlock := by
+  rintro ⟨_, _, strings, _, _, _, _, entries, _, _, _, ⟨columns, found, held⟩, _⟩
+  have keys := fixture_string_keys
+  simp only [prepared, found, Option.map_some, Option.some.injEq] at keys
+  obtain ⟨offset, named, _⟩ := entries (2, suffixBytes) (by simp [suffixBlock])
+  rcases named with ⟨two, _⟩ | given
+  · cases two
+  · have inRow := held offset 2 given
+    change 2 ∈ rowKeys stringsHeap columns block.assemblyRow at inRow
+    rw [keys] at inRow
+    simp at inRow
+#print axioms the_suffix_block_does_not_match
+
+/-- The fixture with the culture cell of its `Assembly` row set to `offset`. -/
+private def culturedImage (offset : Nat) : ImageBytes :=
+  match fixture with
+  | .ok image =>
+    match image.layout.cellAt assemblyToken 8 with
+    | .ok (cell, width) =>
+      ImageBytes.ofBytes (writeLittle (imageBytes StrictFixture.image) cell width offset)
+    | .error _ => StrictFixture.image
+  | .error _ => StrictFixture.image
+
+/-- The variant whose culture is `culture`, at `offset`, prepared under the identity it spells. -/
+private def cultured (offset : Nat) (culture : String) : Except AuditError PreparedImage :=
+  prepareOne { image := culturedImage offset, identity :=
+    "StrictFixture, Version=1.2.3.4, Culture=" ++ culture ++ ", PublicKeyToken=null" }
+
+/-- The fixture's carried row with name key `name` and culture key `culture`. -/
+private def rowWithNames (name culture : Nat) : List Nat :=
+  writeLittle (rowWithKey nameAt name) cultureAt 2 culture
+
+/-- The culture `Fixture` at the suffix of the name: two numbered entries, ranked by their
+    bytes. -/
+theorem accepts_a_culture_at_a_suffix_of_the_name :
+    ok (checked (cultured suffixOffset "Fixture")
+      { block with assemblyRow := rowWithNames 2 1,
+                   strings := [(0, [0]), (1, suffixBytes), (2, nameBytes)] }) = true := by
+  decide +kernel
+#print axioms accepts_a_culture_at_a_suffix_of_the_name
+
+/-- One key for the name and the culture, which are at different offsets. -/
+theorem rejects_one_key_for_two_offsets :
+    failsWith (checked (cultured suffixOffset "Fixture")
+      { block with assemblyRow := rowWithNames 2 2, strings := [(0, [0]), (2, nameBytes)] })
+      (.heapNumbering stringsHeap 2) = true := by
+  decide +kernel
+#print axioms rejects_one_key_for_two_offsets
+
+/-- Two keys for the name and the culture, which are at one offset. -/
+theorem rejects_two_keys_for_one_offset :
+    failsWith (checked (cultured nameOffset "StrictFixture")
+      { block with assemblyRow := rowWithNames 1 2,
+                   strings := [(0, [0]), (1, nameBytes), (2, nameBytes)] })
+      (.heapNumbering stringsHeap 1) = true := by
+  decide +kernel
+#print axioms rejects_two_keys_for_one_offset
 
 /-! ## A public key at a nonzero offset -/
 
