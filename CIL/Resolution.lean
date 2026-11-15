@@ -489,8 +489,8 @@ end ElementShape
 
 /-- The shape of an array element of declared type `type`: a class reference for a class, the
     size the checked layout gives for a struct that the raw layouts hold under its identity and
-    that is not by-ref-like, the managed signature of a function pointer, and the storage
-    `arrayElementType` gives for every other type. -/
+    that is not by-ref-like, the managed signature of a function pointer whose struct parameters
+    the raw layouts bind, and the storage `arrayElementType` gives for every other type. -/
 def LayoutEnvironment.elementShape (environment : LayoutEnvironment)
     (type : Extraction.TypeExpr) : ElementShape :=
   match type with
@@ -505,7 +505,9 @@ def LayoutEnvironment.elementShape (environment : LayoutEnvironment)
         | some layout => .value (.aggregate identity layout.layout.size)
         | none => .unsupported ElementShape.outsideLayouts
   | _ => match Extraction.managedSignature type with
-    | some signature => .method signature
+    | some signature =>
+      if Extraction.callableLayoutsValid environment.rawLayouts type then .method signature
+      else .unsupported ElementShape.outsideLayouts
     | none => match Extraction.arrayElementType type with
       | some element => .value element
       | none => .unsupported ElementShape.unsupportedType
