@@ -269,7 +269,7 @@ def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex Meta
     -- argument reads its frame slot, which this check does not inspect.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
-    let some access ← ResolutionFacts.argumentProof? body index | return true
+    let some access ← ResolutionFacts.argumentAccessProof? body indexTerm | return true
     let some (_, _, access) := (← inferType access).eq? | return true
     unless (← whnfD access).isAppOf ``CIL.ArgumentAccess.value do return true
     let entries ← listEntries args
