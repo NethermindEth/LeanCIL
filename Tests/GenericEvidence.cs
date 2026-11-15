@@ -312,6 +312,7 @@ RejectDeclared(0, "wrong-declared-parameter", "method0", line =>
 RejectDeclared(0, "wrong-declared-return", "method0", line => Regex.Replace(line,
     $$"""(declared := {[^}]*returnType := .atom ){{Regex.Escape(word)}}""",
     match => match.Groups[1].Value + word.Replace("UInt64", "UInt32"), RegexOptions.None));
+RejectDeclared(0, "wrong-declared-init-flag", "method0", line => line.Replace(", initLocals := false }", " }"));
 RejectDeclared(14, "missing-declared-receiver", "method1", line =>
     line.Replace("receiver := some .reference, ", ""));
 RejectDeclared(14, "wrong-declared-receiver-kind", "method1", line =>
