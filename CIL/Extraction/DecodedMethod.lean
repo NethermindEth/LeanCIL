@@ -92,7 +92,8 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
     type test names the type argument. -/
 theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     {environment : LayoutEnvironment} {source : RawMethod} {arguments : List TypeExpr}
-    {method : Method} (decoded : Method.ofRaw? profile environment source arguments = some method) :
+    {method : Method}
+    (decoded : Method.ofRaw? profile environment source arguments = some method) :
     ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
       ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc := by
   unfold Method.ofRaw? at decoded
