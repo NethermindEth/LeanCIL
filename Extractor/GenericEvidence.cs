@@ -256,7 +256,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (instruction.Offset != selected.Offset || instruction.OpCode.Value != selected.OpCode.Value)
                 throw new InvalidDataException("Specialization instruction mapping changed an offset or opcode.");
             var operand = Operand(method, instructions, instruction, selected, reachable);
-            return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
+            return $"{{ offset := {instruction.Offset}, opcode := {Unadmitted.RawOpcode(instruction)}, " +
                 $"operand := {operand} }}";
         });
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));

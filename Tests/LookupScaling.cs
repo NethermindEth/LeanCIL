@@ -654,7 +654,7 @@ long EmbeddingCost(string name, string definitions)
 string DeadBlocks(int calls) => $$"""
 /-- What an extraction emits for one call followed by a dead block. -/
 def extractedSegment : List Instruction :=
-  [.ldarg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
+  [.ldarg 0, .call 1 1, .pop, .ret, .unadmitted 0]
 /-- The hand-written segment without the dead block. -/
 def writtenSegment : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
