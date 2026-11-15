@@ -167,9 +167,7 @@ example : [CIL.MemoryOp.observeView .spanEmpty, .binaryRead 4 false false false,
 example : [CIL.MemoryOp.load128, .load256, .load512, .store128, .store256, .store512,
     .staticAddress [], .staticValue [], .arrayLength, .arrayLoad 4 false, .arrayStore 4,
     .arrayAddress element, .arrayTransfer element false, .nullObject, .stringLiteral "",
-    .objectField .void 0 4 false, .setObjectField .void 0 4, .objectReferenceField .void 0,
-    .setObjectReferenceField .void 0, .referenceArrayLength, .referenceArrayLoad,
-    .referenceArrayStore, .arrayField .void 0 element, .setArrayField .void 0 element].any
+    .referenceArrayLength, .referenceArrayLoad, .referenceArrayStore].any
       CIL.MemoryOp.callReached = false := rfl
 
 end Tests.RuntimeModels

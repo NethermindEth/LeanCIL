@@ -160,48 +160,54 @@ private def nodes : CIL.Safety.Memory :=
 private def first : ManagedReference := .address ⟨0, 0⟩
 private def second : ManagedReference := .address ⟨1, 0⟩
 
+/-- `Node.next`, the `Node` field 1, in the reference slot at model offset 8. -/
+private def nextNode : Extraction.FieldRef :=
+  { owner := node.identity, index := 1, type := node.identity, name := name!"next" }
+
 /-- A class-typed field holds the stored reference itself; no byte of the object changes. -/
 theorem reference_field_reads_back :
-    ((objectFieldInstruction (.setObjectReferenceField node.identity 8)
-        [.object second, .object first] nodes).bind fun stored =>
-      objectFieldInstruction (.objectReferenceField node.identity 8) [.object first]
-        stored.1).map Prod.snd = .ok [.object second] ∧
-    (objectFieldInstruction (.setObjectReferenceField node.identity 8)
-        [.object second, .object first] nodes).map (fun stored => stored.1.cells 0 8) =
-      .ok ⟨0, true⟩ := ⟨rfl, rfl⟩
+    ((fieldStore body nextNode [.object second, .object first] nodes).bind fun stored =>
+      fieldLoad body nextNode [.object first] stored.1).map Prod.snd = .ok [.object second] ∧
+    (fieldStore body nextNode [.object second, .object first] nodes).map
+      (fun stored => stored.1.cells 0 8) = .ok ⟨0, true⟩ := ⟨rfl, rfl⟩
 #print axioms reference_field_reads_back
 
 /-- A fresh field holds null. -/
 theorem reference_field_starts_null :
-    (objectFieldInstruction (.objectReferenceField node.identity 8) [.object first] nodes).map
-      Prod.snd = .ok [.object .null] := rfl
+    (fieldLoad body nextNode [.object first] nodes).map Prod.snd = .ok [.object .null] := rfl
 #print axioms reference_field_starts_null
 
 /-- A null receiver throws on both the load and the store, before the value is checked. -/
 theorem reference_field_null_receiver_throws :
-    objectFieldInstruction (.objectReferenceField node.identity 8) [.object .null] nodes =
-      .error (.thrown .nullReference) ∧
-    objectFieldInstruction (.setObjectReferenceField node.identity 8)
-        [.object (.address ⟨2, 0⟩), .object .null] nodes =
+    fieldLoad body nextNode [.object .null] nodes = .error (.thrown .nullReference) ∧
+    fieldStore body nextNode [.object (.address ⟨2, 0⟩), .object .null] nodes =
       .error (.thrown .nullReference) := ⟨rfl, rfl⟩
 #print axioms reference_field_null_receiver_throws
 
 /-- Only an object or null may be stored: a byte buffer is not one. -/
 theorem reference_field_rejects_buffer :
-    objectFieldInstruction (.setObjectReferenceField node.identity 8)
-        [.object (.address ⟨2, 0⟩), .object first] nodes = .error .invalidState := rfl
+    fieldStore body nextNode [.object (.address ⟨2, 0⟩), .object first] nodes =
+      .error .invalidState := rfl
 #print axioms reference_field_rejects_buffer
 
 /-- A store needs write authority over the field's slot, and the slot must lie in the object. -/
 theorem reference_field_checks_slot :
-    objectFieldInstruction (.setObjectReferenceField node.identity 8)
-        [.object first, .object second] nodes =
+    fieldStore body nextNode [.object first, .object second] nodes =
       .error (.memory .unwritable (.address ⟨1, 8⟩) 8) ∧
-    objectFieldInstruction (.objectReferenceField node.identity 16) [.object first] nodes =
+    fieldLoad body { nextNode with index := 2 } [.object first] nodes =
       .error (.memory .outsideAllocation (.address ⟨0, 16⟩) 8) := ⟨rfl, rfl⟩
 #print axioms reference_field_checks_slot
 
 /-! ## Failure records of object steps -/
+
+/-- `Account.limit`, the `int64` field 0, in the slot at model offset 0. -/
+private def limitField : Extraction.FieldRef :=
+  { owner := account.identity, index := 0, type := .atom Extraction.runtimeScope "System.Int64",
+    name := name!"limit" }
+
+/-- `Account.next`, the `Account` field 1, in the reference slot at model offset 8. -/
+private def nextAccount : Extraction.FieldRef :=
+  { owner := account.identity, index := 1, type := account.identity, name := name!"next" }
 
 /-- `callvirt` of method 4 on argument 0. -/
 @[cil_code] def depositing : CIL.Method :=
@@ -209,11 +215,11 @@ theorem reference_field_checks_slot :
 /-- `ldfld` of a scalar field of argument 0. -/
 @[cil_code] def fieldReading : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.ldarg 0, .memory (.objectField account.identity 0 8 false), .ret] }
+    code := [.ldarg 0, .ldfld limitField, .ret] }
 /-- `ldfld` of a class-typed field of argument 0. -/
 @[cil_code] def slotReading : CIL.Method :=
   { returnsValue := true, locals := [],
-    code := [.ldarg 0, .memory (.objectReferenceField account.identity 8), .ret] }
+    code := [.ldarg 0, .ldfld nextAccount, .ret] }
 /-- `newobj` of an 8-byte instance whose constructor is method 4. -/
 @[cil_code] def creating : CIL.Method :=
   { returnsValue := true, locals := [], code := [.newObject 4 0 account.identity [] 8, .ret] }
@@ -273,21 +279,32 @@ example (memory : CIL.Safety.Memory) (object : Reference) :
       .error ⟨0, 1, .thrown .nullReference⟩ := by
   cil_checked_steps
 
-/-- A signed `ldfld` of a 16-bit field holding `0xFFFF` pushes -1, sign-extended to 32 bits, and
-    an unsigned one pushes 65535: `signedFacts` and `facts` must not be interchangeable. -/
+/-- `Account.offset`, an `int16` field 0. -/
+private def signedShort : Extraction.FieldRef :=
+  { owner := account.identity, index := 0, type := .atom Extraction.runtimeScope "System.Int16",
+    name := name!"offset" }
+
+/-- The same slot read as a `uint16`. -/
+private def unsignedShort : Extraction.FieldRef :=
+  { owner := account.identity, index := 0, type := .atom Extraction.runtimeScope "System.UInt16",
+    name := name!"offset" }
+
+/-- The 2-byte word in the slot at model offset 0 of an `Account`. -/
+private def shortWord : WordField 2 := ⟨account.identity, 0⟩
+
+/-- A `ldfld` of an `int16` field holding `0xFFFF` pushes -1, sign-extended to 32 bits, and one
+    of a `uint16` field pushes 65535: `signedFacts` and `facts` must not be interchangeable. -/
 theorem narrow_field_loads_extend_by_sign {memory : CIL.Safety.Memory} {object : Reference}
-    {field : WordField 2} (readable : field.Readable memory object)
-    (held : field.of memory object = 0xFFFF) :
-    CIL.Safety.step body (.memory (.objectField field.owner field.offset 2 true)) 0 [] frame
-        [.object (.address object)] memory =
+    (readable : shortWord.Readable memory object) (held : shortWord.of memory object = 0xFFFF) :
+    CIL.Safety.step body (.ldfld signedShort) 0 [] frame [.object (.address object)] memory =
       .ok (.next 1 [.scalar (.i32 0xFFFFFFFF)] frame memory) ∧
-    CIL.Safety.step body (.memory (.objectField field.owner field.offset 2 false)) 0 [] frame
-        [.object (.address object)] memory =
+    CIL.Safety.step body (.ldfld unsignedShort) 0 [] frame [.object (.address object)] memory =
       .ok (.next 1 [.scalar (.i32 0xFFFF)] frame memory) := by
   obtain ⟨_, located, signedLoad⟩ := readable.signedFacts
   obtain ⟨_, _, unsignedLoad⟩ := readable.facts
   rw [held] at signedLoad unsignedLoad
-  constructor <;> rw [step_objectField_2_eq] <;>
+  constructor <;> simp only [cil_step, Nat.reduceAdd] <;>
+    simp only [shortWord] at located signedLoad unsignedLoad <;>
     simp only [located, signedLoad, unsignedLoad, Bind.bind, Except.bind, Pure.pure,
       Except.pure] <;> rfl
 #print axioms narrow_field_loads_extend_by_sign
@@ -422,9 +439,8 @@ theorem self_linked_no_segment {field : ReferenceField} {linked : CIL.Safety.Mem
 
 /-- A reference load followed by a word load through the object it produced. -/
 @[cil_code] def linkedReading : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.ldarg 0,
-      .memory (.objectReferenceField account.identity 8),
-      .memory (.objectField account.identity 0 8 false), .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .ldfld nextAccount, .ldfld limitField,
+      .ret] }
 
 /-- The linked-object reader alone. -/
 @[cil_code] def linkedProgram : CIL.Program := [linkedReading]
@@ -496,19 +512,28 @@ theorem checked_receiver_throws (memory : CIL.Safety.Memory) (frame : Frame) :
   cil_checked_steps
 #print axioms checked_receiver_throws
 
+/-- `Account.open`, the Boolean field 0, in the slot at model offset 0. -/
+private def openField : Extraction.FieldRef :=
+  { owner := account.identity, index := 0, type := .atom Extraction.runtimeScope "System.Boolean",
+    name := name!"open" }
+
 /-- A Boolean parameter, read narrowed, is written through its receiver's one-byte field. -/
-@[cil_code] private def narrowStoreProgram : CIL.Program := [
+@[cil_code] private def narrowStore : CIL.Method :=
   { returnsValue := false, locals := [],
     declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Object",
       .atom CIL.Extraction.runtimeScope "System.Boolean"] },
-    code := [.ldarg 0, .ldarg 1, .memory (.setObjectField account.identity 0 1), .ret] }]
+    code := [.ldarg 0, .ldarg 1, .stfld openField, .ret] }
+
+/-- The narrowing store alone. -/
+@[cil_code] private def narrowStoreProgram : CIL.Program := [narrowStore]
 
 /-- Narrowing a literal Boolean preserves the payload of a supplied checked field write. -/
 theorem narrowed_boolean_store (memory stored : CIL.Safety.Memory)
     (receiver : Reference) (frame : Frame)
     (formed : formObject memory (.address receiver) = .ok (.object (.address receiver)))
-    (written : memoryInstruction (.setObjectField account.identity 0 1)
-      [.scalar (.i32 1), .object (.address receiver)] memory = .ok (stored, [])) :
+    (written : step narrowStore (.stfld openField) 2
+      [.object (.address receiver), .scalar (.i32 1)] frame
+      [.scalar (.i32 1), .object (.address receiver)] memory = .ok (.next 3 [] frame stored)) :
     run narrowStoreProgram 5 0 0 [.object (.address receiver), .scalar (.i32 1)]
       frame [] memory = .ok (leaveFrame frame stored, []) := by
   cil_checked_steps [formed, written]
