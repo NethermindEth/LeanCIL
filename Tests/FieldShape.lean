@@ -183,4 +183,27 @@ theorem value_kinds :
       .unsupported "Not a value type" := by decide +kernel
 #print axioms value_kinds
 
+-- The kernel checks each generated fact, which rests on no axiom beyond `propext`.
+/-- info: 'Tests.FieldShape.lowField_shape' depends on axioms: [propext] -/
+#guard_msgs in #print axioms lowField_shape
+
+/-- info: 'Tests.FieldShape.pairType_shape' depends on axioms: [propext] -/
+#guard_msgs in #print axioms pairType_shape
+
+/-- `Pair.high` under another name, for a fact that misstates its shape. -/
+def misstatedField : FieldRef :=
+  { owner := pair, index := 1, type := uint32, name := name!"misstated" }
+
+-- The kernel refuses a fact whose shape differs from the resolver's, so no fact rests on the
+-- compiled evaluation that proposes its shape.
+open Lean Meta Elab in
+set_option Elab.async false in
+run_cmd Command.liftTermElabM do
+  let misstate : Expr → MetaM Expr := fun _ => pure (toExpr (FieldShape.value 4 2 true))
+  let refused ← try
+      Safety.ResolutionFacts.declareShapeFact .field ``environment ``misstatedField misstate
+      pure false
+    catch error => pure (((← error.toMessageData.toString).splitOn "(kernel)").length > 1)
+  unless refused do throwError "the kernel did not refuse a misstated shape fact"
+
 end Tests.FieldShape
