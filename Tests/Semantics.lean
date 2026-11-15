@@ -175,6 +175,17 @@ theorem narrow_read_bounds :
     loadValue Tests.caller (.address ⟨0, 7⟩) 2 true =
       .error (.memory .outsideAllocation (.address ⟨0, 7⟩) 2) := rfl
 
+/-- An eight-byte `stind` refuses an int32 value rather than zero-extending it into eight bytes,
+    and a four-byte `stind` refuses a native value. -/
+theorem stind_value_width_mismatch :
+    instruction (.stind .i8) [.scalar (.i32 0xFFFFFFFF), Tests.reference] Tests.caller =
+      .error .invalidState ∧
+    instruction (.stind .i) [.scalar (.i32 0xFFFFFFFF), Tests.reference] Tests.caller =
+      .error .invalidState ∧
+    instruction (.stind .i4) [.scalar (.i64 7), Tests.reference] Tests.caller =
+      .error (.unsupported "Not a memory instruction") := ⟨rfl, rfl, rfl⟩
+#print axioms stind_value_width_mismatch
+
 theorem scalar_load_rejects_snapshot :
     (instruction (.loadScalar 2) [.scalar (.aggregate [1, 2])] Tests.caller).isOk = false := rfl
 

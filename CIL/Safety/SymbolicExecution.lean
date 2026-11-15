@@ -1187,11 +1187,50 @@ def numericValueFacts (facts : Array Term) : TacticM (Array Term) := withMainCon
     catch _ => saved.restore
   return restated
 
+open Lean Meta in
+/-- Whether a body the goal or its hypotheses reach may hold `stind.i`: some `stind` there names
+    `.i` or a kind that is not a literal, or a body is a variable or has no definition to read.
+    Reads each reached body once, so the cost is linear in the code it reaches. -/
+def mayStoreNativeInt (roots : Array Expr) : MetaM Bool := do
+  let bodyType (type : Expr) : MetaM Bool := forallTelescopeReducing type fun _ result => do
+    let result ← whnfR result
+    let element := if result.isAppOfArity ``List 1 then result.appArg! else result
+    return element.isConstOf ``CIL.Method || element.isConstOf ``CIL.Instruction
+  let narrowKinds := [``CIL.NumericKind.i1, ``CIL.NumericKind.u1, ``CIL.NumericKind.i2,
+    ``CIL.NumericKind.u2, ``CIL.NumericKind.i4, ``CIL.NumericKind.u4, ``CIL.NumericKind.i8]
+  let mut pending := roots
+  let mut seen : NameSet := {}
+  while !pending.isEmpty do
+    let term ← instantiateMVars pending.back!
+    pending := pending.pop
+    if term.hasMVar then return true
+    let masked := term.replace fun part =>
+      if part.isAppOfArity ``CIL.Instruction.stind 1 &&
+          narrowKinds.any part.appArg!.isConstOf then some (mkConst ``Unit.unit) else none
+    if (masked.find? (·.isConstOf ``CIL.Instruction.stind)).isSome then return true
+    for free in (Lean.collectFVars {} term).fvarIds do
+      if ← bodyType (← free.getType) then return true
+    for name in term.getUsedConstants do
+      if seen.contains name then continue
+      seen := seen.insert name
+      let info ← getConstInfo name
+      unless ← bodyType info.type do continue
+      match info with
+      | .ctorInfo _ | .recInfo _ | .inductInfo _ | .quotInfo _ => continue
+      | .defnInfo definition => pending := pending.push definition.value
+      | _ => return true
+  return false
+
 open Lean Elab Tactic Meta in
 /-- Derive checked load and store facts from byte operations once, before stepping. The
-    byte width selects the existing bridge; quantified facts retain their binders. A numeric
-    value test of an opaque value is also stated in its unfolded form (`numericValueFacts`). -/
+    byte width selects the existing bridge; quantified facts retain their binders. An eight-byte
+    write gives a `stind.i` step only when a reached body may hold one (`mayStoreNativeInt`). A
+    numeric value test of an opaque value is also stated in its unfolded form
+    (`numericValueFacts`). -/
 def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMainContext do
+  let roots := (← getLCtx).foldl (init := #[← getMainTarget]) fun roots declaration =>
+    if declaration.isImplementationDetail then roots else roots.push declaration.type
+  let nativeStores ← mayStoreNativeInt roots
   let narrowStores (kind : Name) (written : Expr) : Array (Name × Array Expr) :=
     #[(``step_storeScalar_of_write, #[written]),
       (``step_stind_narrow_of_write, #[mkConst kind, written])]
@@ -1248,8 +1287,8 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
                     | true, 16 => #[(``load_vector128_of_read, #[applied])]
                     | true, 32 => #[(``load_vector256_of_read, #[applied])]
                     | true, 64 => #[(``load_vector512_of_read, #[applied])]
-                    | false, 8 => #[(``step_stind_i8_of_write, #[applied]),
-                        (``step_stind_i_of_write, #[applied])]
+                    | false, 8 => #[(``step_stind_i8_of_write, #[applied])] ++
+                        if nativeStores then #[(``step_stind_i_of_write, #[applied])] else #[]
                     -- A narrow write steps a runtime-model store or the one `stind` of its width.
                     | false, 1 => narrowStores ``CIL.NumericKind.i1 applied
                     | false, 2 => narrowStores ``CIL.NumericKind.i2 applied

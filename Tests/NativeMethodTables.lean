@@ -205,6 +205,24 @@ theorem native_array_load :
         .ok (.next 1 [.methodPointer ⟨signature, some second⟩] frame memory) := rfl
 #print axioms native_array_load
 
+/-- A caller's signature that differs from the table's. -/
+private def otherSignature : ManagedSignature :=
+  ⟨.atom Extraction.runtimeScope "System.Int64", [.atom Extraction.runtimeScope "System.Int32"]⟩
+
+/-- An unhomed table argument loads an entry under the table's own signature, and a call under
+    any other signature selects no target from it. -/
+theorem argument_table_load :
+    let argumentLoad : CIL.Method :=
+      { code := [.ldarg 0, .ldind .i, .ret], locals := [], returnsValue := true }
+    step argumentLoad (.ldarg 0) 0 [.methodTable (cursorAt 8)] frame [] memory =
+      .ok (.next 1 [.methodTable (cursorAt 8)] frame memory) ∧
+    step argumentLoad (.ldind .i) 1 [.methodTable (cursorAt 8)] frame
+      [.methodTable (cursorAt 8)] memory =
+      .ok (.next 2 [.methodPointer ⟨signature, some second⟩] frame memory) ∧
+    indirectTarget otherSignature [{ identity := second, method := 0 }]
+      ⟨signature, some second⟩ = none := ⟨rfl, rfl, rfl⟩
+#print axioms argument_table_load
+
 /-- An opaque table cannot manufacture a native cursor without a valid storage binding. -/
 theorem missing_binding :
     loadNativeTable opaqueTable { memory with staticBindings := [] } =

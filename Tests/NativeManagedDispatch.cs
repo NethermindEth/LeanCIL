@@ -135,6 +135,18 @@ foreach (var (name, mutated) in new[]
     rejected.Add(rejectedPath, "PASS independently rejected native dispatch evidence: " + name,
         "Extraction.ScalarFlowValid");
 }
+// No emitted instruction carries the table's signature; the call-site check binds the calli signature to the raw
+// operand, so a changed signature is rejected there.
+var calls = NarrowEvidence(source, "method0_calls_validated");
+var nativeCall = calls.Split('\n')
+    .First(line => line.TrimStart().StartsWith(".managed (.call ", StringComparison.Ordinal));
+var changedCall = nativeCall.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal);
+var changedCalls = calls.Replace(nativeCall, changedCall, StringComparison.Ordinal);
+if (changedCalls == calls) throw new InvalidOperationException("Ineffective native call signature mutation");
+var signaturePath = Path.Combine(root, "Rejected-call-signature.lean");
+File.WriteAllText(signaturePath, changedCalls);
+rejected.Add(signaturePath, "PASS independently rejected native dispatch evidence: call-signature",
+    "ManagedCallsValid");
 var numericDll = Path.Combine(root, "NumericTarget.dll");
 using (var module = ModuleDefinition.ReadModule(dll))
 {

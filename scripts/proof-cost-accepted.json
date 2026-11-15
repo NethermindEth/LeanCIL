@@ -54,53 +54,5 @@
     "from": 960418,
     "to": 1016037,
     "reason": "bind_entry also declares the entry's Checked evidence structure, one field for each fact of the allocating entry"
-  },
-  {
-    "group": "Tests.StoreFacts",
-    "name": "Tests.StoreFacts.borrow_stores",
-    "measure": "heartbeats",
-    "from": 6506221,
-    "to": 7116578,
-    "reason": "Each eight-byte write fact derives a store step for stind.i8 and one for stind.i, since raw stind keeps its native-int kind; a single fact quantified over the kind does not rewrite in the checked stepper"
-  },
-  {
-    "group": "Tests.StoreFacts",
-    "name": "Tests.StoreFacts.carry_stores",
-    "measure": "heartbeats",
-    "from": 5997326,
-    "to": 6579366,
-    "reason": "Each eight-byte write fact derives a store step for stind.i8 and one for stind.i, since raw stind keeps its native-int kind; a single fact quantified over the kind does not rewrite in the checked stepper"
-  },
-  {
-    "group": "Tests.StoreFacts",
-    "name": "Tests.StoreFacts.carry_contract_steps",
-    "measure": "heartbeats",
-    "from": 5028186,
-    "to": 5593851,
-    "reason": "Each eight-byte write fact derives a store step for stind.i8 and one for stind.i, since raw stind keeps its native-int kind; a single fact quantified over the kind does not rewrite in the checked stepper"
-  },
-  {
-    "group": "Tests.StoreFacts",
-    "name": "example@d8f8ebf5",
-    "measure": "heartbeats",
-    "from": 5753491,
-    "to": 6271771,
-    "reason": "Each eight-byte write fact derives a store step for stind.i8 and one for stind.i, since raw stind keeps its native-int kind; a single fact quantified over the kind does not rewrite in the checked stepper"
-  },
-  {
-    "group": "Tests.StoreFacts",
-    "name": "example@2ad67231",
-    "measure": "heartbeats",
-    "from": 3000506,
-    "to": 3223944,
-    "reason": "Each eight-byte write fact derives a store step for stind.i8 and one for stind.i, since raw stind keeps its native-int kind; a single fact quantified over the kind does not rewrite in the checked stepper"
-  },
-  {
-    "group": "Tests.StoreFacts",
-    "name": "example@f92864ff",
-    "measure": "heartbeats",
-    "from": 2999197,
-    "to": 3222847,
-    "reason": "Each eight-byte write fact derives a store step for stind.i8 and one for stind.i, since raw stind keeps its native-int kind; a single fact quantified over the kind does not rewrite in the checked stepper"
   }
 ]
