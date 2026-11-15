@@ -195,9 +195,12 @@ introduced. Constrained interface calls on these closed owners, with implicit or
 implementations, use the same direct-call proof interface after the certificate resolves and
 binds the exact implementation.
 
-For supplied native dispatch tables, provide an immutable allocation binding and exact catalog
-target identities in `MethodTable.backing`. Checked byte offsets and `ldind.i` preserve
-authenticated callable provenance; numeric address bytes alone are insufficient. These tables
+For supplied native dispatch tables, provide an immutable allocation binding in
+`MethodTable.backing`, the exact catalog target identities in `MethodTable.targets` and their
+number in `MethodTable.entryCount`. The default proof of `MethodTable.counted` checks that number
+once where the table is built, so a table step reads the count without walking the entries.
+Checked byte offsets and `ldind.i` preserve authenticated callable provenance; numeric address
+bytes alone are insufficient. These tables
 require a unique supported managed indirect-call signature in each body; handler
 signatures cannot carry native table pointers. Ordinary call and tail-call lifetime and fuel
 obligations still apply.

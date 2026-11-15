@@ -62,6 +62,15 @@ characters long and differ only in their last character, less the same statement
 than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
 check takes about 5 seconds.
 
+The suite also measures `decide +kernel` on one `add` of an int32 offset to a native method
+table of 16, 64 and 256 entries, less the same statement closed with `sorry`. Each table and its
+static storage are definitions outside the decision, so the proof of `MethodTable.counted` is
+checked once there and not in the measured statement. The step reads `MethodTable.entryCount`,
+not the entries, and costs about 24,700 heartbeats at each size; geometry checks that read
+`targets.size` cost 29,500, 41,800 and 90,900. The suite fails when the cost at 64 or 256 entries
+exceeds 1.15 times the cost at 16. Run these rows alone with
+`dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
+
 The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
 and 512 array element addresses, each followed by a branch, with and without a `readonly.`
 prefix, less the heartbeats of stating the same certificate. It fails when the cost per address

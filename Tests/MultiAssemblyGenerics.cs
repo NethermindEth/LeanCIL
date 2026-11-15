@@ -242,10 +242,10 @@ partial class Program
                 /-- A catalogued handler runs; `LocalAlgo<ulong>.Run`, addressed by no extracted body, does not. -/
                 theorem correctness :
                     (CIL.Safety.invoke Extracted.program 64 0
-                      [.methodTable ⟨signature, some #[{{identity}}], none⟩, {{arguments}}]
+                      [.methodTable ⟨signature, some #[{{identity}}], none, 1, by decide⟩, {{arguments}}]
                       CIL.Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 {{result}})] ∧
                     (match CIL.Safety.invoke Extracted.program 64 0
-                      [.methodTable ⟨signature, some #[{{uncatalogued}}], none⟩, {{arguments}}]
+                      [.methodTable ⟨signature, some #[{{uncatalogued}}], none, 1, by decide⟩, {{arguments}}]
                       CIL.Safety.Memory.empty with
                       | .error fault => some fault.fault | .ok _ => none) = some .invalidState :=
                   ⟨by rfl, by rfl⟩

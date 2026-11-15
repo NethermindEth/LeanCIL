@@ -242,7 +242,8 @@ foreach (var (name, fixture, definition, change) in targetCases)
         theorem generic_table_entry :
             (CIL.Safety.invoke Extracted.program 64 0
               [.methodTable ⟨⟨.atom CIL.Extraction.runtimeScope "System.UInt32",
-                [.atom CIL.Extraction.runtimeScope "System.UInt32"]⟩, some #[{{target.Groups[1].Value}}], none⟩,
+                [.atom CIL.Extraction.runtimeScope "System.UInt32"]⟩, some #[{{target.Groups[1].Value}}], none, 1,
+                by decide⟩,
                 .scalar (.i32 42)]
               { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
                 views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := by rfl
