@@ -226,8 +226,9 @@ Direct Lean mutations exercise validators independently of hashes/regeneration: 
 stack kinds/joins, layouts, homes, generic substitution, pruning, call slots and folds. Positive
 controls establish that fixtures reach the intended obligation. See
 [validation](VALIDATION-COVERAGE.md). Wrong-addition has an execution witness and an
-all-successful-fuel refutation; bounds/lifetime examples use `invoke_fault_refutes_success`. A
-failed positive proof or resource exhaustion alone is not a semantic counterexample.
+all-successful-fuel refutation; bounds/lifetime examples use `invoke_fault_refutes_success`, which
+takes only a definite fault. A failed positive proof, fuel exhaustion or an `unsupported` fault
+alone is not a semantic counterexample.
 
 ## Caller proofs and published library contracts
 

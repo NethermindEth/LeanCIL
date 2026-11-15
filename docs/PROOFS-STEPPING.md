@@ -572,7 +572,7 @@ invariant state of smaller measure.
 | Exit at the loop's own `throw` | `loop_outcome_throw` |
 | Compose paths in either outcome | `loop_outcome_next`, `loop_reaches_outcome` |
 | Lift the head outcome through frame setup | `ensures_outcome_of_loop`, to `EnsuresOutcome pre post raises`, which names the outcome of every permitted input; with `raises` constantly `none` it is `Ensures` (`ensures_outcome_none`) |
-| Refute an expected exception | `loop_outcome_some_refuted`, from any settled run that does not throw it |
+| Refute an expected exception | `loop_outcome_some_refuted`, from any settled run that does not throw it; a run that ends in fuel exhaustion or an `unsupported` fault is not settled |
 
 The normal-only rules are the `none` instances of the outcome rules. Unsupported execution,
 invalid state and fuel exhaustion never satisfy an expected loop exception.

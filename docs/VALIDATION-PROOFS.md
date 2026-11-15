@@ -75,8 +75,8 @@ library and tactic regressions kernel-check the resulting proofs.
   instruction under dead locals. It also rejects an embedding whose declared signature,
   layout environment or call link differs, and names the pc of a differing link.
 - `Tests.OutcomeEmbedding` checks transport of named exceptions and outcome contracts and the
-  relocated fault pc, and that changed throws, unsupported execution and fuel exhaustion do not
-  transfer.
+  relocated fault pc, that changed throws, unsupported execution and fuel exhaustion do not
+  transfer, and that a hole's fault is not settled, so it refutes no raise.
 - `Tests.RetainedNumericLocals` keeps dead numeric declarations before and after a live local,
   transfers exact-memory executions and named exceptions through nested allocating calls, and
   checks that deleting a numeric local changes the allocation watermark and fails ordinary
@@ -103,6 +103,7 @@ library and tactic regressions kernel-check the resulting proofs.
 - `Tests.LoopOutcome` derives the normal-only loop induction, loop call and `Ensures` as the
   `none` instances of the outcome rules, and proves that unsupported execution, invalid state, fuel
   exhaustion, normal return and a different exception never satisfy an expected loop exception.
+  All but unsupported execution refute one; a hole's fault is not settled.
 - `Tests.LoopScaffold` proves a countdown and a span fold over symbolic memory through their
   `LoopFrame`s, naming no frame or span fact, and shows for each that a constant measure fails at
   the decrease goal and an invariant that is not preserved fails at its preservation goal.
@@ -186,8 +187,9 @@ every case; the prefix theorem checks the widened value.
 - `Tests.OutcomeContract` proves every outcome of a two-level chain from the callees' contracts.
   `Tests/OutcomeContract.cs` verifies it against the compiled build and refutes the callee's
   contract on builds with an off-by-one threshold or a different exception type.
-- `Tests.RuntimeExceptions` proves every mapped CLR exception, refutes wrong names and proves
-  unsigned division and remainder by zero for every dividend and caller memory;
+- `Tests.RuntimeExceptions` proves every mapped CLR exception, refutes wrong names, shows that a
+  hole's fault names no exception and is not settled, and proves unsigned division and remainder
+  by zero for every dividend and caller memory;
   `Tests/RuntimeExceptions.cs` checks each against its compiled C# method.
 - `Tests.ContractConsequence` derives public method and outcome contracts from proved internal
   ones without re-executing the callee, composes callers through the derived contracts, and proves
