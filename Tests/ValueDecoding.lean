@@ -84,12 +84,14 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 214, .none⟩, .add_ovf), (⟨0, 215, .none⟩, .add_ovf_un), (⟨0, 216, .none⟩, .mul_ovf),
   (⟨0, 217, .none⟩, .mul_ovf_un), (⟨0, 218, .none⟩, .sub_ovf), (⟨0, 219, .none⟩, .sub_ovf_un),
   (⟨0, 65025, .none⟩, .ceq), (⟨0, 65026, .none⟩, .cgt), (⟨0, 65027, .none⟩, .cgt_un),
-  (⟨0, 65028, .none⟩, .clt), (⟨0, 65029, .none⟩, .clt_un)]
+  (⟨0, 65028, .none⟩, .clt), (⟨0, 65029, .none⟩, .clt_un),
+  -- Dynamic frame storage.
+  (⟨0, 65039, .none⟩, .localloc)]
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
-  ``Instruction.stackAlloc, ``Instruction.newArray, ``Instruction.newReferenceArray,
-  ``Instruction.loadAggregate, ``Instruction.copyObject, ``Instruction.storeAggregate,
+  ``Instruction.newArray, ``Instruction.newReferenceArray, ``Instruction.loadAggregate,
+  ``Instruction.copyObject, ``Instruction.storeAggregate,
   ``Instruction.initAggregate, ``Instruction.loadScalar, ``Instruction.storeScalar,
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
@@ -153,7 +155,7 @@ def mutations : List (RawInstruction × Instruction) := [
   -- A malformed operand, another argument, an argument address, or an opcode outside the family.
   (⟨0, 42, .integer 0⟩, .ret), (⟨0, 17, .argument 4⟩, .ldloc 4), (⟨0, 6, .local 0⟩, .ldloc 0),
   (⟨0, 43, .targets [1]⟩, .br 1), (⟨0, 2, .none⟩, .ldarg 1), (⟨0, 15, .argument 1⟩, .ldarg 1),
-  (⟨0, 107, .none⟩, .conv_i4)]
+  (⟨0, 107, .none⟩, .conv_i4), (⟨0, 65039, .integer 0⟩, .localloc)]
 
 /-- No mutation matches its raw instruction. -/
 theorem mutations_rejected :
@@ -206,7 +208,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 62, undecoded 31 of 93 constructors -/
+/-- info: decoded 63, undecoded 30 of 93 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

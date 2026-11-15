@@ -235,6 +235,18 @@ def loadArgument (body : CIL.Method) (index : Nat) (args : List Value) (frame : 
     let .scalar (.i32 bits) := value | .error .invalidState
     checkedValue memory (.scalar (.i32 (kind.extend bits)))
 
+/-- `localloc` of the byte count alone on the stack: fresh storage owned by `frame`, zeroed when
+    `initLocals` is set. Any other stack is an invalid state. -/
+def localAllocation (initLocals : Bool) (pc : Nat) (frame : Frame) (stack : List Value)
+    (memory : Memory) : ExecutionResult FrameAction := do
+  let [.scalar size] := stack | .error .invalidState
+  let bytes ← match size with
+    | .i32 bits => pure bits.toNat
+    | .i64 bits => pure bits.toNat
+    | _ => .error .invalidState
+  let (reference, owner, memory) ← allocateStack memory frame bytes initLocals
+  return .next (pc + 1) [.reference reference] owner memory
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
@@ -316,6 +328,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .objectTest type throwing, .object value :: rest =>
     let result ← objectTest m type throwing value
     return .next (pc + 1) (.object result :: rest) frame m
+  -- Dynamic frame storage, zeroed as the body's declared localsinit flag says.
+  | .localloc, _ => localAllocation body.declared.initLocals pc frame stack m
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m
@@ -400,13 +414,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .bne_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
-  | .stackAlloc initLocals, [.scalar size] =>
-    let bytes ← match size with
-      | .i32 bits => pure bits.toNat
-      | .i64 bits => pure bits.toNat
-      | _ => .error .invalidState
-    let (reference, owner, memory) ← allocateStack m frame bytes initLocals
-    return .next (pc + 1) [.reference reference] owner memory
   | .intrinsic operation argc, _ =>
     if !operation.available body.profile then .error (.unsupported "Intrinsic unavailable in target profile") else
     if stack.length < argc then .error .invalidState else

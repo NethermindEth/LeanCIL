@@ -526,9 +526,9 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | .tailCall .. | .managed (.call _ _ true) => true | _ => false) then return false
   if instruction.opcode == 65039 then
     return match instruction.operand, emitted with
-      | .none, .stackAlloc flag => flag == raw.initLocals
+      | .none, .localloc => true
       | _, _ => false
-  if let .stackAlloc _ := emitted then return false
+  if let .localloc := emitted then return false
   if let some word := constant32 instruction <|> platformField instruction then
     return match emitted with | .ldc_i4 actual => word == actual | _ => false
   -- Any other static load is never a constant.

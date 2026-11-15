@@ -29,7 +29,8 @@ private def subRaw : RawMethod :=
 
 /-- The frame both bodies declare: no locals, no homes, no arguments, no return value. -/
 private def frame (code : List Instruction) : Method :=
-  { code := code, locals := [], declared := { parameters := [], returnType := .void },
+  { code := code, locals := [],
+    declared := { parameters := [], returnType := .void, initLocals := false },
     returnsValue := false }
 
 /-- The tiny add body decodes to its code and its declared frame. -/
@@ -55,7 +56,8 @@ theorem add_arguments_decode :
     (encodeBody pin addArgumentsRaw).map (·.bytes) = some [0x12, 0x02, 0x03, 0x58, 0x2A] ∧
       decoded (encodeBody pin addArgumentsRaw) addArgumentsRaw = some
         { code := [.ldarg 0, .ldarg 1, .add, .ret], locals := [],
-          declared := { parameters := [uint64, uint64], returnType := uint64 },
+          declared :=
+            { parameters := [uint64, uint64], returnType := uint64, initLocals := false },
           returnsValue := true } := by
   constructor <;> cil_kernel_rfl
 #print axioms add_arguments_decode
@@ -73,6 +75,22 @@ theorem locals_initialized_by_the_bytes :
         some [.unmodeled] := by
   constructor <;> cil_kernel_rfl
 #print axioms locals_initialized_by_the_bytes
+
+/-- `ldc.i4.8; localloc; pop; ret` with no locals and the given init flag. -/
+private def allocationRaw (initLocals : Bool) : RawMethod :=
+  method initLocals [] [instr 0 0x1E, instr 1 0xFE0F, instr 3 0x26, instr 4 0x2A]
+
+/-- Bytes without localsinit decode `localloc` under a declared signature whose init flag is
+    false, whichever flag the definition carries, so the allocation is not zeroed. -/
+theorem localloc_flag_read_from_the_bytes :
+    (decoded (encodeBody pin (allocationRaw false)) (allocationRaw false)).map
+        (fun method => (method.code, method.declared.initLocals)) =
+      some ([.ldc_i4 8, .localloc, .pop, .ret], false) ∧
+    (decoded (encodeBody pin (allocationRaw false)) (allocationRaw true)).map
+        (fun method => (method.code, method.declared.initLocals)) =
+      some ([.ldc_i4 8, .localloc, .pop, .ret], false) := by
+  constructor <;> cil_kernel_rfl
+#print axioms localloc_flag_read_from_the_bytes
 
 /-- The add bytes against the add definition with one parameter, and the local body against its
     definition with a `uint64` local, fail the body check, so neither has a method. -/

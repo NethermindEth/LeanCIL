@@ -154,7 +154,7 @@ inductive FixedStepFamily where
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
-  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
+  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
@@ -292,9 +292,10 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
     -- ones; `fixed_fallback` reads the table-offset ones and the others are cleared.
     all_goals try (
-      rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
-        mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual
+      rename_i localAllocation offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn
+        mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual
         objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue objectTested
+      guard_hyp localAllocation : operation = .localloc → False
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
@@ -304,7 +305,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         operation = .ceq → stack = Value.object right :: Value.object left :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
-        objectBranchFalse objectBranchTrue objectTested
+        objectBranchFalse objectBranchTrue objectTested localAllocation
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

@@ -4,11 +4,12 @@ import CIL.Extraction.Generics
 # Value opcodes decoded from raw instructions
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
-shuffling, return, constants, locals, branches, integer arithmetic, conversions and comparisons,
-with every short and macro form folded into its constructor. `valueEncodingMatches` accepts an
-emitted instruction exactly when it is that decoded instruction, and `Instruction.valueOpcode` is
-the set of opcodes `ofRaw?` decodes for some operand. Instantiation leaves every decoded value
-unchanged (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original.
+shuffling, return, constants, locals, branches, integer arithmetic, conversions, comparisons and
+dynamic frame storage, with every short and macro form folded into its constructor.
+`valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded instruction,
+and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand.
+Instantiation leaves every decoded value unchanged (`Instruction.ofRaw?_substitute`), so a closed
+generic body decodes like its original.
 -/
 
 namespace CIL.Extraction
@@ -91,7 +92,7 @@ def Instruction.valueOpcode (opcode : Nat) : Bool :=
     opcode == 109 || opcode == 110 || (130 <= opcode && opcode <= 139) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 224 ||
     (65025 <= opcode && opcode <= 65029) || opcode == 65033 ||
-    (65036 <= opcode && opcode <= 65038)
+    (65036 <= opcode && opcode <= 65039)
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. Any other opcode, an operand kind that
@@ -170,6 +171,8 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   -- Comparisons.
   | 65025, .none => some .ceq | 65026, .none => some .cgt | 65027, .none => some .cgt_un
   | 65028, .none => some .clt | 65029, .none => some .clt_un
+  -- Dynamic frame storage; whether it is zeroed is the method's localsinit flag, not an operand.
+  | 65039, .none => some .localloc
   | _, _ => none
 
 /-- `ofRaw?` decodes only the opcodes of `Instruction.valueOpcode`. -/
@@ -258,6 +261,8 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .cgt_un => (emitted matches .cgt_un)
   | .clt => (emitted matches .clt)
   | .clt_un => (emitted matches .clt_un)
+  -- Dynamic frame storage.
+  | .localloc => (emitted matches .localloc)
   -- Constructors outside the value family are never a decoded value.
   | _ => false
 
