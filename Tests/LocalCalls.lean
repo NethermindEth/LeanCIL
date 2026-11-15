@@ -203,7 +203,7 @@ def arithmeticFlag (subtract : Bool) (left right : CIL.W64) : CIL.W32 :=
 /-- Both helpers store their wrapped word before returning the unsigned carry or borrow. -/
 @[cil_code] def arithmeticBody (subtract : Bool) : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.ldarg 2, .ldarg 0, .ldarg 1, if subtract then .sub else .add, .store64] ++
+    code := [.ldarg 2, .ldarg 0, .ldarg 1, if subtract then .sub else .add, .stind .i8] ++
       (if subtract then [.ldarg 0, .ldarg 1] else [.ldarg 0, .ldarg 1, .add, .ldarg 0]) ++
       [.clt_un, .ret] }
 
@@ -225,7 +225,7 @@ theorem arithmetic_holds (subtract : Bool) {program : CIL.Program} {callee : Nat
   obtain ⟨final, written, _, readback⟩ :=
     store_word64 (arithmeticWord subtract input.left input.right) writable
   have formed := access_reference_valid _ _ _ _ _ writable
-  have stored := step_store64_of_write written
+  have stored := step_stind_i8_of_write written
   cases subtract <;>
     cil_contract_steps [found, formed, stored, arithmeticBody, arithmeticContract,
       multiplyContract, arithmeticWord, arithmeticFlag]

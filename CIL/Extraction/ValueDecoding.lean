@@ -5,13 +5,13 @@ import CIL.Extraction.Generics
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
 shuffling, return, constants, arguments, locals, branches, integer arithmetic, conversions,
-comparisons and dynamic frame storage, with every short and macro form folded into its constructor.
-`valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded instruction,
-and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand.
-Instantiation leaves every decoded value unchanged (`Instruction.ofRaw?_substitute`), so a closed
-generic body decodes like its original. `Instruction.ofRaw` is the total decoding: it writes a
-hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?` admits nothing
-(`Instruction.ofRaw_eq_unadmitted_iff`).
+comparisons, integer indirect loads and stores, and dynamic frame storage, with every short and
+macro form folded into its constructor. `valueEncodingMatches` accepts an emitted instruction
+exactly when it is that decoded instruction, and `Instruction.valueOpcode` is the set of opcodes
+`ofRaw?` decodes for some operand. Instantiation leaves every decoded value unchanged
+(`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original.
+`Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw opcode,
+exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
 -/
 
 namespace CIL.Extraction
@@ -90,10 +90,11 @@ open Extraction
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
   opcode == 0 || (2 <= opcode && opcode <= 19) ||
     (21 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
-    (42 <= opcode && opcode <= 69) || (88 <= opcode && opcode <= 106) ||
+    (42 <= opcode && opcode <= 77) || (82 <= opcode && opcode <= 85) ||
+    (88 <= opcode && opcode <= 106) ||
     opcode == 109 || opcode == 110 || (130 <= opcode && opcode <= 139) ||
-    (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 224 ||
-    (65025 <= opcode && opcode <= 65029) || (65033 <= opcode && opcode <= 65039)
+    (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 223 ||
+    opcode == 224 || (65025 <= opcode && opcode <= 65029) || (65033 <= opcode && opcode <= 65039)
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. Any other opcode, an operand kind that
@@ -146,6 +147,14 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   | 54, .target target | 67, .target target => some (.ble_un target)
   | 55, .target target | 68, .target target => some (.blt_un target)
   | 69, .targets targets => some (.switch targets)
+  -- Integer indirect loads and stores; the floating and reference kinds decode to nothing.
+  | 70, .none => some (.ldind .i1) | 71, .none => some (.ldind .u1)
+  | 72, .none => some (.ldind .i2) | 73, .none => some (.ldind .u2)
+  | 74, .none => some (.ldind .i4) | 75, .none => some (.ldind .u4)
+  | 76, .none => some (.ldind .i8) | 77, .none => some (.ldind .i)
+  | 82, .none => some (.stind .i1) | 83, .none => some (.stind .i2)
+  | 84, .none => some (.stind .i4) | 85, .none => some (.stind .i8)
+  | 223, .none => some (.stind .i)
   -- Arithmetic, bitwise operations and shifts.
   | 88, .none => some .add | 89, .none => some .sub | 90, .none => some .mul
   | 91, .none => some .div | 92, .none => some .div_un
@@ -284,6 +293,9 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ble_un expected => match emitted with | .ble_un actual => expected == actual | _ => false
   | .blt_un expected => match emitted with | .blt_un actual => expected == actual | _ => false
   | .switch expected => match emitted with | .switch actual => expected == actual | _ => false
+  -- Indirect loads and stores compare their kind.
+  | .ldind expected => match emitted with | .ldind actual => expected == actual | _ => false
+  | .stind expected => match emitted with | .stind actual => expected == actual | _ => false
   -- Arithmetic, bitwise operations and shifts.
   | .add => (emitted matches .add)
   | .sub => (emitted matches .sub)

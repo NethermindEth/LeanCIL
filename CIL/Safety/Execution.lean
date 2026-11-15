@@ -173,10 +173,6 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
       let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
       return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
     return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
-  | .tableLoad signature, .methodTable table :: rest =>
-    if table.signature != signature then .error .invalidState else pure ()
-    let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table memory)
-    return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
   | .call signature catalog tail, .methodPointer pointer :: values =>
     let some method := indirectTarget signature catalog pointer | .error .invalidState
     let count := signature.parameters.length

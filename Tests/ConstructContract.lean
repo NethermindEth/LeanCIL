@@ -322,7 +322,7 @@ theorem missing_authority_rejected : ¬ unguardedContract.Holds Extracted.progra
 
 /-- `Logged(ref ulong log, ulong value) { log = 1; Value = value; }` -/
 @[cil_code] def logged : CIL.Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 1, .ldc_i8 1, .store64, .ldarg 0, .ldarg 2, .setFieldAt 0 8, .ret] }
+  [.ldarg 1, .ldc_i8 1, .stind .i8, .ldarg 0, .ldarg 2, .setFieldAt 0 8, .ret] }
 @[cil_code] def loggedProgram : CIL.Program := [logged]
 
 structure LoggedInput where

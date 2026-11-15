@@ -175,6 +175,17 @@ theorem narrow_read_bounds :
     loadValue Tests.caller (.address ⟨0, 7⟩) 2 true =
       .error (.memory .outsideAllocation (.address ⟨0, 7⟩) 2) := rfl
 
+/-- An eight-byte `stind` refuses an int32 value rather than zero-extending it into eight bytes,
+    and a four-byte `stind` refuses a native value. -/
+theorem stind_value_width_mismatch :
+    instruction (.stind .i8) [.scalar (.i32 0xFFFFFFFF), Tests.reference] Tests.caller =
+      .error .invalidState ∧
+    instruction (.stind .i) [.scalar (.i32 0xFFFFFFFF), Tests.reference] Tests.caller =
+      .error .invalidState ∧
+    instruction (.stind .i4) [.scalar (.i64 7), Tests.reference] Tests.caller =
+      .error (.unsupported "Not a memory instruction") := ⟨rfl, rfl, rfl⟩
+#print axioms stind_value_width_mismatch
+
 theorem scalar_load_rejects_snapshot :
     (instruction (.loadScalar 2) [.scalar (.aggregate [1, 2])] Tests.caller).isOk = false := rfl
 
@@ -419,11 +430,11 @@ theorem null_test_requires_reference :
 
 -- Every load and store through `NullRef` faults as a null dereference.
 theorem null_reference_accesses_fault :
-    instructions [.memory .nullRef, .load64] [] Memory.empty =
+    instructions [.memory .nullRef, .ldind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 8) ∧
     instructions [.memory .nullRef, .loadScalar 4 true] [] Memory.empty =
       .error (.memory .nullDereference .null 4) ∧
-    instructions [.memory .nullRef, .ldc_i8 7, .store64] [] Memory.empty =
+    instructions [.memory .nullRef, .ldc_i8 7, .stind .i8] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
     instructions [.memory .nullRef, .ldc_i4 7, .storeScalar 4] [] Memory.empty =
       .error (.memory .nullDereference .null 0) ∧
@@ -498,7 +509,7 @@ theorem checked_conversion_bad_width :
 
 /-- Memory operations do not widen scalar operands. -/
 theorem native_memory_unchanged :
-    CIL.widenMixed .load64 [.i32 0, .i64 0] = [.i32 0, .i64 0] := rfl
+    CIL.widenMixed (.ldind .i8) [.i32 0, .i64 0] = [.i32 0, .i64 0] := rfl
 #print axioms native_memory_unchanged
 
 /-- Reference operands do not qualify for integer widening. -/

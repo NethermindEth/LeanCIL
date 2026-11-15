@@ -922,29 +922,29 @@ theorem step_appendLocals_ceq :
 
 #print axioms step_appendLocals_ceq
 
-/-- `load64` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_load64 :
-    StepAppendLocals .load64 := by
+/-- `ldind` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldind (kind : CIL.NumericKind) :
+    StepAppendLocals (.ldind kind) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .load64 pc stack frame extra memory
+  exact fallback_appendLocals body.profile (.ldind kind) pc stack frame extra memory
 
-#print axioms step_appendLocals_load64
+#print axioms step_appendLocals_ldind
 
-/-- `store64` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_store64 :
-    StepAppendLocals .store64 := by
+/-- `stind` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_stind (kind : CIL.NumericKind) :
+    StepAppendLocals (.stind kind) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .store64 pc stack frame extra memory
+  exact fallback_appendLocals body.profile (.stind kind) pc stack frame extra memory
 
-#print axioms step_appendLocals_store64
+#print axioms step_appendLocals_stind
 
 /-- `dup` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_dup :
@@ -1416,10 +1416,10 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_cgt_un
     case ceq =>
       exact step_appendLocals_ceq
-    case load64 =>
-      exact step_appendLocals_load64
-    case store64 =>
-      exact step_appendLocals_store64
+    case ldind kind =>
+      exact step_appendLocals_ldind kind
+    case stind kind =>
+      exact step_appendLocals_stind kind
     case dup =>
       exact step_appendLocals_dup
     case pop =>

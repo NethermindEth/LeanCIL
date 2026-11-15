@@ -163,6 +163,7 @@ monadic binds. The tactics accept these fact forms:
 | A branch on a symbolic condition | `v = 0` or `Not (v = 0)` on the condition value; no `CIL.truth` restatement is needed. A literal condition, such as the `1` a decided feature test pushes, decides itself and continues at a numeral program counter |
 | An opcode index stated as closed arithmetic, such as `.ldloc (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.ldloc 7`, the form a fetched opcode has |
 | A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1` | Fact preparation derives its load at the numeral width an opcode carries |
+| A successful write, such as `write memory target (numberBytes word.toNat 8) 1 = .ok after` | Fact preparation derives the step of each store that writes those bytes: `stind.i8` for eight bytes, plus `stind.i` when a body the goal or a hypothesis reaches may hold one; the narrow `stind` and `storeScalar` for one, two or four |
 | A value known only as `argument : CIL.Value`, loaded as an argument or passed to a call | `numericValue argument = true`; preparation also states it over the unfolded definition, the form the checked value test has when the step reaches it |
 | `bitcastByteBool`, whose operand must be `0` or `1` | None for a comparison result `if c then 1 else 0`; for any other int32, `bits.toNat ≤ 1`. The fact may bound a value inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32` |
 | A symbolic reference | Its formation equation; the equation stays usable without splitting the reference |
@@ -235,8 +236,8 @@ directly or `simp only [cil_step, facts]`.
 
 Reference and field instructions have one `@[cil_instruction_step]` equation per operand shape in
 [InstructionSteps](../CIL/Safety/InstructionSteps.lean), which rewrites a step to checked memory
-and formation operations. They cover the `instruction` arms of `load64`, `store64` and
-`storeScalar` through a reference, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
+and formation operations. They cover the `instruction` arms of `ldind`, `stind` and
+`storeScalar` through a reference, `ldind.i` on a native method table cursor, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
 width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and `initobj`.
 
 - Supply successful encoded byte reads and writes directly: the stepper derives the scalar or

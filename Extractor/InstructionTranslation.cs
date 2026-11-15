@@ -23,12 +23,6 @@ internal static class InstructionTranslation
         var reachable = nativeOperands is null || parameterHomes is null
             ? Reachability.Analyze(m, profile) : null;
         nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
-        if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
-        {
-            if (i.OpCode.Code == Code.Ldind_I && dispatchStack.LastOrDefault() is
-                { Kind: NativeOperands.Kind.NativeMethodTable, Metadata: LocalKind.NativeMethodTable nativeTable })
-                return new TableLoad(nativeTable.Signature);
-        }
         if (i.OpCode.Code == Code.Calli && i.Operand is Mono.Cecil.CallSite indirect)
         {
             var tail = i.Previous?.OpCode.Code == Code.Tail;
@@ -208,8 +202,8 @@ internal static class InstructionTranslation
                 throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S => Parameter(index => new Ldarga(index)),
             Code.Conv_I => new StackOperation(StackOpcode.ConvI),
-            Code.Ldind_I => new StackOperation(StackOpcode.Load64),
-            Code.Stind_I => new StackOperation(StackOpcode.Store64),
+            Code.Ldind_I => new IndirectAccess(NumericKind.I, false),
+            Code.Stind_I => new IndirectAccess(NumericKind.I, true),
             Code.Conv_Ovf_I1 => new CheckedConvert(ConvTarget.I1, false),
             Code.Conv_Ovf_I1_Un => new CheckedConvert(ConvTarget.I1, true),
             Code.Conv_Ovf_U1 => new CheckedConvert(ConvTarget.U1, false),
@@ -245,14 +239,15 @@ internal static class InstructionTranslation
                 TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts), true),
             Code.Cpobj => new AggregateTransfer(AggregateAccess.Copy,
                 TypeWidth((TypeReference)i.Operand, m.Module, profile.Architecture, layouts)),
-            Code.Ldind_I1 => new LoadScalar(1, true),
-            Code.Ldind_U1 => new LoadScalar(1, false),
-            Code.Ldind_I2 => new LoadScalar(2, true),
-            Code.Ldind_U2 => new LoadScalar(2, false),
-            Code.Ldind_I4 or Code.Ldind_U4 => new LoadScalar(4, false),
-            Code.Stind_I1 => new StoreScalar(1),
-            Code.Stind_I2 => new StoreScalar(2),
-            Code.Stind_I4 => new StoreScalar(4),
+            Code.Ldind_I1 => new IndirectAccess(NumericKind.I1, false),
+            Code.Ldind_U1 => new IndirectAccess(NumericKind.U1, false),
+            Code.Ldind_I2 => new IndirectAccess(NumericKind.I2, false),
+            Code.Ldind_U2 => new IndirectAccess(NumericKind.U2, false),
+            Code.Ldind_I4 => new IndirectAccess(NumericKind.I4, false),
+            Code.Ldind_U4 => new IndirectAccess(NumericKind.U4, false),
+            Code.Stind_I1 => new IndirectAccess(NumericKind.I1, true),
+            Code.Stind_I2 => new IndirectAccess(NumericKind.I2, true),
+            Code.Stind_I4 => new IndirectAccess(NumericKind.I4, true),
             Code.Conv_I1 => new StackOperation(StackOpcode.ConvI1),
             Code.Conv_I2 => new StackOperation(StackOpcode.ConvI2),
             Code.Conv_U2 => new StackOperation(StackOpcode.ConvU2),
@@ -342,8 +337,8 @@ internal static class InstructionTranslation
             Code.Clt_Un => new StackOperation(StackOpcode.CltUn),
             Code.Cgt_Un => new StackOperation(StackOpcode.CgtUn),
             Code.Ceq => new StackOperation(StackOpcode.Ceq),
-            Code.Ldind_I8 => new StackOperation(StackOpcode.Load64),
-            Code.Stind_I8 => new StackOperation(StackOpcode.Store64),
+            Code.Ldind_I8 => new IndirectAccess(NumericKind.I8, false),
+            Code.Stind_I8 => new IndirectAccess(NumericKind.I8, true),
             Code.Dup => new StackOperation(StackOpcode.Dup),
             Code.Pop => new StackOperation(StackOpcode.Pop),
             Code.Br or Code.Br_S => JumpTo(JumpKind.Always),

@@ -530,9 +530,7 @@ internal static partial class ProofOutline
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
                 ElementWidth(target.ElementType) is not { } width ||
                 ElementWidth(callee.Parameters[word].ParameterType) != width) return null;
-            var stores = width == 4 ? ops[2] is StoreScalar { Width: 4 }
-                : ops[2] is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 8 };
-            return stores ? (reference, word, width, ops[2]) : null;
+            return width is 4 or 8 && StoredWidth(ops[2]) == width ? (reference, word, width, ops[2]) : null;
         }
 
         /// <summary>Whether a callee without locals only computes, so one checked run steps its body.</summary>
@@ -603,7 +601,7 @@ internal static partial class ProofOutline
         static bool ReadsWidth(Operation operation, int width) => operation switch
         {
             LoadScalar { Signed: false } load => load.Width == width,
-            StackOperation { Kind: StackOpcode.Load64 } => width == 8,
+            IndirectAccess { Store: false, Signed: false } load => load.Width == width,
             _ => false
         };
 
@@ -1632,11 +1630,10 @@ internal static partial class ProofOutline
             else if (op is Jump) return Event.Branch;
             else if (op is Call { Kind: CallKind.Static or CallKind.Instance }) return Event.Call;
             else if (op is Return) return Event.Return;
-            else if (op is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 4 or 8 }
-                && stack.Count >= 2 &&
+            else if (StoredWidth(op) is 4 or 8 && stack.Count >= 2 &&
                 stack[^2] is Element written && state.State[written.Component] is SpanTerm { Written: true })
             {
-                var width = op is StoreScalar { Width: 4 } ? 4 : 8;
+                var width = StoredWidth(op)!.Value;
                 if (state.Moved || state.Called)
                     return Stop("a span store after another store or a call of the iteration, whose memory the " +
                         "span's checks are not carried to");
@@ -1647,11 +1644,10 @@ internal static partial class ProofOutline
                 state.Facts.AddRange(SpanWrite(state, written.Component, stored.Term, StoreLemma(op)));
                 state.Moved = true;
             }
-            else if (op is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 4 or 8 }
-                && stack.Count >= 2 &&
+            else if (StoredWidth(op) is 4 or 8 && stack.Count >= 2 &&
                 stack[^2] is AddedReference added && !state.Moved)
             {
-                var width = op is StoreScalar { Width: 4 } ? 4 : 8;
+                var width = StoredWidth(op)!.Value;
                 if (stack[^1] is not Number { Narrow: false } stored || stored.Width != width || added.Width != width)
                     return Stop("a store through `Unsafe.Add` of a value the outline cannot name at the " +
                         "element's width");
