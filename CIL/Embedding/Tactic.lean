@@ -141,10 +141,10 @@ def embedFailure (expected actual : Method) (map : List Nat) : Option (String ×
                   so it must be actual pc {r prior + 1}" else ""
             | _, _ => ""
           return some (s!"{header}\n  the instructions differ{entered}", some q)
-    if staticAt actual q != staticAt expected p then
+    if actual.staticAt q != expected.staticAt p then
       return some (s!"expected pc {p} (actual pc {q}) resolves a different static descriptor\n  \
-        expected: {reprStr (staticAt expected p)}\n  \
-        actual:   {reprStr (staticAt actual q)}{staticSitesHint}", some q)
+        expected: {reprStr (expected.staticAt p)}\n  \
+        actual:   {reprStr (actual.staticAt q)}{staticSitesHint}", some q)
     if actualLinks[q]? != expectedLinks[p]? then
       return some (s!"expected pc {p} (actual pc {q}) has a different call link\n  \
         expected: {reprStr expectedLinks[p]?}\n  \

@@ -103,10 +103,6 @@ def pick (code : List Instruction) : List Instruction → Nat → List Nat → L
     let tail := if start ≤ q then rest.drop (q - start) else code.drop q
     tail.head? :: pick code tail q qs
 
-/-- The static descriptor a `staticAddress` or `staticValue` at `pc` resolves to. -/
-def staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
-  (body.staticSites.find? (fun site => site.1 == pc)).map Prod.snd
-
 end Embedding
 
 open Embedding in
@@ -132,8 +128,8 @@ structure Embeds (expected actual : Method) (map : List Nat) : Prop where
     (sites actual.code.length 0 expected.code map).map
       fun site => some (site.op.relabel (rename map actual.code.length))
   statics :
-    (sites actual.code.length 0 expected.code map).map (fun site => staticAt actual site.image) =
-      (sites actual.code.length 0 expected.code map).map (fun site => staticAt expected site.pc)
+    (sites actual.code.length 0 expected.code map).map (fun site => actual.staticAt site.image) =
+      (sites actual.code.length 0 expected.code map).map (fun site => expected.staticAt site.pc)
   links :
     Extraction.linkReads actual.links
         ((sites actual.code.length 0 expected.code map).map Site.image) =

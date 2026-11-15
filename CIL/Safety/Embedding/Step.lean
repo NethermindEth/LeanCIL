@@ -33,7 +33,7 @@ structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL
   declared : actual.declared = expected.declared
   environment : actual.environment = expected.environment
   arguments : actual.argumentAccess = expected.argumentAccess
-  statics : staticAt actual q = staticAt expected pc
+  statics : actual.staticAt q = expected.staticAt pc
   link : actual.linkAt q = expected.linkAt pc
   next : op.continues = true → r (pc + 1) = q + 1
 
@@ -47,11 +47,11 @@ def StepRelabel (op : CIL.Instruction) : Prop :=
 
 /-- Static-memory instructions at two pcs that resolve the same descriptor behave alike. -/
 theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
-    (same : staticAt actual q = staticAt expected pc) (operation : CIL.MemoryOp)
+    (same : actual.staticAt q = expected.staticAt pc) (operation : CIL.MemoryOp)
     (stack : List Value) (m : Memory) :
     staticInstruction actual q operation stack m =
       staticInstruction expected pc operation stack m := by
-  unfold staticAt at same
+  unfold CIL.Method.staticAt at same
   cases operation
   case staticAddress bytes | staticValue bytes =>
     simp only [staticInstruction]

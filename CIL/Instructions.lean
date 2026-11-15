@@ -370,6 +370,11 @@ def linkLookup (links : List (Nat × Link)) (query : Nat) : Option Link :=
 def Method.linkAt (body : Method) (pc : Nat) : Option Link :=
   linkLookup body.links pc
 
+/-- The static descriptor extraction bound to the static field instruction at `pc`; the first
+    site with that pc wins. -/
+def Method.staticAt (body : Method) (pc : Nat) : Option StaticDescriptor :=
+  (body.staticSites.find? (fun site => site.1 == pc)).map Prod.snd
+
 /-- `method` with new code and the link table that code implies. Static sites are keyed by pc like
     the links, so they are reset to none; a body that reads statics supplies its own after the
     call. The declared signature, the environment and the other fields are kept. A plain
