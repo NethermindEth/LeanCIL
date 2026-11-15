@@ -96,8 +96,12 @@ theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
   unfold Method.ofRaw? at decoded
   simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
     Option.some.injEq] at decoded
-  obtain ⟨_, _, _, _, _, _, _, _, rfl⟩ := decoded
-  simp only [Instruction.ofRawAt, List.getElem?_map]
+  obtain ⟨_, _, _, _, _, _, _, _, built⟩ := decoded
+  -- The argument rule either refuses the code or leaves the decoded method as it was built.
+  split at built
+  · cases built
+    simp only [Instruction.ofRawAt, List.getElem?_map]
+  · simp at built
 
 #print axioms Method.ofRaw?_code
 
