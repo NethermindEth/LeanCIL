@@ -363,6 +363,8 @@ internal static class LeanEmitter
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +
                 $"Extraction.MethodEnvironmentValid rawLayouts computedLayouts method{n} := rfl");
+            lean.AppendLine($"theorem method{n}_declared_validated : " +
+                $"Extraction.DeclaredValid method{n}Closed method{n} := rfl");
             lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts " +
                 $"computedLayouts assemblies methodEvidence imports methodEvidence[{n}] method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
@@ -371,7 +373,7 @@ internal static class LeanEmitter
                 $"method{n}_intrinsics_validated, method{n}_opaque_validated, " +
                 $"method{n}_vector_initializations_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
-            lean.AppendLine($"    method{n}_environment_validated⟩");
+            lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated⟩");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");
