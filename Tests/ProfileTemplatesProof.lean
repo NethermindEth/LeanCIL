@@ -37,6 +37,6 @@ theorem choose_returns (program : Program) (index callee : Nat) (profile : Featu
 theorem unselected_flags (profile : FeatureProfile) (environment : LayoutEnvironment)
     (callee : Nat) :
     (Templates.method0 profile environment false true callee).code[0]? =
-      some (.unsupported "Profile combination not selected for template") := rfl
+      some (.unadmitted 0x28) := rfl
 #print axioms unselected_flags
 end TemplateProof

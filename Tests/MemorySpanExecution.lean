@@ -46,13 +46,13 @@ theorem end_empty_slice :
 theorem invalid_slice_ranges :
     memoryInstruction (.spanSlice true)
       [.scalar (.i32 0), .scalar (.i32 4), .bufferSpan view] memory =
-        .error (.thrown "System.ArgumentOutOfRangeException") ∧
+        .error (.thrown .argumentOutOfRange) ∧
     memoryInstruction (.spanSlice true)
       [.scalar (.i32 2), .scalar (.i32 2), .bufferSpan view] memory =
-        .error (.thrown "System.ArgumentOutOfRangeException") ∧
+        .error (.thrown .argumentOutOfRange) ∧
     memoryInstruction (.spanSlice true)
       [.scalar (.i32 0), .scalar (.i32 4294967295), .bufferSpan view] memory =
-        .error (.thrown "System.ArgumentOutOfRangeException") := by
+        .error (.thrown .argumentOutOfRange) := by
   exact ⟨rfl, rfl, rfl⟩
 #print axioms invalid_slice_ranges
 
@@ -65,7 +65,7 @@ theorem null_empty_slice :
 
 theorem invalid_index :
     (invoke [reader] 16 0 [.bufferSpan view, .scalar (.i32 3)] memory).map Prod.snd =
-      .error ⟨0, 2, .thrown "System.IndexOutOfRangeException"⟩ := rfl
+      .error ⟨0, 2, .thrown .indexOutOfRange⟩ := rfl
 #print axioms invalid_index
 
 private def illegalWriter : Method := {

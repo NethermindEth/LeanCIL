@@ -60,7 +60,7 @@ theorem fill_words (initial : Memory) (base : Reference) (v : W64) (n : W32)
     have baseForm := frame.form valid old
     have frame1 := frame.write_element stored (List.mem_singleton_self _) lower old
     cil_loop_recurse recurse (k + 1) [int_lt small lower,
-      add_int_element frame.wellFormed baseForm (by omega) target, step_store64_of_write stored]
+      add_int_element frame.wellFormed baseForm (by omega) target, step_stind_i8_of_write stored]
     all_goals simp only [invariant, toNat_succ lower]
     case invariant =>
       rw [List.replicate_succ', show n.toNat - (k.toNat + 1) = n.toNat - k.toNat - 1 by omega]

@@ -245,7 +245,7 @@ File.WriteAllText(throwProof, throwSource + """
 
     theorem null_message_raises :
         CIL.Safety.invoke Extracted.program 16 0 [] CIL.Safety.Memory.empty =
-          .error ⟨0, 2, .thrown "System.DivideByZeroException"⟩ := rfl
+          .error ⟨0, 2, .thrown .divideByZero⟩ := rfl
     #print axioms null_message_raises
     """);
 evidence.Add(throwProof, "PASS existing null-message throw folding, runtime and certificate");

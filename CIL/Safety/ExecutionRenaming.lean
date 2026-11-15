@@ -431,7 +431,7 @@ theorem MethodRenaming.step_throw (transport : StepTransport)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (statics : source.StaticBindingsBounded) {arguments stack : List Value}
     (argumentValues : ValuesValid source arguments) (stackValues : ValuesValid source stack)
-    {operation : CIL.Instruction} {pc : Nat} {exception : String}
+    {operation : CIL.Instruction} {pc : Nat} {exception : ExceptionType}
     (stepped : step sourceBody operation pc arguments sourceFrame stack source =
       .error (.thrown exception)) :
     step targetBody (methods.indices.operation operation) pc (arguments.map mapping.value)
@@ -451,7 +451,7 @@ theorem MethodRenaming.step_throw (transport : StepTransport)
 theorem ResultRenamed.located_throw {mapping : AllocationRenaming} {relation : α → β → Prop}
     {source : ExecutionResult α} {target : ExecutionResult β}
     (related : ResultRenamed mapping relation source target) {method pc : Nat}
-    {fault : LocatedFault} {exception : String}
+    {fault : LocatedFault} {exception : ExceptionType}
     (failed : source.mapError (fun fault => ⟨method, pc, fault⟩) = .error fault)
     (thrown : fault.fault = .thrown exception) :
     target.mapError (fun fault => ⟨method, pc, fault⟩) = .error fault := by
@@ -469,7 +469,7 @@ theorem run_throw_rename (transport : StepTransport)
     {sourceProgram targetProgram : CIL.Program}
     (programs : ProgramRenaming sourceProgram targetProgram)
     {fuel method pc : Nat} {arguments stack : List Value} {sourceFrame : Frame}
-    {source : Memory} {fault : LocatedFault} {exception : String}
+    {source : Memory} {fault : LocatedFault} {exception : ExceptionType}
     (failed : run sourceProgram fuel method pc arguments sourceFrame stack source = .error fault)
     (thrown : fault.fault = .thrown exception)
     {sourceBody targetBody : CIL.Method}
@@ -835,7 +835,8 @@ theorem invoke_throw_rename (transport : StepTransport)
     (memory : Memory.Renamed mapping scopes source target)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (statics : source.StaticBindingsBounded) {fuel method : Nat} {arguments : List Value}
-    (argumentValues : ValuesValid source arguments) {fault : LocatedFault} {exception : String}
+    (argumentValues : ValuesValid source arguments) {fault : LocatedFault}
+    {exception : ExceptionType}
     (failed : invoke sourceProgram fuel method arguments source = .error fault)
     (thrown : fault.fault = .thrown exception) :
     invoke targetProgram fuel method (arguments.map mapping.value) target = .error fault := by
@@ -930,7 +931,8 @@ theorem Raises.rename (transport : StepTransport)
     {initial : Memory} (formed : initial.WellFormed) (statics : initial.StaticBindingsBounded)
     (literals : initial.LiteralsBounded) {method : Nat} {arguments : List Value}
     (argumentValues : ValuesValid initial arguments)
-    {exception : String} (raised : Raises sourceProgram method arguments initial exception) :
+    {exception : ExceptionType}
+    (raised : Raises sourceProgram method arguments initial exception) :
     Raises targetProgram method arguments initial exception := by
   obtain ⟨fuel, fault, failed, thrown⟩ := raised
   have targetFailed := invoke_throw_rename transport programs

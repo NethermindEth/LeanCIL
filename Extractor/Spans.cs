@@ -3,8 +3,7 @@ using Mono.Cecil.Cil;
 
 namespace Nethermind.LeanCIL;
 
-// Folds `stloc s; ldloca s` over a ReadOnlySpan<T> local so the span stays on the stack
-// as the receiver of the next span call. Reused locals retain their typed span storage.
+// Span constructors initialize typed local storage without exposing a byte address.
 internal static class Spans
 {
     internal sealed record Analysis(HashSet<Instruction> Operands, HashSet<Instruction> Interior,
@@ -58,30 +57,23 @@ internal static class Spans
         return analysis;
     }
 
-    static bool Store(Instruction i) => i.OpCode.Code is Code.Stloc or Code.Stloc_S or Code.Stloc_0 or Code.Stloc_1 or Code.Stloc_2 or Code.Stloc_3;
     static bool Address(Instruction i) => i.OpCode.Code is Code.Ldloca or Code.Ldloca_S;
     static bool Load(Instruction i) => i.OpCode.Code is Code.Ldloc or Code.Ldloc_S or Code.Ldloc_0 or Code.Ldloc_1 or Code.Ldloc_2 or Code.Ldloc_3;
     static bool Push(Instruction? i) => i is not null && (Load(i) || i.OpCode.Code is Code.Ldarg or Code.Ldarg_S or
         Code.Ldarg_0 or Code.Ldarg_1 or Code.Ldarg_2 or Code.Ldarg_3 or Code.Ldc_I4 or Code.Ldc_I4_S or Code.Ldc_I4_M1 ||
         i.OpCode.Code is >= Code.Ldc_I4_0 and <= Code.Ldc_I4_8);
-    static bool Member(Instruction? i, string name) => i is { OpCode.Code: Code.Call, Operand: MethodReference callee } &&
-        callee.HasThis && callee.Name == name && Is(callee.DeclaringType);
 
     static Analysis Compute(MethodDefinition method, FeatureProfile profile)
     {
         var analysis = new Analysis([], [], []);
-        var uses = new int[method.Body.Variables.Count];
-        foreach (var instruction in method.Body.Instructions)
-            if (Store(instruction) || Address(instruction) || Load(instruction))
-                uses[FeatureConstants.Local(instruction)]++;
         foreach (var i in method.Body.Instructions)
         {
-            if (!(Store(i) || Address(i) || Load(i)) ||
+            if (!Address(i) ||
                 !Is(method.Body.Variables[FeatureConstants.Local(i)].VariableType) ||
                 analysis.Operands.Contains(i))
                 continue;
             var local = FeatureConstants.Local(i);
-            if (Address(i) && Constructor(i, method.Body.Variables[local].VariableType, profile) is { } constructor)
+            if (Constructor(i, method.Body.Variables[local].VariableType, profile) is { } constructor)
             {
                 analysis.Operands.Add(i);
                 for (var interior = i.Next; interior is not null; interior = interior.Next)
@@ -91,17 +83,7 @@ internal static class Spans
                     analysis.Constructors.Add(interior, new InitializeSpanLocal(local, constructor.Source));
                     break;
                 }
-                continue;
             }
-            if (uses[local] != 2)
-                continue;
-            // The receiver is read once: by get_Length, or by get_Item after one index push.
-            if (!Store(i) || i.Next is not { } address || !Address(address) || FeatureConstants.Local(address) != FeatureConstants.Local(i) ||
-                !(Member(address.Next, "get_Length") || (Push(address.Next) && Member(address.Next!.Next, "get_Item"))))
-                continue;
-            analysis.Operands.Add(i);
-            analysis.Operands.Add(address);
-            analysis.Interior.Add(address);
         }
         return analysis;
     }

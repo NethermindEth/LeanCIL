@@ -13,7 +13,7 @@ namespace CIL.Safety
 
 /-- Static resolution reports model or memory faults, never a named CLR exception. -/
 theorem staticReference_not_thrown (descriptor : CIL.StaticDescriptor) (memory : Memory)
-    (exception : String) :
+    (exception : ExceptionType) :
     staticReference descriptor memory ≠ .error (.thrown exception) := by
   intro raised
   unfold staticReference at raised

@@ -11,11 +11,18 @@ the selected profile: the deployment must match the recorded capabilities.
 
 ## Evidence
 
-The runtime sources pin this policy to .NET 10:
+The runtime sources pin this policy to .NET 10, except for the x64 baseline, which follows .NET 11:
 
+- [InstructionSetDesc.txt, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt)
+  puts SSE, SSE2, SSE3, SSSE3, SSE4.1, SSE4.2 and POPCNT in X86Base, and its base x64 group is
+  `x86-64-v2`. [cpufeatures.c, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/native/minipal/cpufeatures.c) marks a CPU that
+  lacks any of them invalid, and [codeman.cpp, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/vm/codeman.cpp) then stops
+  the runtime with an error naming them. On other CPUs codeman.cpp enables X86Base whenever
+  EnableHWIntrinsic is set, and [clrconfigvalues.h, v11.0.0](https://github.com/dotnet/runtime/blob/v11.0.0/src/coreclr/inc/clrconfigvalues.h)
+  defines no EnableSSE42 switch. A .NET 11 x64 process therefore reports SSE2, SSSE3, SSE4.1 and
+  SSE4.2 all on, or all off under `DOTNET_EnableHWIntrinsic=0`, never SSE2 alone.
 - [InstructionSetDesc.txt, v10.0.13](https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/tools/Common/JitInterface/ThunkGenerator/InstructionSetDesc.txt)
-  assigns SSE/SSE2 to X86Base, SSSE3/SSE4.1/SSE4.2 to one group, BMI1/BMI2 to AVX2,
-  and AVX-512 F/DQ/VL to one group. Avx512Vbmi and Avx512Vbmi_VL belong to the separate
+  assigns BMI1/BMI2 to AVX2 and AVX-512 F/DQ/VL to one group. Avx512Vbmi and Avx512Vbmi_VL belong to the separate
   AVX512v2 group, which implies AVX512; the `x86-64-v4` group is `x86-64-v3` plus AVX512 only.
 - [codeman.cpp, v10.0.13](https://github.com/dotnet/runtime/blob/v10.0.13/src/coreclr/vm/codeman.cpp)
   enables groups from CPU capabilities and runtime switches. On ARM64 it enables
@@ -36,7 +43,7 @@ The runtime sources pin this policy to .NET 10:
 
 Fresh-process observations are checked in:
 
-- [Windows x64, .NET 10.0.14, AMD Ryzen 9 9950X](evidence/runtime-profiles/windows-x64-net10.json).
+- [Windows x64, .NET 11.0.0, AMD Ryzen 9 9950X](evidence/runtime-profiles/windows-x64-net11.json).
 - [macOS ARM64, .NET 10.0.14, GitHub `macos-15` runner](evidence/runtime-profiles/macos-arm64-net10.json).
 
 Each record includes the actual runtime version, process architecture, OS, switch
@@ -49,16 +56,15 @@ dotnet run --file scripts/ProbeRuntimeProfiles.cs -- observations.json
 The probe launches a new runtime process for each configuration and removes the
 tested DOTNET_/COMPlus_ switches before applying that case. It records observations;
 it does not certify a runtime, install one, or assume missing hardware is present.
-These measurements do not claim coverage of Mono, NativeAOT, .NET 11 or every
-future .NET 10 servicing release. Recheck runtime changes before extending the
+These measurements do not claim coverage of Mono, NativeAOT or every future
+servicing release. Recheck runtime changes before extending the
 supported deployment boundary.
 
 ## Constraints
 
 | Capabilities | Constraint |
 | --- | --- |
-| X86Base.X64, SSE2 | Equal; x64 only |
-| SSSE3, SSE4.1, SSE4.2 | Equal; require SSE2 |
+| X86Base.X64, SSE2, SSSE3, SSE4.1, SSE4.2 | Equal; x64 only |
 | AVX | Requires SSE4.2; may be enabled without AVX2 |
 | AVX2, BMI1, BMI2 | Equal; require AVX |
 | AVX-512 F, F.VL, DQ, DQ.VL | Equal; require AVX2 |
@@ -69,12 +75,12 @@ supported deployment boundary.
 | Vector128 acceleration | Equal to SSE2 or AdvSimd |
 | Vector256 acceleration | Requires AVX2; may be disabled independently |
 
-On the measured x64 runtime, EnableSSE42, EnableAVX, EnableAVX2 and EnableAVX512
-disable whole groups and their dependents. EnableAVX512v2=0 disables VBMI and VBMI.VL
+On the measured x64 runtime, EnableAVX, EnableAVX2 and EnableAVX512 disable whole groups and
+their dependents, and EnableSSE2, EnableSSSE3, EnableSSE41 and EnableSSE42 have no effect. EnableAVX512v2=0 disables VBMI and VBMI.VL
 and leaves AVX-512 F/DQ/VL enabled, which is exactly x64-v4; EnableAVX512=0 disables both.
 The default configuration on the measured Ryzen 9 9950X reports VBMI, so it matches x64-v4
 plus `avx512Vbmi`, not x64-v4. It also reports AES by default; EnableAES=0 disables AES and
-AES.X64 alone, leaving SSE4.2, AVX2 and AVX-512 enabled, and EnableSSE42=0 leaves AES enabled.
+AES.X64 alone, leaving SSE4.2, AVX2 and AVX-512 enabled.
 Legacy individual switches such as
 EnableBMI2 and EnableAVX512DQ have no effect. PreferredVectorBitWidth=128 disables
 Vector256 acceleration without disabling AVX2. On the measured ARM64 runtime,
@@ -84,11 +90,13 @@ together; the tested individual ARM switches do not split that group.
 ## Profile selection
 
 Pass a built-in name or `@profile.json` as the profile argument of `leancil extract`
-([CLI](CLI.md)); the default is `scalar`. The built-in profiles are `scalar`, `x64-sse2`,
+([CLI](CLI.md)); the default is `scalar`. The built-in profiles are `scalar`,
 `x64-sse42`, `x64-v3`, `x64-v4` and `arm64-advsimd`; the
 [profile table](SIMD.md#feature-getters-profiles-and-execution-restrictions) lists the flags each
-enables. `scalar` is the no-hardware-intrinsics profile, and `x64-sse2` is the x64 baseline
-with SSE4.2 and higher groups disabled.
+enables. `scalar` is the no-hardware-intrinsics profile, and `x64-sse42` is the x64 baseline
+(`x86-64-v2`) with AVX and higher groups disabled. Both validators reject an x64 profile that
+sets `x86Base64` without all of `sse2`, `ssse3`, `sse41` and `sse42`, and the extractor's
+message names the missing sets.
 
 The built-in list does not name every valid configuration. Use
 custom JSON for SSE4.2+AVX without AVX2 and for v3/v4 with
@@ -138,8 +146,8 @@ AES group, is unclassified.
 Custom profiles must obey the same constraints and supply every capability field, including
 `avx512Vbmi`, `aes` and `armAes`, each with the value the deployment reports. Set
 AVX2/BMI1/BMI2 together; set all four modeled AVX-512 flags together; set `avx512Vbmi` only with
-them; set `aes` only on x64 and `armAes` only on ARM64; set all three modeled SSE4.2-group flags
-together. ARM64 profiles must set ArmBase/AdvSimd/Vector128 together and cannot enable Vector256
+them; set `aes` only on x64 and `armAes` only on ARM64; set `x86Base64`, `sse2`, `ssse3`,
+`sse41` and `sse42` together. ARM64 profiles must set ArmBase/AdvSimd/Vector128 together and cannot enable Vector256
 acceleration. A reduced-width x64 profile may set `vector256Accelerated: false` with the full
 AVX2 group enabled.
 

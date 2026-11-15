@@ -9,19 +9,24 @@ open CIL.Safety
 
 /-- `*sum = a + b + c; *carry = (a + b + c < a) ? 1 : 0`. -/
 @[cil_code] def carryMethod : CIL.Method := {
-  code := [.ldarg 3, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .store64,
-    .ldarg 4, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .ldarg 0, .clt_un, .conv_u8, .store64,
+  code := [.ldarg 3, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .stind .i8,
+    .ldarg 4, .ldarg 0, .ldarg 1, .add, .ldarg 2, .add, .ldarg 0, .clt_un, .conv_u8, .stind .i8,
     .ret]
   locals := [], returnsValue := false }
 @[cil_code] def carryProgram : CIL.Program := [carryMethod]
 
 /-- `*difference = a - b - c; *borrow = (a < b) | (c & (a == b))`, with sign-extended flags. -/
 @[cil_code] def borrowMethod : CIL.Method := {
-  code := [.ldarg 3, .ldarg 0, .ldarg 1, .sub, .ldarg 2, .sub, .store64,
+  code := [.ldarg 3, .ldarg 0, .ldarg 1, .sub, .ldarg 2, .sub, .stind .i8,
     .ldarg 4, .ldarg 0, .ldarg 1, .clt_un, .conv_i8, .ldarg 2, .ldarg 0, .ldarg 1, .ceq, .conv_i8,
-    .and, .or, .store64, .ret]
+    .and, .or, .stind .i8, .ret]
   locals := [], returnsValue := false }
 @[cil_code] def borrowProgram : CIL.Program := [borrowMethod]
+
+/-- `*target = word` through a native-int store. -/
+@[cil_code] def nativeWordMethod : CIL.Method := {
+  code := [.ldarg 1, .ldarg 0, .stind .i, .ret], locals := [], returnsValue := false }
+@[cil_code] def nativeWordProgram : CIL.Program := [nativeWordMethod]
 
 def carryOut (a b c : CIL.W64) : CIL.W64 := (if a + b + c < a then (1 : CIL.W32) else 0).zeroExtend 64
 
@@ -54,6 +59,16 @@ theorem borrow_stores (a b c : CIL.W64) (difference borrow : Reference) (m m1 m2
     formedBorrow1, differenceWrite, borrowWrite]
 
 #print axioms borrow_stores
+
+/-- An eight-byte write fact steps `stind.i` as it steps `stind.i8`. -/
+theorem native_word_stores (word : CIL.W64) (target : Reference) (m m1 : Memory)
+    (formed : form m target = .ok target)
+    (written : write m target (numberBytes word.toNat 8) 1 = .ok m1) :
+    invoke nativeWordProgram (CIL.executionBound nativeWordProgram 0) 0
+      [.scalar (.i64 word), .reference (.address target)] m = .ok (m1, []) := by
+  cil_checked_steps [formed, written]
+
+#print axioms native_word_stores
 
 -- The same facts drive `cil_contract_steps` on an existential run.
 theorem carry_contract_steps (a b c : CIL.W64) (sum carry : Reference) (m m1 m2 : Memory)
@@ -143,12 +158,13 @@ theorem contract_normalize_once (words : Nat → Nat) (memory : Memory) (_zero :
   exact ⟨rfl, rfl⟩
 
 @[cil_code] def twentySevenRaises : CIL.Method :=
-  { code := List.replicate 26 .nop ++ [.throw "Test.Exception"], locals := [], returnsValue := false }
+  { code := List.replicate 26 .nop ++ [.throw .baseException], locals := [],
+    returnsValue := false }
 
 @[cil_code] def twentySevenRaisesProgram : CIL.Program := [twentySevenRaises]
 
 theorem raise_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : words 0 = 0) :
-    Raises twentySevenRaisesProgram 0 [] memory "Test.Exception" := by
+    Raises twentySevenRaisesProgram 0 [] memory .baseException := by
   fact_normalizations 1 in
     cil_raise_steps [_zero]
 

@@ -18,12 +18,8 @@ partial class Program
     const double MaximumPerRowGrowth = 1.5;
 
     /// <summary>
-    /// The body check costs time linear in the number of claims and independent of the image size per claim. The
-    /// 1272 claims of Examples.dll (98 KB) are repeated to 5088, which the page cap lays out in eight pages of
-    /// 636 where 1272 claims take six pages of 212, so the cost per claim cannot hide in the page count. The same
-    /// 1272 claims followed by 770 KB of other bytes, which no body reads, take at most about twice as long, the cost
-    /// of decoding the larger image once per page, where a read that touched the whole image would take about nine
-    /// times as long. Times are measured above the fixture's, which is the fixed cost.
+    /// Body-check heartbeats grow linearly with claims and cover decoding the image once per page.
+    /// The fixture's heartbeat count is the fixed cost subtracted from each larger case.
     /// </summary>
     static void CheckBindingScaling(string root)
     {
@@ -42,6 +38,7 @@ partial class Program
         CheckGeneratedBodiesModuleElaborates(root, package);
         CheckAssemblyBlockScaling(root, package);
         CheckSliceRowsScaling(root, package);
+        CheckUserStringScaling(root, package);
         var examples = File.ReadAllBytes(At("Examples/Assembly/bin/Examples.dll"));
         var larger = new byte[examples.Length + 770 * 1024];
         examples.CopyTo(larger, 0);
@@ -56,27 +53,29 @@ partial class Program
             ($"Examples.dll, {largerClaims} claims", examples, largerClaims)
         ];
         Directory.CreateDirectory(root);
-        var seconds = new double[cases.Length];
+        var heartbeats = new long[cases.Length];
         for (var index = 0; index < cases.Length; index++)
         {
             var path = Path.Combine(root, $"Bodies{index}.lean");
-            File.WriteAllText(path, AllBodiesModule(cases[index].Bytes, cases[index].Claims));
-            var started = System.Diagnostics.Stopwatch.StartNew();
-            var run = Execute(["lake", "env", "lean", path], cwd: package);
-            seconds[index] = started.Elapsed.TotalSeconds;
+            File.WriteAllText(path, AllBodiesModule(cases[index].Bytes, cases[index].Claims) +
+                "\n#eval show IO Nat from IO.getNumHeartbeats\n");
+            var run = Execute(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
             if (run.Code != 0)
                 throw new InvalidOperationException($"The bodies of {cases[index].Name} were not found: {run.Output}");
+            heartbeats[index] = long.Parse(run.Output.Split('\n', StringSplitOptions.TrimEntries |
+                StringSplitOptions.RemoveEmptyEntries).Last(), System.Globalization.CultureInfo.InvariantCulture);
         }
-        var times = cases.Zip(seconds, (item, time) => $"{item.Name} {time:F1} s");
-        Console.WriteLine("Body checks: " + string.Join(", ", times));
-        double Above(int index) => seconds[index] - seconds[0];
-        if (Above(1) < 2) throw new InvalidOperationException("The body check is too fast to measure its growth");
+        var costs = cases.Zip(heartbeats, (item, count) => $"{item.Name} {count} heartbeats");
+        Console.WriteLine("Body checks: " + string.Join(", ", costs));
+        double Above(int index) => heartbeats[index] - heartbeats[0];
+        if (Above(1) <= 0)
+            throw new InvalidOperationException("The body check has no measured work above the fixture");
         var perClaim = Above(3) / largerClaims / (Above(1) / smaller);
         var perImage = Above(2) / Above(1);
         if (perClaim > MaximumPerClaimGrowth || perImage > MaximumImageGrowth)
             throw new InvalidOperationException(
-                $"The body check took {perClaim:F1} times as long per claim for {largerClaims / smaller} times the " +
-                $"claims and {perImage:F1} times as long for 8.8 times the image");
+                $"The body check used {perClaim:F1} times the heartbeats per claim for " +
+                $"{largerClaims / smaller} times the claims and {perImage:F1} times for 8.8 times the image");
         Console.WriteLine($"PASS the body check is linear in the claims ({perClaim:F1} times per claim) and " +
             $"independent of the image size ({perImage:F1} times for 8.8)");
     }
@@ -163,6 +162,78 @@ partial class Program
         var measured = RequireGrowth(sizes, CheckHeartbeats(path, package, sizes.Length, "carried rows"),
             MaximumPerRowGrowth, "rows check", "row");
         Console.WriteLine($"PASS the rows check grows as n log n in the carried rows ({measured})");
+    }
+
+    /// <summary>The whole metadata check with one user string grows linearly in its carried bytes.</summary>
+    static void CheckUserStringScaling(string root, string package)
+    {
+        const string report = "#eval show IO Nat from IO.getNumHeartbeats";
+        int[] sizes = [1024, 4096, 16384];
+        var cases = string.Concat(sizes.Select(size =>
+        {
+            var characters = size / 2;
+            var file = SyntheticUserString(characters);
+            var length = 2 * characters + 1;
+            int[] prefix = length < 0x4000
+                ? [0x80 | (length >> 8), length & 255]
+                : [0xC0 | (length >> 24), (length >> 16) & 255, (length >> 8) & 255, length & 255];
+            return $$"""
+                namespace UserString{{size}}
+                {{BindingImage.Definitions(file)}}
+                /-- The synthetic image under its assembly identity. -/
+                def pinned : StrictBinding.PinnedImage :=
+                  { identity := "{{StrictBindingFacts.Identity(file)}}", image := image }
+                /-- The independently numbered Assembly block. -/
+                def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
+                  {{StrictBindingFacts.AssemblyBlock(file)}}
+                /-- One UTF-16 user string, including its prefix and terminal byte. -/
+                def entry : List Nat := [{{string.Join(", ", prefix)}}] ++
+                  (List.replicate {{characters}} [65, 0]).flatten ++ [0]
+                /-- Metadata carrying the Assembly block and one user string. -/
+                def slice : CIL.Extraction.MetadataSlice :=
+                  { assembly := assemblyBlock, userStrings := [(1, entry)] }
+                {{report}}
+                /-- The synthetic image has a supported container and metadata layout. -/
+                theorem prepared : StrictBinding.ok (StrictBinding.prepareOne pinned) = true := by decide +kernel
+                {{report}}
+                /-- Every carried entry belongs to the synthetic image. -/
+                theorem checked :
+                    StrictBinding.ok (StrictBinding.prepareOne pinned >>= fun image =>
+                      StrictBinding.sliceBound image slice) = true := by
+                  decide +kernel
+                {{report}}
+                #print axioms prepared
+                #print axioms checked
+                end UserString{{size}}
+
+                """;
+        }));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "UserStrings.lean");
+        File.WriteAllText(path, $"import StrictBinding.Slice\n\n{cases}");
+        var measured = RequireGrowth(sizes, CheckHeartbeats(path, package, sizes.Length, "carried user strings"),
+            MaximumPerByteGrowth, "user-string metadata check", "byte");
+        Console.WriteLine($"PASS the complete metadata check is linear in its user-string bytes ({measured})");
+    }
+
+    /// <summary>A library whose user-string heap holds one repeated UTF-16 string at offset 1.</summary>
+    static byte[] SyntheticUserString(int characters)
+    {
+        var metadata = new MetadataBuilder();
+        metadata.AddAssembly(metadata.GetOrAddString("Synthetic"), new Version(1, 2, 3, 4), default, default,
+            default, AssemblyHashAlgorithm.Sha1);
+        metadata.AddModule(0, metadata.GetOrAddString("Synthetic.dll"), metadata.GetOrAddGuid(Guid.Empty), default,
+            default);
+        metadata.AddTypeDefinition(default, default, metadata.GetOrAddString("<Module>"), default,
+            MetadataTokens.FieldDefinitionHandle(1), MetadataTokens.MethodDefinitionHandle(1));
+        var handle = metadata.GetOrAddUserString(new string('A', characters));
+        if (MetadataTokens.GetHeapOffset(handle) != 1)
+            throw new InvalidOperationException("The synthetic user string must start at heap offset 1.");
+        var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(), new MetadataRootBuilder(metadata),
+            new BlobBuilder());
+        var image = new BlobBuilder();
+        builder.Serialize(image);
+        return image.ToArray();
     }
 
     /// <summary>

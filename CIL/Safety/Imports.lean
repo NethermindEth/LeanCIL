@@ -205,7 +205,8 @@ theorem invoke_extend {base linked : CIL.Program} (links : Links base linked) (f
 
 /-- A raised exception is not `invalidState`, so it is raised in every linked program. -/
 theorem Raises.extend {base linked : CIL.Program} {method : Nat} {args : List Value}
-    {memory : Memory} {exception : String} (raised : Raises base method args memory exception)
+    {memory : Memory} {exception : ExceptionType}
+    (raised : Raises base method args memory exception)
     (links : Links base linked) :
     Raises linked method args memory exception := by
   obtain ⟨fuel, fault, invoked, thrown⟩ := raised

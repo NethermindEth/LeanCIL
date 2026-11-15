@@ -103,15 +103,20 @@ namespace CIL.Safety
 #print axioms guard_conv_ovf_un
 @[cil_guard] theorem guard_ldarg (index : Nat) : observerCount (.ldarg index) = 0 := rfl
 #print axioms guard_ldarg
+@[cil_guard] theorem guard_starg (index : Nat) : observerCount (.starg index) = 0 := rfl
+#print axioms guard_starg
+@[cil_guard] theorem guard_ldarga (index : Nat) : observerCount (.ldarga index) = 0 := rfl
+#print axioms guard_ldarga
 @[cil_guard] theorem guard_call (callee argc : Nat) :
     observerCount (.call callee argc) = argc := rfl
 @[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     observerCount (.newAggregate callee argc size) = argc := rfl
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :
     observerCount (.memory op) = op.argumentCount := rfl
-@[cil_guard] theorem guard_throw (exception : String) : observerCount (.throw exception) = 0 := rfl
-@[cil_guard] theorem guard_unsupported (description : String) :
-    observerCount (.unsupported description) = 0 := rfl
+@[cil_guard] theorem guard_throw (exception : ExceptionType) :
+    observerCount (.throw exception) = 0 := rfl
+@[cil_guard] theorem guard_unadmitted (opcode : Nat) :
+    observerCount (.unadmitted opcode) = 0 := rfl
 /-- Return observes at most the first stack value, regardless of narrowing. -/
 @[cil_guard] theorem guard_ret :
     observerCount .ret = 1 := rfl
@@ -137,8 +142,8 @@ namespace CIL.Safety
     observerCount (.aggregateFieldAt offset size) = 1 := rfl
 @[cil_guard] theorem guard_setAggregateFieldAt (offset size : Nat) :
     observerCount (.setAggregateFieldAt offset size) = 2 := rfl
-@[cil_guard] theorem guard_load64 : observerCount .load64 = 1 := rfl
-@[cil_guard] theorem guard_store64 : observerCount .store64 = 2 := rfl
+@[cil_guard] theorem guard_ldind (kind : CIL.NumericKind) : observerCount (.ldind kind) = 1 := rfl
+@[cil_guard] theorem guard_stind (kind : CIL.NumericKind) : observerCount (.stind kind) = 2 := rfl
 @[cil_guard] theorem guard_skipInit : observerCount .skipInit = 1 := rfl
 
 -- Operand counts of memory instructions, which `observerCount` defers to.

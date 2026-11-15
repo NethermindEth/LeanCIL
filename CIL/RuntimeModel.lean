@@ -73,7 +73,7 @@ def MemoryOp.callReached : MemoryOp → Bool
   | .copyBlock _ | .initBlock _
   | .load128 | .load256 | .load512 | .store128 | .store256 | .store512
   | .staticAddress _ | .staticValue _ | .arrayLength | .arrayLoad .. | .arrayStore _
-  | .arrayAddress .. | .arrayTransfer .. | .nullObject | .stringLiteral _
+  | .arrayAddress .. | .arrayTransfer .. | .stringLiteral _
   | .objectField .. | .setObjectField .. | .objectReferenceField .. | .setObjectReferenceField ..
   | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore | .arrayField ..
   | .setArrayField .. => false

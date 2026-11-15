@@ -18,9 +18,7 @@ using System.Text.Json;
 
 // A relocated shared runner must not execute an older suite plan after its source changes.
 var fixtureManifest = Environment.GetEnvironmentVariable(FixtureManifestEnvironment);
-if (!string.IsNullOrEmpty(fixtureManifest) &&
-    typeof(Program).Assembly.Location.StartsWith(Path.GetDirectoryName(Path.GetFullPath(fixtureManifest))! +
-        Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+if (!string.IsNullOrEmpty(fixtureManifest) && RunsFromFixtures(fixtureManifest) &&
     PreparedFixtureCommand("scripts/Test.cs", []) is null)
 {
     Run(["dotnet", "run", "--file", At("scripts/Test.cs"), "--", .. args], streamOutput: true,
@@ -107,7 +105,7 @@ if (suite is "all" or "core")
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
         "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/OutlineStops.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
-        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs"]);
+        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs", "Tests/SupportExtractionCache.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
@@ -185,6 +183,9 @@ Passed("prepared extractor source and output identity");
 RunFixture("Tests/VerificationCache.cs", [], streamOutput: true, progress: "Certified verification cache checks");
 Passed("certified artifact receipts and cache tampering rejection");
 
+RunFixture("Tests/SupportExtractionCache.cs", [], streamOutput: true, progress: "Support extraction cache checks");
+Passed("support audit reuse bound to extraction identity");
+
 RunFixture("Tests/VerificationReuse.cs", [], streamOutput: true, progress: "Certified verification reuse checks");
 Passed("cold and warm verification, proof-edit invalidation and unchecked helper rejection");
 
@@ -237,13 +238,15 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
+    "Tests.SegmentContract",
     "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
     "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
     "Tests.ResolutionFacts", "Tests.ValueDecoding", "Tests.DecodedMethod", "Tests.ReplayDiagnostics",
     "Tests.BodyLiteral",
     "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
     "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
-    "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.RuntimeModels"],
+    "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.FieldShape",
+    "Tests.RuntimeModels"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "

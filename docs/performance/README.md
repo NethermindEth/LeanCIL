@@ -53,25 +53,18 @@ A job's summary and each suite's transcript report the suite's verification time
 
 ## Fold discovery
 
-Two files measure the kernel evaluating `foldRoles`, which
-[fold discovery](../VALIDATION-EXPORTS.md#fold-discovery) keeps from scanning the whole body once
-per local or per message load. Each proves its statement by `decide +kernel`:
+`docs/performance/fold-roles/ThrowScaling.lean` measures the kernel evaluating `foldRoles` on
+4,096 message loads with no admitted throw fold. The statement uses `decide +kernel`;
+[fold discovery](../VALIDATION-EXPORTS.md#fold-discovery) bounds the scan at each message load.
 
-| File | Workload |
-| --- | --- |
-| `docs/performance/fold-roles/CountScaling.lean` | 256 span locals, each stored once and loaded by address once before a receiver call; includes building the local-use index |
-| `docs/performance/fold-roles/ThrowScaling.lean` | 4,096 message loads with no admitted throw fold |
-
-Build the module they import, then time each file:
+Build the imported module, then time the file:
 
 ```sh
 lake build CIL.Extraction.Folds
-lake env lean -Dprofiler=true docs/performance/fold-roles/CountScaling.lean
 lake env lean -Dprofiler=true docs/performance/fold-roles/ThrowScaling.lean
 ```
 
-To check scaling, double the size (`256` or `4096`, at each occurrence in the file) in a scratch
-copy and compare. The time of `ThrowScaling.lean` should about double; a fourfold increase means
-a scan per load has returned. The time of `CountScaling.lean` should also about double, since
-each local's type is read from an index built once. There are no reference figures for these
-files; the `lookups` suite checks addressed locals with a failing limit.
+To check scaling, double the size (`4096`, at each occurrence in the file) in a scratch copy
+and compare. The time should about double; a fourfold increase indicates an unbounded scan per
+load. There are no reference figures for this file. The `lookups` suite checks addressed locals
+with a failing limit.

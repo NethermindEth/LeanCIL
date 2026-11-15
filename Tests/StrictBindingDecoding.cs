@@ -104,11 +104,12 @@ partial class Program
 
     /// <summary>
     /// The slices the extractor carries for every method with a body in each selected assembly, with the operand
-    /// and local signature tokens of the body, hold the images' rows and heap entries: Lean's assembly block and
-    /// rows checks accept each slice in the image its identity pins. Together the slices carry rows of every table
+    /// and local signature tokens of the body, hold the images' rows and heap entries, including user strings.
+    /// Lean checks each complete slice in the image its identity pins. Together they carry rows of every table
     /// a slice may carry and at least one omitted-entry marker, so neither is left unchecked.
     /// </summary>
-    static void CheckExtractedSlices(string root, params (string Selected, string[] References)[] extractions)
+    static void CheckExtractedSlices(string root, string package,
+        params (string Selected, string[] References)[] extractions)
     {
         const BindingFlags Internal = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
         var extractor = Assembly.LoadFrom(ExtractorPath);
@@ -117,9 +118,9 @@ partial class Program
         var slicesType = extractor.GetType("Nethermind.LeanCIL.MetadataSlices", throwOnError: true)!;
         var objectType = extractor.GetType("Nethermind.LeanCIL.ObjectTypes", throwOnError: true)!
             .GetMethod("Is", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
-        var package = FixturePackage();
         HashSet<int> tables = [];
         var markers = 0;
+        var userStrings = 0;
         Directory.CreateDirectory(root);
         for (var index = 0; index < extractions.Length; index++)
         {
@@ -156,22 +157,25 @@ partial class Program
                     (refused.Length == 0 ? output : string.Join("\n", refused)));
             var counts = lines.Select(line => line.Split(' ')).Select(words =>
                 (Slices: int.Parse(words[1]), Rows: int.Parse(words[2]), Markers: int.Parse(words[3]),
-                    Tables: words[4].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse))).ToArray();
+                    Tables: words[4].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(int.Parse),
+                    UserStrings: int.Parse(words[5]))).ToArray();
             if (counts.Sum(count => count.Rows) == 0)
                 throw new InvalidOperationException($"No slice of {Path.GetFileName(selected)} carries a row.");
             tables.UnionWith(counts.SelectMany(count => count.Tables));
             markers += counts.Sum(count => count.Markers);
+            userStrings += counts.Sum(count => count.UserStrings);
             Console.WriteLine($"PASS Lean matches the slices of {methods.Count} methods of " +
                 $"{Path.GetFileName(selected)} to their images: {counts.Sum(count => count.Slices)} slices, " +
-                $"{counts.Sum(count => count.Rows)} rows, {counts.Sum(count => count.Markers)} marker cells");
+                $"{counts.Sum(count => count.Rows)} rows, {counts.Sum(count => count.Markers)} marker cells, " +
+                $"{counts.Sum(count => count.UserStrings)} user strings");
         }
         var missing = CarriedTables.Except(tables).ToArray();
-        if (missing.Length != 0 || markers == 0)
+        if (missing.Length != 0 || markers == 0 || userStrings == 0)
             throw new InvalidOperationException("The extracted slices leave unchecked: " +
                 string.Join(", ", missing.Select(table => $"table 0x{table:X2}")) +
-                (markers == 0 ? " omitted-entry markers" : ""));
+                (markers == 0 ? " omitted-entry markers" : "") + (userStrings == 0 ? " user strings" : ""));
         Console.WriteLine($"PASS the extracted slices carry rows of all {CarriedTables.Length} tables and " +
-            $"{markers} marker cells");
+            $"{markers} marker cells and {userStrings} user strings");
     }
 
     /// <summary>The tables whose rows a metadata slice carries.</summary>
@@ -227,7 +231,7 @@ partial class Program
     /// </summary>
     static string SlicesModule(byte[][] images, string[] blocks, List<string> methods)
     {
-        var text = new StringBuilder("import StrictBinding.Rows\n\n");
+        var text = new StringBuilder("import StrictBinding.Slice\n\n");
         for (var index = 0; index < images.Length; index++)
             text.Append($"namespace Image{index}\n\n{BindingImage.Definitions(images[index])}\nend Image{index}\n\n");
         text.Append("open StrictBinding CIL.Extraction\n\ndef images : List PinnedImage :=\n  [");
@@ -239,10 +243,9 @@ partial class Program
         text.Append("def methods : List (String × MethodMetadata) :=\n  [");
         text.Append(string.Join(",\n   ", methods)).Append("]\n\n");
         text.Append("""
-            def sliceBound (prepared : List PreparedImage) (slice : MetadataSlice) : Except AuditError Unit := do
+            def checkSlice (prepared : List PreparedImage) (slice : MetadataSlice) : Except AuditError Unit := do
               let image ← located prepared slice.assembly.identity
-              assemblyBound image slice.assembly
-              rowsBound image slice.rows slice.strings slice.blobs
+              StrictBinding.sliceBound image slice
 
             def markerCells (prepared : List PreparedImage) (slice : MetadataSlice) : Nat :=
               match located prepared slice.assembly.identity with
@@ -262,13 +265,15 @@ partial class Program
               | .ok prepared =>
                 for (name, metadata) in methods do
                   let slices := metadata.own :: metadata.others
-                  match slices.forM (sliceBound prepared) with
+                  match slices.forM (checkSlice prepared) with
                   | .ok _ =>
                     let rows := slices.flatMap (·.rows)
                     let tables := (rows.map (·.1 / 2 ^ 24)).eraseDups.map toString
                     let markers := (slices.map (markerCells prepared)).sum
+                    let userStrings := (slices.map (fun slice => slice.userStrings.length)).sum
                     IO.println
-                      s!"ok {slices.length} {rows.length} {markers} {",".intercalate tables} {name}"
+                      (s!"ok {slices.length} {rows.length} {markers} {",".intercalate tables} " ++
+                        s!"{userStrings} {name}")
                   | .error error => IO.println s!"{name}: {repr error}"
                 pure 0
 

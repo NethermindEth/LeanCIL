@@ -145,7 +145,8 @@ private def formsBytes : List Nat :=
 private def someField : RawOperand := countOperand
 
 /-- The static field `ldtoken` names in `formsBytes`. -/
-private def staticField : RawOperand := .field (.atom ownIdentity "Program") 1 int32 true
+private def staticField : RawOperand :=
+  .field (.atom ownIdentity "Program") 1 int32 name!"total" true
 
 /-- The signature `calli` names in `formsBytes`. -/
 private def someSignature : RawOperand := .indirectCall .void [int32] false false 0
@@ -289,6 +290,14 @@ theorem rejects_token_with_different_operand :
          (tokens.hello, .text "hi"), (tokens.objectRef, .type objectType)])
       (.metadata (.operandMismatch tokens.writeLine)) = true := by decide +kernel
 #print axioms rejects_token_with_different_operand
+
+/-- A field operand that names another field than the row its token names: `ldfld` of the count
+    field with the name `total`. -/
+theorem rejects_a_field_operand_named_for_another_row :
+    failsWith (evidence ([0x16, 0x7B] ++ token tokens.countField)
+        [(tokens.countField, .field (.atom ownIdentity "Program") 0 int32 name!"total" false)])
+      (.metadata (.operandMismatch tokens.countField)) = true := by decide +kernel
+#print axioms rejects_a_field_operand_named_for_another_row
 
 /-- A token missing from the table fails the check. -/
 theorem rejects_missing_token :

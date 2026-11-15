@@ -80,8 +80,8 @@ example : ¬ UnsafeCallsValid [] (raw { testCall with typeArguments := [word, wo
 example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .isNullRef] := by decide +kernel
 example : UnsafeCallsValid [] nonCall [true] [.pop] := by decide +kernel
--- Unreachable sites are emitted as unsupported placeholders and are not bound.
-example : UnsafeCallsValid [] (raw nullCall) [false] [.unsupported "excluded"] := by decide +kernel
+-- Unreachable sites are emitted as holes and are not bound.
+example : UnsafeCallsValid [] (raw nullCall) [false] [.unadmitted 0x28] := by decide +kernel
 
 end Tests.UnsafeCallEvidence
 

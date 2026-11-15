@@ -11,7 +11,7 @@ internal static partial class ProofOutline
     static (int Width, Operation Op)? SpanStores(Extraction extraction, int index)
     {
         var method = extraction.Methods[index];
-        var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
+        var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
         if (method.HasThis || method.ReturnType.FullName != "System.Void" || method.Parameters.Count != 2 ||
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||
@@ -20,10 +20,16 @@ internal static partial class ProofOutline
                 Memory { Operation: SpanItem item }, Arg { Index: 1 }, var store,
                 Return] || item.Width != width || !MethodArguments.Plain(method, 1))
             return null;
-        var stores = width == 4 ? store is StoreScalar { Width: 4 }
-            : store is StackOperation { Kind: StackOpcode.Store64 } or StoreScalar { Width: 8 };
-        return stores ? (width, store) : null;
+        return width is 4 or 8 && StoredWidth(store) == width ? (width, store) : null;
     }
+
+    /// <summary>The bytes a scalar store through a reference writes, or null for any other operation.</summary>
+    static int? StoredWidth(Operation op) => op switch
+    {
+        StoreScalar store => store.Width,
+        IndirectAccess { Store: true } access => access.Width,
+        _ => null
+    };
 
     /// <summary>The element width of a writable span of words, or null for any other type.</summary>
     static int? WrittenSpanWidth(TypeReference type) =>
@@ -33,7 +39,9 @@ internal static partial class ProofOutline
     /// <summary>The step lemma of a scalar store through an address whose write succeeds.</summary>
     static string StoreLemma(Operation op) => op switch
     {
-        StackOperation { Kind: StackOpcode.Store64 } => "step_store64_of_write",
+        IndirectAccess { Kind: NumericKind.I8 } => "step_stind_i8_of_write",
+        IndirectAccess { Kind: NumericKind.I } => "step_stind_i_of_write",
+        IndirectAccess access => $"step_stind_narrow_of_write {access.KindTerm}",
         StoreScalar { Width: 8 } => "step_storeScalar_i64_of_write",
         _ => "step_storeScalar_of_write"
     };

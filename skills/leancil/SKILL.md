@@ -43,8 +43,8 @@ leancil verify artifacts/Method --proof proofs/Method.lean --theorem MyProof.cor
 - A selector needs the parameter list. C# aliases (`ulong`), an optional return type and an
   unqualified type name work when the result is unique; `ulong&` is a `ref` or `out` parameter.
   An ambiguous selector fails with the candidate signatures.
-- The profile is `scalar` (the default, no hardware intrinsics), `x64-sse2`, `x64-sse42`,
-  `x64-v3`, `x64-v4`, `arm64-advsimd` or a custom `@profile.json`
+- The profile is `scalar` (the default, no hardware intrinsics), `x64-sse42`, `x64-v3`,
+  `x64-v4`, `arm64-advsimd` or a custom `@profile.json`
   ([runtime profiles](https://github.com/NethermindEth/LeanCIL/blob/main/docs/RUNTIME-PROFILES.md#profile-selection)).
   A result holds for the extracted profile only, so extract and verify once per deployment
   profile; when the user names none, use `scalar` and say so. `check` and `verify` read the

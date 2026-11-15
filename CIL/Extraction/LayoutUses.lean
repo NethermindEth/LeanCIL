@@ -33,6 +33,10 @@ theorem subtractionStride_mul (width : Nat) (offset : BitVec 64) :
   simp only [subtractionStride, BitVec.ofNat_toNat, BitVec.setWidth_eq, BitVec.neg_mul]
 #print axioms subtractionStride_mul
 
+/-- Whether a load of a field of this kind sign-extends it to the evaluation stack: only the
+    narrow signed integers do. -/
+def signedField (kind : FieldType) : Bool := kind == .signed8 || kind == .signed16
+
 /-- Raw type/field identities at layout-dependent uses; no computed offsets or sizes. -/
 inductive LayoutUse where
   | field (pc type field : Nat) (access : FieldAccess)
@@ -98,8 +102,7 @@ def validateLayoutUse (raw : List RawLayout) (layouts : Array ComputedLayout)
       let layout ← layouts[type]?
       let computed ← layout.layout.fields[index]?
       let operation ← method.code[pc]?
-      let signed := field.type == FieldType.signed8 || field.type == FieldType.signed16
-      return checkField computed signed access operation).getD false
+      return checkField computed (signedField field.type) access operation).getD false
   | .size pc type access => (do
       let metadata ← raw[type]?
       if access = SizeAccess.arrayElement ∧ metadata.byRefLike = true then none else pure ()

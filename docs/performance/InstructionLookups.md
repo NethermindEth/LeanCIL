@@ -62,6 +62,10 @@ characters long and differ only in their last character, less the same statement
 than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
 check takes about 5 seconds.
 
+Exception decisions compare `CIL.ExceptionType` constructors. The equality, inequality,
+CLR mapping and optional outcome rows each allow 2,000 to 9,500 kernel heartbeats. Using
+`applicationException` instead of `format` may increase the cost by at most 1.05 times.
+
 The suite also measures `decide +kernel` on one `add` of an int32 offset to a native method
 table of 16, 64 and 256 entries, less the same statement closed with `sorry`. Each table and its
 static storage are definitions outside the decision, so the proof of `MethodTable.counted` is
@@ -80,16 +84,12 @@ entries exceeds 1.15 times the cost at 16, or when the last entry's cost beyond 
 divided by its index, does. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
 
-The suite also measures `decide +kernel` on the two metadata name computations of the call and
-field operand checks, for names of 20, 80 and 320 bytes that share all but their last byte, less
-the same statements closed with `sorry`. The method name clause of the call operand check,
-`MetadataName.spells`, reads the name's code back into bytes: about 41,300, 151,400 and 589,600
-heartbeats, or 2,070, 1,890 and 1,840 per byte. `MetadataName.ofBytes?`, which names a field
-row's bytes, reads one byte per kernel step from a leading one: about 13,500, 35,100 and 119,300
-heartbeats, or 670, 440 and 370 per byte. An encoder that indexes an array literal, which the
-kernel holds as a list, reads byte i in i steps and costs 143,500, 1,746,500 and 26,147,700. The
-suite fails when either cost per byte grows more than 1.15 times from one length to the next. Run
-this row alone with `dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
+The suite also measures `decide +kernel` on the name clause of the call and field operand checks,
+`MetadataName.spells`, for names of 20, 80 and 320 bytes that share all but their last byte, less
+the same statements closed with `sorry`. The clause reads the name's code back into bytes: about
+41,300, 151,400 and 589,600 heartbeats, or 2,070, 1,890 and 1,840 per byte. The suite fails when
+the cost per byte grows more than 1.15 times from one length to the next. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
 
 The suite also measures `decide +kernel` on a runtime model lookup in a table of 16 and of 256
 entries, less the same statement closed with `sorry`. `model_table%` writes the table as a literal
@@ -120,7 +120,7 @@ at each address measures 2.6 for plain and 3.4 for prefixed addresses without th
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
 128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
 of stating the same certificate. Integer locals take a constant and are popped after a load or
-after `ldloca`, which also makes each a receiver fold candidate; native-int locals take a method
+after `ldloca`; native-int locals take a method
 address and are consumed by `calli`, which makes each a pointer local. For the pointer locals it
 also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
 exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a
@@ -174,6 +174,23 @@ one size to the next. The facts cost about 7,400, 8,400 and 8,400 heartbeats per
 homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewer entries, which
 accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
 size.
+
+The suite declares `cil_field_shape` for 8, 32 and 128 `int32` fields of one struct and for 8,
+32, 128 and 512 fields each in a struct of its own, and `cil_value_shape` for 8, 32, 128 and 512
+struct types, and reads every operand's `Method.fieldShape` or `Method.valueShape` through the
+facts with `simp only [cil_code]` from a 512-instruction body. It fails when the heartbeats per
+operand of the facts, or of the reads, grow more than 1.35 times from one size to the next. The
+first fact of an environment names 16-entry suffixes of its layout lists, about 517,000
+heartbeats at 512 layouts, and each fact reads its struct's entries from the suffix that starts
+the entry's block, so an entry further into its block costs about 750 heartbeats more. The
+compiled resolver that proposes each shape evaluates the environment once. The field facts cost
+about 269,000, 280,000 and 326,000 heartbeats per field in one struct, where each fact walks the
+struct's field list to its index, and 269,000, 271,000, 272,000 and 272,000 with a struct per
+field; most of a field fact is the kernel deciding the storage of the field's `int32` type. The
+value facts cost about 13,300, 15,900, 16,000 and 16,100 heartbeats per type. Facts that walk the
+layout lists to the struct instead cost 293,000, 313,000, 386,000 and 672,000 heartbeats per
+field and 38,000, 58,000, 131,000 and 417,000 per type. The reads cost 11,100 to 14,700
+heartbeats per operand at every size.
 
 The suite decides `ManagedCallsValid` on bodies of 64, 256 and 1,024 call sites, each followed by a
 `nop`, with the literal link table the extractor writes, and reads the heartbeats of that one

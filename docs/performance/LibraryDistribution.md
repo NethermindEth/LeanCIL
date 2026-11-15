@@ -92,7 +92,8 @@ dotnet run --file scripts/TestLibraryArchive.cs -c Release
 ```
 
 The tests cover complete payloads, hidden files, executable permissions, hard-link contents,
-source symlink rejection, missing and wrong digests, truncated compressed streams, raw-directory
-artifacts, traversal, tar links and devices, and duplicate entries. Every unsafe tar has a valid
-manifest and must fail for its specific unsafe entry, not for a missing manifest. The hard-link
-and source symlink cases run on Linux only.
+source symlink rejection, an archive inside the library or reached through a link into it,
+missing and wrong digests, truncated compressed streams, raw-directory artifacts, traversal, tar
+links and devices, and duplicate entries. Every unsafe tar has a valid manifest and must fail for
+its specific unsafe entry, not for a missing manifest. The hard-link and source symlink cases run
+on Linux only; the archive through a link prints SKIP where no directory link can be made.
