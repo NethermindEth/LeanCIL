@@ -91,7 +91,7 @@ theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame) (stack : List Value) :
     ResultEquivalent FrameActionEquivalent (managedStep operation pc frame stack m)
       (managedStep operation pc frame stack n) := by
-  unfold CIL.Safety.managedStep
+  unfold CIL.Safety.managedStep CIL.Safety.methodTableLength CIL.Safety.methodTableElement
   split <;> try simp only [same.checkedValues, same.loadNativeTable]
   all_goals repeat' first
     | exact .error _

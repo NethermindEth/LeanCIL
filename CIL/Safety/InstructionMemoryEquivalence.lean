@@ -236,7 +236,8 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (otherMemoryInstruction operation stack m)
       (otherMemoryInstruction operation stack n) := by
-  unfold CIL.Safety.otherMemoryInstruction
+  unfold CIL.Safety.otherMemoryInstruction CIL.Safety.arrayAddress CIL.Safety.arrayLength
+    CIL.Safety.arrayLoad CIL.Safety.arrayStore
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
     same.arrayValidate, same.arrayElement, same.loadTransfer]
@@ -288,7 +289,8 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (objectFieldInstruction operation stack m)
       (objectFieldInstruction operation stack n) := by
-  unfold CIL.Safety.objectFieldInstruction
+  unfold CIL.Safety.objectFieldInstruction CIL.Safety.referenceArrayLength
+    CIL.Safety.referenceArrayLoad CIL.Safety.referenceArrayStore
   split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot,
     same.referenceArrayOf, same.referenceArraySlot, same.storableIn, same.loadArraySlot]
   all_goals repeat first

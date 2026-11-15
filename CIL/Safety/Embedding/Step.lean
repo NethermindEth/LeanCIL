@@ -627,7 +627,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case managed operation =>
     cases operation
     all_goals plain_cases
-    all_goals simp only [managedStep] at h ⊢
+    all_goals simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
     all_goals repeat' first
       | contradiction
       | solve | simp only [FrameAction.relabel, context.next rfl]
@@ -1164,7 +1164,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   cases op
   case managed operation =>
     plain_cases
-    simp only [managedStep] at h ⊢
+    simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
     repeat' first
       | solve | raise_lockstep
       | cases h

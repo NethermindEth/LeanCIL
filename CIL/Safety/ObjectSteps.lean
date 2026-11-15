@@ -491,7 +491,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let found ← referenceArrayOf memory array
       return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 found.2.2)) :: rest) frame memory := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    objectFieldInstruction, referenceArrayLength, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take,
     List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
   cases referenceArrayOf memory array <;> rfl
@@ -505,7 +506,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let value ← loadSlot memory slot.1
       return .next (pc + 1) (value :: rest) frame memory := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    objectFieldInstruction, referenceArrayLoad, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take,
     List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
     arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
@@ -524,7 +526,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let after ← storeSlot memory slot.1 value
       return .next (pc + 1) rest frame after := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    objectFieldInstruction, referenceArrayStore, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take,
     List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
     arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl

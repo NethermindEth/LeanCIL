@@ -1225,7 +1225,7 @@ theorem step_appendLocals_managed (operation : ManagedOp) :
   clear kept
   unfold step
   apply observed_appendLocals
-  unfold managedStep
+  unfold managedStep methodTableLength methodTableElement
   split
   all_goals repeat' first
     | rfl
