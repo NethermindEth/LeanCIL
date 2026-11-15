@@ -45,9 +45,22 @@ def targetBody (code : List CIL.Instruction) : CIL.Method := {
 /-- Retained local operands, all method metadata and exact frame declarations match. -/
 theorem bodies_related (code : List CIL.Instruction) :
     Nonempty (MethodRenaming (sourceBody code) (targetBody code)) := by
-  refine ⟨⟨indices, ⟨rfl, rfl, rfl, rfl, fun _ => ⟨_, rfl, rfl⟩, rfl⟩,
-    .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
-      (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil)))), ?_, ?_, rfl⟩⟩
+  refine Nonempty.intro {
+    indices := indices
+    metadata := {
+      profile := rfl
+      returnsValue := rfl
+      staticSites := rfl
+      returnNarrow := rfl
+      arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
+      declared := rfl
+      environment := rfl }
+    declarations :=
+      .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
+        (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil))))
+    sourceReady := ?_
+    targetReady := ?_
+    code := rfl }
   all_goals constructor <;> first
     | rfl
     | (intro kind member
@@ -276,9 +289,20 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
   cases method with
   | zero =>
     cases found
-    refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil,
-      ⟨rfl, rfl, rfl, rfl, fun _ => ⟨_, rfl, rfl⟩, rfl⟩,
-      .skip kind initial fits .nil, ?_, inserted_ready kind initial fits, rfl⟩⟩⟩
+    refine Exists.intro (inserted kind initial) (And.intro rfl (Nonempty.intro {
+      indices := .skip .nil
+      metadata := {
+        profile := rfl
+        returnsValue := rfl
+        staticSites := rfl
+        returnNarrow := rfl
+        arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
+        declared := rfl
+        environment := rfl }
+      declarations := .skip kind initial fits .nil
+      sourceReady := ?_
+      targetReady := inserted_ready kind initial fits
+      code := rfl }))
     exact ⟨rfl, rfl, by intro selected member; cases member⟩
   | succ method => cases found
 #print axioms inserted_related

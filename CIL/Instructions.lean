@@ -16,6 +16,27 @@ and `Program` the list a call index refers into.
 
 namespace CIL
 
+/-- The admitted integer suffixes of `ldind.*`, `stind.*`, `ldelem.*` and `stelem.*`. -/
+inductive NumericKind where
+  | i1 | u1 | i2 | u2 | i4 | u4 | i8 | i
+  deriving DecidableEq, Repr
+
+/-- The load width in bytes and whether a narrow value is sign-extended to i32. -/
+def NumericKind.load? : NumericKind -> Option (Prod Nat Bool)
+  | .i1 => some (1, true)
+  | .u1 => some (1, false)
+  | .i2 => some (2, true)
+  | .u2 => some (2, false)
+  | .i4 | .u4 => some (4, false)
+  | .i8 | .i => some (8, false)
+
+/-- The store width in bytes; narrow stores keep the low bytes of an i32 value. -/
+def NumericKind.store? : NumericKind -> Option Nat
+  | .i1 | .u1 => some 1
+  | .i2 | .u2 => some 2
+  | .i4 | .u4 => some 4
+  | .i8 | .i => some 8
+
 /-- Small integer storage types; all extend to the 32-bit evaluation-stack type. -/
 inductive NarrowKind where
   | signed8 | unsigned8 | signed16 | unsigned16

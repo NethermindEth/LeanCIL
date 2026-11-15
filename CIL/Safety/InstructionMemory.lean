@@ -65,6 +65,9 @@ inductive ExecutionFault where
 /-- A checked result: a value, or the fault that stopped execution. -/
 abbrev ExecutionResult := Except ExecutionFault
 
+/-- A checked memory operation transforms the evaluation stack and memory together. -/
+abbrev MemoryStep := List Value -> Memory -> ExecutionResult (Prod Memory (List Value))
+
 /-- Whether a stack value has bits that must not be observed; only a scalar can. -/
 def Value.hasUnspecified : Value → Bool
   | .scalar value => value.hasUnspecified
