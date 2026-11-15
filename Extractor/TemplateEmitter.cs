@@ -205,6 +205,28 @@ internal static partial class TemplateEmitter
         return enabled.Operation == disabled.Operation && enabled.Text == disabled.Text ? enabled
             : new(null, $"if {Flag(feature)} then ({enabled.Text}) else ({disabled.Text})");
     }
+    /// <summary>The table entries of one pc, as a list expression over the template's feature flags.</summary>
+    static string LinkEntries(Template template, Row[] rows, int pc, int featureIndex = 0)
+    {
+        if (rows.Length == 0) return "[]";
+        if (featureIndex == template.Features.Length)
+            return rows[0].Ops[pc].Link(Callee) is { } link ? $"[({pc}, {link})]" : "[]";
+        var feature = template.Features[featureIndex];
+        var enabled = LinkEntries(template, [.. rows.Where(row => row.Variant.Profile.Get(feature))], pc,
+            featureIndex + 1);
+        var disabled = LinkEntries(template, [.. rows.Where(row => !row.Variant.Profile.Get(feature))], pc,
+            featureIndex + 1);
+        return enabled == disabled ? enabled : $"if {Flag(feature)} then ({enabled}) else ({disabled})";
+    }
+
+    /// <summary>The links field of a template: one entry per call site, in pc order, linear in the code.</summary>
+    static string LinkTable(Template template)
+    {
+        var entries = Enumerable.Range(0, template.Rows[0].Ops.Length)
+            .Select(pc => LinkEntries(template, template.Rows, pc)).Where(entry => entry != "[]").ToArray();
+        return entries.Length == 0 ? "[]" : string.Join(" ++ ", entries.Select(entry => $"({entry})"));
+    }
+
     // Lines end in LF on every platform, so committed output compares equal wherever it was generated.
     static string EmitTemplates(Template[] templates, string space, bool omitEquations)
     {
@@ -223,7 +245,8 @@ internal static partial class TemplateEmitter
                 $"({FrameMetadata.EnvironmentLean} : LayoutEnvironment)");
             foreach (var feature in template.Features) lean.Append($" ({Flag(feature)} : Bool)");
             for (var callee = 0; callee < template.Callees.Length; callee++) lean.Append($" (callee{callee} : Nat)");
-            Line($" : Method := {{ profile, {template.Frame.ToLean(Callee)}, code := [");
+            Line($" : Method := {{ profile, {template.Frame.ToLean(Callee)}, " +
+                $"links := {LinkTable(template)}, code := [");
             Line(string.Join(",\n", Enumerable.Range(0, template.Rows[0].Ops.Length)
                 .Select(pc => "  " + Instruction(template, template.Rows, pc).Text)) + "] }");
             if (!omitEquations)
