@@ -180,7 +180,7 @@ theorem short_constant_decoded :
 #guard_msgs in
 #print axioms short_constant_decoded
 
-/-- info: 'CIL.Instruction.valueOpcode_of_ofRaw?' depends on axioms: [propext] -/
+/-- info: 'CIL.Instruction.valueOpcode_of_ofRaw?' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms Instruction.valueOpcode_of_ofRaw?
 
