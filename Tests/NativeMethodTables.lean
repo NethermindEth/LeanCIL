@@ -106,7 +106,7 @@ private def tableFault (rule : Fault) : ExecutionResult FrameAction :=
 theorem native_dispatch_load :
     addStep [.scalar (.i64 8), .methodTable opaqueTable] =
       .ok (.next 1 [.methodTable (cursorAt 8)] frame memory) ∧
-    managedStep (.tableLoad signature) 1 frame [.methodTable (cursorAt 8)] memory =
+    step body (.ldind .i) 1 [] frame [.methodTable (cursorAt 8)] memory =
       .ok (.next 2 [.methodPointer ⟨signature, some second⟩] frame memory) := ⟨rfl, rfl⟩
 #print axioms native_dispatch_load
 
@@ -147,11 +147,11 @@ theorem native_add_out_of_range :
 theorem native_add_unloadable :
     addStep [.scalar (.i64 16), .methodTable opaqueTable] =
       .ok (.next 1 [.methodTable (cursorAt 16)] frame memory) ∧
-    managedStep (.tableLoad signature) 1 frame [.methodTable (cursorAt 16)] memory =
+    step body (.ldind .i) 1 [] frame [.methodTable (cursorAt 16)] memory =
       tableFault .outsideAllocation ∧
     addStep [.scalar (.i32 1), .methodTable opaqueTable] =
       .ok (.next 1 [.methodTable (cursorAt 1)] frame memory) ∧
-    managedStep (.tableLoad signature) 1 frame [.methodTable (cursorAt 1)] memory =
+    step body (.ldind .i) 1 [] frame [.methodTable (cursorAt 1)] memory =
       tableFault .alignment := ⟨rfl, rfl, rfl, rfl⟩
 #print axioms native_add_unloadable
 
@@ -175,13 +175,13 @@ theorem native_add_storage :
       tableFault .missingAllocation ∧
     addStep [.scalar (.i64 8), .methodTable opaqueTable] { memory with views := [] } =
       .ok (.next 1 [.methodTable (cursorAt 8)] frame { memory with views := [] }) ∧
-    managedStep (.tableLoad signature) 1 frame [.methodTable (cursorAt 8)]
+    step body (.ldind .i) 1 [] frame [.methodTable (cursorAt 8)]
         { memory with views := [] } = tableFault .unreadable ∧
     addStep [.scalar (.i64 8), .methodTable opaqueTable]
         { memory with cells := fun _ _ => ⟨0, false⟩ } =
       .ok (.next 1 [.methodTable (cursorAt 8)] frame
         { memory with cells := fun _ _ => ⟨0, false⟩ }) ∧
-    managedStep (.tableLoad signature) 1 frame [.methodTable (cursorAt 8)]
+    step body (.ldind .i) 1 [] frame [.methodTable (cursorAt 8)]
         { memory with cells := fun _ _ => ⟨0, false⟩ } = tableFault .uninitialized :=
   ⟨rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl, rfl⟩
 #print axioms native_add_storage
@@ -205,16 +205,33 @@ theorem native_array_load :
         .ok (.next 1 [.methodPointer ⟨signature, some second⟩] frame memory) := rfl
 #print axioms native_array_load
 
+/-- A caller's signature that differs from the table's. -/
+private def otherSignature : ManagedSignature :=
+  ⟨.atom Extraction.runtimeScope "System.Int64", [.atom Extraction.runtimeScope "System.Int32"]⟩
+
+/-- An unhomed table argument loads an entry under the table's own signature, and a call under
+    any other signature selects no target from it. -/
+theorem argument_table_load :
+    let argumentLoad : CIL.Method :=
+      { code := [.ldarg 0, .ldind .i, .ret], locals := [], returnsValue := true }
+    step argumentLoad (.ldarg 0) 0 [.methodTable (cursorAt 8)] frame [] memory =
+      .ok (.next 1 [.methodTable (cursorAt 8)] frame memory) ∧
+    step argumentLoad (.ldind .i) 1 [.methodTable (cursorAt 8)] frame
+      [.methodTable (cursorAt 8)] memory =
+      .ok (.next 2 [.methodPointer ⟨signature, some second⟩] frame memory) ∧
+    indirectTarget otherSignature [{ identity := second, method := 0 }]
+      ⟨signature, some second⟩ = none := ⟨rfl, rfl, rfl⟩
+#print axioms argument_table_load
+
 /-- An opaque table cannot manufacture a native cursor without a valid storage binding. -/
 theorem missing_binding :
     loadNativeTable opaqueTable { memory with staticBindings := [] } =
       .error .missingAllocation := rfl
 #print axioms missing_binding
 
-/-- A scalar address remains uncallable after the new native load operation is introduced. -/
+/-- A native load of a scalar address is refused rather than producing a callable identity. -/
 theorem numeric_load_rejected :
-    managedStep (.tableLoad signature) 0 frame [.scalar (.i64 0)] memory =
-      .error .invalidState := rfl
+    (step body (.ldind .i) 0 [] frame [.scalar (.i64 0)] memory).isOk = false := rfl
 #print axioms numeric_load_rejected
 
 section Admission
@@ -245,6 +262,13 @@ theorem native_add_admission :
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.word32, .word32] .add = true := by
   decide +kernel
 #print axioms native_add_admission
+
+/-- A load through a native table cursor admits only the decoded `ldind.i`. -/
+theorem native_load_admission :
+    scalarEmissionMatches #[] none ⟨0, 77, .none⟩ [nativeKind] (.ldind .i) = true ∧
+    scalarEmissionMatches #[] none ⟨0, 77, .none⟩ [nativeKind] (.ldind .i8) = false := by
+  decide +kernel
+#print axioms native_load_admission
 
 end Admission
 

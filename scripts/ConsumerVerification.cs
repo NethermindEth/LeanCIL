@@ -506,13 +506,17 @@ partial class Program
     sealed record ConsumerDependency(string Name, string Directory, string Source, string Revision, string Url);
     ConsumerDependency[]? fullBundleDependencies { get; init; }
 
+    /// <summary>
+    /// `relative`, read against `root`, spelled under `root` as given. Containment is decided after links are
+    /// followed on both sides, so Lake's resolved spelling of a package directory matches the root as given.
+    /// </summary>
     static string Within(string root, string relative)
     {
-        var path = Path.GetFullPath(relative, root);
-        var back = Path.GetRelativePath(root, path);
-        if (Path.IsPathRooted(back) || back == ".." || back.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-            throw new InvalidDataException("Consumer path escapes its package: " + relative);
-        return path;
+        var spelledRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        // Not made full first: Path.GetFullPath would drop a `..` before the link it follows is read.
+        var inside = ResolvedRelativePath(spelledRoot, Path.Combine(spelledRoot, relative))
+            ?? throw new InvalidDataException("Consumer path escapes its package: " + relative);
+        return inside == "." ? spelledRoot : Path.Join(spelledRoot, inside);
     }
 
     /// <summary>A directory name whose contents are never consumer sources, such as build outputs.</summary>
@@ -521,7 +525,8 @@ partial class Program
 
     static IEnumerable<string> ConsumerSources(string root, string? excludedDirectory = null)
     {
-        if (excludedDirectory is not null && Path.GetFullPath(root) == Path.GetFullPath(excludedDirectory)) yield break;
+        if (excludedDirectory is not null &&
+            LocationComparer.Equals(Path.GetFullPath(root), Path.GetFullPath(excludedDirectory))) yield break;
         foreach (var path in Directory.EnumerateFileSystemEntries(root).Order(StringComparer.Ordinal))
         {
             if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
@@ -698,23 +703,20 @@ partial class Program
     static string CertifiedModuleDirectory(string certified) =>
         Path.TrimEndingDirectorySeparator(Path.GetFullPath(Path.Combine(certified, ".lake/build/lib/lean")));
 
-    /// <summary>Accepts only the toolchain, certified base and physical descendants of the session.</summary>
+    /// <summary>
+    /// The import directories in `leanPath`, read against `session`, without the trusted toolchain's: the certified
+    /// base spelled as `certified` and every other directory spelled under `session`. A directory that lies
+    /// outside the session once links are followed is refused, so no import is read from a directory the session
+    /// does not hold.
+    /// </summary>
     static string[] ValidatedConsumerImportDirectories(
-        string session, string trusted, string? certified, string leanPath)
-    {
-        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-        var physicalSession = PhysicalImportDirectory(session);
-        var physicalTrusted = PhysicalImportDirectory(trusted);
-        var physicalCertified = certified is null ? null : PhysicalImportDirectory(certified);
-        return leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Select(path => PhysicalImportDirectory(
-                Path.IsPathFullyQualified(path) ? path : Path.Combine(session, path)))
-            .Where(path => !path.Equals(physicalTrusted, comparison))
-            .Select(path => path.Equals(physicalCertified, comparison) ? certified! :
-                Within(session, Path.GetRelativePath(physicalSession, Within(physicalSession, path))))
-            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
-            .ToArray();
-    }
+        string session, string trusted, string? certified, string leanPath) =>
+        [.. leanPath.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => Path.Combine(session, path))
+            // Lake reports directories with links followed, so each is compared after following links too.
+            .Where(path => !SameLocation(trusted, path))
+            .Select(path => certified is not null && SameLocation(certified, path) ? certified : Within(session, path))
+            .Distinct(LocationComparer)];
 
     (string[] Directories, string LeanPath) ConsumerImportDirectories(string session)
     {
@@ -1114,10 +1116,11 @@ partial class Program
     static string[] ConsumerSupportCandidates(IEnumerable<string> proofs, string[] sourceDirectories,
         IEnumerable<string> generatedModules, string toolchainModules)
     {
-        // Directory aliases name the same source; distinct roots can still contain ambiguous modules.
-        sourceDirectories = sourceDirectories.Select(PhysicalImportDirectory).Distinct().ToArray();
         var excluded = generatedModules.Concat(["Extracted", "ExtractedSymbols", "ExtractionAudit"])
             .ToHashSet(StringComparer.Ordinal);
+        // Lake lists source directories with links followed, as macOS reaches /var through /private/var, while
+        // package roots are spelled as given: one location counts once, or every module there looks ambiguous.
+        sourceDirectories = [.. sourceDirectories.DistinctBy(ResolvedPath, LocationComparer)];
         var imports = new Dictionary<string, string[]>(StringComparer.Ordinal);
         var pending = new Queue<string>();
         foreach (var proof in proofs)
@@ -1442,7 +1445,7 @@ partial class Program
                 Fail([members[k]], failure);
             }
         }
-        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var comparer = CollidingLocationComparer;
         var all = Enumerable.Range(0, requests.Count).ToArray();
         var identities = new string[requests.Count];
         var extractions = new ExtractionIdentity[requests.Count];
@@ -1466,18 +1469,23 @@ partial class Program
             return inputs;
         }
         foreach (var i in all)
-            try { proofs[i] = Within(root, Path.GetRelativePath(root, Path.GetFullPath(requests[i].Proof))); }
+            try { proofs[i] = Within(root, AbsolutePath(requests[i].Proof)); }
             catch (Exception error) { Fail([i], error); }
-        // Only the last request for an output may leave a certificate, as in sequential runs.
-        var last = all.GroupBy(i => outputs[i], comparer).ToDictionary(group => group.Key, group => group.Max(), comparer);
-        foreach (var output in last.Keys) File.Delete(Path.Combine(output, "verified.json"));
+        // Only the last request for an output may leave a certificate, as in sequential runs. Spellings that may name
+        // one output, through a link or in another case where case is ignored or unknown, can only lose one.
+        var locations = outputs.Select(ResolvedPath).ToArray();
+        var last = all.GroupBy(i => locations[i], comparer)
+            .ToDictionary(group => group.Key, group => group.Max(), comparer);
+        foreach (var output in outputs.Distinct(StringComparer.Ordinal))
+            File.Delete(Path.Combine(output, "verified.json"));
         var parallel = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism) };
         void CheckExtractions(int[] members, bool reportStage = true)
         {
             if (reportStage) Stage(members, "extraction integrity");
-            Parallel.ForEach(Pending(members).GroupBy(i => outputs[i], comparer), parallel, group =>
+            // Grouped by exact resolved spelling, so every directory is checked whatever its volume's case rule.
+            Parallel.ForEach(Pending(members).GroupBy(i => locations[i], StringComparer.Ordinal), parallel, group =>
             {
-                try { RunExtractor(["dotnet", ExtractorPath, "check", group.Key]); }
+                try { RunExtractor(["dotnet", ExtractorPath, "check", outputs[group.First()]]); }
                 catch (Exception error) { Fail(group, error); }
             });
         }
@@ -1504,13 +1512,18 @@ partial class Program
         {
             snapshot = ConsumerSnapshot(root, excluded, fullBundleDependencies);
             var common = Common(snapshot);
+            // Each source is resolved once, so a batch costs one pass over the sources per request.
+            string[] consumerSources = batch
+                ? snapshot.Keys.Where(key => key.StartsWith("consumer:", StringComparison.Ordinal))
+                    .Select(key => ResolvedPath(key["consumer:".Length..])).ToArray()
+                : [];
             foreach (var i in live)
                 try
                 {
-                    var output = outputs[i] + Path.DirectorySeparatorChar;
-                    if (batch && snapshot.Keys.Any(key => key.StartsWith("consumer:" + output, OperatingSystem.IsWindows()
-                        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
-                        throw new InvalidDataException("Batch outputs must lie outside the consumer sources, for example under artifacts/: " + outputs[i]);
+                    if (consumerSources.Any(source => MayLieBelow(locations[i], source)))
+                        throw new InvalidDataException(
+                            "Batch outputs must lie outside the consumer sources, for example under artifacts/: " +
+                            outputs[i]);
                     before[i] = BoundRequestInputs(i, common);
                     if (!before[i].ContainsKey("consumer:" + proofs[i]))
                         throw new InvalidDataException("Proof must be a Lean source under the consumer root, outside excluded build/artifact directories.");
@@ -1648,7 +1661,9 @@ partial class Program
                     contractImports = ContractImportAssumptions(current), contractDependencies = DeploymentDependencies(current)
                 };
                 outcomes[i].Detail = null;
-                if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
+                if (last[locations[i]] == i)
+                    File.WriteAllText(Path.Combine(outputs[i], "verified.json"),
+                        JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
                 CompleteTiming(i);
                 CacheProgress("certified consumer proof: " + requests[i].Theorem);
@@ -1761,12 +1776,9 @@ partial class Program
                 var packageRoots = dependencies.Where(dependency => dependency.Name != "leancil")
                     .Select(dependency => Within(session, Path.GetRelativePath(root, dependency.Source)))
                     .Prepend(session);
-                var pathComparison = OperatingSystem.IsWindows()
-                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                // Lake lists source directories with links followed, so the session holds them by location.
                 RequireConsumerDeepNamespaces(ConsumerSourceDirectories(session, packageRoots)
-                    .Where(directory => !directory.Equals(frameworkCopy, pathComparison) &&
-                        (directory.Equals(session, pathComparison) ||
-                         directory.StartsWith(session + Path.DirectorySeparatorChar, pathComparison))));
+                    .Where(directory => !SameLocation(directory, frameworkCopy) && Inside(session, directory)));
             }
             foreach (var member in members) outcomes[member].Sources = prepared.Sources;
             var generatedInputPaths = prepared.Copied.Keys.Where(path =>
@@ -2085,13 +2097,13 @@ partial class Program
             var supportUnchanged = restoredArtifacts.Count > 0 && restoredArtifacts.Where(pair =>
                 Path.GetFileName(pair.Key).Contains(".olean", StringComparison.Ordinal)).All(pair =>
                 File.Exists(Within(session, pair.Key)) && Sha(Within(session, pair.Key)) == pair.Value);
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             var frameworkModules = CertifiedModuleDirectory(certifiedLibrary);
             var generatedModules = Path.GetFullPath(Path.Combine(generatedPackage, ".lake/build/lib/lean"));
             // No external commands run between this snapshot and the replay manifest.
             // Recorded base modules take their hashes from the producer's manifest; unrecorded ones are replayed.
             SortedDictionary<string, string> DirectoryArtifacts(string directory) =>
-                directory.Equals(frameworkModules, comparison) ? BaseModuleArtifacts() : ConsumerArtifactSnapshot(directory);
+                LocationComparer.Equals(directory, frameworkModules) ? BaseModuleArtifacts()
+                    : ConsumerArtifactSnapshot(directory);
             var artifactSnapshots = importDirectories.Where(Directory.Exists)
                 .Select(directory => (Directory: directory, Artifacts: DirectoryArtifacts(directory))).ToArray();
             DeepSessionContribution? deep = null;
@@ -2104,8 +2116,8 @@ partial class Program
                 var extractedPaths = artifactSnapshots.SelectMany(snapshot => snapshot.Artifacts.Keys
                     .Where(path => path == "Extracted.olean")
                     .Select(path => Path.Combine(snapshot.Directory, path))).ToArray();
-                if (extractedPaths.Length != 1 || !string.Equals(extractedPaths[0],
-                    Path.Combine(generatedModules, "Extracted.olean"), comparison))
+                if (extractedPaths.Length != 1 || !LocationComparer.Equals(extractedPaths[0],
+                    Path.Combine(generatedModules, "Extracted.olean")))
                     throw new InvalidDataException("Deep checks require the consumer's generated Extracted module.");
                 if (Directory.Exists(Path.Combine(session, "BindingAudit")) ||
                     File.Exists(Path.Combine(session, "BindingAudit.lean")))
@@ -2143,7 +2155,7 @@ partial class Program
                     });
                 })
                 .OrderBy(pair => pair.Name, StringComparer.Ordinal).ToDictionary(pair => pair.Name, pair => pair.Parts);
-            var baseUnchanged = importDirectories.Any(path => path.Equals(frameworkModules, comparison));
+            var baseUnchanged = importDirectories.Any(path => LocationComparer.Equals(path, frameworkModules));
             var certifiedCounts = ConsumerArtifactCounts(certifiedBase.Keys);
             var interfaceCounts = ConsumerArtifactCounts(acceptedInterfaceArtifacts.Keys);
             var preparedArtifacts = bindingPreparation?.SessionArtifacts;
@@ -2157,11 +2169,11 @@ partial class Program
                     if (!moduleNames.Add(module.Key)) throw new InvalidDataException("Ambiguous consumer module: " + module.Key);
                     if (File.Exists(Path.Combine(Toolchain, "lib/lean", module.Key.Replace('.', '/') + ".olean")))
                         throw new InvalidDataException("Consumer module shadows the trusted Lean toolchain: " + module.Key);
-                    var unchanged = directory.Equals(frameworkModules, comparison) &&
+                    var unchanged = LocationComparer.Equals(directory, frameworkModules) &&
                         module.Count() == certifiedCounts.GetValueOrDefault(module.Key) &&
                         module.All(pair => certifiedBase.TryGetValue(pair.Key, out var hash) && hash == pair.Value);
                     bool preparedBinding = bindingModules is not null &&
-                        directory.Equals(bindingModules, comparison) &&
+                        LocationComparer.Equals(directory, bindingModules) &&
                         module.Count() == preparedCounts.GetValueOrDefault(module.Key) &&
                         module.All(pair => preparedArtifacts!.TryGetValue(pair.Key, out var hash) &&
                             hash == pair.Value);
@@ -2177,7 +2189,8 @@ partial class Program
                         var relative = Path.GetRelativePath(session, Path.Combine(directory, pair.Key));
                         return restoredArtifacts.TryGetValue(relative.Replace('\\', '/'), out var hash) && hash == pair.Value;
                     });
-                    bool publishedInterface = directory.Equals(generatedModules, comparison) && interfaceModuleNames.Contains(module.Key);
+                    bool publishedInterface = LocationComparer.Equals(directory, generatedModules) &&
+                        interfaceModuleNames.Contains(module.Key);
                     if (publishedInterface && (module.Count() != interfaceCounts.GetValueOrDefault(module.Key) ||
                         module.Any(pair => !acceptedInterfaceArtifacts.TryGetValue(pair.Key, out string? accepted) || accepted != pair.Value)))
                         throw new InvalidDataException("Published contract interface artifacts changed after their closure audit: " + module.Key);
@@ -2567,7 +2580,9 @@ partial class Program
                     RequireDeepStable();
                 }
                 if (deep is null) PublishSuccess(proofKeys[i], receipt);
-                if (last[outputs[i]] == i) File.WriteAllText(Path.Combine(outputs[i], "verified.json"), JsonSerializer.Serialize(report, Json) + "\n");
+                if (last[locations[i]] == i)
+                    File.WriteAllText(Path.Combine(outputs[i], "verified.json"),
+                        JsonSerializer.Serialize(report, Json) + "\n");
                 outcomes[i].Report = report;
                 CompleteTiming(i);
             }
@@ -2612,9 +2627,7 @@ partial class Program
                 }
             }
             if (!share) return;
-            var modules = directories.Where(directory => Path.GetFullPath(directory).StartsWith(
-                    session + Path.DirectorySeparatorChar, OperatingSystem.IsWindows()
-                        ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            var modules = directories.Where(directory => ResolvedRelativePath(session, directory) is not (null or "."))
                 .Where(Directory.Exists).SelectMany(directory => Directory.EnumerateFiles(
                     directory, "*.olean", SearchOption.AllDirectories).Select(path =>
                         (Name: ModuleName(Path.GetRelativePath(directory, path)), Path: path)))

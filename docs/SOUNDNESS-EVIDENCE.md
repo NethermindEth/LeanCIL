@@ -33,9 +33,10 @@ pass by stack effect alone. Non-covered raw opcodes cannot emit these scalar ope
 feature-bound type-test words and size constants bound to exact primitive/vector widths or
 validated layouts.
 
-Indirect accesses are matched exactly too. Each integer `ldind` and `stind`, each `ldobj` and
-`stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit the
-one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
+Indirect accesses are matched exactly too. Each integer `ldind` and `stind` must emit the
+`ldind` or `stind` of the kind its opcode names, which `Instruction.ofRaw?` decodes. Each `ldobj`
+and `stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit
+the one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
 without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
 emits its aggregate transfer, whose width its layout use binds. A span `ldobj` emits nothing, and
 `ldobj` or `stobj` of any other type, such as a floating-point or pointer type, is rejected. No
@@ -179,7 +180,7 @@ What `MetadataResolution` and `MetadataBinding` check:
   checked against its token. The extractor chooses among `atom`, `object`, `aggregate` and `enum`
   for a type, and Lean accepts the choices that name the same scoped type with a form its kind
   allows. A field of a platform ``ValueTuple`2`` reads as the pair's first or second item only when
-  the pair's own `TypeRef` is scoped by a core-library assembly. A field's index and static flag,
+  the pair's own `TypeRef` is scoped by a core-library assembly. A field's name, index and static flag,
   the generic arguments of a type or method instantiation,
   the parameter and return types after substitution, the definition a member reference resolves to
   in a pinned assembly (its name, its signature and its place in its type's members) and the

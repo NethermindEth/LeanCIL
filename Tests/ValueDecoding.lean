@@ -13,6 +13,9 @@ namespace Tests.ValueDecoding
 
 open CIL CIL.Extraction Lean Meta
 
+/-- The class the type test rows name. -/
+private def dog : TypeExpr := .object "Fixture" "Fixture.Dog"
+
 /-- One raw instruction per value opcode, every short, long and macro form, with the instruction
     ECMA-335 assigns it; constants include the extremes of each form's range and locals the largest
     index each width encodes. -/
@@ -20,7 +23,8 @@ def named : List (RawInstruction × Instruction) := [
   -- Stack shuffling and return.
   (⟨0, 0, .none⟩, .nop), (⟨0, 37, .none⟩, .dup), (⟨0, 38, .none⟩, .pop), (⟨0, 42, .none⟩, .ret),
   -- Constants.
-  (⟨0, 21, .none⟩, .ldc_i4 (-1)), (⟨0, 22, .none⟩, .ldc_i4 0), (⟨0, 23, .none⟩, .ldc_i4 1),
+  (⟨0, 20, .none⟩, .ldnull), (⟨0, 21, .none⟩, .ldc_i4 (-1)), (⟨0, 22, .none⟩, .ldc_i4 0),
+  (⟨0, 23, .none⟩, .ldc_i4 1),
   (⟨0, 24, .none⟩, .ldc_i4 2), (⟨0, 25, .none⟩, .ldc_i4 3), (⟨0, 26, .none⟩, .ldc_i4 4),
   (⟨0, 27, .none⟩, .ldc_i4 5), (⟨0, 28, .none⟩, .ldc_i4 6), (⟨0, 29, .none⟩, .ldc_i4 7),
   (⟨0, 30, .none⟩, .ldc_i4 8), (⟨0, 31, .integer (-5)⟩, .ldc_i4 (-5)),
@@ -60,6 +64,12 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 64, .target 64⟩, .bne_un 64), (⟨0, 65, .target 65⟩, .bge_un 65),
   (⟨0, 66, .target 66⟩, .bgt_un 66), (⟨0, 67, .target 67⟩, .ble_un 67),
   (⟨0, 68, .target 68⟩, .blt_un 68), (⟨0, 69, .targets [1, 2]⟩, .switch [1, 2]),
+  -- Integer indirect loads and stores.
+  (⟨0, 70, .none⟩, .ldind .i1), (⟨0, 71, .none⟩, .ldind .u1), (⟨0, 72, .none⟩, .ldind .i2),
+  (⟨0, 73, .none⟩, .ldind .u2), (⟨0, 74, .none⟩, .ldind .i4), (⟨0, 75, .none⟩, .ldind .u4),
+  (⟨0, 76, .none⟩, .ldind .i8), (⟨0, 77, .none⟩, .ldind .i), (⟨0, 82, .none⟩, .stind .i1),
+  (⟨0, 83, .none⟩, .stind .i2), (⟨0, 84, .none⟩, .stind .i4), (⟨0, 85, .none⟩, .stind .i8),
+  (⟨0, 223, .none⟩, .stind .i),
   -- Arithmetic, bitwise operations and shifts.
   (⟨0, 88, .none⟩, .add), (⟨0, 89, .none⟩, .sub), (⟨0, 90, .none⟩, .mul), (⟨0, 91, .none⟩, .div),
   (⟨0, 92, .none⟩, .div_un), (⟨0, 93, .none⟩, .rem), (⟨0, 94, .none⟩, .rem_un),
@@ -89,7 +99,9 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 65025, .none⟩, .ceq), (⟨0, 65026, .none⟩, .cgt), (⟨0, 65027, .none⟩, .cgt_un),
   (⟨0, 65028, .none⟩, .clt), (⟨0, 65029, .none⟩, .clt_un),
   -- Dynamic frame storage.
-  (⟨0, 65039, .none⟩, .localloc)]
+  (⟨0, 65039, .none⟩, .localloc),
+  -- Class type tests.
+  (⟨0, 116, .type dog⟩, .castclass dog), (⟨0, 117, .type dog⟩, .isinst dog)]
 
 /-- Constructors no opcode decodes to: the families outside the value opcodes. -/
 def undecoded : List Name := [
@@ -99,9 +111,9 @@ def undecoded : List Name := [
   ``Instruction.fieldAt, ``Instruction.fieldAddress, ``Instruction.setFieldAt,
   ``Instruction.aggregateFieldAt, ``Instruction.setAggregateFieldAt,
   ``Instruction.initializeSpanLocal, ``Instruction.tailCall, ``Instruction.managed,
-  ``Instruction.load64, ``Instruction.store64, ``Instruction.call, ``Instruction.callInstance,
+  ``Instruction.call, ``Instruction.callInstance,
   ``Instruction.callVirtual, ``Instruction.newAggregate, ``Instruction.newObject,
-  ``Instruction.objectTest, ``Instruction.skipInit, ``Instruction.feature,
+  ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.memory, ``Instruction.throw,
   ``Instruction.unadmitted]
 
@@ -162,7 +174,8 @@ def mutations : List (RawInstruction × Instruction) := [
   -- A malformed operand, another argument, an argument address, or an opcode outside the family.
   (⟨0, 42, .integer 0⟩, .ret), (⟨0, 17, .argument 4⟩, .ldloc 4), (⟨0, 6, .local 0⟩, .ldloc 0),
   (⟨0, 43, .targets [1]⟩, .br 1), (⟨0, 2, .none⟩, .ldarg 1), (⟨0, 15, .argument 1⟩, .ldarg 1),
-  (⟨0, 107, .none⟩, .conv_i4), (⟨0, 65039, .integer 0⟩, .localloc)]
+  (⟨0, 107, .none⟩, .conv_i4), (⟨0, 65039, .integer 0⟩, .localloc),
+  (⟨0, 116, .none⟩, .castclass dog), (⟨0, 20, .type dog⟩, .ldnull), (⟨0, 20, .none⟩, .ldc_i4 0)]
 
 /-- No mutation matches its raw instruction. -/
 theorem mutations_rejected :
@@ -182,7 +195,7 @@ theorem short_constant_decoded :
 #guard_msgs in
 #print axioms short_constant_decoded
 
-/-- info: 'CIL.Instruction.valueOpcode_of_ofRaw?' depends on axioms: [propext] -/
+/-- info: 'CIL.Instruction.valueOpcode_of_ofRaw?' depends on axioms: [propext, Quot.sound] -/
 #guard_msgs in
 #print axioms Instruction.valueOpcode_of_ofRaw?
 
@@ -215,7 +228,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 65, undecoded 30 of 95 constructors -/
+/-- info: decoded 70, undecoded 27 of 97 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors

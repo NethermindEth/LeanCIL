@@ -247,7 +247,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
             case FieldReference field:
                 var (owner, index, held, isStatic) = FieldOperand(instruction, field);
-                return $".field ({owner}) {index} ({held}) {Bool(isStatic)}";
+                var name = MetadataName.OfText(field.Name).ToLean();
+                return $".field ({owner}) {index} ({held}) {name} {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
             case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";
@@ -395,7 +396,12 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         Code.Ldloca_S, Code.Ldloca, Code.Localloc,
         // Constants.
         Code.Ldc_I4_M1, Code.Ldc_I4_0, Code.Ldc_I4_1, Code.Ldc_I4_2, Code.Ldc_I4_3, Code.Ldc_I4_4, Code.Ldc_I4_5,
-        Code.Ldc_I4_6, Code.Ldc_I4_7, Code.Ldc_I4_8, Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8,
+        Code.Ldc_I4_6, Code.Ldc_I4_7, Code.Ldc_I4_8, Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8, Code.Ldnull,
+        // Indirect loads and stores of integers and native integers.
+        Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
+        Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
+        // Class type tests.
+        Code.Castclass, Code.Isinst,
         // Branches.
         Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
         Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,

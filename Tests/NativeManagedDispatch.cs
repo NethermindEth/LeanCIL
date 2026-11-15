@@ -109,21 +109,20 @@ var path = Path.Combine(root, "NativeProof.lean");
 File.WriteAllText(path, proof);
 evidence.Add(path, "PASS native supplied-table cycle, exception, scalar local and storage checks");
 var rejected = new RejectedEvidence(root);
-var load = Regex.Match(scalar, @"(?m)^  \.managed \(\.tableLoad [^\r\n]+$").Value;
-if (load.Length == 0) throw new InvalidOperationException("Missing native table load");
+const string nativeLoadLine = "\n  .ldind .i,";
+if (!scalar.Contains(nativeLoadLine, StringComparison.Ordinal))
+    throw new InvalidOperationException("Missing native table load");
 // The dispatcher's table offset is the decoded add that feeds its table load, and raw add at offset 21 of its
 // original and closed bodies; the handler's own add is left unchanged.
-const string tableLoadLine = "\n  .managed (.tableLoad";
-const string emittedAdd = "  .add," + tableLoadLine;
+const string emittedAdd = "  .add," + nativeLoadLine;
 const string rawAdd = "{ offset := 21, opcode := 88, operand := .none }";
 foreach (var (name, mutated) in new[]
 {
-    ("signature", scalar.Replace(load, load.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal),
-        StringComparison.Ordinal)),
+    ("load-kind", ReplaceExactly(scalar, nativeLoadLine, "\n  .ldind .i8,", 1)),
     ("raw-load", scalar.Replace("opcode := 77, operand := .none", "opcode := 76, operand := .none",
         StringComparison.Ordinal)),
-    ("emitted-sub", ReplaceExactly(scalar, emittedAdd, "  .sub," + tableLoadLine, 1)),
-    ("emitted-add-ovf", ReplaceExactly(scalar, emittedAdd, "  .add_ovf," + tableLoadLine, 1)),
+    ("emitted-sub", ReplaceExactly(scalar, emittedAdd, "  .sub," + nativeLoadLine, 1)),
+    ("emitted-add-ovf", ReplaceExactly(scalar, emittedAdd, "  .add_ovf," + nativeLoadLine, 1)),
     ("raw-sub", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 89, operand := .none }", 2)),
     ("raw-operand", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 88, operand := .local 0 }", 2)),
     ("input", scalar.Replace(".pointer (.atom Extraction.runtimeScope \"System.IntPtr\")",
@@ -136,6 +135,18 @@ foreach (var (name, mutated) in new[]
     rejected.Add(rejectedPath, "PASS independently rejected native dispatch evidence: " + name,
         "Extraction.ScalarFlowValid");
 }
+// No emitted instruction carries the table's signature; the call-site check binds the calli signature to the raw
+// operand, so a changed signature is rejected there.
+var calls = NarrowEvidence(source, "method0_calls_validated");
+var nativeCall = calls.Split('\n')
+    .First(line => line.TrimStart().StartsWith(".managed (.call ", StringComparison.Ordinal));
+var changedCall = nativeCall.Replace("System.Int32", "System.UInt32", StringComparison.Ordinal);
+var changedCalls = calls.Replace(nativeCall, changedCall, StringComparison.Ordinal);
+if (changedCalls == calls) throw new InvalidOperationException("Ineffective native call signature mutation");
+var signaturePath = Path.Combine(root, "Rejected-call-signature.lean");
+File.WriteAllText(signaturePath, changedCalls);
+rejected.Add(signaturePath, "PASS independently rejected native dispatch evidence: call-signature",
+    "ManagedCallsValid");
 var numericDll = Path.Combine(root, "NumericTarget.dll");
 using (var module = ModuleDefinition.ReadModule(dll))
 {
@@ -154,10 +165,10 @@ using (var module = ModuleDefinition.ReadModule(dll))
 {
     var dispatch = module.GetType("Examples.NativeManagedDispatch").Methods.Single(method => method.Name == "Dispatch");
     var addition = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Add);
-    var tableLoad = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldarg_0);
+    var tableArgument = dispatch.Body.Instructions.Single(instruction => instruction.OpCode.Code == Code.Ldarg_0);
     var processor = dispatch.Body.GetILProcessor();
-    processor.Remove(tableLoad);
-    processor.InsertBefore(addition, tableLoad);
+    processor.Remove(tableArgument);
+    processor.InsertBefore(addition, tableArgument);
     module.Write(commutedDll);
 }
 var commutedOutput = Path.Combine(root, "Commuted");

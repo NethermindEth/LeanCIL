@@ -50,6 +50,12 @@ theorem rejects_wrong_offset :
       (.heapMismatch userStringHeap 2) = true := by decide +kernel
 #print axioms rejects_wrong_offset
 
+/-- A later user string is checked even when the first entry matches. -/
+theorem rejects_false_second_entry :
+    failsWith (checked { carried with userStrings := [(1, [1, 0]), (2, [1, 1])] })
+      (.heapMismatch userStringHeap 2) = true := by decide +kernel
+#print axioms rejects_false_second_entry
+
 /-- A prepared view with an explicit user-string heap, for prefix and boundary tests. -/
 private def heapImage (bytes : List Nat) (size : Nat) : Except AuditError PreparedImage := do
   let image <- fixture
@@ -64,6 +70,18 @@ private def heapImage (bytes : List Nat) (size : Nat) : Except AuditError Prepar
 /-- User-string checks over a bounded heap inside a larger view. -/
 private def checkedHeap (bytes : List Nat) (size : Nat) (entries : List ByteEntry) :=
   heapImage bytes size >>= fun image => userStringsBound image entries
+
+/-- Equal prefixes at different offsets still require equal payload bytes. -/
+theorem rejects_wrong_offset_with_same_length :
+    failsWith (checkedHeap [0, 1, 65, 1, 66] 5 [(3, [1, 65])])
+      (.heapMismatch userStringHeap 3) = true := by decide +kernel
+#print axioms rejects_wrong_offset_with_same_length
+
+/-- Bytes inside the image but starting beyond the heap cannot supply an entry. -/
+theorem rejects_offset_past_heap_end :
+    failsWith (checkedHeap [0, 1, 0, 1, 0] 2 [(3, [1, 0])])
+      (.heapMismatch userStringHeap 3) = true := by decide +kernel
+#print axioms rejects_offset_past_heap_end
 
 /-- Matching bytes beyond the declared heap end cannot extend an entry. -/
 theorem rejects_crossing_heap_end :
@@ -98,6 +116,12 @@ theorem accepts_four_byte_prefix :
     ok (checkedHeap (0 :: longEntry) (longEntry.length + 1) [(1, longEntry)]) = true := by
   decide +kernel
 #print axioms accepts_four_byte_prefix
+
+/-- A four-byte prefix requires its entire declared payload. -/
+theorem rejects_truncated_four_byte_payload :
+    failsWith (checkedHeap (0 :: longEntry) (longEntry.length + 1) [(1, longEntry.dropLast)])
+      (.heapMismatch userStringHeap 1) = true := by decide +kernel
+#print axioms rejects_truncated_four_byte_payload
 
 /-- The claim also accepts an interior offset whose bytes form a length-prefixed payload. -/
 theorem accepts_interior_offset :

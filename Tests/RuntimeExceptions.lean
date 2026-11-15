@@ -170,7 +170,7 @@ example : CIL.ExceptionType.all.Nodup := by decide
 #guard_msgs in
 #print axioms CIL.ExceptionType.ofTypeIdentity?_typeIdentity
 
-/-- info: 'CIL.ExceptionType.ownerName_spells' depends on axioms: [propext, Quot.sound] -/
+/-- info: 'CIL.ExceptionType.ownerName_spells' does not depend on any axioms -/
 #guard_msgs in
 #print axioms CIL.ExceptionType.ownerName_spells
 

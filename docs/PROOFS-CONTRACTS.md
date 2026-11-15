@@ -246,6 +246,18 @@ the memory written to at the new memory, each under the name it already has:
 
 A fact whose condition is not shown stays at the old memory.
 
+A restated fact replaces the fact it restates when that one is stated at a memory the walk
+introduced, the `storedLocal` of an earlier store: the hypothesis the new one shadows is cleared, so
+a walk adds the names of each store and nothing that grows with the stores before it. The walk
+records the variables it introduces, so a fact stated at the memory the walk entered with, such as
+`valid`, `homes` or `preserved`, stays in scope next to its restatement whatever that memory is
+named. A `MemoryBelow` or `AccessBelow` fact that starts at a `storedLocal` memory is restated only
+when homes are stated at that memory, as after a step that changes memory without a store; the ones
+that start at the memory the walk entered with, such as `MemoryBelow boundary memory`, follow every
+store, and the `localBelow` and `localAccess` of a store state the step from the memory before it.
+The access a store finds for its own home is read by that store only, and the walk clears it with
+the other facts the store alone uses.
+
 The contract form then prepares its step facts again at `storedLocal`. The carried `ValidCall`
 forms the by-reference arguments and reads their fields there, and the restated reads supply their loads, so
 `.ldarg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
@@ -297,11 +309,11 @@ reprofiled program, by `rfl` when only the profiles differ.
   "contract": "Public.supported",
   "theorem": "Proof.family",
   "program": "Reference.program",
-  "referenceProfile": "x64-sse2",
+  "referenceProfile": "x64-sse42",
   "profiles": [
-    { "profile": "x64-sse2", "artifact": "extractions/sse2" },
     { "profile": "x64-sse42", "artifact": "extractions/sse42" },
-    { "profile": "x64-v3", "artifact": "extractions/v3" }
+    { "profile": "x64-v3", "artifact": "extractions/v3" },
+    { "profile": "x64-v4", "artifact": "extractions/v4" }
   ]
 }
 ```
@@ -518,7 +530,7 @@ contents separately.
 
 For a word store through a named output, `cil_contract_steps` first uses supplied checked
 operation facts. If none establishes the store, it derives a successful write from the current
-`ValidCall` and the output bounds. This covers `store64`, eight-byte `storeScalar` and eight-byte
+`ValidCall` and the output bounds. This covers `stind.i8`, `stind.i`, eight-byte `storeScalar` and eight-byte
 `setFieldAt`. The continuation names:
 
 | Name | Holds |
@@ -715,7 +727,7 @@ scope; stepping looks the class up in the call's table (`step_callVirtual_eq`,
 fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).
 A class the table omits steps to the model fault `outsideDispatchTable` (`virtualCall_outside`).
 
-`castclass` and `isinst` step on the same fact (`step_objectTest_eq`): with
+`castclass` and `isinst` step on the same fact (`step_castclass_eq`, `step_isinst_eq`): with
 `RuntimeType.lineage` and the definitions of the type, its bases and their scope, stepping
 decides whether the tested class is in the lineage, so the reference passes, becomes null or
 throws `InvalidCastException` ([DogTest](../Examples/Proofs/DogTest.lean),

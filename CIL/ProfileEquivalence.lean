@@ -54,6 +54,8 @@ theorem step_profile_eq (op : Instruction) (p q : FeatureProfile)
   case intrinsic operation argc =>
     change operation.available p = operation.available q at h
     rw [step_intrinsic, step_intrinsic, h]
+  case' ldind kind => cases kind
+  case' stind kind => cases kind
   all_goals
     cases stack with
     | nil => rfl

@@ -7,7 +7,7 @@ import CIL.Safety.InstructionMemoryEquivalence
 
 Equivalent memories (same allocations, bytes, bindings and permissions, however the access
 views are listed) give equivalent results for static field resolution and for the static
-and span instructions.
+field instructions.
 -/
 
 namespace CIL.Safety
@@ -48,13 +48,13 @@ theorem Memory.Equivalent.staticReference {m n : Memory} (same : m.Equivalent n)
     · exact (equivalent.prependView _).permissions
     · simp only [equivalent.staticBindings]
 
-/-- Equivalent memories give equivalent results for every static or span instruction. -/
+/-- Equivalent memories give equivalent results for every static or memory instruction. -/
 theorem Memory.Equivalent.staticInstruction {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (pc : Nat) (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (CIL.Safety.staticInstruction body pc operation stack m)
       (CIL.Safety.staticInstruction body pc operation stack n) := by
   unfold CIL.Safety.staticInstruction
-  split <;> try simp only [checkedAt, liveAllocation, same.allocations, same.formValue]
+  split <;> try simp only [checkedAt]
   all_goals repeat first
     | exact same.memoryInstruction _ _
     | exact .ok ⟨same, rfl⟩

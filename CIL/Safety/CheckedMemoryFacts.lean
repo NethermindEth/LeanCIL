@@ -81,17 +81,44 @@ theorem step_store512_of_write {memory after : Memory} {target : Reference} {bit
   rfl
 #print axioms step_store512_of_write
 
-/-- `store64` through an address whose eight-byte write succeeds steps to that write. The step
+/-- `stind.i8` through an address whose eight-byte write succeeds steps to that write. The step
     holds in any method and frame. -/
-theorem step_store64_of_write {memory after : Memory} {target : Reference} {word : CIL.W64}
+theorem step_stind_i8_of_write {memory after : Memory} {target : Reference} {word : CIL.W64}
     (written : write memory target (numberBytes word.toNat 8) 1 = .ok after) :
     ∀ body pc args frame rest,
-      step body .store64 pc args frame
+      step body (.stind .i8) pc args frame
         (.scalar (.i64 word) :: .reference (.address target) :: rest) memory =
         .ok (.next (pc + 1) rest frame after) := by
   intro body pc args frame rest
-  rw [step_store64_reference_eq, storeValue_word64_of_write written]
+  rw [step_stind_i8_eq, storeValue_word64_of_write written]
   rfl
+
+/-- `stind.i` through an address whose eight-byte write succeeds steps to that write, as
+    `stind.i8` does. -/
+theorem step_stind_i_of_write {memory after : Memory} {target : Reference} {word : CIL.W64}
+    (written : write memory target (numberBytes word.toNat 8) 1 = .ok after) :
+    ∀ body pc args frame rest,
+      step body (.stind .i) pc args frame
+        (.scalar (.i64 word) :: .reference (.address target) :: rest) memory =
+        .ok (.next (pc + 1) rest frame after) := by
+  intro body pc args frame rest
+  rw [step_stind_i_eq, storeValue_word64_of_write written]
+  rfl
+
+/-- A one-, two- or four-byte `stind` of an int through an address whose write succeeds steps to
+    that write. The step holds in any method and frame. -/
+theorem step_stind_narrow_of_write (kind : CIL.NumericKind) {memory after : Memory}
+    {target : Reference} {bits : CIL.W32}
+    (written : write memory target (numberBytes bits.toNat kind.width) 1 = .ok after)
+    (narrow : kind.width ≠ 8 := by decide) :
+    ∀ body pc args frame rest,
+      step body (.stind kind) pc args frame
+        (.scalar (.i32 bits) :: .reference (.address target) :: rest) memory =
+        .ok (.next (pc + 1) rest frame after) := by
+  intro body pc args frame rest
+  rw [step_stind_i32_eq body pc args frame memory kind narrow]
+  simp [referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
+    Except.bind, Pure.pure, Except.pure]
 
 /-- A 1-, 2- or 4-byte scalar store of an int through an address whose write succeeds steps to
     that write. The step holds in any method and frame. -/
@@ -120,7 +147,9 @@ theorem step_storeScalar_i64_of_write {memory after : Memory} {target : Referenc
   simp [referenceAt, checkedAt, ordinaryAccessAlignment, written, Except.mapError, Bind.bind,
     Except.bind, Pure.pure, Except.pure]
 
-#print axioms step_store64_of_write
+#print axioms step_stind_i8_of_write
+#print axioms step_stind_i_of_write
+#print axioms step_stind_narrow_of_write
 #print axioms step_storeScalar_of_write
 #print axioms step_storeScalar_i64_of_write
 end CIL.Safety

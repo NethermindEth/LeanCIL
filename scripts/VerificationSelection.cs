@@ -121,6 +121,7 @@ internal static class VerificationSelection
             "Tests/VerificationReuse.cs", "Tests/SupportExtractionCache.cs",
             "Tests/RuntimeExceptions.lean", "Tests/ProfileContract.lean",
             "Tests/InstructionEquations.lean", "Tests/CodeAt.lean", "Tests/SimdLanes.lean",
+            "Tests/SegmentContract.lean",
             "Tests/OperationFacts.lean", "Tests/VectorLocalCalls.lean", "Tests/SimdCarryCalls.lean",
             "Tests/OperationFactAdapters.lean", "Tests/AggregateMemorySteps.lean", "Tests/BodyDecoding.lean",
             "Tests/Identity.lean", "Tests/MetadataDecoding.lean",
@@ -130,7 +131,7 @@ internal static class VerificationSelection
             "Tests/ReturnMetadataBinding.lean", "Tests/ReferenceArrays.lean", "Tests/ArrayFields.lean",
             "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",
             "Tests/Crypto.lean", "Tests/MetadataAssemblies.lean", "Tests/PinnedIndexScaling.lean",
-            "Tests/FieldRef.lean", "Tests/FieldShape.lean"
+            "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean"
         };
         inputs["core"].UnionWith(new[] { "Add", "AddModel", "DecodedAdd", "Choose", "Calls", "Alias", "Struct",
             "StructCopy", "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }

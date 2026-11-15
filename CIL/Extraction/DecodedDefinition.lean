@@ -102,6 +102,7 @@ deriving instance ToExpr for ArraySpanRange
 deriving instance ToExpr for SnapshotShape
 deriving instance ToExpr for TransferKind
 deriving instance ToExpr for ExceptionType
+deriving instance ToExpr for NumericKind
 deriving instance ToExpr for Extraction.TypeExpr
 deriving instance ToExpr for ViewObservation
 deriving instance ToExpr for MemoryOp

@@ -507,19 +507,23 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
         if let some (position, source, target) ← reachedPc then
           loopTargetMismatch tactic position source target
     -- Fetching unifies the goal with a step lemma; only its closed lookup proofs are kept.
-    let saved ← saveState
-    let fetched? ← observing? do
-      let fetched ← loopFetch core
-      let stores := [``CIL.Instruction.stloc, ``CIL.Instruction.starg,
-        ``CIL.Instruction.setFieldAt, ``CIL.Instruction.initAggregate]
-      let classify : StateT LoopLocalIndex MetaM (Bool × Bool) := do
-        let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
-            pure !(← loopStoreKnown fetched.op fetched.step facts.known)
-          else pure false
-        return (← loopReadsReferences fetched.op fetched.step, unknownStore)
-      let ((references, unknownStore), indexed) ← classify.run localIndex
-      return (fetched, references, unknownStore, indexed)
-    saved.restore
+    -- The fetch runs on the record of the facts, so its lookups read the equation hypotheses the
+    -- record holds; the restore inside the step undoes the fetch and keeps the record.
+    let fetched? ← withNormalNodes prepared do
+      let saved ← saveState
+      let fetched? ← observing? do
+        let fetched ← loopFetch core
+        let stores := [``CIL.Instruction.stloc, ``CIL.Instruction.starg,
+          ``CIL.Instruction.setFieldAt, ``CIL.Instruction.initAggregate]
+        let classify : StateT LoopLocalIndex MetaM (Bool × Bool) := do
+          let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
+              pure !(← loopStoreKnown fetched.op fetched.step facts.known)
+            else pure false
+          return (← loopReadsReferences fetched.op fetched.step, unknownStore)
+        let ((references, unknownStore), indexed) ← classify.run localIndex
+        return (fetched, references, unknownStore, indexed)
+      saved.restore
+      pure fetched?
     let some (fetched, references, unknownStore, indexed) := fetched?
       | loopStuck tactic facts.all prepared stops; return none
     localIndex := indexed

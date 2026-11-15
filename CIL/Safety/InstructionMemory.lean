@@ -1,6 +1,7 @@
 import CIL.Safety.SnapshotMemory
 import CIL.Safety.SpanViews
 import CIL.Safety.ArrayViews
+import CIL.Safety.NativeMethodTables
 import CIL.Semantics
 
 /-!
@@ -89,25 +90,25 @@ def observerCount : CIL.Instruction → Nat
   | .add | .sub | .mul | .and | .or | .xor | .shl | .shr | .shr_un
   | .clt | .clt_un | .cgt | .cgt_un | .ceq | .bgt _ | .ble _ | .ble_un _
   | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _ | .blt _ | .beq _ | .bne_un _ => 2
-  | .brfalse _ | .brtrue _ | .switch _ | .objectTest .. => 1
+  | .brfalse _ | .brtrue _ | .switch _ | .castclass _ | .isinst _ => 1
   -- Memory and fields
   | .loadAggregate _ | .loadScalar .. | .fieldAt .. | .fieldAddress _ | .aggregateFieldAt ..
-  | .load64 | .skipInit | .initAggregate _ => 1
+  | .ldind _ | .skipInit | .initAggregate _ => 1
   | .storeAggregate _ | .storeScalar _ | .setFieldAt .. | .setAggregateFieldAt ..
-  | .store64 | .copyObject _ => 2
+  | .stind _ | .copyObject _ => 2
   -- Method boundaries
   | .ret => 1
   | .call _ argc | .callInstance _ argc | .callVirtual _ argc | .tailCall _ argc
   | .newAggregate _ argc _ | .newObject _ argc .. => argc
   | .managed (.call signature _ _) => signature.parameters.length + 1
   | .managed (.tableElement _) => 2
-  | .managed .tableLength | .managed (.tableLoad _) => 1
+  | .managed .tableLength => 1
   | .managed (.address ..) => 0
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
   | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
-  | .ldc_i8 _ | .dup | .pop | .br _ | .feature _ | .intrinsic ..
+  | .ldc_i8 _ | .ldnull | .dup | .pop | .br _ | .feature _ | .intrinsic ..
   | .throw _ | .unadmitted _ => 0
 
 /-- A memory check as an execution result; a fault is attributed to `reference` and `width`. -/
@@ -854,12 +855,11 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (memory, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
   -- Null references
   | .nullRef, _ => return (memory, .reference .null :: stack)
-  | .nullObject, _ => return (memory, .object .null :: stack)
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
   | .isNullRef, .reference r :: rest | .isNullRef, .readOnlyReference r :: rest =>
     return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
-  | .staticAddress _, _ | .staticValue _, _ | .createSpan _, _ | .spanCreate, _ =>
-    .error (.unsupported "Extraction-bound static/span allocation metadata")
+  | .staticAddress _, _ | .staticValue _, _ =>
+    .error (.unsupported "Extraction-bound static field metadata")
   | _, _ => .error .invalidState
 
 /-- Constructs a one-element view over checked existing storage without reading its bytes. -/
@@ -1081,9 +1081,44 @@ def comparisonGuardInstruction (guard : ComparisonGuard) (width : Nat) (signed :
     | _, _ => .error .invalidState
   | _ => .error .invalidState
 
+/-- CoreCLR's `CreateSpan<T>` throws unless the field data is aligned to `sizeof(T)`, so a typed
+    span needs `width` to divide the allocation's guaranteed alignment. -/
+def staticSpanAligned (allocation : Allocation) (width : Nat) : Bool :=
+  0 < width && allocation.layout.alignment % width == 0
+
+/-- Spans over extracted static data. A byte span from a pointer must lie in a live immutable
+    static allocation, or be empty over null; a typed span covers a whole static field whose
+    alignment its element width divides. Memory is never changed. -/
+def staticSpanInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
+  match operation, stack with
+  | .spanCreate, .scalar (.i32 length) :: .reference (.address reference) :: rest =>
+    if length.toInt < 0 then .error .invalidState else pure ()
+    let allocation ← checkedAt (.address reference) length.toNat
+      (liveAllocation memory reference.allocation)
+    if allocation.kind == .immutableStatic then pure () else
+      .error (.unsupported "Span pointer constructor outside extracted static data")
+    let _ ← formValue memory (.address reference)
+    if reference.offset + length.toNat ≤ allocation.layout.size then pure () else
+      .error (.memory .outsideAllocation (.address reference) length.toNat)
+    return (memory, .span (.address reference) length.toNat :: rest)
+  | .createSpan width, .reference (.address reference) :: rest =>
+    let allocation ← checkedAt (.address reference) 0
+      (liveAllocation memory reference.allocation)
+    if allocation.kind == .immutableStatic && reference.offset == 0 && 0 < width &&
+        allocation.layout.size % width == 0 then
+      if staticSpanAligned allocation width then
+        return (memory, .span (.address reference) (allocation.layout.size / width) :: rest)
+      else .error (.unsupported "Typed span element width does not divide the field alignment")
+    else .error (.unsupported "Typed span outside a whole extracted static field")
+  | .spanCreate, .scalar (.i32 length) :: .reference .null :: rest =>
+    if length == 0 then return (memory, .span .null 0 :: rest)
+    else .error (.memory .nullDereference .null length.toNat)
+  | _, _ => .error .invalidState
+
 /-- Runs a `.memory` operation on the stack (top first), giving the new memory and stack.
-    Operands with unspecified bits are rejected first. The static-field and span-construction
-    operations need extracted metadata, so `staticInstruction` runs them and they are
+    Operands with unspecified bits are rejected first. The static-field operations need the
+    extracted descriptor at their pc, so `staticInstruction` runs them and they are
     unsupported here; any other operand shape is `invalidState`. -/
 def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) := do
@@ -1106,6 +1141,7 @@ def memoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memory : 
   | .spanFill width clear => spanFillInstruction width clear stack memory
   | .arrayFill element counted => arrayFillInstruction element counted stack memory
   | .bigMul64 _ | .divRemOut _ => wideArithmeticInstruction operation stack memory
+  | .spanCreate | .createSpan _ => staticSpanInstruction operation stack memory
   | .objectField .. | .setObjectField ..
   | .objectReferenceField .. | .setObjectReferenceField ..
   | .referenceArrayLength | .referenceArrayLoad | .referenceArrayStore
@@ -1246,15 +1282,28 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | .fieldAt .., .readOnlyReference .null :: _ | .fieldAddress _, .readOnlyReference .null :: _
   | .setFieldAt .., .scalar _ :: .reference .null :: _ =>
     .error (.memory .nullDereference .null 0)
-  -- Memory operations, constants and 64-bit words
+  -- Memory operations and constants
   | .memory operation, _ => memoryInstruction operation stack m
   | .ldc_i4 bits, _ => return (m, .scalar (.i32 bits) :: stack)
   | .ldc_i8 bits, _ => return (m, .scalar (.i64 bits) :: stack)
-  | .load64, .reference r :: rest | .load64, .readOnlyReference r :: rest =>
-    return (m, .scalar (← loadValue m r 8) :: rest)
-  | .store64, .scalar (.i64 bits) :: .reference r :: rest =>
+  | .ldnull, _ => return (m, .object .null :: stack)
+  -- Indirect integer loads and stores; a native load from a method table reads its entry.
+  | .ldind .i, .methodTable table :: rest =>
+    let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table m)
+    return (m, .methodPointer pointer :: rest)
+  | .ldind kind, .reference r :: rest | .ldind kind, .readOnlyReference r :: rest =>
+    return (m, .scalar (← loadValue m r kind.width kind.signed) :: rest)
+  | .stind .i8, .scalar (.i64 bits) :: .reference r :: rest
+  | .stind .i, .scalar (.i64 bits) :: .reference r :: rest =>
     return (← storeValue m r (.i64 bits), rest)
-  | .store64, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r 8)
+  -- An eight-byte store takes an i64, never the bytes of an i32.
+  | .stind .i8, .scalar (.i32 _) :: .reference _ :: _
+  | .stind .i, .scalar (.i32 _) :: .reference _ :: _ => .error .invalidState
+  | .stind kind, .scalar (.i32 bits) :: .reference r :: rest =>
+    let address ← referenceAt r
+    return (← checkedAt r kind.width
+      (write m address (numberBytes bits.toNat kind.width) ordinaryAccessAlignment), rest)
+  | .stind kind, _ :: .readOnlyReference r :: _ => .error (.memory .unwritable r kind.width)
   -- References and stack shuffles
   | .skipInit, .reference r :: rest =>
     let _ ← formValue m r

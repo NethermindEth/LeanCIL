@@ -3,6 +3,7 @@ import Tests.StrictBinding.Container
 import Tests.StrictBinding.Bodies
 import Tests.StrictBinding.Rows
 import Tests.StrictBinding.Slice
+import Tests.StrictBinding.Metadata
 
 /-!
 # Strict binding tests: digests
