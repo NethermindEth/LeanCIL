@@ -34,7 +34,7 @@ if (args is ["--return-only"])
     var baseline = File.ReadAllText(Path.Combine(directory, "Extracted.lean"));
     var positive = Path.Combine(output, "ReturnControl.lean");
     File.WriteAllText(positive, baseline + "\n" + string.Join("\n", controls[9]));
-    evidence.Add(positive, "PASS declared return shape control");
+    evidence.Add(positive, "PASS declared return control");
     evidence.Check();
     rejected.Check();
     return;
@@ -190,18 +190,29 @@ const string bodyTheorem = "method0_body_validated";
 // The tactic that proves a body obligation names the method and the failure when the kernel refutes it; a mutation
 // that only breaks parsing prints other text, and the unmutated obligation is the positive control.
 const string bodyDecisionFailed = "the decoded method does not match its body bytes or metadata";
-// A mutated body obligation must fail to elaborate and its negation must be proved by the kernel: the second file
-// keeps the mutated definitions and replaces the obligation by `bodyMatches ... = false`.
+// A mutated body obligation must fail to elaborate and its negation must be proved by the kernel.
 void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change)
 {
     Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, bodyDecisionFailed);
+    RefuteMutation(sample, name, theorem, definition, change);
+}
+// A file that keeps the mutated definitions and states the obligation's negation, which the kernel must prove.
+void RefuteMutation(int sample, string name, string theorem, string definition, Func<string, string> change)
+{
     var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")),
         definition, change);
-    var refutation = theorem[..^"_body_validated".Length] + "_body_refuted";
+    var refutation = theorem[..^"_validated".Length] + "_refuted";
     var refuted = KernelRefutation(mutated, theorem, refutation);
     var path = Path.Combine(output, "Refuted-" + name + ".lean");
     File.WriteAllText(path, NarrowEvidence(refuted, refutation));
-    evidence.Add(path, "PASS the kernel proves the mutated body obligation false: " + name, refutation);
+    evidence.Add(path, "PASS the kernel proves the mutated obligation false: " + name, refutation);
+}
+// A changed declared signature of `definition` fails its `rfl` obligation, which the kernel proves false.
+void RejectDeclared(int sample, string name, string definition, Func<string, string> change)
+{
+    var theorem = definition + "_declared_validated";
+    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, rflRefused);
+    RefuteMutation(sample, name, theorem, definition, change);
 }
 // The metadata rows of a body shift with the assembly, so each byte is found by its position in the emitted list.
 string ChangeByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
@@ -273,28 +284,25 @@ void ReturnMutations()
 {
     foreach (var (name, replacement) in new[]
         { ("missing-return-narrowing", "System.Int32"), ("wrong-return-signedness", "System.Byte") })
-        Reject(9, name, source => ChangeDefinition(source, "method1", line =>
+        RejectDeclared(9, name, "method1", line =>
         {
             var returned = line.IndexOf("returnType :=", StringComparison.Ordinal);
             var atom = returned < 0 ? -1 : line.IndexOf("System.SByte", returned, StringComparison.Ordinal);
             if (atom < 0) throw new InvalidOperationException("Missing declared SByte return");
             return line[..atom] + replacement + line[(atom + "System.SByte".Length)..];
-        }), "method1_declared_validated", rflRefused);
+        });
 }
 
 // The declared signature, call links and layout environment are each checked against their own evidence.
 const string word = "Extraction.runtimeScope \"System.UInt64\"";
-Reject(0, "wrong-declared-parameter", source => ChangeDefinition(source, "method0", line =>
-    line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]")),
-    "method0_declared_validated", rflRefused);
-Reject(0, "wrong-declared-return", source => ChangeDefinition(source, "method0", line =>
-    line.Replace($"returnType := .atom {word} }}", $"returnType := .atom {word.Replace("UInt64", "UInt32")} }}")),
-    "method0_declared_validated", rflRefused);
-Reject(14, "missing-declared-receiver", source => ChangeDefinition(source, "method1", line =>
-    line.Replace("receiver := some .reference, ", "")), "method1_declared_validated", rflRefused);
-Reject(14, "wrong-declared-receiver-kind", source => ChangeDefinition(source, "method1", line =>
-    line.Replace("receiver := some .reference", "receiver := some .object")), "method1_declared_validated",
-    rflRefused);
+RejectDeclared(0, "wrong-declared-parameter", "method0", line =>
+    line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]"));
+RejectDeclared(0, "wrong-declared-return", "method0", line =>
+    line.Replace($"returnType := .atom {word} }}", $"returnType := .atom {word.Replace("UInt64", "UInt32")} }}"));
+RejectDeclared(14, "missing-declared-receiver", "method1", line =>
+    line.Replace("receiver := some .reference, ", ""));
+RejectDeclared(14, "wrong-declared-receiver-kind", "method1", line =>
+    line.Replace("receiver := some .reference", "receiver := some .object"));
 Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
     line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
 Reject(0, "dropped-link", source => ChangeDefinition(source, "method0", line =>
