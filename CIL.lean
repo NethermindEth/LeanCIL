@@ -193,6 +193,7 @@ import CIL.Safety.TupleDivision
 import CIL.Extraction.LayoutProjection
 import CIL.Extraction.Translation
 import CIL.Extraction.DecodedMethod
+import CIL.Extraction.DecodedDefinition
 import CIL.Safety.MemoryEquivalence
 import CIL.Safety.FrameEquivalence
 import CIL.Safety.ExecutionEquivalence

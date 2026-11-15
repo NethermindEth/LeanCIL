@@ -1,4 +1,5 @@
-import CIL.Extraction.DecodedMethod
+import CIL.Extraction.DecodedDefinition
+import CIL.InstructionEquations
 import Tests.BodyEncoding
 import Tests.MetadataWorld
 
@@ -9,7 +10,8 @@ Bodies built by `Tests.BodyEncoding.encodeBody` and by hand over `Tests.Metadata
 decode through `Method.ofBody?` to the method their bytes denote: the code `Instruction.ofRaw?`
 gives, locals initialized by the flag in the bytes rather than the definition's, and the code of
 the bytes rather than the definition's. A body with an instruction outside the value family
-gives no method, and neither does a program with such a body.
+gives no method, and neither does a program with such a body. A method defined by
+`cil_decoded_method` is the decoder's method, written as literals its facts and stepping read.
 -/
 
 namespace Tests.DecodedMethod
@@ -112,5 +114,48 @@ theorem program_needs_every_method :
         true := by
   decide +kernel
 #print axioms program_needs_every_method
+
+/-- The profile the decoded definitions below are evaluated under; a named constant passed to
+    the decoder stays named in the method. -/
+def testProfile : FeatureProfile := .scalar
+
+/-- The layouts the decoded definitions below are evaluated under. -/
+def testEnvironment : LayoutEnvironment := {}
+
+/-- `ldarg.0; ldarg.1; add; ldc.i4.m1; add; ret` over two `uint32` parameters. -/
+private def sumRaw : RawMethod :=
+  { method false [] [instr 0 2, instr 1 3, instr 2 0x58, instr 3 0x15, instr 4 0x58, instr 5 0x2A]
+    with parameters := [uint32, uint32], returnType := uint32 }
+
+cil_decoded_method sumMethod := Method.ofRaw? testProfile testEnvironment sumRaw []
+cil_instruction_equations sumMethod
+
+/-- The definition is the method the decoder gives: the decoded code, the declared signature,
+    and the profile and layouts it was evaluated under. -/
+example : sumMethod =
+    { code := [.ldarg 0, .ldarg 1, .add, .ldc_i4 4294967295, .add, .ret], locals := [],
+      profile := testProfile, environment := testEnvironment,
+      declared := { parameters := [uint32, uint32], returnType := uint32 },
+      returnsValue := true } := rfl
+
+/-- info: Tests.DecodedMethod.sumMethod_decoded :
+  Method.ofRaw? testProfile testEnvironment sumRaw [] = some sumMethod -/
+#guard_msgs (whitespace := lax) in #check sumMethod_decoded
+#print axioms sumMethod_decoded
+
+-- Stepping reads each instruction as a constructor over numerals, a negative constant included.
+/-- info: Tests.DecodedMethod.sumMethod_instruction3 :
+  sumMethod.code[3]? = some (Instruction.ldc_i4 0xFFFFFFFF) -/
+#guard_msgs (whitespace := lax) in #check sumMethod_instruction3
+
+-- The profile fact names the profile the decoder was given, as an extraction's facts do.
+/-- info: Tests.DecodedMethod.sumMethod_profile : sumMethod.profile = testProfile -/
+#guard_msgs in #check sumMethod_profile
+
+-- A body outside the value family defines nothing.
+/-- error: cil_decoded_method: the decoder gives no method
+  Method.ofRaw? testProfile testEnvironment newarrRaw [] -/
+#guard_msgs (whitespace := lax) in
+cil_decoded_method newarrMethod := Method.ofRaw? testProfile testEnvironment newarrRaw []
 
 end Tests.DecodedMethod
