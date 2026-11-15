@@ -114,8 +114,8 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
           ⟨.atom CIL.Extraction.runtimeScope "System.Int32",
             [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
         """ + "\ntheorem managed_dispatch_result :\n" + string.Join(" ∧\n", claims) +
-        " := " + (claims.Count == 1 ? "by rfl" :
-            "by exact ⟨" + string.Join(", ", claims.Select(_ => "by rfl")) + "⟩") +
+        " := " + (claims.Count == 1 ? "by cil_kernel_rfl" :
+            "by exact ⟨" + string.Join(", ", claims.Select(_ => "by cil_kernel_rfl")) + "⟩") +
         "\n#print axioms managed_dispatch_result\n");
     evidence.Add(proof, "PASS compiled typed indirect dispatch: " + name);
     if (name != "Address") continue;

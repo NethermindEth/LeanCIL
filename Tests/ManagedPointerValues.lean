@@ -118,4 +118,19 @@ theorem long_owner_call (rest : List CIL.Safety.Value) :
   rfl
 #print axioms long_owner_call
 
+/-- A program whose entry takes the long owner's address and calls it through the pointer. -/
+private def longProgram : Program :=
+  [{ returnsValue := true, locals := [],
+      code := [.arg 0, .managed (.address ⟨longIdentity, 1⟩ signature),
+        .managed (.call signature longCatalog false), .ret] },
+    { returnsValue := true, locals := [], code := [.arg 0, .ret] }]
+
+/-- A whole run through the long owner, closed as an extraction's proofs of indirect calls are:
+    the kernel evaluates the run, including both owner comparisons. -/
+theorem long_owner_run :
+    (invoke longProgram 16 0 [.scalar (.i32 42)] Memory.empty).map Prod.snd =
+      .ok [.scalar (.i32 42)] := by
+  cil_kernel_rfl
+#print axioms long_owner_run
+
 end Tests.ManagedPointerValues

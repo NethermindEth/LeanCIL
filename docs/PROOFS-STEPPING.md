@@ -195,15 +195,16 @@ with numeric locals is not a closed term; `bind_entry ... allocating` supplies i
 and home facts instead (see [loop
 scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
 
-An indirect call through a method pointer, `calli`, steps by `CIL.Safety.step_managed_call_eq`,
-which states the step over `CIL.Safety.indirectTarget`: the catalog body selected for the
-pointer, or `none`, which faults with `invalidState`. Supply the selection as a fact
-`CIL.Safety.indirectTarget signature catalog pointer = some method` proved by `cil_kernel_rfl`.
-`simp only [cil_step, fact]` then leaves the operand guard, the arity check and the checked
-arguments, which reduce as for a direct call once the signature's parameter count is a numeral.
-The kernel compares the pointer's owner string with each catalog entry's; `rfl` compares them in
-the elaborator with recursion as deep as the owner is long, and stops at the default recursion
-limit once owners reach about 113 bytes.
+A closed run through an indirect call through a method pointer, `calli`, is proved by
+`cil_kernel_rfl` on the equation `(CIL.Safety.invoke program fuel method args memory).map
+Prod.snd = .ok results`: the kernel evaluates the run, including the comparison of the pointer's
+owner string with each catalog entry's, and the elaborator evaluates none of it. A single step
+uses `CIL.Safety.step_managed_call_eq`, which states the step over `CIL.Safety.indirectTarget`:
+the catalog body selected for the pointer, or `none`, which faults with `invalidState`. Supply
+the selection as a fact `CIL.Safety.indirectTarget signature catalog pointer = some method`
+proved by `cil_kernel_rfl`. `simp only [cil_step, fact]` then leaves the operand guard, the
+arity check and the checked arguments, which reduce as for a direct call once the signature's
+parameter count is a numeral.
 
 At a fetched `.ret`, narrow returns included, the tactic leaves the equation between the computed
 checked result and the stated result as a goal over the returned values, with no unexecuted `run`.
