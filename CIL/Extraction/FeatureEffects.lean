@@ -6,7 +6,8 @@ import CIL.Instructions
 The feature-flow check in `Features` matches most raw instructions to their emitted
 counterpart only by stack effect. This file gives that effect, as `(pops, pushes)`, for
 each emitted instruction that cannot disturb a tracked local; the rest have none and must
-be matched exactly.
+be matched exactly. Indirect loads, stores and block operations also meet the exact rule of
+`IndirectAccess`.
 -/
 
 namespace CIL.Extraction
