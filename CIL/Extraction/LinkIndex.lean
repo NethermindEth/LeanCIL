@@ -7,9 +7,9 @@ import CIL.Instructions
 Two forms keep a read of a method's link table from costing the table's length. For a table
 whose keys ascend, the entry at a position is the first for its key (`linkAt_of_position`), so
 `cil_instruction_equations` proves each call site's link from its entry, read through named
-suffixes of the table, after checking once that the keys ascend. An embedding reads the link of every live instruction on each side; when the
-table keys ascend, which holds for every extracted table and every table `linksOfCode` builds, a
-walk over the table answers all queries. The walk advances while the queried pcs do not
+suffixes of the table, after checking once that the keys ascend. An embedding reads the link of
+every live instruction on each side; when the table keys ascend, which holds for every extracted
+table and every table `linksOfCode` builds, a walk over the table answers all queries. The walk advances while the queried pcs do not
 decrease and starts again from the head of the table at each pc below the one before, so a map
 that reorders a few blocks costs a few passes. A hand-written table without ascending keys takes
 the scan, which costs the table's length per query. The extraction call check reads each pc's
