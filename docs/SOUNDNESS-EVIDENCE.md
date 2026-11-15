@@ -37,7 +37,9 @@ Indirect accesses are matched exactly too. Each integer `ldind` and `stind`, eac
 `stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit the
 one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
 without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
-emits its aggregate transfer, whose width its layout use binds. No other raw opcode may emit one
+emits its aggregate transfer, whose width its layout use binds. A span `ldobj` emits nothing, and
+`ldobj` or `stobj` of any other type, such as a floating-point or pointer type, is rejected. No
+other raw opcode may emit one
 of these forms, except a call, whose Unsafe and runtime-model checks bind it. `volatile.`, an
 `unaligned.` alignment other than 1, 2 or 4, and `unaligned.` before an instruction that does
 not take it are rejected.

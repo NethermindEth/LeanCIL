@@ -82,7 +82,8 @@ private def layoutFreeTransfer (type : TypeExpr) : Bool :=
 
 /-- An indirect access after `previous` emits exactly the instruction its opcode, operand type
     and prefix give; an aggregate `ldobj` or `stobj` emits its aggregate transfer, whose width
-    the layout use binds; `ldind.i` may instead load a native table entry, whose signature the
+    the layout use binds; a span `ldobj` emits `.nop`, and `ldobj` or `stobj` of any other
+    operand type is refused; `ldind.i` may instead load a native table entry, whose signature the
     scalar check binds. Any other instruction emits none of the forms `indirectEmission` names,
     except a call, which `UnsafeCallsValid` binds and which never emits a 64-bit word access. -/
 def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawInstruction)
@@ -94,10 +95,11 @@ def indirectAccessMatches (previous : Option RawInstruction) (instruction : RawI
     | none, _, _ => false
     | some _, 113, .type (.aggregate ..) => (emitted matches .loadAggregate _)
     | some _, 129, .type (.aggregate ..) => (emitted matches .storeAggregate _)
-    -- A span or other operand type is bound by the feature and scalar checks themselves.
     | some _, 113, .type type | some _, 129, .type type =>
-      if !layoutFreeTransfer type then !indirectEmission emitted
-      else typedTransferMatches [] type (instruction.opcode == 113) emitted
+      if layoutFreeTransfer type then
+        typedTransferMatches [] type (instruction.opcode == 113) emitted
+      -- A span `ldobj` copies nothing; extraction refuses every other operand type.
+      else instruction.opcode == 113 && spanLocal type && (emitted matches .nop)
     | some alignment, opcode, _ =>
       (opcode == 77 && (emitted matches .managed (.tableLoad _))) ||
         (indirectEmission? alignment opcode).any (sameIndirectEmission · emitted)

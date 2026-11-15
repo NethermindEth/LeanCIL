@@ -836,6 +836,22 @@ private def block (opcode : Nat) (emitted : Instruction) (prefixes : List RawIns
   { pops := 3, pushed := none, prefixes, access := i opcode, emitted }
 private def unaligned (alignment : Int) : RawInstruction := i 65042 (.integer alignment)
 private def sbyteType : TypeExpr := .atom runtime "System.SByte"
+private def aggregateType : TypeExpr := .aggregate "S" 0
+private def enumType : TypeExpr := .enum "E" (.atom runtime "System.Int16")
+private def vectorType : TypeExpr :=
+  .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") intType
+/-- An `ldobj` (113) or `stobj` (129) of `type`, pushing the kind the scalar check gives it. -/
+private def typed (opcode : Nat) (type : TypeExpr) (emitted : Instruction) : IndirectCase :=
+  if opcode == 113 then load 113 emitted (scalarType type) (operand := .type type)
+  else store 129 emitted (operand := .type type)
+/-- A static call taking one word and returning one, the stack effect of a 64-bit load. -/
+private def loadSite : CallSite :=
+  { target := .managed 0x06000002, typeArguments := [], parameterCount := 1, hasThis := false,
+    returnsValue := true, returnType := word, parameterTypes := [word] }
+/-- A static call taking two words and returning nothing, the stack effect of a 64-bit store. -/
+private def storeSite : CallSite :=
+  { target := .managed 0x06000002, typeArguments := [], parameterCount := 2, hasThis := false,
+    returnsValue := false, parameterTypes := [word, word] }
 
 /-- The emissions extraction gives these accesses, none of which carries a metadata token. -/
 private def indirectEmitted : List IndirectCase := [
@@ -850,13 +866,16 @@ private def indirectEmitted : List IndirectCase := [
   load 74 (.loadScalar 4 false) (prefixes := [unaligned 1]),
   store 85 .store64 [unaligned 2]]
 
-/-- `ldobj` and `stobj` of primitive types, whose type tokens the test encoder cannot write. -/
+/-- `ldobj` and `stobj` of primitive, aggregate, enum and vector types, whose type tokens the
+    test encoder cannot write. -/
 private def objectEmitted : List IndirectCase := [
   load 113 (.loadScalar 4 false) (operand := .type intType),
   load 113 (.loadScalar 1 true) (operand := .type sbyteType),
   load 113 (.loadScalar 8 false) .word64 (operand := .type word),
   store 129 (.storeScalar 4) (operand := .type intType),
-  store 129 (.storeScalar 1) (operand := .type sbyteType)]
+  store 129 (.storeScalar 1) (operand := .type sbyteType),
+  typed 113 aggregateType (.loadAggregate 8), typed 129 aggregateType (.storeAggregate 8),
+  typed 113 enumType (.loadScalar 2 true), typed 113 vectorType (.memory .load128)]
 
 /-- Each accepted before the indirect access rule: a wrong width, sign, alignment or operation,
     a kind or prefix extraction refuses, and an access form at an unrelated opcode. -/
@@ -883,14 +902,24 @@ private def indirectForged : List IndirectCase := [
   -- Access forms at other opcodes.
   load 108 (.loadScalar 8 false) .other, load 107 (.loadAggregate 4) .other]
 
-/-- Wrong widths and signs of `ldobj` and `stobj` of primitive types. -/
+/-- Forged emissions at operands the test encoder cannot write: wrong widths and signs of `ldobj`
+    and `stobj`, field accesses at operand types extraction refuses, and calls emitting 64-bit
+    accesses. -/
 private def objectForged : List IndirectCase := [
   load 113 (.loadScalar 2 false) (operand := .type intType),
   load 113 (.loadScalar 4 true) (operand := .type intType),
   load 113 (.loadScalar 1 false) (operand := .type sbyteType),
   load 113 .load64 .word64 (operand := .type word),
   store 129 (.storeScalar 1) (operand := .type intType),
-  store 129 (.storeScalar 8) (operand := .type sbyteType)]
+  store 129 (.storeScalar 8) (operand := .type sbyteType),
+  typed 113 aggregateType (.loadScalar 4 false), typed 129 aggregateType (.loadAggregate 8),
+  typed 113 enumType (.loadScalar 2 false), typed 113 vectorType (.memory .load256),
+  -- Floating-point and pointer operands, which extraction refuses.
+  typed 113 (.atom runtime "System.Double") (.fieldAt 0 4 false),
+  typed 129 (.atom runtime "System.Single") (.setFieldAt 0 8),
+  typed 113 (.pointer intType) (.fieldAt 0 1 true),
+  load 40 .load64 .word64 (operand := .call loadSite),
+  store 40 .store64 (operand := .call storeSite)]
 
 /-- Every emission extraction gives passes the indirect access rule, both flow checks and, where
     the body has no token, every check of the method's evidence. -/
