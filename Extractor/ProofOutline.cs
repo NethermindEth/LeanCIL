@@ -16,6 +16,26 @@ internal static partial class ProofOutline
         ClassViews.View[] Views, string Architecture,
         ComputedLayout[] Layouts);
 
+    /// <summary>The emitted operations as the outline reads them, over frame slots: a homed argument's load, store and
+    /// address are those of its home's slot, which follows the declared locals, as the step equations state. Each
+    /// such operation still renders as the argument instruction the body holds.</summary>
+    internal static Operation[] SlotOperations(TemplateEmitter.Method emitted)
+    {
+        var frame = emitted.Frame;
+        var slots = new Dictionary<int, int>();
+        for (var position = 0; position < frame.ParameterHomes.Count; position++)
+            slots.TryAdd(frame.ParameterHomes[position].Argument, frame.Locals.Count + position);
+        int Home(int argument) => slots.TryGetValue(argument, out var slot) ? slot
+            : throw new InvalidDataException($"Argument {argument} is stored or addressed without a home");
+        return [.. emitted.Operations.Select(operation => operation switch
+        {
+            Arg load when slots.ContainsKey(load.Index) => new Local(Home(load.Index)) { Argument = load },
+            Starg store => new SetLocal(Home(store.Index)) { Argument = store },
+            Ldarga address => new LocalAddress(Home(address.Index)) { Argument = address },
+            _ => operation
+        })];
+    }
+
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ComputedLayout[],
         Dictionary<string, int>> LayoutIndices = new();
 

@@ -289,7 +289,7 @@ foreach ((string name, int width, string profile, string unavailable, string fea
     foreach ((int sourceLength, int controlLength, int pc) in new[] { (width - 1, width, 1), (width, width - 1, 3) })
     {
         claims.Add(Claim(sourceLength, controlLength, "[]", "[]",
-            $".error ⟨0, {pc}, .thrown \"System.ArgumentOutOfRangeException\"⟩"));
+            $".error ⟨0, {pc}, .thrown .argumentOutOfRange⟩"));
         proofs.Add("by rfl");
     }
     File.WriteAllText(proof, $$"""

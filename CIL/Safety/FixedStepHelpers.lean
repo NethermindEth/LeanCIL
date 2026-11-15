@@ -154,7 +154,7 @@ inductive FixedStepFamily where
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
-  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
+  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
@@ -162,8 +162,8 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
   | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
-  | .managed _ | .ldarg _ | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
-  | .tailCall ..
+  | .managed _ | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callInstance .. | .callVirtual ..
+  | .objectTest .. | .tailCall ..
   | .throw _ | .ret => .boundary
   | _ => .other
 
@@ -201,6 +201,8 @@ macro "fixed_fallback" : tactic => `(tactic| (
   | (have referenceCases := referenceStepOperation operation family
      cases referenceCases)
   | (cases operation <;> try cases family)
+  -- A hole has its own faulting arm, so the fallback arm excludes it.
+  all_goals try exact False.elim (unadmitted _ rfl)
   all_goals try exact fallback
   all_goals cases stack with
   | nil =>
@@ -290,11 +292,18 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
-    -- ones; `fixed_fallback` reads the table-offset ones and the others are cleared.
+    -- ones; `fixed_fallback` reads the hole and table-offset exclusions, the others are cleared.
+    -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
-      rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
-        mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual
-        objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue objectTested
+      rename_i addressHome localAllocation unadmitted offsetBeforeTable tableBeforeOffset addOvf
+        addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual
+        objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue
+        objectTested storeHome
+      guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
+      guard_hyp localAllocation : operation = .localloc → False
+      guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
+      guard_hyp storeHome : ∀ (index : Nat) (value : Value) (rest : List Value),
+        operation = .starg index → stack = value :: rest → False
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
@@ -304,7 +313,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         operation = .ceq → stack = Value.object right :: Value.object left :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
-        objectBranchFalse objectBranchTrue objectTested
+        objectBranchFalse objectBranchTrue objectTested storeHome addressHome localAllocation
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

@@ -56,7 +56,7 @@ theorem unrelated_rejected (memory : CIL.Safety.Memory) (type : RuntimeType)
 /-- Reading a field of the null reference throws `NullReferenceException` at the `ldfld`. -/
 theorem null_throws (memory : CIL.Safety.Memory) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
-      .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨0, 1, .thrown .nullReference⟩ := by
   cil_checked_steps [objectFieldAddress]
 
 #print axioms null_throws

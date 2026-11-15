@@ -376,6 +376,8 @@ Require(sites.Count == 2 && reaches.Count == 2 && chains.Count == 2 &&
 const string selfAdmission = "Tests/SelfAdmission.cs";
 Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
 Run(["dotnet", "run", "--file", "Tests/CanonicalMethods.cs"], streamOutput: true, progress: "Canonical methods");
+Run(["dotnet", "run", "--file", "Tests/HoleCorpus.cs", "--", "--admission-report",
+    At("artifacts/SelfAdmission/blockers.json")], streamOutput: true, progress: "Hole corpus");
 var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))
     .GetProperty("entries").EnumerateArray().ToArray();
 // Source-named methods, so the gate's stable names equal the report's.
@@ -477,10 +479,15 @@ double VirtualDispatchSeconds(int classes)
         entries = Enumerable.Range(0, VirtualCallers).Select(index =>
             new { signature = $"Callers::Call{index}(Shape,int)", profile = "scalar" })
     }));
-    var timer = System.Diagnostics.Stopwatch.StartNew();
-    Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Dispatch.dll"),
-        "--manifest", callers, "--output", Path.Combine(fixtureDirectory, "blockers.json")]);
-    return timer.Elapsed.TotalSeconds;
+    var seconds = double.MaxValue;
+    for (var sample = 0; sample < 3; sample++)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Dispatch.dll"),
+            "--manifest", callers, "--output", Path.Combine(fixtureDirectory, "blockers.json")]);
+        seconds = Math.Min(seconds, timer.Elapsed.TotalSeconds);
+    }
+    return seconds;
 }
 var fewClassesSeconds = VirtualDispatchSeconds(FewClasses);
 var manyClassesSeconds = VirtualDispatchSeconds(ManyClasses);

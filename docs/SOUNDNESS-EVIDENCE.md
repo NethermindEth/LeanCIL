@@ -111,6 +111,13 @@ the string the block states (`assembly{k}Identity` holds those bytes). A method'
 assembly's identity with its pin, lists the identity of every pinned assembly (`pinned`, equated with
 `Extracted.assemblies`) and names the identity each of its slices spells.
 
+Every byte list of this evidence (body bytes, rows, heap entries, header bytes and UTF-8 names) is written
+as `CIL.Extraction.fixedBytes count 0x...` ([ByteLiterals](../CIL/Extraction/ByteLiterals.lean)): its length
+and one hexadecimal numeral holding the bytes big-endian, with a list longer than 256 bytes written as such
+literals of at most 256 bytes joined by `++`. Elaborating a numeral costs a few allocations, where a list
+literal costs a numeral and a constructor per byte; the kernel computes the list when a check reads it,
+splitting each numeral in halves down to words of eight bytes, and the checks see the same list values.
+
 ### Names tied to bytes by equations
 
 A name the extraction states is a `String`; Lean reads the same name as heap bytes. A decision that
@@ -189,7 +196,10 @@ What `MetadataResolution` and `MetadataBinding` check:
   parameter counts and flags; a class receiver also checks the class layout facts. A row whose
   flags give it no IL body (abstract, platform invoke, internal call, or a code type other than
   IL) is refused, and so is a runtime-async row (`ImplFlags` 0x2000), whose body returns the
-  result its signature states as a task. The `RVA` and `ParamList` columns are not read.
+  result its signature states as a task. An `EXPLICITTHIS` method is refused because the model
+  requires an implicit receiver outside the parameter list. Instantiation also refuses this
+  flag, including for methods decoded directly from raw definitions.
+  The `RVA` and `ParamList` columns are not read.
 - A table or signature form the checker does not read is an explicit error: tables other than
   those the checker names, general arrays, `typedref`, pinned locals and vararg conventions,
   modifiers other than `modreq(InAttribute)` on an `in` parameter and `modreq(IsExternalInit)` on a
@@ -222,7 +232,6 @@ output can lose admission without invalidating a theorem over an already admitte
 | Closed `typeof` equality/inequality calls, reference `ceq` and comparison branches | Exact type handles, runtime helper identities, substituted types, result and selected target; all encoded targets validated and no branch into the interior | Forwarding/scoped identity ambiguities, decorated names and arbitrary runtime `System.Type` use remain unsupported. Reference comparison relies on [CoreCLR runtime type equality](https://github.com/dotnet/runtime/blob/v10.0.0/src/libraries/System.Private.CoreLib/src/System/Type.cs) and [GetTypeFromHandle](https://github.com/dotnet/runtime/blob/v10.0.0/src/coreclr/System.Private.CoreLib/src/System/Type.CoreCLR.cs). |
 | `throw new E(...)` | Allowlisted type/constructor, permitted literal/null arguments and final throw; no branch into the interior | No exception-object identity, observable constructor effects, handlers or resource-exhaustion model. |
 | `ldnull; throw` | Adjacent operand-free null load and throw, bound to `System.NullReferenceException`; no branch into the throw | No general exception-object evaluation or handlers. |
-| Single-use span receiver | Exact local uses and permitted Length/Item receiver sequence; protected entry edges | No escaping or aliased receiver addresses. |
 | In-place span constructor | Exact receiver/argument positions, constructor identity, element layout/width and capability | Unrecognized argument expressions and interior branch entries are rejected. |
 
 The [compiler corpus](COMPILER-COVERAGE.md) checks admission changes, not compiler correctness or

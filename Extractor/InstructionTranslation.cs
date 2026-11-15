@@ -106,7 +106,7 @@ internal static class InstructionTranslation
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
             return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
-        if (throws.Raises.TryGetValue(i, out string? raised)) return new Throw(raised);
+        if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
         var spans = Spans.Analyze(m, profile);
         if (spans.Constructors.TryGetValue(i, out var constructor)) return constructor;
         if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return StackOperation.Nop;
@@ -115,17 +115,12 @@ internal static class InstructionTranslation
         Operation LoadLocal(int index) => new Local(index);
         Operation StoreLocal(int index) => new SetLocal(index);
         Operation AddressLocal(int index) => new LocalAddress(index);
-        Operation LoadArgument(int index)
-        {
-            var home = parameterHomes.GetValueOrDefault(index, -1);
-            return home < 0 ? new Arg(index) :
-                new Local(m.Body.Variables.Count + home);
-        }
+        // A store or address names the argument, which must have a home; the step reaches the home's slot.
         Operation Parameter(Func<int, Operation> operation)
         {
-            var home = parameterHomes.GetValueOrDefault(MethodArguments.Index(m, (ParameterDefinition)i.Operand), -1);
-            if (home < 0) throw new InvalidDataException("Missing parameter storage");
-            return operation(m.Body.Variables.Count + home);
+            var argument = MethodArguments.Index(m, (ParameterDefinition)i.Operand);
+            if (!parameterHomes.ContainsKey(argument)) throw new InvalidDataException("Missing parameter storage");
+            return operation(argument);
         }
         int Layout(TypeReference type) => layouts?.Size(type) ??
             MetadataValidation.Layout(type, m.Module, profile.Architecture);
@@ -202,16 +197,16 @@ internal static class InstructionTranslation
             // Ordinary accesses already use the documented byte-aligned runtime model.
             // For block instructions the validated prefix selects the required alignment.
             Code.Unaligned => StackOperation.Nop,
-            Code.Localloc => new StackAlloc(m.Body.InitLocals),
+            Code.Localloc => new Localloc(),
             Code.Cpblk => MemoryOperation.Other($"(.copyBlock {MemoryPrefixes.BlockAlignment(i)})"),
             Code.Initblk => MemoryOperation.Other($"(.initBlock {MemoryPrefixes.BlockAlignment(i)})"),
-            Code.Starg or Code.Starg_S => Parameter(index => new SetLocal(index)),
+            Code.Starg or Code.Starg_S => Parameter(index => new Starg(index)),
             Code.Ldarga or Code.Ldarga_S when m.HasThis && i.Operand == m.Body.ThisParameter &&
                 ObjectTypes.Candidate(m.DeclaringType) =>
                 throw new InvalidDataException("Unsupported address of a class instance receiver: " + m.FullName),
             Code.Ldarga or Code.Ldarga_S when ObjectTypes.Rooted(((ParameterDefinition)i.Operand).ParameterType) =>
                 throw new InvalidDataException("Unsupported address of a class instance argument: " + m.FullName),
-            Code.Ldarga or Code.Ldarga_S => Parameter(index => new LocalAddress(index)),
+            Code.Ldarga or Code.Ldarga_S => Parameter(index => new Ldarga(index)),
             Code.Conv_I => new StackOperation(StackOpcode.ConvI),
             Code.Ldind_I => new StackOperation(StackOpcode.Load64),
             Code.Stind_I => new StackOperation(StackOpcode.Store64),
@@ -293,11 +288,11 @@ internal static class InstructionTranslation
             Code.Stobj => new StoreScalar(MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)),
             Code.Initobj => new AggregateTransfer(AggregateAccess.Initialize,
                 MetadataValidation.PrimitiveWidth((TypeReference)i.Operand)),
-            Code.Ldarg_0 => LoadArgument(0),
-            Code.Ldarg_1 => LoadArgument(1),
-            Code.Ldarg_2 => LoadArgument(2),
-            Code.Ldarg_3 => LoadArgument(3),
-            Code.Ldarg or Code.Ldarg_S => LoadArgument(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
+            Code.Ldarg_0 => new Arg(0),
+            Code.Ldarg_1 => new Arg(1),
+            Code.Ldarg_2 => new Arg(2),
+            Code.Ldarg_3 => new Arg(3),
+            Code.Ldarg or Code.Ldarg_S => new Arg(MethodArguments.Index(m, (ParameterDefinition)i.Operand)),
             Code.Ldloc_0 => LoadLocal(0),
             Code.Ldloc_1 => LoadLocal(1),
             Code.Ldloc_2 => LoadLocal(2),

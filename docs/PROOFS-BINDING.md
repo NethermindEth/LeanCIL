@@ -178,7 +178,7 @@ instructions stay in the region; `regionClosedCheck` decides it for a region lis
 lower)` suffixes (`inStarts`). `AgreesOn program other region` says `other` has the same methods and
 metadata, link table included, and the same instruction at every region pc; `AgreesOn.set` and
 `code_agrees_of_drop` build it for one replaced body. Then `run_congr_region` gives equal runs from any region pc, faults
-included. Masking the code outside the region with `.unsupported` makes it dead for `Embeds`, so
+included. Masking the code outside the region with holes (`.unadmitted`) makes it dead for `Embeds`, so
 `run_refines` carries the suffix run on to a body with a different prefix, for example a suffix
 after inline code to the same suffix after a helper call, one pc earlier.
 
@@ -216,11 +216,11 @@ theorem found : program[1]? = some double := by cil_body
 
 An extracted method also carries its declared signature (`declared`), the layout tables shared by
 the whole extraction (`environment`) and a call-link table (`links`), and an equality or an
-embedding compares all of them with the extraction's. A bare literal such as `double` has no
-signature, so it binds only to a method with none. Start from the extraction's method and replace
-its code with `Method.withCode`, which keeps `declared`, `environment` and the other fields, gives
-the body the links its new code implies and resets the static sites, which are keyed by pc like the
-links:
+embedding compares all of them with the extraction's. A bare literal such as `double` has the
+default signature, with no parameters, a void return and localsinit, so it binds only to a method
+declared that way. Start from the extraction's method and replace its code with `Method.withCode`,
+which keeps `declared`, `environment` and the other fields, gives the body the links its new code
+implies and resets the static sites, which are keyed by pc like the links:
 
 ```lean extracted
 import Extracted
@@ -246,7 +246,7 @@ open CIL
 
 /-- What an extraction emits: a dead block puts the call at pc 3. -/
 def emitted : Method :=
-  { code := [.ldarg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret],
+  { code := [.ldarg 0, .br 3, .unadmitted 0, .call 1 1, .ret],
     locals := [], returnsValue := true }
 
 /-- The body the proof uses; its call is at pc 2, and `withCode` gives it the link of that pc. -/
@@ -406,8 +406,9 @@ documents share. Without a PDB every message is unchanged.
 
 ### Bodies modulo dead code
 
-A profile can make the extractor emit dead `.unsupported` blocks that shift every later branch
-target, which breaks a `cil_body` equality even though reachable behaviour is unchanged. `cil_embed`
+A profile can make the extractor emit dead blocks of holes, `.unadmitted` with the raw opcode of
+each pc, that shift every later branch target. That breaks a `cil_body` equality even though
+reachable behaviour is unchanged, so `cil_embed`
 (from `CIL.Embedding.Tactic`) proves the weaker `MethodEmbeds` relation instead: every live
 instruction of the literal body appears in the extracted method at a mapped pc, with its code
 targets mapped the same way and its fallthrough kept adjacent. The literal body must carry the
@@ -431,7 +432,7 @@ open CIL (Method MethodEmbeds)
 /-- `body` as a profile-specific extraction emits it, with a dead block before the branch target. -/
 def extracted : Method := {
   code := [.ldarg 0, .brfalse 6, .ldarg 1, .ret,
-    .unsupported "Unreachable under selected profile", .ldc_i4 9, .ldarg 1, .ret]
+    .unadmitted 0, .ldc_i4 9, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem bound : MethodEmbeds [extracted] 0 body := by cil_embed
@@ -458,7 +459,7 @@ static descriptor list; `ProgramRefines.set` composes several bound methods. Nam
 transfer too: `bound.raises` transports `Raises`, `bound.holds` an `OutcomeContract.Holds` with both
 clauses (from `CIL.Safety.Embedding.Outcomes`), and `Embeds.invoke_raise` states the actual fault,
 whose pc is the one the map assigns in the throwing method. Other faults, including fuel exhaustion
-and `.unsupported`, do not transfer. The pc map is computed outside the kernel and then checked by
+and the fault of a hole, do not transfer. The pc map is computed outside the kernel and then checked by
 it, so the kernel rejects a wrong map without trusting it. A changed reachable instruction or an
 inserted live one is reported by expected and actual pc:
 
@@ -522,7 +523,7 @@ create or change any allocation.
 
 For numeric or interspersed dead locals, keep the extracted declarations and original local indices
 in the expected body and use ordinary `MethodEmbeds`. Unreachable code can still be omitted or
-marked `.unsupported`. This route preserves the identities of later parent and callee allocations
+marked as holes (`.unadmitted`). This route preserves the identities of later parent and callee allocations
 and so retains exact final memory; use it when a postcondition names fresh references.
 
 To omit numeric or interspersed declarations from the proof body, import
@@ -535,7 +536,8 @@ initializer and this proof before the remaining declarations. It admits valid sc
 aggregate values, null managed slots and unmodeled values. Private initialized
 homes are written outside the entire mapped allocation image, preserving caller bytes and
 permissions. `MethodRenaming` checks the target code's relocated local operands; method indices,
-call targets, profiles, return metadata and static sites stay exact. `ProgramRenaming` supplies this
+call targets, profiles, return metadata, layout environments and static sites stay exact.
+`ProgramRenaming` supplies this
 correspondence for every source method. The target is the extraction with the additional dead
 declarations.
 
@@ -555,7 +557,7 @@ reference, while a field holding a fresh object may name another identity in the
 initial memory to the target's final memory. `ProgramRenaming.raises` transfers a named exception
 and additionally requires valid initial arguments. These theorems use the proved complete
 dispatcher internally. The allocation relation extends through local setup, nested calls,
-constructors, static allocation and `stackAlloc`; frame ownership and expiry remain checked.
+constructors, static allocation and `localloc`; frame ownership and expiry remain checked.
 
 `MethodContract.Holds.of_allocationRenaming` transfers the original complete contract, including its
 precondition and footprint. Supply proofs that the precondition establishes well-formed memory,
@@ -623,7 +625,7 @@ rejected rather than remapped. Imported callee slots are not supported in templa
 
 A body written once for every profile takes its feature flags and callee indices as parameters and
 keeps each feature-dependent instruction as an `if`, padding the other profile's side with
-`.unsupported` so every profile has the same pcs. `cil_instruction_equations` (from
+a hole (`.unadmitted`) so every profile has the same pcs. `cil_instruction_equations` (from
 `CIL.InstructionEquations`) states one `@[cil_code ↓]` equation per pc for such a body, the same
 `code[pc]? = some op` equations it states for each method of an extraction, so a lookup rewrites by
 one equation instead of unfolding the body:
@@ -632,7 +634,7 @@ one equation instead of unfolding the body:
 import CIL.InstructionEquations
 import CIL.Safety.SymbolicExecution
 
-abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected profile"
+abbrev unreachable : CIL.Instruction := .unadmitted 0
 
 def body (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
@@ -658,6 +660,30 @@ proves each equation from the suffix that starts its block, so the equations cos
 the body's length: about 6,400 heartbeats each from 250 to 4,000 instructions, as
 [instruction lookups](performance/InstructionLookups.md) records.
 
+### Field and value shapes
+
+An extraction states once how its methods resolve each distinct operand of a reachable `ldfld`,
+`ldflda` or `stfld`, and of a reachable `ldobj`, `stobj`, `initobj`, `cpobj` or `sizeof`.
+`Extracted.fieldRef{k}` holds a field operand as a `CIL.Extraction.FieldRef` and
+`Extracted.valueType{k}` a type operand. `cil_field_shape` and `cil_value_shape` (from
+`CIL.Safety.ResolutionFacts`) declare `Extracted.fieldRef{k}_shape` and
+`Extracted.valueType{k}_shape`, which give `CIL.Method.fieldShape` or `CIL.Method.valueShape` of
+the operand for every method whose environment is `Extracted.environment`. Each fact costs one
+kernel check, however many sites and methods use the operand, and the `cil_code` simprocs
+`reduceFieldShape` and `reduceValueShape` read a method's shape of the operand from it.
+`CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
+checked layout entry when the operand holds the field's declared type, and a class instance
+field to the model slot of its index; `valueShape` gives a vector, including a floating-point
+one, its width.
+
+The first fact of an environment names suffixes of its layout lists,
+`Extracted.environment_rawLayoutSuffix{start}` and `Extracted.environment_layoutSuffix{start}`
+with their `_placed` lemmas, as `cil_instruction_equations` does for code. A struct field, a
+class field holding an array of a struct and a struct type operand are then checked from their
+layout entries alone, read from the suffix that starts the entry's block, so the facts of an
+extraction cost time linear in its layouts and distinct operands. The compiled resolver proposes
+each shape and the kernel checks it; a fact that misstates a shape fails to elaborate.
+
 ### Methods defined from their decoder
 
 `cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
@@ -672,9 +698,10 @@ then checks `name_decoded : decoder = some name` by reduction, and the `@[cil_co
 does not reduce to the evaluated method are errors, so a file builds only when the kernel confirms
 what compiled code computed.
 
-An extraction defines a method this way when `Method.ofRaw?` decodes all of it: every opcode is
-one `Instruction.ofRaw?` reads, every instruction is reachable under the profile, and no parameter
-has a home. Its `Extracted.lean` then states the method as
+The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs and
+every pc is reachable under the profile; a method with a pc the reachability certificate rules out
+keeps its literal, whose `.unsupported` padding at that pc the feature check requires. Its
+`Extracted.lean` then states the method as
 
 ```text
 cil_decoded_method method0 := Method.ofRaw? profile environment method0Original method0TypeArgumentsRaw

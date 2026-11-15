@@ -10,6 +10,10 @@
 
 using System.Text.Json;
 
+const double AllowedKernelGrowth = 1.2;
+CheckDeclaredSignatureScaling();
+if (args.Contains("--declared-only", StringComparer.Ordinal)) return;
+
 BuildLeanTestLibraries("Generic owner index scaling library", "Tests.GenericOwnerScaling");
 
 // Real compiled C# call graph: each method fits the ordinary budget, while one monolithic elaborator `decide`
@@ -71,7 +75,6 @@ Console.WriteLine("PASS six-method compiled fixture: the elaborator refuses the 
 // The kernel decides the monolithic certificate. Its heartbeats and peak memory per added method of the call graph
 // may not grow with the number of methods: superlinear growth would make the check unusable on large extractions
 // even though only the kernel may run it. Measured: 0.96 in heartbeats, 0.92 in memory.
-const double AllowedKernelGrowth = 1.2;
 (long Heartbeats, double Gigabytes) KernelCost(int methodCount)
 {
     var work = Path.Combine(directory, "Kernel" + methodCount);
@@ -290,4 +293,63 @@ void CheckLayoutTableScaling(string extraction)
         Console.WriteLine($"PASS {rows[row].Name} costs {measured}");
     }
     Console.WriteLine($"PASS {large} nested and {large} generic layouts check within 8 GiB");
+}
+
+// Only the emitted declaration is measured; fixture construction and other validators are outside the count.
+void CheckDeclaredSignatureScaling()
+{
+    int[] parameterCounts = [1, 4, 16];
+    var work = At("artifacts/TranslationScaling/Declared");
+    var assemblySource = Path.Combine(work, "Assembly");
+    Directory.CreateDirectory(assemblySource);
+    File.WriteAllText(Path.Combine(assemblySource, "Declared.csproj"), """
+        <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net11.0</TargetFramework>
+        <Optimize>true</Optimize></PropertyGroup></Project>
+        """);
+    var declarations = parameterCounts.Select(count =>
+        $"public static ulong M{count}(" + string.Join(", ", Enumerable.Range(0, count)
+            .Select(index => $"ulong p{index}")) + ") => p0;");
+    File.WriteAllText(Path.Combine(assemblySource, "Declared.cs"),
+        "public static class Declared { " + string.Join('\n', declarations) + " }");
+    Run(["dotnet", "build", Path.Combine(assemblySource, "Declared.csproj"), "-c", "Release"]);
+    var costs = new List<long>();
+    foreach (var count in parameterCounts)
+    {
+        var extraction = Path.Combine(work, "Parameters" + count);
+        var entry = $"Declared::M{count}(" + string.Join(',', Enumerable.Repeat("ulong", count)) + ")";
+        Run(Extract("extract", Path.Combine(assemblySource, "bin/Declared.dll"), "Declared", entry, extraction));
+        const string theorem = "method0_declared_validated";
+        var narrowed = NarrowEvidence(File.ReadAllText(Path.Combine(extraction, "Extracted.lean")), theorem);
+        var declaration = narrowed.Split('\n').Single(line => line.StartsWith($"theorem {theorem} :",
+            StringComparison.Ordinal));
+        var measuredDeclaration = $$"""
+            open Lean Elab Command
+            /-- Elaboration and kernel checking of one declared signature. -/
+            elab "#declared_cost " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              liftIO <| IO.println (after - before)
+            #declared_cost {{declaration}}
+            """;
+        var measured = narrowed.Replace(declaration, measuredDeclaration,
+            StringComparison.Ordinal) + $"\n#print axioms Extracted.{theorem}\n";
+        var path = Path.Combine(extraction, "DeclaredCost.lean");
+        File.WriteAllText(path, measured);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var counts = HeartbeatCount().Matches(output).Select(match =>
+            long.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        if (counts.Length != 1 || counts[0] <= 0 ||
+            !output.Contains($"'Extracted.{theorem}' does not depend on any axioms", StringComparison.Ordinal))
+            throw new InvalidOperationException($"Unchecked declared signature with {count} parameters:\n{output}");
+        var cost = counts[0];
+        costs.Add(cost);
+        Console.WriteLine($"Declared signature with {count} parameters: {cost} heartbeats per method");
+    }
+    var growth = (double)costs.Max() / costs[0];
+    if (growth > AllowedKernelGrowth)
+        throw new InvalidOperationException(FormattableString.Invariant(
+            $"Declared signature cost per method grows {growth:F2} times; the limit is {AllowedKernelGrowth}."));
+    Console.WriteLine(FormattableString.Invariant(
+        $"PASS declared signature cost per method grows {growth:F2} times over 1, 4 and 16 parameters"));
 }

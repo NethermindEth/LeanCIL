@@ -165,6 +165,63 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         _ => type.FullName
     };
 
+    /// <summary>
+    /// The declaring type, model index, held type and static flag of a field operand, which the raw operand and the
+    /// typed field reference both state.
+    /// </summary>
+    (string Owner, int Index, string Held, bool IsStatic) FieldOperand(Instruction instruction, FieldReference field)
+    {
+        var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
+        var index = 0;
+        // A field signature's `!n` is the declaring type's parameter: the declaring instance's argument.
+        var fieldType = field.FieldType.ContainsGenericParameter &&
+            field.DeclaringType is GenericInstanceType instance
+            ? GenericStructs.Substitute((field.Resolve() ?? throw new InvalidDataException(
+                "Unresolved generic field: " + field.FullName)).FieldType, instance) : field.FieldType;
+        if (field.DeclaringType.Scope is ModuleDefinition ||
+            PinnedAssemblies.Active?.ModuleOf(field.DeclaringType) is not null)
+        {
+            var resolved = field.Resolve();
+            index = layouts.Metadata.FieldIndex(field.DeclaringType, resolved, isStatic);
+            if (!isStatic) fieldType = layouts.Metadata.Fields(field.DeclaringType)[index].Type;
+            // A class field's index counts its bases' fields first, as its model slot does.
+            if (!isStatic && ObjectTypes.Is(field.DeclaringType))
+                index = ObjectTypes.FieldIndex(field.DeclaringType, resolved);
+        }
+        else if (!isStatic && ValueTuples.Is(field.DeclaringType))
+        {
+            // Tuple fields are typed by the instance's arguments, not the definition's T1/T2.
+            var fields = layouts.Metadata.Fields(field.DeclaringType);
+            index = layouts.Metadata.FieldIndex(field.DeclaringType, field.Resolve());
+            if (index < 0) throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
+            fieldType = fields[index].Type;
+        }
+        // A class field of a type outside the model holds an object reference like an admitted one.
+        var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType)
+            ? ObjectType(fieldType) : Type(fieldType);
+        return (Type(field.DeclaringType), index, heldType, isStatic);
+    }
+
+    /// <summary>
+    /// The typed reference of the field operand of <paramref name="instruction"/> in <paramref name="method"/>, the
+    /// owner, index and held type its raw operand states and its name.
+    /// </summary>
+    internal FieldRef FieldReferenceOf(MethodDefinition method, Instruction instruction)
+    {
+        methodParameterCount = method.GenericParameters.Count;
+        var field = (FieldReference)instruction.Operand;
+        var (owner, index, held, _) = FieldOperand(instruction, field);
+        return new(owner, index, held, MetadataName.OfText(field.Name));
+    }
+
+    /// <summary>The type operand of <paramref name="instruction"/> in <paramref name="method"/>, as its raw operand
+    /// states it.</summary>
+    internal string TypeOperandOf(MethodDefinition method, Instruction instruction)
+    {
+        methodParameterCount = method.GenericParameters.Count;
+        return Type((TypeReference)instruction.Operand);
+    }
+
     string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
         Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)
     {
@@ -189,35 +246,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     $"{List(site.Parameters.Select(parameter => Type(parameter.ParameterType)))} "+
                     $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
             case FieldReference field:
-                var isStatic = instruction.OpCode.Code is Code.Ldsfld or Code.Stsfld or Code.Ldsflda or Code.Ldtoken;
-                var index = 0;
-                // A field signature's `!n` is the declaring type's parameter: the declaring instance's argument.
-                var fieldType = field.FieldType.ContainsGenericParameter &&
-                    field.DeclaringType is GenericInstanceType instance
-                    ? GenericStructs.Substitute((field.Resolve() ?? throw new InvalidDataException(
-                        "Unresolved generic field: " + field.FullName)).FieldType, instance) : field.FieldType;
-                if (field.DeclaringType.Scope is ModuleDefinition ||
-                    PinnedAssemblies.Active?.ModuleOf(field.DeclaringType) is not null)
-                {
-                    var resolved = field.Resolve();
-                    index = layouts.Metadata.FieldIndex(field.DeclaringType, resolved, isStatic);
-                    if (!isStatic) fieldType = layouts.Metadata.Fields(field.DeclaringType)[index].Type;
-                    // A class field's index counts its bases' fields first, as its model slot does.
-                    if (!isStatic && ObjectTypes.Is(field.DeclaringType))
-                        index = ObjectTypes.FieldIndex(field.DeclaringType, resolved);
-                }
-                else if (!isStatic && ValueTuples.Is(field.DeclaringType))
-                {
-                    // Tuple fields are typed by the instance's arguments, not the definition's T1/T2.
-                    var fields = layouts.Metadata.Fields(field.DeclaringType);
-                    index = layouts.Metadata.FieldIndex(field.DeclaringType, field.Resolve());
-                    if (index < 0) throw new InvalidDataException("Unresolved tuple field: " + field.FullName);
-                    fieldType = fields[index].Type;
-                }
-                // A class field of a type outside the model holds an object reference like an admitted one.
-                var heldType = !isStatic && ObjectTypes.Is(field.DeclaringType) && ObjectTypes.Opaque(fieldType)
-                    ? ObjectType(fieldType) : Type(fieldType);
-                return $".field ({Type(field.DeclaringType)}) {index} ({heldType}) {Bool(isStatic)}";
+                var (owner, index, held, isStatic) = FieldOperand(instruction, field);
+                return $".field ({owner}) {index} ({held}) {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
             case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";
@@ -271,7 +301,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             if (instruction.Offset != selected.Offset || instruction.OpCode.Value != selected.OpCode.Value)
                 throw new InvalidDataException("Specialization instruction mapping changed an offset or opcode.");
             var operand = Operand(method, instructions, instruction, selected, reachable);
-            return $"{{ offset := {instruction.Offset}, opcode := {(ushort)instruction.OpCode.Value}, " +
+            return $"{{ offset := {instruction.Offset}, opcode := {Unadmitted.RawOpcode(instruction)}, " +
                 $"operand := {operand} }}";
         });
         var owner = Quote(LayoutEvidence.Identity(method.DeclaringType));
@@ -309,13 +339,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             Type(InitAccessors.Return(method.ReturnType)));
     }
 
-    /// <summary>The method's DeclaredSignature: the receiver kind and types of method{n}Closed.</summary>
+    /// <summary>
+    /// The method's DeclaredSignature: the receiver kind, types and localsinit flag of method{n}Closed. Fields at
+    /// their default are omitted.
+    /// </summary>
     internal string Declared(MethodDefinition method)
     {
         var receiver = method.HasThis
             ? $"receiver := some .{(ObjectReceiver(method) ? "object" : "reference")}, " : "";
         var (parameters, returnType) = SignatureTypes(method);
-        return $"{{ {receiver}parameters := {parameters}, returnType := {returnType} }}";
+        var initLocals = method.Body.InitLocals ? "" : ", initLocals := false";
+        return $"{{ {receiver}parameters := {parameters}, returnType := {returnType}{initLocals} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,
@@ -348,16 +382,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     /// <summary>
     /// The opcodes Lean's `Instruction.ofRaw?` decodes for some operand, the set `Instruction.valueOpcode` holds;
-    /// Tests/DecodedOpcodes.cs compares the two. The table goes when every opcode decodes.
+    /// `Instruction.ofRaw` writes a hole for every other one. Tests/DecodedOpcodes.cs compares the two.
     /// </summary>
     internal static readonly FrozenSet<Code> DecodedOpcodes = new[]
     {
         // Stack shuffling, return, arguments and locals.
         Code.Nop, Code.Dup, Code.Pop, Code.Ret,
         Code.Ldarg_0, Code.Ldarg_1, Code.Ldarg_2, Code.Ldarg_3, Code.Ldarg_S, Code.Ldarg,
+        Code.Ldarga_S, Code.Ldarga, Code.Starg_S, Code.Starg,
         Code.Ldloc_0, Code.Ldloc_1, Code.Ldloc_2, Code.Ldloc_3, Code.Ldloc_S, Code.Ldloc,
         Code.Stloc_0, Code.Stloc_1, Code.Stloc_2, Code.Stloc_3, Code.Stloc_S, Code.Stloc,
-        Code.Ldloca_S, Code.Ldloca,
+        Code.Ldloca_S, Code.Ldloca, Code.Localloc,
         // Constants.
         Code.Ldc_I4_M1, Code.Ldc_I4_0, Code.Ldc_I4_1, Code.Ldc_I4_2, Code.Ldc_I4_3, Code.Ldc_I4_4, Code.Ldc_I4_5,
         Code.Ldc_I4_6, Code.Ldc_I4_7, Code.Ldc_I4_8, Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8,
@@ -381,13 +416,13 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }.ToFrozenSet();
 
     /// <summary>
-    /// Whether Lean's `Method.ofRaw?` decodes all of `method`: every opcode is in <see cref="DecodedOpcodes"/>,
-    /// every pc is in the reachability certificate and no parameter has a home. A wrong answer fails the build at
+    /// Whether the extraction defines `method` from its decoder: `Method.ofRaw?` writes no hole at any pc (every
+    /// opcode is in <see cref="DecodedOpcodes"/>) and every pc is in the reachability certificate, since a decoded
+    /// instruction at a pc the certificate rules out fails the feature check. A wrong answer fails the build at
     /// the method's `cil_decoded_method` definition.
     /// </summary>
-    internal static bool DecodesInFull(MethodDefinition method, IReadOnlySet<Instruction> reachable,
-        IReadOnlyCollection<int> parameterHomes) =>
-        parameterHomes.Count == 0 && method.Body.Instructions.All(instruction =>
+    internal static bool DecodesInFull(MethodDefinition method, IReadOnlySet<Instruction> reachable) =>
+        method.Body.Instructions.All(instruction =>
             reachable.Contains(instruction) && DecodedOpcodes.Contains(instruction.OpCode.Code));
 
     static readonly HashSet<Instruction> EmptySet = [];
@@ -437,7 +472,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Each closed instantiation carries its own bytes and metadata slice, built from the open definition and the
         // assembly, so a method's component names no other method and does not depend on which instantiations the
         // extraction holds or in which order.
-        var data = List(bytes.Select(value => value.ToString(CultureInfo.InvariantCulture)));
+        var data = MetadataSlices.Bytes(bytes);
         var classOwner = original.HasThis && ObjectTypes.Is(original.DeclaringType);
         var (rows, tables, assemblies) = (metadata ?? throw new InvalidOperationException(
             "Method evidence requires the pinned assemblies.")).Method(original,
@@ -520,7 +555,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             lean.AppendLine($"def assembly{index}Metadata : Extraction.AssemblyMetadata := " +
                 slices.AssemblyBlock(module));
             lean.AppendLine($"def assembly{index}Identity : List Nat := " +
-                MetadataSlices.Bytes(System.Text.Encoding.UTF8.GetBytes(identity)));
+                MetadataSlices.Bytes(Encoding.UTF8.GetBytes(identity)));
             // The assembly's header bytes decode to the stated header, its bytes spell this identity, and it is the
             // string the block states: one proof for every method of the assembly.
             lean.AppendLine($"theorem assembly{index}_identified : Extraction.AssemblyIdentified " +

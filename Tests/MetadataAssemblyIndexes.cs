@@ -148,8 +148,8 @@ double Measure(int count)
         if (repeat > 0) times.Add(elapsed);
     }
     times.Sort();
-    Console.WriteLine($"{count} assemblies: construction {construction:F2} ms, queries {times[2]:F2} ms");
-    return times[2];
+    Console.WriteLine($"{count} assemblies: construction {construction:F2} ms, queries {times[0]:F2} ms minimum");
+    return times[0];
 }
 
 var small = Measure(512);

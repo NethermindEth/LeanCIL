@@ -4,11 +4,14 @@ import CIL.Extraction.Generics
 # Value opcodes decoded from raw instructions
 
 `Instruction.ofRaw?` gives the one instruction a raw value-family instruction denotes: stack
-shuffling, return, constants, locals, branches, integer arithmetic, conversions and comparisons,
-with every short and macro form folded into its constructor. `valueEncodingMatches` accepts an
-emitted instruction exactly when it is that decoded instruction, and `Instruction.valueOpcode` is
-the set of opcodes `ofRaw?` decodes for some operand. Instantiation leaves every decoded value
-unchanged (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original.
+shuffling, return, constants, arguments, locals, branches, integer arithmetic, conversions,
+comparisons and dynamic frame storage, with every short and macro form folded into its constructor.
+`valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded instruction,
+and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand.
+Instantiation leaves every decoded value unchanged (`Instruction.ofRaw?_substitute`), so a closed
+generic body decodes like its original. `Instruction.ofRaw` is the total decoding: it writes a
+hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?` admits nothing
+(`Instruction.ofRaw_eq_unadmitted_iff`).
 -/
 
 namespace CIL.Extraction
@@ -85,18 +88,19 @@ open Extraction
 
 /-- The opcodes `Instruction.ofRaw?` decodes for some operand. -/
 def Instruction.valueOpcode (opcode : Nat) : Bool :=
-  opcode == 0 || (2 <= opcode && opcode <= 14) || (17 <= opcode && opcode <= 19) ||
+  opcode == 0 || (2 <= opcode && opcode <= 19) ||
     (21 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
     (42 <= opcode && opcode <= 69) || (88 <= opcode && opcode <= 106) ||
     opcode == 109 || opcode == 110 || (130 <= opcode && opcode <= 139) ||
     (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 224 ||
-    (65025 <= opcode && opcode <= 65029) || opcode == 65033 ||
-    (65036 <= opcode && opcode <= 65038)
+    (65025 <= opcode && opcode <= 65029) || (65033 <= opcode && opcode <= 65039)
 
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. Any other opcode, an operand kind that
-    instantiation rewrites, or a malformed or out-of-range operand gives `none`. -/
+    instantiation rewrites, or a malformed or out-of-range operand gives `none`. A hole is never
+    a decoding, so `Instruction.ofRaw` can write one where this admits nothing. -/
 def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
+  Option.filter (fun decoded => !(decoded matches .unadmitted _)) <|
   if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
   match raw.opcode, raw.operand with
   -- Stack shuffling and return.
@@ -114,11 +118,15 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
     if -(2^63) <= value && value < 2^63 then some (.ldc_i8 (BitVec.ofInt 64 value)) else none
   | 22, .none | 23, .none | 24, .none | 25, .none | 26, .none | 27, .none | 28, .none
   | 29, .none | 30, .none => some (.ldc_i4 (BitVec.ofNat 32 (raw.opcode - 22)))
-  -- Argument loads; `ldarga` and `starg` (15, 16, 65034, 65035) decode to nothing.
+  -- Argument loads, addresses and stores; an index wider than its form encodes gives `none`.
   | 2, .none => some (.ldarg 0) | 3, .none => some (.ldarg 1)
   | 4, .none => some (.ldarg 2) | 5, .none => some (.ldarg 3)
   | 14, .argument index | 65033, .argument index =>
     if index < operandIndexBound raw.opcode then some (.ldarg index) else none
+  | 15, .argument index | 65034, .argument index =>
+    if index < operandIndexBound raw.opcode then some (.ldarga index) else none
+  | 16, .argument index | 65035, .argument index =>
+    if index < operandIndexBound raw.opcode then some (.starg index) else none
   -- Locals; `encodedLocal` validates the operand of every form and its width.
   | 6, _ | 7, _ | 8, _ | 9, _ | 17, _ | 65036, _ => Instruction.ldloc <$> encodedLocal raw
   | 10, _ | 11, _ | 12, _ | 13, _ | 19, _ | 65038, _ => Instruction.stloc <$> encodedLocal raw
@@ -170,6 +178,8 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   -- Comparisons.
   | 65025, .none => some .ceq | 65026, .none => some .cgt | 65027, .none => some .cgt_un
   | 65028, .none => some .clt | 65029, .none => some .clt_un
+  -- Dynamic frame storage; whether it is zeroed is the method's localsinit flag, not an operand.
+  | 65039, .none => some .localloc
   | _, _ => none
 
 /-- `ofRaw?` decodes only the opcodes of `Instruction.valueOpcode`. -/
@@ -185,6 +195,62 @@ theorem Instruction.valueOpcode_of_ofRaw? {raw : RawInstruction} {instruction : 
 
 #print axioms Instruction.valueOpcode_of_ofRaw?
 
+/-- No raw instruction decodes to a hole: a hole is what `Instruction.ofRaw` writes where
+    `ofRaw?` admits nothing. -/
+theorem Instruction.ofRaw?_ne_unadmitted (raw : RawInstruction) (opcode : Nat) :
+    Instruction.ofRaw? raw ≠ some (.unadmitted opcode) := fun decoded =>
+  Bool.false_ne_true (Option.filter_eq_some_iff.mp decoded).2
+
+#print axioms Instruction.ofRaw?_ne_unadmitted
+
+/-- The instruction a raw instruction denotes: its value decoding where `ofRaw?` admits one,
+    and otherwise a hole carrying the raw opcode, which faults when stepped. -/
+def Instruction.ofRaw (raw : RawInstruction) : Instruction :=
+  (Instruction.ofRaw? raw).getD (.unadmitted raw.opcode)
+
+/-- Decoding gives a hole exactly when `ofRaw?` admits nothing, and the hole carries the raw
+    opcode; an instruction `ofRaw?` admits is never a hole. -/
+theorem Instruction.ofRaw_eq_unadmitted_iff (raw : RawInstruction) (opcode : Nat) :
+    Instruction.ofRaw raw = .unadmitted opcode ↔
+      Instruction.ofRaw? raw = none ∧ opcode = raw.opcode := by
+  unfold Instruction.ofRaw
+  cases decoded : Instruction.ofRaw? raw with
+  | none =>
+    simp only [Option.getD_none, Instruction.unadmitted.injEq, true_and]
+    exact eq_comm
+  | some instruction =>
+    simp only [Option.getD_some, reduceCtorEq, false_and, iff_false]
+    intro hole
+    subst hole
+    exact Instruction.ofRaw?_ne_unadmitted raw opcode decoded
+
+#print axioms Instruction.ofRaw_eq_unadmitted_iff
+
+/-- An instruction `ofRaw?` admits decodes to itself. -/
+theorem Instruction.ofRaw_of_ofRaw? {raw : RawInstruction} {instruction : Instruction}
+    (decoded : Instruction.ofRaw? raw = some instruction) :
+    Instruction.ofRaw raw = instruction := by
+  rw [Instruction.ofRaw, decoded, Option.getD_some]
+
+#print axioms Instruction.ofRaw_of_ofRaw?
+
+/-- An opcode outside the value opcodes decodes to a hole carrying it. -/
+theorem Instruction.ofRaw_of_not_valueOpcode {raw : RawInstruction}
+    (outside : Instruction.valueOpcode raw.opcode = false) :
+    Instruction.ofRaw raw = .unadmitted raw.opcode := by
+  cases decoded : Instruction.ofRaw? raw with
+  | none => rw [Instruction.ofRaw, decoded, Option.getD_none]
+  | some _ =>
+    rw [Instruction.valueOpcode_of_ofRaw? decoded] at outside
+    cases outside
+
+#print axioms Instruction.ofRaw_of_not_valueOpcode
+
+/-- The instruction at `pc` of raw code as `Instruction.ofRaw` decodes it; `none` past the end
+    of the code. -/
+def Instruction.ofRawAt (code : List RawInstruction) (pc : Nat) : Option Instruction :=
+  code[pc]?.map Instruction.ofRaw
+
 /-- Whether `emitted` is the instruction `decoded`, operands included. Defined only for the
     value constructors `ofRaw?` produces; every other `decoded` gives `false`. -/
 def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
@@ -198,6 +264,8 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
   | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
   | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
+  | .ldarga expected => match emitted with | .ldarga actual => expected == actual | _ => false
+  | .starg expected => match emitted with | .starg actual => expected == actual | _ => false
   | .ldloc expected => match emitted with | .ldloc actual => expected == actual | _ => false
   | .stloc expected => match emitted with | .stloc actual => expected == actual | _ => false
   | .ldloca expected => match emitted with | .ldloca actual => expected == actual | _ => false
@@ -258,6 +326,8 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .cgt_un => (emitted matches .cgt_un)
   | .clt => (emitted matches .clt)
   | .clt_un => (emitted matches .clt_un)
+  -- Dynamic frame storage.
+  | .localloc => (emitted matches .localloc)
   -- Constructors outside the value family are never a decoded value.
   | _ => false
 

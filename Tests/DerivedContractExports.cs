@@ -143,8 +143,8 @@ Console.WriteLine("PASS exact internal contracts derive the published MethodCont
 // stands for all four kinds; each proof module's Rejected section refutes every kind on the actual extraction.
 string certified = Sha(sidecar);
 string publicText = File.ReadAllText(interfaceSource);
-string renamed = publicText.Replace("else some \"System.ArgumentOutOfRangeException\"",
-    "else some \"System.ArgumentException\"", StringComparison.Ordinal);
+string renamed = publicText.Replace("else some .argumentOutOfRange",
+    "else some .argument", StringComparison.Ordinal);
 if (renamed == publicText)
     throw new InvalidOperationException("Precondition: the public contract must name its exception.");
 File.WriteAllText(interfaceSource, renamed);

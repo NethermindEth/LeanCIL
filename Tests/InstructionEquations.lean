@@ -14,7 +14,7 @@ proved once over the flags is then bound to concrete profiles without restating 
 namespace Tests.InstructionEquations
 
 /-- The instruction a profile extraction emits for code its feature tests exclude. -/
-abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected profile"
+abbrev unreachable : CIL.Instruction := .unadmitted 0
 
 /-- `if (Avx2.IsSupported) return Callee(a, b); return Sse42.IsSupported ? b : a;` with the
     paths of the other profile padded as `unreachable`, so every profile has the same pcs. -/
@@ -163,7 +163,7 @@ def lengthDependsBody (avx2 : Bool) : CIL.Method :=
 error: cil_instruction_equations: the instruction at pc 0 of
 Tests.InstructionEquations.lengthDependsBody is not determined by its parameters, or the body
 does not unfold; state each feature-dependent instruction as an `if` on the instruction,
-padding the shorter side with `.unsupported`, so every profile has the same pcs
+padding the shorter side with `.unadmitted`, so every profile has the same pcs
 -/
 #guard_msgs (whitespace := lax) in cil_instruction_equations lengthDependsBody
 
@@ -176,7 +176,7 @@ def tailDependsBody (avx2 : Bool) : CIL.Method :=
 error: cil_instruction_equations: the instruction at pc 1 of
 Tests.InstructionEquations.tailDependsBody is not determined by its parameters, or the body
 does not unfold; state each feature-dependent instruction as an `if` on the instruction,
-padding the shorter side with `.unsupported`, so every profile has the same pcs
+padding the shorter side with `.unadmitted`, so every profile has the same pcs
 -/
 #guard_msgs (whitespace := lax) in cil_instruction_equations tailDependsBody
 /-- error: Unknown identifier `tailDependsBody_instruction0` -/

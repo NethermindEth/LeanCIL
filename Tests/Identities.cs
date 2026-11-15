@@ -26,6 +26,11 @@ using Srm = System.Reflection.Metadata;
 // Every identity of the corpus is rendered with ToLean(), elaborated by Lean, and shown by CIL/Identity.lean's
 // display; that text must equal ToDisplay(). Each record is first checked against the raw metadata rows it reads.
 var clock = Stopwatch.StartNew();
+if (args.Contains("--exception-types-only", StringComparer.Ordinal))
+{
+    CheckExceptionTypes();
+    return;
+}
 if (args.Contains("--assembly-cache-only", StringComparer.Ordinal))
 {
     CheckAssemblyCache();
@@ -51,6 +56,7 @@ if (args.Contains("--code-cost", StringComparer.Ordinal))
     CheckCodeCost();
     return;
 }
+if (args.Length == 0) CheckExceptionTypes();
 CheckScaling();
 CheckCodeCost();
 if (args.Contains("--scaling-only", StringComparer.Ordinal)) return;
@@ -203,6 +209,48 @@ Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
 
 // A rendered field reference elaborates to the structure holding the record's owner, index, type and name bytes;
 // a swapped field or a name rendered from other bytes fails to elaborate or fails its guard.
+static void CheckExceptionTypes()
+{
+    var directory = At("artifacts/Identities");
+    Directory.CreateDirectory(directory);
+    var path = Path.Combine(directory, "ExceptionTypes.lean");
+    var members = ExceptionTypeText.All;
+    string enumeration = string.Join(", ", members.Select(member => member.ToLean()));
+    string displays = string.Join("\n", members.Select(member =>
+        $"#guard CIL.ExceptionType.ownerName {member.ToLean()} == \"{member.FullName()}\""));
+    File.WriteAllText(path, $$"""
+        import CIL.ExceptionType
+        example : CIL.ExceptionType.all = [{{enumeration}}] := rfl
+        {{displays}}
+        """);
+    Run(["lake", "env", "lean", path], cwd: At("."));
+    using var module = ModuleDefinition.CreateModule("ExceptionConstructors", ModuleKind.Dll);
+    var scope = new AssemblyNameReference("System.Runtime", new Version(11, 0, 0, 0))
+    {
+        PublicKeyToken = [0xb0, 0x3f, 0x5f, 0x7f, 0x11, 0xd5, 0x0a, 0x3a]
+    };
+    (string Name, ExceptionType? Raised)[] constructors =
+    [
+        ("InvalidOperationException", ExceptionType.InvalidOperation),
+        ("PlatformNotSupportedException", null),
+        ("InvalidCastException", null)
+    ];
+    foreach (var (name, raised) in constructors)
+    {
+        var owner = new TypeReference("System", name, module, scope);
+        var constructor = new MethodReference(".ctor", module.TypeSystem.Void, owner) { HasThis = true };
+        var method = new MethodDefinition(name, MethodAttributes.Public | MethodAttributes.Static,
+            module.TypeSystem.Void);
+        var throwing = Instruction.Create(OpCodes.Throw);
+        method.Body.Instructions.Add(Instruction.Create(OpCodes.Newobj, constructor));
+        method.Body.Instructions.Add(throwing);
+        var analysis = Throws.Analyze(method);
+        ExceptionType? actual = analysis.Raises.TryGetValue(throwing, out var result) ? result : null;
+        if (actual != raised) throw new InvalidOperationException("Unexpected exception admission: " + name);
+    }
+    Console.WriteLine("PASS exception members, display names and constructor admission");
+}
+
 static void CheckFieldReferences()
 {
     const string scope = "\"T, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null\"";

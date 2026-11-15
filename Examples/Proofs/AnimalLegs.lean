@@ -53,7 +53,7 @@ theorem bird_legs (memory : CIL.Safety.Memory) (animal : Reference)
 /-- A null receiver throws `NullReferenceException` at the `callvirt`, before any body runs. -/
 theorem null_throws (memory : CIL.Safety.Memory) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
-      .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨0, 1, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms null_throws

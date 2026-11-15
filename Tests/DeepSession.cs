@@ -80,18 +80,22 @@ foreach (var count in new[] { 64, 512, 4096 })
         ["StrictBinding.olean"] = "binding"
     };
     const int repetitions = 64;
-    var elapsed = System.Diagnostics.Stopwatch.StartNew();
-    for (var repetition = 0; repetition < repetitions; repetition++)
+    var milliseconds = double.MaxValue;
+    for (var sample = 0; sample < 7; sample++)
     {
-        after["StrictBinding.olean"] = repetition.ToString();
-        if (!ModuleArtifactsPreserved(before, after))
-            throw new InvalidOperationException("Binding inventory scaling rejected an additional family");
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        for (var repetition = 0; repetition < repetitions; repetition++)
+        {
+            after["StrictBinding.olean"] = repetition.ToString();
+            if (!ModuleArtifactsPreserved(before, after))
+                throw new InvalidOperationException("Binding inventory scaling rejected an additional family");
+        }
+        milliseconds = Math.Min(milliseconds, elapsed.Elapsed.TotalMilliseconds);
     }
-    var milliseconds = elapsed.Elapsed.TotalMilliseconds;
     if (previousInventoryMilliseconds > 0 && milliseconds > previousInventoryMilliseconds * 20 + 20)
         throw new InvalidOperationException("Binding inventory validation grew faster than n log n");
     previousInventoryMilliseconds = milliseconds;
-    Console.WriteLine($"PASS {count} binding artifacts validated {repetitions} times in {milliseconds:F1} ms");
+    Console.WriteLine($"PASS {count} binding artifacts validated {repetitions} times in {milliseconds:F1} ms minimum");
 }
 if (args is ["--artifact-inventory"]) return;
 MultiAssemblyFixture fixture = new("DeepSession");

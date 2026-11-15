@@ -86,7 +86,7 @@ theorem ResultEquivalent.checkedAt {mapping : AllocationRenaming} {relation : α
 
 /-- A raised CLR exception is unchanged by reference renaming. -/
 theorem ResultRenamed.thrown {mapping : AllocationRenaming} {relation : α → β → Prop}
-    {target : ExecutionResult β} {exception : String}
+    {target : ExecutionResult β} {exception : ExceptionType}
     (related : ResultRenamed mapping relation (.error (.thrown exception)) target) :
     target = .error (.thrown exception) := by cases related; rfl
 #print axioms ResultRenamed.thrown

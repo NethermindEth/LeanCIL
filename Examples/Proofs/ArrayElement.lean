@@ -55,7 +55,7 @@ theorem index_out_of_range (memory : Memory) (nodes : Reference) (length : Nat)
     (outside : length ≤ index.toNat) :
     ∃ fuel, invoke Extracted.program fuel elementAt
         [.object (.address nodes), .scalar (.i32 index)] memory =
-      .error ⟨elementAt, 2, .thrown "System.IndexOutOfRangeException"⟩ := by
+      .error ⟨elementAt, 2, .thrown .indexOutOfRange⟩ := by
   have past := live.slot_outside outside
   cil_checked_steps [past]
 
@@ -67,7 +67,7 @@ theorem negative_out_of_range (memory : Memory) (nodes : Reference) (length : Na
     (small : length ≤ 2 ^ 31) (negative : index.toInt < 0) :
     ∃ fuel, invoke Extracted.program fuel elementAt
         [.object (.address nodes), .scalar (.i32 index)] memory =
-      .error ⟨elementAt, 2, .thrown "System.IndexOutOfRangeException"⟩ :=
+      .error ⟨elementAt, 2, .thrown .indexOutOfRange⟩ :=
   index_out_of_range memory nodes length index live (by
     rw [BitVec.toInt_eq_toNat_cond] at negative
     split at negative <;> omega)
@@ -77,7 +77,7 @@ theorem negative_out_of_range (memory : Memory) (nodes : Reference) (length : Na
 /-- A null array throws `NullReferenceException` at pc 2. -/
 theorem null_array (memory : Memory) (index : BitVec 32) :
     ∃ fuel, invoke Extracted.program fuel elementAt [.object .null, .scalar (.i32 index)]
-        memory = .error ⟨elementAt, 2, .thrown "System.NullReferenceException"⟩ := by
+        memory = .error ⟨elementAt, 2, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms null_array

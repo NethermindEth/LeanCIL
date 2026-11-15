@@ -129,7 +129,7 @@ foreach (var (name, signature, arguments, expected) in new[]
             theorem constructor_fault_keeps_call_pc :
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.object .null, .scalar (.i32 1), .scalar (.i32 0)] spanMemory).map Prod.snd =
-                  .error ⟨0, 4, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
+                  .error ⟨0, 4, .thrown .argumentOutOfRange⟩ := rfl
             #print axioms constructor_fault_keeps_call_pc
 
             theorem uninitialized_span_local_rejected :
@@ -318,13 +318,13 @@ foreach (var (name, signature, element, width, writable, range) in new[]
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
                     .scalar (.i32 (-1)){{tail}}] arrayMemory).map Prod.snd =
-                  .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
+                  .error ⟨0, {{range + 1}}, .thrown .argumentOutOfRange⟩ := rfl
             #print axioms compiled_negative_start
 
             theorem compiled_null_invalid_start :
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.object .null, .scalar (.i32 1){{tail}}] arrayMemory).map Prod.snd =
-                  .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
+                  .error ⟨0, {{range + 1}}, .thrown .argumentOutOfRange⟩ := rfl
             #print axioms compiled_null_invalid_start
             """);
     }
@@ -336,14 +336,14 @@ foreach (var (name, signature, element, width, writable, range) in new[]
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
                     .scalar (.i32 2147483647), .scalar (.i32 2147483647)] arrayMemory).map Prod.snd =
-                  .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
+                  .error ⟨0, {{range + 1}}, .thrown .argumentOutOfRange⟩ := rfl
             #print axioms compiled_overflowing_range
 
             theorem compiled_negative_length :
                 (CIL.Safety.invoke Extracted.program 64 0
                   [.array ⟨.address ⟨0, 0⟩, 3, .{{element}}⟩,
                     .scalar (.i32 0), .scalar (.i32 (-1))] arrayMemory).map Prod.snd =
-                  .error ⟨0, {{range + 1}}, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
+                  .error ⟨0, {{range + 1}}, .thrown .argumentOutOfRange⟩ := rfl
             #print axioms compiled_negative_length
 
             theorem expired_array_is_not_a_range_exception :
