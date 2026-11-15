@@ -127,8 +127,8 @@ internal static class VerificationSuites
         // Split from evidence: each fixture alone runs for minutes, so they take separate runners.
         new("scaling", "Tests/TranslationScaling.cs",
             "compositional certificate for a six-method call graph and its consumer replay, and the header and " +
-            "per-method struct layout checks at a per-layout cost that does not grow with the table, and the generic " +
-            "owner index library"),
+            "per-method struct layout checks at a per-layout cost that does not grow with the table, and the " +
+            "generic owner index library"),
         new("excluded", "Tests/ExcludedBranchScaling.cs",
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",

@@ -2873,7 +2873,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     {
         if (Run(["lake", "build", .. modules], FixturePackage(), progress: progress)
             .Contains("sorryAx", StringComparison.Ordinal))
-            throw new InvalidOperationException("A Lean test library depends on sorryAx: " + string.Join(' ', modules));
+            throw new InvalidOperationException(
+                "A Lean test library depends on sorryAx: " + string.Join(' ', modules));
     }
 
     /// <summary>The Lean search path for static test helpers: checkout outputs, then the certified library.</summary>
