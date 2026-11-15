@@ -493,7 +493,7 @@ private def nativeReturnEvidence : MethodEvidence := withBody {
 private def nativeReturnMethod : Method := {
   locals := [], returnsValue := true,
   declared := { parameters := [.byref word], returnType := word },
-  code := [.ldarg 0, .loadScalar 8, .ret] }
+  code := [.ldarg 0, .load64, .ret] }
 example : TranslationValid [] #[] [] [nativeReturnEvidence] [] [nativeReturnMethod] := by
   decide +kernel
 example : scalarTransfer nativeReturnRaw (i 42) [.native] = some [] := by decide
@@ -790,23 +790,204 @@ private def unaryHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unk
 private def unaryHoleStates : ScalarCertificate := [some [], some [.word64], some [.other], some [], some [.word64]]
 private def unaryHoleCode (emitted : Instruction) : List Instruction :=
   [.ldarg 0, emitted, .pop, .ldarg 0, .ret]
-example : ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates (unaryHoleCode (.loadScalar 8)) := by decide
+-- An access form is reserved for the opcodes that decide its width, so no conversion emits one.
+example : ¬ ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates
+    (unaryHoleCode (.loadScalar 8)) := by decide
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 108) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .conv_i8) := by decide
--- `conv.r4` is uncovered: the site admits a load, but no conversion or faulting arithmetic.
+-- `conv.r4` is uncovered: the site admits no access form, conversion or faulting arithmetic.
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .conv_i) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.conv_ovf .i)) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.conv_ovf_un .u)) := by decide +kernel
-example : ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
+example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode (.loadScalar 8)) := by decide +kernel
 example : ¬ ScalarFlowValid #[] (unaryHoleRaw 107) unaryHoleFeatures unaryHoleStates
     (unaryHoleCode .rem_un) := by decide +kernel
 example : ([Instruction.div, .div_un, .rem, .add_ovf, .add_ovf_un, .sub_ovf, .sub_ovf_un, .mul_ovf,
     .mul_ovf_un].all fun emitted => !decide (ScalarFlowValid #[] (unaryHoleRaw 107)
       unaryHoleFeatures unaryHoleStates (unaryHoleCode emitted))) = true := by decide +kernel
+
+/-! ## Indirect accesses
+
+A body pushes `pops` copies of its argument, runs the access after its prefixes, pops what the
+access pushed and returns the argument. Each raw `ldind`, `stind`, `ldobj`, `stobj`, `cpblk`
+and `initblk` admits exactly the emission its opcode, operand type and prefix give. -/
+
+/-- One access with its prefixes and the emission a certificate claims for it. -/
+private structure IndirectCase where
+  pops : Nat
+  /-- The kind the access pushes, or `none` for a store or block operation. -/
+  pushed : Option ScalarKind
+  prefixes : List RawInstruction := []
+  access : RawInstruction
+  emitted : Instruction
+
+private def IndirectCase.pushes (access : IndirectCase) : Nat :=
+  if access.pushed.isSome then 1 else 0
+private def IndirectCase.middle (access : IndirectCase) : List RawInstruction :=
+  access.prefixes ++ [access.access]
+private def IndirectCase.rawMethod (access : IndirectCase) : RawMethod :=
+  { raw (List.replicate access.pops (i 2) ++ access.middle ++
+      List.replicate access.pushes (i 38) ++ [i 2, i 42]) [word] with maxStack := 3 }
+private def IndirectCase.code (access : IndirectCase) : List Instruction :=
+  List.replicate access.pops (.ldarg 0) ++ access.prefixes.map (fun _ => .nop) ++
+    [access.emitted] ++ List.replicate access.pushes .pop ++ [.ldarg 0, .ret]
+private def IndirectCase.features (access : IndirectCase) : FeatureCertificate :=
+  (List.range access.pops).map unknown ++ access.middle.map (fun _ => unknown access.pops) ++
+    List.replicate access.pushes (unknown 1) ++ [unknown 0, unknown 1]
+private def IndirectCase.states (access : IndirectCase) : ScalarCertificate :=
+  (List.range access.pops).map (fun depth => some (List.replicate depth .word64)) ++
+    access.middle.map (fun _ => some (List.replicate access.pops .word64)) ++
+    access.pushed.toList.map (fun kind => some [kind]) ++ [some [], some [.word64]]
+private def IndirectCase.reachable (access : IndirectCase) : List Bool :=
+  List.replicate access.rawMethod.code.length true
+private def IndirectCase.uses (access : IndirectCase) : List ArgumentOp :=
+  List.replicate access.pops (.load 0) ++ access.middle.map (fun _ => .other) ++
+    List.replicate access.pushes .other ++ [.load 0, .other]
+private def IndirectCase.evidence (access : IndirectCase) : MethodEvidence := withBody {
+  body := noBody, original := access.rawMethod, arguments := [], closed := access.rawMethod,
+  parameterInput := { arguments := [.field .unsigned64], locals := [], code := access.uses },
+  reachable := access.reachable, featureStates := access.features,
+  scalarStates := access.states, layoutUses := [], assembly := scope }
+private def IndirectCase.method (access : IndirectCase) : Method :=
+  { locals := [], returnsValue := true, declared := { parameters := [word], returnType := word },
+    code := access.code }
+/-- Whether the feature and scalar checks accept the claimed emission. -/
+private def IndirectCase.flows (access : IndirectCase) : Bool :=
+  decide (FeatureFlowValid #[] (fun _ => none) access.rawMethod .scalar access.features
+      access.reachable access.code) &&
+    decide (ScalarFlowValid #[] access.rawMethod access.features access.states access.code)
+/-- Whether the indirect access rule accepts the emission at the access itself. -/
+private def IndirectCase.window (access : IndirectCase) : Bool :=
+  indirectSiteWindow (access.rawMethod.code[·]?) (access.pops + access.prefixes.length)
+    access.access access.emitted
+/-- Whether every check of the method's evidence accepts it. -/
+private def IndirectCase.translates (access : IndirectCase) : Bool :=
+  decide (MethodEvidenceValid [] #[] [] [access.evidence] [] access.evidence access.method)
+
+private def load (opcode : Nat) (emitted : Instruction) (kind : ScalarKind := .word32)
+    (prefixes : List RawInstruction := []) (operand : RawOperand := .none) : IndirectCase :=
+  { pops := 1, pushed := some kind, prefixes, access := i opcode operand, emitted }
+private def store (opcode : Nat) (emitted : Instruction) (prefixes : List RawInstruction := [])
+    (operand : RawOperand := .none) : IndirectCase :=
+  { pops := 2, pushed := none, prefixes, access := i opcode operand, emitted }
+private def block (opcode : Nat) (emitted : Instruction) (prefixes : List RawInstruction := []) :
+    IndirectCase :=
+  { pops := 3, pushed := none, prefixes, access := i opcode, emitted }
+private def unaligned (alignment : Int) : RawInstruction := i 65042 (.integer alignment)
+private def sbyteType : TypeExpr := .atom runtime "System.SByte"
+private def aggregateType : TypeExpr := .aggregate "S" 0
+private def enumType : TypeExpr := .enum "E" (.atom runtime "System.Int16")
+private def vectorType : TypeExpr :=
+  .apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") intType
+/-- An `ldobj` (113) or `stobj` (129) of `type`, pushing the kind the scalar check gives it. -/
+private def typed (opcode : Nat) (type : TypeExpr) (emitted : Instruction) : IndirectCase :=
+  if opcode == 113 then load 113 emitted (scalarType type) (operand := .type type)
+  else store 129 emitted (operand := .type type)
+/-- A static call taking one word and returning one, the stack effect of a 64-bit load. -/
+private def loadSite : CallSite :=
+  { target := .managed 0x06000002, typeArguments := [], parameterCount := 1, hasThis := false,
+    returnsValue := true, returnType := word, parameterTypes := [word] }
+/-- A static call taking two words and returning nothing, the stack effect of a 64-bit store. -/
+private def storeSite : CallSite :=
+  { target := .managed 0x06000002, typeArguments := [], parameterCount := 2, hasThis := false,
+    returnsValue := false, parameterTypes := [word, word] }
+
+/-- The emissions extraction gives these accesses, none of which carries a metadata token. -/
+private def indirectEmitted : List IndirectCase := [
+  load 70 (.loadScalar 1 true), load 71 (.loadScalar 1 false), load 72 (.loadScalar 2 true),
+  load 73 (.loadScalar 2 false), load 74 (.loadScalar 4 false), load 75 (.loadScalar 4 false),
+  load 76 .load64 .word64, load 77 .load64 .native, store 82 (.storeScalar 1),
+  store 83 (.storeScalar 2), store 84 (.storeScalar 4), store 85 .store64, store 223 .store64,
+  block 65047 (.memory (.copyBlock 8)), block 65048 (.memory (.initBlock 8)),
+  block 65047 (.memory (.copyBlock 1)) [unaligned 1],
+  block 65048 (.memory (.initBlock 2)) [unaligned 2],
+  block 65047 (.memory (.copyBlock 4)) [unaligned 4],
+  load 74 (.loadScalar 4 false) (prefixes := [unaligned 1]),
+  store 85 .store64 [unaligned 2]]
+
+/-- `ldobj` and `stobj` of primitive, aggregate, enum and vector types, whose type tokens the
+    test encoder cannot write. -/
+private def objectEmitted : List IndirectCase := [
+  load 113 (.loadScalar 4 false) (operand := .type intType),
+  load 113 (.loadScalar 1 true) (operand := .type sbyteType),
+  load 113 (.loadScalar 8 false) .word64 (operand := .type word),
+  store 129 (.storeScalar 4) (operand := .type intType),
+  store 129 (.storeScalar 1) (operand := .type sbyteType),
+  typed 113 aggregateType (.loadAggregate 8), typed 129 aggregateType (.storeAggregate 8),
+  typed 113 enumType (.loadScalar 2 true), typed 113 vectorType (.memory .load128)]
+
+/-- Each accepted before the indirect access rule: a wrong width, sign, alignment or operation,
+    a kind or prefix extraction refuses, and an access form at an unrelated opcode. -/
+private def indirectForged : List IndirectCase := [
+  -- Width.
+  load 70 (.loadScalar 4 true), load 73 (.loadScalar 1 false), load 74 (.loadScalar 8 false),
+  load 74 .load64, load 76 (.loadScalar 4 false) .word64, load 77 (.loadScalar 8 false) .native,
+  load 70 (.memory .load128), store 82 (.storeScalar 4), store 84 .store64,
+  store 85 (.storeScalar 4), store 223 (.storeScalar 2),
+  -- Sign.
+  load 70 (.loadScalar 1 false), load 71 (.loadScalar 1 true), load 72 (.loadScalar 2 false),
+  load 73 (.loadScalar 2 true), load 74 (.loadScalar 4 true), load 75 (.loadScalar 4 true),
+  -- Alignment and operation.
+  block 65047 (.memory (.copyBlock 1)), block 65048 (.memory (.initBlock 4)),
+  block 65047 (.memory (.copyBlock 8)) [unaligned 1],
+  block 65048 (.memory (.initBlock 2)) [unaligned 4],
+  block 65047 (.memory (.initBlock 8)), block 65048 (.memory (.copyBlock 8)),
+  -- Kinds and prefixes extraction refuses.
+  block 65047 (.memory (.copyBlock 3)) [unaligned 3],
+  load 74 (.loadScalar 4 false) (prefixes := [i 65043]),
+  load 78 (.loadScalar 4 false) .other, load 79 (.loadScalar 8 false) .other,
+  load 80 .load64 .other, store 81 .store64, store 86 (.storeScalar 4),
+  store 87 (.storeScalar 8),
+  -- Access forms at other opcodes.
+  load 108 (.loadScalar 8 false) .other, load 107 (.loadAggregate 4) .other]
+
+/-- Forged emissions at operands the test encoder cannot write: wrong widths and signs of `ldobj`
+    and `stobj`, field accesses at operand types extraction refuses, and calls emitting 64-bit
+    accesses. -/
+private def objectForged : List IndirectCase := [
+  load 113 (.loadScalar 2 false) (operand := .type intType),
+  load 113 (.loadScalar 4 true) (operand := .type intType),
+  load 113 (.loadScalar 1 false) (operand := .type sbyteType),
+  load 113 .load64 .word64 (operand := .type word),
+  store 129 (.storeScalar 1) (operand := .type intType),
+  store 129 (.storeScalar 8) (operand := .type sbyteType),
+  typed 113 aggregateType (.loadScalar 4 false), typed 129 aggregateType (.loadAggregate 8),
+  typed 113 enumType (.loadScalar 2 false), typed 113 vectorType (.memory .load256),
+  -- Floating-point and pointer operands, which extraction refuses.
+  typed 113 (.atom runtime "System.Double") (.fieldAt 0 4 false),
+  typed 129 (.atom runtime "System.Single") (.setFieldAt 0 8),
+  typed 113 (.pointer intType) (.fieldAt 0 1 true),
+  load 40 .load64 .word64 (operand := .call loadSite),
+  store 40 .store64 (operand := .call storeSite)]
+
+/-- Every emission extraction gives passes the indirect access rule, both flow checks and, where
+    the body has no token, every check of the method's evidence. -/
+private theorem indirect_emissions_accepted :
+    (indirectEmitted.all fun access => access.window && access.flows && access.translates) ∧
+    (objectEmitted.all fun access => access.window && access.flows) := by
+  decide +kernel
+
+#print axioms indirect_emissions_accepted
+
+/-- Every forged emission fails the indirect access rule, so both flow checks and the method's
+    evidence check reject it. -/
+private theorem indirect_forgeries_rejected :
+    (indirectForged.all fun access => !access.window && !access.flows && !access.translates) ∧
+    (objectForged.all fun access => !access.window && !access.flows) := by
+  decide +kernel
+
+#print axioms indirect_forgeries_rejected
+
+-- `unaligned.` takes only an access, with an alignment of 1, 2 or 4, and emits nothing.
+example : indirectSiteWindow ([unaligned 1, i 105][·]?) 0 (unaligned 1) .nop = false := by decide
+example : indirectSiteWindow ([unaligned 1, i 74][·]?) 0 (unaligned 1) .nop = true := by decide
+example : indirectSiteWindow ([unaligned 8, i 74][·]?) 0 (unaligned 8) .nop = false := by decide
+example : indirectSiteWindow ([unaligned 1][·]?) 0 (unaligned 1) .nop = false := by decide
+example : indirectSiteWindow ([i 65043, i 74][·]?) 0 (i 65043) .nop = false := by decide
 
 private def pushHoleRaw (opcode : Nat) := raw [i opcode, i 38, i 2, i 42] [word]
 private def pushHoleFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 0, unknown 1]

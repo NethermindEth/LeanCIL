@@ -17,6 +17,11 @@ if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
     ArgumentResolutionCosts();
     return;
 }
+if (args.Contains("--indirect-access-only", StringComparer.Ordinal))
+{
+    IndirectAccessCosts();
+    return;
+}
 if (args.Contains("--call-check-only", StringComparer.Ordinal))
 {
     CallCheckCosts();
@@ -1399,6 +1404,82 @@ foreach (var prefixed in new[] { false, true })
             $"Checking the scalar certificate of {label} costs {addressesMeasured}; the limit is {AllowedGrowth} " +
             $"times the cost per address at {FewAddresses}."));
     Console.WriteLine($"PASS checking the scalar certificate of {label} costs {addressesMeasured}");
+}
+IndirectAccessCosts();
+
+// The kernel heartbeats of the feature and scalar certificates of a body whose segments each copy a block, with or
+// without an `unaligned.` prefix, and branch to the next segment, less those of stating them. The indirect access
+// rule reads the instructions next to each site from an index built once per body.
+void IndirectAccessCosts()
+{
+    var accessDirectory = At("artifacts/LookupScaling/IndirectAccess");
+    Directory.CreateDirectory(accessDirectory);
+    long Cost(bool prefixed, int sites)
+    {
+        var flag = prefixed ? "true" : "false";
+        var header = $$"""
+            import CIL.Extraction.Scalars
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            namespace IndirectAccesses
+            open CIL CIL.Extraction
+            def word : TypeExpr := .atom runtimeScope "System.UInt64"
+            def width (prefixed : Bool) : Nat := if prefixed then 6 else 5
+            def segment (prefixed : Bool) (index : Nat) : List RawInstruction :=
+              [⟨0, 2, .none⟩, ⟨0, 2, .none⟩, ⟨0, 2, .none⟩] ++
+                (if prefixed then [⟨0, 65042, .integer 1⟩] else []) ++
+                [⟨0, 65047, .none⟩, ⟨0, 43, .target ((index + 1) * width prefixed)⟩]
+            def raw (prefixed : Bool) (sites : Nat) : RawMethod := {
+              token := 1, owner := "Scaling", hasThis := false, explicitThis := false,
+              callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+              parameters := [word], locals := [], initLocals := true, maxStack := 3,
+              genericParameters := [],
+              code := (List.range sites).flatMap (segment prefixed) ++ [⟨0, 42, .none⟩] }
+            def featureSegment (prefixed : Bool) : FeatureCertificate :=
+              [some ⟨[], []⟩, some ⟨[none], []⟩, some ⟨[none, none], []⟩] ++
+                (if prefixed then [some ⟨[none, none, none], []⟩] else []) ++
+                [some ⟨[none, none, none], []⟩, some ⟨[], []⟩]
+            def features (prefixed : Bool) (sites : Nat) : FeatureCertificate :=
+              (List.replicate sites (featureSegment prefixed)).flatten ++ [some ⟨[], []⟩]
+            def stateSegment (prefixed : Bool) : ScalarCertificate :=
+              [some [], some [.word64], some [.word64, .word64]] ++
+                (if prefixed then [some [.word64, .word64, .word64]] else []) ++
+                [some [.word64, .word64, .word64], some []]
+            def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
+              (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
+            def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
+              [.ldarg 0, .ldarg 0, .ldarg 0] ++ (if prefixed then [.nop] else []) ++
+                [.memory (.copyBlock (if prefixed then 1 else 8)), .br ((index + 1) * width prefixed)]
+            def code (prefixed : Bool) (sites : Nat) : List Instruction :=
+              (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
+            """ + "\n";
+        var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {flag} {sites}) .scalar " +
+            $"(features {flag} {sites}) ((features {flag} {sites}).map Option.isSome) (code {flag} {sites}) ∧ " +
+            $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
+            $"(code {flag} {sites})";
+        var path = Path.Combine(accessDirectory, $"Blocks{(prefixed ? "Prefixed" : "")}{sites}.lean");
+        var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend IndirectAccesses\n",
+            equations: false);
+        var decided = Heartbeats(path, header + $"""
+            theorem valid : {statement} := by decide +kernel
+            #print axioms valid
+            end IndirectAccesses
+            """ + "\n", equations: false);
+        return decided - stated;
+    }
+    foreach (var prefixed in new[] { false, true })
+    {
+        var label = prefixed ? "unaligned block copies" : "block copies";
+        var perSite = new[] { FewAddresses, MoreAddresses, ManyAddresses }
+            .Select(sites => (Sites: sites, Cost: (double)Cost(prefixed, sites) / sites)).ToArray();
+        var measured = string.Join("; ", perSite.Select(run =>
+            string.Create(CultureInfo.InvariantCulture, $"{run.Cost:F0} kernel heartbeats per copy at {run.Sites}")));
+        if (perSite.Skip(1).Any(run => run.Cost > perSite[0].Cost * AllowedGrowth))
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"Checking the feature and scalar certificates of {label} costs {measured}; the limit is " +
+                $"{AllowedGrowth} times the cost per copy at {FewAddresses}."));
+        Console.WriteLine($"PASS checking the feature and scalar certificates of {label} costs {measured}");
+    }
 }
 
 // The kernel heartbeats of the feature certificate of a body that loads, stores and addresses four int32 locals in
