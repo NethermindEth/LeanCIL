@@ -626,7 +626,8 @@ def wideArithmeticInstruction (operation : CIL.MemoryOp) (stack : List Value) (m
 
 /-- `ldlen` of a value array: its supplied length once its storage checks; a null array throws
     `NullReferenceException`. -/
-def arrayLength (stack : List Value) (memory : Memory) : ExecutionResult (Memory × List Value) := do
+def arrayLength (stack : List Value) (memory : Memory) :
+    ExecutionResult (Memory × List Value) := do
   match stack with
   | .array view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)

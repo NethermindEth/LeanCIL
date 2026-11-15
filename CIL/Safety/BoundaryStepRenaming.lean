@@ -13,7 +13,8 @@ private theorem managedReference_null_iff (mapping : AllocationRenaming)
 #print axioms managedReference_null_iff
 
 /-- A method table's length reads no memory, so renaming leaves it and its faults unchanged. -/
-private theorem methodTableLength_renamed (mapping : AllocationRenaming) (table : CIL.MethodTable) :
+private theorem methodTableLength_renamed (mapping : AllocationRenaming)
+    (table : CIL.MethodTable) :
     ResultRenamed mapping Eq (methodTableLength table) (methodTableLength table) := by
   unfold methodTableLength
   cases table.targets with
