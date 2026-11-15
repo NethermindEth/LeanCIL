@@ -326,27 +326,48 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
   simp only [step, observerCount]
   rfl
 
-/-- `ldsfld` pushes the value `staticLoad` reads through the descriptor bound to its pc. -/
+/-- `ldsfld` pushes the value `staticLoad` reads through the descriptor bound to its pc. Stated
+    as the match a rewrite of the read leaves, so checking a stepped load never evaluates it. -/
 @[cil_step] theorem step_ldsfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
-    step body (.ldsfld field) pc args frame stack memory = do
+    step body (.ldsfld field) pc args frame stack memory =
+      match staticLoad body pc memory with
+      | .ok result => .ok (.next (pc + 1) (result.2 :: stack) frame result.1)
+      | .error fault => .error fault := by
+  have unfolded : step body (.ldsfld field) pc args frame stack memory = (do
       let (memory, value) ← staticLoad body pc memory
-      return FrameAction.next (pc + 1) (value :: stack) frame memory := id rfl
+      return FrameAction.next (pc + 1) (value :: stack) frame memory) := id rfl
+  rw [unfolded]
+  cases staticLoad body pc memory <;> rfl
 
 #print axioms step_ldsfld_eq
 
-/-- `ldsflda` pushes the reference to the storage of the descriptor bound to its pc. -/
+/-- `ldsflda` pushes the reference to the storage of the descriptor bound to its pc. Stated as
+    the match a rewrite of the read leaves, so checking a stepped load never evaluates it. -/
 @[cil_step] theorem step_ldsflda_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
-    step body (.ldsflda field) pc args frame stack memory = do
+    step body (.ldsflda field) pc args frame stack memory =
+      match staticAddress body pc memory with
+      | .ok result => .ok (.next (pc + 1) (result.2 :: stack) frame result.1)
+      | .error fault => .error fault := by
+  have unfolded : step body (.ldsflda field) pc args frame stack memory = (do
       let (memory, value) ← staticAddress body pc memory
-      return FrameAction.next (pc + 1) (value :: stack) frame memory := id rfl
+      return FrameAction.next (pc + 1) (value :: stack) frame memory) := id rfl
+  rw [unfolded]
+  cases staticAddress body pc memory <;> rfl
 
 #print axioms step_ldsflda_eq
 
-/-- A field `ldtoken` pushes the same reference as `ldsflda` of that field. -/
+/-- A field `ldtoken` pushes the same reference as `ldsflda` of that field. Stated as the match
+    a rewrite of the read leaves, so checking a stepped load never evaluates it. -/
 @[cil_step] theorem step_ldtoken_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
-    step body (.ldtoken (.field field)) pc args frame stack memory = do
+    step body (.ldtoken (.field field)) pc args frame stack memory =
+      match staticAddress body pc memory with
+      | .ok result => .ok (.next (pc + 1) (result.2 :: stack) frame result.1)
+      | .error fault => .error fault := by
+  have unfolded : step body (.ldtoken (.field field)) pc args frame stack memory = (do
       let (memory, value) ← staticAddress body pc memory
-      return FrameAction.next (pc + 1) (value :: stack) frame memory := id rfl
+      return FrameAction.next (pc + 1) (value :: stack) frame memory) := id rfl
+  rw [unfolded]
+  cases staticAddress body pc memory <;> rfl
 
 #print axioms step_ldtoken_eq
 

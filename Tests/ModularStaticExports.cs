@@ -186,7 +186,6 @@ theorem correctness : PublishedTable.read.Holds Extracted.program 0 := by
       .ok (.next 1 [.reference (.address reference)] frame result) := by
     intro field
     rw [step_ldsflda_eq, addressed]
-    rfl
   have second : step Extracted.method0 .load64 1 [] frame [.reference (.address reference)] result =
       .ok (.next 2 [.scalar (.i64 17)] frame result) := by
     rw [step_load64_eq]

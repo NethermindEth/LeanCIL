@@ -333,4 +333,15 @@ theorem staticAddress_resolved {body : CIL.Method} {pc : Nat} {descriptor : CIL.
 
 #print axioms staticAddress_resolved
 
+/-- With a descriptor bound to its pc, `staticAddress` resolves that descriptor's storage, so a
+    step can rewrite the read without evaluating the site table. -/
+theorem staticAddress_site {body : CIL.Method} {pc : Nat} {descriptor : CIL.StaticDescriptor}
+    {memory : Memory} (site : body.staticAt pc = some descriptor) :
+    staticAddress body pc memory = (do
+      let (memory, reference) ← staticReference descriptor memory
+      return (memory, .reference (.address reference))) := by
+  rw [staticAddress, site]
+
+#print axioms staticAddress_site
+
 end CIL.Safety

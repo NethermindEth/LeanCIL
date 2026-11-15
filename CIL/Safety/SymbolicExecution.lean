@@ -966,6 +966,32 @@ def dispatchFacts (step : Expr) (function : Name) (facts : Array Term) :
     else return #[]
   facts.filterM (suppliedFactSatisfies · (dispatchFactMatches wanted function))
 
+open Lean Elab Tactic Meta in
+/-- The result of a static read at `pc` of a named body, from the body's `@[cil_code]` site
+    fact: an initialized load's value, or an address's storage reference. Nothing for a literal
+    body, a pc without a site fact, or an opaque value, which a caller's fact must give. -/
+def stepStaticFact? (body pc memory : Expr) (load : Bool) : TacticM (Option Expr) :=
+    withMainContext do
+  if (← instantiateMVars body).isAppOf ``CIL.Method.mk then return none
+  let read := mkApp2 (mkConst ``CIL.Method.staticAt) body pc
+  let normalize ← `(tactic| simp only [cil_code])
+  let { ctx, simprocs, .. } ← mkSimpContext normalize (eraseLocal := false)
+  let (result, _) ← simp read ctx simprocs
+  unless result.expr.isAppOfArity ``Option.some 2 do return none
+  let some site := result.proof? | return none
+  let site ← Term.exprToSyntax site
+  let memory ← Term.exprToSyntax memory
+  let fact ← if load then
+      `(CIL.Safety.staticLoad_initialized (memory := $memory) $site rfl rfl rfl)
+    else `(CIL.Safety.staticAddress_site (memory := $memory) $site)
+  let saved ← saveState
+  try
+    let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm fact none
+    let proof ← instantiateMVars proof
+    if proof.hasMVar then saved.restore; return none
+    return some proof
+  catch _ => saved.restore; return none
+
 open Lean Meta in
 /-- Expose a concrete stack spine without reducing the values carried by its cells. -/
 private partial def exposeStackSpine (stack : Expr) : MetaM Expr := withIncRecDepth do
@@ -1126,6 +1152,32 @@ elab_rules : tactic
             done)))
           return
         catch _ => saved.restore
+    -- A static read rewrites by a fact built from the site fact; evaluating the read instead walks
+    -- the site table at every load. A hypothesis keeps the run's record, keyed by fact text, out.
+    let staticRead := if operation == ``CIL.Instruction.ldsfld then some ``CIL.Safety.staticLoad
+      else if operation == ``CIL.Instruction.ldsflda || operation == ``CIL.Instruction.ldtoken then
+        some ``CIL.Safety.staticAddress
+      else none
+    let facts : Syntax.TSepArray `term "," ← match staticRead with
+      | none => pure facts
+      | some read =>
+        let supplied ← facts.getElems.anyM (suppliedFactSatisfies · fun type =>
+          forallTelescope type fun _ conclusion => do
+            let some (_, left, _) := conclusion.consumeMData.eq? | return false
+            return left.isAppOf read)
+        let body ← entryAt "cil_checked_step_normalized" args 0
+        let pc ← entryAt "cil_checked_step_normalized" args 2
+        let memory ← entryAt "cil_checked_step_normalized" args 6
+        let found ← if supplied then pure none
+          else stepStaticFact? body pc memory (read == ``CIL.Safety.staticLoad)
+        match found with
+        | none => pure facts
+        | some proof =>
+          let (fact, goal) ← (← (← getMainGoal).assert (← mkFreshUserName `static)
+            (← inferType proof) proof).intro1P
+          replaceMainGoal [goal]
+          let factTerm ← goal.withContext (Term.exprToSyntax (mkFVar fact))
+          pure (.ofElems (facts.getElems.push factTerm))
     let strategy ← if operation == ``CIL.Instruction.intrinsic then
         `(tactic| cil_checked_intrinsic [$facts:term,*])
       else if operation == ``CIL.Instruction.memory then

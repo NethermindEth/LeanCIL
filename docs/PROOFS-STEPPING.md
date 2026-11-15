@@ -291,13 +291,13 @@ of `loadArgument` on `body.argumentAccess index`, which a later fact decides.
 A `.ldsfld field` step pushes the value `staticLoad body pc memory` returns, and `.ldsflda field`
 or `.ldtoken (.field field)` the reference `staticAddress body pc memory` returns
 ([StepComposition](../CIL/Safety/StepComposition.lean)); `.stsfld` faults. Both read the
-descriptor `body.staticAt pc` binds to the pc. In a body given as a literal, the stepping tactics
-compute a load whose value extraction fixed. Otherwise they take the result from a fact, supplied
-or, for the loop tactics, in the context; an opaque value read from the caller's memory always
-needs one.
-`cil_resolution_facts` declares `methodN_staticAtPC : methodN.staticAt PC = some
-descriptor` for each static site, from which `staticLoad_initialized` or `staticAddress_resolved`
-([StaticMemoryLemmas](../CIL/Safety/StaticMemoryLemmas.lean)) states the fact.
+descriptor `body.staticAt pc` binds to the pc. `cil_resolution_facts` declares
+`methodN_staticAtPC : methodN.staticAt PC = some descriptor` for each static site. From it the
+stepping tactics state a load's result with `staticLoad_initialized` when extraction fixed the
+value, and an address's with `staticAddress_site`
+([StaticMemoryLemmas](../CIL/Safety/StaticMemoryLemmas.lean)), so no step evaluates the site
+table. A load of an opaque value read from the caller's memory takes its result from a fact,
+supplied or, for the loop tactics, in the context; a supplied fact on the read wins over the site.
 
 ### Consumer stepping regressions
 

@@ -88,7 +88,6 @@ private theorem libBody_reads (memory : Safety.Memory) (formed : memory.WellForm
   have first : step libBody (.ldsflda (tableRef "Lib")) 0 [] frame [] memory =
       .ok (.next 1 [.reference (.address reference)] frame result) := by
     rw [step_ldsflda_eq, addressed]
-    rfl
   have second : step libBody .load64 1 [] frame [.reference (.address reference)] result =
       .ok (.next 2 [.scalar (.i64 17)] frame result) := by
     rw [step_load64_eq]
