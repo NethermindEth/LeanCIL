@@ -117,7 +117,7 @@ private def states : CIL.Extraction.ScalarCertificate :=
     some [.word32, .array .signed32], some [.reference], none]
 private def code (writable : Bool) : List CIL.Instruction :=
   [.ldarg 0, .ldarg 1, .nop, .memory (.arrayAddress .signed32 writable), .ret,
-    .unsupported "unreachable"]
+    .unadmitted 43]
 
 /-- A branch to the prefix itself does not bypass the restriction. -/
 theorem prefix_certificate : CIL.Extraction.ScalarFlowValid #[] (raw 2) features states (code false) :=

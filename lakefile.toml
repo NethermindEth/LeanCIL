@@ -79,6 +79,9 @@ name = "Tests.DecodedMethod"
 name = "Tests.FieldRef"
 
 [[lean_lib]]
+name = "Tests.FieldShape"
+
+[[lean_lib]]
 name = "Tests.ReturnOpcode"
 
 [[lean_lib]]

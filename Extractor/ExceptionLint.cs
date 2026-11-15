@@ -13,7 +13,7 @@ internal static class ExceptionLint
 {
     const string Usage = "Usage: leancil lint-exceptions output-directory --documentation assembly.xml";
     const string Notice = "Diagnostic only. Sites are potential model paths, not proved exceptions. XML comments are untrusted documentation, not evidence.";
-    sealed record Site(string Method, int IlOffset, string Exception, string Origin);
+    sealed record Site(string Method, int IlOffset, ExceptionType Exception, string Origin);
     sealed record Declaration(string Exception, string Text);
 
     internal static int Run(string[] args)
@@ -64,19 +64,24 @@ internal static class ExceptionLint
             Throws.Analysis folded = Throws.Analyze(method);
             foreach (Instruction instruction in reachable.OrderBy(value => value.Offset))
             {
-                if (folded.Raises.TryGetValue(instruction, out string? exception))
+                if (folded.Raises.TryGetValue(instruction, out ExceptionType exception))
                     sites.Add(new(method.FullName, instruction.Offset, exception, "folded throw"));
                 Operation operation = InstructionTranslation.Translate(instruction, method, methodIndices,
                     methodIndex, instructions, profile, nativeOperands, parameterHomes);
-                foreach (string named in RuntimeExceptions(operation))
+                foreach (ExceptionType named in RuntimeExceptions(operation))
                     sites.Add(new(method.FullName, instruction.Offset, named,
                         "interpreter operation: " + operation.ToLean()));
             }
         }
-        string[] modeled = sites.Select(site => site.Exception).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        ExceptionType[] modeled = sites.Select(site => site.Exception).Distinct()
+            .OrderBy(exception => exception.FullName(), StringComparer.Ordinal).ToArray();
+        HashSet<ExceptionType> modeledSet = [.. modeled];
         string[] documented = declarations.Select(value => value.Exception).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        string[] undocumented = modeled.Except(documented, StringComparer.Ordinal).ToArray();
-        string[] absent = documented.Except(modeled, StringComparer.Ordinal).ToArray();
+        HashSet<ExceptionType> documentedMembers = [.. documented.Select(DocumentedMember).OfType<ExceptionType>()];
+        string[] undocumented = modeled.Where(exception => !documentedMembers.Contains(exception))
+            .Select(exception => exception.FullName()).ToArray();
+        string[] absent = documented.Where(name => DocumentedMember(name) is not ExceptionType member ||
+            !modeledSet.Contains(member)).ToArray();
         string report = JsonSerializer.Serialize(new
         {
             schema = 1, note = Notice,
@@ -85,7 +90,10 @@ internal static class ExceptionLint
             assemblyIdentity = module.Assembly.Name.FullName, assemblySha256 = Hash(assembly),
             documentationSha256 = Hash(xml), generatedSha256 = regeneratedHash,
             entry = methods[0].FullName, documentationMember = member, profile = profile.Name,
-            potentialModeled = modeled, documented = declarations, sites,
+            potentialModeled = modeled.Select(exception => exception.FullName()),
+            documented = declarations,
+            sites = sites.Select(site =>
+                new { site.Method, site.IlOffset, Exception = site.Exception.FullName(), site.Origin }),
             findings = undocumented.Select(exception => new { exception, message = "potential modelled exception not documented" })
                 .Concat(absent.Select(exception => new { exception, message = "documented exception not found in the model" }))
         }, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
@@ -101,23 +109,31 @@ internal static class ExceptionLint
         return 0;
     }
 
-    static IEnumerable<string> RuntimeExceptions(Operation operation)
+    static IEnumerable<ExceptionType> RuntimeExceptions(Operation operation)
     {
 
         if (operation is Divide divide)
         {
-            yield return "System.DivideByZeroException";
-            if (divide.Signed) yield return "System.OverflowException";
+            yield return ExceptionType.DivideByZero;
+            if (divide.Signed) yield return ExceptionType.Overflow;
         }
         else if (operation is CheckedArithmetic or CheckedConvert or ScalarIntrinsic { Function: ScalarFunction.Abs })
-            yield return "System.OverflowException";
+            yield return ExceptionType.Overflow;
         else if (operation is X86BaseDivRem64)
         {
-            yield return "System.DivideByZeroException";
-            yield return "System.OverflowException";
+            yield return ExceptionType.DivideByZero;
+            yield return ExceptionType.Overflow;
         }
         else if (operation is Memory { Operation: SpanItem })
-            yield return "System.IndexOutOfRangeException";
+            yield return ExceptionType.IndexOutOfRange;
+    }
+
+    // The documentation boundary: a documented type name is the member of that full name, or none.
+    static ExceptionType? DocumentedMember(string name)
+    {
+        foreach (ExceptionType exception in ExceptionTypeText.All)
+            if (exception.FullName() == name) return exception;
+        return null;
     }
 
     static Declaration[] ReadDocumentation(byte[] xml, string assembly, string member)

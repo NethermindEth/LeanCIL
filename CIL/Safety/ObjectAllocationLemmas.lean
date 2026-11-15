@@ -239,7 +239,7 @@ theorem newReferenceArray_insufficient (memory : Memory) (element : CIL.Extracti
 theorem newReferenceArray_negative (memory : Memory) (element : CIL.Extraction.TypeExpr)
     (bits : BitVec 32) (negative : bits.toInt < 0) :
     newReferenceArray memory element (.i32 bits) =
-      .error (.thrown "System.OverflowException") := by
+      .error (.thrown .overflow) := by
   simp [newReferenceArray, negative, Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms newReferenceArray_negative

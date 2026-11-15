@@ -9,6 +9,7 @@ import StrictBinding.Bind
 import StrictBinding.Evidence
 import StrictBinding.Reads
 import StrictBinding.Rows
+import StrictBinding.Slice
 
 /-!
 # Deep verification

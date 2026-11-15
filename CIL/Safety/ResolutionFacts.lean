@@ -16,6 +16,14 @@ For a method `m` with a raw method `mClosed`, the command also declares the shap
 distinct array element type the raw code names (`CIL.Method.elementShape`). A struct element
 reads its layout entries through named suffixes of the layout lists, shared by every method of
 an environment constant, so the facts cost time linear in the layouts and the distinct types.
+
+`cil_field_shape` and `cil_value_shape` declare how every method of an extraction resolves one
+distinct field or type operand, against the environment those methods share, so an operand used
+at many sites of many methods costs one kernel check. A struct shape is checked from one entry
+of each layout list, read through suffixes of the lists named by the environment's first fact,
+so an extraction's facts cost time linear in its layouts and distinct operands. The `cil_code`
+simprocs `reduceFieldShape` and `reduceValueShape` read a method's shape of an operand from its
+fact.
 -/
 
 namespace CIL.Safety.ResolutionFacts
@@ -186,6 +194,20 @@ def argumentAccessProof? (method index : Expr) : MetaM (Option Expr) := do
   if let some plain ← plainArgumentProof? method index then return some plain
   let some literal ← (Meta.evalNat index).run | return none
   argumentProof? method literal
+
+/-- How `method` reads argument `index`, reduced to an `ArgumentAccess` constructor, with the
+    proof `argumentAccessProof?` finds for it. -/
+def resolvedArgumentAccess? (method index : Expr) : MetaM (Option (Expr × Expr)) := do
+  let some proof ← argumentAccessProof? method index | return none
+  let some (_, _, access) := (← inferType proof).eq? | return none
+  return some (← whnfR (← instantiateMVars access), proof)
+
+/-- The frame slot of the home of argument `index` of `method`, with the proof that the method
+    reads the argument there; none for an argument without a home or an undecided access. -/
+def argumentHome? (method index : Expr) : MetaM (Option (Expr × Expr)) := do
+  let some (access, proof) ← resolvedArgumentAccess? method index | return none
+  let_expr CIL.ArgumentAccess.home slot := access | return none
+  return some (slot, proof)
 
 /-- What a method's argument facts read: its receiver, parameter types and homes. -/
 structure Signature where
@@ -556,5 +578,282 @@ elab_rules : command
         (inv := false) .global (eval_prio default)
       declareArgumentFacts body simpSet
       declareElementFacts body simpSet
+
+/-! ## Field and value shapes -/
+
+deriving instance Lean.ToExpr for CIL.EnumStorage
+deriving instance Lean.ToExpr for CIL.ArrayElement
+deriving instance Lean.ToExpr for CIL.ClassSlot
+deriving instance Lean.ToExpr for CIL.FieldShape
+deriving instance Lean.ToExpr for CIL.ValueShape
+
+/-- The name of the shape fact `cil_field_shape` or `cil_value_shape` declares for `operand`. -/
+def shapeFactName (operand : Name) : Name := operand.appendAfter "_shape"
+
+/-- The stem of the named suffixes of an environment's `rawLayouts`. -/
+def rawLayoutStem : String := "_rawLayoutSuffix"
+
+/-- The stem of the named suffixes of an environment's `layouts.toList`. -/
+def computedLayoutStem : String := "_layoutSuffix"
+
+/-- The two layout lists of an environment and the type of their entries, by suffix stem. -/
+def layoutLists (environment : Expr) : Array (String × Expr × Expr) :=
+  let computedType := mkConst ``CIL.Extraction.ComputedLayout
+  #[(rawLayoutStem, mkConst ``CIL.Extraction.RawLayout,
+      mkApp (mkConst ``CIL.LayoutEnvironment.rawLayouts) environment),
+    (computedLayoutStem, computedType, mkApp2 (mkConst ``Array.toList [.zero]) computedType
+      (mkApp (mkConst ``CIL.LayoutEnvironment.layouts) environment))]
+
+/-- Names the suffixes of both layout lists of `environment` once, so the facts of one
+    environment walk each list once between them. -/
+def declareLayoutSuffixes (owner : Body) : TermElabM Unit := do
+  for (stem, entryType, list) in layoutLists (mkConst owner.name) do
+    if (← getEnv).contains (owner.name.appendAfter s!"{stem}0") then continue
+    let (entries, complete) ← listElements list
+    unless complete do
+      throwError "cil_shape_facts: the layouts of {owner.name} do not reduce to a list"
+    declareSuffixes owner entryType stem
+      (fun start => s!"The layouts of `{owner.name}` from entry {start} on") list entries
+
+/-- The entry at `position` of the layout list with suffixes `stem`, and a proof that the list
+    has it there, which reads only the suffix that starts the position's block. -/
+def layoutEntry? (owner : Body) (stem : String) (position : Nat) :
+    MetaM (Option (Expr × Expr)) := do
+  let some (_, entryType, list) := (layoutLists (mkConst owner.name)).find? (·.1 == stem)
+    | return none
+  let offset := position % suffixBlock
+  let start := position - offset
+  let some (.defnInfo info) := (← getEnv).find? (owner.name.appendAfter s!"{stem}{start}")
+    | return none
+  let mut cell := info.value
+  for _ in [0:offset] do
+    let (``List.cons, #[_, _, tail]) := cell.getAppFnArgs | return none
+    cell := tail
+  let (``List.cons, #[_, entry, _]) := cell.getAppFnArgs | return none
+  let found ← mkEqRefl (mkApp2 (mkConst ``Option.some [.zero]) entryType entry)
+  return some (entry, mkApp8 (mkConst ``CIL.CodeSuffix.lookup) entryType list
+    (owner.constant s!"{stem}{start}") (mkNatLit start) entry (mkNatLit offset)
+    (owner.constant s!"{stem}{start}_placed") found)
+
+/-- The element at `index` of the list `list` reduces to, as written. -/
+def listEntry? (list : Expr) (index : Nat) : MetaM (Option Expr) := do
+  let (entries, _) ← listElements list
+  return entries[index]?
+
+/-- A proof that `environment.fieldShape field` is the checked entry of a struct field, read
+    through the layout suffixes; `none` for any other field. -/
+def structFieldProof? (owner : Body) (field : Expr) : MetaM (Option Expr) := do
+  let environment := mkConst owner.name
+  let (``CIL.Extraction.FieldRef.mk, #[ownerType, indexExpr, held, _]) :=
+    (← whnf field).getAppFnArgs | return none
+  let (``CIL.Extraction.TypeExpr.aggregate, #[identity, parentExpr]) :=
+    (← whnf ownerType).getAppFnArgs | return none
+  let some index ← (Meta.evalNat indexExpr).run | return none
+  let some parent ← (Meta.evalNat parentExpr).run | return none
+  let some (metadata, rawFound) ← layoutEntry? owner rawLayoutStem parent | return none
+  let some (layout, checked) ← layoutEntry? owner computedLayoutStem parent | return none
+  let raw := mkApp (mkConst ``CIL.LayoutEnvironment.rawLayouts) environment
+  let ownerStorage := mkAppN (mkConst ``CIL.Extraction.typeStorage_aggregate)
+    #[raw, metadata, identity, parentExpr, rawFound, ← mkEqRefl identity]
+  let some declared ← listEntry? (mkApp (mkConst ``CIL.Extraction.RawLayout.fields) metadata) index
+    | return none
+  let some computed ← listEntry? (mkApp (mkConst ``CIL.AggregateLayout.fields)
+      (mkApp (mkConst ``CIL.Extraction.ComputedLayout.layout) layout)) index | return none
+  let declaredType := mkApp (mkConst ``CIL.Extraction.RawField.type) declared
+  let storageType := mkConst ``CIL.Extraction.StorageType
+  let declaredStorage := mkApp2 (mkConst ``Option.some [.zero]) storageType
+    (mkApp (mkConst ``CIL.Extraction.declaredFieldStorage) declaredType)
+  -- A held struct is decoded through its own entry; other held types do not read the layouts.
+  let heldStorage ← match (← whnf held).getAppFnArgs with
+    | (``CIL.Extraction.TypeExpr.aggregate, #[heldIdentity, heldIndexExpr]) => do
+      let some heldIndex ← (Meta.evalNat heldIndexExpr).run | return none
+      let some (heldMetadata, heldFound) ← layoutEntry? owner rawLayoutStem heldIndex
+        | return none
+      pure (mkAppN (mkConst ``CIL.Extraction.typeStorage_aggregate)
+        #[raw, heldMetadata, heldIdentity, heldIndexExpr, heldFound, ← mkEqRefl heldIdentity])
+    | _ => mkEqRefl declaredStorage
+  let fieldFound ← mkEqRefl (mkApp2 (mkConst ``Option.some [.zero])
+    (mkConst ``CIL.Extraction.RawField) declared)
+  let entryFound ← mkEqRefl (mkApp2 (mkConst ``Option.some [.zero])
+    (mkConst ``CIL.FieldLayout) computed)
+  let structFound := mkAppN (mkConst ``CIL.LayoutEnvironment.structField?_eq)
+    #[environment, parentExpr, indexExpr, held, metadata, declared, layout, computed, rawFound,
+      fieldFound, heldStorage, checked, entryFound]
+  let signed := mkApp (mkConst ``CIL.Extraction.signedField) declaredType
+  return mkAppN (mkConst ``CIL.LayoutEnvironment.fieldShape_struct)
+    #[environment, field, parentExpr, computed, signed, ownerStorage, structFound]
+
+/-- A proof that `environment.fieldShape field` is the slot of a class field holding an array
+    of an admitted struct, read through the layout suffixes; `none` for any other field. -/
+def classArrayProof? (owner : Body) (field : Expr) : MetaM (Option Expr) := do
+  let environment := mkConst owner.name
+  let (``CIL.Extraction.FieldRef.mk, #[ownerType, _, held, _]) :=
+    (← whnf field).getAppFnArgs | return none
+  let ownerType ← whnf ownerType
+  let (``CIL.Extraction.TypeExpr.object, #[scope, name]) := ownerType.getAppFnArgs
+    | return none
+  let (``CIL.Extraction.TypeExpr.array, #[element]) := (← whnf held).getAppFnArgs | return none
+  let (``CIL.Extraction.TypeExpr.aggregate, #[identity, indexExpr]) :=
+    (← whnf element).getAppFnArgs | return none
+  let some index ← (Meta.evalNat indexExpr).run | return none
+  let some (metadata, found) ← layoutEntry? owner rawLayoutStem index | return none
+  let some (layout, checked) ← layoutEntry? owner computedLayoutStem index | return none
+  let raw := mkApp (mkConst ``CIL.LayoutEnvironment.rawLayouts) environment
+  let storage := mkAppN (mkConst ``CIL.Extraction.typeStorage_aggregateArray)
+    #[raw, metadata, identity, indexExpr, found, ← mkEqRefl (mkConst ``Bool.true)]
+  let slotProof := mkAppN (mkConst ``CIL.LayoutEnvironment.classSlot_aggregateArray)
+    #[environment, identity, indexExpr, layout, storage, checked]
+  let size := mkApp (mkConst ``CIL.AggregateLayout.size)
+    (mkApp (mkConst ``CIL.Extraction.ComputedLayout.layout) layout)
+  let slot := mkApp (mkConst ``CIL.ClassSlot.array)
+    (mkApp2 (mkConst ``CIL.ArrayElement.aggregate) identity size)
+  return mkAppN (mkConst ``CIL.LayoutEnvironment.fieldShape_class)
+    #[environment, field, scope, name, slot, ← mkEqRefl ownerType, slotProof]
+
+/-- A proof that `environment.valueShape type` is the checked size of a struct type, read
+    through the layout suffixes; `none` for any other type. -/
+def aggregateValueProof? (owner : Body) (type : Expr) : MetaM (Option Expr) := do
+  let environment := mkConst owner.name
+  let (``CIL.Extraction.TypeExpr.aggregate, #[identity, indexExpr]) :=
+    (← whnf type).getAppFnArgs | return none
+  let some index ← (Meta.evalNat indexExpr).run | return none
+  let some (metadata, found) ← layoutEntry? owner rawLayoutStem index | return none
+  let some (layout, checked) ← layoutEntry? owner computedLayoutStem index | return none
+  let raw := mkApp (mkConst ``CIL.LayoutEnvironment.rawLayouts) environment
+  let storage := mkAppN (mkConst ``CIL.Extraction.typeStorage_aggregate)
+    #[raw, metadata, identity, indexExpr, found, ← mkEqRefl identity]
+  let noWidth := mkApp (mkConst ``Option.none [.zero]) (mkConst ``Nat)
+  return mkAppN (mkConst ``CIL.LayoutEnvironment.valueShape_aggregate)
+    #[environment, type, indexExpr, layout, ← mkEqRefl (mkConst ``Bool.false),
+      ← mkEqRefl noWidth, storage, checked]
+
+/-- The operand kinds that have shape facts. -/
+inductive ShapeOperand where
+  /-- A field operand of `ldfld`, `ldflda` or `stfld`, resolved by `fieldShape`. -/
+  | field
+  /-- A type operand of `ldobj`, `stobj`, `initobj`, `cpobj` or `sizeof`, resolved by
+      `valueShape`. -/
+  | value
+
+/-- The method resolver, lemma lifting the environment's resolution to every method sharing it,
+    and shape type of an operand kind. -/
+def ShapeOperand.names : ShapeOperand → Name × Name × Name
+  | .field => (``CIL.Method.fieldShape, ``CIL.Method.fieldShape_of_environment, ``CIL.FieldShape)
+  | .value => (``CIL.Method.valueShape, ``CIL.Method.valueShape_of_environment, ``CIL.ValueShape)
+
+/-- Layout environments evaluated by the compiled code, by name, so the shape facts of one
+    environment build its value once rather than once per operand. -/
+initialize evaluatedEnvironments : EnvExtension (Std.HashMap Name LayoutEnvironment) ←
+  registerEnvExtension (pure {})
+
+/-- The value of the layout environment `name`, evaluated on its first use in an elaboration. -/
+unsafe def evaluatedEnvironment (name : Name) : MetaM LayoutEnvironment := do
+  if let some environment := (evaluatedEnvironments.getState (← getEnv)).get? name then
+    return environment
+  let environment ← evalExpr LayoutEnvironment (mkConst ``CIL.LayoutEnvironment) (mkConst name)
+  modifyEnv (evaluatedEnvironments.modifyState · (·.insert name environment))
+  return environment
+
+/-- The literal shape the compiled resolver gives `operand` under the environment
+    `environmentName`. The kernel still checks the fact that states it, so a wrong evaluation
+    fails the declaration. -/
+unsafe def evaluateShape (kind : ShapeOperand) (environmentName : Name) (operand : Expr) :
+    MetaM Expr := do
+  let environment ← evaluatedEnvironment environmentName
+  match kind with
+  | .field => return toExpr (environment.fieldShape
+      (← evalExpr Extraction.FieldRef (mkConst ``CIL.Extraction.FieldRef) operand))
+  | .value => return toExpr (environment.valueShape
+      (← evalExpr Extraction.TypeExpr (mkConst ``CIL.Extraction.TypeExpr) operand))
+
+/-- A proof of the environment's resolution of `operand` that reads one layout entry through
+    the suffixes, for the struct shapes that have one; `none` for the shapes the resolver gives
+    without reading the layouts and for refused operands. -/
+def ShapeOperand.entryProof? (kind : ShapeOperand) (owner : Body) (operand : Expr) :
+    MetaM (Option Expr) :=
+  match kind with
+  | .field => do
+    if let some proof ← structFieldProof? owner operand then return some proof
+    classArrayProof? owner operand
+  | .value => aggregateValueProof? owner operand
+
+/-- Declares `{operand}_shape`: every method whose environment is `environment` resolves the
+    operand to the shape `evaluate` gives it. The kernel checks that shape: from one layout entry
+    for a struct shape, or by reducing the resolver otherwise. -/
+def declareShapeFact (kind : ShapeOperand) (environmentName operandName : Name)
+    (evaluate : Expr → MetaM Expr) : TermElabM Unit := do
+  let (methodResolver, sharedLemma, shapeType) := kind.names
+  let owner : Body :=
+    { name := environmentName, levelParams := [], parameters := #[], syntaxRef := ← getRef }
+  declareLayoutSuffixes owner
+  let environment := mkConst environmentName
+  let operand := mkConst operandName
+  let shape ← evaluate operand
+  let resolved ← match ← kind.entryProof? owner operand with
+    | some proof => pure proof
+    | none => pure (mkApp2 (mkConst ``Eq.refl [.one]) (mkConst shapeType) shape)
+  let (statement, proof) ← withLocalDecl `body .implicit (mkConst ``CIL.Method) fun body => do
+    let environmentOf := mkApp (mkConst ``CIL.Method.environment) body
+    withLocalDeclD `shared (← mkEq environmentOf environment) fun shared => do
+      let lhs := mkApp2 (mkConst methodResolver) body operand
+      let proof := mkAppN (mkConst sharedLemma) #[body, environment, operand, shape, shared,
+        resolved]
+      return (← mkForallFVars #[body, shared] (← mkEq lhs shape),
+        ← mkLambdaFVars #[body, shared] proof)
+  let name := shapeFactName operandName
+  withCurrHeartbeats do
+    addDecl (.thmDecl { name, levelParams := [], type := statement, value := proof })
+  let describe := match kind with | .field => "field" | .value => "type"
+  addDocStringCore name <| s!"How every method sharing `{environmentName}` resolves the " ++
+    s!"{describe} operand `{operandName}`."
+
+/-- `cil_field_shape environment field` declares `field_shape`: how every method whose
+    environment is `environment` resolves the field operand `field` (`CIL.Method.fieldShape`). -/
+syntax "cil_field_shape " ident ident : command
+
+/-- `cil_value_shape environment type` declares `type_shape`: how every method whose
+    environment is `environment` resolves the type operand `type` (`CIL.Method.valueShape`). -/
+syntax "cil_value_shape " ident ident : command
+
+elab_rules : command
+  | `(cil_field_shape $environment:ident $field:ident) => liftTermElabM do
+    let environmentName ← realizeGlobalConstNoOverloadWithInfo environment
+    declareShapeFact .field environmentName (← realizeGlobalConstNoOverloadWithInfo field)
+      (unsafe evaluateShape .field environmentName)
+  | `(cil_value_shape $environment:ident $type:ident) => liftTermElabM do
+    let environmentName ← realizeGlobalConstNoOverloadWithInfo environment
+    declareShapeFact .value environmentName (← realizeGlobalConstNoOverloadWithInfo type)
+      (unsafe evaluateShape .value environmentName)
+
+/-- The shape of `resolver body operand` from `operand_shape`, when `operand` is a constant with
+    that fact and a hypothesis states `body`'s environment is the fact's, or `body` unfolds to a
+    method with that environment, which the kernel checks by unfolding `body` once. -/
+def sharedShape? (resolver : Name) (expression : Expr) : MetaM (Option Simp.Step) := do
+  let (name, #[body, operand]) := expression.getAppFnArgs | return none
+  unless name == resolver do return none
+  let .const operandName _ := operand | return none
+  let fact := shapeFactName operandName
+  let some info := (← getEnv).find? fact | return none
+  let .forallE _ _ (.forallE _ shared _ _) _ := info.type | return none
+  let some (_, _, environment) := shared.eq? | return none
+  if environment.hasLooseBVars then return none
+  let environmentOf := mkApp (mkConst ``CIL.Method.environment) body
+  let shared ← match ← findLocalDeclWithType? (← mkEq environmentOf environment) with
+    | some hypothesis => pure (mkFVar hypothesis)
+    | none =>
+      unless ← withDefault (isDefEq environmentOf environment) do return none
+      mkEqRefl environment
+  let proof := mkApp2 (mkConst fact) body shared
+  let some (_, resolved, shape) := (← inferType proof).eq? | return none
+  unless resolved == expression do return none
+  return some (.done { expr := shape, proof? := some proof })
+
+/-- A method's field shape, from the shared fact of a field operand that has one. -/
+simproc ↓ [cil_code] reduceFieldShape (CIL.Method.fieldShape _ _) := fun expression => do
+  return (← sharedShape? ``CIL.Method.fieldShape expression).getD .continue
+
+/-- A method's value shape, from the shared fact of a type operand that has one. -/
+simproc ↓ [cil_code] reduceValueShape (CIL.Method.valueShape _ _) := fun expression => do
+  return (← sharedShape? ``CIL.Method.valueShape expression).getD .continue
 
 end CIL.Safety.ResolutionFacts

@@ -159,7 +159,7 @@ cil_value_steps (target : Nat) [bgt, ble, ble_un, blt_un, bge_un, bgt_un, bge, b
 cil_value_steps (targets : List Nat) [switch] 1
 cil_value_steps (target : Nat) [br] 0
 cil_value_steps [nop] 0
-cil_value_steps (exception : String) [throw] 0
+cil_value_steps (exception : ExceptionType) [throw] 0
 #print axioms step_throw_eq
 
 cil_value_steps (id : CIL.Feature) [feature] 0
@@ -266,22 +266,31 @@ simproc [cil_step] reduceElementShape (CIL.Method.elementShape _ _) := fun expre
   return .done { expr := shape, proof? := some proof }
 
 open Lean Meta in
-/-- An argument load steps by the equation for how the body reads that argument: from its
-    declared fact or signature, or else as simp rewrites the access with the facts in scope. A load
-    whose access stays unknown steps to `loadArgument`, whose match a later fact can decide. -/
+/-- How `body` reads argument `index`, reduced to an `ArgumentAccess` constructor where it can
+    be, with its proof: from the declared fact or signature, or else as simp rewrites the access
+    with the facts in scope. -/
+def argumentAccessIn (body index : Expr) : SimpM (Option (Expr × Expr)) := do
+  if let some resolved ← ResolutionFacts.resolvedArgumentAccess? body index then
+    return some resolved
+  let access ← Simp.simp (mkApp2 (mkConst ``CIL.Method.argumentAccess) body index)
+  return some (← whnfR (← instantiateMVars access.expr), ← access.getProof)
+
+open Lean Meta in
+/-- The step an argument instruction takes by `equation`, whose right side is the result. -/
+def argumentStep (equation : Expr) : SimpM Simp.Step := do
+  let some (_, _, stepped) := (← inferType equation).eq? | return .continue
+  return .visit { expr := stepped, proof? := some equation }
+
+open Lean Meta in
+/-- An argument load steps by the equation for how the body reads that argument, as
+    `argumentAccessIn` finds it. A load whose access stays unknown steps to `loadArgument`,
+    whose match a later fact can decide. -/
 simproc [cil_step] reduceArgumentLoad (step _ (.ldarg _) _ _ _ _ _) := fun expression => do
   let_expr CIL.Safety.step body operation pc args frame stack memory := expression
     | return .continue
   let_expr CIL.Instruction.ldarg index := operation | return .continue
   let leading := #[body, pc, args, frame, memory, index, stack]
-  let (access, proof) ← match ← ResolutionFacts.argumentAccessProof? body index with
-    | some proof =>
-      let some (_, _, access) := (← inferType proof).eq? | return .continue
-      pure (access, proof)
-    | none =>
-      let access ← Simp.simp (mkApp2 (mkConst ``CIL.Method.argumentAccess) body index)
-      pure (access.expr, ← access.getProof)
-  let resolved ← whnfR (← instantiateMVars access)
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
   let known? ← match resolved.getAppFnArgs with
     | (``CIL.ArgumentAccess.value, #[narrow]) =>
       match (← whnfR narrow).getAppFnArgs with
@@ -293,8 +302,42 @@ simproc [cil_step] reduceArgumentLoad (step _ (.ldarg _) _ _ _ _ _) := fun expre
     | (``CIL.ArgumentAccess.home, #[slot]) =>
       pure (some (mkAppN (mkConst ``step_ldarg_home_eq) (leading ++ #[slot, proof])))
     | _ => pure none
-  let equation := known?.getD (mkAppN (mkConst ``step_ldarg_eq) leading)
-  let some (_, _, stepped) := (← inferType equation).eq? | return .continue
-  return .visit { expr := stepped, proof? := some equation }
+  argumentStep (known?.getD (mkAppN (mkConst ``step_ldarg_eq) leading))
+
+open Lean Meta in
+/-- An argument store steps as `stloc` of the argument's home, or faults without one, as
+    `argumentAccessIn` finds it. A store whose access stays unknown steps to `storeArgument`. -/
+simproc [cil_step] reduceArgumentStore (step _ (.starg _) _ _ _ (_ :: _) _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.starg index := operation | return .continue
+  let_expr List.cons _ value rest := stack | return .continue
+  let leading := #[body, pc, args, frame, memory, index, value, rest]
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
+  let known? := match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      some (mkAppN (mkConst ``step_starg_value_eq) (leading ++ #[narrow, proof]))
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      some (mkAppN (mkConst ``step_starg_home_eq) (leading ++ #[slot, proof]))
+    | _ => none
+  argumentStep (known?.getD (mkAppN (mkConst ``step_starg_eq) leading))
+
+open Lean Meta in
+/-- An argument address steps as `ldloca` of the argument's home, or faults without one, as
+    `argumentAccessIn` finds it. An address whose access stays unknown steps to
+    `addressArgument`. -/
+simproc [cil_step] reduceArgumentAddress (step _ (.ldarga _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.ldarga index := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, index, stack]
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
+  let known? := match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      some (mkAppN (mkConst ``step_ldarga_value_eq) (leading ++ #[narrow, proof]))
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      some (mkAppN (mkConst ``step_ldarga_home_eq) (leading ++ #[slot, proof]))
+    | _ => none
+  argumentStep (known?.getD (mkAppN (mkConst ``step_ldarga_eq) leading))
 
 end CIL.Safety

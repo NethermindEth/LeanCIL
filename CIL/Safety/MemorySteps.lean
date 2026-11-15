@@ -543,7 +543,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
         let address ← referenceAt r
         let result ← checkedAt r 0 (add memory address width (BitVec.ofNat 64 index.toNat))
         return .next (pc + 1) (.reference (.address result) :: rest) frame memory
-      else .error (.thrown "System.IndexOutOfRangeException") := by
+      else .error (.thrown .indexOutOfRange) := by
   memory_step_proof
 
 @[cil_step high] theorem step_memory_spanLength_eq (r : ManagedReference) (length : Nat)
@@ -567,7 +567,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     step body (.memory (.spanSlice false)) pc args frame
       (.scalar (.i32 start) :: .bufferSpan view :: rest) memory = do
       if start.toNat ≤ view.length then pure ()
-        else .error (.thrown "System.ArgumentOutOfRangeException")
+        else .error (.thrown .argumentOutOfRange)
       let sliced ← checkedAt view.reference 0
         (view.slice memory start.toNat (view.length - start.toNat))
       return .next (pc + 1) (.bufferSpan sliced :: rest) frame memory := by
@@ -580,7 +580,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     step body (.memory (.spanSlice true)) pc args frame
       (.scalar (.i32 length) :: .scalar (.i32 start) :: .bufferSpan view :: rest) memory = do
       if start.toNat ≤ view.length && length.toNat ≤ view.length - start.toNat then pure ()
-        else .error (.thrown "System.ArgumentOutOfRangeException")
+        else .error (.thrown .argumentOutOfRange)
       let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat length.toNat)
       return .next (pc + 1) (.bufferSpan sliced :: rest) frame memory := by
   memory_step_proof
@@ -593,7 +593,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
       (.scalar (.i32 index) :: .bufferSpan view :: rest) memory = do
       if width == view.width then pure () else .error .invalidState
       if index.toNat < view.length then pure ()
-        else .error (.thrown "System.IndexOutOfRangeException")
+        else .error (.thrown .indexOutOfRange)
       let reference ← checkedAt view.reference width (view.element memory index.toNat)
       return .next (pc + 1)
         ((if view.writable then .reference (.address reference)
@@ -607,7 +607,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 theorem step_memory_arrayLength_eq (view : ArrayView) (rest : List Value) :
     step body (.memory .arrayLength) pc args frame (.array view :: rest) memory = do
       let _ ← checkedAt view.reference 0 (view.validate memory)
-      if view.reference == .null then .error (.thrown "System.NullReferenceException") else
+      if view.reference == .null then .error (.thrown .nullReference) else
         return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 view.length)) :: rest) frame
           memory := by
   memory_step_proof
@@ -631,7 +631,7 @@ theorem step_memory_arrayLength_eq (view : ArrayView) (rest : List Value) :
     step body (.memory .arrayLength) pc args frame
         (.array ⟨.null, length, element⟩ :: rest) memory =
       checkedAt .null 0 (ArrayView.validate ⟨.null, length, element⟩ memory) >>= fun _ =>
-        .error (.thrown "System.NullReferenceException") := by
+        .error (.thrown .nullReference) := by
   rw [step_memory_arrayLength_eq]
   rfl
 #print axioms step_memory_arrayLength_null_eq
@@ -639,7 +639,7 @@ theorem step_memory_arrayLength_eq (view : ArrayView) (rest : List Value) :
 /-- `ldlen` of a null object reference, as `ldnull` pushes it, throws `NullReferenceException`. -/
 @[cil_step high] theorem step_memory_arrayLength_object_null_eq (rest : List Value) :
     step body (.memory .arrayLength) pc args frame (.object .null :: rest) memory =
-      .error (.thrown "System.NullReferenceException") := by
+      .error (.thrown .nullReference) := by
   memory_step_proof
 #print axioms step_memory_arrayLength_object_null_eq
 

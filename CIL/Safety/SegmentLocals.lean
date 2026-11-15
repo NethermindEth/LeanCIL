@@ -12,39 +12,46 @@ Indirect writes and aliased homes cannot be justified by placement alone.
 
 namespace CIL.Safety
 
-/-- Direct local destinations named by a code segment. -/
-def segmentStores (code : List CIL.Instruction) : List Nat := code.filterMap fun operation =>
+/-- Direct destinations named by a code segment of `body`: the slots its local stores name,
+    and the home slots of the homed arguments it stores to. -/
+def segmentStores (body : CIL.Method) (code : List CIL.Instruction) : List Nat :=
+  code.filterMap fun operation =>
   match operation with
   | .stloc index | .initializeSpanLocal index _ => some index
+  | .starg index =>
+    match body.argumentAccess index with
+    | .home slot => some slot
+    | .value _ => none
   | _ => none
 
 /-- The remembered values of locals outside a segment's direct-store set. -/
-def untouchedLocals (code : List CIL.Instruction) (known : Nat → Option CIL.Value) :
-    Nat → Option CIL.Value := fun index =>
-  if index ∈ segmentStores code then none else known index
+def untouchedLocals (body : CIL.Method) (code : List CIL.Instruction)
+    (known : Nat → Option CIL.Value) : Nat → Option CIL.Value := fun index =>
+  if index ∈ segmentStores body code then none else known index
 
 /-- A memory effect consists of actual successful writes to local homes named by the code.
     Slot identities stay fixed. Merely omitting an indirect write from the code is not evidence
     for this relation: every memory transition requires its checked write equation. -/
-inductive SegmentLocalEffects (code : List CIL.Instruction) (slots : List LocalSlot) :
-    Memory → Memory → Prop where
-  | refl (memory) : SegmentLocalEffects code slots memory memory
+inductive SegmentLocalEffects (body : CIL.Method) (code : List CIL.Instruction)
+    (slots : List LocalSlot) : Memory → Memory → Prop where
+  | refl (memory) : SegmentLocalEffects body code slots memory memory
   | store {before after} (index : Nat) (kind : CIL.LocalKind) (home : Reference)
       (bytes : List (BitVec 8)) (alignment : Nat)
-      (destination : index ∈ segmentStores code)
+      (destination : index ∈ segmentStores body code)
       (slot : slots[index]? = some (.bytes kind home))
       (written : write before home bytes alignment = .ok after) :
-      SegmentLocalEffects code slots before after
+      SegmentLocalEffects body code slots before after
   | trans {before middle after}
-      (first : SegmentLocalEffects code slots before middle)
-      (second : SegmentLocalEffects code slots middle after) :
-      SegmentLocalEffects code slots before after
+      (first : SegmentLocalEffects body code slots before middle)
+      (second : SegmentLocalEffects body code slots middle after) :
+      SegmentLocalEffects body code slots before after
 
 /-- An effect remains valid when the containing placed region permits more destinations. -/
-theorem SegmentLocalEffects.mono {small large : List CIL.Instruction} {slots : List LocalSlot}
-    {before after : Memory} (effects : SegmentLocalEffects small slots before after)
-    (included : ∀ index ∈ segmentStores small, index ∈ segmentStores large) :
-    SegmentLocalEffects large slots before after := by
+theorem SegmentLocalEffects.mono {body : CIL.Method} {small large : List CIL.Instruction}
+    {slots : List LocalSlot} {before after : Memory}
+    (effects : SegmentLocalEffects body small slots before after)
+    (included : ∀ index ∈ segmentStores body small, index ∈ segmentStores body large) :
+    SegmentLocalEffects body large slots before after := by
   induction effects with
   | refl memory => exact .refl memory
   | store index kind home bytes alignment destination slot written =>
@@ -54,11 +61,11 @@ theorem SegmentLocalEffects.mono {small large : List CIL.Instruction} {slots : L
 #print axioms SegmentLocalEffects.mono
 
 /-- Adjacent placed regions combine their checked memory effects. -/
-theorem SegmentLocalEffects.append {left right : List CIL.Instruction} {slots : List LocalSlot}
-    {before middle after : Memory}
-    (first : SegmentLocalEffects left slots before middle)
-    (second : SegmentLocalEffects right slots middle after) :
-    SegmentLocalEffects (left ++ right) slots before after :=
+theorem SegmentLocalEffects.append {body : CIL.Method} {left right : List CIL.Instruction}
+    {slots : List LocalSlot} {before middle after : Memory}
+    (first : SegmentLocalEffects body left slots before middle)
+    (second : SegmentLocalEffects body right slots middle after) :
+    SegmentLocalEffects body (left ++ right) slots before after :=
   (first.mono (by
     intro index member
     simp only [segmentStores, List.filterMap_append, List.mem_append] at *
@@ -70,19 +77,20 @@ theorem SegmentLocalEffects.append {left right : List CIL.Instruction} {slots : 
 #print axioms SegmentLocalEffects.append
 /-- A checked local-write effect preserves every remembered value outside the placed stores.
     Distinct writable homes rule out aliasing between the stored and retained locals. -/
-theorem SegmentLocalEffects.frame {code : List CIL.Instruction} {slots : List LocalSlot}
+theorem SegmentLocalEffects.frame {body : CIL.Method} {code : List CIL.Instruction}
+    {slots : List LocalSlot}
     {before after entered : Memory} {boundary : Nat} {kinds : List CIL.LocalKind}
     {known : Nat → Option CIL.Value}
-    (effects : SegmentLocalEffects code slots before after)
+    (effects : SegmentLocalEffects body code slots before after)
     (homes : WritableHomes entered boundary kinds slots)
-    (snapshots : LocalSnapshots before slots (untouchedLocals code known)) :
-    LocalSnapshots after slots (untouchedLocals code known) := by
+    (snapshots : LocalSnapshots before slots (untouchedLocals body code known)) :
+    LocalSnapshots after slots (untouchedLocals body code known) := by
   induction effects with
   | refl => exact snapshots
   | store index kind home bytes alignment destination slot written =>
     apply snapshots.after_write_apart written
     intro other value otherKind otherHome specified otherSlot
-    have outside : other ∉ segmentStores code := by
+    have outside : other ∉ segmentStores body code := by
       intro stored
       simp [untouchedLocals, stored] at specified
     have different : other ≠ index := fun same => outside (same ▸ destination)
@@ -92,12 +100,12 @@ theorem SegmentLocalEffects.frame {code : List CIL.Instruction} {slots : List Lo
 #print axioms SegmentLocalEffects.frame
 
 /-- Forgetting destinations from a snapshot map preserves all other snapshot evidence. -/
-theorem LocalSnapshots.untouched {code : List CIL.Instruction} {memory : Memory}
-    {slots : List LocalSlot} {known : Nat → Option CIL.Value}
+theorem LocalSnapshots.untouched {body : CIL.Method} {code : List CIL.Instruction}
+    {memory : Memory} {slots : List LocalSlot} {known : Nat → Option CIL.Value}
     (snapshots : LocalSnapshots memory slots known) :
-    LocalSnapshots memory slots (untouchedLocals code known) := by
+    LocalSnapshots memory slots (untouchedLocals body code known) := by
   intro index value specified
-  by_cases stored : index ∈ segmentStores code
+  by_cases stored : index ∈ segmentStores body code
   · simp [untouchedLocals, stored] at specified
   · exact snapshots index value (by simpa [untouchedLocals, stored] using specified)
 
@@ -115,9 +123,9 @@ theorem SegmentRun.frameLocals {program : CIL.Program} {method start finish cost
     (homes : WritableHomes entered boundary kinds before.frame.locals)
     (snapshots : LocalSnapshots before.memory before.frame.locals known)
     (slots : after.frame.locals = before.frame.locals)
-    (effects : SegmentLocalEffects code before.frame.locals before.memory after.memory) :
+    (effects : SegmentLocalEffects body code before.frame.locals before.memory after.memory) :
     SegmentRun program method start finish cost arguments before after ∧
-      LocalSnapshots after.memory after.frame.locals (untouchedLocals code known) := by
+      LocalSnapshots after.memory after.frame.locals (untouchedLocals body code known) := by
   refine ⟨execution, ?_⟩
   rw [slots]
   exact effects.frame homes snapshots.untouched
@@ -136,10 +144,10 @@ theorem Segment.frameLocals {program : CIL.Program} {method start finish : Nat}
     (snapshots : LocalSnapshots initial slots known)
     (contract : Segment program method start finish pre fun arguments state =>
       post arguments state ∧ state.frame.locals = slots ∧
-        SegmentLocalEffects code slots initial state.memory) :
+        SegmentLocalEffects body code slots initial state.memory) :
     Segment program method start finish pre fun arguments state =>
       post arguments state ∧ LocalSnapshots state.memory state.frame.locals
-        (untouchedLocals code known) := by
+        (untouchedLocals body code known) := by
   apply contract.consequence (fun _ _ valid => valid)
   intro arguments state result
   refine ⟨result.1, ?_⟩

@@ -286,7 +286,13 @@ from a supplied fact such as `body.argumentAccess 0 = .value none`, and steps by
 `step_ldarg_value_eq`, `step_ldarg_narrow_eq` or `step_ldarg_home_eq`
 ([StepComposition](../CIL/Safety/StepComposition.lean)), so the goal shows the incoming value,
 its narrowing or the load of the home slot. An access that none of these decides leaves the match
-of `loadArgument` on `body.argumentAccess index`, which a later fact decides.
+of `loadArgument` on `body.argumentAccess index`, which a later fact decides. A `.starg index` or
+`.ldarga index` step reads the access the same way: a home steps by `step_starg_home_eq` or
+`step_ldarga_home_eq` to the store to or address of the home slot, an argument without a home by
+`step_starg_value_eq` or `step_ldarga_value_eq` to the unsupported fault, and an undecided access
+to `storeArgument` or `addressArgument`. Under a home, `step_ldarg_home_ldloc`,
+`step_starg_home_stloc` and `step_ldarga_home_ldloca` state each argument instruction as the
+local instruction of its slot.
 
 ### Consumer stepping regressions
 
@@ -361,9 +367,10 @@ Neither tactic assumes a memory or availability premise. `LoopReaches` uses the 
 relation with an exact-target postcondition.
 
 For numeric-local framing, record successful write equations in `SegmentLocalEffects`. The
-destinations must occur in `segmentStores code`, read from the placed instructions.
-`Segment.frameLocals` combines these effects with the initial `LocalSnapshots` and `WritableHomes`
-to derive snapshots for `untouchedLocals code known`. Effects compose through `append` or `trans`;
+destinations must occur in `segmentStores body code`, read from the placed instructions: the slot
+of each `stloc` and the home slot of each `starg` to a homed argument. `Segment.frameLocals`
+combines these effects with the initial `LocalSnapshots` and `WritableHomes` to derive snapshots
+for `untouchedLocals body code known`. Effects compose through `append` or `trans`;
 one frame-rule application replaces separate disjoint-read proofs for all retained locals. The
 numeric slot identities must remain fixed, and the frame-rule placement must belong to the running
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
@@ -616,8 +623,8 @@ type, so an unrelated context adds nothing to simp. It gathers:
 - `elementWidth` of a `SpanContents`;
 - for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, and for the
   entry frame `bind_entry ... allocating` proves for every footprint, the `form` of each home
-  (`LoopFrame.form_home`), so `ldloca` steps, and the load of each remembered home through
-  `LoopFrame.load`, with `localResult`;
+  (`LoopFrame.form_home`), so `ldloca` and a homed `ldarga` step, and the load of each
+  remembered home through `LoopFrame.load`, with `localResult`;
 - for a struct local remembered as `.aggregate (layout.encode fields)`, the read of each field by
   value (`ldloc` then `ldfld`, [`step_fieldAt_encode`](../CIL/Safety/FieldValues.lean)) and by
   address (`LoopFrame.load_field`), as that field's value;
@@ -637,9 +644,9 @@ carries, such as a span's validity, so a span local loads after a word local's s
 facts are added as hygienic hypotheses, and a statement already gathered is not added again.
 `SpanSum` names no fact but its invariant equation.
 
-Each instruction is given only the facts it can read: home forms reach only `ldloca`, field reads
-only `ldfld`, and the negative sides of case splits only instructions that test or compute on
-data, while `ret` reads them all.
+Each instruction is given only the facts it can read: home forms reach only `ldloca` and
+`ldarga`, field reads only `ldfld`, and the negative sides of case splits only instructions that
+test or compute on data, while `ret` reads them all.
 
 A loop over symbolic caller memory keeps the frame part of its state as the
 [`LoopFrame`](../CIL/Safety/LoopFrames.lean) that `bind_entry ... allocating` returns, in a

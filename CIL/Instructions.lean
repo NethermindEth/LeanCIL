@@ -1,4 +1,5 @@
 import CIL.Types
+import CIL.ExceptionType
 import CIL.IntegerArithmetic
 import CIL.Features
 import CIL.SIMD.Availability
@@ -15,6 +16,27 @@ and `Program` the list a call index refers into.
 -/
 
 namespace CIL
+
+/-- The admitted integer suffixes of `ldind.*`, `stind.*`, `ldelem.*` and `stelem.*`. -/
+inductive NumericKind where
+  | i1 | u1 | i2 | u2 | i4 | u4 | i8 | i
+  deriving DecidableEq, Repr
+
+/-- The load width in bytes and whether a narrow value is sign-extended to i32. -/
+def NumericKind.load? : NumericKind -> Option (Prod Nat Bool)
+  | .i1 => some (1, true)
+  | .u1 => some (1, false)
+  | .i2 => some (2, true)
+  | .u2 => some (2, false)
+  | .i4 | .u4 => some (4, false)
+  | .i8 | .i => some (8, false)
+
+/-- The store width in bytes; narrow stores keep the low bytes of an i32 value. -/
+def NumericKind.store? : NumericKind -> Option Nat
+  | .i1 | .u1 => some 1
+  | .i2 | .u2 => some 2
+  | .i4 | .u4 => some 4
+  | .i8 | .i => some 8
 
 /-- Small integer storage types; all extend to the 32-bit evaluation-stack type. -/
 inductive NarrowKind where
@@ -152,6 +174,10 @@ inductive Instruction where
   -- Arguments and locals.
   /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/
   | ldarg (index : Nat)
+  /-- Stores the top of the stack into argument `index`'s home, as `storeArgument` says. -/
+  | starg (index : Nat)
+  /-- Pushes the address of argument `index`'s home, as `addressArgument` says. -/
+  | ldarga (index : Nat)
   | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)
@@ -204,8 +230,10 @@ inductive Instruction where
   | memory (operation : MemoryOp)
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
-  | throw (exception : String)
-  | unsupported (description : String)
+  | throw (exception : ExceptionType)
+  /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
+      outside the code the extractor reaches under the selected profile. It faults when stepped. -/
+  | unadmitted (opcode : Nat)
   deriving Repr
 
 /-- The name of the instruction type, for tactics that recognise its constructors. -/
@@ -265,7 +293,7 @@ inductive Receiver where
   deriving DecidableEq, Repr
 
 /-- A method's declared signature after its type arguments are closed. Aggregate types refer
-    to `LayoutEnvironment.rawLayouts`. -/
+    to `LayoutEnvironment.rawLayouts`. Only implicit receiver signatures are supported. -/
 structure DeclaredSignature where
   /-- `some` exactly for an instance method. -/
   receiver : Option Receiver := none

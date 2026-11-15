@@ -68,7 +68,7 @@ theorem secondValue_holds : secondValueContract.Holds Extracted.program secondVa
 /-- A null node throws `NullReferenceException` at `SecondValue`'s first field load, pc 1. -/
 theorem secondValue_null_node_throws (memory : Memory) :
     ∃ fuel, invoke Extracted.program fuel secondValue [.object .null] memory =
-      .error ⟨secondValue, 1, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨secondValue, 1, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms secondValue_null_node_throws
@@ -78,7 +78,7 @@ theorem secondValue_null_node_throws (memory : Memory) :
 theorem secondValue_null_next_throws (memory : Memory) (node : Reference)
     (readable : Node.Next.Readable memory node) (held : Node.Next.of memory node = .null) :
     ∃ fuel, invoke Extracted.program fuel secondValue [.object (.address node)] memory =
-      .error ⟨secondValue, 2, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨secondValue, 2, .thrown .nullReference⟩ := by
   cil_checked_steps [readable.load_null held]
 
 #print axioms secondValue_null_next_throws

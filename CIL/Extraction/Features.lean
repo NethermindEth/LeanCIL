@@ -15,15 +15,15 @@ the extractor prunes the branches they decide. `FeatureFlowValid` checks that pr
 abstract interpretation tracks known 32-bit words on the stack and in eligible locals, its
 transfer function and successor edges are recomputed here from the raw body, and the
 extractor's per-pc certificate must be closed under them. Only pcs the certificate reaches
-may be live; every other emitted instruction must be an `.unsupported` hole.
+may be live; every other emitted instruction must be a hole (`.unadmitted`).
 
 The same pass binds each raw instruction to its emitted counterpart, exactly for control
 flow, locals and feature tests, and by stack effect for everything else.
 
 A parameterless static Boolean call pushes the word `constantReturn` reads from the callee's own
 certificate, which the whole-program obligation validates alongside the caller's. Known words
-only decide which pcs are live, and every pc they rule out is emitted as an `.unsupported` hole
-that has no step. A wrong claim, cyclic or not, therefore sends execution into a hole that faults:
+only decide which pcs are live, and every pc they rule out is emitted as a hole, whose step
+faults. A wrong claim, cyclic or not, therefore sends execution into a hole that faults:
 it cannot make a successful outcome provable, only unreachable.
 -/
 
@@ -516,7 +516,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Inst
 
 /-- Bind every control-flow operation and every operation that propagates a known
     feature fact to the actual emitted instruction. Unknown operations may not
-    emit an unsupported hole on a reachable path. -/
+    emit a hole on a reachable path. -/
 def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     Id.run do
@@ -557,14 +557,16 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     return match localIndex instruction, emitted with
       | some index, .ldloca actual => index == actual
       | _, _ => false
-  -- Argument homes are appended after all raw locals. Their precise mapping is
-  -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
+  -- An argument's address and store name the argument itself; ParameterHomesValid checks that
+  -- it has a home, so neither can alias a tracked local.
   if instruction.opcode ∈ [15, 65034] then
-    return match emitted with
-      | .ldloca index => raw.locals.length <= index
-      | _ => false
+    return match argumentOperation instruction, emitted with
+      | some (.address index), .ldarga actual => index == actual
+      | _, _ => false
   if instruction.opcode ∈ [16, 65035] then
-    return match emitted with | .stloc index => raw.locals.length <= index | _ => false
+    return match argumentOperation instruction, emitted with
+      | some (.store index), .starg actual => index == actual
+      | _, _ => false
   -- A span address on the stack is already the view it names, so copying the span emits nothing.
   if instruction.opcode == 113 then
     if let .type type := instruction.operand then
@@ -590,7 +592,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | 69, .targets x, .switch y => x == y
     | 42, _, .ret => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
-    | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
+    | _, _, .unadmitted _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
     | _, _, .brfalse _ | _, _, .brtrue _ => false
     | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
@@ -614,7 +616,7 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
   | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
-  | some (.raise name), .throw exception => name == exception
+  | some (.raise raised), .throw exception => raised == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
     index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with
@@ -641,7 +643,7 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     (certificate : Nat → Option (Option (FeatureFacts Locals)))
     (roles : Nat → Option (Option FoldRole)) (rawAt : Nat → Option RawInstruction) :
     (RawInstruction × Option FoldRole) × Nat → Option (FeatureFacts Locals) → Instruction → Bool
-  | _, none, .unsupported _ => true
+  | _, none, .unadmitted _ => true
   | ((instruction, role), pc), some state, emitted =>
     wellShaped raw facts state &&
       (featureOpMatchesAt layouts raw role instruction emitted &&
@@ -666,7 +668,7 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
   | _, none, _ => false
 
 /-- No optional sites: entry, every raw PC, the entire parameter-reachability mask,
-    every successor, and all unsupported holes are covered. The entry state has no known fact.
+    every successor, and all holes are covered. The entry state has no known fact.
     `constants` gives, by emitted method index, the word a parameterless call to that method
     pushes. -/
 def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32)

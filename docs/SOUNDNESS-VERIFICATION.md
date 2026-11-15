@@ -79,6 +79,12 @@ closures, file hashes and unchanged artifacts after building. Imports of `Extrac
 extraction-dependent modules and closed generated certificates still undergo required kernel replay
 when proof checking. Certificate/theorem audits and extraction regeneration remain mandatory.
 
+The single-file verifier's support audit key binds the audit schema, verification policy,
+certified library identity, extraction identity digest, ordered support imports and support
+source hashes. The digest comes from the extraction identity already read for verification.
+Support results are reusable only for the same extraction identity. A changed extraction
+misses entries certified for a different extraction.
+
 Canonical fingerprints deserialize every available olean part with the pinned Lean toolchain,
 remove only the diagnostic `Lean.Linter.lintLogExt`, and reserialize. Constants, private
 declarations, import modifiers, other extensions and source paths in definitions remain covered.

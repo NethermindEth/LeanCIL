@@ -291,21 +291,44 @@ Console.WriteLine(Elaborated("""
       let nil := mkApp (mkConst ``List.nil [.zero]) ty
       let cons := fun head tail => mkApp3 (mkConst ``List.cons [.zero]) ty head tail
       let mut previous := 0
+      let mut iterations := 1
+      let mut baseline := 0
+      let minimumNanos := 25000000
       for count in [16, 128, 1024] do
         let mut tail := nil
         for index in [:count - 1] do tail := cons (mkNatLit index) tail
         let pattern := Json.mkObj [("list", Json.mkObj [
           ("type", Json.mkObj [("const", toJson "Nat")]), ("level", toJson (0 : Nat)),
           ("items", toJson (Array.replicate count (Json.str "_")))])]
-        let started ← IO.monoNanosNow
+        let started <- IO.getNumHeartbeats
         for iteration in [:1000] do
           unless (LeanCILAudit.fits pattern (cons (mkNatLit iteration) tail)).toOption == some true do
             throw <| IO.userError "matcher scaling result"
-        let elapsed := (← IO.monoNanosNow) - started
-        IO.println s!"PASS list matcher {count}: {elapsed / 1000000} ms for 1000 matches"
-        if previous > 0 && elapsed > previous * 12 + 20000000 then
+        let used := (<- IO.getNumHeartbeats) - started
+        IO.println s!"PASS list matcher {count}: {used} heartbeats for 1000 matches"
+        if previous > 0 && used > previous * 12 then
           throw <| IO.userError "list matcher growth exceeds linear allowance"
-        previous := elapsed
+        previous := used
+        let measure := fun repeats => do
+          let mut best := 1000000000000
+          for _ in [:5] do
+            let start <- IO.monoNanosNow
+            for iteration in [:repeats] do
+              let result := LeanCILAudit.fits pattern (cons (mkNatLit iteration) tail)
+              unless result.toOption == some true do
+                throw <| IO.userError "matcher timing result"
+            best := min best ((<- IO.monoNanosNow) - start)
+          return best
+        let mut elapsed <- measure iterations
+        if count == 16 then
+          while elapsed < minimumNanos do
+            iterations := iterations * 2
+            elapsed <- measure iterations
+          baseline := elapsed
+        -- Allocation-free quadratic traversal costs 4096x at 64x items, above the 256x bound.
+        if count == 1024 && elapsed > baseline * 256 then
+          throw <| IO.userError "list matcher time exceeds linear allowance"
+        IO.println s!"PASS list matcher {count}: {elapsed} ns for {iterations} matches"
     """));
 if (listsOnly) return;
 

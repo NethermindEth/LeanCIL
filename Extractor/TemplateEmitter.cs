@@ -7,13 +7,14 @@ namespace Nethermind.LeanCIL;
 // Templates are proof inputs. Only the generated, kernel-checked bindings connect them to CIL.
 internal static partial class TemplateEmitter
 {
-    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations);
+    /// <summary>One extracted method: its identity, frame, operations and the raw opcode at each pc.</summary>
+    internal sealed record Method(string Identity, FrameMetadata Frame, Operation[] Operations, int[] Opcodes);
     internal sealed record Variant(string Directory, string AssemblyHash, FeatureProfile Profile, Method[] Methods);
     /// <summary>One profile's frame and body, its callees renumbered to the template's callee parameters.</summary>
     sealed record Row(Variant Variant, FrameMetadata Frame, Operation[] Ops);
-    sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows);
+    sealed record Template(string Identity, FrameMetadata Frame, Feature[] Features, string[] Callees, Row[] Rows,
+        int[] Opcodes);
 
-    static readonly string MissingProfile = new Unsupported("Profile combination not selected for template").ToLean();
     const string Usage = "Usage: leancil templates output-directory extraction-directory... [--check] " +
         "[--namespace name] [--omit-equations] [--module file.lean]";
 
@@ -156,7 +157,8 @@ internal static partial class TemplateEmitter
     static Template Prepare(string identity, (Variant Variant, Method Method)[] selected)
     {
         var first = selected[0].Method;
-        if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length))
+        if (selected.Any(row => row.Method.Operations.Length != first.Operations.Length ||
+            !row.Method.Opcodes.AsSpan().SequenceEqual(first.Opcodes)))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
         var features = Enum.GetValues<Feature>().Where(feature => selected.Any(row =>
@@ -177,7 +179,7 @@ internal static partial class TemplateEmitter
         if (rows.Any(row => row.Frame != rows[0].Frame))
             throw new InvalidDataException("Template metadata or instruction count differs between profiles: " +
                 identity);
-        return new(identity, rows[0].Frame, features, callees, rows);
+        return new(identity, rows[0].Frame, features, callees, rows, first.Opcodes);
     }
 
     /// <summary>An instruction merged over profiles: the operation when every profile agrees, and its text.</summary>
@@ -185,10 +187,14 @@ internal static partial class TemplateEmitter
 
     static string Callee(int index) => "callee" + index;
 
-    // Missing combinations stay unsupported even where all selected rows share an instruction.
+    // A missing combination is a hole with the pc's raw opcode, even where all selected rows share an instruction.
     static Merged Instruction(Template template, Row[] rows, int pc, int featureIndex = 0)
     {
-        if (rows.Length == 0) return new(null, MissingProfile);
+        if (rows.Length == 0)
+        {
+            var operation = new Unadmitted(template.Opcodes[pc]);
+            return new(operation, operation.ToLean());
+        }
         if (featureIndex == template.Features.Length)
         {
             var values = rows.Select(row => row.Ops[pc]).Distinct().ToArray();
