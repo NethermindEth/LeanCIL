@@ -78,7 +78,7 @@ theorem locals_initialized_by_the_bytes :
 
 /-- `ldc.i4.8; localloc; pop; ret` with no locals and the given init flag. -/
 private def allocationRaw (initLocals : Bool) : RawMethod :=
-  method initLocals [] [instr 0 0x1E, instr 1 0xFE0F, instr 3 0x26, instr 4 0x2A]
+  method 8 initLocals [] [instr 0 0x1E, instr 1 0xFE0F, instr 3 0x26, instr 4 0x2A]
 
 /-- Bytes without localsinit decode `localloc` under a declared signature whose init flag is
     false, whichever flag the definition carries, so the allocation is not zeroed. -/
