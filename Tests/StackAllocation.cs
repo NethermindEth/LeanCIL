@@ -85,12 +85,14 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
     }
 
     if (name != "uninitialized") continue;
-    const string operation = ".stackAlloc false";
-    if (!source.Contains(operation, StringComparison.Ordinal)) throw new Exception("Missing uninitialized allocation");
+    // The declared signature carries the flag that localloc reads; omitting it declares localsinit.
+    const string flag = ", initLocals := false }";
+    if (!source.Contains(".localloc", StringComparison.Ordinal) || !source.Contains(flag, StringComparison.Ordinal))
+        throw new Exception("Missing uninitialized allocation");
     var forged = Path.Combine(root, "forged-initialization.lean");
-    File.WriteAllText(forged, source.Replace(operation, ".stackAlloc true", StringComparison.Ordinal));
+    File.WriteAllText(forged, source.Replace(flag, " }", StringComparison.Ordinal));
     var rejected = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
-    if (rejected.Code == 0 || !rejected.Output.Contains("FeatureFlowValid", StringComparison.Ordinal))
+    if (rejected.Code == 0 || !rejected.Output.Contains("MethodShapeValid", StringComparison.Ordinal))
         throw new Exception("Forged localsinit was not rejected by the Lean certificate: " + rejected.Output);
     Console.WriteLine("PASS forged stack initialization rejected");
 }

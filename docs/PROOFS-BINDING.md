@@ -216,11 +216,11 @@ theorem found : program[1]? = some double := by cil_body
 
 An extracted method also carries its declared signature (`declared`), the layout tables shared by
 the whole extraction (`environment`) and a call-link table (`links`), and an equality or an
-embedding compares all of them with the extraction's. A bare literal such as `double` has no
-signature, so it binds only to a method with none. Start from the extraction's method and replace
-its code with `Method.withCode`, which keeps `declared`, `environment` and the other fields, gives
-the body the links its new code implies and resets the static sites, which are keyed by pc like the
-links:
+embedding compares all of them with the extraction's. A bare literal such as `double` has the
+default signature, with no parameters, a void return and localsinit, so it binds only to a method
+declared that way. Start from the extraction's method and replace its code with `Method.withCode`,
+which keeps `declared`, `environment` and the other fields, gives the body the links its new code
+implies and resets the static sites, which are keyed by pc like the links:
 
 ```lean extracted
 import Extracted
@@ -555,7 +555,7 @@ reference, while a field holding a fresh object may name another identity in the
 initial memory to the target's final memory. `ProgramRenaming.raises` transfers a named exception
 and additionally requires valid initial arguments. These theorems use the proved complete
 dispatcher internally. The allocation relation extends through local setup, nested calls,
-constructors, static allocation and `stackAlloc`; frame ownership and expiry remain checked.
+constructors, static allocation and `localloc`; frame ownership and expiry remain checked.
 
 `MethodContract.Holds.of_allocationRenaming` transfers the original complete contract, including its
 precondition and footprint. Supply proofs that the precondition establishes well-formed memory,

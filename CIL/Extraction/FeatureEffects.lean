@@ -57,7 +57,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .managed (.tableElement _) => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
-  | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)
+  | .localloc | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
   | .ldc_i4 _ | .ldc_i8 _ | .ldarg _ | .ldloc .. => some (0, 1)

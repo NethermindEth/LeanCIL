@@ -123,6 +123,19 @@ theorem step_ldarg_home_eq (index : Nat) (stack : List Value) (slot : Nat)
 
 #print axioms step_call_eq
 
+/-- `localloc` allocates frame storage, zeroed as the body's declared localsinit flag says. -/
+@[cil_step] theorem step_localloc_eq (stack : List Value) :
+    step body .localloc pc args frame stack memory =
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else localAllocation body.declared.initLocals pc frame stack memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_localloc_eq
+
+attribute [cil_step] localAllocation
+
 /-- A narrowed return of one i32 extends it to the declared width. -/
 @[cil_step] theorem returnFrom_narrow_eq (kind : CIL.NarrowKind) (returnsValue : Bool)
     (bits : CIL.W32) :
