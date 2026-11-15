@@ -344,15 +344,17 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
               cil_checked_steps
             """
     };
-    const string Audit = """
+    // A homed argument's access fact walks the homes through findIdx?_of_keysAscend, which uses choice.
+    var axioms = workload == "homes" ? "propext, Classical.choice, Quot.sound" : "propext, Quot.sound";
+    var audit = $$"""
 
-        /-- info: 'checked' depends on axioms: [propext, Quot.sound] -/
+        /-- info: 'checked' depends on axioms: [{{axioms}}] -/
         #guard_msgs (whitespace := lax) in
         #print axioms checked
         """;
     File.WriteAllText(path, header);
     var baseline = full ? Compile(module, path, "header") : null;
-    File.WriteAllText(path, header + statement + "\n" + Audit + "\n");
+    File.WriteAllText(path, header + statement + "\n" + audit + "\n");
     var samples = Enumerable.Range(0, full ? Repetitions : 1)
         .Select(index => Compile(module, path, "proof" + index)).ToArray();
     var commands = samples.Select(sample => sample.Commands.Single(command => command.Label == "checked")).ToArray();
