@@ -91,6 +91,18 @@ if (templates.Split("@[cil_code] def method").Length != 4 ||
     !templates.Contains("(sse42 : Bool) (avx2 : Bool) (callee0 : Nat)", StringComparison.Ordinal) ||
     !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
     throw new InvalidOperationException("Expected one generated body per method with flags, callees and equations.");
+// Each body that enters a method names its links, so the table never depends on a default.
+foreach (var body in templates.Split("@[cil_code] def method").Skip(1))
+{
+    string[] callForms = [".call ", ".callInstance ", ".tailCall ", ".callVirtual ", ".newAggregate ", ".newObject ",
+        ".managed (.call "];
+    if (callForms.Any(form => body.Contains(form, StringComparison.Ordinal)) &&
+        !body.Contains("links := [", StringComparison.Ordinal) && !body.Contains("links := (", StringComparison.Ordinal))
+        throw new InvalidOperationException("A template method with a call instruction has no links field.");
+}
+if (!templates.Contains("links := ([(", StringComparison.Ordinal) &&
+    !templates.Contains("links := [(", StringComparison.Ordinal))
+    throw new InvalidOperationException("Expected the Choose template to carry links naming callee0.");
 var renamed = File.ReadAllText(Path.Combine(shared, "TemplateBindings3.lean"));
 if (!renamed.Contains("Templates.method0 Extracted.profile Extracted.environment true true 2",
         StringComparison.Ordinal))
