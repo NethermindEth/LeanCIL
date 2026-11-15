@@ -93,31 +93,57 @@ foreach (var (owner, methodName, selector) in new[]
 }
 if (args is ["--return-only"]) return;
 
-// A parameter of a narrow declared type is loaded narrowed by its step, which no outline family models, so each
-// family refuses it; the unedited method is the wide control.
-foreach (var (owner, methodName, parameter, selector, narrowSelector) in new[]
+// A parameter of a narrow declared type is loaded narrowed by its step, which no outline reader models, so each
+// reader refuses it and names it; the method before the retyping is the wide control.
+var unnamed = new List<string>();
+foreach (var (owner, methodName, parameter, selector, narrowSelector, prepare) in
+    new (string, string, int, string, string, Action<MethodDefinition>?)[]
 {
-    ("Arithmetic", "Larger", 0, "Arithmetic::Larger(int,int)", "Arithmetic::Larger(ushort,int)"),
+    ("Arithmetic", "Larger", 0, "Arithmetic::Larger(int,int)", "Arithmetic::Larger(ushort,int)", null),
     ("PrimitiveArrays", "ReadInt32", 1, "PrimitiveArrays::ReadInt32(int[],int)",
-        "PrimitiveArrays::ReadInt32(int[],ushort)"),
+        "PrimitiveArrays::ReadInt32(int[],ushort)", null),
     ("Loops", "Put", 1, "Loops::Put(System.Span`1<System.UInt32>,uint)",
-        "Loops::Put(System.Span`1<System.UInt32>,ushort)"),
+        "Loops::Put(System.Span`1<System.UInt32>,ushort)", null),
+    ("Loops", "CountUntil", 1, "Loops::CountUntil(uint,uint)", "Loops::CountUntil(uint,ushort)", null),
     ("Objects", "SetLimit", 1, "Objects::SetLimit(Examples.Account,uint)",
-        "Objects::SetLimit(Examples.Account,ushort)"),
-    ("NarrowTotals", "WriteRead", 0, "NarrowTotals::WriteRead(uint)", "NarrowTotals::WriteRead(ushort)")
+        "Objects::SetLimit(Examples.Account,ushort)", null),
+    ("NarrowTotals", "WriteRead", 0, "NarrowTotals::WriteRead(uint)", "NarrowTotals::WriteRead(ushort)", null),
+    ("OutlineCountdown", "Drain", 0, "OutlineCountdown::Drain(ulong)", "OutlineCountdown::Drain(ushort)",
+        CountBy)
 })
 {
-    var wide = Outline("WideArgument" + owner, selector, _ => { });
-    if (wide.Code != 0 || wide.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
-        throw new InvalidOperationException("Wide argument control failed: " + selector + "\n" + wide.Output);
-    var narrow = Outline("NarrowArgument" + owner, narrowSelector, module =>
+    MethodDefinition Target(ModuleDefinition module)
     {
         var method = module.GetType("Examples." + owner).Methods.Single(method => method.Name == methodName);
-        method.Parameters[parameter].ParameterType = module.TypeSystem.UInt16;
+        prepare?.Invoke(method);
+        return method;
+    }
+    var wide = Outline("WideArgument" + owner + methodName, selector, module => Target(module));
+    if (wide.Code != 0 || wide.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException("Wide argument control failed: " + selector + "\n" + wide.Output);
+    var name = "";
+    var narrow = Outline("NarrowArgument" + owner + methodName, narrowSelector, module =>
+    {
+        var retyped = Target(module).Parameters[parameter];
+        retyped.ParameterType = module.TypeSystem.UInt16;
+        name = retyped.Name;
     });
-    if (narrow.Code == 0 && !narrow.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
-        throw new InvalidOperationException("Narrow argument was outlined: " + narrowSelector + "\n" + narrow.Proof);
-    Console.WriteLine("PASS declared narrow argument outline rejection and wide control: " + owner);
+    var refused = narrow.Code != 0 || narrow.Proof.Contains("-- not outlined:", StringComparison.Ordinal);
+    if (!refused || !(narrow.Output + narrow.Proof).Contains($"`{name}`", StringComparison.Ordinal))
+        unnamed.Add(
+            $"Narrow argument `{name}` was outlined or not named: {narrowSelector}\n{narrow.Output}{narrow.Proof}");
+    else Console.WriteLine($"PASS declared narrow argument outline rejection and wide control: {owner}::{methodName}");
+}
+if (unnamed.Count > 0) throw new InvalidOperationException(string.Join("\n", unnamed));
+
+// The receiver loop adds its one word argument to the count instead of one, so the loop body reads an argument.
+static void CountBy(MethodDefinition drain)
+{
+    drain.Parameters.Add(new ParameterDefinition("step", Mono.Cecil.ParameterAttributes.None,
+        drain.Module.TypeSystem.UInt64));
+    var one = drain.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Ldc_I4_1).ElementAt(1);
+    one.OpCode = OpCodes.Ldarg_1;
+    one.Next.OpCode = OpCodes.Conv_U8;
 }
 
 // A conditional branch with mixed native/int32 operands, in a method over a class instance, is a hole that names

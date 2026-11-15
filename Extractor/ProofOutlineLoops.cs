@@ -1456,8 +1456,6 @@ internal static partial class ProofOutline
                 stack.Add(parameter.Shape switch
                 {
                     ParameterShape.Scalar => new Number(parameter.Name, parameter.Width),
-                    ParameterShape.Boolean => new Unknown($"the `bool` argument `{parameter.Name}`"),
-                    ParameterShape.Narrow => new Unknown($"the narrow argument `{parameter.Name}`"),
                     ParameterShape.Reference or ParameterShape.Object => new ReferenceArgument(parameter.Name),
                     ParameterShape.WordArray => new WordArrayArgument(parameter),
                     _ => new SpanArgument(parameter)
@@ -1664,6 +1662,9 @@ internal static partial class ProofOutline
                 return Stop("an `Unsafe.Add` other than one of a reference argument by a 32-bit index, written " +
                     "through before any other store of an iteration, which needs `add memory base width offset = " +
                     ".ok reference` (such as from `Writable.add_int`) and write authority in `footprint`");
+            else if (op is Arg { Index: var narrow })
+                return Stop($"`{op.ToLean()}`, a read of the narrow argument " +
+                    $"`{spec.Parameters[narrow].Name}`, which the outline does not step");
             else return Stop($"`{op.ToLean()}`, which the outline does not step");
             state.Pc++;
             return Event.Continue;
