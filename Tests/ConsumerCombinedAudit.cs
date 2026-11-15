@@ -7,6 +7,7 @@
 #:include ../scripts/BindingImage.cs
 #:include ../scripts/DeepCheckInputs.cs
 
+// Standalone timing and profiling workload for a combined audit (several minutes); no suite runs it.
 using System.Diagnostics;
 using System.Text.Json;
 

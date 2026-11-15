@@ -22,6 +22,7 @@ using System.Text.Json.Nodes;
 MultiAssemblyFixture fixture = new("MultiAssembly");
 Run(["dotnet", "run", "--file", "Tests/MetadataAssemblyIndexes.cs"]);
 Run(["dotnet", "run", "--file", "Tests/ExactMetadataBytes.cs"]);
+Run(["dotnet", "run", "--file", "Tests/StrictBindingFixture.cs"]);
 string root = fixture.Root;
 string[] cli = fixture.Cli;
 const string libName = "MultiFixture.Lib";
