@@ -313,7 +313,7 @@ run_cmd do
     if previousElaboration != 0 && elaboration > previousElaboration * growthBound then
       throwError "byte literal elaboration grew faster than its bytes"
     if elaboration > elaborationPerByte * bytes.length then
-      throwError "byte literal elaboration costs more than {elaborationPerByte} heartbeats per byte"
+      throwError "byte literal elaboration exceeds {elaborationPerByte} heartbeats per byte"
     previousElaboration := elaboration
     let proof := mkApp2 (mkConst ``Eq.refl [1]) (mkConst ``Bool) (mkConst ``Bool.true)
     let decoded ← liftTermElabM do
