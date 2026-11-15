@@ -17,6 +17,11 @@ if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
     ArgumentResolutionCosts();
     return;
 }
+if (args.Contains("--call-check-only", StringComparer.Ordinal))
+{
+    CallCheckCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -34,6 +39,7 @@ if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
 ArgumentResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
+CallCheckCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
@@ -293,6 +299,65 @@ void ArgumentResolutionCosts()
             Console.WriteLine($"PASS argument {name} {label}: {measured} heartbeats per argument");
         }
     }
+}
+
+// Decides the managed-call check on bodies of call and nop pairs with the extractor's literal table; a per-pc table
+// scan costs the square of the call sites.
+void CallCheckCosts()
+{
+    var checkDirectory = At("artifacts/LookupScaling/CallCheck");
+    Directory.CreateDirectory(checkDirectory);
+    var samples = new List<(int Sites, long Cost)>();
+    foreach (var sites in new[] { 64, 256, 1024 })
+    {
+        var pcs = Enumerable.Range(0, sites).Select(site => 2 * site).ToArray();
+        var raw = string.Join(", ", pcs.Select(_ => "site, ⟨0, 0, .none⟩"));
+        var code = string.Join(", ", pcs.Select(_ => ".call 0 0, .nop"));
+        var links = string.Join(", ", pcs.Select(pc => $"({pc}, .direct 0)"));
+        var statement = $"ManagedCallsValid [⟨[], callee⟩] [] raw (List.replicate {2 * sites} true) body";
+        var source = $$"""
+            import CIL.Extraction.Generics
+            open CIL CIL.Extraction Lean Elab Command
+            set_option maxRecDepth 65536
+            set_option maxHeartbeats 0
+            /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+            elab "#call_check_cost " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              logInfo m!"call check {after - before} heartbeats"
+            def callee : RawMethod := {
+              token := 1, owner := "Tests::Scaling", hasThis := false, explicitThis := false,
+              callingConvention := 0, attributes := 0, implementation := 0,
+              returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
+              genericParameters := [], code := [] }
+            def site : RawInstruction := ⟨0, 40, .call {
+              declaringType := .atom "Tests" "Scaling", target := .managed 1, typeArguments := [],
+              parameterCount := 0, hasThis := false, returnsValue := false, returnType := .void,
+              parameterTypes := [] }⟩
+            def raw : RawMethod := { callee with code := [{{raw}}] }
+            def body : Method := { locals := [], returnsValue := false, code := [{{code}}], links := [{{links}}] }
+            #call_check_cost
+            theorem checked : {{statement}} := by decide +kernel
+            #print axioms checked
+            """ + "\n";
+        var path = Path.Combine(checkDirectory, $"Sites{sites}.lean");
+        File.WriteAllText(path, source);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("The call check cost fixture introduced an unproved theorem.");
+        var cost = LookupPatterns.CallCheck().Match(output);
+        if (!cost.Success) throw new InvalidOperationException("Missing the call check cost: " + output);
+        samples.Add((sites, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perSite = samples.Select(sample => (double)sample.Cost / sample.Sites).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{sample.Sites} = {(double)sample.Cost / sample.Sites:F0}")));
+    if (perSite.Skip(1).Zip(perSite).Any(pair => pair.First > pair.Second * AllowedCallGrowth))
+        throw new InvalidOperationException(
+            $"The managed-call check costs {measured} heartbeats per call site; the limit is {AllowedCallGrowth} " +
+            "times the cost per call site at the size before.");
+    Console.WriteLine($"PASS the managed-call check costs {measured} heartbeats per call site");
 }
 
 // Isolating one validator must also remove generated facts whose signature premises were removed.
@@ -1441,6 +1506,9 @@ static partial class LookupPatterns
 {
     [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
     internal static partial Regex ReturnResolution();
+
+    [GeneratedRegex(@"call check ([0-9]+) heartbeats")]
+    internal static partial Regex CallCheck();
 
     [GeneratedRegex(@"([0-9]+) lemmas rechecked, ([0-9]+) kernel heartbeats")]
     internal static partial Regex EmbeddingRecheck();

@@ -154,6 +154,14 @@ homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewe
 accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
 size.
 
+The suite decides `ManagedCallsValid` on bodies of 64, 256 and 1,024 call sites, each followed by a
+`nop`, with the literal link table the extractor writes, and reads the heartbeats of that one
+command. It fails when the heartbeats per call site grow more than 1.35 times from one size to the
+next. The check reads each pc's link by one walk beside the code and costs about 10,900, 9,500 and
+9,100 heartbeats per call site; a scan of the table at each pc costs 41,500 and 133,900 at 64 and
+256 sites and exhausts a 16 GB memory limit at 1,024. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --call-check-only`.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the
