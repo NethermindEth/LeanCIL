@@ -354,9 +354,10 @@ void CallCheckCosts()
               returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
               genericParameters := [], code := [] }
             def site : RawInstruction := ⟨0, 40, .call {
-              declaringType := .atom "Tests" "Scaling", target := .managed 1, typeArguments := [],
-              parameterCount := 0, hasThis := false, returnsValue := false, returnType := .void,
-              parameterTypes := [] }⟩
+              method := {
+                owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
+                returnType := .void, parameters := [] },
+              target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }⟩
             def raw : RawMethod := { callee with code := [{{raw}}] }
             def body : Method := { locals := [], returnsValue := false, code := [{{code}}], links := [{{links}}] }
             #call_check_cost
