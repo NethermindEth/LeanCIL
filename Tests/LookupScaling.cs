@@ -27,6 +27,11 @@ if (args.Contains("--method-decode-only", StringComparer.Ordinal))
     MethodDecodeCosts();
     return;
 }
+if (args.Contains("--decoded-definition-only", StringComparer.Ordinal))
+{
+    DecodedDefinitionCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -41,6 +46,7 @@ ArgumentResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 DecodeCosts();
 MethodDecodeCosts();
+DecodedDefinitionCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
@@ -470,6 +476,70 @@ void MethodDecodeCosts()
             $"Decoding a method costs {measured} heartbeats per instruction; the limit is " +
             $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
     Console.WriteLine($"PASS decoding a method costs {measured} heartbeats per instruction");
+}
+
+// The heartbeats `cil_decoded_method` spends defining a value-only method of 500, 2000 and 8000 instructions with
+// four locals from its raw definition, its kernel checks included. Its literal and its checks are linear in the
+// instructions, so four times the instructions may cost at most `AllowedLocalGrowth` more per instruction.
+void DecodedDefinitionCosts()
+{
+    var definitionDirectory = At("artifacts/LookupScaling/DecodedDefinition");
+    Directory.CreateDirectory(definitionDirectory);
+    const int SegmentLength = 10;
+    var samples = new List<(int Instructions, long Cost)>();
+    foreach (var instructions in new[] { 500, 2000, 8000 })
+    {
+        var path = Path.Combine(definitionDirectory, $"Instructions{instructions}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.DecodedDefinition
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            /-- Logs the heartbeats elaborating `body` costs, its kernel checks included. -/
+            elab "#command_cost " label:str body:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand body
+              let after <- IO.getNumHeartbeats
+              logInfo m!"{label.getString} {after - before} heartbeats"
+            namespace DecodedDefinitionCost
+            /-- The raw instructions of one segment: short and long constants, locals, arithmetic, a checked
+                conversion, a branch, a four-target switch and a return. -/
+            def segment (index : Nat) : List RawInstruction :=
+              let start := {{SegmentLength}} * index
+              [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
+                ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
+                ⟨start + 4, 6, .none⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+                ⟨start + 7, 58, .target index⟩,
+                ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
+            /-- The profile the method is decoded under, named as an extraction names it. -/
+            def profile : FeatureProfile := .scalar
+            /-- The layouts the method is decoded under, named as an extraction names them. -/
+            def environment : LayoutEnvironment := {}
+            /-- A static method with four zero-initialized `uint32` locals and {{instructions}} raw instructions. -/
+            def source : RawMethod :=
+              { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
+                attributes := 0, implementation := 0, returnType := .void, parameters := [],
+                locals := List.replicate 4 (.atom runtimeScope "System.UInt32"), initLocals := true,
+                maxStack := 8, genericParameters := [],
+                code := (List.range {{instructions / SegmentLength}}).flatMap segment }
+            #command_cost "decoded definition {{instructions}}"
+              cil_decoded_method method := Method.ofRaw? profile environment source []
+            end DecodedDefinitionCost
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var cost = LookupPatterns.DecodedDefinition().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the decoded definition cost:\n{output}");
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions}")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+        throw new InvalidOperationException(
+            $"Defining a decoded method costs {measured} heartbeats per instruction; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
+    Console.WriteLine($"PASS defining a decoded method costs {measured} heartbeats per instruction");
 }
 
 // The heartbeats `decide +kernel` adds to one `add` of an int32 offset to a native method table of 16, 64 and 256
@@ -1562,4 +1632,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"decoded method [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedMethod();
+
+    [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex DecodedDefinition();
 }
