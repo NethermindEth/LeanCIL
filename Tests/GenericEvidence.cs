@@ -308,8 +308,10 @@ void ReturnMutations()
 const string word = "Extraction.runtimeScope \"System.UInt64\"";
 RejectDeclared(0, "wrong-declared-parameter", "method0", line =>
     line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]"));
-RejectDeclared(0, "wrong-declared-return", "method0", line =>
-    line.Replace($"returnType := .atom {word} }}", $"returnType := .atom {word.Replace("UInt64", "UInt32")} }}"));
+// The declared signature's own return type, whatever fields follow it.
+RejectDeclared(0, "wrong-declared-return", "method0", line => Regex.Replace(line,
+    $$"""(declared := {[^}]*returnType := .atom ){{Regex.Escape(word)}}""",
+    match => match.Groups[1].Value + word.Replace("UInt64", "UInt32"), RegexOptions.None));
 RejectDeclared(14, "missing-declared-receiver", "method1", line =>
     line.Replace("receiver := some .reference, ", ""));
 RejectDeclared(14, "wrong-declared-receiver-kind", "method1", line =>
