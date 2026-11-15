@@ -482,8 +482,8 @@ private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInst
   | _, _, _ => false
 
 /-- Covered opcodes emit exactly their encoding, and a class type test only from the raw
-    `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's word,
-    a size constant or an exact runtime query may emit a scalar operation. -/
+    `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's
+    word, a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Instruction) : Bool :=
