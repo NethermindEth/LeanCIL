@@ -45,3 +45,38 @@ File.WriteAllText(path, $$"""
     """ + "\n");
 Run(["lake", "env", "lean", path], cwd: FixturePackage());
 Console.WriteLine($"PASS the extractor's {table.Length} decoded opcodes are those of Instruction.valueOpcode");
+
+// The decoder reads every pc, but the feature check requires a hole at each pc the reachability certificate rules
+// out, so a body of decoded opcodes with an unreachable tail must keep its literal and still build.
+var deadDirectory = Path.Combine(directory, "UnreachableTail");
+Directory.CreateDirectory(deadDirectory);
+var deadAssembly = Path.Combine(deadDirectory, "UnreachableTail.dll");
+using (var module = Mono.Cecil.ModuleDefinition.CreateModule("UnreachableTail", Mono.Cecil.ModuleKind.Dll))
+{
+    var owner = new Mono.Cecil.TypeDefinition("", "UnreachableTail", Mono.Cecil.TypeAttributes.Public |
+        Mono.Cecil.TypeAttributes.Abstract | Mono.Cecil.TypeAttributes.Sealed, module.TypeSystem.Object);
+    module.Types.Add(owner);
+    var method = new Mono.Cecil.MethodDefinition("One",
+        Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+    owner.Methods.Add(method);
+    var il = method.Body.GetILProcessor();
+    foreach (var opcode in new[] { OpCodes.Ldc_I4_1, OpCodes.Ret, OpCodes.Ldc_I4_0, OpCodes.Ret }) il.Emit(opcode);
+    module.Write(deadAssembly);
+}
+var deadOutput = Path.Combine(deadDirectory, "Extraction");
+Run(["dotnet", ExtractorPath, "extract", deadAssembly, "UnreachableTail::One()", deadOutput]);
+var deadSource = Path.Combine(deadOutput, "Extracted.lean");
+var deadLines = File.ReadAllText(deadSource).ReplaceLineEndings("\n").Split('\n');
+var header = Array.FindIndex(deadLines, line => line.StartsWith("def method0 : Method := ", StringComparison.Ordinal));
+// The literal lists one instruction per line after its header; the last one closes the list and the structure.
+string[] literal = header < 0 ? [] : deadLines.Skip(header + 1)
+    .TakeWhile(line => line.StartsWith("  ", StringComparison.Ordinal)).Select(line => line.Trim())
+    .Select(line => line.EndsWith("] }", StringComparison.Ordinal) ? line[..^3] : line.TrimEnd(',')).ToArray();
+string[] expectedLiteral =
+    [".ldc_i4 1", ".ret", $".unadmitted {OpCodes.Ldc_I4_0.Value}", $".unadmitted {OpCodes.Ret.Value}"];
+if (deadLines.Any(line => line.StartsWith("cil_decoded_method ", StringComparison.Ordinal)) ||
+    !literal.SequenceEqual(expectedLiteral, StringComparer.Ordinal))
+    throw new InvalidOperationException("A method with an unreachable tail must keep its literal with a hole at each " +
+        "dead pc, found:\n" + string.Join('\n', literal));
+Run(["lake", "env", "lean", deadSource], cwd: FixturePackage());
+Console.WriteLine("PASS a method with an unreachable tail keeps its literal, with holes at its dead pcs, and builds");
