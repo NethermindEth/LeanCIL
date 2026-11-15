@@ -16,13 +16,15 @@ private def raw : RawMethod := {
 private def emitted : Method :=
   { code := [.localloc], locals := [], returnsValue := false, declared := .ofRaw raw }
 
-/-- The emitted body's shape, localsinit flag included, is the raw method's. -/
-theorem shape_matches_metadata : MethodShapeValid raw emitted := by decide
+/-- The emitted body's shape and declared signature, localsinit flag included, are the raw
+    method's. -/
+theorem shape_matches_metadata : MethodShapeValid raw emitted ∧ DeclaredValid raw emitted := by
+  decide
 #print axioms shape_matches_metadata
 
 /-- Raw uninitialized storage cannot be emitted as initialized storage. -/
 theorem forged_initialization_rejected :
-    ¬ MethodShapeValid raw
+    ¬ DeclaredValid raw
       { emitted with declared := { emitted.declared with initLocals := true } } := by decide
 #print axioms forged_initialization_rejected
 

@@ -80,6 +80,23 @@ entries exceeds 1.15 times the cost at 16, or when the last entry's cost beyond 
 divided by its index, does. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
 
+The suite also measures `decide +kernel` on the method name clause of the call operand check,
+`MetadataName.spells`, for a name of 20 and of 80 bytes that share all but their last byte, less
+the same statement closed with `sorry`. The clause reads the name's code back into bytes, so it
+costs about 41,200 heartbeats at 20 bytes and 151,400 at 80, about 2,060 and 1,890 per byte. The
+same statement decided through `MetadataName.ofBytes?` costs about 143,300 and 1,746,500, since
+reducing it indexes an array literal, which the kernel holds as a list, once per byte. The suite
+fails when the cost per byte at 80 bytes exceeds 1.15 times the cost per byte at 20. Run this row
+alone with `dotnet run --file Tests/LookupScaling.cs -- --call-name-only`.
+
+The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
+`calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
+entry holds the same owner, less the same statement closed with `sorry`. The kernel compares
+the owners byte by byte, at 8,300 to 8,900 heartbeats per byte: 572,000, 2,165,000 and 8,533,000
+heartbeats. The suite fails when the cost grows more than 1.1 times as fast as the length from one
+size to the next. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --indirect-target-only`.
+
 The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
 and 512 array element addresses, each followed by a branch, with and without a `readonly.`
 prefix, less the heartbeats of stating the same certificate. It fails when the cost per address
@@ -145,6 +162,14 @@ one size to the next. The facts cost about 7,400, 8,400 and 8,400 heartbeats per
 homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewer entries, which
 accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
 size.
+
+The suite decides `ManagedCallsValid` on bodies of 64, 256 and 1,024 call sites, each followed by a
+`nop`, with the literal link table the extractor writes, and reads the heartbeats of that one
+command. It fails when the heartbeats per call site grow more than 1.35 times from one size to the
+next. The check reads each pc's link by one walk beside the code and costs about 10,900, 9,500 and
+9,100 heartbeats per call site; a scan of the table at each pc costs 41,500 and 133,900 at 64 and
+256 sites and exhausts a 16 GB memory limit at 1,024. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --call-check-only`.
 
 ## Reference figures
 

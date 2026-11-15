@@ -119,6 +119,32 @@ inductive FrameAction where
       (temporary : Reference) (kind : CIL.LocalKind) (memory : Memory)
   | returned (result : List Value) (memory : Memory)
 
+/-- The catalog body an indirect call through `pointer` enters: the entry for the pointer's
+    target, when the pointer has the call site's signature; `none` for any other pointer. A
+    step proof rewrites this with a fact the kernel checks, so the elaborator never compares the
+    identities, whose strings it compares with recursion as deep as they are long. -/
+def indirectTarget (signature : CIL.ManagedSignature) (catalog : List CIL.ManagedTarget)
+    (pointer : CIL.MethodPointer) : Option Nat :=
+  if pointer.signature != signature then none
+  else pointer.target.bind fun identity =>
+    (catalog.find? (·.identity == identity)).map (·.method)
+
+/-- A selected body is one the catalog lists. -/
+theorem indirectTarget_mem {signature : CIL.ManagedSignature} {catalog : List CIL.ManagedTarget}
+    {pointer : CIL.MethodPointer} {method : Nat}
+    (selected : indirectTarget signature catalog pointer = some method) :
+    method ∈ catalog.map CIL.ManagedTarget.method := by
+  unfold indirectTarget at selected
+  split at selected
+  · cases selected
+  · cases target : pointer.target with
+    | none => simp [target] at selected
+    | some identity =>
+      simp only [target, Option.bind] at selected
+      obtain ⟨entry, found, rfl⟩ := Option.map_eq_some_iff.mp selected
+      exact List.mem_map.mpr ⟨entry, List.mem_of_find?_eq_some found, rfl⟩
+#print axioms indirectTarget_mem
+
 /-- Managed dispatch checks stable pointer identity and signature before selecting a body.
     Tail calls use the same retirement action as direct tail calls. -/
 def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
@@ -150,15 +176,13 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table memory)
     return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
   | .call signature catalog tail, .methodPointer pointer :: values =>
-    if pointer.signature != signature then .error .invalidState else pure ()
-    let some identity := pointer.target | .error .invalidState
-    let some target := catalog.find? (·.identity == identity) | .error .invalidState
+    let some method := indirectTarget signature catalog pointer | .error .invalidState
     let count := signature.parameters.length
     if (if tail then values.length != count else values.length < count) then
       .error .invalidState else pure ()
     let arguments ← (values.take count).reverse.mapM (checkedValue memory)
-    if tail then return .tailCall target.method arguments memory
-    else return .call target.method arguments (values.drop count) memory
+    if tail then return .tailCall method arguments memory
+    else return .call method arguments (values.drop count) memory
   | _, _ => .error .invalidState
 
 /-- Evaluates an intrinsic. Operands with unspecified bits are allowed only where the
@@ -229,8 +253,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Faulting arithmetic is matched apart from the rest; the native table arms lead this match so
-  -- that the match under its catch-all stays within the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic and object identity are matched apart from the
+  -- rest, so that neither match exceeds the 79 alternatives `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -282,6 +306,28 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value ← (CIL.convertInteger target.width target.signed true x).mapError
       ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
+  | .ceq, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
+  | .beq target, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (if equal then target else pc + 1) rest frame m
+  | .bne_un target, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (if equal then pc + 1 else target) rest frame m
+  | .cgt_un, .object right :: .object left :: rest =>
+    let present ← objectAboveNull m left right
+    return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
+  | .brfalse target, .object value :: rest =>
+    let present ← objectNonNull m value
+    return .next (if present then pc + 1 else target) rest frame m
+  | .brtrue target, .object value :: rest =>
+    let present ← objectNonNull m value
+    return .next (if present then target else pc + 1) rest frame m
+  | .objectTest type throwing, .object value :: rest =>
+    let result ← objectTest m type throwing value
+    return .next (pc + 1) (.object result :: rest) frame m
   -- Dynamic frame storage, zeroed as the body's declared localsinit flag says.
   | .localloc, _ => localAllocation body.declared.initLocals pc frame stack m
   | _, _ =>
@@ -368,28 +414,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .bne_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
-  -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
-  | .ceq, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
-  | .beq target, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (if equal then target else pc + 1) rest frame m
-  | .bne_un target, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (if equal then pc + 1 else target) rest frame m
-  | .cgt_un, .object right :: .object left :: rest =>
-    let present ← objectAboveNull m left right
-    return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
-  | .brfalse target, .object value :: rest =>
-    let present ← objectNonNull m value
-    return .next (if present then pc + 1 else target) rest frame m
-  | .brtrue target, .object value :: rest =>
-    let present ← objectNonNull m value
-    return .next (if present then target else pc + 1) rest frame m
-  | .objectTest type throwing, .object value :: rest =>
-    let result ← objectTest m type throwing value
-    return .next (pc + 1) (.object result :: rest) frame m
   | .intrinsic operation argc, _ =>
     if !operation.available body.profile then .error (.unsupported "Intrinsic unavailable in target profile") else
     if stack.length < argc then .error .invalidState else
