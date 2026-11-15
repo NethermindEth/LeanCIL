@@ -217,8 +217,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Faulting arithmetic is matched apart from the rest; the native table arms lead this match so
-  -- that the match under its catch-all stays within the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic and object identity are matched apart from the
+  -- rest, so that neither match exceeds the 79 alternatives `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -270,6 +270,28 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value ← (CIL.convertInteger target.width target.signed true x).mapError
       ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
+  | .ceq, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
+  | .beq target, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (if equal then target else pc + 1) rest frame m
+  | .bne_un target, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (if equal then pc + 1 else target) rest frame m
+  | .cgt_un, .object right :: .object left :: rest =>
+    let present ← objectAboveNull m left right
+    return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
+  | .brfalse target, .object value :: rest =>
+    let present ← objectNonNull m value
+    return .next (if present then pc + 1 else target) rest frame m
+  | .brtrue target, .object value :: rest =>
+    let present ← objectNonNull m value
+    return .next (if present then target else pc + 1) rest frame m
+  | .objectTest type throwing, .object value :: rest =>
+    let result ← objectTest m type throwing value
+    return .next (pc + 1) (.object result :: rest) frame m
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m
@@ -354,28 +376,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .bne_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
-  -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
-  | .ceq, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
-  | .beq target, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (if equal then target else pc + 1) rest frame m
-  | .bne_un target, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (if equal then pc + 1 else target) rest frame m
-  | .cgt_un, .object right :: .object left :: rest =>
-    let present ← objectAboveNull m left right
-    return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
-  | .brfalse target, .object value :: rest =>
-    let present ← objectNonNull m value
-    return .next (if present then pc + 1 else target) rest frame m
-  | .brtrue target, .object value :: rest =>
-    let present ← objectNonNull m value
-    return .next (if present then target else pc + 1) rest frame m
-  | .objectTest type throwing, .object value :: rest =>
-    let result ← objectTest m type throwing value
-    return .next (pc + 1) (.object result :: rest) frame m
   | .stackAlloc initLocals, [.scalar size] =>
     let bytes ← match size with
       | .i32 bits => pure bits.toNat
