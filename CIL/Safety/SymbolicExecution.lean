@@ -985,14 +985,14 @@ private partial def exposeStackSpine (stack : Expr) : MetaM Expr := withIncRecDe
   return mkApp withHead (← exposeStackSpine tail)
 
 open Lean Elab Tactic Meta in
-/-- The link a call-family step reads, `body.linkAt pc = link` with the link a constructor: a
-    literal body's by evaluation, a named body's by its `@[cil_code]` fact and link definition,
-    and a named body without one by evaluating its table. Nothing when none decides it, so a
-    caller's fact must. -/
-def stepLinkFact? (body pc : Expr) : TacticM (Option Term) := withMainContext do
+/-- A proof of `body.linkAt pc = link`, the link a call-family step reads, with `link` a
+    constructor: a literal body's by evaluation, a named body's by its `@[cil_code]` fact and link
+    definition, and a named body without one by evaluating its table. Nothing when none decides
+    it, so a caller's fact must. -/
+def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
   let read := mkApp2 (mkConst ``CIL.Method.linkAt) body pc
-  let byEvaluation (link : Expr) : TacticM Term := do
-    Term.exprToSyntax (← mkExpectedTypeHint (← mkEqRefl read) (← mkEq read link))
+  let byEvaluation (link : Expr) : TacticM Expr := do
+    mkExpectedTypeHint (← mkEqRefl read) (← mkEq read link)
   if let some link ← literalLink? read then return some (← byEvaluation link)
   if (← instantiateMVars body).isAppOf ``CIL.Method.mk then return none
   let normalize ← `(tactic| simp only [cil_code])
@@ -1001,8 +1001,7 @@ def stepLinkFact? (body pc : Expr) : TacticM (Option Term) := withMainContext do
   let link ← whnfR result.expr
   if link.isAppOfArity ``Option.some 2 || link.isAppOfArity ``Option.none 1 then
     -- A fact proved by `rfl` rewrites without a proof term; the hint restores the read it states.
-    let proof ← mkExpectedTypeHint (← result.getProof) (← mkEq read result.expr)
-    return some (← Term.exprToSyntax proof)
+    return some (← mkExpectedTypeHint (← result.getProof) (← mkEq read result.expr))
   -- Facts cover every extracted call site, so only a hand-written table is evaluated here.
   let link ← withDefault <| whnf read
   match_expr link with
@@ -1171,11 +1170,17 @@ elab_rules : tactic
             done)))
           return
         catch _ => saved.restore
-    -- A call-family step's arm matches on its link; the read's fact lets that match reduce.
+    -- A call-family step's arm matches on its link; the read's fact lets that match reduce. It
+    -- enters as a hypothesis, so the run's record, whose simp contexts are keyed by fact text and
+    -- would hand a later pc this pc's fact, is not consulted for this step.
     let stepFacts ← if linkedOpcodes.contains operation then
         match (← stepLinkFact? (← entryAt "cil_checked_step_normalized" args 0)
             (← entryAt "cil_checked_step_normalized" args 2)) with
-        | some fact => pure (facts.getElems.push fact)
+        | some proof =>
+          let (link, goal) ← (← (← getMainGoal).assert (← mkFreshUserName `link)
+            (← inferType proof) proof).intro1P
+          replaceMainGoal [goal]
+          pure (facts.getElems.push (← goal.withContext (Term.exprToSyntax (mkFVar link))))
         | none => pure facts.getElems
       else pure facts.getElems
     let strategy ← if operation == ``CIL.Instruction.intrinsic then
