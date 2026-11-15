@@ -117,7 +117,7 @@ private def olderConsole : TypeExpr :=
     "System.Console"
 
 theorem rejects_an_owner_scope_with_another_version :
-    rejects own.1 lib tokens.writeLine (.call { writeLineSite with declaringType := olderConsole })
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.owner := olderConsole })
       (.scopeMismatch tokens.writeLine) = true := by decide +kernel
 #print axioms rejects_an_owner_scope_with_another_version
 
@@ -192,11 +192,62 @@ theorem rejects_another_string_than_the_user_string :
   decide +kernel
 #print axioms rejects_another_string_than_the_user_string
 
+/-! ## Method names -/
+
+/-- A call site's typed fields read its method, so they keep the values the fixtures state. -/
+theorem call_site_fields_read_the_method :
+    writeLineSite.declaringType = .atom runtimeScope "System.Console" ∧
+      writeLineSite.hasThis = false ∧ writeLineSite.returnType = .void ∧
+      writeLineSite.parameterTypes = [int32] ∧ writeLineSite.method.argumentCount = 1 ∧
+    getSite.declaringType = .atom libScope "Lib.Box" ∧ getSite.returnType = int32 ∧
+      getSite.parameterTypes = [] ∧
+    idSite.method.methodArguments = idSite.typeArguments ∧ idSite.method.genericArity = 1 := by
+  decide
+#print axioms call_site_fields_read_the_method
+
+/-- The method a call operand names is the row's name read as a metadata name; a site whose
+    display name still matches the row but whose typed name does not is refused. -/
+theorem rejects_a_method_name_other_than_the_row :
+    rejects own.1 lib tokens.writeLine
+      (.call { writeLineSite with method.name := name!"WriteLin" })
+      (.operandMismatch tokens.writeLine) = true ∧
+    rejects own.1 lib tokens.getRef (.call { getSite with method.name := name!"Set" })
+      (.operandMismatch tokens.getRef) = true ∧
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.name := name!"Ids" })
+      (.operandMismatch tokens.idSpec) = true := by decide +kernel
+#print axioms rejects_a_method_name_other_than_the_row
+
+/-- A typed name whose code spells no byte list, the empty code or one whose leading digit is
+    not 1, names no row. -/
+theorem rejects_a_method_name_that_spells_no_bytes :
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.name := ⟨0⟩ })
+      (.operandMismatch tokens.writeLine) = true ∧
+    rejects own.1 lib tokens.writeLine (.call { writeLineSite with method.name := ⟨767⟩ })
+      (.operandMismatch tokens.writeLine) = true := by decide +kernel
+#print axioms rejects_a_method_name_that_spells_no_bytes
+
+/-- A call's typed method states the row's generic arity and the method arguments the site
+    instantiates; a site that disagrees on either names another method. -/
+theorem rejects_a_method_with_another_arity_or_arguments :
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.genericArity := 0 })
+      (.genericMismatch tokens.idSpec) = true ∧
+    rejects own.1 lib tokens.idSpec (.call { idSite with method.methodArguments := [int32] })
+      (.genericMismatch tokens.idSpec) = true := by decide +kernel
+#print axioms rejects_a_method_with_another_arity_or_arguments
+
+/-- A string heap entry that holds a value above a byte is refused when the slice is indexed,
+    so every row name the call check reads is a metadata name. -/
+theorem rejects_a_row_name_that_is_not_bytes :
+    rejects { own.1 with strings := own.1.strings.map fun (offset, bytes) =>
+        (offset, if bytes == bytesOf "WriteLine" ++ [0] then 256 :: bytes else bytes) } lib
+      tokens.writeLine (.call writeLineSite) .invalidByte = true := by decide +kernel
+#print axioms rejects_a_row_name_that_is_not_bytes
+
 /-! ## Calls into a pinned assembly -/
 
 theorem rejects_a_pinned_callee_with_another_name :
     rejects (borrow own.1 tokens.getRef tokens.writeLine 2) lib
-      tokens.getRef (.call { getSite with name := "WriteLine" })
+      tokens.getRef (.call { getSite with name := "WriteLine", method.name := name!"WriteLine" })
       (.unresolvedMember tokens.getRef) = true := by decide +kernel
 #print axioms rejects_a_pinned_callee_with_another_name
 
@@ -280,7 +331,7 @@ theorem rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number :
     passes own.1 lib tokens.sumRef (.call sumSite) = true ∧
     passes own.1 libWithoutCorlib tokens.sumRef (.call sumSite) = true ∧
     rejects own.1 libWithoutCorlib tokens.sumRef
-      (.call { sumSite with declaringType := .object libScope "Lib.Pair" })
+      (.call { sumSite with method.owner := .object libScope "Lib.Pair" })
       (.operandMismatch tokens.sumRef) = true := by decide +kernel
 #print axioms rejects_a_call_naming_a_struct_as_a_class_without_the_corlib_number
 

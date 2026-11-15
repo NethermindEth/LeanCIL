@@ -80,6 +80,15 @@ entries exceeds 1.15 times the cost at 16, or when the last entry's cost beyond 
 divided by its index, does. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
 
+The suite also measures `decide +kernel` on the method name clause of the call operand check,
+`MetadataName.spells`, for a name of 20 and of 80 bytes that share all but their last byte, less
+the same statement closed with `sorry`. The clause reads the name's code back into bytes, so it
+costs about 41,200 heartbeats at 20 bytes and 151,400 at 80, about 2,060 and 1,890 per byte. The
+same statement decided through `MetadataName.ofBytes?` costs about 143,300 and 1,746,500, since
+reducing it indexes an array literal, which the kernel holds as a list, once per byte. The suite
+fails when the cost per byte at 80 bytes exceeds 1.15 times the cost per byte at 20. Run this row
+alone with `dotnet run --file Tests/LookupScaling.cs -- --call-name-only`.
+
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
 `calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
 entry holds the same owner, less the same statement closed with `sorry`. The kernel compares

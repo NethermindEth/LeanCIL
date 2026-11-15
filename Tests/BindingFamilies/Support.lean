@@ -35,7 +35,7 @@ theorem equal32 (program : Program) (profile : FeatureProfile)
     (left right : W32) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (if left = right then 1 else 0))]) := by
-  rcases declared with ⟨receiver, parameters, returnType⟩
+  rcases declared with ⟨receiver, parameters, returnType, initLocals⟩
   cases returned
   -- The stepped body is the unfolded literal, so the argument facts are stated over it too.
   simp only [cil_code, ↓reduceIte, List.cons_append, List.nil_append] at first second
@@ -53,7 +53,7 @@ theorem different64 (program : Program) (profile : FeatureProfile)
     (left right : W64) (memory : Safety.Memory) :
     invoke program 7 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i32 (if left ≠ right then 1 else 0))]) := by
-  rcases declared with ⟨receiver, parameters, returnType⟩
+  rcases declared with ⟨receiver, parameters, returnType, initLocals⟩
   cases returned
   -- The stepped body is the unfolded literal, so the argument facts are stated over it too.
   simp only [cil_code, Bool.false_eq_true, ↓reduceIte, List.cons_append, List.nil_append]
@@ -73,7 +73,7 @@ theorem and32 (program : Program) (profile : FeatureProfile)
     (left right : W32) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i32 left), .scalar (.i32 right)] memory =
       .ok (memory, [.scalar (.i32 (left &&& right))]) := by
-  rcases declared with ⟨receiver, parameters, returnType⟩
+  rcases declared with ⟨receiver, parameters, returnType, initLocals⟩
   cases returned
   -- The stepped body is the unfolded literal, so the argument facts are stated over it too.
   simp only [cil_code] at first second
@@ -91,7 +91,7 @@ theorem xor64 (program : Program) (profile : FeatureProfile)
     (left right : W64) (memory : Safety.Memory) :
     invoke program 5 0 [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 (left ^^^ right))]) := by
-  rcases declared with ⟨receiver, parameters, returnType⟩
+  rcases declared with ⟨receiver, parameters, returnType, initLocals⟩
   cases returned
   -- The stepped body is the unfolded literal, so the argument facts are stated over it too.
   simp only [cil_code] at first second

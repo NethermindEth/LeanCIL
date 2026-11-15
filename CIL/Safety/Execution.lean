@@ -247,14 +247,26 @@ def loadArgument (body : CIL.Method) (index : Nat) (args : List Value) (frame : 
     let .scalar (.i32 bits) := value | .error .invalidState
     checkedValue memory (.scalar (.i32 (kind.extend bits)))
 
+/-- `localloc` of the byte count alone on the stack: fresh storage owned by `frame`, zeroed when
+    `initLocals` is set. Any other stack is an invalid state. -/
+def localAllocation (initLocals : Bool) (pc : Nat) (frame : Frame) (stack : List Value)
+    (memory : Memory) : ExecutionResult FrameAction := do
+  let [.scalar size] := stack | .error .invalidState
+  let bytes ← match size with
+    | .i32 bits => pure bits.toNat
+    | .i64 bits => pure bits.toNat
+    | _ => .error .invalidState
+  let (reference, owner, memory) ← allocateStack memory frame bytes initLocals
+  return .next (pc + 1) [.reference reference] owner memory
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Faulting arithmetic is matched apart from the rest; the native table arms lead this match so
-  -- that the match under its catch-all stays within the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic and object identity are matched apart from the
+  -- rest, so that neither match exceeds the 79 alternatives `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -306,6 +318,30 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value ← (CIL.convertInteger target.width target.signed true x).mapError
       ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
+  | .ceq, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
+  | .beq target, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (if equal then target else pc + 1) rest frame m
+  | .bne_un target, .object right :: .object left :: rest =>
+    let equal ← objectEqual m left right
+    return .next (if equal then pc + 1 else target) rest frame m
+  | .cgt_un, .object right :: .object left :: rest =>
+    let present ← objectAboveNull m left right
+    return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
+  | .brfalse target, .object value :: rest =>
+    let present ← objectNonNull m value
+    return .next (if present then pc + 1 else target) rest frame m
+  | .brtrue target, .object value :: rest =>
+    let present ← objectNonNull m value
+    return .next (if present then target else pc + 1) rest frame m
+  | .objectTest type throwing, .object value :: rest =>
+    let result ← objectTest m type throwing value
+    return .next (pc + 1) (.object result :: rest) frame m
+  -- Dynamic frame storage, zeroed as the body's declared localsinit flag says.
+  | .localloc, _ => localAllocation body.declared.initLocals pc frame stack m
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m
@@ -390,35 +426,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .bne_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
-  -- Object identity and null tests; `x != null` compiles to `cgt.un` against null.
-  | .ceq, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
-  | .beq target, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (if equal then target else pc + 1) rest frame m
-  | .bne_un target, .object right :: .object left :: rest =>
-    let equal ← objectEqual m left right
-    return .next (if equal then pc + 1 else target) rest frame m
-  | .cgt_un, .object right :: .object left :: rest =>
-    let present ← objectAboveNull m left right
-    return .next (pc + 1) (.scalar (.i32 (if present then 1 else 0)) :: rest) frame m
-  | .brfalse target, .object value :: rest =>
-    let present ← objectNonNull m value
-    return .next (if present then pc + 1 else target) rest frame m
-  | .brtrue target, .object value :: rest =>
-    let present ← objectNonNull m value
-    return .next (if present then target else pc + 1) rest frame m
-  | .objectTest type throwing, .object value :: rest =>
-    let result ← objectTest m type throwing value
-    return .next (pc + 1) (.object result :: rest) frame m
-  | .stackAlloc initLocals, [.scalar size] =>
-    let bytes ← match size with
-      | .i32 bits => pure bits.toNat
-      | .i64 bits => pure bits.toNat
-      | _ => .error .invalidState
-    let (reference, owner, memory) ← allocateStack m frame bytes initLocals
-    return .next (pc + 1) [.reference reference] owner memory
   | .intrinsic operation argc, _ =>
     if !operation.available body.profile then .error (.unsupported "Intrinsic unavailable in target profile") else
     if stack.length < argc then .error .invalidState else

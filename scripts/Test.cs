@@ -239,7 +239,8 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
     "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
     "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
-    "Tests.ResolutionFacts", "Tests.ValueDecoding", "Tests.ReplayDiagnostics", "Tests.BodyLiteral",
+    "Tests.ResolutionFacts", "Tests.ValueDecoding", "Tests.DecodedMethod", "Tests.ReplayDiagnostics",
+    "Tests.BodyLiteral",
     "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
     "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
     "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef"],
@@ -249,9 +250,9 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "local snapshot, struct field view, loop frame, contract consequence, invocation certificate, call transport, "
     + "buffer contents, linking, "
     + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity, method body "
-    + "decoding, declared narrowing, value opcode decoding, replay diagnostic, literal body evidence, return "
-    + "metadata, object array, embedding retention and profile, full transfer, SHA-1, assembly index and pin index "
-    + "scaling and field reference tests");
+    + "decoding, declared narrowing, value opcode decoding, decoded method, replay diagnostic, literal body "
+    + "evidence, return metadata, object array, embedding retention and profile, full transfer, SHA-1, assembly "
+    + "index and pin index scaling and field reference tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
 

@@ -309,10 +309,10 @@ theorem differing_narrowing_rejected : ¬ CIL.Safety.StepMetadata primitive enum
 /-- Signature and environment evidence suffice without an instruction-shaped hypothesis. -/
 theorem shape_narrowing {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
     {closed : RawMethod} {method : Method}
-    (shape : MethodShapeValid closed method)
+    (shape : MethodShapeValid closed method) (declared : DeclaredValid closed method)
     (environment : MethodEnvironmentValid rawLayouts layouts method) :
     method.returnNarrow = declaredNarrow rawLayouts closed.returnType :=
-  returnNarrow_of_shape shape environment
+  returnNarrow_of_shape shape declared environment
 #print axioms shape_narrowing
 
 end Generated

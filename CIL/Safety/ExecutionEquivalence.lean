@@ -235,6 +235,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
   all_goals repeat' first
     | exact same.managedStep _ _ _ _
     | unfold returnFrom
+    | unfold localAllocation
     | simp only [same.checkedValues]
     | (apply ResultEquivalent.bind (same.newArray _ _)
        intro left right related

@@ -18,11 +18,11 @@ namespace Tests.BodyDecoding
 open CIL CIL.Extraction Tests.BodyEncoding Tests.MetadataBuilder Tests.MetadataWorld
 
 /-- The assembly whose metadata the bodies are checked against. -/
-private def pin : AssemblyPin := { identity := ownIdentity }
+def pin : AssemblyPin := { identity := ownIdentity }
 
 /-- A decoded method with the given body fields: the world's `Main`, a public static method
     with no parameters. -/
-private def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
+def method (maxStack : Nat) (initLocals : Bool) (locals : List TypeExpr)
     (code : List RawInstruction) : RawMethod :=
   { token := tokens.main, owner := ownIdentity ++ "::Program", hasThis := false,
     explicitThis := false, callingConvention := 0, attributes := 0x96, implementation := 0,
@@ -36,7 +36,7 @@ private def evidence (bytes : List Nat) (operands : List (Nat × RawOperand) := 
   evidenceOf bytes operands { own := own.1, others := [lib] } (method 8 false [] [])
 
 /-- One decoded instruction. -/
-private def instr (offset opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
+def instr (offset opcode : Nat) (operand : RawOperand := .none) : RawInstruction :=
   { offset := offset, opcode := opcode, operand := operand }
 
 /-- The four little-endian bytes of a token. -/
@@ -116,7 +116,7 @@ private def tokenBytes : List Nat :=
     token tokens.objectRef ++ [0x22, 0x00, 0x00, 0x80, 0xBF, 0x23, 0, 0, 0, 0, 0, 0, 0, 0xC0, 0x2A]
 
 /-- The system type `ldtoken` names in `tokenBytes`. -/
-private def objectType : TypeExpr := .atom runtimeScope "System.Object"
+def objectType : TypeExpr := .atom runtimeScope "System.Object"
 
 /-- The token table of `tokenBytes`: a method, a user string and a type. -/
 private def tokenOperands : List (Nat × RawOperand) :=

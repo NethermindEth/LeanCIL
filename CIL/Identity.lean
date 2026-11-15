@@ -618,6 +618,23 @@ theorem MetadataName.ofBytes?_injective {left right : List Nat} {name : Metadata
 
 #print axioms MetadataName.ofBytes?_injective
 
+/-- Whether `name` is the metadata name of `bytes`, decided by reading the name back, which costs
+    time linear in the bytes in the kernel. -/
+def MetadataName.spells (name : MetadataName) (bytes : List Nat) : Bool :=
+  name.bytes? == some bytes
+
+/-- A name spells exactly the bytes it is the metadata name of. -/
+theorem MetadataName.spells_iff {name : MetadataName} {bytes : List Nat} :
+    name.spells bytes = true ↔ MetadataName.ofBytes? bytes = some name := by
+  unfold MetadataName.spells
+  constructor
+  · intro spelled
+    exact MetadataName.ofBytes?_bytes? (by simpa using spelled)
+  · intro encoded
+    simpa using MetadataName.bytes?_ofBytes? encoded
+
+#print axioms MetadataName.spells_iff
+
 /-- A `#US` literal: its UTF-16 code units read as a big-endian base-65536 number after a
     leading 1. -/
 structure UserString where
