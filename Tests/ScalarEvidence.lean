@@ -889,12 +889,16 @@ private def typed (opcode : Nat) (type : TypeExpr) (emitted : Instruction) : Ind
   else store 129 emitted (operand := .type type)
 /-- A static call taking one word and returning one, the stack effect of a 64-bit load. -/
 private def loadSite : CallSite :=
-  { target := .managed 0x06000002, typeArguments := [], parameterCount := 1, hasThis := false,
-    returnsValue := true, returnType := word, parameterTypes := [word] }
+  { method := {
+      owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := word,
+      parameters := [word] },
+    target := .managed 0x06000002, typeArguments := [], parameterCount := 1, returnsValue := true }
 /-- A static call taking two words and returning nothing, the stack effect of a 64-bit store. -/
 private def storeSite : CallSite :=
-  { target := .managed 0x06000002, typeArguments := [], parameterCount := 2, hasThis := false,
-    returnsValue := false, parameterTypes := [word, word] }
+  { method := {
+      owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := .void,
+      parameters := [word, word] },
+    target := .managed 0x06000002, typeArguments := [], parameterCount := 2, returnsValue := false }
 
 /-- The emissions extraction gives these accesses, none of which carries a metadata token. -/
 private def indirectEmitted : List IndirectCase := [
