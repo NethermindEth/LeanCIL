@@ -705,8 +705,9 @@ partial class Program
 
     /// <summary>
     /// The import directories in `leanPath`, read against `session`, without the trusted toolchain's: the certified
-    /// base spelled as `certified` and every other directory spelled under `session`. A directory that lies outside
-    /// the session once links are followed is refused, so no import is read from a directory the session does not hold.
+    /// base spelled as `certified` and every other directory spelled under `session`. A directory that lies
+    /// outside the session once links are followed is refused, so no import is read from a directory the session
+    /// does not hold.
     /// </summary>
     static string[] ValidatedConsumerImportDirectories(
         string session, string trusted, string? certified, string leanPath) =>
