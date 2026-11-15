@@ -347,7 +347,7 @@ void DecodeCosts()
     Directory.CreateDirectory(decodeDirectory);
     // Raw instructions carry distinct offsets, so the kernel decodes each one instead of reusing a cached decode.
     const int SegmentLength = 10;
-    var samples = new List<(int Instructions, long Cost)>();
+    var samples = new List<(int Instructions, long Cost, long Milliseconds)>();
     foreach (var instructions in new[] { 500, 2000, 8000 })
     {
         var path = Path.Combine(decodeDirectory, $"Instructions{instructions}.lean");
@@ -380,14 +380,17 @@ void DecodeCosts()
               (raw.zip code).all (fun pair => valueEncodingMatches pair.1 pair.2) = true
             end ValueDecodingCost
             """ + "\n");
-        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var package = FixturePackage();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
         var cost = LookupPatterns.ValueDecoding().Match(output);
         if (!cost.Success) throw new InvalidOperationException($"Missing the value decoding cost:\n{output}");
-        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture),
+            clock.ElapsedMilliseconds));
     }
     var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
     var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
-        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions}")));
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions} ({sample.Milliseconds} ms)")));
     if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
         perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
         throw new InvalidOperationException(
