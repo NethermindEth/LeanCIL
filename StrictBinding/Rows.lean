@@ -11,7 +11,8 @@ its `Assembly` row and the heap entries that row names
 offsets: each heap column holds a key, 0 for offset 0, the rank of the entry among the entries
 carried, or `omittedKey` for an entry the extraction does not carry. `RowAt`, `StringAt` and
 `SizedAt` state that carried bytes are the image's under such a numbering, and `AssemblyMatches`
-states it for an assembly block. `assemblyBound` checks it, taking every position and length it
+states it for an assembly block, which also needs an entry for every key of the row other than 0
+and `omittedKey`. `assemblyBound` checks it, taking every position and length it
 compares from the image itself, and `assemblyMatches_of_assemblyBound` proves that its success
 means the proposition.
 -/
@@ -147,8 +148,14 @@ def HeaderAt (image : PreparedImage) (tableHeader : List Nat) : Prop :=
       .ok valid ∧ tableHeader.length = tableHeaderLength valid ∧
     image.view.bytes image.layout.pe.tables.start tableHeader.length = .ok tableHeader
 
+/-- Every key the numbering gives names a carried entry, so a carried row holds no key other
+    than 0 and `omittedKey` without the entry it ranks. -/
+def Covered (keyOf : Nat → Option Nat) (entries : List ByteEntry) : Prop :=
+  ∀ offset key, keyOf offset = some key → ∃ entry ∈ entries, entry.1 = key
+
 /-- The assembly block is the image's: its header bytes, the header they decode to, its
-    `Assembly` row under a numbering of its own entries, and each of those entries. -/
+    `Assembly` row under a numbering of its own entries, each of those entries, and an entry for
+    every key of the row other than 0 and `omittedKey`. -/
 def AssemblyMatches (image : PreparedImage) (assembly : AssemblyMetadata) : Prop :=
   HeaderAt image assembly.tableHeader ∧
     decodeTableHeader assembly.tableHeader = .ok assembly.header ∧
@@ -156,8 +163,9 @@ def AssemblyMatches (image : PreparedImage) (assembly : AssemblyMetadata) : Prop
       RowAt image strings blobs assemblyToken assembly.assemblyRow ∧
       (∀ entry ∈ assembly.strings, ∃ offset, Names strings entry.1 offset ∧
         StringAt image offset entry.2) ∧
-      ∀ entry ∈ assembly.blobs, ∃ offset, Names blobs entry.1 offset ∧
-        SizedAt image image.layout.pe.blobs offset entry.2
+      (∀ entry ∈ assembly.blobs, ∃ offset, Names blobs entry.1 offset ∧
+        SizedAt image image.layout.pe.blobs offset entry.2) ∧
+      Covered strings assembly.strings ∧ Covered blobs assembly.blobs
 
 /-! ## Checks -/
 
@@ -261,7 +269,14 @@ def entriesBound (heap : Nat) (found : Nat → List Nat → Except AuditError Bo
     let isFound ← found offset entry.2
     if isFound then pure () else throw (.heapMismatch heap entry.1)
 
-/-- The assembly block is the image's: header, decoded header, `Assembly` row and entries. Each
+/-- Every key among the pairs names a carried entry of `heap`. -/
+def coveredBound (heap : Nat) (pairs : List (Nat × Nat)) (entries : List ByteEntry) :
+    Except AuditError Unit :=
+  pairs.forM fun pair =>
+    if entries.any (·.1 == pair.2) then pure () else throw (.heapNumbering heap pair.2)
+
+/-- The assembly block is the image's: header, decoded header, `Assembly` row, entries, and an
+    entry for each key of the row. Each
     entry, the row and the header take one read of the bytes compared, and the work is linear in
     those bytes up to the logarithmic joins of `ImageView.slice` and `bytesValue`. -/
 def assemblyBound (image : PreparedImage) (assembly : AssemblyMetadata) :
@@ -270,6 +285,8 @@ def assemblyBound (image : PreparedImage) (assembly : AssemblyMetadata) :
   let pairs ← assemblyRowBound image assembly.assemblyRow
   entriesBound stringsHeap (stringFound image) pairs.1 assembly.strings
   entriesBound blobHeap (sizedFound image image.layout.pe.blobs) pairs.2 assembly.blobs
+  coveredBound stringsHeap pairs.1 assembly.strings
+  coveredBound blobHeap pairs.2 assembly.blobs
 
 /-! ## Soundness -/
 
@@ -488,6 +505,22 @@ theorem sizedAt_of_sizedFound {image : PreparedImage} (bounded : image.view.Boun
 
 #print axioms sizedAt_of_sizedFound
 
+/-- A successful coverage check gives every key of the pairs a carried entry. -/
+theorem covered_of_coveredBound {heap : Nat} {pairs : List (Nat × Nat)}
+    {entries : List ByteEntry} (bound : coveredBound heap pairs entries = .ok ()) :
+    Covered (keyOfPairs pairs) entries := by
+  intro offset key given
+  obtain ⟨pair, member, _, pairKey⟩ := pair_of_keyOfPairs given
+  have checked := forM_ok bound pair member
+  split at checked
+  · rename_i found
+    simp only [List.any_eq_true, beq_iff_eq] at found
+    obtain ⟨entry, inEntries, sameKey⟩ := found
+    exact ⟨entry, inEntries, sameKey.trans pairKey⟩
+  · exact absurd checked throw_ne_ok
+
+#print axioms covered_of_coveredBound
+
 /-- When the assembly check succeeds on a view of a well-formed image, the assembly block is the
     image's. -/
 theorem assemblyMatches_of_assemblyBound {image : PreparedImage} {assembly : AssemblyMetadata}
@@ -496,7 +529,9 @@ theorem assemblyMatches_of_assemblyBound {image : PreparedImage} {assembly : Ass
   unfold assemblyBound at bound
   obtain ⟨_, headerChecked, bound⟩ := bind_ok bound
   obtain ⟨⟨strings, blobs⟩, rowChecked, bound⟩ := bind_ok bound
-  obtain ⟨_, stringsChecked, blobsChecked⟩ := bind_ok bound
+  obtain ⟨_, stringsChecked, bound⟩ := bind_ok bound
+  obtain ⟨_, blobsChecked, bound⟩ := bind_ok bound
+  obtain ⟨_, stringsCovered, blobsCovered⟩ := bind_ok bound
   obtain ⟨headerAt, decoded⟩ := header_of_headerBound bounded headerChecked
   obtain ⟨stringsNumbering, stringsConsistent, blobsNumbering, blobsConsistent, rowAt⟩ :=
     row_of_assemblyRowBound bounded rowChecked
@@ -505,7 +540,8 @@ theorem assemblyMatches_of_assemblyBound {image : PreparedImage} {assembly : Ass
     entries_of_entriesBound (fun _ _ => stringAt_of_stringFound bounded) stringsConsistent
       stringsChecked,
     entries_of_entriesBound (fun _ _ => sizedAt_of_sizedFound bounded) blobsConsistent
-      blobsChecked⟩
+      blobsChecked,
+    covered_of_coveredBound stringsCovered, covered_of_coveredBound blobsCovered⟩
 
 #print axioms assemblyMatches_of_assemblyBound
 

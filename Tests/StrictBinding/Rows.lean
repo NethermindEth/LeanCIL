@@ -130,6 +130,20 @@ theorem rejects_the_marker_for_offset_zero :
   decide +kernel
 #print axioms rejects_the_marker_for_offset_zero
 
+/-- Name key 1 without the entry it ranks. -/
+theorem rejects_a_string_key_without_its_entry :
+    failsWith (checked fixture { block with strings := block.strings.filter (·.1 != 1) })
+      (.heapNumbering stringsHeap 1) = true := by
+  decide +kernel
+#print axioms rejects_a_string_key_without_its_entry
+
+/-- Keys 0, for the empty culture and the absent key, need no carried entry. -/
+theorem accepts_zero_keys_without_entries :
+    ok (checked fixture
+      { block with strings := block.strings.filter (·.1 != 0), blobs := [] }) = true := by
+  decide +kernel
+#print axioms accepts_zero_keys_without_entries
+
 /-! ## A public key at a nonzero offset -/
 
 /-- The key the variant carries: eight bytes without the `PublicKey` flag, so they are its
@@ -163,6 +177,13 @@ private def keyedBlock : AssemblyMetadata :=
 theorem accepts_a_carried_key_at_a_nonzero_offset : ok (checked keyed keyedBlock) = true := by
   decide +kernel
 #print axioms accepts_a_carried_key_at_a_nonzero_offset
+
+/-- Blob key 1 without the entry it ranks. -/
+theorem rejects_a_blob_key_without_its_entry :
+    failsWith (checked keyed { keyedBlock with blobs := [] })
+      (.heapNumbering blobHeap 1) = true := by
+  decide +kernel
+#print axioms rejects_a_blob_key_without_its_entry
 
 /-- The last key byte is `0xee` instead of `0xef`. -/
 theorem rejects_a_changed_key_byte :
