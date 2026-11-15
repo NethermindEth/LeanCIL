@@ -23,43 +23,62 @@ def site : CallSite := {
   target := .external addToIdentity, typeArguments := [], parameterCount := 3, hasThis := false, returnsValue := false,
   returnType := .void, parameterTypes := [.byref word, .byref word, .byref word] }
 def call (site : CallSite) : RawInstruction := ⟨8, 40, .call site⟩
+/-- The call rule at a pc whose table entry is the link `emitted` implies, as in every accepted
+    table; the cases below vary the metadata alone. -/
+def callValid (methods : List SpecializedMethod) (imports : List ImportSlot)
+    (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
+  validateManagedCall methods imports raw live emitted.link? emitted
 
-example : validateManagedCall methods imports (call site) true (.call 1 3) = true := by decide +kernel
+example : callValid methods imports (call site) true (.call 1 3) = true := by decide +kernel
 
 -- Forged slots: identity, argument count, receiver and result shape must each match the site.
-example : validateManagedCall methods [{ slot with identity := addToIdentity ++ " " }] (call site) true (.call 1 3) = false := by decide +kernel
-example : validateManagedCall methods [{ slot with identity := "Other::System.Void Library.Adder::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)" }] (call site) true (.call 1 3) = false := by decide +kernel
-example : validateManagedCall methods [{ slot with parameterCount := 2 }] (call site) true (.call 1 3) = false := by decide +kernel
-example : validateManagedCall methods [{ slot with returnsValue := true }] (call site) true (.call 1 3) = false := by decide +kernel
-example : validateManagedCall methods [{ slot with hasThis := true }] (call site) true (.call 1 3) = false := by decide +kernel
+example : callValid methods [{ slot with identity := addToIdentity ++ " " }]
+    (call site) true (.call 1 3) = false := by decide +kernel
+example : callValid methods [{ slot with identity :=
+      "Other::System.Void Library.Adder::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)" }]
+    (call site) true (.call 1 3) = false := by decide +kernel
+example : callValid methods [{ slot with parameterCount := 2 }]
+    (call site) true (.call 1 3) = false := by decide +kernel
+example : callValid methods [{ slot with returnsValue := true }]
+    (call site) true (.call 1 3) = false := by decide +kernel
+example : callValid methods [{ slot with hasThis := true }]
+    (call site) true (.call 1 3) = false := by decide +kernel
 -- The emitted argument count must agree with the site, including the receiver.
-example : validateManagedCall methods imports (call site) true (.call 1 2) = false := by decide +kernel
-example : validateManagedCall methods imports (call site) true (.call 1 4) = false := by decide +kernel
-example : validateManagedCall methods [{ slot with hasThis := true }] (call { site with hasThis := true }) true (.call 1 4) = true := by decide +kernel
-example : validateManagedCall methods [{ slot with hasThis := true }] (call { site with hasThis := true }) true (.call 1 3) = false := by decide +kernel
+example : callValid methods imports (call site) true (.call 1 2) = false := by decide +kernel
+example : callValid methods imports (call site) true (.call 1 4) = false := by decide +kernel
+example : callValid methods [{ slot with hasThis := true }]
+    (call { site with hasThis := true }) true (.call 1 4) = true := by decide +kernel
+example : callValid methods [{ slot with hasThis := true }]
+    (call { site with hasThis := true }) true (.call 1 3) = false := by decide +kernel
 -- The site's own shape is checked against the slot too.
-example : validateManagedCall methods imports (call { site with returnsValue := true }) true (.call 1 3) = false := by decide +kernel
-example : validateManagedCall methods imports (call { site with parameterCount := 2 }) true (.call 1 2) = false := by decide +kernel
+example : callValid methods imports
+    (call { site with returnsValue := true }) true (.call 1 3) = false := by decide +kernel
+example : callValid methods imports
+    (call { site with parameterCount := 2 }) true (.call 1 2) = false := by decide +kernel
 
 -- A slot index inside the program, or past the import table, is never an import.
-example : validateManagedCall methods imports (call site) true (.call 0 3) = false := by decide +kernel
-example : validateManagedCall methods imports (call site) true (.call 2 3) = false := by decide +kernel
-example : validateManagedCall [] imports (call site) true (.call 0 3) = true := by decide +kernel
-example : validateManagedCall [] imports (call site) true (.call 1 3) = false := by decide +kernel
+example : callValid methods imports (call site) true (.call 0 3) = false := by decide +kernel
+example : callValid methods imports (call site) true (.call 2 3) = false := by decide +kernel
+example : callValid [] imports (call site) true (.call 0 3) = true := by decide +kernel
+example : callValid [] imports (call site) true (.call 1 3) = false := by decide +kernel
 -- Without an import table the previous rule applies: an external site emits no call.
-example : validateManagedCall methods [] (call site) true (.call 1 3) = false := by decide +kernel
+example : callValid methods [] (call site) true (.call 1 3) = false := by decide +kernel
 
 -- Only a plain `call` of a closed method may target an import; constructors and generic sites may not.
-example : validateManagedCall methods imports ⟨8, 115, .call site⟩ true (.call 1 3) = false := by decide +kernel
-example : validateManagedCall methods imports ⟨8, 115, .call site⟩ true (.newAggregate 1 3 0) = false := by decide +kernel
-example : validateManagedCall methods imports (call { site with typeArguments := [word] }) true (.call 1 3) = false := by decide +kernel
+example : callValid methods imports
+    ⟨8, 115, .call site⟩ true (.call 1 3) = false := by decide +kernel
+example : callValid methods imports
+    ⟨8, 115, .call site⟩ true (.newAggregate 1 3 0) = false := by decide +kernel
+example : callValid methods imports
+    (call { site with typeArguments := [word] }) true (.call 1 3) = false := by decide +kernel
 
 -- A managed site or a non-call instruction cannot reach the import range either.
-example : validateManagedCall methods imports (call { site with target := .managed 100663298 }) true (.call 1 3) = false := by decide +kernel
-example : validateManagedCall methods imports ⟨8, 88, .none⟩ true (.call 1 3) = false := by decide +kernel
+example : callValid methods imports
+    (call { site with target := .managed 100663298 }) true (.call 1 3) = false := by decide +kernel
+example : callValid methods imports ⟨8, 88, .none⟩ true (.call 1 3) = false := by decide +kernel
 -- A runtime-modelled external call still emits its model, and dead code is unconstrained.
-example : validateManagedCall methods imports (call site) true .add = true := by decide +kernel
-example : validateManagedCall methods imports (call site) false (.call 0 3) = true := by decide +kernel
+example : callValid methods imports (call site) true .add = true := by decide +kernel
+example : callValid methods imports (call site) false (.call 0 3) = true := by decide +kernel
 
 /-- The whole-method check: the same forged slot is rejected at the only live call. -/
 def caller : RawMethod := { callee with code := [⟨0, 2, .none⟩, ⟨1, 3, .none⟩, ⟨2, 4, .none⟩, ⟨3, 40, .call site⟩, ⟨8, 42, .none⟩] }
@@ -69,8 +88,46 @@ example : ¬ ManagedCallsValid methods [{ slot with identity := "forged" }] call
 example : ¬ ManagedCallsValid methods [] caller [true, true, true, true, true] emitted := by decide +kernel
 example : ManagedCallsValid methods [] caller [true, true, true, false, true] emitted := by decide +kernel
 
+/-- `caller` with a second call to the slot, at pc 7. -/
+def callerTwice : RawMethod := { callee with code := [⟨0, 2, .none⟩, ⟨1, 3, .none⟩,
+  ⟨2, 4, .none⟩, ⟨3, 40, .call site⟩, ⟨8, 2, .none⟩, ⟨9, 3, .none⟩, ⟨10, 4, .none⟩,
+  ⟨11, 40, .call site⟩, ⟨16, 42, .none⟩] }
+/-- The emitted body of `callerTwice`, whose default table is the one its code implies. -/
+def emittedTwice : Method := {
+  returnsValue := false, locals := [],
+  code := [.arg 0, .arg 1, .arg 2, .call 1 3, .arg 0, .arg 1, .arg 2, .call 1 3, .ret] }
+/-- Every pc of `callerTwice` is live. -/
+def liveTwice : List Bool := List.replicate 9 true
+/-- `emittedTwice` with the link table `links`. -/
+def linkedTwice (links : List (Nat × Link)) : Method := { emittedTwice with links := links }
+
+-- A table is accepted when its keys ascend, sit at the call pcs and give each its call's link.
+example : ManagedCallsValid methods imports callerTwice liveTwice emittedTwice := by
+  decide +kernel
+example : ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (7, .direct 1)]) := by decide +kernel
+-- A table that omits a call pc, even a dead one.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1)]) := by decide +kernel
+example : ¬ ManagedCallsValid methods imports callerTwice (liveTwice.set 7 false)
+    (linkedTwice [(3, .direct 1)]) := by decide +kernel
+-- A key at a pc that is not a call, or past the code.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (5, .direct 1), (7, .direct 1)]) := by decide +kernel
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (7, .direct 1), (9, .direct 1)]) := by decide +kernel
+-- Keys out of order or repeated.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(7, .direct 1), (3, .direct 1)]) := by decide +kernel
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (3, .direct 1), (7, .direct 1)]) := by decide +kernel
+-- A call pc whose link is not the one its instruction implies.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 0), (7, .direct 1)]) := by decide +kernel
+
 -- The validator's guarantees, not only these instances.
-example (raw : RawInstruction) (target count : Nat) (valid : validateManagedCall methods imports raw true (.call target count) = true) :
+example (raw : RawInstruction) (link : Option Link) (target count : Nat)
+    (valid : validateManagedCall methods imports raw true link (.call target count) = true) :
     target < 2 := validated_call_bound valid
 
 /-- Imported slot zero follows all extracted methods, even with a larger indexed table. -/

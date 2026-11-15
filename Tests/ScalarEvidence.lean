@@ -324,9 +324,12 @@ private def site : CallSite := {
   declaringType := .atom scope.identity "Fixture",
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
   returnsValue := true, returnType := word, parameterTypes := [word, word] }
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (.call 0 2) = true := by decide
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call { site with returnType := intType })) true (.call 0 2) = false := by decide
-example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] [] (i 40 (.call site)) true (.call 0 2) = false := by decide
+example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call site)) true (some (.direct 0))
+    (.call 0 2) = true := by decide
+example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call { site with returnType := intType }))
+    true (some (.direct 0)) (.call 0 2) = false := by decide
+example : validateManagedCall [⟨[], { addRaw with returnType := intType }⟩] [] (i 40 (.call site))
+    true (some (.direct 0)) (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.Int32 Owner::M()", parameterCount := 0, parameterTypes := [], returnType := word })) [] = some [.other] := by decide +kernel
 theorem external_call_validated : scalarTransfer addRaw (i 40 (.call { site with target := .external "Scope::System.UInt64 Owner::M()", parameterCount := 0, parameterTypes := [] })) [] = some [.word64] := by decide +kernel
 
@@ -347,7 +350,8 @@ private theorem generic_return_cases :
 #print axioms generic_return_cases
 
 example : validateManagedCall [⟨[], addRaw⟩] []
-    (i 40 (.call { site with parameterTypes := [intType, word] })) true (.call 0 2) = false := by decide
+    (i 40 (.call { site with parameterTypes := [intType, word] })) true (some (.direct 0))
+        (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.word64, .word64] = some [.word64] := by decide
 example : scalarTransfer addRaw (i 40 (.call site)) [.other, .word64] = none := by decide
 /-- Call signatures retain parameter order, receiver kinds and generic substitutions. -/
@@ -699,7 +703,8 @@ example : ¬ ScalarFlowValid #[] { loopRaw with code := [i 22, i 0, i 43 (.targe
 private def unsignedSite : CallSite := {
   target := .managed 0x06000001, typeArguments := [], parameterCount := 2, hasThis := false,
   returnsValue := true }
-example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (.call 0 2) = false := by decide
+example : validateManagedCall [⟨[], addRaw⟩] [] (i 40 (.call unsignedSite)) true (some (.direct 0))
+    (.call 0 2) = false := by decide
 example : scalarTransfer addRaw (i 40 (.call unsignedSite)) [.word64, .word64] = none := by decide
 /-- External unsigned signatures retain their exact parameter and return metadata. -/
 private theorem unsigned_signature_cases :
