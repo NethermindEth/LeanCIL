@@ -12,9 +12,9 @@ offsets: each heap column holds a key, 0 for offset 0, the rank of the entry amo
 carried, or `omittedKey` for an entry the extraction does not carry. `RowAt`, `StringAt` and
 `SizedAt` state that carried bytes are the image's under such a numbering, and `AssemblyMatches`
 states it for an assembly block, which also needs an entry for every key of the row other than 0
-and `omittedKey`, and a row cell holding the key of every entry. `assemblyBound` checks it, taking every position and length it
-compares from the image itself, and `assemblyMatches_of_assemblyBound` proves that its success
-means the proposition.
+and `omittedKey`, and a row cell holding the key of every entry. `assemblyBound` checks it,
+taking every position and length it compares from the image itself, and
+`assemblyMatches_of_assemblyBound` proves that its success means the proposition.
 -/
 
 namespace StrictBinding
