@@ -130,7 +130,8 @@ foreach (var (owner, methodName, parameter, selector, narrowSelector, prepare) i
     });
     var refused = narrow.Code != 0 || narrow.Proof.Contains("-- not outlined:", StringComparison.Ordinal);
     if (!refused || !(narrow.Output + narrow.Proof).Contains($"`{name}`", StringComparison.Ordinal))
-        unnamed.Add($"Narrow argument `{name}` was outlined or not named: {narrowSelector}\n{narrow.Output}{narrow.Proof}");
+        unnamed.Add(
+            $"Narrow argument `{name}` was outlined or not named: {narrowSelector}\n{narrow.Output}{narrow.Proof}");
     else Console.WriteLine($"PASS declared narrow argument outline rejection and wide control: {owner}::{methodName}");
 }
 if (unnamed.Count > 0) throw new InvalidOperationException(string.Join("\n", unnamed));

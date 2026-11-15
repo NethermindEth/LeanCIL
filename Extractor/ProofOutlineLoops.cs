@@ -1663,8 +1663,8 @@ internal static partial class ProofOutline
                     "through before any other store of an iteration, which needs `add memory base width offset = " +
                     ".ok reference` (such as from `Writable.add_int`) and write authority in `footprint`");
             else if (op is Arg { Index: var narrow })
-                return Stop($"`{op.ToLean()}`, a read of the narrow argument `{spec.Parameters[narrow].Name}`, which " +
-                    "the outline does not step");
+                return Stop($"`{op.ToLean()}`, a read of the narrow argument " +
+                    $"`{spec.Parameters[narrow].Name}`, which the outline does not step");
             else return Stop($"`{op.ToLean()}`, which the outline does not step");
             state.Pc++;
             return Event.Continue;
