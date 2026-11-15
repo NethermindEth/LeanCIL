@@ -96,8 +96,9 @@ foreach (var body in templates.Split("@[cil_code] def method").Skip(1))
 {
     string[] callForms = [".call ", ".callInstance ", ".tailCall ", ".callVirtual ", ".newAggregate ", ".newObject ",
         ".managed (.call "];
+    var emptyLinks = body.Contains("links := [],", StringComparison.Ordinal);
     if (callForms.Any(form => body.Contains(form, StringComparison.Ordinal)) &&
-        !body.Contains("links := [", StringComparison.Ordinal) && !body.Contains("links := (", StringComparison.Ordinal))
+        (emptyLinks || !body.Contains("links := ", StringComparison.Ordinal)))
         throw new InvalidOperationException("A template method with a call instruction has no links field.");
 }
 if (!templates.Contains("links := ([(", StringComparison.Ordinal) &&
