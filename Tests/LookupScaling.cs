@@ -308,8 +308,9 @@ void ElementShapeCosts()
     foreach (var size in new[] { 8, 32, 128 })
     {
         var indices = Enumerable.Range(0, size).ToArray();
-        var raw = string.Join(",\n  ", indices.Select(index =>
-            $$"""{ identity := "Cell{{index}}", explicit := false, packing := 0, declaredSize := 0, fields := [] }"""));
+        var raw = string.Join(",\n  ", indices.Select(index => $$"""
+            { identity := "Cell{{index}}", explicit := false, packing := 0, declaredSize := 0, fields := [] }
+            """));
         var computed = string.Join(",\n  ", indices.Select(index =>
             $$"""{ layout := { size := {{4 * (index + 1)}}, fields := [] }, alignment := 4 }"""));
         var sites = string.Join(", ", indices.Select(index =>
