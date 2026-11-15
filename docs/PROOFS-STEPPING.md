@@ -388,7 +388,8 @@ See [segment contracts](../CIL/Safety/SegmentContract.lean).
 `SegmentExit.Raises` names CLR exceptions through `ExecutionFault.clrException`, retaining
 the distinction between thrown and arithmetic faults. Fault exits exclude fuel exhaustion;
 divergence requires exhaustion at every fuel budget. Returns compare the memory after frame
-release. `SegmentState.localFootprint` names the byte homes and widths of directly stored locals.
+release. `SegmentState.localFootprint body code` names the byte homes and widths of the slots that
+`segmentStores body code` lists.
 
 `ReachesRun` relates settled outcomes before and after a prefix, including prefixes with calls.
 `ReachesRun.call` takes the caller stack and the callee arguments separately. Its checked step

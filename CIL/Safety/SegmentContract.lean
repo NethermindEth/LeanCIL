@@ -213,11 +213,11 @@ def SegmentExit.Confined (footprint : List (Prod Reference Nat)) (before : Segme
   | .faults _ => True
   | .diverges => True
 
-/-- Directly stored byte locals contribute their homes and widths to a memory footprint. -/
-def SegmentState.localFootprint (code : List CIL.Instruction) (state : SegmentState) :
-    List (Prod Reference Nat) :=
+/-- The byte homes and widths of the frame slots a code segment of `body` stores to directly. -/
+def SegmentState.localFootprint (body : CIL.Method) (code : List CIL.Instruction)
+    (state : SegmentState) : List (Prod Reference Nat) :=
   let locals : Array LocalSlot := state.frame.locals.toArray
-  (segmentStores code).filterMap fun index => match locals[index]? with
+  (segmentStores body code).filterMap fun index => match locals[index]? with
     | some (LocalSlot.bytes kind home) => some (home, localWidth kind)
     | _ => none
 

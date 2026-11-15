@@ -421,7 +421,7 @@ theorem returned :
 /-- The returning store permits exactly its four-byte home and its actual return. -/
 def contract : CIL.Safety.SegmentContract where
   pre := before.exact []
-  footprint _ state := state.localFootprint body.code
+  footprint _ state := state.localFootprint body body.code
   post _ _ exit := exit = .returns finalMemory []
 
 /-- The stored byte is retained in the contract's returned memory. -/
