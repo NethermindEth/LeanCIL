@@ -165,7 +165,8 @@ theorem loop_outcome_some_refuted {program : CIL.Program} {fuel method pc : Nat}
     (other : ∀ fault, outcome = .error fault → fault.fault ≠ .thrown exception) :
     ¬ LoopOutcome program method args post (some exception) ⟨pc, frame, stack, memory⟩ := by
   rintro ⟨later, fault, raised, thrown⟩
-  have up := run_mono program fuel later method pc args frame stack memory outcome settled.stable ran
+  have up :=
+    run_mono program fuel later method pc args frame stack memory outcome settled.stable ran
   have down := run_mono program later fuel method pc args frame stack memory (.error fault)
     (by simp [Stable, thrown]) raised
   rw [Nat.add_comm] at down

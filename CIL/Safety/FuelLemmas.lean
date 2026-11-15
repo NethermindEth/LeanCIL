@@ -32,8 +32,9 @@ def Stable (outcome : Except LocatedFault α) : Prop :=
   | .ok _ => True
   | .error fault => fault.fault ≠ .fuelExhausted
 
-/-- An outcome that stands as evidence about the method: a success, or a definite fault. Every refutation lemma takes it, so none of them refutes anything
-    from a run that reaches an `unsupported` operation. -/
+/-- An outcome that stands as evidence about the method: a success, or a definite fault. Every
+    refutation lemma takes it, so none of them refutes anything from a run that reaches an
+    `unsupported` operation. -/
 def Settled (outcome : Except LocatedFault α) : Prop :=
   match outcome with
   | .ok _ => True
@@ -199,7 +200,8 @@ theorem invoke_fault_refutes_success (program : CIL.Program) (observed method : 
     invoke program fuel method args memory ≠ .ok result := by
   intro success
   have failure :=
-    invoke_mono program observed fuel method args memory (.error fault) (Settled.stable definite) witness
+    invoke_mono program observed fuel method args memory (.error fault) (Settled.stable definite)
+      witness
   have returned := invoke_mono program fuel observed method args memory (.ok result) trivial success
   rw [Nat.add_comm] at returned
   rw [failure] at returned
