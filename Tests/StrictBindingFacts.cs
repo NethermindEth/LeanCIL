@@ -418,7 +418,11 @@ static partial class StrictBindingFacts
 
     /// <summary>Carried heap entries as a Lean list of key and bytes, one entry to a line.</summary>
     static string Entries(SortedDictionary<int, byte[]> entries) => Packed(entries.Select(entry =>
-        $"({entry.Key}, {Packed(entry.Value, "         ")})"), "      ", oneEach: true);
+        $"({entry.Key}, {Packed(entry.Value, new string(' ', EntryIndent + $"({entry.Key}, ".Length))})"),
+        new string(' ', EntryIndent - 1), oneEach: true);
+
+    // The column where each carried entry starts, past the list's bracket.
+    const int EntryIndent = 7;
 
     /// <summary>
     /// The public key token of an Assembly row as Lean spells it: the last eight bytes of the key's SHA-1 digest in
