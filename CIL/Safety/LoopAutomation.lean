@@ -191,7 +191,7 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
-  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.ldloc,
+  [``CIL.Instruction.nop, ``CIL.Instruction.ldarg, ``CIL.Instruction.ldloc,
     ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.skipInit,
     ``CIL.Instruction.initAggregate, ``CIL.Instruction.fieldAddress]
@@ -199,7 +199,7 @@ def loopMovesOnly : List Lean.Name :=
 /-- Instructions that read no reference: they compare or compute on scalars, or move a value
     that `loopReadsReferences` shows is a scalar. -/
 def loopScalarOnly : List Lean.Name :=
-  [``CIL.Instruction.nop, ``CIL.Instruction.arg, ``CIL.Instruction.ldloc,
+  [``CIL.Instruction.nop, ``CIL.Instruction.ldarg, ``CIL.Instruction.ldloc,
     ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br,
     ``CIL.Instruction.div, ``CIL.Instruction.div_un, ``CIL.Instruction.rem,
@@ -254,20 +254,24 @@ def loopLocalAt (locals : Expr) (index : Nat) : StateT LoopLocalIndex MetaM (Opt
 
 open Lean Meta in
 /-- Whether the step obligation `step` of the fetched `op` can check a reference or span: any
-    instruction but `loopScalarOnly`, an argument load or local store of a non-scalar, a load of
-    a local that is not a byte home or holds a reference, and the address of a local that is not a
-    byte home. -/
+    instruction but `loopScalarOnly`, a homed argument load, an argument load or local store of a
+    non-scalar, a load of a local that is not a byte home or holds a reference, and the address of
+    a local that is not a byte home. -/
 def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex MetaM Bool := do
   let op ← whnfR op
   let some name := op.getAppFn.constName? | return true
   unless loopScalarOnly.contains name do return true
   let scalar (value : Expr) : MetaM Bool := return (← whnfR value).isAppOf ``Value.scalar
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
-  let some #[_, _, _, args, frame, stack, _] := argumentsOf? lhs ``step 7 | return true
-  if name == ``CIL.Instruction.arg then
-    -- An argument is checked as it is loaded, so a reference argument's `form` is read.
+  let some #[body, _, _, args, frame, stack, _] := argumentsOf? lhs ``step 7 | return true
+  if name == ``CIL.Instruction.ldarg then
+    -- An argument is checked as it is loaded, so a reference argument's `form` is read; a homed
+    -- argument reads its frame slot, which this check does not inspect.
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
+    let some access ← ResolutionFacts.argumentAccessProof? body indexTerm | return true
+    let some (_, _, access) := (← inferType access).eq? | return true
+    unless (← whnfD access).isAppOf ``CIL.ArgumentAccess.value do return true
     let entries ← listEntries args
     let some (_, value) := entries.find? (·.1 == index) | return true
     return !(← scalar value)

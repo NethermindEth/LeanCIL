@@ -13,12 +13,13 @@ open CIL.Safety
 
 /-- The argument formation sequence used by the vector input prefixes. -/
 def referencePrefix (index : Nat) : List CIL.Instruction :=
-  [.arg index, .memory .asRef, .memory .asRef]
+  [.ldarg index, .memory .asRef, .memory .asRef]
 
 /-- Argument formation is a reusable segment at any placed position. -/
 theorem reference_prefix {program : CIL.Program} {method start : Nat} {body : CIL.Method}
     (found : program[method]? = some body) (index : Nat)
     (placed : CodeAt body start (referencePrefix index))
+    (plain : body.argumentAccess index = .value none)
     (arguments : List Value) (frame : Frame) (stack : List Value)
     (memory : Memory) (reference : Reference)
     (argument : arguments[index]? = some (.reference (.address reference)))
@@ -26,7 +27,7 @@ theorem reference_prefix {program : CIL.Program} {method start : Nat} {body : CI
     Segment program method start (start + 3)
       (SegmentState.exact arguments ⟨frame, stack, memory⟩)
       (SegmentState.exact arguments ⟨frame, .reference (.address reference) :: stack, memory⟩) := by
-  cil_segment 3 [found, placed, argument, formed]
+  cil_segment 3 [found, placed, plain, argument, formed]
 
 #print axioms reference_prefix
 
@@ -52,6 +53,8 @@ theorem save_right {program : CIL.Program} {method start : Nat} {body : CIL.Meth
 theorem add_vector128_inputs {program : CIL.Program} {method : Nat} {body : CIL.Method}
     (found : program[method]? = some body)
     (placed : CodeAt body 0 (referencePrefix 0 ++ referencePrefix 1 ++ [.stloc 0, .dup]))
+    (leftPlain : body.argumentAccess 0 = .value none)
+    (rightPlain : body.argumentAccess 1 = .value none)
     (arguments : List Value) (frame : Frame) (slots : List LocalSlot)
     (initial : Option ManagedReference) (memory : Memory) (left right : Reference)
     (layout : frame.locals = .root initial :: slots)
@@ -62,10 +65,10 @@ theorem add_vector128_inputs {program : CIL.Program} {method : Nat} {body : CIL.
       (SegmentState.exact arguments
         ⟨{ frame with locals := .root (some (.address right)) :: slots },
           [.reference (.address left), .reference (.address left)], memory⟩) := by
-  have first := reference_prefix found 0 placed.append_left.append_left arguments frame []
-    memory left leftArgument leftFormed
-  have second := reference_prefix found 1 placed.append_left.append_right arguments frame
-    [.reference (.address left)] memory right rightArgument rightFormed
+  have first := reference_prefix found 0 placed.append_left.append_left leftPlain arguments
+    frame [] memory left leftArgument leftFormed
+  have second := reference_prefix found 1 placed.append_left.append_right rightPlain arguments
+    frame [.reference (.address left)] memory right rightArgument rightFormed
   have third := save_right found placed.append_right arguments frame slots initial memory
     left right layout rightFormed
   exact (first.trans second).trans third
@@ -78,6 +81,7 @@ theorem add_vector128_inputs {program : CIL.Program} {method : Nat} {body : CIL.
 theorem load256_prefix {program : CIL.Program} {method start : Nat} {body : CIL.Method}
     (found : program[method]? = some body) (index : Nat)
     (placed : CodeAt body start (referencePrefix index ++ [.memory .load256]))
+    (plain : body.argumentAccess index = .value none)
     (arguments : List Value) (frame : Frame) (memory : Memory) (reference : Reference)
     (vector : BitVec 256)
     (argument : arguments[index]? = some (.reference (.address reference)))
@@ -86,7 +90,7 @@ theorem load256_prefix {program : CIL.Program} {method start : Nat} {body : CIL.
     Segment program method start (start + 4)
       (SegmentState.exact arguments ⟨frame, [], memory⟩)
       (SegmentState.exact arguments ⟨frame, [.scalar (.v256 vector)], memory⟩) := by
-  cil_segment 4 [found, placed, argument, formed, loaded]
+  cil_segment 4 [found, placed, plain, argument, formed, loaded]
 
 #print axioms load256_prefix
 
@@ -107,6 +111,7 @@ theorem store256 {program : CIL.Program} {method start index : Nat} {body : CIL.
 theorem multiply_left_input {program : CIL.Program} {method : Nat} {body : CIL.Method}
     (found : program[method]? = some body)
     (placed : CodeAt body 44 (referencePrefix 0 ++ [.memory .load256, .stloc 23]))
+    (plain : body.argumentAccess 0 = .value none)
     (arguments : List Value) (frame : Frame) (before after : Memory) (left : Reference)
     (vector : BitVec 256)
     (argument : arguments[0]? = some (.reference (.address left)))
@@ -118,7 +123,7 @@ theorem multiply_left_input {program : CIL.Program} {method : Nat} {body : CIL.M
       (SegmentState.exact arguments ⟨frame, [], after⟩) := by
   have split : CodeAt body 44 ((referencePrefix 0 ++ [.memory .load256]) ++ [.stloc 23]) :=
     placed
-  exact (load256_prefix found 0 split.append_left arguments frame before left vector
+  exact (load256_prefix found 0 split.append_left plain arguments frame before left vector
     argument formed loaded).trans
       (store256 found split.append_right arguments frame before after vector stored)
 
@@ -158,6 +163,8 @@ theorem multiply_inputs {program : CIL.Program} {method : Nat} {body : CIL.Metho
     (leftPlaced : CodeAt body 44 (referencePrefix 0 ++ [.memory .load256, .stloc 23]))
     (rightPlaced : CodeAt body 49 (referencePrefix 1 ++ [.memory .load256,
       .ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2, .stloc 24]))
+    (leftPlain : body.argumentAccess 0 = .value none)
+    (rightPlain : body.argumentAccess 1 = .value none)
     (arguments : List Value) (frame : Frame) (before middle after : Memory)
     (left right : Reference) (leftVector rightVector reversed : BitVec 256)
     (leftArgument : arguments[0]? = some (.reference (.address left)))
@@ -174,12 +181,12 @@ theorem multiply_inputs {program : CIL.Program} {method : Nat} {body : CIL.Metho
       .ok (.v256 reversed)) :
     Segment program method 44 56 (SegmentState.exact arguments ⟨frame, [], before⟩)
       (SegmentState.exact arguments ⟨frame, [], after⟩) := by
-  have first := multiply_left_input found leftPlaced arguments frame before middle left
+  have first := multiply_left_input found leftPlaced leftPlain arguments frame before middle left
     leftVector leftArgument leftFormed leftLoaded leftStored
   have split : CodeAt body 49 (((referencePrefix 1 ++ [.memory .load256]) ++
       [.ldc_i4 27, .intrinsic (.avx2 .permute4x64) 2]) ++ [.stloc 24]) := rightPlaced
-  have loaded := load256_prefix found 1 split.append_left.append_left arguments frame middle
-    right rightVector rightArgument rightFormed rightLoaded
+  have loaded := load256_prefix found 1 split.append_left.append_left rightPlain arguments
+    frame middle right rightVector rightArgument rightFormed rightLoaded
   have reversed := reverse256 found split.append_left.append_right arguments frame middle
     rightVector reversed available permuted
   have stored := store256 found split.append_right arguments frame middle after _ rightStored
@@ -255,7 +262,7 @@ theorem composition_boundaries {program : CIL.Program} {method : Nat}
 
 /-- Wrong opcodes, endpoint states and missing memory facts do not yield a segment proof. -/
 theorem checked_boundaries {program : CIL.Program} {method : Nat} {body : CIL.Method}
-    (_found : program[method]? = some body) (_placed : CodeAt body 0 [.arg 0])
+    (_found : program[method]? = some body) (_placed : CodeAt body 0 [.ldarg 0])
     (_frame : Frame) (_memory : Memory) : True := by
   fail_if_success
     have : (SegmentRun program method 0 1 1 [.scalar (.i64 4)]

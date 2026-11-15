@@ -51,6 +51,9 @@ internal static partial class ProofOutline
             }).ToArray();
             spec = new(spec.Method, parameters, spec.Result, spec.Symbolic, spec.Classes);
             var loops = body.Loops();
+            if (spec.Parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Narrow) is { } narrow)
+                throw Unsupported(
+                    $"A struct receiver loop reads word arguments only, and `{narrow.Name}` is a narrow integer");
             if (loops.Count != 1 || !Body.Conditional(body.Operations[loops[0].Latch]) ||
                 spec.Method.Body.Variables.Count != 0 || spec.Parameters.Any(parameter =>
                     parameter.Shape is not (ParameterShape.StructReference or ParameterShape.Scalar) ||
@@ -225,7 +228,7 @@ internal static partial class ProofOutline
                     path.Stack.RemoveAt(path.Stack.Count - 1);
                     return value;
                 }
-                if (op is Arg { Narrow: null } argument)
+                if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
                     path.Stack.Add(spec.Parameters[argument.Index].Name);
                 else if (StructLiteral(op) is { } literal)
                 {

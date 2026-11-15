@@ -246,7 +246,7 @@ A fact whose condition is not shown stays at the old memory.
 
 The contract form then prepares its step facts again at `storedLocal`. The carried `ValidCall`
 forms the by-reference arguments and reads their fields there, and the restated reads supply their loads, so
-`.arg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
+`.ldarg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
 word load through a `ValidCall` is stated at that store's memory, as `view.word storedLocal
 offset`. `ArgumentView.word_below localBelow view old` restates a word at the memory the store
 wrote to, and `ArgumentView.bytes_below` the whole range.
@@ -1010,8 +1010,8 @@ body. Given `add_holds : addContract.Holds Extracted.program addTo`:
 
 ```lean extracted
 theorem sum_forwards : sumContract.Holds Extracted.program sum :=
-  add_holds.forward (loads := plainLoads [0, 1, 2]) (narrow := none) sum.found addTo.found
-    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged _ _)
+  add_holds.forward (loads := [0, 1, 2]) (narrow := none) sum.found addTo.found
+    ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl) (fun _ _ _ => plainLoads_unchanged (by decide) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => rfl) (fun _ _ _ _ _ => trivial)
 ```
@@ -1019,11 +1019,14 @@ theorem sum_forwards : sumContract.Holds Extracted.program sum :=
 `Forwards body calleeBody loads callee narrow` fixes the body to `forwarderCode loads callee`
 with `body.returnNarrow = narrow` and no locals or parameter homes, so frame entry and exit leave memory
 unchanged and the callee's precondition, footprint and postcondition carry over verbatim. The loads
-are data: each is an argument index and the narrowing the extractor attaches to `bool`, `byte`,
-`sbyte`, `short` and `ushort` parameters (`plainLoads` for wider ones). The lemma has these premises:
+are data: each is an argument index, read as `Method.argumentAccess` says, which narrows `bool`,
+`char`, `byte`, `sbyte`, `short` and `ushort` parameters, and enums over them, to their declared
+width. The lemma has these
+premises:
 
-- The callee's arguments are the forwarder's at those indices, each kept by its load's narrowing
-  (`LoadsUnchanged`).
+- The callee's arguments are the forwarder's at those indices, each kept by the forwarder's read
+  (`LoadsUnchanged body index value`). `plainLoads_unchanged` discharges it for arguments read
+  without narrowing, and `LoadsUnchanged.narrow` for an i32 already in its declared range.
 - Every forwarder argument reaches the callee or is valid under the precondition, since the
   forwarder's own invocation checks them all.
 - The call exposes no unspecified vector bits.

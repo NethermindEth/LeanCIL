@@ -50,7 +50,7 @@ private def target : SpecializedMethod := ⟨[], { raw with
   code := [⟨0, 23, .none⟩, ⟨1, 42, .none⟩] }⟩
 private def methods := [⟨[], raw⟩, target]
 private def emitted : Method := {
-  locals := [], returnsValue := true, code := [.arg 0, .nop, .call 1 1, .ret] }
+  locals := [], returnsValue := true, code := [.ldarg 0, .nop, .call 1 1, .ret] }
 
 theorem concrete_call_valid :
     ConstrainedCallsValid types methods raw [true, true, true, true] emitted := by decide +kernel
@@ -196,7 +196,7 @@ private def defaultTarget : SpecializedMethod := ⟨[price, allowance], { raw wi
 private def overrideTarget : SpecializedMethod := ⟨[price], { defaultTarget.closed with
   token := 41, owner := "Fixture::Allowance", ownerArgumentCount := 0 }⟩
 private def defaultEmitted : Method := {
-  locals := [], returnsValue := true, code := [.arg 0, .nop, .call 1 1, .ret] }
+  locals := [], returnsValue := true, code := [.ldarg 0, .nop, .call 1 1, .ret] }
 
 /-- Without an implementation on the receiver, a generic static virtual slot runs its own body,
     instantiated at the site's method and interface arguments. -/
@@ -596,7 +596,7 @@ private def castRaw : RawMethod := { raw with
   parameters := [dogClass], returnType := dogClass,
   code := [⟨0, 2, .none⟩, ⟨1, 116, .type dogClass⟩, ⟨6, 42, .none⟩] }
 private def castEmitted : Method := {
-  locals := [], returnsValue := true, code := [.arg 0, .objectTest dogClass true, .ret] }
+  locals := [], returnsValue := true, code := [.ldarg 0, .objectTest dogClass true, .ret] }
 
 /-- A cast to a pinned catalog class is a type test of that class. -/
 theorem class_cast_valid :
@@ -623,7 +623,7 @@ theorem root_cast_rejected :
       [⟨[], { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }⟩]
       { castRaw with code := [⟨0, 2, .none⟩, ⟨1, 116, .type root⟩, ⟨6, 42, .none⟩] }
       [true, true, true]
-      { castEmitted with code := [.arg 0, .objectTest root true, .ret] } := by decide +kernel
+      { castEmitted with code := [.ldarg 0, .objectTest root true, .ret] } := by decide +kernel
 #print axioms root_cast_rejected
 
 /-- A type test emitted for an instruction that is no cast is rejected. -/

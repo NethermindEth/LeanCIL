@@ -82,7 +82,7 @@ theorem null_array_throws :
 theorem index_out_of_range :
     runs [.ldc_i4 2, .newReferenceArray node, .ldc_i4 2, .memory .referenceArrayLoad,
       .ret] [] budgeted = .error ⟨0, 3, .thrown "System.IndexOutOfRangeException"⟩ ∧
-    runs [.ldc_i4 2, .newReferenceArray circle, .ldc_i4 (-1), .arg 0 none,
+    runs [.ldc_i4 2, .newReferenceArray circle, .ldc_i4 (-1), .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .ret] [squareObject] holdingSquare =
       .error ⟨0, 4, .thrown "System.IndexOutOfRangeException"⟩ := ⟨rfl, rfl⟩
 #print axioms index_out_of_range
@@ -98,7 +98,7 @@ theorem null_elements :
 
 /-- A `Square` is storable into an array of `Shape` and loads back as itself. -/
 theorem covariant_store :
-    (runs [.ldc_i4 1, .newReferenceArray shape, .dup, .ldc_i4 0, .arg 0 none,
+    (runs [.ldc_i4 1, .newReferenceArray shape, .dup, .ldc_i4 0, .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret]
       [squareObject] holdingSquare).map Prod.snd = .ok [squareObject] := rfl
 #print axioms covariant_store
@@ -106,7 +106,7 @@ theorem covariant_store :
 /-- Storing a `Square` into an array of `Circle` throws `ArrayTypeMismatchException`, and the
     element keeps what it held. -/
 theorem mismatched_store :
-    runs [.ldc_i4 1, .newReferenceArray circle, .ldc_i4 0, .arg 0 none,
+    runs [.ldc_i4 1, .newReferenceArray circle, .ldc_i4 0, .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .ret] [squareObject] holdingSquare =
       .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ := rfl
 #print axioms mismatched_store
@@ -129,7 +129,7 @@ private def holdingText : CIL.Safety.Memory :=
 /-- A string stores into an array of strings and loads back as itself: the element class is
     the string's own class. -/
 theorem opaque_store :
-    (runs [.ldc_i4 1, .newReferenceArray text, .dup, .ldc_i4 0, .arg 0 none,
+    (runs [.ldc_i4 1, .newReferenceArray text, .dup, .ldc_i4 0, .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret]
       [.object (.address ⟨0, 0⟩)] holdingText).map Prod.snd =
       .ok [.object (.address ⟨0, 0⟩)] := rfl
@@ -138,10 +138,10 @@ theorem opaque_store :
 /-- A `Square` stored into an array of strings throws `ArrayTypeMismatchException`, and a string
     stored into an array of `Shape` does too: neither class derives from the other. -/
 theorem opaque_mismatch :
-    runs [.ldc_i4 1, .newReferenceArray text, .ldc_i4 0, .arg 0 none,
+    runs [.ldc_i4 1, .newReferenceArray text, .ldc_i4 0, .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .ret] [.object (.address ⟨1, 0⟩)]
       holdingText = .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ ∧
-    runs [.ldc_i4 1, .newReferenceArray shape, .ldc_i4 0, .arg 0 none,
+    runs [.ldc_i4 1, .newReferenceArray shape, .ldc_i4 0, .ldarg 0,
       .memory .referenceArrayStore, .ldc_i4 0, .ret] [.object (.address ⟨0, 0⟩)]
       holdingText = .error ⟨0, 4, .thrown "System.ArrayTypeMismatchException"⟩ := ⟨rfl, rfl⟩
 #print axioms opaque_mismatch

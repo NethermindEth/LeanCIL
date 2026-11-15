@@ -34,7 +34,7 @@ Binders parameterize the generated declarations, including memory stores for sym
 import CIL.Safety.LoopScaffold
 
 /-- Returns its 32-bit argument. -/
-def body : CIL.Method := { code := [.arg 0, .ret], locals := [], returnsValue := true }
+def body : CIL.Method := { code := [.ldarg 0, .ret], locals := [], returnsValue := true }
 
 bind_entry entry (value : CIL.W32) := body
   with [.scalar (.i32 value)] from CIL.Safety.Memory.empty
@@ -207,7 +207,7 @@ import CIL.MethodBinding
 
 /-- The body a proof expects at index 1 of the program. -/
 def double : CIL.Method :=
-  { code := [.arg 0, .arg 0, .add, .ret], locals := [], returnsValue := true }
+  { code := [.ldarg 0, .ldarg 0, .add, .ret], locals := [], returnsValue := true }
 
 def program : CIL.Program := [{ code := [.ret], locals := [], returnsValue := false }, double]
 
@@ -227,7 +227,7 @@ import Extracted
 import CIL.MethodBinding
 
 /-- The extraction's method at index 1 with the body this proof expects. -/
-def double : CIL.Method := Extracted.method1.withCode [.arg 0, .arg 0, .add, .ret]
+def double : CIL.Method := Extracted.method1.withCode [.ldarg 0, .ldarg 0, .add, .ret]
 
 theorem found : Extracted.program[1]? = some double := by cil_body
 ```
@@ -246,11 +246,11 @@ open CIL
 
 /-- What an extraction emits: a dead block puts the call at pc 3. -/
 def emitted : Method :=
-  { code := [.arg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret],
+  { code := [.ldarg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret],
     locals := [], returnsValue := true }
 
 /-- The body the proof uses; its call is at pc 2, and `withCode` gives it the link of that pc. -/
-def literal : Method := emitted.withCode [.arg 0, .br 2, .call 1 1, .ret]
+def literal : Method := emitted.withCode [.ldarg 0, .br 2, .call 1 1, .ret]
 
 theorem literal_embeds : MethodEmbeds [emitted] 0 literal := by cil_embed
 ```
@@ -425,13 +425,13 @@ open CIL (Method MethodEmbeds)
 
 /-- Returns argument 1 on both paths; pc 4 is reached only by the branch. -/
 @[cil_code] def body : Method := {
-  code := [.arg 0, .brfalse 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.ldarg 0, .brfalse 4, .ldarg 1, .ret, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 /-- `body` as a profile-specific extraction emits it, with a dead block before the branch target. -/
 def extracted : Method := {
-  code := [.arg 0, .brfalse 6, .arg 1, .ret,
-    .unsupported "Unreachable under selected profile", .ldc_i4 9, .arg 1, .ret]
+  code := [.ldarg 0, .brfalse 6, .ldarg 1, .ret,
+    .unsupported "Unreachable under selected profile", .ldc_i4 9, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem bound : MethodEmbeds [extracted] 0 body := by cil_embed
@@ -491,7 +491,7 @@ open CIL
 
 /-- Reads its one local, a null reference, then returns argument 0. -/
 @[cil_code] def stored : Method := {
-  code := [.ldloc 0, .pop, .arg 0, .ret]
+  code := [.ldloc 0, .pop, .ldarg 0, .ret]
   locals := [.nullRef], localKinds := [.reference], returnsValue := true }
 
 /-- `stored` with two unused reference locals after its own, as a profile can extract it. -/

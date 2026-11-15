@@ -101,8 +101,8 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_conv_ovf_un (target : CIL.ConvTarget) :
     observerCount (.conv_ovf_un target) = 1 := rfl
 #print axioms guard_conv_ovf_un
-@[cil_guard] theorem guard_arg (index : Nat) (narrow : Option CIL.NarrowKind) :
-    observerCount (.arg index narrow) = 0 := rfl
+@[cil_guard] theorem guard_ldarg (index : Nat) : observerCount (.ldarg index) = 0 := rfl
+#print axioms guard_ldarg
 @[cil_guard] theorem guard_call (callee argc : Nat) :
     observerCount (.call callee argc) = argc := rfl
 @[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :

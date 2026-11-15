@@ -250,7 +250,7 @@ void ArgumentResolutionCosts()
             var homes = string.Join(", ", slots.Keys.Order().Select(index => $"({index}, .word32)"));
             var signature = $"{{ parameters := [{string.Join(", ", Enumerable.Repeat(Int32Type, size))}] }}";
             var code = string.Join(", ", Enumerable.Range(0, size).Select(index =>
-                slots.TryGetValue(index, out var slot) ? $".ldloc {slot}, .pop" : $".arg {index}, .pop")) + ", .ret";
+                slots.TryGetValue(index, out var slot) ? $".ldloc {slot}, .pop" : $".ldarg {index}, .pop")) + ", .ret";
             var accesses = string.Join(", ", Enumerable.Range(0, size).Select(index =>
                 slots.TryGetValue(index, out var slot) ? $".home {slot}" : ".value none"));
             var reads = string.Join(", ", Enumerable.Range(0, size).Select(index => $"body.argumentAccess {index}"));
@@ -353,7 +353,7 @@ void DecodeCosts()
     Directory.CreateDirectory(decodeDirectory);
     // Raw instructions carry distinct offsets, so the kernel decodes each one instead of reusing a cached decode.
     const int SegmentLength = 10;
-    var samples = new List<(int Instructions, long Cost)>();
+    var samples = new List<(int Instructions, long Cost, long Milliseconds)>();
     foreach (var instructions in new[] { 500, 2000, 8000 })
     {
         var path = Path.Combine(decodeDirectory, $"Instructions{instructions}.lean");
@@ -364,19 +364,19 @@ void DecodeCosts()
             open CIL CIL.Extraction Lean Elab Command
             {{KernelCostCommand}}
             namespace ValueDecodingCost
-            /-- The raw instructions of one segment: short and long constants, locals, arithmetic, a checked
-                conversion, a branch, a four-target switch and a return. -/
+            /-- The raw instructions of one segment: short and long constants, locals, an argument,
+                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
             def segment (index : Nat) : List RawInstruction :=
               let start := {{SegmentLength}} * index
               [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
                 ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
-                ⟨start + 4, 6, .none⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
                 ⟨start + 7, 58, .target index⟩,
                 ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
             /-- The instructions the translator emits for one segment. -/
             def codeSegment (index : Nat) : List Instruction :=
               [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
-                .ldloc (index % 4), .stloc (index % 4), .ldloc 0, .add, .conv_ovf_un .i1, .brtrue index,
+                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1, .brtrue index,
                 .switch [index, index + 1, index + 2, index + 3], .ret]
             /-- A body of {{instructions}} raw instructions. -/
             def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
@@ -386,14 +386,17 @@ void DecodeCosts()
               (raw.zip code).all (fun pair => valueEncodingMatches pair.1 pair.2) = true
             end ValueDecodingCost
             """ + "\n");
-        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var package = FixturePackage();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
         var cost = LookupPatterns.ValueDecoding().Match(output);
         if (!cost.Success) throw new InvalidOperationException($"Missing the value decoding cost:\n{output}");
-        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture),
+            clock.ElapsedMilliseconds));
     }
     var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
     var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
-        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions}")));
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions} ({sample.Milliseconds} ms)")));
     if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
         perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
         throw new InvalidOperationException(
@@ -791,9 +794,9 @@ long EmbeddingCost(string name, string definitions)
 string DeadBlocks(int calls) => $$"""
 /-- What an extraction emits for one call followed by a dead block. -/
 def extractedSegment : List Instruction :=
-  [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
+  [.ldarg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
 /-- The hand-written segment without the dead block. -/
-def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+def writtenSegment : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
@@ -807,9 +810,9 @@ def written : Method :=
 // second block first, so the pc map descends once at every size.
 string Reordered(int segments) => $$"""
 /-- The block after the head. -/
-def first : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+def first : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The block the head branches to. -/
-def second : List Instruction := [.arg 1, .call 2 1, .pop, .ret]
+def second : List Instruction := [.ldarg 1, .call 2 1, .pop, .ret]
 /-- The extraction, with the second block first. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
@@ -889,7 +892,7 @@ long ComputedLookupCost(int cases)
         import CIL.InstructionEquations
         import CIL.Safety.SymbolicExecution
         open CIL.Safety
-        def segment : List CIL.Instruction := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
+        def segment : List CIL.Instruction := [.ldarg 0, .ldarg 1, .add, .nop, .nop, .nop, .nop]
         def body : CIL.Method :=
           { locals := [], returnsValue := true,
             code := [.nop] ++ (List.replicate {{cases}} segment).flatten ++ [.ret] }
@@ -1207,7 +1210,7 @@ long ArrayAddressCost(bool prefixed, int sites)
         def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
           (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
         def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
-          [.arg 0, .arg 1] ++ (if prefixed then [.nop] else []) ++
+          [.ldarg 0, .ldarg 1] ++ (if prefixed then [.nop] else []) ++
             [.memory (.arrayAddress .signed32 !prefixed), .pop, .br ((index + 1) * width prefixed)]
         def code (prefixed : Bool) (sites : Nat) : List Instruction :=
           (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]

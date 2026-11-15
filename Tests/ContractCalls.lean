@@ -98,7 +98,7 @@ theorem supplied_contract (program : Program) (memory : Safety.Memory)
 
 /-- A caller that passes its argument to the helper and returns the helper's result. -/
 @[cil_code] def forwarder : Method := {
-  returnsValue := true, locals := [], code := [.arg 0, .call 1 1, .ret] }
+  returnsValue := true, locals := [], code := [.ldarg 0, .call 1 1, .ret] }
 
 /-- A helper over one word, which returns its successor. -/
 def successor : MethodContract W32 W32 where
@@ -213,7 +213,7 @@ theorem checked_child_concrete (memory final : Safety.Memory) (value : W32)
 
 /-- A caller forwards two scalar arguments to a separately contracted helper. -/
 @[cil_code] def pairCaller : Method := {
-  returnsValue := true, locals := [], code := [.arg 0, .arg 1, .call 1 2, .ret] }
+  returnsValue := true, locals := [], code := [.ldarg 0, .ldarg 1, .call 1 2, .ret] }
 
 /-- A tuple input exposes both argument inference and a nontrivial precondition. -/
 def orderedPair : MethodContract (W32 × W32) W32 where

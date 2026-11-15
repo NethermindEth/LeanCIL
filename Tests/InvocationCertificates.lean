@@ -20,11 +20,12 @@ abbrev echoMethod : Nat := 0
 abbrev relayMethod : Nat := 1
 
 /-- `Echo(v) => v` on one scalar argument. -/
-@[cil_code] def echo : CIL.Method := { returnsValue := true, locals := [], code := [.arg 0, .ret] }
+@[cil_code] def echo : CIL.Method :=
+  { returnsValue := true, locals := [], code := [.ldarg 0, .ret] }
 
 /-- `Relay(v) => Echo(v)`: one call whose result it returns. -/
 @[cil_code] def relay : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.arg 0, .call echoMethod 1, .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call echoMethod 1, .ret] }
 
 /-- `Echo` then `Relay`; the program declares no statics. -/
 @[cil_code] def program : CIL.Program := [echo, relay]
