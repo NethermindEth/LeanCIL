@@ -693,10 +693,10 @@ layers.
 
 Prefer a small `change` or an instruction equation over repeatedly unfolding `run`,
 `CIL.Safety.step` and `CIL.step`. For generic opcode proofs, split the opcode and stack shape before
-splitting operand constructors, and close definitionally equal cases early. `CIL.step` widens a
-mixed int32 and native pair before it selects an arm, so for an instruction
-`CIL.nativePureBinary` admits the arm is reached only once both operand constructors are split. Share the remaining
-family-level reasoning. For concrete execution, compose steps first and simplify the resulting value
+splitting operand constructors, and close definitionally equal cases early. `CIL.step` matches on
+the instruction and on `CIL.widenMixed` applied to the stack, so `simp only [CIL.step]` needs
+`CIL.widenMixed` and `CIL.nativePureBinary` in its simp set for every arm that matches the stack;
+the smallest case is `.div` on `b :: a :: rest`. Share the remaining family-level reasoning. For concrete execution, compose steps first and simplify the resulting value
 equation separately when needed.
 
 `cil_checked_steps` in every form (including the snapshot forms), `cil_contract_steps` in every
