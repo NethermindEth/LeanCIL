@@ -252,7 +252,9 @@ def MetadataLayout.rowAt (layout : MetadataLayout) (token : Nat) : Except AuditE
 structure ColumnPlace where
   /-- Where the column starts within a row. -/
   offset : Nat
+  /-- The bytes the column takes in each row. -/
   width : Nat
+  /-- The kind of value the column holds, which decides its width and the heap it indexes. -/
   column : Column
 
 /-- The columns of a row laid out one after another from `offset`, each as wide as the heap size
@@ -267,6 +269,41 @@ def placeColumns (heapSizes : Nat) (rows : Nat → Nat) : Nat → List Column �
 def MetadataLayout.columnTable (layout : MetadataLayout) : List (Option (List ColumnPlace)) :=
   (List.range tableLimit).map fun table =>
     (schema table).map (placeColumns layout.heapSizes layout.rowCount 0)
+
+/-- Every laid-out column is as wide as its kind is under the heap size flags and row counts. -/
+theorem placeColumns_width (heapSizes : Nat) (rows : Nat → Nat) :
+    ∀ (offset : Nat) (columns : List Column), ∀ place ∈ placeColumns heapSizes rows offset columns,
+      place.width = columnWidth heapSizes rows place.column
+  | _, [], place, member => by simp [placeColumns] at member
+  | offset, column :: rest, place, member => by
+    simp only [placeColumns, List.mem_cons] at member
+    rcases member with here | later
+    · subst here; rfl
+    · exact placeColumns_width heapSizes rows _ rest place later
+
+#print axioms placeColumns_width
+
+/-- The schema has no table at or above `tableLimit`. -/
+theorem schema_none_above : ∀ table, tableLimit ≤ table → schema table = none := by
+  intro table above
+  unfold tableLimit at above
+  unfold schema
+  split <;> first | rfl | omega
+
+#print axioms schema_none_above
+
+/-- The column table holds, for every table number, the schema's columns laid out from offset 0,
+    and nothing for a number the schema does not cover. -/
+theorem columnTable_getD (layout : MetadataLayout) (table : Nat) :
+    layout.columnTable.getD table none =
+      (schema table).map (placeColumns layout.heapSizes layout.rowCount 0) := by
+  unfold MetadataLayout.columnTable
+  rw [List.getD_eq_getElem?_getD, List.getElem?_map]
+  by_cases inside : table < tableLimit
+  · rw [List.getElem?_range inside]; rfl
+  · rw [List.getElem?_eq_none (by simp; omega), schema_none_above table (by omega)]; rfl
+
+#print axioms columnTable_getD
 
 /-- The offset within a row of column `column` of `table`, and its width. -/
 def MetadataLayout.columnIn (layout : MetadataLayout) (table column : Nat) :

@@ -17,7 +17,10 @@ key of the rows other than 0 and `omittedKey`, and a row cell holding the key of
 `AssemblyMatches` adds the header for an assembly block. `rowsBound` and `assemblyBound` check
 them, taking every position and length they compare from the image itself, with a fixed number
 of image reads per row and per entry and one sort per heap; `rowsMatch_of_rowsBound` and
-`assemblyMatches_of_assemblyBound` prove that their success means the propositions.
+`assemblyMatches_of_assemblyBound` prove that their success means the propositions. For an image
+`prepareOne` decodes, `rvaColumn_of_prepareOne` says the mask covers the four RVA bytes, and
+`stringColumns_of_prepareOne` and `blobColumns_of_prepareOne` say every cell of a heap has the
+width of that heap's marker.
 -/
 
 namespace StrictBinding
@@ -447,6 +450,8 @@ theorem linked_trans {first second third : Nat × Nat} (one : Linked first secon
     · exact .inl (Nat.lt_trans less less')
     · subst same'; exact .inl less
   · subst same; exact two
+
+#print axioms linked_trans
 
 /-- A successful `distinctPairs` keeps exactly the pairs it was given, which ascend. -/
 theorem distinctPairs_sound {heap : Nat} {keyOf : Nat × Nat → Nat} :
@@ -1111,5 +1116,62 @@ theorem prepareOne_columns {pinned : PinnedImage} {image : PreparedImage}
     rfl
 
 #print axioms prepareOne_columns
+
+/-- A prepared image's MethodDef RVA column is the first four bytes of a row, so `maskRva` zeroes
+    exactly them. -/
+theorem rvaColumn_of_prepareOne {pinned : PinnedImage} {image : PreparedImage}
+    (prepared : prepareOne pinned = .ok image) : image.rvaColumn = (0, 4) := by
+  unfold prepareOne at prepared
+  obtain ⟨view, _, prepared⟩ := except_bind_ok prepared
+  obtain ⟨layout, _, prepared⟩ := except_bind_ok prepared
+  obtain ⟨_, _, prepared⟩ := except_bind_ok prepared
+  split at prepared
+  · exact absurd prepared throw_ne_ok
+  · obtain ⟨rva, rvaOk, prepared⟩ := except_bind_ok prepared
+    obtain ⟨_, _, prepared⟩ := except_bind_ok prepared
+    injection prepared with prepared
+    subst prepared
+    simp [MetadataLayout.columnIn, schema, placeColumns, columnWidth, pure, Except.pure]
+      at rvaOk
+    exact rvaOk.symm
+
+#print axioms rvaColumn_of_prepareOne
+
+/-- In a prepared image every column of `kind` in every table is as wide as `kind` is in the
+    image, so all cells of one heap share the width of its omitted-entry marker. -/
+theorem columnWidth_of_prepareOne {pinned : PinnedImage} {image : PreparedImage}
+    (prepared : prepareOne pinned = .ok image) (kind : Column) :
+    ∀ table columns, image.columnsOf table = some columns → ∀ place ∈ columns,
+      place.column = kind →
+        place.width = columnWidth image.layout.heapSizes image.layout.rowCount kind := by
+  intro table columns found place member isKind
+  unfold PreparedImage.columnsOf at found
+  rw [prepareOne_columns prepared, columnTable_getD] at found
+  cases schemaAt : schema table with
+  | none => simp [schemaAt] at found
+  | some all =>
+    simp only [schemaAt, Option.map_some, Option.some.injEq] at found
+    subst found
+    rw [placeColumns_width _ _ _ _ place member, isKind]
+
+#print axioms columnWidth_of_prepareOne
+
+/-- Every `#Strings` column of a prepared image is `stringWidth` bytes wide. -/
+theorem stringColumns_of_prepareOne {pinned : PinnedImage} {image : PreparedImage}
+    (prepared : prepareOne pinned = .ok image) :
+    ∀ table columns, image.columnsOf table = some columns →
+      ∀ place ∈ columns, place.column = .string → place.width = stringWidth image :=
+  columnWidth_of_prepareOne prepared .string
+
+#print axioms stringColumns_of_prepareOne
+
+/-- Every `#Blob` column of a prepared image is `blobWidth` bytes wide. -/
+theorem blobColumns_of_prepareOne {pinned : PinnedImage} {image : PreparedImage}
+    (prepared : prepareOne pinned = .ok image) :
+    ∀ table columns, image.columnsOf table = some columns →
+      ∀ place ∈ columns, place.column = .blob → place.width = blobWidth image :=
+  columnWidth_of_prepareOne prepared .blob
+
+#print axioms blobColumns_of_prepareOne
 
 end StrictBinding
