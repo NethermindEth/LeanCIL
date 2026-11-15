@@ -68,7 +68,7 @@ theorem readonly_reference_observed :
 #print axioms readonly_reference_observed
 
 private def compare : CIL.Method := {
-  code := [.arg 0, .arg 1, .ceq, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .ldarg 1, .ceq, .ret], locals := [], returnsValue := true }
 
 /-- Compiled equality observes readonly and writable views without changing memory. -/
 theorem mixed_capability_equality :
@@ -77,7 +77,7 @@ theorem mixed_capability_equality :
 #print axioms mixed_capability_equality
 
 private def branch (operation : CIL.Instruction) : CIL.Method := {
-  code := [.arg 0, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
+  code := [.ldarg 0, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
   locals := [], returnsValue := true }
 
 /-- Null reference branches select the zero arm. -/
@@ -93,7 +93,7 @@ theorem readonly_branch :
 #print axioms readonly_branch
 
 private def compareBranch (operation : CIL.Instruction) : CIL.Method := {
-  code := [.arg 0, .arg 1, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
+  code := [.ldarg 0, .ldarg 1, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
   locals := [], returnsValue := true }
 
 /-- Equality branches use the same checked comparison as ceq. -/
@@ -200,7 +200,7 @@ private def writableMemory : Memory := { memory with
 
 /-- Offset then store a word; only the base reference's capability varies. -/
 private def offsetStore : CIL.Method := {
-  code := [.arg 0, .ldc_i4 4, .add, .ldc_i4 7, .storeScalar 4, .ret]
+  code := [.ldarg 0, .ldc_i4 4, .add, .ldc_i4 7, .storeScalar 4, .ret]
   locals := [], returnsValue := false }
 
 /-- A store through an offset readonly reference faults, while the writable base stores. -/

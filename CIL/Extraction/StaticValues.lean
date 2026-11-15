@@ -48,7 +48,7 @@ def constructorYields (program : Program) (descriptor : StaticDescriptor)
   if size : descriptor.bytes.length < 2^64 then
     let wrapper : Method := {
       profile := body.profile
-      code := (List.range init.arguments.length).map (fun index => .arg index) ++
+      code := (List.range init.arguments.length).map (fun index => .ldarg index) ++
         [.newAggregate init.method init.arguments.length ⟨descriptor.bytes.length, size⟩, .ret]
       locals := []
       returnsValue := true }

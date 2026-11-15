@@ -146,6 +146,41 @@ def argumentProof? (method : Expr) (index : Nat) : MetaM (Option Expr) := withDe
         narrowed])
   | _ => return none
 
+/-- The fact `cil_resolution_facts` declared for how the method constant `method` reads argument
+    `index`, when its statement is about exactly that method and index. -/
+def argumentFact? (method index : Expr) : MetaM (Option Expr) := do
+  let .const name _ := method | return none
+  let some literal ← (Meta.evalNat index).run | return none
+  let fact := name.appendAfter s!"_argumentAccess{literal}"
+  let some info := (← getEnv).find? fact | return none
+  let some (_, lhs, _) := info.type.eq? | return none
+  let_expr CIL.Method.argumentAccess factMethod factIndex := lhs | return none
+  unless factMethod == method do return none
+  unless (← (Meta.evalNat factIndex).run) == some literal do return none
+  return some (mkConst fact)
+
+/-- That a method with no homes and no declared receiver or parameters reads argument `index` as
+    it is, from premises about the method alone, which the kernel checks once for every index. -/
+def plainArgumentProof? (method index : Expr) : MetaM (Option Expr) := withDefault do
+  let homes := mkApp (mkConst ``CIL.Method.parameterHomes) method
+  unless (← whnf homes).isAppOf ``List.nil do return none
+  let declared := mkApp (mkConst ``CIL.Method.declared) method
+  let parameters := mkApp (mkConst ``CIL.DeclaredSignature.parameters) declared
+  unless (← whnf parameters).isAppOf ``List.nil do return none
+  let receiver := mkApp (mkConst ``CIL.DeclaredSignature.receiver) declared
+  unless (← whnf receiver).isAppOf ``Option.none do return none
+  return some (mkAppN (mkConst ``CIL.Method.argumentAccess_plain)
+    #[method, index, ← mkEqRefl homes, ← mkEqRefl parameters, ← mkEqRefl receiver])
+
+/-- How `method` reads argument `index`: its declared fact or the plain reading of a method
+    without a signature, which cost the kernel nothing per index, or else a proof from premises
+    that walk the signature up to `index`. -/
+def argumentAccessProof? (method index : Expr) : MetaM (Option Expr) := do
+  if let some fact ← argumentFact? method index then return some fact
+  if let some plain ← plainArgumentProof? method index then return some plain
+  let some literal ← (Meta.evalNat index).run | return none
+  argumentProof? method literal
+
 /-- What a method's argument facts read: its receiver, parameter types and homes. -/
 structure Signature where
   /-- The receiver's value, for an instance method. -/

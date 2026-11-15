@@ -590,28 +590,28 @@ private def emittedAnd : Method :=
   { profile := profile, returnsValue := true, locals := [], localKinds := [],
     opaqueVectorLocals := [], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
-    code := [.arg 0, .intrinsic (.vector (.create64 256)) 1, .arg 1,
+    code := [.ldarg 0, .intrinsic (.vector (.create64 256)) 1, .ldarg 1,
       .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 .band) 2, .ldc_i4 0,
       .intrinsic (.vector (.extract64 256)) 2, .ret] }
 
 example : (Safety.invoke [emittedAnd] 256 0 [.scalar (.i64 13), .scalar (.i64 6)]
     Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 4)] := by
   exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastBinary_word profile .band 0 13 6 4
-    Safety.Memory.empty rfl rfl (by decide) (Safety.checked_broadcast_and 13 6))
+    Safety.Memory.empty rfl rfl rfl rfl (by decide) (Safety.checked_broadcast_and 13 6))
 
 /-- `Avx2.ShiftLeftLogical` of a broadcast by a full-width count, in the emitted form. -/
 private def emittedShift : Method :=
   { profile := profile, returnsValue := true, locals := [.v128 0], localKinds := [.vector128],
     opaqueVectorLocals := [0], parameterHomes := [], staticSites := [],
     declared := wordSignature, environment := emittedEnvironment, links := [],
-    code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0, .arg 0,
+    code := [.ldarg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0, .ldarg 0,
       .intrinsic (.vector (.create64 256)) 1, .ldloc 0, .intrinsic (.avx2 .shl64Count) 2,
       .ldc_i4 0, .intrinsic (.vector (.extract64 256)) 2, .ret] }
 
 example : (Safety.invoke [emittedShift] 256 0 [.scalar (.i64 1), .scalar (.i64 63)]
     Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 9223372036854775808)] := by
   exact congrArg (Except.map Prod.snd) (Safety.invoke_broadcastShift profile .shl64Count 0 1 63
-    9223372036854775808 Safety.Memory.empty rfl rfl (by decide)
+    9223372036854775808 Safety.Memory.empty rfl rfl rfl rfl (by decide)
     (Safety.checked_broadcast_shiftLeft 1 63))
 
 end Tests.ExactIntrinsics

@@ -11,15 +11,16 @@ open CIL CIL.Safety
 def outOfRange : String := "System.ArgumentOutOfRangeException"
 
 /-- `Outer(v) => Check(v)`: any exception comes from the helper. -/
-@[cil_code] def outer : Method := { returnsValue := true, locals := [], code := [.arg 0, .call 1 1, .ret] }
+@[cil_code] def outer : Method :=
+  { returnsValue := true, locals := [], code := [.ldarg 0, .call 1 1, .ret] }
 
 /-- `Check(v) => v > 100 ? throw new ArgumentOutOfRangeException() : v`, as the proof states it. -/
 @[cil_code] def check : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 100, .conv_i8, .bgt_un 6, .arg 0, .ret, .throw outOfRange] }
+  [.ldarg 0, .ldc_i4 100, .conv_i8, .bgt_un 6, .ldarg 0, .ret, .throw outOfRange] }
 
 /-- `check` as the profile-specific extraction emits it: a dead block moves the throw to pc 7. -/
 @[cil_code] def extractedCheck : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 100, .conv_i8, .bgt_un 7, .arg 0, .ret,
+  [.ldarg 0, .ldc_i4 100, .conv_i8, .bgt_un 7, .ldarg 0, .ret,
     .unsupported "Unreachable under selected profile", .throw outOfRange] }
 
 @[cil_code] def literal : Program := [outer, check]

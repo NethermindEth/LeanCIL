@@ -14,7 +14,7 @@ open CIL.Safety
 
 /-- Store both inputs, read the vector, and return the stored int32. -/
 @[cil_code] def storeBoth : CIL.Method := {
-  code := [.arg 0, .stloc 0, .arg 1, .stloc 1, .ldloc 0, .pop, .ldloc 1, .ret]
+  code := [.ldarg 0, .stloc 0, .ldarg 1, .stloc 1, .ldloc 0, .pop, .ldloc 1, .ret]
   locals := [.v128 0, .i32 0], returnsValue := true }
 
 /-- A single empty snapshot collection follows stores and reloads through the whole body. -/
@@ -36,7 +36,7 @@ theorem store_and_reload {entered memory : Memory} {frame : Frame} {boundary : N
 
 /-- Overwrite the vector after the int32 store, then reload both locals. -/
 @[cil_code] def overwriteVector : CIL.Method := {
-  code := [.arg 0, .stloc 0, .arg 1, .stloc 1, .arg 2, .stloc 0,
+  code := [.ldarg 0, .stloc 0, .ldarg 1, .stloc 1, .ldarg 2, .stloc 0,
     .ldloc 1, .pop, .ldloc 0, .ret]
   locals := [.v128 0, .i32 0], returnsValue := true }
 
@@ -60,7 +60,7 @@ theorem overwrite_and_reload {entered memory : Memory} {frame : Frame} {boundary
 
 /-- Keep a 256-bit vector across stores and reloads of a 128-bit vector and an int32. -/
 @[cil_code] def mixedVectors : CIL.Method := {
-  code := [.arg 0, .stloc 0, .arg 1, .stloc 1, .arg 2, .stloc 2,
+  code := [.ldarg 0, .stloc 0, .ldarg 1, .stloc 1, .ldarg 2, .stloc 2,
     .ldloc 1, .pop, .ldloc 2, .pop, .ldloc 0, .ret]
   locals := [.v256 0, .v128 0, .i32 0], returnsValue := true }
 
@@ -87,7 +87,7 @@ theorem mixed_vector_widths {entered memory : Memory} {frame : Frame} {boundary 
 
 /-- A compiled signed-byte local, whose slot kind truncates its store and extends its load. -/
 @[cil_code] def narrowLocal : CIL.Method := {
-  code := [.arg 0, .stloc 0, .ldloc 0, .ret]
+  code := [.ldarg 0, .stloc 0, .ldloc 0, .ret]
   locals := [.i32 0], localKinds := [.narrow .signed8], returnsValue := true }
 
 /-- The snapshot remembers the truncated and extended value, not the original operand. -/
@@ -165,8 +165,8 @@ theorem unknown_load (memory : Memory) (frame : Frame) (vector : BitVec 128) :
 
 /-- Mixed private homes include a narrowed byte and a vector. -/
 @[cil_code] def mixedHomes : CIL.Method := {
-  code := [.arg 0, .stloc 0, .ldc_i4 0x1FF, .stloc 1,
-    .arg 1, .stloc 2, .ldloc 2, .pop, .ldloc 1, .pop,
+  code := [.ldarg 0, .stloc 0, .ldc_i4 0x1FF, .stloc 1,
+    .ldarg 1, .stloc 2, .ldloc 2, .pop, .ldloc 1, .pop,
     .ldloc 0, .ret]
   locals := [.i64 0, .i32 0, .v128 0]
   localKinds := [.word64, .narrow .unsigned8, .vector128], returnsValue := true }
@@ -346,7 +346,7 @@ theorem entry_homes_need_retained_access (entered memory : Memory) (frame : Fram
 
 /-- A reference local precedes the numeric local the method stores and reloads. -/
 @[cil_code] def rootedHomes : CIL.Method := {
-  code := [.arg 0, .stloc 1, .ldloc 1, .ret]
+  code := [.ldarg 0, .stloc 1, .ldloc 1, .ret]
   locals := [.i64 0, .i64 0], localKinds := [.reference, .word64], returnsValue := true }
 
 /-- Numeric homes that cover the locals after a leading root slot justify a store past it:
@@ -418,7 +418,7 @@ theorem opaque_kinds_wp (memory : Memory) (frame : Frame) (boundary : Nat)
 #print axioms opaque_kinds_wp
 /-- Store an argument in the local three past a base and reload it. -/
 @[cil_code] def basedLocal (base : Nat) : CIL.Method := {
-  code := [.arg 0, .stloc (base + 3), .ldloc (base + 3), .ret]
+  code := [.ldarg 0, .stloc (base + 3), .ldloc (base + 3), .ret]
   locals := [], returnsValue := true }
 
 /-- A block stated at a symbolic local base stores and reloads through entry homes, given the
@@ -481,7 +481,7 @@ theorem supplied_store_reload (before after : Memory) (frame : Frame) (boundary 
 
 /-- Store a word and return. -/
 @[cil_code] def wordStore : CIL.Method := {
-  code := [.arg 0, .stloc 0, .ret], locals := [.i64 0], localKinds := [.word64]
+  code := [.ldarg 0, .stloc 0, .ret], locals := [.i64 0], localKinds := [.word64]
   returnsValue := false }
 
 /-- A store names its memory and evidence, and restates the caller's reads and buffers below
@@ -514,11 +514,11 @@ def pair (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 /-- Store an argument, then read caller data after each store: an input word, the output
     reference, and two caller limbs. -/
 @[cil_code] def callerReads : CIL.Method := {
-  code := [.arg 0, .stloc 0,
-    .arg 1, .fieldAt 8 8, .stloc 1,
-    .arg 2, .pop,
-    .arg 3, .load64, .stloc 0,
-    .arg 4, .load64, .pop,
+  code := [.ldarg 0, .stloc 0,
+    .ldarg 1, .fieldAt 8 8, .stloc 1,
+    .ldarg 2, .pop,
+    .ldarg 3, .load64, .stloc 0,
+    .ldarg 4, .load64, .pop,
     .ldloc 1, .ldloc 0, .add, .ret]
   locals := [.i64 0, .i64 0], localKinds := [.word64, .word64], returnsValue := true }
 
@@ -583,12 +583,12 @@ theorem counted_walk (memory : Memory) (slots : List LocalSlot) (boundary : Nat)
 
 /-- Store a word and reload it. -/
 @[cil_code] def reloadWord : CIL.Method := {
-  code := [.arg 0, .stloc 0, .ldloc 0, .ret], locals := [.i64 0], localKinds := [.word64]
+  code := [.ldarg 0, .stloc 0, .ldloc 0, .ret], locals := [.i64 0], localKinds := [.word64]
   returnsValue := true }
 
 /-- The same store and reload after a leading `nop`. -/
 @[cil_code] def paddedReloadWord : CIL.Method := {
-  code := [.nop, .arg 0, .stloc 0, .ldloc 0, .ret], locals := [.i64 0]
+  code := [.nop, .ldarg 0, .stloc 0, .ldloc 0, .ret], locals := [.i64 0]
   localKinds := [.word64], returnsValue := true }
 
 /-- One proof covers two bodies: the body is a variable until the case split, so the homes are

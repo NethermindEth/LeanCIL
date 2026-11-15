@@ -4,7 +4,7 @@ import CIL.Safety.LocalOperandRenaming
 /-!
 # Pure step computations under allocation renaming
 
-Argument guards, scalar decoding and arithmetic diagnostics contain no allocation identities.
+Scalar decoding and arithmetic diagnostics contain no allocation identities.
 Their results can therefore be reused exactly while checked references are mapped separately.
 -/
 
@@ -14,22 +14,6 @@ namespace CIL.Safety
 theorem LocalIndexMap.operation_nil (operation : CIL.Instruction) :
     LocalIndexMap.nil.operation operation = operation := by cases operation <;> rfl
 #print axioms LocalIndexMap.operation_nil
-
-/-- Relocating locals and references preserves the narrow-argument observation guard. -/
-theorem LocalIndexMap.argumentGuard (indices : LocalIndexMap) (mapping : AllocationRenaming)
-    (operation : CIL.Instruction) (arguments : List Value) :
-    (match indices.operation operation with
-      | .arg position (some _) =>
-        ((arguments.map mapping.value)[position]?.map Value.hasUnspecified).getD false
-      | _ => false) =
-    (match operation with
-      | .arg position (some _) => (arguments[position]?.map Value.hasUnspecified).getD false
-      | _ => false) := by
-  cases operation <;> try rfl
-  rename_i position narrow
-  cases narrow <;> simp only [LocalIndexMap.operation, List.getElem?_map,
-    Option.map_map, Function.comp_def, mapping.hasUnspecified]
-#print axioms LocalIndexMap.argumentGuard
 
 /-- Arithmetic faults and scalar results are independent of allocation identities. -/
 theorem ResultRenamed.arithmetic (mapping : AllocationRenaming)

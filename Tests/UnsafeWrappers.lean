@@ -10,13 +10,17 @@ open CIL.Safety
 /-- `Unsafe.Add` of an element of `size` bytes as an extraction emits it. -/
 def addMethod (size : Nat) (signed : Bool) (profile : CIL.FeatureProfile)
     (declared : CIL.DeclaredSignature) (environment : CIL.LayoutEnvironment) : CIL.Method :=
-  { profile := profile, code := [.arg 0, .arg 1, .memory (.add size signed), .ret],
+  { profile := profile, code := [.ldarg 0, .ldarg 1, .memory (.add size signed), .ret],
     locals := [], returnsValue := true, declared := declared, environment := environment }
 
-/-- An in-bounds `Unsafe.Add` returns the offset reference. -/
+/-- An in-bounds `Unsafe.Add` over arguments read whole returns the offset reference. -/
 theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvironment}
     {element : CIL.Extraction.TypeExpr}
     (returnedType : declared.returnType = .byref element)
+    (referenceStorage : (declared.argumentType 0).bind
+      (CIL.Extraction.declaredNarrow environment.rawLayouts) = none)
+    (offsetStorage : (declared.argumentType 1).bind
+      (CIL.Extraction.declaredNarrow environment.rawLayouts) = none)
     (size : Nat) (signed : Bool) (profile : CIL.FeatureProfile)
     (memory : Memory) (reference returned : ManagedReference) (offset : CIL.Value)
     (valid : checkedValue memory (.reference reference) = .ok (.reference reference))
@@ -39,9 +43,11 @@ theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvir
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     List.map_nil, List.nil_append]
   rw [run_next (body := addMethod size signed profile declared environment) rfl rfl
-    (by simp [step, observerCount, unspecifiedOperands, valid] <;> rfl)]
+    (by simp [step, observerCount, unspecifiedOperands, loadArgument, CIL.Method.argumentAccess,
+      addMethod, referenceStorage, valid] <;> rfl)]
   rw [run_next (body := addMethod size signed profile declared environment) rfl rfl
-    (by simp [step, observerCount, unspecifiedOperands, numeric] <;> rfl)]
+    (by simp [step, observerCount, unspecifiedOperands, loadArgument, CIL.Method.argumentAccess,
+      addMethod, offsetStorage, numeric] <;> rfl)]
   rw [run_next (body := addMethod size signed profile declared environment) rfl rfl
     (by simp [step, observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
       Value.hasUnspecified, specified, staticInstruction, operation] <;> rfl)]
@@ -54,6 +60,10 @@ theorem add_ok {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvir
 
 /-- A faulting `Unsafe.Add` stops at the add with its fault. -/
 theorem add_error {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEnvironment}
+    (referenceStorage : (declared.argumentType 0).bind
+      (CIL.Extraction.declaredNarrow environment.rawLayouts) = none)
+    (offsetStorage : (declared.argumentType 1).bind
+      (CIL.Extraction.declaredNarrow environment.rawLayouts) = none)
     (size : Nat) (signed : Bool) (profile : CIL.FeatureProfile)
     (memory : Memory) (reference : ManagedReference) (offset : CIL.Value) (fault : ExecutionFault)
     (valid : checkedValue memory (.reference reference) = .ok (.reference reference))
@@ -69,9 +79,11 @@ theorem add_error {declared : CIL.DeclaredSignature} {environment : CIL.LayoutEn
     Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure,
     List.map_nil, List.nil_append]
   rw [run_next (body := addMethod size signed profile declared environment) rfl rfl
-    (by simp [step, observerCount, unspecifiedOperands, valid] <;> rfl)]
+    (by simp [step, observerCount, unspecifiedOperands, loadArgument, CIL.Method.argumentAccess,
+      addMethod, referenceStorage, valid] <;> rfl)]
   rw [run_next (body := addMethod size signed profile declared environment) rfl rfl
-    (by simp [step, observerCount, unspecifiedOperands, numeric] <;> rfl)]
+    (by simp [step, observerCount, unspecifiedOperands, loadArgument, CIL.Method.argumentAccess,
+      addMethod, offsetStorage, numeric] <;> rfl)]
   rw [Tests.WrapperProofs.run_fault
     (body := addMethod size signed profile declared environment) rfl rfl
     (by simp [step, observerCount, CIL.MemoryOp.argumentCount, unspecifiedOperands,
@@ -131,7 +143,7 @@ private def emittedAdd : CIL.Method :=
           .atom CIL.Extraction.runtimeScope "System.Int32"],
         returnType := .byref (.atom CIL.Extraction.runtimeScope "System.Boolean") },
     environment := emittedEnvironment, links := [],
-    code := [.arg 0, .arg 1, .memory (.add 1 true), .ret] }
+    code := [.ldarg 0, .ldarg 1, .memory (.add 1 true), .ret] }
 
 /-- Four caller-stack bytes at allocation 0. -/
 private def emittedMemory : Memory := { Memory.empty with
@@ -143,6 +155,7 @@ example :
       emittedMemory).map Prod.snd = .ok [.reference (.address ⟨0, 1⟩)] ∧
     (invoke [emittedAdd] 8 0 [.reference .null, .scalar (.i32 0)] emittedMemory).map Prod.snd =
       .error ⟨0, 2, .memory .nullDereference .null 0⟩ := by
-  exact ⟨add_ok rfl _ _ _ _ _ _ _ rfl rfl rfl rfl, add_error _ _ _ _ _ _ _ rfl rfl rfl rfl⟩
+  exact ⟨add_ok rfl rfl rfl _ _ _ _ _ _ _ rfl rfl rfl rfl,
+    add_error rfl rfl _ _ _ _ _ _ _ rfl rfl rfl rfl⟩
 
 end Tests.UnsafeWrappers

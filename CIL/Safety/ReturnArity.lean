@@ -51,7 +51,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
       simp_all [observerCount, unspecifiedOperands, List.take_of_length_le,
         Value.hasUnspecified, CIL.Value.hasUnspecified]
     | solve |
-        simp_all only [reduceCtorEq, implies_true, Bool.or_false, Bool.not_eq_true,
+        simp_all only [reduceCtorEq, implies_true, Bool.not_eq_true,
           List.reverse_cons, List.reverse_nil, List.nil_append, List.length_cons,
           List.length_nil, Nat.zero_add, ↓reduceIte, List.any_cons, Value.hasUnspecified,
           CIL.Value.hasUnspecified, List.any_nil, Bool.or_self, and_self]
@@ -127,7 +127,7 @@ theorem step_call_known {body : CIL.Method} {callee argc pc : Nat}
     (executed : step body (.call callee argc) pc args frame stack memory =
       .ok (.call callee arguments rest final)) :
     arguments.any Value.hasUnspecified = false := by
-  simp only [step, observerCount, Bool.or_false] at executed
+  simp only [step] at executed
   split at executed
   · cases executed
   · rename_i known
@@ -140,7 +140,7 @@ theorem step_call_known {body : CIL.Method} {callee argc pc : Nat}
           Except.ok.injEq, FrameAction.call.injEq] at executed
         obtain ⟨_, rfl, rfl, rfl⟩ := executed
         rw [(checkedValues_valid _ _ _ checked).1]
-        simpa [unspecifiedOperands] using known
+        simpa [unspecifiedOperands, observerCount] using known
 
 #print axioms step_call_known
 end CIL.Safety

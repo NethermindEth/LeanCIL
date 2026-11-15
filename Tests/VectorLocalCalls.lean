@@ -16,7 +16,7 @@ open CIL.Safety
 /-- The helper adds four pairs of lanes and writes the vector through its output argument. -/
 @[cil_code] def helper : CIL.Method :=
   { locals := [], returnsValue := false,
-    code := [.arg 2, .arg 0, .arg 1, .intrinsic (.vector (.add64 256)) 2,
+    code := [.ldarg 2, .ldarg 0, .ldarg 1, .intrinsic (.vector (.add64 256)) 2,
       .memory .store256, .ret] }
 
 /-- The helper receives two saved vector values and one writable output reference. -/
@@ -56,7 +56,7 @@ theorem helper_holds {program : CIL.Program} {callee : Nat}
 @[cil_code] def caller : CIL.Method :=
   { locals := [.i64 42, .unmodeled], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.arg 0, .arg 1, .ldloca 1, .call 1 3, .ldloc 1, .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldloca 1, .call 1 3, .ldloc 1, .ret] }
 
 bind_entry entry (memory : Memory) (left right : BitVec 256)
     (formed : memory.WellFormed) := caller

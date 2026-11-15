@@ -183,10 +183,10 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
   if !live then match emitted with | .unsupported _ => true | _ => false
   else match operation with
   | .load index => (do
-      let type ← argumentAt index
+      let _ ← argumentAt index
       match homeAt index, emitted with
       | some slot, .ldloc actual => return actual == slot
-      | none, .arg actual narrow => return actual == index && narrow == type.narrow
+      | none, .ldarg actual => return actual == index
       | _, _ => return false).getD false
   | .store index => (do
       let _ ← argumentAt index
@@ -203,7 +203,7 @@ def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option Storage
       | .ldloca actual => return actual == slot
       | _ => return false).getD false
   | .other => match emitted with
-      | .arg .. => false
+      | .ldarg _ => false
       | .ldloc index | .stloc index | .ldloca index | .initializeSpanLocal index _ =>
         index < localCount
       | _ => true
@@ -285,9 +285,8 @@ theorem validated_argument_access {layouts : Array ComputedLayout} {raw : RawArg
 
 /-- Once a parameter has a home, loading its original argument slot is rejected. -/
 theorem home_load_rejects_original_arg (raw : RawArguments) (reachable : List Bool)
-    (index actual : Nat) (narrow : Option NarrowKind)
-    (home : index ∈ requiredHomeIndices raw reachable) :
-    validateArgumentOp raw reachable (.load index) true (.arg actual narrow) = false := by
+    (index actual : Nat) (home : index ∈ requiredHomeIndices raw reachable) :
+    validateArgumentOp raw reachable (.load index) true (.ldarg actual) = false := by
   cases found : raw.arguments[index]? <;>
     simp [validateArgumentOp, validateArgumentOpIn, validateArgumentOpAt, homeSlot, home, found]
 

@@ -138,7 +138,7 @@ private def switchRaw := raw [i 2, i 69 (.targets [4, 6]), i 23, i 42, i 24, i 4
 private def switchStates : FeatureCertificate := [state [], state [none], state [], state [some 1],
   state [], state [some 2], state [], state [some 3]]
 private def switchCode : List Instruction :=
-  [.arg 0, .switch [4, 6], .ldc_i4 1, .ret, .ldc_i4 2, .ret, .ldc_i4 3, .ret]
+  [.ldarg 0, .switch [4, 6], .ldc_i4 1, .ret, .ldc_i4 2, .ret, .ldc_i4 3, .ret]
 example : FeatureFlowValid #[] (fun _ => none) switchRaw .scalar switchStates
     (List.replicate 8 true) switchCode := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) switchRaw .scalar (switchStates.set 6 none)
