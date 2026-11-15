@@ -369,6 +369,51 @@ numeric slot identities must remain fixed, and the frame-rule placement must bel
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
 absence of a direct `stloc` is not evidence that an aliased byte-backed local keeps its value.
 
+### Contracts for segment exits
+
+`CIL.Safety.SegmentContract` describes an incoming boundary state, permitted memory writes and
+an exit predicate. Its precondition can constrain the arguments, stack, frame, allocation
+lifetimes and memory authority. `SegmentContract.Holds` requires interpreter evidence for every
+permitted input, together with confinement to the declared footprint and the postcondition.
+See [segment contracts](../CIL/Safety/SegmentContract.lean).
+
+`SegmentExit` distinguishes a continuing boundary, a return, a located fault and divergence.
+`SegmentExit.Raises` names CLR exceptions through `ExecutionFault.clrException`, retaining
+the distinction between thrown and arithmetic faults. Fault exits exclude fuel exhaustion;
+divergence requires exhaustion at every fuel budget. Returns compare the memory after frame
+release. `SegmentState.localFootprint` names the byte homes and widths of directly stored locals.
+
+`ReachesRun` relates settled outcomes before and after a prefix, including prefixes with calls.
+A reaching exit supplies continuation equivalence and a positive fuel lower bound. Its boundary
+state need not be an observed execution state, and any promised state invariant belongs in the
+postcondition. `SegmentContract.Holds.wp` requires a successful continuation or return to prove
+success; `SegmentContract.Holds.raises` consumes a named exception or a raising continuation.
+`Segment.contract` converts an exact segment between increasing pcs when its postcondition
+justifies the footprint. `ReachesRun.congr_region` transports reaching through the existing
+closed-region agreement rule.
+
+A reusable summary takes the containing method and a `CodeAt` premise for its exact instructions.
+Instructions that read the method's declared signature, environment, links or runtime profile
+require the corresponding facts in the theorem. Branch targets depend on the placement pc.
+Changing a required instruction or fact makes the proof application fail kernel checking.
+The theorem also depends on the library definitions of `run` and `step`.
+
+`SegmentContract.Holds.seq` composes a head with a contract at each reachable pc. The link
+premise proves the successor's precondition. For a stopping exit, the stopping premise receives
+confinement to the head's footprint and must establish both confinement to the composed footprint
+and the composed postcondition. For a reaching exit, the join premise receives both contracts'
+confinement facts and must establish the same two conclusions. Unused pcs can use
+`SegmentContract.unreachable`.
+
+`SegmentContract.Holds.then` specializes composition to two continuing contracts. It requires
+the composed footprint to contain each part's footprint, with the second evaluated at the
+intermediate state. Composition applies the named contract proofs without stepping their code.
+
+`SegmentContract.branch` uses a conditional instruction's checked step equation to expose its
+selected successor while preserving memory. `SegmentContract.branch_seq` composes that branch
+with the successor contracts. Its join premise receives successor confinement and establishes
+confinement to the composed footprint together with the composed postcondition.
+
 ## Step loops
 
 Import [LoopAutomation](../CIL/Safety/LoopAutomation.lean) for `cil_loop_steps [facts]`, which

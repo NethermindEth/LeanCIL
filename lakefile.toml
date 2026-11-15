@@ -345,6 +345,9 @@ name = "Tests.FeatureGetter"
 name = "Tests.Segment"
 
 [[lean_lib]]
+name = "Tests.SegmentContract"
+
+[[lean_lib]]
 name = "Tests.AllocationRenaming"
 
 [[lean_lib]]
