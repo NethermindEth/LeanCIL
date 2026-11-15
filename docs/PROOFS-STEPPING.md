@@ -367,9 +367,10 @@ Neither tactic assumes a memory or availability premise. `LoopReaches` uses the 
 relation with an exact-target postcondition.
 
 For numeric-local framing, record successful write equations in `SegmentLocalEffects`. The
-destinations must occur in `segmentStores code`, read from the placed instructions.
-`Segment.frameLocals` combines these effects with the initial `LocalSnapshots` and `WritableHomes`
-to derive snapshots for `untouchedLocals code known`. Effects compose through `append` or `trans`;
+destinations must occur in `segmentStores body code`, read from the placed instructions: the slot
+of each `stloc` and the home slot of each `starg` to a homed argument. `Segment.frameLocals`
+combines these effects with the initial `LocalSnapshots` and `WritableHomes` to derive snapshots
+for `untouchedLocals body code known`. Effects compose through `append` or `trans`;
 one frame-rule application replaces separate disjoint-read proofs for all retained locals. The
 numeric slot identities must remain fixed, and the frame-rule placement must belong to the running
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
