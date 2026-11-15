@@ -340,23 +340,31 @@ theorem encodeRange_spec (bits : Nat) (digits : Array Nat) (offset count : Nat)
 
 #print axioms encodeRange_spec
 
-/-- A leading one followed by bounded fixed-width digits; one array conversion and validation. -/
+/-- A leading one followed by bounded fixed-width digits, read one digit at a time, so the kernel
+    reduces it in steps linear in the digits. Compiled code runs `balancedBitCode?`. -/
 def bitCode? (bits : Nat) (digits : List Nat) : Option Nat :=
+  radixCode? (2^bits) digits 1
+
+/-- The code `bitCode?` gives, from one array conversion and a balanced split whose bit work grows
+    as n log n. The kernel holds an array as a list and reads entry i in i steps, so only compiled
+    code runs this form. -/
+def balancedBitCode? (bits : Nat) (digits : List Nat) : Option Nat :=
   if digits.all (· < 2^bits) then
     let entries := digits.toArray
     some ((1 <<< (bits * entries.size)) + encodeRange bits entries 0 entries.size)
   else none
 
-/-- The balanced encoder has exactly the acceptance and value of the radix specification. -/
-theorem bitCode?_eq_radixCode? (bits : Nat) (digits : List Nat) :
-    bitCode? bits digits = radixCode? (2^bits) digits 1 := by
-  unfold bitCode?
+/-- The balanced encoder has exactly the acceptance and value of the digit-by-digit reading, so
+    compiled code may run it in place of `bitCode?`. -/
+@[csimp] theorem bitCode?_eq_balancedBitCode? : @bitCode? = @balancedBitCode? := by
+  funext bits digits
+  unfold bitCode? balancedBitCode?
   split
   next valid =>
     have bounded : ∀ digit ∈ digits, digit < 2^bits := by simpa using valid
     have spec := encodeRange_spec bits digits.toArray 0 digits.length
       (by simp) (by simpa using bounded) 1
-    simpa [Nat.shiftLeft_eq, Nat.pow_mul] using spec.symm
+    simpa [Nat.shiftLeft_eq, Nat.pow_mul] using spec
   next invalid =>
     cases read : radixCode? (2^bits) digits 1 with
     | none => rfl
@@ -364,6 +372,12 @@ theorem bitCode?_eq_radixCode? (bits : Nat) (digits : List Nat) :
       have bounded := radixCode?_digits read
       have valid : digits.all (· < 2^bits) = true := by simpa using bounded
       exact False.elim (invalid valid)
+
+#print axioms bitCode?_eq_balancedBitCode?
+
+/-- `bitCode?` reads its digits as `radixCode?` does from a leading one. -/
+theorem bitCode?_eq_radixCode? (bits : Nat) (digits : List Nat) :
+    bitCode? bits digits = radixCode? (2^bits) digits 1 := rfl
 
 #print axioms bitCode?_eq_radixCode?
 

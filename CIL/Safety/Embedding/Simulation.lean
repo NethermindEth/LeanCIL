@@ -127,14 +127,13 @@ theorem enterFrame_congr {expected actual : CIL.Method} {r : Nat → Nat}
   simp only [enterFrame, refines.locals, refines.localKinds, refines.opaqueVectorLocals,
     refines.parameterHomes]
 
-/-- `.unsupported` never steps successfully. -/
-theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {args : List Value}
+/-- A hole never steps successfully. -/
+theorem step_unadmitted_ne_ok {body : CIL.Method} {opcode : Nat} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
-    (h : step body (.unsupported description) pc args frame stack m = .ok action) : False := by
-  change Except.error
-    (ExecutionFault.unsupported "Not a memory instruction") =
-      .ok action at h
+    (h : step body (.unadmitted opcode) pc args frame stack m = .ok action) : False := by
   cases h
+
+#print axioms step_unadmitted_ne_ok
 
 /-- `.throw` never steps successfully. -/
 theorem step_throw {body : CIL.Method} {exception : String} {pc : Nat} {args : List Value}
@@ -168,7 +167,7 @@ theorem continues_of_invocation {body : CIL.Method} {op : CIL.Instruction} {pc :
     op.continues = true := by
   cases op
   case throw => exact (step_throw h).elim
-  case unsupported => exact (step_unsupported h).elim
+  case unadmitted => exact (step_unadmitted_ne_ok h).elim
   case br target =>
     change Except.ok (.next target stack frame m) = .ok action at h
     cases h
@@ -328,7 +327,7 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
         | ok action =>
           simp only [stepped, Except.mapError] at h
           have live : op.live = true := by
-            cases op <;> first | rfl | exact (step_unsupported stepped).elim
+            cases op <;> first | rfl | exact (step_unadmitted_ne_ok stepped).elim
           obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
           have arguments := Method.argumentAccess_congr refined.parameterHomes
             (congrArg List.length refined.localKinds) refined.declared refined.environment

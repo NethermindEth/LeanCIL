@@ -27,6 +27,12 @@ dotnet run --file scripts/Test.cs -- --suite outlines-objects
 - A C# change requires analyzer validation, including changed file-based tests.
 - Any `sorryAx`, unexpected diagnostic or failed proof is a failure.
 
+The blockers suite checks dead instructions in methods admitted from the extractor assembly under
+the scalar profile. Its hole corpus baseline pins argument indices requiring homes only at dead
+instructions, dead prefix positions and opcodes other than `unaligned.`, and the count of refused
+methods skipped. The per-method lists are written to `artifacts/HoleCorpus/methods.json`; admission
+results are reused from the self-admission check.
+
 | Changed area | Relevant suites or checks |
 | --- | --- |
 | Extraction certificates and metadata | `evidence`, plus the affected opcode or runtime-helper suite |
@@ -59,7 +65,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `imports` | implementation-bound contract imports and conditional caller verification |
 | `exceptionlint` | diagnostic XML exception drift without proof claims |
 | `contracts` | universal checked contracts, caller memory preservation and incorrect implementations |
-| `evidence` | independent extraction certificates, malformed evidence rejection and the metadata decoder's method names against Cecil's |
+| `evidence` | independent extraction certificates, malformed evidence rejection, the metadata decoder's method names against Cecil's and framework argument guards |
 | `dispatch` | constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage |
 | `loops` | cyclic control-flow validation, universal termination, negative contracts and class/word-array composition |
 | `outlines-control` | generated outlines for control flow, arithmetic and value types, completed proofs and rejection checks |
@@ -100,14 +106,14 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `callers` | caller proofs that survive reimplemented helpers through their contracts |
 | `construction` | caller proofs that survive reimplemented constructors through their contracts |
 | `outcomes` | outcome contracts that name exactly when each exception is thrown |
-| `scaling` | compositional certificate for a six-method call graph and its consumer replay, and the header and per-method struct layout checks at a per-layout cost that does not grow with the table, and the generic owner index library |
+| `scaling` | compositional certificate for a six-method call graph and its consumer replay, declared signature checks at flat per-method cost over 1, 4 and 16 parameters, header and per-method struct layout checks at a per-layout cost that does not grow with the table, and the generic owner index library |
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
-| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, the method name clause of the call operand check at a per-byte cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the managed-call check of a body with many call sites at a per-site cost that does not grow with the call sites; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction; the kernel's selection of a calli body at a cost linear in the length of the pointer's owner; raw value opcode decoding and the method decoded from a raw body at a per-instruction kernel cost that does not grow with the body; and the certificate index, feature getter, layout accumulation and projection, and extraction home index libraries |
+| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, the method name clause of the call operand check and the encoding of a metadata name at a per-byte cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the managed-call check of a body with many call sites at a per-site cost that does not grow with the call sites; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters; the shape facts of `cil_field_shape` and the reads through them at a per-field cost that grows less than 1.35 times from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 to 512 fields in a struct each, and the facts of `cil_value_shape` and their reads at a per-type cost that grows less than 1.35 times from 8 to 32 to 128 to 512 struct types; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction; the kernel's selection of a calli body at a cost linear in the length of the pointer's owner; raw value opcode decoding and the method decoded from a raw body at a per-instruction kernel cost that does not grow with the body; and the certificate index, feature getter, layout accumulation and projection, and extraction home index libraries |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
 | `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting and arguments bodies with per-instruction heartbeat, proof-size and latency budgets |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
-| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal and self-admission |
+| `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission and the admitted hole corpus |
 | `audit` | theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts cannot forge |
 | `docs` | documentation Lean snippets, cited library names and documented commands against the library and tool |
 | `exports` | contract production, restrictions and caller reuse |
@@ -201,7 +207,7 @@ accumulate and locals body up to 256 instructions, and one compilation for every
   1.35 times. The arguments bodies read one of a list of arguments that grows with the body, so
   their heartbeats per instruction may grow at most by the ratio of the sizes, linearly in the
   number of arguments. For the bodies with three compilations, compiled proof bytes per instruction may
-  also grow by at most 1.35 times, and median frontend milliseconds by at most twice.
+  also grow by at most 1.35 times. Frontend milliseconds are recorded for comparison between runs.
 - The heartbeats a hypothesis adds may not grow by more than 1.35 times from the step between
   16 and 64 hypotheses to the step between 64 and 256, which a step that compares each hypothesis
   with every other would exceed.

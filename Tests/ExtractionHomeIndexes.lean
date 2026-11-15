@@ -27,10 +27,10 @@ theorem argument_bounds :
       [] [.stloc 0] = false := by decide +kernel
 #print axioms argument_bounds
 
-/-- Pruned instructions must remain unsupported, even when their indexes are invalid. -/
+/-- Pruned instructions must be holes, even when their indexes are invalid. -/
 theorem pruned_argument :
     argumentInstructionsValid ⟨[], [], [.load 99]⟩ []
-      [false] [.unsupported "dead"] = true ∧
+      [false] [.unadmitted 0x0E] = true ∧
     argumentInstructionsValid ⟨[], [], [.load 99]⟩ [] [false] [.ldarg 99] = false := by
   decide +kernel
 #print axioms pruned_argument

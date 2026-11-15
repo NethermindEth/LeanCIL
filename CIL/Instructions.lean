@@ -16,6 +16,24 @@ and `Program` the list a call index refers into.
 
 namespace CIL
 
+/-- The admitted integer suffixes of `ldind.*`, `stind.*`, `ldelem.*` and `stelem.*`. -/
+inductive NumericKind where
+  | i1 | u1 | i2 | u2 | i4 | u4 | i8 | i
+  deriving DecidableEq, Repr
+
+/-- Bytes the access moves; native int is eight bytes on every admitted profile. -/
+def NumericKind.width : NumericKind → Nat
+  | .i1 | .u1 => 1
+  | .i2 | .u2 => 2
+  | .i4 | .u4 => 4
+  | .i8 | .i => 8
+
+/-- Whether a load sign-extends to the stack width: only the one- and two-byte signed kinds,
+    since a four-byte load gives the same i32 bits either way. -/
+def NumericKind.signed : NumericKind → Bool
+  | .i1 | .i2 => true
+  | _ => false
+
 /-- Small integer storage types; all extend to the 32-bit evaluation-stack type. -/
 inductive NarrowKind where
   | signed8 | unsigned8 | signed16 | unsigned16
@@ -116,25 +134,6 @@ def ConvTarget.signed : ConvTarget → Bool
   | .i1 | .i2 | .i4 | .i8 | .i => true
   | .u1 | .u2 | .u4 | .u8 | .u => false
 
-/-- The integer element of an `ldind` or `stind`; `i` is native-sized. Only the kinds an admitted
-    opcode names: there is no `ldind.u8`, and the floating and reference kinds are refused. -/
-inductive NumericKind where
-  | i1 | u1 | i2 | u2 | i4 | u4 | i8 | i
-  deriving DecidableEq, Repr
-
-/-- Bytes the access moves; native int is eight bytes on every admitted profile. -/
-def NumericKind.width : NumericKind → Nat
-  | .i1 | .u1 => 1
-  | .i2 | .u2 => 2
-  | .i4 | .u4 => 4
-  | .i8 | .i => 8
-
-/-- Whether a load sign-extends to the stack width: only the one- and two-byte signed kinds,
-    since a four-byte load gives the same i32 bits either way. -/
-def NumericKind.signed : NumericKind → Bool
-  | .i1 | .i2 => true
-  | _ => false
-
 /-- One instruction. Branch targets and call indices are positions in the method's code
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
@@ -145,8 +144,8 @@ inductive Instruction where
   | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf | mul_ovf_un
   -- Overflow-checked conversion to `target`, reading the operand as signed or as unsigned.
   | conv_ovf (target : ConvTarget) | conv_ovf_un (target : ConvTarget)
-  /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
-  | stackAlloc (initLocals : Bool)
+  /-- Fresh frame storage of the popped byte count, zeroed when `declared.initLocals` is set. -/
+  | localloc
   /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
   | newArray (element : ArrayElement)
   /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
@@ -229,7 +228,9 @@ inductive Instruction where
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
   | throw (exception : String)
-  | unsupported (description : String)
+  /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
+      outside the code the extractor reaches under the selected profile. It faults when stepped. -/
+  | unadmitted (opcode : Nat)
   deriving Repr
 
 /-- The name of the instruction type, for tactics that recognise its constructors. -/
@@ -289,13 +290,15 @@ inductive Receiver where
   deriving DecidableEq, Repr
 
 /-- A method's declared signature after its type arguments are closed. Aggregate types refer
-    to `LayoutEnvironment.rawLayouts`. -/
+    to `LayoutEnvironment.rawLayouts`. Only implicit receiver signatures are supported. -/
 structure DeclaredSignature where
   /-- `some` exactly for an instance method. -/
   receiver : Option Receiver := none
   /-- Declared parameter types in order, `this` excluded. -/
   parameters : List Extraction.TypeExpr := []
   returnType : Extraction.TypeExpr := .void
+  /-- The body's localsinit flag: `localloc` storage and locals start zeroed when set. -/
+  initLocals : Bool := true
   deriving DecidableEq, Repr
 
 /-- The declared type of argument `index`, counting `this` as argument 0; `none` for `this`. -/

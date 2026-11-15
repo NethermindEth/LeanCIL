@@ -109,20 +109,20 @@ var path = Path.Combine(root, "NativeProof.lean");
 File.WriteAllText(path, proof);
 evidence.Add(path, "PASS native supplied-table cycle, exception, scalar local and storage checks");
 var rejected = new RejectedEvidence(root);
-const string tableLoadLine = "\n  .ldind .i,";
-if (!scalar.Contains(tableLoadLine, StringComparison.Ordinal))
+const string nativeLoadLine = "\n  .ldind .i,";
+if (!scalar.Contains(nativeLoadLine, StringComparison.Ordinal))
     throw new InvalidOperationException("Missing native table load");
 // The dispatcher's table offset is the decoded add that feeds its table load, and raw add at offset 21 of its
 // original and closed bodies; the handler's own add is left unchanged.
-const string emittedAdd = "  .add," + tableLoadLine;
+const string emittedAdd = "  .add," + nativeLoadLine;
 const string rawAdd = "{ offset := 21, opcode := 88, operand := .none }";
 foreach (var (name, mutated) in new[]
 {
-    ("load-kind", ReplaceExactly(scalar, tableLoadLine, "\n  .ldind .i8,", 1)),
+    ("load-kind", ReplaceExactly(scalar, nativeLoadLine, "\n  .ldind .i8,", 1)),
     ("raw-load", scalar.Replace("opcode := 77, operand := .none", "opcode := 76, operand := .none",
         StringComparison.Ordinal)),
-    ("emitted-sub", ReplaceExactly(scalar, emittedAdd, "  .sub," + tableLoadLine, 1)),
-    ("emitted-add-ovf", ReplaceExactly(scalar, emittedAdd, "  .add_ovf," + tableLoadLine, 1)),
+    ("emitted-sub", ReplaceExactly(scalar, emittedAdd, "  .sub," + nativeLoadLine, 1)),
+    ("emitted-add-ovf", ReplaceExactly(scalar, emittedAdd, "  .add_ovf," + nativeLoadLine, 1)),
     ("raw-sub", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 89, operand := .none }", 2)),
     ("raw-operand", ReplaceExactly(scalar, rawAdd, "{ offset := 21, opcode := 88, operand := .local 0 }", 2)),
     ("input", scalar.Replace(".pointer (.atom Extraction.runtimeScope \"System.IntPtr\")",

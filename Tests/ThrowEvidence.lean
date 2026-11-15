@@ -100,7 +100,7 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
     (guardCode.set 4 (.throw "System.InvalidOperationException")) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none)
     guardRaw .scalar guardStates (List.replicate 7 true)
-    (guardCode.set 4 (.unsupported "hidden")) := by decide
+    (guardCode.set 4 (.unadmitted 122)) := by decide
 
 -- A branch to the raw `throw` would raise whatever object it carries, so it is rejected.
 private def enteredRaw := raw [i 2, i 37, i 45 (.target 6), i 38, i 114 (.text "zero"), i 115 argument, i 122]
@@ -132,7 +132,7 @@ theorem null_throw_entry :
       [.memory .nullRef, .br 2, .nop, .throw "System.NullReferenceException"] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (raw [i 20, i 43 (.target 3), i 20, i 122]) .scalar
       [state [], state [none], none, state [none]] [true, true, false, true]
-      [.memory .nullRef, .br 3, .unsupported "dead", .throw "System.NullReferenceException"] :=
+      [.memory .nullRef, .br 3, .unadmitted 20, .throw "System.NullReferenceException"] :=
   by decide +kernel
 #print axioms null_throw_entry
 

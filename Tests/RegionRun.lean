@@ -21,7 +21,7 @@ def actual : Method :=
   { code := [.ldarg 0, .call 1 1, .ldc_i4 1, .add, .ret], locals := [], returnsValue := true }
 
 def masked : Method :=
-  { expected with code := List.replicate 3 (.unsupported "Outside the region") ++ expected.code.drop 3 }
+  { expected with code := List.replicate 3 (.unadmitted 0) ++ expected.code.drop 3 }
 
 abbrev suffix : Nat → Nat → Prop := fun method pc => inStarts [(0, 3)] method pc = true
 
@@ -46,7 +46,7 @@ theorem suffix_moves (fuel : Nat) (args stack : List Value) (frame : Frame) (m :
 def caller : Method :=
   { code := [.ldc_i4 5, .ret, .ldarg 0, .call 1 1, .ret], locals := [], returnsValue := true }
 def rewritten : Method :=
-  { caller with code := [.unsupported "Outside the region", .throw "System.Exception",
+  { caller with code := [.unadmitted 0, .throw "System.Exception",
       .ldarg 0, .call 1 1, .ret] }
 
 abbrev calling : Nat → Nat → Prop := fun method pc => inStarts [(0, 2), (1, 0)] method pc = true
@@ -75,7 +75,7 @@ def longExpected (profile : CIL.FeatureProfile) : Method :=
 
 def longMasked (profile : CIL.FeatureProfile) : Method :=
   (longExpected profile).withCode
-    (List.replicate 3 (.unsupported "Outside the region") ++ longSuffix)
+    (List.replicate 3 (.unadmitted 0) ++ longSuffix)
 
 def longActual (profile : CIL.FeatureProfile) (callee : Nat) : Method :=
   (longExpected profile).withCode ([.ldarg 0, .call callee 1] ++
@@ -97,8 +97,8 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
   · rfl
   · omega
   · intro pc op before found
-    have lookup : (longMasked profile).code[pc]? = some (.unsupported "Outside the region") := by
-      exact (List.getElem?_append_left (l₁ := List.replicate 3 (.unsupported "Outside the region"))
+    have lookup : (longMasked profile).code[pc]? = some (.unadmitted 0) := by
+      exact (List.getElem?_append_left (l₁ := List.replicate 3 (.unadmitted 0))
         (l₂ := longSuffix) (by simpa only [List.length_replicate] using before)).trans
           (List.getElem?_replicate_of_lt before)
     rw [lookup] at found
@@ -123,7 +123,7 @@ def callExpected : Method :=
     returnsValue := true }
 
 def callMasked : Method :=
-  callExpected.withCode (List.replicate 3 (.unsupported "Outside the region") ++
+  callExpected.withCode (List.replicate 3 (.unadmitted 0) ++
     callExpected.code.drop 3)
 
 def callActual : Method :=

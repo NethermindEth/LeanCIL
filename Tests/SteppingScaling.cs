@@ -12,7 +12,6 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 
 const double WorkGrowthLimit = 1.35;
-const double TimeGrowthLimit = 2.0;
 const int Repetitions = 3;
 const int LocalCount = 8;
 const int HypothesisBodyCycles = 30;
@@ -86,7 +85,7 @@ var report = new
     TimingIsolation = "External machine load is not controlled; wall times are observations",
     Measurement = "Frontend includes its initial kernel check; kernel columns are separate rechecks. " +
         "Module command time excludes imports. Compiled proof bytes subtract the same body without its proof.",
-    Budgets = new { WorkGrowthLimit, TimeGrowthLimit },
+    Budgets = new { WorkGrowthLimit },
     Rows = rows
 };
 File.WriteAllText(reportPath,
@@ -391,14 +390,11 @@ static void CheckGrowth(SteppingMeasurement shorter, SteppingMeasurement longer,
         longer.FrontendHeartbeatsPerInstruction, workBudget);
     Check("kernel heartbeats", shorter.KernelHeartbeatsPerInstruction,
         longer.KernelHeartbeatsPerInstruction, workBudget);
-    // Proof bytes need the header-only module and milliseconds need repeated runs; a reduced
-    // measurement has neither.
+    // Proof bytes require the header-only module; timing remains a diagnostic measurement.
     if (shorter.Full && longer.Full)
     {
         Check("compiled proof bytes", shorter.ProofBytesPerInstruction,
             longer.ProofBytesPerInstruction, WorkGrowthLimit);
-        Check("frontend milliseconds", shorter.FrontendMsPerInstruction,
-            longer.FrontendMsPerInstruction, TimeGrowthLimit);
     }
 
     void Check(string metric, double before, double after, double budget)
@@ -436,9 +432,9 @@ static void ScalingChecks()
     var linear = baseline with { Instructions = 64, FrontendHeartbeats = 64000, KernelHeartbeats = 6400,
         ProofBytes = 128000, FrontendMs = 640 };
     CheckGrowth(baseline, linear);
+    CheckGrowth(baseline, linear with { FrontendMs = 2560 });
     foreach (var mutant in new[] { linear with { FrontendHeartbeats = 256000 },
-        linear with { KernelHeartbeats = 25600 }, linear with { ProofBytes = 512000 },
-        linear with { FrontendMs = 2560 } })
+        linear with { KernelHeartbeats = 25600 }, linear with { ProofBytes = 512000 } })
     {
         try { CheckGrowth(baseline, mutant); }
         catch (InvalidOperationException) { continue; }

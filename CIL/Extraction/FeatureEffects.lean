@@ -58,7 +58,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .managed (.tableElement _) => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
-  | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)
+  | .localloc | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
   | .ldc_i4 _ | .ldc_i8 _ | .ldarg _ | .ldloc .. => some (0, 1)
@@ -83,7 +83,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .memory operation => some (memoryFeatureEffect operation)
   -- Local writes, local addresses and control flow must match their raw instruction exactly.
   | .ldloca _ | .stloc .. | .initializeSpanLocal ..
-  | .feature _ | .ret | .throw _ | .unsupported _ | .br _ | .switch _ | .brfalse _
+  | .feature _ | .ret | .throw _ | .unadmitted _ | .br _ | .switch _ | .brfalse _
   | .brtrue _ | .bgt _ | .ble _ | .ble_un _ | .blt_un _ | .bge_un _ | .bgt_un _ | .bge _
   | .blt _ | .beq _ | .bne_un _ => none
 

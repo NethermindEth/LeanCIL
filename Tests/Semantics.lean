@@ -238,7 +238,14 @@ theorem gc_slot_rejected :
       ⟨0, 0⟩ 8 1 = .error .unsupportedLayout := rfl
 
 theorem unknown_instruction_rejected :
-    (instruction (.unsupported "test") [] Memory.empty).isOk = false := rfl
+    (instruction (.unadmitted 0) [] Memory.empty).isOk = false := rfl
+
+/-- A hole faults on every stack, so no frame, memory or operand makes it a step. -/
+theorem unadmitted_faults (body : CIL.Method) (pc : Nat) (args stack : List Value)
+    (frame : Frame) (memory : Memory) :
+    CIL.Safety.step body (.unadmitted 123) pc args frame stack memory =
+      .error (.unsupported "Opcode not admitted") := rfl
+#print axioms unadmitted_faults
 
 -- Generic round-trip theorem now covers arbitrary bounded aggregate lengths.
 theorem aggregate_roundtrip {memory : Memory} {reference : Reference}

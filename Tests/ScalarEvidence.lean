@@ -890,13 +890,13 @@ private def typed (opcode : Nat) (type : TypeExpr) (emitted : Instruction) : Ind
 /-- A static call taking one word and returning one, the stack effect of a 64-bit load. -/
 private def loadSite : CallSite :=
   { method := {
-      owner := .atom runtime "Words", name := name!"Load", hasThis := false, genericArity := 0,
-      returnType := word, parameters := [word] },
+      owner := .void, name := name!"", hasThis := false, genericArity := 0, returnType := word,
+      parameters := [word] },
     target := .managed 0x06000002, typeArguments := [], parameterCount := 1, returnsValue := true }
 /-- A static call taking two words and returning nothing, the stack effect of a 64-bit store. -/
 private def storeSite : CallSite :=
   { method := {
-      owner := .atom runtime "Words", name := name!"Store", hasThis := false, genericArity := 0,
+      owner := .void, name := name!"", hasThis := false, genericArity := 0,
       returnType := .void, parameters := [word, word] },
     target := .managed 0x06000002, typeArguments := [], parameterCount := 2,
     returnsValue := false }

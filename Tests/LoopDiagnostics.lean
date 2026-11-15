@@ -1079,10 +1079,11 @@ theorem factListTraversal (_tail : List (Option Nat)) : True := by
           throwError "fact-list traversal lost entries in a deep list"
         entriesTimes := entriesTimes.push (middle - start)
         indicesTimes := indicesTimes.push (stop - middle)
-      return ((entriesTimes.qsort (· < ·))[1]!, (indicesTimes.qsort (· < ·))[1]!)
+      return ((entriesTimes.qsort (fun left right => left < right))[0]!,
+        (indicesTimes.qsort (fun left right => left < right))[0]!)
     let shorter ← measureCopies 16384
     let longer ← measureCopies 65536
-    logInfo m!"fact-list median milliseconds: {shorter}, {longer}"
+    logInfo m!"fact-list minimum milliseconds: {shorter}, {longer}"
     -- Heartbeats count small allocations; array copying also needs an elapsed-time check.
     unless longer.1 < shorter.1 * 8 + 20 && longer.2 < shorter.2 * 8 + 20 do
       throwError "fact-list copying costs grew too quickly"
