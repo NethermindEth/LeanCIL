@@ -352,9 +352,9 @@ def sizedFound (image : PreparedImage) (heap : Stream) (offset : Nat) (bytes : L
   else pure false
 
 /-- The carried rows and `#Strings` and `#Blob` entries are the image's under one numbering per
-    heap. Each row and each entry takes one read of the image, and the numbering one sort of the
-    heap cells per heap, so the check costs O((R + E) log (R + E)) comparisons for R rows and E
-    entries, plus the bytes compared. -/
+    heap. Each row and each entry takes a fixed number of reads of the image, and the numbering
+    one sort of the heap cells per heap, so the check costs O((R + E) log (R + E)) comparisons for
+    R rows and E entries, plus the bytes compared. -/
 def rowsBound (image : PreparedImage) (rows strings blobs : List ByteEntry) :
     Except AuditError Unit := do
   let cells ← rowsCells image rows

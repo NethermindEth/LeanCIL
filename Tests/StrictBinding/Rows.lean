@@ -541,10 +541,12 @@ theorem rejects_a_row_key_without_its_entry :
   decide +kernel
 #print axioms rejects_a_row_key_without_its_entry
 
-/-- An entry under the omitted-entry marker, which no numbering gives. -/
+/-- The name of `Tiny` carried under the omitted-entry marker, in its row cell and as its entry:
+    no numbering gives the marker, so the entry is one no row cell holds. -/
 theorem rejects_an_entry_at_the_marker :
     failsWith
-      (rowsChecked fixture slice.rows (slice.strings ++ [(0xFFFF, [65, 0])]) slice.blobs)
+      (rowsChecked fixture (withRow tinyToken (writeLittle · methodNameAt 2 0xFFFF))
+        (slice.strings.filter (·.1 != tinyKey) ++ [(0xFFFF, [84, 105, 110, 121, 0])]) slice.blobs)
       (.heapNumbering stringsHeap 0xFFFF) = true := by
   decide +kernel
 #print axioms rejects_an_entry_at_the_marker
