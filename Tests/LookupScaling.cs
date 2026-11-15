@@ -17,9 +17,9 @@ if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
     ArgumentResolutionCosts();
     return;
 }
-if (args.Contains("--field-resolution-only", StringComparer.Ordinal))
+if (args.Contains("--shape-resolution-only", StringComparer.Ordinal))
 {
-    FieldResolutionCosts();
+    ShapeResolutionCosts();
     return;
 }
 if (args.Contains("--indirect-access-only", StringComparer.Ordinal))
@@ -63,7 +63,7 @@ CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
 ArgumentResolutionCosts();
-FieldResolutionCosts();
+ShapeResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 CallCheckCosts();
 DecodeCosts();
@@ -329,92 +329,117 @@ void ArgumentResolutionCosts()
     }
 }
 
-// Fails when shape facts or reads at 8, 32 and 128 distinct fields cost over 1.35 times more per field than at the
-// size before, with every field in one struct or each field in a struct of its own, read by a 512-instruction body.
-void FieldResolutionCosts()
+// Fails when the shape facts or reads of distinct operands cost over 1.35 times more per operand than at the size
+// before: fields of one struct up to 128, and fields and value types of a struct each from 32 to 512, read by a
+// 512-instruction body. A fact that walks the layouts to its struct costs 1.7 times as much per operand at 512 as
+// at 128; one read from the suffix starting its block costs the same at every size of at least two blocks.
+// Every row is measured before the first failure is reported.
+void ShapeResolutionCosts()
 {
-    const double AllowedFieldGrowth = 1.35;
-    var resolutionDirectory = At("artifacts/LookupScaling/FieldResolution");
+    const double AllowedShapeGrowth = 1.35;
+    var resolutionDirectory = At("artifacts/LookupScaling/ShapeResolution");
     Directory.CreateDirectory(resolutionDirectory);
-    foreach (var spread in new[] { false, true })
+    (string Name, string Label, int[] Sizes, bool Spread, bool Value)[] rows =
+    [
+        ("Struct", "field shape {0} with every field in one struct", [8, 32, 128], false, false),
+        ("Spread", "field shape {0} with each field in its own struct", [32, 128, 512], true, false),
+        ("Value", "value shape {0} with each type a struct of its own", [32, 128, 512], true, true),
+    ];
+    var failures = new List<string>();
+    foreach (var row in rows)
     {
         var samples = new List<(int Size, long Facts, long Reads)>();
-        foreach (var size in new[] { 8, 32, 128 })
+        foreach (var size in row.Sizes)
         {
-            var structs = spread ? size : 1;
-            var fieldsPerStruct = spread ? 1 : size;
-            var structFields = string.Join(", ", Enumerable.Repeat("{ type := .signed32 }", fieldsPerStruct));
-            var raw = string.Join(",\n  ", Enumerable.Range(0, structs).Select(index =>
-                $"{{ identity := \"T::S{index}\", explicit := false, packing := 0, declaredSize := 0, " +
-                $"fields := [{structFields}] }}"));
-            var offsets = string.Join(", ", Enumerable.Range(0, fieldsPerStruct).Select(field =>
-                $"{{ offset := {4 * field}, width := 4 }}"));
-            var computed = string.Join(",\n  ", Enumerable.Repeat(
-                $"⟨{{ size := {4 * fieldsPerStruct}, fields := [{offsets}] }}, 4⟩", structs));
-            var fields = new StringBuilder();
-            var facts = new StringBuilder();
-            for (var field = 0; field < size; field++)
-            {
-                var owner = spread ? field : 0;
-                fields.AppendLine($"def field{field} : FieldRef := {{ owner := .aggregate \"T::S{owner}\" {owner}, " +
-                    $"index := {(spread ? 0 : field)}, type := .atom runtimeScope \"System.Int32\", " +
-                    $"name := name!\"f{field}\" }}");
-                facts.AppendLine($"#resolution_cost \"fact\" in cil_field_shape environment field{field}");
-            }
-            var reads = string.Join(", ", Enumerable.Range(0, size).Select(field => $"body.fieldShape field{field}"));
-            var shapes = string.Join(", ", Enumerable.Range(0, size).Select(field =>
-                $".value {(spread ? 0 : 4 * field)} 4 false"));
-            var source = $$"""
-                import CIL.Safety.ResolutionFacts
-                open CIL CIL.Extraction Lean Elab Command
-                set_option maxRecDepth 8192
-                /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
-                elab "#resolution_cost " label:str " in " command:command : command => do
-                  let before <- IO.getNumHeartbeats
-                  elabCommand command
-                  let after <- IO.getNumHeartbeats
-                  logInfo m!"resolution {label.getString} {after - before} heartbeats"
-                def rawLayouts : List RawLayout := [
-                  {{raw}}]
-                def computedLayouts : Array ComputedLayout := #[
-                  {{computed}}]
-                @[cil_code] def environment : LayoutEnvironment :=
-                  { rawLayouts := rawLayouts, layouts := computedLayouts }
-                def body : Method :=
-                  { code := List.replicate 512 .nop, locals := [], returnsValue := false, environment }
-                {{fields}}
-                {{facts}}
-                #resolution_cost "simplifier" in
-                theorem body_reads : [{{reads}}] = [{{shapes}}] := by simp only [cil_code]
-                #print axioms field{{size - 1}}_shape
-                #print axioms body_reads
-                """ + "\n";
-            var path = Path.Combine(resolutionDirectory, $"{(spread ? "Spread" : "Struct")}{size}.lean");
-            File.WriteAllText(path, source);
-            var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-            if (output.Contains("sorryAx", StringComparison.Ordinal))
-                throw new InvalidOperationException("Field resolution introduced an unproved theorem.");
+            var output = RunShapeFixture(resolutionDirectory, row.Name, size, row.Spread, row.Value);
             var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
             if (costs.Length != size + 1)
-                throw new InvalidOperationException("Missing field resolution costs: " + output);
+                throw new InvalidOperationException("Missing shape resolution costs: " + output);
             long Sum(string label) => costs.Where(match => match.Groups[1].Value == label)
                 .Sum(match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
             samples.Add((size, Sum("fact"), Sum("simplifier")));
         }
-        var label = spread ? "with each field in its own struct" : "with every field in one struct";
         foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
             { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
         {
-            var perField = samples.Select(sample => (double)cost(sample) / sample.Size).ToArray();
+            var label = string.Format(CultureInfo.InvariantCulture, row.Label, name);
+            var perOperand = samples.Select(sample => (double)cost(sample) / sample.Size).ToArray();
             var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
                 $"{sample.Size} = {(double)cost(sample) / sample.Size:F0}")));
-            if (perField.Skip(1).Zip(perField).Any(pair => pair.First > pair.Second * AllowedFieldGrowth))
-                throw new InvalidOperationException(
-                    $"Field shape {name} {label} cost {measured} heartbeats per field; the limit is " +
-                    $"{AllowedFieldGrowth} times the cost per field at the size before.");
-            Console.WriteLine($"PASS field shape {name} {label}: {measured} heartbeats per field");
+            if (perOperand.Skip(1).Zip(perOperand).Any(pair => pair.First > pair.Second * AllowedShapeGrowth))
+            {
+                failures.Add($"{label} cost {measured} heartbeats per operand; the limit is {AllowedShapeGrowth} " +
+                    "times the cost per operand at the size before.");
+                Console.WriteLine($"FAIL {label}: {measured} heartbeats per operand");
+            }
+            else Console.WriteLine($"PASS {label}: {measured} heartbeats per operand");
         }
     }
+    if (failures.Count > 0) throw new InvalidOperationException(string.Join("\n", failures));
+}
+
+// Declares one shape fact per operand over size structs, or over one struct of size fields, and reads every fact.
+string RunShapeFixture(string directory, string name, int size, bool spread, bool value)
+{
+    var structs = spread ? size : 1;
+    var fieldsPerStruct = spread ? 1 : size;
+    var structFields = string.Join(", ", Enumerable.Repeat("{ type := .signed32 }", fieldsPerStruct));
+    var raw = string.Join(",\n  ", Enumerable.Range(0, structs).Select(index =>
+        $"{{ identity := \"T::S{index}\", explicit := false, packing := 0, declaredSize := 0, " +
+        $"fields := [{structFields}] }}"));
+    var offsets = string.Join(", ", Enumerable.Range(0, fieldsPerStruct).Select(field =>
+        $"{{ offset := {4 * field}, width := 4 }}"));
+    var computed = string.Join(",\n  ", Enumerable.Repeat(
+        $"⟨{{ size := {4 * fieldsPerStruct}, fields := [{offsets}] }}, 4⟩", structs));
+    var operands = new StringBuilder();
+    var facts = new StringBuilder();
+    for (var operand = 0; operand < size; operand++)
+    {
+        var owner = spread ? operand : 0;
+        operands.AppendLine(value
+            ? $"def operand{operand} : TypeExpr := .aggregate \"T::S{owner}\" {owner}"
+            : $"def operand{operand} : FieldRef := {{ owner := .aggregate \"T::S{owner}\" {owner}, " +
+                $"index := {(spread ? 0 : operand)}, type := .atom runtimeScope \"System.Int32\", " +
+                $"name := name!\"f{operand}\" }}");
+        facts.AppendLine($"#resolution_cost \"fact\" in cil_{(value ? "value" : "field")}_shape environment " +
+            $"operand{operand}");
+    }
+    var reads = string.Join(", ", Enumerable.Range(0, size).Select(operand =>
+        $"body.{(value ? "valueShape" : "fieldShape")} operand{operand}"));
+    var shapes = string.Join(", ", Enumerable.Range(0, size).Select(operand =>
+        value ? ".aggregate 4" : $".value {(spread ? 0 : 4 * operand)} 4 false"));
+    var shapeType = value ? "ValueShape" : "FieldShape";
+    var source = $$"""
+        import CIL.Safety.ResolutionFacts
+        open CIL CIL.Extraction Lean Elab Command
+        set_option maxRecDepth 8192
+        /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+        elab "#resolution_cost " label:str " in " command:command : command => do
+          let before <- IO.getNumHeartbeats
+          elabCommand command
+          let after <- IO.getNumHeartbeats
+          logInfo m!"resolution {label.getString} {after - before} heartbeats"
+        def rawLayouts : List RawLayout := [
+          {{raw}}]
+        def computedLayouts : Array ComputedLayout := #[
+          {{computed}}]
+        @[cil_code] def environment : LayoutEnvironment :=
+          { rawLayouts := rawLayouts, layouts := computedLayouts }
+        def body : Method :=
+          { code := List.replicate 512 .nop, locals := [], returnsValue := false, environment }
+        {{operands}}
+        {{facts}}
+        #resolution_cost "simplifier" in
+        theorem body_reads : ([{{reads}}] : List {{shapeType}}) = [{{shapes}}] := by simp only [cil_code]
+        #print axioms operand{{size - 1}}_shape
+        #print axioms body_reads
+        """ + "\n";
+    var path = Path.Combine(directory, $"{name}{size}.lean");
+    File.WriteAllText(path, source);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException("Shape resolution introduced an unproved theorem.");
+    return output;
 }
 
 // Decides the managed-call check on bodies of call and nop pairs with the extractor's literal table; a per-pc table

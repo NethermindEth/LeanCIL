@@ -669,4 +669,97 @@ theorem Method.valueShape_of_environment {body : Method} {environment : LayoutEn
 
 #print axioms Method.valueShape_of_environment
 
+/-! ### Shapes from one layout entry
+
+Each lemma reads the layouts only through the entries it names, so a fact built from them never
+has the kernel walk the layout lists to an index; the entries come from named suffixes. -/
+
+/-- A struct type decodes to the field storage of its index when the layout there carries its
+    identity. -/
+theorem Extraction.typeStorage_aggregate {layouts : List Extraction.RawLayout}
+    {metadata : Extraction.RawLayout} {identity : String} {index : Nat}
+    (found : layouts[index]? = some metadata) (named : metadata.identity = identity) :
+    Extraction.typeStorage layouts (.aggregate identity index) =
+      some (.field (.aggregate index)) := by
+  simp only [Extraction.typeStorage]
+  rw [found]
+  dsimp only [bind, Option.bind]
+  simp only [named, ite_true, eq_self, pure]
+
+#print axioms Extraction.typeStorage_aggregate
+
+/-- An array of a struct decodes to an array of that struct's layout when the layout at its
+    index carries its identity and is not byref-like. -/
+theorem Extraction.typeStorage_aggregateArray {layouts : List Extraction.RawLayout}
+    {metadata : Extraction.RawLayout} {identity : String} {index : Nat}
+    (found : layouts[index]? = some metadata)
+    (admitted : (metadata.identity == identity && !metadata.byRefLike) = true) :
+    Extraction.typeStorage layouts (.array (.aggregate identity index)) =
+      some (.aggregateArray identity index) := by
+  simp only [Extraction.typeStorage]
+  rw [found]
+  dsimp only [bind, Option.bind]
+  simp only [admitted, ite_true]
+
+#print axioms Extraction.typeStorage_aggregateArray
+
+/-- Field `index` of the struct at `parent` is its checked entry when its declared storage is
+    the storage of `held`. -/
+theorem LayoutEnvironment.structField?_eq {environment : LayoutEnvironment}
+    {parent index : Nat} {held : Extraction.TypeExpr} {metadata : Extraction.RawLayout}
+    {declared : Extraction.RawField} {layout : Extraction.ComputedLayout} {computed : FieldLayout}
+    (raw : environment.rawLayouts[parent]? = some metadata)
+    (field : metadata.fields[index]? = some declared)
+    (storage : Extraction.typeStorage environment.rawLayouts held =
+      some (Extraction.declaredFieldStorage declared.type))
+    (checked : environment.layouts.toList[parent]? = some layout)
+    (entry : layout.layout.fields[index]? = some computed) :
+    environment.structField? parent index held =
+      some (computed, Extraction.signedField declared.type) := by
+  rw [Array.getElem?_toList] at checked
+  unfold LayoutEnvironment.structField?
+  rw [raw]
+  dsimp only [bind, Option.bind]
+  rw [field]
+  dsimp only [bind, Option.bind]
+  rw [storage, bne_self_eq_false]
+  dsimp only [bind, Option.bind, Bool.false_eq_true, ↓reduceIte, pure]
+  rw [checked]
+  dsimp only [bind, Option.bind]
+  rw [entry]
+  rfl
+
+#print axioms LayoutEnvironment.structField?_eq
+
+/-- A class field holding an array of an admitted struct has that struct's checked size. -/
+theorem LayoutEnvironment.classSlot_aggregateArray {environment : LayoutEnvironment}
+    {identity : String} {index : Nat} {layout : Extraction.ComputedLayout}
+    (storage : Extraction.typeStorage environment.rawLayouts (.array (.aggregate identity index)) =
+      some (.aggregateArray identity index))
+    (checked : environment.layouts.toList[index]? = some layout) :
+    environment.classSlot (.array (.aggregate identity index)) =
+      some (.array (.aggregate identity layout.layout.size)) := by
+  rw [Array.getElem?_toList] at checked
+  unfold LayoutEnvironment.classSlot
+  rw [storage]
+  dsimp only [bind, Option.bind]
+  rw [checked]
+  rfl
+
+#print axioms LayoutEnvironment.classSlot_aggregateArray
+
+/-- A struct type that is neither a span nor a vector has its checked size. -/
+theorem LayoutEnvironment.valueShape_aggregate {environment : LayoutEnvironment}
+    {type : Extraction.TypeExpr} {index : Nat} {layout : Extraction.ComputedLayout}
+    (notSpan : Extraction.spanLocal type = false)
+    (notVector : Extraction.integerVectorWidth type = none)
+    (storage : Extraction.typeStorage environment.rawLayouts type =
+      some (.field (.aggregate index)))
+    (checked : environment.layouts.toList[index]? = some layout) :
+    environment.valueShape type = .aggregate layout.layout.size := by
+  rw [Array.getElem?_toList] at checked
+  simp [LayoutEnvironment.valueShape, notSpan, notVector, storage, checked]
+
+#print axioms LayoutEnvironment.valueShape_aggregate
+
 end CIL

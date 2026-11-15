@@ -667,8 +667,16 @@ An extraction states once how its methods resolve each distinct operand of a rea
 `CIL.Safety.ResolutionFacts`) declare `Extracted.fieldRef{k}_shape` and
 `Extracted.valueType{k}_shape`, which give `CIL.Method.fieldShape` or `CIL.Method.valueShape` of
 the operand for every method whose environment is `Extracted.environment`. Each fact costs one
-kernel check against the shared layout tables, however many sites and methods use the operand,
-and the `cil_code` simprocs `reduceFieldShape` and `reduceValueShape` read a method's shape of
-the operand from it. `CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset
-and width of its checked layout entry when the operand holds the field's declared type, and a
-class instance field to the model slot of its index.
+kernel check, however many sites and methods use the operand, and the `cil_code` simprocs
+`reduceFieldShape` and `reduceValueShape` read a method's shape of the operand from it.
+`CIL.LayoutEnvironment.fieldShape` resolves a struct field to the offset and width of its
+checked layout entry when the operand holds the field's declared type, and a class instance
+field to the model slot of its index.
+
+The first fact of an environment names suffixes of its layout lists,
+`Extracted.environment_rawLayoutSuffix{start}` and `Extracted.environment_layoutSuffix{start}`
+with their `_placed` lemmas, as `cil_instruction_equations` does for code. A struct field, a
+class field holding an array of a struct and a struct type operand are then checked from their
+layout entries alone, read from the suffix that starts the entry's block, so the facts of an
+extraction cost time linear in its layouts and distinct operands. The compiled resolver proposes
+each shape and the kernel checks it; a fact that misstates a shape fails to elaborate.
