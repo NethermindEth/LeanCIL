@@ -6,8 +6,8 @@ import CIL.Extraction.Scalars
 
 Bare decoded arithmetic instructions widen admitted mixed operands. The reference step and the
 checked step agree on every instruction `widenMixed` widens, in both operand orders, and on
-division and overflow-checked arithmetic. Scalar admission keeps native integers distinct from fixed-width
-integers and rejects mixed unsigned branches.
+division and overflow-checked arithmetic. Scalar admission keeps native integers distinct from
+fixed-width integers and rejects mixed unsigned branches.
 -/
 
 namespace Tests.MixedNativeOpcodes
