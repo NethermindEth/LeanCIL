@@ -47,6 +47,19 @@ Verified: ExampleProof.correctness
   Extraction entry: System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)
   Proof: Examples/Proofs/Add.lean
   Axioms: propext, Quot.sound
+  Binding: default
+  body-bytes: trusted
+  metadata-rows: trusted
+  platform-type-kinds: trusted
+  enum-underlying-types: trusted
+  value-tuple-field-order: trusted
+  object-fields: trusted
+  layout-content: trusted
+  dispatch-catalogs: trusted
+  static-data: trusted
+  generic-constraints: trusted
+  public-key-tokens: trusted
+  import-identities: trusted
   Settings: artifacts/Add/verification.json
   Report: artifacts/Add/verified.json
   Statement:
@@ -61,6 +74,9 @@ Verified: ExampleProof.correctness
   Lean messages (1):
     Examples/Proofs/Add.lean:15:0: info: 'ExampleProof.correctness' depends on axioms: [propext, Quot.sound]
 ```
+
+`Binding:` lists the facts about the assembly image that this run trusts; `verify --deep-checks`
+reconfirms them in the kernel ([deep verification](CLI.md#deep-verification)).
 
 `Subject:` is the method the theorem's conclusion is about and `Extraction entry:` the method the
 extraction started from; see [reading the report](CLI.md#reading-the-report).
