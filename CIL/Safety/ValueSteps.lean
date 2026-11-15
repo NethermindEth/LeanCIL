@@ -251,9 +251,40 @@ open Lean Meta in
     caller's fact. -/
 simproc [cil_step] reduceArgumentAccess (CIL.Method.argumentAccess _ _) := fun expression => do
   let_expr CIL.Method.argumentAccess method index := expression | return .continue
-  let some index ← (Meta.evalNat index).run | return .continue
-  let some proof ← ResolutionFacts.argumentProof? method index | return .continue
+  let some proof ← ResolutionFacts.argumentAccessProof? method index | return .continue
   let some (_, _, result) := (← inferType proof).eq? | return .continue
   return .done { expr := ← withDefault <| whnf result, proof? := some proof }
+
+open Lean Meta in
+/-- An argument load steps by the equation for how the body reads that argument: from its
+    declared fact or signature, or else as simp rewrites the access with the facts in scope. A load
+    whose access stays unknown steps to `loadArgument`, whose match a later fact can decide. -/
+simproc [cil_step] reduceArgumentLoad (step _ (.ldarg _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.ldarg index := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, index, stack]
+  let (access, proof) ← match ← ResolutionFacts.argumentAccessProof? body index with
+    | some proof =>
+      let some (_, _, access) := (← inferType proof).eq? | return .continue
+      pure (access, proof)
+    | none =>
+      let access ← Simp.simp (mkApp2 (mkConst ``CIL.Method.argumentAccess) body index)
+      pure (access.expr, ← access.getProof)
+  let resolved ← whnfR (← instantiateMVars access)
+  let known? ← match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      match (← whnfR narrow).getAppFnArgs with
+      | (``Option.none, _) =>
+        pure (some (mkAppN (mkConst ``step_ldarg_value_eq) (leading.push proof)))
+      | (``Option.some, #[_, kind]) =>
+        pure (some (mkAppN (mkConst ``step_ldarg_narrow_eq) (leading ++ #[kind, proof])))
+      | _ => pure none
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      pure (some (mkAppN (mkConst ``step_ldarg_home_eq) (leading ++ #[slot, proof])))
+    | _ => pure none
+  let equation := known?.getD (mkAppN (mkConst ``step_ldarg_eq) leading)
+  let some (_, _, stepped) := (← inferType equation).eq? | return .continue
+  return .visit { expr := stepped, proof? := some equation }
 
 end CIL.Safety

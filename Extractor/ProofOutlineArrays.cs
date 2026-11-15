@@ -38,7 +38,7 @@ internal static partial class ProofOutline
             ? new(array, index, new(call.Method, method, "")) : null;
 
         Parameter? Argument(Operation op) =>
-            op is Arg { Narrow: null } load ? spec.Parameters[load.Index] : null;
+            op is Arg load && MethodArguments.Plain(spec.Method, load.Index) ? spec.Parameters[load.Index] : null;
     }
 
     /// <summary>Method `index` when it is static `(T[] values, int index)` returning `ref values[index]` of
@@ -52,7 +52,7 @@ internal static partial class ProofOutline
             WordArrayElement(array.ElementType) == element &&
             method.Parameters[1].ParameterType.FullName is "System.Int32" &&
             extraction.Emitted[index].Frame.HasNoLocals && ops is
-                [Arg { Index: 0, Narrow: null }, Arg { Index: 1, Narrow: null },
+                [Arg { Index: 0 }, Arg { Index: 1 },
                     Memory { Operation: ArrayAddress { ReadOnly: false } address }, Return] &&
             address.Element == element
             ? method : null;

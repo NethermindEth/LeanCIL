@@ -25,7 +25,8 @@ namespace Tests.ResolutionFacts
 
 open CIL CIL.Extraction
 
--- A primitive below 32 bits narrows to its own width and signedness.
+-- A primitive below 32 bits narrows to its own width and signedness; the extractor's own table
+-- agrees head by head (Tests/InstructionIndexes.cs).
 example : declaredNarrow [] (.atom runtimeScope "System.SByte") = some .signed8 :=
   declaredNarrow_primitive [] .sbyte
 example : declaredNarrow [] (.atom runtimeScope "System.Byte") = some .unsigned8 :=
@@ -34,14 +35,26 @@ example : declaredNarrow [] (.atom runtimeScope "System.Boolean") = some .unsign
   declaredNarrow_primitive [] .boolean
 example : declaredNarrow [] (.atom runtimeScope "System.Int16") = some .signed16 :=
   declaredNarrow_primitive [] .int16
+example : declaredNarrow [] (.atom runtimeScope "System.UInt16") = some .unsigned16 :=
+  declaredNarrow_primitive [] .uint16
 example : declaredNarrow [] (.atom runtimeScope "System.Char") = some .unsigned16 :=
   declaredNarrow_primitive [] .char
 
 -- A primitive of 32 bits or more, or a floating-point one, is returned as it is.
 example : declaredNarrow [] (.atom runtimeScope "System.Int32") = none :=
   declaredNarrow_primitive [] .int32
+example : declaredNarrow [] (.atom runtimeScope "System.UInt32") = none :=
+  declaredNarrow_primitive [] .uint32
+example : declaredNarrow [] (.atom runtimeScope "System.Int64") = none :=
+  declaredNarrow_primitive [] .int64
+example : declaredNarrow [] (.atom runtimeScope "System.UInt64") = none :=
+  declaredNarrow_primitive [] .uint64
+example : declaredNarrow [] (.atom runtimeScope "System.IntPtr") = none :=
+  declaredNarrow_primitive [] .intPtr
 example : declaredNarrow [] (.atom runtimeScope "System.UIntPtr") = none :=
   declaredNarrow_primitive [] .uintPtr
+example : declaredNarrow [] (.atom runtimeScope "System.Single") = none :=
+  declaredNarrow_primitive [] .single
 example : declaredNarrow [] (.atom runtimeScope "System.Double") = none :=
   declaredNarrow_primitive [] .double
 
@@ -52,6 +65,14 @@ example : declaredNarrow [] (.enum "Examples.Small" (.atom runtimeScope "System.
 example : declaredNarrow [] (.enum "Examples.Flags" (.atom runtimeScope "System.Byte")) =
     some .unsigned8 :=
   (declaredNarrow_enum [] "Examples.Flags" .byte).trans rfl
+example : declaredNarrow [] (.enum "Examples.Signed" (.atom runtimeScope "System.SByte")) =
+    some .signed8 :=
+  (declaredNarrow_enum [] "Examples.Signed" .sbyte).trans rfl
+example : declaredNarrow [] (.enum "Examples.Wide" (.atom runtimeScope "System.UInt16")) =
+    some .unsigned16 :=
+  (declaredNarrow_enum [] "Examples.Wide" .uint16).trans rfl
+example : declaredNarrow [] (.enum "Examples.Plain" (.atom runtimeScope "System.Int32")) = none :=
+  (declaredNarrow_enum [] "Examples.Plain" .int32).trans rfl
 
 -- An enum over a type `typeStorage` does not admit as an enum's underlying type has no storage.
 example : declaredNarrow [] (.enum "Examples.Truth" (.atom runtimeScope "System.Boolean")) =
@@ -301,7 +322,7 @@ def twoParameterSignature : DeclaredSignature :=
 /-- A static method with a byte parameter read as it arrives and an int parameter that the body
     stores to, so it has a home after the method's one local. -/
 def twoParameters : Method :=
-  { code := [.ldc_i4 0, .stloc 1, .arg 0 (some .unsigned8), .ret], locals := [.i32 0],
+  { code := [.ldc_i4 0, .stloc 1, .ldarg 0, .ret], locals := [.i32 0],
     localKinds := [.word32], parameterHomes := [(1, .word32)], returnsValue := true,
     declared := twoParameterSignature }
 

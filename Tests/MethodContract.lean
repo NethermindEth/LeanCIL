@@ -16,11 +16,12 @@ def method0Signature : String := "System.Void Contracts.Calls::Root(System.UInt6
 def method1Signature : String := "System.UInt64 Contracts.Calls::Mix(System.UInt64,System.UInt64)"
 def method2Signature : String := "System.Void Contracts.Calls::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"
 @[cil_code] def method0 : Method := { returnsValue := false, locals := [], code :=
-  [.arg 0, .arg 1, .arg 0, .call 2 3, .arg 0, .arg 0, .load64, .arg 1, .load64, .call 1 2, .store64, .ret] }
+  [.ldarg 0, .ldarg 1, .ldarg 0, .call 2 3, .ldarg 0, .ldarg 0, .load64, .ldarg 1, .load64,
+      .call 1 2, .store64, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 3, .conv_i8, .mul, .arg 1, .add, .ret] }
+  [.ldarg 0, .ldc_i4 3, .conv_i8, .mul, .ldarg 1, .add, .ret] }
 @[cil_code] def method2 : Method := { returnsValue := false, locals := [], code :=
-  [.arg 2, .arg 0, .load64, .arg 1, .load64, .add, .store64, .ret] }
+  [.ldarg 2, .ldarg 0, .load64, .ldarg 1, .load64, .add, .store64, .ret] }
 @[cil_code] def program : Program := [method0, method1, method2]
 def signatures : List String := [method0Signature, method1Signature, method2Signature]
 
@@ -286,7 +287,7 @@ theorem loaded_limb_branch (program : CIL.Program) (index : Nat) (profile : CIL.
 -- equation; re-elaborating a tactic at every contract step exceeds the budget.
 def widenBody (signed : Bool) : CIL.Method :=
   { returnsValue := true, locals := [], code :=
-      [.arg 0, if signed then .conv_i8 else .conv_u8, .arg 1, .pop, .pop, .ldc_i4 0, .ret] }
+      [.ldarg 0, if signed then .conv_i8 else .conv_u8, .ldarg 1, .pop, .pop, .ldc_i4 0, .ret] }
 
 def widenArgs (scalarFirst : Bool) (input : Reference) (value : CIL.Value) : List Value :=
   if scalarFirst then [.scalar value, .reference (.address input)] else [.reference (.address input), .scalar value]
@@ -317,7 +318,8 @@ theorem selected_widening (signed : Bool) (program : CIL.Program) (index : Nat)
 
 /-- A feature test and a vector load step by their own equations inside a contract proof. -/
 def featureLoadBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.feature .avx2, .pop, .arg 0, .memory .load128, .ret] }
+  { profile, returnsValue := true, locals := [], code := [.feature .avx2, .pop, .ldarg 0,
+      .memory .load128, .ret] }
 
 theorem feature_load_contract (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (wide : profile.avx2 = true) (found : program[index]? = some (featureLoadBody profile))
@@ -335,7 +337,7 @@ theorem feature_load_contract (program : CIL.Program) (index : Nat) (profile : C
 /-- A body whose first instruction depends on a feature, stepped as a contract proof steps it. -/
 def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [],
-    code := [if profile.avx2 then .arg 1 else .arg 0, .fieldAt 0 8, .ret] }
+    code := [if profile.avx2 then .ldarg 1 else .ldarg 0, .fieldAt 0 8, .ret] }
 
 open CIL.Safety in
 theorem feature_op_contract_steps (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -358,8 +360,8 @@ def orderedWidenBody (signed scalarFirst reversed : Bool) : CIL.Method :=
   let second := if reversed then 0 else 1
   let convert := if signed then CIL.Instruction.conv_i8 else CIL.Instruction.conv_u8
   { returnsValue := true, locals := [], code :=
-      (if scalarFirst then [.arg first, convert, .arg second]
-       else [.arg first, .arg second, convert]) ++ [.pop, .pop, .ldc_i4 0, .ret] }
+      (if scalarFirst then [.ldarg first, convert, .ldarg second]
+       else [.ldarg first, .ldarg second, convert]) ++ [.pop, .pop, .ldc_i4 0, .ret] }
 
 set_option maxHeartbeats 12000 in
 /-- All eight wrapper cases use one three-step proof without unfolding the evaluator. -/
@@ -469,7 +471,7 @@ theorem coerced_index_facts (program : CIL.Program) (index : Nat) (body : CIL.Me
 /-- Two symbolic words are combined and branched on. -/
 @[cil_code] def symbolicBranchBody : CIL.Method :=
   { returnsValue := true, locals := [], code :=
-    [.arg 0, .arg 1, .or, .brtrue 6, .ldc_i4 7, .ret, .ldc_i4 9, .ret] }
+    [.ldarg 0, .ldarg 1, .or, .brtrue 6, .ldc_i4 7, .ret, .ldc_i4 9, .ret] }
 
 /-- A branch no fact decides ends the walk with its condition in the program counter, where
     `split` gives both successors; stepping resumes in each. -/

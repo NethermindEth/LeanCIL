@@ -122,6 +122,20 @@ theorem loadLocal_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
       | cases h
       | split at h
 
+/-- An argument load pushes a value valid in the memory it was read from, from its home or
+    checked from the incoming arguments. -/
+theorem loadArgument_result_valid (body : CIL.Method) (index : Nat) (args : List Value)
+    (frame : Frame) (m : Memory) (value : Value)
+    (h : loadArgument body index args frame m = .ok value) : value.Valid m := by
+  unfold loadArgument at h
+  split at h <;> try simp only [Bind.bind, Except.bind] at h
+  all_goals repeat' first
+    | solve | exact (checkedValue_valid _ _ _ h).2
+    | solve | exact loadLocal_result_valid _ _ _ h
+    | cases h
+    | split at h
+#print axioms loadArgument_result_valid
+
 theorem localAddress_result_valid (m : Memory) (slot : LocalSlot) (value : Value)
     (h : localAddress m slot = .ok value) : value.Valid m := by
   cases slot with
@@ -384,6 +398,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
                   | exact (referenceSubtract_valid _ _ _ _ (by assumption)).1
                   | exact (referenceSubtract_valid _ _ _ _ (by assumption)).2
                   | apply loadLocal_result_valid; assumption
+                  | apply loadArgument_result_valid; assumption
                   | apply localAddress_result_valid; assumption
                   | apply allocated_store_reference_valid; exact hm; assumption; assumption
                   | apply allocated_storeLocal_reference_valid; exact hm; assumption; assumption

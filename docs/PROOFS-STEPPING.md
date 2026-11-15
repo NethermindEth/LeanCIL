@@ -21,7 +21,7 @@ import CIL.Safety.SymbolicExecution
 namespace ProofGuide
 
 @[cil_code] def arithmeticMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
+  code := [.ldarg 0, .ldarg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
   locals := [], returnsValue := true }
 
 theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
@@ -268,6 +268,14 @@ tactics, a local fact, proof term or global theorem stated through `evaluate` or
 profile projection, including one quantified over every feature, is normalized to that form.
 Elsewhere, including `simp only [cil_step, facts]` and `cil_checked_step_equations`, state the
 fact on the field or first run `simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h`.
+
+A `.ldarg index` step reads the argument as `body.argumentAccess index` says. `cil_step` takes that
+access from the method's `cil_resolution_facts` fact, from a literal body's homes and signature, or
+from a supplied fact such as `body.argumentAccess 0 = .value none`, and steps by
+`step_ldarg_value_eq`, `step_ldarg_narrow_eq` or `step_ldarg_home_eq`
+([StepComposition](../CIL/Safety/StepComposition.lean)), so the goal shows the incoming value,
+its narrowing or the load of the home slot. An access that none of these decides leaves the match
+of `loadArgument` on `body.argumentAccess index`, which a later fact decides.
 
 ### Consumer stepping regressions
 
@@ -609,7 +617,7 @@ type, so an unrelated context adds nothing to simp. It gathers:
 Only hypotheses reachable by name are read: a shadowed state of an earlier iteration and
 hygienic hypotheses are skipped. A fact is kept only when stepping can meet every variable it is
 about. [`loopGoalScope`](../CIL/Safety/LoopFacts.lean) starts from the goal's states and
-postcondition, and from the method arguments only when the program reads one with `.arg`; the
+postcondition, and from the method arguments only when the program reads one with `.ldarg`; the
 right side of each kept equation then extends it. A derived fact must be about variables reached
 without an equation. A fact about a memory that no state of the goal holds and no kept equation
 produces, such as the caller's memory once the frame has stored, is dropped; a frame fact at a

@@ -63,7 +63,8 @@ example : validateManagedCall methods imports (call site) false (.call 0 3) = tr
 
 /-- The whole-method check: the same forged slot is rejected at the only live call. -/
 def caller : RawMethod := { callee with code := [⟨0, 2, .none⟩, ⟨1, 3, .none⟩, ⟨2, 4, .none⟩, ⟨3, 40, .call site⟩, ⟨8, 42, .none⟩] }
-def emitted : Method := { returnsValue := false, locals := [], code := [.arg 0, .arg 1, .arg 2, .call 1 3, .ret] }
+def emitted : Method :=
+  { returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .ldarg 2, .call 1 3, .ret] }
 example : ManagedCallsValid methods imports caller [true, true, true, true, true] emitted := by decide +kernel
 example : ¬ ManagedCallsValid methods [{ slot with identity := "forged" }] caller [true, true, true, true, true] emitted := by decide +kernel
 example : ¬ ManagedCallsValid methods [] caller [true, true, true, true, true] emitted := by decide +kernel
