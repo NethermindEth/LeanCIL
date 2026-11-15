@@ -288,7 +288,9 @@ foreach (string modifierScope in new[] { "ModifierA", "ModifierB" })
         MethodReference call = module.GetType("TypedFixture.Application").Methods.Single(method => method.Name == "Forward")
             .Body.Instructions.Where(instruction => instruction.OpCode.Code == Code.Call).Select(instruction => (MethodReference)instruction.Operand).Single();
         ByReferenceType parameter = (ByReferenceType)call.Parameters[0].ParameterType;
-        TypeReference modifier = new("System.Runtime.InteropServices", "InAttribute", module, new AssemblyNameReference(modifierScope, new Version(1, 0, 0, 0)));
+        AssemblyNameReference scope = new(modifierScope, new Version(1, 0, 0, 0));
+        module.AssemblyReferences.Add(scope);
+        TypeReference modifier = new("System.Runtime.InteropServices", "InAttribute", module, scope);
         call.Parameters[0].ParameterType = new ByReferenceType(new RequiredModifierType(modifier, parameter.ElementType));
         module.Write(malformed);
     }
@@ -300,8 +302,9 @@ using (ModuleDefinition module = ModuleDefinition.ReadModule(app))
 {
     GenericInstanceMethod call = module.GetType("TypedFixture.Application").Methods.Single(method => method.Name == "Identity")
         .Body.Instructions.Select(instruction => instruction.Operand).OfType<GenericInstanceMethod>().Single();
-    call.GenericArguments[0] = new TypeReference("System", "UInt64", module,
-        new AssemblyNameReference("Other", new Version(1, 0, 0, 0))) { IsValueType = true };
+    AssemblyNameReference otherScope = new("Other", new Version(1, 0, 0, 0));
+    module.AssemblyReferences.Add(otherScope);
+    call.GenericArguments[0] = new TypeReference("System", "UInt64", module, otherScope) { IsValueType = true };
     module.Write(wrongScope);
 }
 Reject("WrongScope", "exact scoped", wrongScope, "TypedFixture.Application::Identity(ulong)", sidecar, interfaceDigest);
