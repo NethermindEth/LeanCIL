@@ -124,9 +124,13 @@ foreach (var scope in new[] { "local-marker", "versioned-marker" })
             replacement = local;
         }
         else
+        {
+            var versioned = new AssemblyNameReference(runtime.Name, new Version(9, 0, 0, 0))
+                { PublicKeyToken = runtime.PublicKeyToken };
+            module.AssemblyReferences.Add(versioned);
             replacement = new TypeReference(marker.ModifierType.Namespace, marker.ModifierType.Name, module,
-                new AssemblyNameReference(runtime.Name, new Version(9, 0, 0, 0))
-                    { PublicKeyToken = runtime.PublicKeyToken });
+                versioned);
+        }
         setter.ReturnType = new RequiredModifierType(replacement, marker.ElementType);
         module.Write(dll);
     }

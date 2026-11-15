@@ -228,12 +228,17 @@ private def nativeKind : ScalarKind := .nativeMethodTable signature
 theorem native_add_admission :
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.word32, nativeKind] .add = true ∧
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [nativeKind, .native] .add = true ∧
+    scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.native, nativeKind] .add = true ∧
+    scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [nativeKind, .word32] .add = true ∧
     scalarEmissionMatches #[] none ⟨0, 88, .local 0⟩ [.word32, nativeKind] .add = false ∧
     scalarEmissionMatches #[] none ⟨0, 89, .none⟩ [.word32, nativeKind] .add = false ∧
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.word32, nativeKind] .sub = false ∧
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.word32, nativeKind] .add_ovf = false ∧
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.word64, nativeKind] .add = false ∧
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.other, nativeKind] .add = false ∧
+    scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [nativeKind, .word64] .add = false ∧
+    scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [nativeKind, .other] .add = false ∧
+    scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [nativeKind, .reference] .add = false ∧
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [nativeKind, nativeKind] .add = false ∧
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.word32, .methodTable signature] .add = false ∧
     scalarEmissionMatches #[] none ⟨0, 88, .none⟩ [.word32, .word32] .add = true := by
