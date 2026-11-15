@@ -854,6 +854,15 @@ example : literalArrays.elementShape (.aggregate "Examples.Point" 5) =
 example : literalArrays.elementShape (.aggregate "Examples.Other" 0) =
     .unsupported ElementShape.outsideLayouts := by simp only [cil_step]
 
+/-- A method whose raw layouts hold `pointLayout` without a checked layout for it. -/
+def uncomputedArrays : Method :=
+  { code := [.ret], locals := [], returnsValue := false,
+    environment := { rawLayouts := [pointLayout], layouts := #[] } }
+
+-- A struct the raw layouts hold under its identity, but that has no checked layout, has no shape.
+example : uncomputedArrays.elementShape (.aggregate "Examples.Point" 0) =
+    .unsupported ElementShape.outsideLayouts := by simp only [cil_step]
+
 /-- A method over layouts that are not known. -/
 def symbolicLayouts (environment : LayoutEnvironment) : Method :=
   { code := [], locals := [], returnsValue := false, environment }
