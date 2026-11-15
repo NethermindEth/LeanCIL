@@ -126,8 +126,8 @@ inductive Instruction where
   | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf | mul_ovf_un
   -- Overflow-checked conversion to `target`, reading the operand as signed or as unsigned.
   | conv_ovf (target : ConvTarget) | conv_ovf_un (target : ConvTarget)
-  /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
-  | stackAlloc (initLocals : Bool)
+  /-- Fresh frame storage of the popped byte count, zeroed when `declared.initLocals` is set. -/
+  | localloc
   /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
   | newArray (element : ArrayElement)
   /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
@@ -272,6 +272,8 @@ structure DeclaredSignature where
   /-- Declared parameter types in order, `this` excluded. -/
   parameters : List Extraction.TypeExpr := []
   returnType : Extraction.TypeExpr := .void
+  /-- The body's localsinit flag: `localloc` storage and locals start zeroed when set. -/
+  initLocals : Bool := true
   deriving DecidableEq, Repr
 
 /-- The declared type of argument `index`, counting `this` as argument 0; `none` for `this`. -/
@@ -438,13 +440,21 @@ theorem linksOfCode_find (code : List Instruction) (start pc : Nat) :
 
 #print axioms linksOfCode_find
 
+/-- The table a code list implies gives each pc the link of the instruction there. -/
+theorem linkLookup_linksOfCode (code : List Instruction) (pc : Nat) :
+    linkLookup (linksOfCode code) pc = (code[pc]?).bind Instruction.link? := by
+  simp only [linkLookup, linksOfCode_eq_zipIdx]
+  rw [linksOfCode_find code 0 pc]
+  simp
+
+#print axioms linkLookup_linksOfCode
+
 /-- A body whose table is the one its code implies has a link exactly at its linking
     instructions. -/
 theorem Method.linkAt_of_implied {body : Method} (implied : body.links = linksOfCode body.code)
     (pc : Nat) : body.linkAt pc = (body.code[pc]?).bind Instruction.link? := by
-  simp only [Method.linkAt, linkLookup, implied, linksOfCode_eq_zipIdx]
-  rw [linksOfCode_find body.code 0 pc]
-  simp
+  rw [Method.linkAt, implied]
+  exact linkLookup_linksOfCode body.code pc
 
 #print axioms Method.linkAt_of_implied
 
@@ -465,14 +475,21 @@ theorem Method.linkAt_of_instruction {body : Method}
 
 #print axioms Method.linkAt_of_instruction
 
-/-- A body's table has no entry at a pc the table lists no key for. -/
-theorem Method.linkAt_of_unlisted {body : Method} {pc : Nat}
-    (unlisted : ∀ entry ∈ body.links, entry.1 ≠ pc) : body.linkAt pc = none := by
-  have none_found : (body.links.find? fun entry => entry.1 == pc) = none := by
+/-- A table that lists no key `pc` gives it no link. -/
+theorem linkLookup_of_unlisted {links : List (Nat × Link)} {pc : Nat}
+    (unlisted : ∀ entry ∈ links, entry.1 ≠ pc) : linkLookup links pc = none := by
+  have none_found : (links.find? fun entry => entry.1 == pc) = none := by
     rw [List.find?_eq_none]
     intro entry member
     simpa using unlisted entry member
-  simp [Method.linkAt, linkLookup, none_found]
+  simp [linkLookup, none_found]
+
+#print axioms linkLookup_of_unlisted
+
+/-- A body's table has no entry at a pc the table lists no key for. -/
+theorem Method.linkAt_of_unlisted {body : Method} {pc : Nat}
+    (unlisted : ∀ entry ∈ body.links, entry.1 ≠ pc) : body.linkAt pc = none :=
+  linkLookup_of_unlisted unlisted
 
 #print axioms Method.linkAt_of_unlisted
 

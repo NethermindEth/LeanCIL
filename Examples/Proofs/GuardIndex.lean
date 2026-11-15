@@ -23,14 +23,16 @@ theorem correctness (memory : Memory) (literal : Reference) (index length : CIL.
       if length.toNat ≤ index.toNat then
         .error ⟨0, 3, .thrown "System.ArgumentOutOfRangeException"⟩
       else .ok (memory, [.scalar (.i32 index)]) := by
+  have outcome : comparisonGuardOutcome .greaterThanOrEqual 32 false (.i32 index)
+      (.i32 length) = if length.toNat <= index.toNat then
+        .error (.thrown "System.ArgumentOutOfRangeException") else .ok () := by
+    by_cases outside : length.toNat <= index.toNat <;>
+      simp [comparisonGuardOutcome, CIL.guardOperand, CIL.ComparisonGuard.throws, outside]
   by_cases outside : length.toNat ≤ index.toNat
   · simp only [outside, ite_true]
-    cil_checked_steps [literalObject_of_lookup bound, formed, comparisonGuardOutcome,
-      CIL.guardOperand, CIL.ComparisonGuard.throws, BitVec.setWidth_eq, outside]
+    cil_checked_steps [literalObject_of_lookup bound, formed, outcome, outside]
   · simp only [outside, ite_false]
-    cil_checked_steps [literalObject_of_lookup bound, formed,
-      comparisonGuardOutcome, CIL.guardOperand, CIL.ComparisonGuard.throws, BitVec.setWidth_eq,
-      outside]
+    cil_checked_steps [literalObject_of_lookup bound, formed, outcome, outside]
 
 #print axioms correctness
 

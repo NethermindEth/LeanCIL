@@ -1038,6 +1038,48 @@ try
         if (!jumped.GaveUp) throw new Exception("A pass whose clock jumped past its limit did not say so");
     }
     finally { passClock = realClock; }
+    // Past its limit a pass retires no pin, even one judged by its age without reading a lakefile, and a pass
+    // that reaches its limit while removing closure records stops there.
+    var agedPinRoot = NewEvictionRoot();
+    var agedPin = PlantPin(agedPinRoot, PlantEntry(agedPinRoot, LibraryKeyOf('a'), Days(30)), "", 8);
+    var lateRoot = NewEvictionRoot();
+    var lateRecord = Path.Combine(lateRoot, LibraryKeyOf('d') + ".closure");
+    File.WriteAllText(lateRecord, LibraryKeyOf('7'));
+    var lateCalls = 0;
+    try
+    {
+        passLimit = TimeSpan.Zero;
+        EvictLibraries(agedPinRoot);
+        if (!File.Exists(agedPin)) throw new Exception("A pass past its limit deleted a pin");
+        passLimit = zeroLimit;
+        // The first two readings are the deadline and the check before closure records are removed.
+        passClock = () => lateCalls++ < 2 ? jumpStart : jumpStart.AddHours(2);
+        EvictLibraries(lateRoot);
+        if (!File.Exists(lateRecord)) throw new Exception("A pass past its limit deleted a closure record");
+    }
+    finally { (passLimit, passClock) = (zeroLimit, realClock); }
+    // A read that waited out the rest of the pass stops it even when the clock has not yet passed the
+    // deadline, as when a wait rounded down to whole milliseconds returns just before it.
+    var stalledRead = new ManualResetEventSlim(false);
+    var limitsBefore = (packageReader, packageReadLimit, passLimit);
+    try
+    {
+        var frozenAt = DateTime.UtcNow;
+        passClock = () => frozenAt;
+        packageReader = _ => { stalledRead.Wait(); return ""; };
+        packageReadLimit = TimeSpan.FromSeconds(30);
+        passLimit = TimeSpan.FromMilliseconds(200);
+        var cutShort = new PassReport();
+        EvictUnused(unread, KeyName(), LibraryStaging(), Days(7), null, null, null, true, cutShort);
+        RequireUnreadKept("a read that waited out the pass");
+        if (!cutShort.GaveUp) throw new Exception("A pass whose read waited out its limit did not say so");
+    }
+    finally
+    {
+        stalledRead.Set();
+        passClock = realClock;
+        (packageReader, packageReadLimit, passLimit) = limitsBefore;
+    }
     var holdsRead = new ManualResetEventSlim(false);
     var readerBefore = (packageReader, packageReadLimit);
     try

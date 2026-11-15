@@ -165,7 +165,7 @@ partial class Program
                 theorem generic_result :
                     (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i64 5)] CIL.Safety.Memory.empty).map
                       Prod.snd =
-                      .ok [.scalar (.i64 {{result}})] := by rfl
+                      .ok [.scalar (.i64 {{result}})] := by cil_kernel_rfl
                 #print axioms generic_result
                 """);
             evidence.Add(path, "PASS cross-assembly generic " + name + ": pinned layouts and bodies with proof");
@@ -248,7 +248,7 @@ partial class Program
                       [.methodTable ⟨signature, some #[{{uncatalogued}}], none, 1, by decide⟩, {{arguments}}]
                       CIL.Safety.Memory.empty with
                       | .error fault => some fault.fault | .ok _ => none) = some .invalidState :=
-                  ⟨by rfl, by rfl⟩
+                  ⟨by cil_kernel_rfl, by cil_kernel_rfl⟩
 
                 #print axioms correctness
                 """;

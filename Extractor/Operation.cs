@@ -380,9 +380,10 @@ internal sealed record StoreScalar(int Width) : Operation
     internal override string Render(Func<int, string> calleeName) => $".storeScalar {Width}";
 }
 
-internal sealed record StackAlloc(bool Zeroed) : Operation
+/// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>
+internal sealed record Localloc : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".stackAlloc {LeanText.Bool(Zeroed)}";
+    internal override string Render(Func<int, string> calleeName) => ".localloc";
 }
 
 /// <summary>The target of an overflow-checked conversion; <c>I</c> and <c>U</c> are native-sized.</summary>

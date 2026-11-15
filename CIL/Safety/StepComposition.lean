@@ -123,6 +123,41 @@ theorem step_ldarg_home_eq (index : Nat) (stack : List Value) (slot : Nat)
 
 #print axioms step_call_eq
 
+/-- `localloc` allocates frame storage, zeroed as the body's declared localsinit flag says. -/
+@[cil_step] theorem step_localloc_eq (stack : List Value) :
+    step body .localloc pc args frame stack memory =
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else localAllocation body.declared.initLocals pc frame stack memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_localloc_eq
+
+attribute [cil_step] localAllocation
+
+/-- An indirect call through a method pointer enters the body `indirectTarget` selects; a fact
+    for that selection, which the kernel checks, decides it without comparing identities here. -/
+@[cil_step] theorem step_managed_call_eq (signature : CIL.ManagedSignature)
+    (catalog : List CIL.ManagedTarget) (tail : Bool) (pointer : CIL.MethodPointer)
+    (values : List Value) :
+    step body (.managed (.call signature catalog tail)) pc args frame
+        (.methodPointer pointer :: values) memory =
+      if unspecifiedOperands (signature.parameters.length + 1) (.methodPointer pointer :: values)
+      then .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let some method := indirectTarget signature catalog pointer | .error .invalidState
+        let count := signature.parameters.length
+        if (if tail then values.length != count else values.length < count) then
+          .error .invalidState else pure ()
+        let arguments ← (values.take count).reverse.mapM (checkedValue memory)
+        if tail then return .tailCall method arguments memory
+        else return .call method arguments (values.drop count) memory := by
+  simp only [step, observerCount, Bool.or_false, managedStep]
+  rfl
+
+#print axioms step_managed_call_eq
+
 /-- A narrowed return of one i32 extends it to the declared width. -/
 @[cil_step] theorem returnFrom_narrow_eq (kind : CIL.NarrowKind) (returnsValue : Bool)
     (bits : CIL.W32) :

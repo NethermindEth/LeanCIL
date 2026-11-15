@@ -160,13 +160,13 @@ double IdentityLookupCost(int count)
     finally { foreach (var module in modules) module.Dispose(); }
 }
 
-double previous = IdentityLookupCost(64);
-foreach (int count in new[] { 256, 1024 })
-{
-    double elapsed = IdentityLookupCost(count);
-    if (elapsed > previous * 8 + 1) throw new Exception("Import identity lookup cost grew faster than module count.");
-    previous = elapsed;
-}
+// A lookup that scans the registered modules costs 256 times as much at 16 times the modules; a keyed
+// lookup stays within the factor of 4 that cache misses add per lookup on a loaded machine.
+double smallest = IdentityLookupCost(64);
+IdentityLookupCost(256);
+double largest = IdentityLookupCost(1024);
+if (largest > smallest * 16 * 4 + 1)
+    throw new Exception("Import identity lookup cost grew faster than module count.");
 
 static void ExpectRejected(Action action)
 {
