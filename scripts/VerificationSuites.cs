@@ -145,8 +145,9 @@ internal static class VerificationSuites
             "through them at a per-argument cost that does not grow with the parameters; the kernel check of " +
             "one body at a cost independent of the methods and metadata rows of its extraction; the kernel's " +
             "selection of a calli body at a cost linear in the length of the pointer's owner; raw value opcode " +
-            "decoding at a per-instruction kernel cost that does not grow with the body; and the certificate " +
-            "index, feature getter, layout accumulation and projection, and extraction home index libraries"),
+            "decoding and the method decoded from a raw body at a per-instruction kernel cost that does not " +
+            "grow with the body; and the certificate index, feature getter, layout accumulation and " +
+            "projection, and extraction home index libraries"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +
