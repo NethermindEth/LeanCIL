@@ -76,7 +76,8 @@ example : callValid methods imports
 example : callValid methods imports
     (call { site with target := .managed 100663298 }) true (.call 1 3) = false := by decide +kernel
 example : callValid methods imports ⟨8, 88, .none⟩ true (.call 1 3) = false := by decide +kernel
--- A runtime-modelled external call still emits its model, and dead code is unconstrained.
+-- A runtime-modelled external call still emits its model, and dead code is unconstrained
+-- beyond the link its instruction implies.
 example : callValid methods imports (call site) true .add = true := by decide +kernel
 example : callValid methods imports (call site) false (.call 0 3) = true := by decide +kernel
 

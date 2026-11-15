@@ -140,8 +140,10 @@ internal static class VerificationSuites
             "facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with " +
             "the calls, type identity equality at a cost that does not grow with the name, and one native " +
             "method table step and one load of its first entry at a kernel cost that does not grow with the " +
-            "table's entries; the argument facts of cil_resolution_facts and the reads through them at a " +
-            "per-argument cost that does not grow with the parameters; the kernel check of one body at a cost " +
+            "table's entries; the managed-call check of a body with many call sites at a per-site cost that " +
+            "does not grow with the call sites; the argument facts of cil_resolution_facts and the reads " +
+            "through them at a per-argument cost that does not grow with the parameters; the kernel check " +
+            "of one body at a cost " +
             "independent of the methods and metadata rows of its extraction; and the certificate index, feature " +
             "getter, layout accumulation and projection, and extraction home index libraries"),
         new("gates", "Tests/ProofGates.cs",
