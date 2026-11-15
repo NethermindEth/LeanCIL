@@ -266,8 +266,8 @@ def argumentAccessIn (body index : Expr) : SimpM (Option (Expr × Expr)) := do
   return some (← whnfR (← instantiateMVars access.expr), ← access.getProof)
 
 open Lean Meta in
-/-- The step an argument instruction takes by `equation`, whose right side is the result. -/
-def argumentStep (equation : Expr) : SimpM Simp.Step := do
+/-- The step an instruction takes by `equation`, whose right side is the result. -/
+def equationStep (equation : Expr) : SimpM Simp.Step := do
   let some (_, _, stepped) := (← inferType equation).eq? | return .continue
   return .visit { expr := stepped, proof? := some equation }
 
@@ -292,7 +292,7 @@ simproc [cil_step] reduceArgumentLoad (step _ (.ldarg _) _ _ _ _ _) := fun expre
     | (``CIL.ArgumentAccess.home, #[slot]) =>
       pure (some (mkAppN (mkConst ``step_ldarg_home_eq) (leading ++ #[slot, proof])))
     | _ => pure none
-  argumentStep (known?.getD (mkAppN (mkConst ``step_ldarg_eq) leading))
+  equationStep (known?.getD (mkAppN (mkConst ``step_ldarg_eq) leading))
 
 open Lean Meta in
 /-- An argument store steps as `stloc` of the argument's home, or faults without one, as
@@ -310,7 +310,7 @@ simproc [cil_step] reduceArgumentStore (step _ (.starg _) _ _ _ (_ :: _) _) := f
     | (``CIL.ArgumentAccess.home, #[slot]) =>
       some (mkAppN (mkConst ``step_starg_home_eq) (leading ++ #[slot, proof]))
     | _ => none
-  argumentStep (known?.getD (mkAppN (mkConst ``step_starg_eq) leading))
+  equationStep (known?.getD (mkAppN (mkConst ``step_starg_eq) leading))
 
 open Lean Meta in
 /-- An argument address steps as `ldloca` of the argument's home, or faults without one, as
@@ -328,6 +328,6 @@ simproc [cil_step] reduceArgumentAddress (step _ (.ldarga _) _ _ _ _ _) := fun e
     | (``CIL.ArgumentAccess.home, #[slot]) =>
       some (mkAppN (mkConst ``step_ldarga_home_eq) (leading ++ #[slot, proof]))
     | _ => none
-  argumentStep (known?.getD (mkAppN (mkConst ``step_ldarga_eq) leading))
+  equationStep (known?.getD (mkAppN (mkConst ``step_ldarga_eq) leading))
 
 end CIL.Safety

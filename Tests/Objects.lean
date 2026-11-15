@@ -292,6 +292,43 @@ theorem narrow_field_loads_extend_by_sign {memory : CIL.Safety.Memory} {object :
       Except.pure] <;> rfl
 #print axioms narrow_field_loads_extend_by_sign
 
+/-! ## Class field steps by shape -/
+
+/-- The layouts of the class field steps; a class slot reads none. -/
+@[cil_code] def accounts : LayoutEnvironment := {}
+
+/-- `Account.balance`, the `int64` field 1, in the slot at model offset 8. -/
+def balanceField : Extraction.FieldRef :=
+  { owner := account.identity, index := 1, type := .atom Extraction.runtimeScope "System.Int64",
+    name := name!"balance" }
+
+cil_field_shape accounts balanceField
+
+/-- `ldfld` of the balance of argument 0. -/
+@[cil_code] def balanceReading : CIL.Method :=
+  { returnsValue := true, locals := [], environment := accounts,
+    code := [.ldarg 0, .ldfld balanceField, .ret] }
+
+/-- Stepping a class field load resolves its slot from the field's shape fact and shows the
+    owner as the operand writes it, so a fact stated over `account.identity` matches. -/
+theorem balance_load_shows_owner (memory : CIL.Safety.Memory) (receiver : ManagedReference)
+    (frame : Frame) :
+    step balanceReading (.ldfld balanceField) 1 [] frame [.object receiver] memory = do
+      let address ← objectFieldAddress memory receiver account.identity 8
+      let value ← loadValue memory (.address address) 8 false
+      return .next 2 [.scalar value] frame memory := by
+  simp only [cil_step, Nat.reduceAdd]
+#print axioms balance_load_shows_owner
+
+/-- A class field load steps to the value its located slot holds. -/
+theorem balance_load_steps (memory : CIL.Safety.Memory) (object field : Reference) (frame : Frame)
+    (located : objectFieldAddress memory (.address object) account.identity 8 = .ok field)
+    (loaded : loadValue memory (.address field) 8 false = .ok (.i64 7)) :
+    step balanceReading (.ldfld balanceField) 1 [] frame [.object (.address object)] memory =
+      .ok (.next 2 [.scalar (.i64 7)] frame memory) := by
+  cil_checked_step [located, loaded]
+#print axioms balance_load_steps
+
 /-- The return check forms an object the method created, or any other object its frame does
     not own, in memory after the frame is left. -/
 theorem unowned_object_returns (memory : CIL.Safety.Memory) (object : Reference) (frame : Frame)

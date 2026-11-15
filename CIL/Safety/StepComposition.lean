@@ -212,7 +212,9 @@ theorem step_ldarga_value_eq (index : Nat) (stack : List Value) (narrow : Option
 
 #print axioms step_localloc_eq
 
-/-- `ldfld` reads the field as the body resolves it, behind the unspecified-bits guard. -/
+/-- `ldfld` reads the field as the body resolves it, behind the unspecified-bits guard.
+    Stepping uses this form only while the field's shape is unknown, and the equations of
+    `ObjectSteps` once it is known. -/
 theorem step_ldfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
     step body (.ldfld field) pc args frame stack memory =
       if unspecifiedOperands 1 stack then
@@ -225,7 +227,8 @@ theorem step_ldfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
 
 #print axioms step_ldfld_eq
 
-/-- `stfld` writes the field as the body resolves it, behind the unspecified-bits guard. -/
+/-- `stfld` writes the field as the body resolves it, behind the unspecified-bits guard.
+    Stepping uses this form only while the field's shape is unknown. -/
 theorem step_stfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
     step body (.stfld field) pc args frame stack memory =
       if unspecifiedOperands 2 stack then
@@ -238,7 +241,8 @@ theorem step_stfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
 
 #print axioms step_stfld_eq
 
-/-- `ldflda` faults as the body's resolution of the field says, behind the guard. -/
+/-- `ldflda` faults as the body's resolution of the field says, behind the guard. Stepping
+    uses this form only while the field's shape is unknown. -/
 theorem step_ldflda_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
     step body (.ldflda field) pc args frame stack memory =
       if unspecifiedOperands 1 stack then
@@ -248,6 +252,8 @@ theorem step_ldflda_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
   rfl
 
 #print axioms step_ldflda_eq
+
+attribute [cil_step] fieldLoad fieldStore fieldAddressFault
 
 attribute [cil_step] localAllocation
 
@@ -268,7 +274,7 @@ attribute [cil_step] localAllocation
         let arguments ← (values.take count).reverse.mapM (checkedValue memory)
         if tail then return .tailCall method arguments memory
         else return .call method arguments (values.drop count) memory := by
-  simp only [step, observerCount, Bool.or_false, managedStep]
+  simp only [step, observerCount, managedStep]
   rfl
 
 #print axioms step_managed_call_eq
