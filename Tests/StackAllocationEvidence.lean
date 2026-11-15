@@ -1,5 +1,6 @@
 import CIL.Extraction.Scalars
 import CIL.Extraction.Translation
+import CIL.Safety.Execution
 
 /-! # Independent certificate rejection of forged stack allocation metadata -/
 
@@ -27,6 +28,27 @@ theorem forged_initialization_rejected :
     ¬ DeclaredValid raw
       { emitted with declared := { emitted.declared with initLocals := true } } := by decide
 #print axioms forged_initialization_rejected
+
+/-- Empty memory with a stack budget, for stepping `emitted`. -/
+private def memory : CIL.Safety.Memory := {
+  allocations := fun _ => none
+  cells := fun _ _ => ⟨0, false⟩
+  views := []
+  nextIdentity := 0
+  stackLimit := 32 }
+
+/-- A frame with no locals or owned storage. -/
+private def frame : CIL.Safety.Frame := { activation := 0, locals := [], owned := [] }
+
+/-- `localloc` faults unless the byte count is the only stack item: a size with another item
+    below it and an empty stack both fault before allocating. -/
+theorem malformed_stack_faults :
+    CIL.Safety.step emitted .localloc 0 [] frame
+        ([.scalar (.i32 1), .scalar (.i32 4)] : List CIL.Safety.Value) memory =
+      .error .invalidState ∧
+    CIL.Safety.step emitted .localloc 0 [] frame [] memory = .error .invalidState := by
+  constructor <;> rfl
+#print axioms malformed_stack_faults
 
 /-- The raw opcode admits the emitted `localloc`. -/
 theorem allocation_matches_opcode :
