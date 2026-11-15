@@ -67,7 +67,7 @@ def load : RawInstruction :=
 
 /-- The field `load` names. -/
 def loaded : FieldRef :=
-  { owner := .void, index := 0, type := .atom runtimeScope "System.Byte", name := name!"Field" }
+  { owner := .void, index := 0, type := .atom runtimeScope "System.Byte", name := name!"Value" }
 
 /-- An emitted scalar load with caller-provided static metadata. -/
 def body (sites : List (Nat × StaticDescriptor)) : Method := {
