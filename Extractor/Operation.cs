@@ -190,31 +190,33 @@ internal sealed record Ldarga(int Index) : Operation
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
 internal sealed record Local(int Index) : Operation
 {
-    /// <summary>The argument homed in this slot when the body loads it by argument, as diagnostics name it.</summary>
-    internal int? Argument { get; init; }
+    /// <summary>The load of the argument homed in this slot when the body names the argument, as diagnostics show it.
+    /// </summary>
+    internal Arg? Argument { get; init; }
 
     internal override string Render(Func<int, string> calleeName) =>
-        Argument is { } argument ? $".ldarg {argument}" : $".ldloc {Index}";
+        Argument?.Render(calleeName) ?? $".ldloc {Index}";
 }
 
 /// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
 internal sealed record SetLocal(int Index) : Operation
 {
-    /// <summary>The argument homed in this slot when the body stores it by argument, as diagnostics name it.</summary>
-    internal int? Argument { get; init; }
+    /// <summary>The store to the argument homed in this slot when the body names the argument, as diagnostics show it.
+    /// </summary>
+    internal Starg? Argument { get; init; }
 
     internal override string Render(Func<int, string> calleeName) =>
-        Argument is { } argument ? $".starg {argument}" : $".stloc {Index}";
+        Argument?.Render(calleeName) ?? $".stloc {Index}";
 }
 
 internal sealed record LocalAddress(int Index) : Operation
 {
-    /// <summary>The argument homed in this slot when the body addresses it by argument, as diagnostics name it.
-    /// </summary>
-    internal int? Argument { get; init; }
+    /// <summary>The address of the argument homed in this slot when the body names the argument, as diagnostics show
+    /// it.</summary>
+    internal Ldarga? Argument { get; init; }
 
     internal override string Render(Func<int, string> calleeName) =>
-        Argument is { } argument ? $".ldarga {argument}" : $".ldloca {Index}";
+        Argument?.Render(calleeName) ?? $".ldloca {Index}";
 }
 
 /// <summary>
