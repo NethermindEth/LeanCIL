@@ -37,11 +37,7 @@ def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     let .field (.aggregate parent) ← typeStorage layouts owner | none
     let metadata ← layouts[parent]?
     let field ← metadata.fields[index]?
-    let storage := match field.type with
-      | .vector128 => StorageType.vector128
-      | .vector256 => StorageType.vector256
-      | kind => .field kind
-    if typeStorage layouts type != some storage then none else
+    if typeStorage layouts type != some (declaredFieldStorage field.type) then none else
       return [.field pc parent index (if instruction.opcode = 0x7b then .load
         else if instruction.opcode = 0x7c then .address else .store)]
   -- `ldobj`, `stobj`, `initobj`, `cpobj` and `sizeof` of a struct.

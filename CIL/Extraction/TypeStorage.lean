@@ -132,6 +132,13 @@ def callableLayoutsValid (layouts : List RawLayout) : TypeExpr → Bool
     callableLayoutsValid layouts head && callableLayoutsValid layouts tail
   | _ => true
 
+/-- The storage a struct field's declared type must decode to: vector fields to vector storage,
+    every other field kind to a field of that kind. -/
+def declaredFieldStorage : FieldType → StorageType
+  | .vector128 => .vector128
+  | .vector256 => .vector256
+  | kind => .field kind
+
 /-- Decode storage independently from the exact metadata type identity. -/
 def typeStorage (layouts : List RawLayout) : TypeExpr → Option StorageType
   | .atom scope name => if scope = runtimeScope then .field <$> primitiveField name else none
