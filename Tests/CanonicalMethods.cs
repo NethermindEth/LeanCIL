@@ -19,7 +19,8 @@ var update = args switch { [] => false, ["--update"] => true, _ => throw new Arg
 var listPath = At("Tests/canonical-methods.txt");
 var reportPath = At("artifacts/SelfAdmission/blockers.json");
 if (!File.Exists(reportPath))
-    throw new InvalidOperationException($"Missing {reportPath}; run `dotnet run --file Tests/SelfAdmission.cs` first.");
+    throw new InvalidOperationException(
+        $"Missing {reportPath}; run `dotnet run --file Tests/SelfAdmission.cs` first.");
 using var document = JsonDocument.Parse(File.ReadAllText(reportPath));
 var root = document.RootElement;
 // A report from another extractor describes another emission.

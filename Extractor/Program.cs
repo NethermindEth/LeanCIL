@@ -481,7 +481,8 @@ internal static partial class Program
                 report.WriteLine($"  Unknown static value: {name} is not computed; " +
                     "loads read the caller's static binding.");
             checkedTemplate?.Invoke(new(output, assemblyHash, profile, emitted.Templates));
-            decoded?.Invoke([.. methods.Where((_, index) => emitted.Decoded[index]).Select(method => method.FullName)]);
+            decoded?.Invoke(
+                [.. methods.Where((_, index) => emitted.Decoded[index]).Select(method => method.FullName)]);
             if (args[0] == "check" && !refresh)
                 inspect?.Invoke(new(methods, emitted.Templates, emitted.Views,
                     profile.Architecture, emitted.Layouts));
