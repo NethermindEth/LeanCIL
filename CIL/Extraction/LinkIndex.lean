@@ -441,7 +441,8 @@ theorem all3_reads_iff {α β : Type} (check : α → β → Option Link → Ins
       (all3 (fun first (second, link) op => check first second link op) raw
           (states.zip ((List.range' start code.length).map reads)) code = true ↔
         (List.range' start code.length).map reads = code.map Instruction.link? ∧
-          all3 (fun first second op => check first second op.link? op) raw states code = true) := by
+          all3 (fun first second op => check first second op.link? op) raw states code = true) :=
+    by
   induction raw generalizing start with
   | nil =>
     intro states code statesLength codeLength

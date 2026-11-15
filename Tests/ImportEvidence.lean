@@ -88,14 +88,14 @@ example : ¬ ManagedCallsValid methods [{ slot with identity := "forged" }] call
 example : ¬ ManagedCallsValid methods [] caller [true, true, true, true, true] emitted := by decide +kernel
 example : ManagedCallsValid methods [] caller [true, true, true, false, true] emitted := by decide +kernel
 
-/-- `caller` with a second call to the slot, at pc 7. -/
-def callerTwice : RawMethod := { callee with code := [⟨0, 2, .none⟩, ⟨1, 3, .none⟩,
-  ⟨2, 4, .none⟩, ⟨3, 40, .call site⟩, ⟨8, 2, .none⟩, ⟨9, 3, .none⟩, ⟨10, 4, .none⟩,
+/-- Two calls to the slot, at pcs 3 and 7, among nops. -/
+def callerTwice : RawMethod := { callee with code := [⟨0, 0, .none⟩, ⟨1, 0, .none⟩,
+  ⟨2, 0, .none⟩, ⟨3, 40, .call site⟩, ⟨8, 0, .none⟩, ⟨9, 0, .none⟩, ⟨10, 0, .none⟩,
   ⟨11, 40, .call site⟩, ⟨16, 42, .none⟩] }
 /-- The emitted body of `callerTwice`, whose default table is the one its code implies. -/
 def emittedTwice : Method := {
   returnsValue := false, locals := [],
-  code := [.arg 0, .arg 1, .arg 2, .call 1 3, .arg 0, .arg 1, .arg 2, .call 1 3, .ret] }
+  code := [.nop, .nop, .nop, .call 1 3, .nop, .nop, .nop, .call 1 3, .ret] }
 /-- Every pc of `callerTwice` is live. -/
 def liveTwice : List Bool := List.replicate 9 true
 /-- `emittedTwice` with the link table `links`. -/
