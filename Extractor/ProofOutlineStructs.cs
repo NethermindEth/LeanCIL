@@ -84,10 +84,9 @@ internal static partial class ProofOutline
                 var parameter = spec.Parameters[argument.Index];
                 if (parameter.Shape == ParameterShape.StructReference) stack.Push(Receiver);
                 else if (parameter.Shape == ParameterShape.Scalar) stack.Push(parameter.Name);
-                else if (parameter.Shape == ParameterShape.Narrow)
-                    stack.Push($"({parameter.Name}.{(parameter.Signed ? "signExtend" : "setWidth")} 32)");
                 else return Stop($"the argument `{parameter.Name}`", pc);
             }
+            else if (op is Arg narrow) return Stop($"the narrow argument `{spec.Parameters[narrow.Index].Name}`", pc);
             else if (StructLiteral(op) is { } literal) stack.Push(literal.Term);
             else if (SizedConversion(op) is { } conversion)
             {

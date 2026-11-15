@@ -137,7 +137,9 @@ internal static partial class ProofOutline
         var spanStore = loops.Count == 0 ? SpanStores(extraction, 0) : null;
         if (loops.Count == 0 && spanStore is null && parameters.Any(parameter => parameter.Writable))
             throw Unsupported($"{method.FullName} writes a span outside a loop other than by storing its value " +
-                "into `target[0]`; new-proof follows a span written from the front by a loop or that one store");
+                "into `target[0]`; new-proof follows a span written from the front by a loop or that one store" +
+                (parameters.FirstOrDefault(parameter => parameter.Shape == ParameterShape.Narrow) is { } narrow
+                    ? $", of a word argument where `{narrow.Name}` is a narrow integer" : ""));
         if (spanStore is { } store)
             source = SpanStoreLine(spec, store.Op, lean);
         else if (structReceiver && loops.Count > 0)

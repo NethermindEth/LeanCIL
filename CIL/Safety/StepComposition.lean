@@ -39,6 +39,8 @@ theorem step_ldarg_eq (index : Nat) (stack : List Value) :
         frame memory :=
   id rfl
 
+#print axioms step_ldarg_eq
+
 attribute [cil_step] loadArgument
 
 /-- An argument read without a home or narrowing pushes the checked incoming value. -/

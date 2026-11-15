@@ -286,6 +286,8 @@ theorem step_relabel_ldarg (index : Nat) : StepRelabel (.ldarg index) := by
     simp only [loadArgument, context.arguments]]
   lockstep
 
+#print axioms step_relabel_ldarg
+
 /-- An argument store writes the home `Method.argumentAccess` gives, which both methods share. -/
 theorem step_relabel_starg (index : Nat) : StepRelabel (.starg index) := by
   stack_cases =>
@@ -296,6 +298,7 @@ theorem step_relabel_starg (index : Nat) : StepRelabel (.starg index) := by
         intro value
         simp only [storeArgument, context.arguments]]
        lockstep)
+#print axioms step_relabel_starg
 
 /-- An argument address is the home `Method.argumentAccess` gives, which both methods share. -/
 theorem step_relabel_ldarga (index : Nat) : StepRelabel (.ldarga index) := by
@@ -303,6 +306,7 @@ theorem step_relabel_ldarga (index : Nat) : StepRelabel (.ldarga index) := by
   rw [show addressArgument actual index frame m = addressArgument expected index frame m by
     simp only [addressArgument, context.arguments]]
   lockstep
+#print axioms step_relabel_ldarga
 
 theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases

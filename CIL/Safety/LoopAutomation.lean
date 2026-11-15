@@ -286,8 +286,9 @@ def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex Meta
     unless name == ``CIL.Instruction.ldarg do return true
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
-    let some (access, _) ← ResolutionFacts.resolvedArgumentAccess? body indexTerm | return true
-    unless access.isAppOf ``CIL.ArgumentAccess.value do return true
+    let some access ← ResolutionFacts.argumentAccessProof? body indexTerm | return true
+    let some (_, _, access) := (← inferType access).eq? | return true
+    unless (← whnfD access).isAppOf ``CIL.ArgumentAccess.value do return true
     let entries ← listEntries args
     let some (_, value) := entries.find? (·.1 == index) | return true
     return !(← scalar value)

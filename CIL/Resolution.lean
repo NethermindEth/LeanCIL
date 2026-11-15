@@ -422,7 +422,7 @@ private theorem length_of_mapM {α β : Type} {inputs : List α} {outputs : List
 #print axioms length_of_mapM
 
 /-- Searching the expected homes for an argument searches the required home indices. -/
-private theorem homeKeys_findIdx? {layouts : Array ComputedLayout} {raw : RawArguments}
+theorem homeKeys_findIdx? {layouts : Array ComputedLayout} {raw : RawArguments}
     {reachable : List Bool} {homes : List (Nat × LocalKind)} {index : Nat}
     (expected : expectedHomes layouts raw reachable = some homes) :
     homes.findIdx? (fun home => home.1 == index) =
