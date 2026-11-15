@@ -82,6 +82,9 @@ name = "Tests.FieldRef"
 name = "Tests.FieldShape"
 
 [[lean_lib]]
+name = "Tests.RuntimeModels"
+
+[[lean_lib]]
 name = "Tests.ReturnOpcode"
 
 [[lean_lib]]

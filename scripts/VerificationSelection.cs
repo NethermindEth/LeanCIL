@@ -131,7 +131,7 @@ internal static class VerificationSelection
             "Tests/ReturnMetadataBinding.lean", "Tests/ReferenceArrays.lean", "Tests/ArrayFields.lean",
             "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",
             "Tests/Crypto.lean", "Tests/MetadataAssemblies.lean", "Tests/PinnedIndexScaling.lean",
-            "Tests/FieldRef.lean", "Tests/FieldShape.lean"
+            "Tests/FieldRef.lean", "Tests/FieldShape.lean", "Tests/RuntimeModels.lean"
         };
         inputs["core"].UnionWith(new[] { "Add", "AddModel", "DecodedAdd", "Choose", "Calls", "Alias", "Struct",
             "StructCopy", "LargeStruct", "PastEnd", "WrongAdd", "Escape", "Hardware", "StaticData" }

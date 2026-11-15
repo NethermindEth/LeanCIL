@@ -279,7 +279,7 @@ macro "fixed_fallback" : tactic => `(tactic| (
 set_option hygiene false in
 /-- Compose fixed-map primitives after selecting one checked dispatcher family. -/
 macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
-  unfold CIL.Safety.step at observable ⊢
+  unfold CIL.Safety.step intrinsicCall referenceCompareCall referenceSubtractCall at observable ⊢
   change SuccessOrThrow (if unspecifiedOperands (observerCount operation) stack then _ else _)
     at observable
   change ResultRenamed mapping _

@@ -57,9 +57,6 @@ theorem staticInstruction_congr {expected actual : CIL.Method} {pc q : Nat}
     simp only [staticInstruction]
     cases h1 : actual.staticSites.find? (fun site => site.1 == q) <;>
       cases h2 : expected.staticSites.find? (fun site => site.1 == pc) <;> simp_all
-  case spanCreate | createSpan =>
-    unfold staticInstruction
-    split <;> first | contradiction | rfl
   all_goals unfold staticInstruction; rfl
 
 /-- The shared tail of `step` for instructions without a dedicated case. -/
@@ -199,7 +196,7 @@ set_option hygiene false in
 /-- Introduces a `StepRelabel` or `StepRaise` goal, unfolds both steps and clears the guard. -/
 macro "explicit_intro" : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
-  unfold step at h ⊢
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers))
 
@@ -214,7 +211,7 @@ set_option hygiene false in
     before examining the second operand. -/
 local macro "stack_cases" " => " close:tacticSeq : tactic => `(tactic| (
   intro expected actual r pc q args frame stack m action context h
-  unfold step at h ⊢
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at h ⊢
   dsimp only [CIL.Instruction.relabel] at h ⊢
   step_observers
   rcases stack with _ | ⟨v1, rest⟩ <;> (try cases v1)
