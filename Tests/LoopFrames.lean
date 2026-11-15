@@ -190,7 +190,7 @@ namespace Extracted
 /-- `while (remaining != 0) remaining--; return remaining;` with `remaining` in a frame home. -/
 @[cil_code] def method0 : CIL.Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true
-  code := [.arg 0, .stloc 0, .ldloc 0, .brtrue 6, .ldloc 0, .ret, .ldloc 0, .ldc_i4 1,
+  code := [.ldarg 0, .stloc 0, .ldloc 0, .brtrue 6, .ldloc 0, .ret, .ldloc 0, .ldc_i4 1,
     .sub, .stloc 0, .br 2] }
 
 /-- The extracted program. -/

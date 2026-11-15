@@ -31,7 +31,7 @@ theorem argument_bounds :
 theorem pruned_argument :
     argumentInstructionsValid ⟨[], [], [.load 99]⟩ []
       [false] [.unsupported "dead"] = true ∧
-    argumentInstructionsValid ⟨[], [], [.load 99]⟩ [] [false] [.arg 99] = false := by
+    argumentInstructionsValid ⟨[], [], [.load 99]⟩ [] [false] [.ldarg 99] = false := by
   decide +kernel
 #print axioms pruned_argument
 /-- A minimal raw body for metadata-only validation. -/

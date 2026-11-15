@@ -93,7 +93,7 @@ theorem Memory.Renamed.stepStackAlloc {indices : LocalIndexMap} {mapping : Alloc
         (step sourceBody (.stackAlloc initLocals) pc arguments sourceFrame stack source)
         (step targetBody (.stackAlloc initLocals) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, Bool.or_false, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step, mapping.unspecifiedOperands] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -156,7 +156,7 @@ theorem Memory.Renamed.stepNewArray {indices : LocalIndexMap} {mapping : Allocat
         (step sourceBody (.newArray element) pc arguments sourceFrame stack source)
         (step targetBody (.newArray element) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, Bool.or_false, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step, mapping.unspecifiedOperands] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard
@@ -231,7 +231,7 @@ theorem Memory.Renamed.stepNewObject {indices : LocalIndexMap} {mapping : Alloca
           source)
         (step targetBody (.newObject callee argc owner bases size) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, Bool.or_false, List.length_map,
+  simp only [step, mapping.unspecifiedOperands, List.length_map,
     ← List.map_take, ← List.map_drop, ← List.map_reverse] at observable ⊢
   by_cases guard :
       unspecifiedOperands (observerCount (.newObject callee argc owner bases size)) stack = true
@@ -302,7 +302,7 @@ theorem Memory.Renamed.stepNewReferenceArray {indices : LocalIndexMap}
         (step sourceBody (.newReferenceArray element) pc arguments sourceFrame stack source)
         (step targetBody (.newReferenceArray element) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, Bool.or_false, mapping.unspecifiedOperands] at observable ⊢
+  simp only [step, mapping.unspecifiedOperands] at observable ⊢
   split at observable
   · cases observable
   · rename_i guard

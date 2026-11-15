@@ -658,7 +658,8 @@ def instanceSignature (owner name : List Nat) (constructor : Bool) (arity : Nat)
     ties to the extractor's strings. A generic instance names its type arguments in
     `instantiation`, which must be the types `arguments` name. The row's relative virtual
     address, which the extractor zeroes in the rows it carries, and its parameter list are not
-    read: where a body sits in the image is the strict audit's to confirm. -/
+    read: where a body sits in the image is the strict audit's to confirm. A modified return or
+    parameter is refused, except an `init` accessor's void and an `in` reference. -/
 def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
     (instantiation : List ResolvedType) (arguments : List TypeExpr) :
     Except MetadataError MethodNames := do
@@ -690,6 +691,9 @@ def methodIdentityValid (env : MetadataEnv) (method : RawMethod)
   let normalizedReturn := declaredReturn returned
   if hasModifier resolveFuel normalizedReturn then throw (.methodMismatch method.token)
   let parameters ← env.resolveAll 0 signature.parameters
+  -- An argument read narrows by the declared type, so no parameter may hide a modifier in an atom.
+  if parameters.any (hasModifier resolveFuel ∘ declaredParameter) then
+    throw (.methodMismatch method.token)
   if !(frame.admits normalizedReturn method.returnType) ||
       parameters.length != method.parameters.length ||
       !(parameters.zip method.parameters).all

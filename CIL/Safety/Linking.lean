@@ -243,15 +243,18 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
     case managed operation =>
       cases operation <;> simp only [CIL.Instruction.callees, reduceCtorEq] at hc
       case call signature catalog tail =>
-        simp only [step, CIL.Instruction.relocate, observerCount, Bool.or_false]
-        split
-        · rfl
-        · exact managedStep_relocate f signature catalog tail pc frame stack m
+        simp only [step, CIL.Instruction.relocate, observerCount]
+        by_cases unknown : unspecifiedOperands (signature.parameters.length + 1) stack = true
+        · simp only [unknown, ite_true]
+          rfl
+        · simp only [unknown, Bool.false_eq_true, ite_false]
+          exact managedStep_relocate f signature catalog tail pc frame stack m
     case callVirtual targets argc =>
-      simp only [step, CIL.Instruction.relocate, observerCount, Bool.or_false,
-        virtualTarget_relocate]
-      split
-      · rfl
+      simp only [step, CIL.Instruction.relocate, observerCount, virtualTarget_relocate]
+      by_cases unknown : unspecifiedOperands argc stack = true
+      · simp only [unknown, ite_true]
+        rfl
+      simp only [unknown, Bool.false_eq_true, ite_false]
       split
       · rfl
       cases (stack.take argc).reverse.mapM (checkedValue m) with
@@ -263,10 +266,10 @@ theorem step_relocate (f : Nat → Nat) (body : CIL.Method) (op : CIL.Instructio
           cases virtualTarget m targets receiver <;> rfl
         all_goals rfl
     all_goals
+      simp only [CIL.Instruction.relocate]
       unfold step
-      simp only [CIL.Instruction.relocate, observerCount, Bool.or_false,
-        Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map]
-      repeat' (split <;> simp_all [FrameAction.relocate])
+      simp only [Bind.bind, Except.bind, Pure.pure, Except.pure, Except.map]
+      repeat' (split <;> simp_all [FrameAction.relocate, observerCount])
     all_goals
       split <;> try rfl
       split <;> rfl

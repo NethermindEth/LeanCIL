@@ -11,8 +11,12 @@ def method1Signature : String := "System.UInt64 Examples.Identity::Left(System.U
 def method2Signature : String := "System.UInt64 Examples.Identity::Right(System.UInt64,System.UInt64)"
 def method3Signature : String := "System.UInt64 Examples.Overloads::Pick(System.UInt64)"
 def method4Signature : String := "System.UInt32 Examples.Overloads::Pick(System.UInt32)"
-def helper (marker : Nat) : Method := { code := [.arg 0, .arg 1, .ldc_i8 (BitVec.ofNat 64 marker), .ret], locals := [], returnsValue := true }
-def method0 : Method := { code := [.arg 0, .arg 0, .call 2 2, .arg 0, .call 1 2, .ret], locals := [], returnsValue := true }
+def helper (marker : Nat) : Method :=
+  { code := [.ldarg 0, .ldarg 1, .ldc_i8 (BitVec.ofNat 64 marker), .ret], locals := [],
+    returnsValue := true }
+def method0 : Method :=
+  { code := [.ldarg 0, .ldarg 0, .call 2 2, .ldarg 0, .call 1 2, .ret], locals := [],
+    returnsValue := true }
 def method1 : Method := helper 1
 def method2 : Method := helper 2
 def method3 : Method := helper 3
@@ -244,7 +248,8 @@ end BatchCase0
 namespace ImportCase.Extracted
 
 def method0Signature : String := "System.Void Examples.Imports::Root(System.UInt64&,System.UInt64&)"
-def method0 : CIL.Method := { code := [.arg 0, .arg 1, .arg 0, .call 1 3, .ret], locals := [], returnsValue := false }
+def method0 : CIL.Method :=
+  { code := [.ldarg 0, .ldarg 1, .ldarg 0, .call 1 3, .ret], locals := [], returnsValue := false }
 def program : CIL.Program := [method0]
 def signatures : List String := [method0Signature]
 def importSignatures : List String := ["System.Void Library.Adder::AddTo(System.UInt64&,System.UInt64&,System.UInt64&)"]

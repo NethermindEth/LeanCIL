@@ -16,6 +16,7 @@ const double TimeGrowthLimit = 2.0;
 const int Repetitions = 3;
 const int LocalCount = 8;
 const int HypothesisBodyCycles = 30;
+const string Int32Type = ".atom CIL.Extraction.runtimeScope \"System.Int32\"";
 var localSlots = string.Join(", ", Enumerable.Repeat(".root (some target)", LocalCount));
 
 ScalingChecks();
@@ -56,7 +57,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
-    ("faulting", [16, 64], false)
+    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -99,7 +100,7 @@ foreach (var workload in rows.GroupBy(row => row.Workload))
         continue;
     }
     for (var index = 1; index < measurements.Length; index++)
-        CheckGrowth(measurements[index - 1], measurements[index]);
+        CheckGrowth(measurements[index - 1], measurements[index], workload.Key == "arguments");
 }
 Console.WriteLine("PASS stepping growth budgets for " +
     string.Join(", ", rows.Select(row => row.Workload).Distinct()) + "; results: " + reportPath);
@@ -110,18 +111,21 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // into each of eight reference locals per cycle. The table body offsets a native method table by a
 // symbolic int32 and pops the selected cursor. The hypotheses body is an accumulate body of fixed
 // length. The faulting body divides, takes a remainder, adds with an overflow check and converts
-// with one, each from the arguments, so each step reads a fact of constant size.
+// with one, each from the arguments, so each step reads a fact of constant size. The arguments body
+// declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
-    "memory" => ([], [".arg 0", ".arg 1", ".store64", ".arg 0", ".load64", ".pop"], [".arg 0", ".load64", ".ret"]),
-    "reference" or "table" => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"]),
-    "accumulate" or "contract" or "hypotheses" or "lemma" or "outcome" => ([".arg 0"], [".arg 1", ".add"], [".ret"]),
-    "loop" or "loopfacts" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
-    "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".arg 0", $".stloc {slot}" })
+    "memory" => ([], [".ldarg 0", ".ldarg 1", ".store64", ".ldarg 0", ".load64", ".pop"],
+        [".ldarg 0", ".load64", ".ret"]),
+    "reference" or "table" => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"]),
+    "accumulate" or "contract" or "hypotheses" or "lemma" or "outcome" =>
+        ([".ldarg 0"], [".ldarg 1", ".add"], [".ret"]),
+    "loop" or "loopfacts" => ([".ldarg 0"], [".ldarg 1", ".add"], [".nop"]),
+    "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".ldarg 0", $".stloc {slot}" })
         .ToArray(), [".ldloc 0", ".ret"]),
-    "faulting" => ([], [".arg 0", ".arg 1", ".div", ".pop", ".arg 0", ".arg 1", ".rem", ".pop", ".arg 0", ".arg 1",
-        ".add_ovf", ".pop", ".arg 0", ".conv_ovf .i4", ".pop"], [".arg 0", ".ret"]),
-    _ => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"])
+    "faulting" => ([], [".ldarg 0", ".ldarg 1", ".div", ".pop", ".ldarg 0", ".ldarg 1", ".rem", ".pop",
+        ".ldarg 0", ".ldarg 1", ".add_ovf", ".pop", ".ldarg 0", ".conv_ovf .i4", ".pop"], [".ldarg 0", ".ret"]),
+    _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
 // The value a stack of `depth` copies of `right` adds up to, associated to the right as `.add` pops them.
@@ -133,12 +137,22 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var memory = workload == "memory";
     var depth = Math.Max(2, requested / 2);
     var (opening, cycle, ending) = Shape(workload);
+    var parameters = Math.Max(2, requested / 2);
     var cycles = workload == "hypotheses" ? HypothesisBodyCycles
         : workload == "depth" ? depth - 1
+        : workload == "arguments" ? parameters - 1
         : Math.Max(1, (requested - opening.Length - ending.Length) / cycle.Length);
-    var operations = workload == "depth"
-        ? Enumerable.Repeat(".arg 1", depth).Concat(Enumerable.Repeat(".add", depth - 1)).Append(".ret").ToArray()
-        : opening.Concat(Enumerable.Range(0, cycles).SelectMany(_ => cycle)).Concat(ending).ToArray();
+    var operations = workload switch
+    {
+        "depth" => Enumerable.Repeat(".ldarg 1", depth).Concat(Enumerable.Repeat(".add", depth - 1)).Append(".ret")
+            .ToArray(),
+        "arguments" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".ldarg {index}", ".add" })
+            .Prepend(".ldarg 0").Append(".ret").ToArray(),
+        _ => opening.Concat(Enumerable.Range(0, cycles).SelectMany(_ => cycle)).Concat(ending).ToArray()
+    };
+    var parameterTypes = string.Join(", ", Enumerable.Repeat(Int32Type, parameters));
+    var signature = $"{{ parameters := [{parameterTypes}], returnType := {Int32Type} }}";
+    var declaredField = workload == "arguments" ? $" declared := {signature}," : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
@@ -155,10 +169,17 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         set_option maxHeartbeats 800000
         /-- A synthetic body in the emitter's explicit instruction-list shape. -/
         def body : CIL.Method := {
-          locals := [], returnsValue := true,
+          locals := [], returnsValue := true,{{declaredField}}
           code := [{{string.Join(",\n    ", operations)}}] }
         cil_instruction_equations body
-        """ + "\n";
+        """ + "\n" + (workload == "arguments" ? $$"""
+        theorem body_returnsValue : body.returnsValue = true := rfl
+        theorem body_declared : body.declared = {{signature}} := rfl
+        cil_resolution_facts body
+        """ + "\n" : "");
+    var incoming = string.Join(", ",
+        Enumerable.Range(0, parameters).Select(index => $".scalar (.i32 (argument {index}))"));
+    var sum = string.Join(" + ", Enumerable.Range(0, parameters).Select(index => $"argument {index}"));
     var statement = workload switch
     {
         "reference" => $$"""
@@ -277,6 +298,13 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   .ok (memory, [.scalar (.i64 left)]) := by
               cil_checked_steps [divided, reduced, added, converted]
             """,
+        "arguments" => $$"""
+            /-- Each argument is read once and added to the running sum of the ones before it. -/
+            theorem checked (memory : Memory) (argument : Nat -> CIL.W32) :
+                invoke [body] {{operations.Length + 1}} 0 [{{incoming}}] memory =
+                  .ok (memory, [.scalar (.i32 ({{sum}}))]) := by
+              cil_checked_steps
+            """,
         "locals" => $$"""
             /-- Every cycle replaces all eight reference locals of a literal frame. -/
             theorem checked (memory : Memory) (target : ManagedReference) (activation : Nat)
@@ -354,12 +382,15 @@ static long Median(IEnumerable<long> values)
     return sorted[sorted.Length / 2];
 }
 
-static void CheckGrowth(SteppingMeasurement shorter, SteppingMeasurement longer)
+// A body whose argument count grows with its length may cost per instruction at most linearly in that
+// count, since each read indexes the argument list; any other body costs a bounded amount per instruction.
+static void CheckGrowth(SteppingMeasurement shorter, SteppingMeasurement longer, bool linearInArguments = false)
 {
+    var workBudget = linearInArguments ? (double)longer.Instructions / shorter.Instructions : WorkGrowthLimit;
     Check("frontend heartbeats", shorter.FrontendHeartbeatsPerInstruction,
-        longer.FrontendHeartbeatsPerInstruction, WorkGrowthLimit);
+        longer.FrontendHeartbeatsPerInstruction, workBudget);
     Check("kernel heartbeats", shorter.KernelHeartbeatsPerInstruction,
-        longer.KernelHeartbeatsPerInstruction, WorkGrowthLimit);
+        longer.KernelHeartbeatsPerInstruction, workBudget);
     // Proof bytes need the header-only module and milliseconds need repeated runs; a reduced
     // measurement has neither.
     if (shorter.Full && longer.Full)
@@ -413,6 +444,12 @@ static void ScalingChecks()
         catch (InvalidOperationException) { continue; }
         throw new InvalidOperationException("Scaling budget accepted a quadratic work mutant.");
     }
+    // Per-instruction work four times higher at four times the arguments is linear; sixteen times is not.
+    var reduced = baseline with { Full = false };
+    var linearInArguments = reduced with { Instructions = 64, KernelHeartbeats = 4 * 6400 };
+    CheckGrowth(reduced, linearInArguments, linearInArguments: true);
+    if (!Rejects(() => CheckGrowth(reduced, linearInArguments with { KernelHeartbeats = 16 * 6400 }, true)))
+        throw new InvalidOperationException("The argument budget accepted a per-instruction quadratic mutant.");
     var scanned = new[] { 16, 64, 256 }.Select(size => baseline with { Size = size,
         FrontendHeartbeats = 1_000_000 + 1000L * size }).ToArray();
     CheckMarginalGrowth(scanned);
@@ -425,6 +462,13 @@ static void ScalingChecks()
         return;
     }
     throw new InvalidOperationException("The hypothesis budget accepted a quadratic mutant.");
+}
+
+static bool Rejects(Action check)
+{
+    try { check(); }
+    catch (InvalidOperationException) { return true; }
+    return false;
 }
 
 internal sealed record CommandSample(string Label, long Heartbeats, long KernelHeartbeats,

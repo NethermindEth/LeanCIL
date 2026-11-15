@@ -148,7 +148,7 @@ theorem step_ret_returns {body : CIL.Method} {pc : Nat}
     (h : step body .ret pc args frame stack m = .ok action) :
     ∃ values m', action = .returned values m' := by
   unfold step at h
-  simp only [observerCount, Bool.or_false] at h
+  dsimp only at h
   split at h
   · cases h
   · unfold returnFrom at h
@@ -318,9 +318,11 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
               | rfl
               | (change Except.error (ExecutionFault.unsupported _) = _ at stepped; cases stepped)
           obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
+          have arguments := Method.argumentAccess_congr refined.parameterHomes
+            (congrArg List.length refined.localKinds) refined.declared refined.environment
           have actualStep := step_raise op body target (maps method) pc (maps method pc) args
             frame stack m exception ⟨refined.profile, refined.returnsValue, refined.declared,
-              refined.environment, statics, link, next⟩ stepped
+              refined.environment, arguments, statics, link, next⟩ stepped
           simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
           rfl
         | ok action =>
@@ -328,9 +330,11 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
           have live : op.live = true := by
             cases op <;> first | rfl | exact (step_unsupported stepped).elim
           obtain ⟨code, statics, link, next⟩ := refined.code pc op decoded live
+          have arguments := Method.argumentAccess_congr refined.parameterHomes
+            (congrArg List.length refined.localKinds) refined.declared refined.environment
           have actualStep := step_relabel op body target (maps method) pc (maps method pc) args
             frame stack m action ⟨refined.profile, refined.returnsValue, refined.declared,
-              refined.environment, statics, link, next⟩ stepped
+              refined.environment, arguments, statics, link, next⟩ stepped
           simp only [found, code, actualStep, Except.mapError, bind, Except.bind]
           cases action with
           | next target' stack' frame' m' =>
@@ -386,7 +390,7 @@ theorem run_outcome_refines {expected actual : CIL.Program} {maps : Nat → Nat 
               split at h
               · subst h; obtain ⟨_, thrown⟩ := transported; cases thrown
               · rename_i returns
-                simp only [returns, ↓reduceIte]
+                simp only [returns]
                 cases checked : arguments.mapM (checkedValue (leaveFrame frame m')) with
                 | error fault => simp only [checked] at h ⊢; subst h; rfl
                 | ok values =>

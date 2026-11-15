@@ -97,7 +97,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
       if stack.length < argc then Except.error ExecutionFault.invalidState else do
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false none pc [] values (fun _ => none) profile |
+          CIL.step op false none pc values (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue memory)
         pure (FrameAction.next target (result ++ stack.drop argc) (frame.appendLocals extra) memory)
@@ -110,7 +110,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
         if stack.length < argc then Except.error ExecutionFault.invalidState else do
           let values ← scalars (stack.take argc)
           let some (.next target result _) :=
-            CIL.step op false none pc [] values (fun _ => none) profile |
+            CIL.step op false none pc values (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
           let result ← (result.map Value.scalar).mapM (checkedValue memory)
           pure (FrameAction.next target (result ++ stack.drop argc) frame memory)
@@ -448,16 +448,35 @@ theorem step_appendLocals_setAggregateFieldAt (offset size : Nat) :
 
 #print axioms step_appendLocals_setAggregateFieldAt
 
-/-- `arg` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_arg (index : Nat) (narrow : Option NarrowKind) :
-    StepAppendLocals (.arg index narrow) := by
+/-- `ldarg` preserves outcomes under trailing local slots: a homed argument's slot precedes
+    them, and an argument value does not involve the frame. -/
+theorem step_appendLocals_ldarg (index : Nat) : StepAppendLocals (.ldarg index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
-  unfold step
-  frame_natural
+  have loaded : loadArgument body index args (frame.appendLocals extra) memory =
+      loadArgument body index args frame memory ∨
+      loadArgument body index args frame memory = .error .invalidState := by
+    unfold loadArgument
+    split
+    · rename_i slot _
+      cases found : frame.locals[slot]? with
+      | none => exact Or.inr rfl
+      | some home => exact Or.inl (by simp only [Frame.appendLocals_getElem? found])
+    all_goals exact Or.inl rfl
+  have unfolded : ∀ current : Frame, step body (.ldarg index) pc args current stack memory =
+      (do
+        let value ← loadArgument body index args current memory
+        return FrameAction.next (pc + 1) (value :: stack) current memory) := fun _ => rfl
+  revert kept
+  rw [unfolded, unfolded]
+  rcases loaded with same | missing
+  · rw [same]
+    intro
+    frame_natural
+  · rw [missing]
+    simp [StepKept, Functor.map, Except.map]
 
-#print axioms step_appendLocals_arg
+#print axioms step_appendLocals_ldarg
 
 /-- `ldloc` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_ldloc (index : Nat) : StepAppendLocals (.ldloc index) := by
@@ -1162,8 +1181,12 @@ theorem step_appendLocals_ret :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
   simp only [returnFrom]
+  by_cases unknown : unspecifiedOperands 1 stack = true
+  · simp only [unknown, ite_true]
+    rfl
+  simp only [unknown, Bool.false_eq_true, ite_false]
   repeat' first
     | rfl
     | (simp only [map_bind, map_pure, FrameAction.appendLocals]; done)
@@ -1267,8 +1290,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_aggregateFieldAt offset size
     case setAggregateFieldAt offset size =>
       exact step_appendLocals_setAggregateFieldAt offset size
-    case arg index narrow =>
-      exact step_appendLocals_arg index narrow
+    case ldarg index =>
+      exact step_appendLocals_ldarg index
     case ldloc index =>
       exact step_appendLocals_ldloc index
     case initializeSpanLocal index constructor =>

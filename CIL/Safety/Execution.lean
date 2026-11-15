@@ -192,14 +192,30 @@ def returnFrom (narrow : Option CIL.NarrowKind) (returnsValue : Bool) (stack : L
       return .returned (← stack.mapM (checkedValue memory)) memory
     else .error .invalidState
 
+/-- The value `ldarg index` pushes: a homed argument's frame slot, or the incoming argument
+    narrowed as its declared type requires. An incoming value with unspecified vector bits is
+    never narrowed. -/
+def loadArgument (body : CIL.Method) (index : Nat) (args : List Value) (frame : Frame)
+    (memory : Memory) : ExecutionResult Value :=
+  match body.argumentAccess index with
+  | .home slot => do
+    let some home := frame.locals[slot]? | .error .invalidState
+    loadLocal memory home
+  | .value none => do
+    let some value := args[index]? | .error .invalidState
+    checkedValue memory value
+  | .value (some kind) => do
+    let some value := args[index]? | .error .invalidState
+    if value.hasUnspecified then
+      .error (.unsupported "Instruction observes unspecified vector bits") else
+    let .scalar (.i32 bits) := value | .error .invalidState
+    checkedValue memory (.scalar (.i32 (kind.extend bits)))
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
-  let unknownArgument := match op with
-    | .arg index (some _) => (args[index]?.map Value.hasUnspecified).getD false
-    | _ => false
-  if unspecifiedOperands (observerCount op) stack || unknownArgument then
+  if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
   -- Faulting arithmetic is matched apart from the rest; the native table arms lead this match so
   -- that the match under its catch-all stays within the 79 alternatives `split` handles.
@@ -373,12 +389,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       let operands ← scalars (stack.take argc).reverse
       let value ← checkedIntrinsic operation operands
       return .next (pc + 1) ((← checkedValue m (.scalar value)) :: stack.drop argc) frame m
-  | .arg i none, _ =>
-    let some value := args[i]? | .error .invalidState
-    return .next (pc + 1) ((← checkedValue m value) :: stack) frame m
-  | .arg i (some kind), _ =>
-    let some (.scalar (.i32 bits)) := args[i]? | .error .invalidState
-    return .next (pc + 1) ((← checkedValue m (.scalar (.i32 (kind.extend bits)))) :: stack) frame m
+  | .ldarg index, _ =>
+    return .next (pc + 1) ((← loadArgument body index args frame m) :: stack) frame m
   | .ldloc i, _ =>
     let some slot := frame.locals[i]? | .error .invalidState
     return .next (pc + 1) ((← loadLocal m slot) :: stack) frame m
@@ -450,7 +462,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       if stack.length < argc then .error .invalidState else
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false none pc [] values (fun _ => none) body.profile
+          CIL.step op false none pc values (fun _ => none) body.profile
             | .error .invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue m)
         return .next target (result ++ stack.drop argc) frame m
