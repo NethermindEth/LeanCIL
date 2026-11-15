@@ -146,6 +146,11 @@ homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewe
 accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
 size.
 
+The suite also declares `cil_resolution_facts` for methods of 8, 32 and 128 static sites at even
+pcs and reads every site's `Method.staticAt` through the facts, under the same 1.35 limit per
+site. The facts cost about 5,500, 7,000 and 7,000 heartbeats per site, lower at 8 for the same
+reason, and the reads 22,100 to 23,500 heartbeats per site at every size.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the

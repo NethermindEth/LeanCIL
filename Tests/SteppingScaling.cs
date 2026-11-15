@@ -156,8 +156,9 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var signature = $"{{ parameters := [{parameterTypes}], returnType := {Int32Type} }}";
     var declaredField = workload == "arguments" ? $" declared := {signature}," : "";
     var staticField = workload == "statics"
-        ? "def staticField : CIL.Extraction.FieldRef := { owner := .atom \"Fixture\" \"Holder\", index := 0,\n" +
-            "  type := .atom \"Fixture\" \"System.Int32\", name := name!\"Value\" }\n"
+        ? "def staticField : CIL.Extraction.FieldRef :=\n" +
+            "  { owner := .atom \"Fixture\" \"Holder\", index := 0, type := .atom \"Fixture\" \"System.Int32\",\n" +
+            "    name := name!\"Value\" }\n"
         : "";
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
