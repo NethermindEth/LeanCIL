@@ -74,6 +74,16 @@ inductive AuditError where
   | unpinned (identity : String)
   /-- Two pinned images have the same identity. -/
   | duplicateImage (identity : String)
+  /-- The carried table stream header of the assembly pinned under `identity` is not the image's
+      header through its last row count, or does not decode to the carried decoded header. -/
+  | headerMismatch (identity : String)
+  /-- The carried row of the token is not the image's row under the carried heap numbering. -/
+  | rowMismatch (token : Nat)
+  /-- The carried entry with this key is not the entry of the image at the offset the key names. -/
+  | heapMismatch (heap key : Nat)
+  /-- Two keys name one offset, one key names two offsets, no row names the key, or the key is not
+      below the omitted-entry marker. -/
+  | heapNumbering (heap key : Nat)
   deriving DecidableEq, Repr
 
 /-- Whether a check succeeded; the proposition of each audited theorem is `ok check = true`. -/

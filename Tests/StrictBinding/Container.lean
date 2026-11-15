@@ -87,22 +87,6 @@ theorem rejects_row_counts_past_the_stream :
 
 /-! ## Metadata version length -/
 
-/-- The bytes of the unchanged fixture. -/
-private def fixtureBytes : List Nat :=
-  match ImageView.ofImage StrictFixture.image >>= (·.bytes 0 StrictFixture.image.length) with
-  | .ok bytes => bytes
-  | .error _ => []
-
-/-- The little-endian value of `width` bytes at `offset`. -/
-private def readLittle (bytes : List Nat) (offset width : Nat) : Nat :=
-  (List.range width).foldl
-    (fun value index => value + bytes.getD (offset + index) 0 * 256 ^ index) 0
-
-/-- The bytes with `width` bytes at `offset` replaced by the little-endian `value`. -/
-private def writeLittle (bytes : List Nat) (offset width value : Nat) : List Nat :=
-  (List.range width).foldl
-    (fun bytes index => bytes.set (offset + index) (value / 256 ^ index % 256)) bytes
-
 /-- The stream headers from `header` with `extra` added to each stream offset; a header is eight
     bytes and a name padded to four. -/
 private def shiftStreams (extra : Nat) : Nat → Nat → List Nat → List Nat
@@ -124,7 +108,7 @@ private def textVirtualSize : Nat := 0x180
     its streams move up into the unused end of the text section, whose mapped size grows to cover
     them, and the stream offsets and the metadata size follow. -/
 private def widenedVersion (extra : Nat) : ImageBytes :=
-  let bytes := fixtureBytes
+  let bytes := imageBytes StrictFixture.image
   let versionEnd := fixtureRoot + 16 + fixtureVersionLength
   let metadataEnd := fixtureRoot + fixtureMetadataSize
   let moved := bytes.take versionEnd ++ List.replicate extra 0 ++
