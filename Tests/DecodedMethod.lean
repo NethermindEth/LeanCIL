@@ -61,6 +61,21 @@ theorem code_read_from_bytes :
   cil_kernel_rfl
 #print axioms code_read_from_bytes
 
+/-- `ldarg.0; ldarg.1; add; ret` over two `uint64` parameters, returning `uint64`. -/
+private def addArgumentsRaw : RawMethod :=
+  { method false [] [instr 0 0x02, instr 1 0x03, instr 2 0x58, instr 3 0x2A] with
+    parameters := [uint64, uint64], returnType := uint64 }
+
+/-- The bytes `12 02 03 58 2A` decode to the two argument loads, the add and the return. -/
+theorem add_arguments_decode :
+    (encodeBody pin addArgumentsRaw).map (·.bytes) = some [0x12, 0x02, 0x03, 0x58, 0x2A] ∧
+      decoded (encodeBody pin addArgumentsRaw) addArgumentsRaw = some
+        { code := [.ldarg 0, .ldarg 1, .add, .ret], locals := [],
+          declared := { parameters := [uint64, uint64], returnType := uint64 },
+          returnsValue := true } := by
+  constructor <;> cil_kernel_rfl
+#print axioms add_arguments_decode
+
 /-- `ldc.i4.1; stloc.0; ldloc.0; ret` over one `uint32` local, with the given init flag. -/
 private def localRaw (initLocals : Bool) : RawMethod :=
   method initLocals [uint32] [instr 0 0x17, instr 1 0x0A, instr 2 0x06, instr 3 0x2A]

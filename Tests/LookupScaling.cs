@@ -406,8 +406,8 @@ void DecodeCosts()
 }
 
 // The heartbeats `decide +kernel` adds to deciding that `Method.ofRaw?` of a value-only body of 500, 2000 and 8000
-// instructions with four locals gives the emitted code, the initialized locals and no homes or links. Each
-// instruction is decoded and instantiated once, so four times the instructions may cost at most
+// instructions with four parameters and four locals gives the emitted code, the initialized locals and no homes or
+// links. Each instruction is decoded and instantiated once, so four times the instructions may cost at most
 // `AllowedLocalGrowth` more per instruction.
 void MethodDecodeCosts()
 {
@@ -425,27 +425,30 @@ void MethodDecodeCosts()
             open CIL CIL.Extraction Lean Elab Command
             {{KernelCostCommand}}
             namespace DecodedMethodCost
-            /-- The raw instructions of one segment: short and long constants, locals, arithmetic, a checked
-                conversion, a branch, a four-target switch and a return. -/
+            /-- The raw instructions of one segment: short and long constants, locals, an argument,
+                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
             def segment (index : Nat) : List RawInstruction :=
               let start := {{SegmentLength}} * index
               [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
                 ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
-                ⟨start + 4, 6, .none⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
                 ⟨start + 7, 58, .target index⟩,
                 ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
             /-- The instructions the translator emits for one segment. -/
             def codeSegment (index : Nat) : List Instruction :=
               [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
-                .ldloc (index % 4), .stloc (index % 4), .ldloc 0, .add, .conv_ovf_un .i1, .brtrue index,
-                .switch [index, index + 1, index + 2, index + 3], .ret]
+                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1,
+                .brtrue index, .switch [index, index + 1, index + 2, index + 3], .ret]
             /-- The {{instructions}} emitted instructions of the body. -/
             def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
-            /-- A static method with four zero-initialized `uint32` locals and {{instructions}} raw instructions. -/
+            /-- The type of every parameter and local. -/
+            def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
+            /-- A static method with four parameters, four zero-initialized locals and {{instructions}} raw
+                instructions. -/
             def source : RawMethod :=
               { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
-                attributes := 0, implementation := 0, returnType := .void, parameters := [],
-                locals := List.replicate 4 (.atom runtimeScope "System.UInt32"), initLocals := true,
+                attributes := 0, implementation := 0, returnType := .void, parameters := List.replicate 4 uint32,
+                locals := List.replicate 4 uint32, initLocals := true,
                 maxStack := 8, genericParameters := [],
                 code := (List.range {{instructions / SegmentLength}}).flatMap segment }
             #kernel_cost "decoded method {{instructions}}"
