@@ -275,7 +275,8 @@ private def walkedAddBytes (table : NativeMethodTable) (memory : CIL.Safety.Memo
   walkedCheck result memory
   return result
 
-/-- `NativeMethodTable.load` with `walkedCheck`. -/
+/-- `NativeMethodTable.load` with `walkedCheck`, reading the entry with `targets[index]?`, whose
+    bound check walks `targets`. -/
 private def walkedLoadView (table : NativeMethodTable) (memory : CIL.Safety.Memory) :
     Checked CIL.MethodPointer := do
   walkedCheck table memory
@@ -342,12 +343,24 @@ theorem addNativeTable_eq_walked : addNativeTable = walkedAdd := by
   rfl
 #print axioms addNativeTable_eq_walked
 
+/-- Bounding the entry index by the carried count loads exactly the entry, or the fault, that the
+    walked bound check gives, for every view and memory. -/
+theorem load_eq_walked : NativeMethodTable.load = walkedLoadView := by
+  funext view memory
+  rcases view with ⟨signature, targets, origin, cursor, count, counted⟩
+  subst counted
+  unfold NativeMethodTable.load walkedLoadView
+  simp only [check_eq_walked]
+  by_cases inside : (cursor.offset - origin.offset) / nativeMethodWidth < targets.size
+  · simp only [inside, dite_true, Array.getElem?_eq_getElem]
+  · simp only [inside, dite_false, Array.getElem?_eq_none (Nat.le_of_not_lt inside)]
+#print axioms load_eq_walked
+
 /-- Reading the carried entry count loads a native entry exactly as walking the entries does. -/
 theorem loadNativeTable_eq_walked : loadNativeTable = walkedLoad := by
   funext table memory
-  unfold loadNativeTable walkedLoad NativeMethodTable.load walkedLoadView
-  simp only [nativeTableView_eq_walked, check_eq_walked]
-  rfl
+  unfold loadNativeTable walkedLoad
+  simp only [nativeTableView_eq_walked, load_eq_walked]
 #print axioms loadNativeTable_eq_walked
 
 /-- An int32 offset added to a native table steps as the addition that walks the entries. -/

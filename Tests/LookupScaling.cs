@@ -22,7 +22,7 @@ if (args.Contains("--return-step-only", StringComparer.Ordinal))
     ReturnResolutionCosts(stepOnly: true);
     return;
 }
-NativeTableStepCosts();
+NativeTableCosts();
 if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
 CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
@@ -330,13 +330,15 @@ const string KernelCostCommand = """
     """;
 
 // The heartbeats `decide +kernel` adds to one `add` of an int32 offset to a native method table of 16, 64 and 256
-// entries, each table and its storage defined once outside the decision. The step reads the table's entry count, not
-// its entries, so its cost may grow by at most `AllowedGrowth` between sizes; reading the entries grows it linearly.
-void NativeTableStepCosts()
+// entries and to one load of its first and of its last entry, each table and its storage defined once outside the
+// decision. The step and the load's bound read the table's entry count, not its entries, so their cost may grow by at
+// most `AllowedGrowth` between sizes. Reading entry i walks i cells of the literal, so the last entry's cost beyond
+// the first's may grow per index by at most `AllowedGrowth`.
+void NativeTableCosts()
 {
     var tableDirectory = At("artifacts/LookupScaling/NativeTableStep");
     Directory.CreateDirectory(tableDirectory);
-    var costs = new List<(int Entries, long Cost)>();
+    var costs = new List<(int Entries, long Step, long First, long Last)>();
     foreach (var entries in new[] { 16, 64, 256 })
     {
         var targets = string.Join(", ", Enumerable.Range(1, entries).Select(token => $"⟨\"Handlers\", {token}, []⟩"));
@@ -349,9 +351,15 @@ void NativeTableStepCosts()
             namespace NativeTableStep
             /-- The closed signature every entry shares. -/
             def signature : ManagedSignature := ⟨.void, []⟩
-            /-- A supplied native table of {{entries}} entries whose storage is static binding 42. -/
+            /-- The {{entries}} supplied entries, the entry at index i holding token i + 1. -/
+            def targets : Array ManagedIdentity := #[{{targets}}]
+            /-- A supplied native table of the entries whose storage is static binding 42. -/
             def table : MethodTable :=
-              { signature, targets := some #[{{targets}}], backing := some ⟨42, 0⟩, entryCount := {{entries}} }
+              { signature, targets := some targets, backing := some ⟨42, 0⟩, entryCount := {{entries}} }
+            /-- The table with its cursor on the last entry. -/
+            def lastTable : MethodTable :=
+              { signature, targets := some targets, backing := some ⟨42, {{8 * (entries - 1)}}⟩,
+                entryCount := {{entries}} }
             /-- Immutable static storage holding exactly the table's entries. -/
             def memory : CIL.Safety.Memory :=
               { allocations := fun index => if index == 0 then
@@ -368,20 +376,51 @@ void NativeTableStepCosts()
                 [.scalar (.i32 8), .methodTable table] memory with
               | .ok (.next _ [.methodTable moved] _ _) => moved.backing
               | _ => none) = some ⟨42, 8⟩
+            #kernel_cost "table load first {{entries}}" (match loadNativeTable table memory with
+              | .ok ⟨_, some ⟨_, token, _⟩⟩ => token == 1
+              | _ => false) = true
+            #kernel_cost "table load last {{entries}}" (match loadNativeTable lastTable memory with
+              | .ok ⟨_, some ⟨_, token, _⟩⟩ => token == {{entries}}
+              | _ => false) = true
             end NativeTableStep
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-        var cost = LookupPatterns.NativeTableStep().Match(output);
-        if (!cost.Success) throw new InvalidOperationException("Missing the native table step cost:\n" + output);
-        costs.Add((entries, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+        long Measured(Regex pattern, string row)
+        {
+            var cost = pattern.Match(output);
+            if (!cost.Success) throw new InvalidOperationException($"Missing the native table {row} cost:\n{output}");
+            return long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture);
+        }
+        costs.Add((entries, Measured(LookupPatterns.NativeTableStep(), "step"),
+            Measured(LookupPatterns.NativeTableLoadFirst(), "first load"),
+            Measured(LookupPatterns.NativeTableLoadLast(), "last load")));
     }
+    RequireConstant("one native table step", costs.Select(sample => (sample.Entries, sample.Step)).ToList());
+    RequireConstant("one load of a native table's first entry",
+        costs.Select(sample => (sample.Entries, sample.First)).ToList());
+    // The last entry sits at index entries - 1, so its cost beyond the first entry's is divided by that index.
+    var perIndex = costs.Select(sample => (sample.Entries, sample.Last,
+        PerIndex: (sample.Last - sample.First) / (sample.Entries - 1))).ToList();
+    var walked = string.Join("; ", perIndex.Select(sample =>
+        $"{sample.Last} heartbeats, {sample.PerIndex} per index, at {sample.Entries}"));
+    if (costs.Any(sample => sample.Last < KernelDecisionFloor) ||
+        perIndex.Skip(1).Any(sample => sample.PerIndex > perIndex[0].PerIndex * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Loading a native table's last entry costs {walked}; the limit is {AllowedGrowth} times the cost per " +
+            $"index at {costs[0].Entries} entries."));
+    Console.WriteLine($"PASS loading a native table's last entry costs {walked} entries");
+}
+
+// Fails unless every cost is a real decision and none exceeds `AllowedGrowth` times the cost at the smallest size.
+void RequireConstant(string row, List<(int Entries, long Cost)> costs)
+{
     var measured = string.Join("; ", costs.Select(sample => $"{sample.Cost} heartbeats at {sample.Entries} entries"));
     if (costs.Any(sample => sample.Cost < KernelDecisionFloor) ||
         costs.Skip(1).Any(sample => sample.Cost > costs[0].Cost * AllowedGrowth))
         throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"Deciding one native table step costs {measured}; the limit is {AllowedGrowth} times the cost at " +
+            $"Deciding {row} costs {measured}; the limit is {AllowedGrowth} times the cost at " +
             $"{costs[0].Entries} entries."));
-    Console.WriteLine($"PASS deciding one native table step costs {measured}");
+    Console.WriteLine($"PASS deciding {row} costs {measured}");
 }
 
 // The heartbeats `decide +kernel` adds to the same statement closed with `sorry`, for equal and unequal type
@@ -1368,4 +1407,10 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex NativeTableStep();
+
+    [GeneratedRegex(@"table load first [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex NativeTableLoadFirst();
+
+    [GeneratedRegex(@"table load last [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex NativeTableLoadLast();
 }

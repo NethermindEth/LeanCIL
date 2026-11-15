@@ -68,7 +68,16 @@ static storage are definitions outside the decision, so the proof of `MethodTabl
 checked once there and not in the measured statement. The step reads `MethodTable.entryCount`,
 not the entries, and costs about 24,700 heartbeats at each size; geometry checks that read
 `targets.size` cost 29,500, 41,800 and 90,900. The suite fails when the cost at 64 or 256 entries
-exceeds 1.15 times the cost at 16. Run these rows alone with
+exceeds 1.15 times the cost at 16.
+
+The same files measure `loadNativeTable` of the table's first and of its last entry. The load
+bounds the entry index by `MethodTable.entryCount`, so the first entry costs about 27,400
+heartbeats at each size; a bound read from `targets[index]?`, which walks the array to its size,
+costs 30,100, 42,700 and 92,800. Reading entry i still walks i cells of the literal array, which
+the kernel holds as a list, so the last entry costs 36,000, 63,700 and 174,300, about 576
+heartbeats per index at each size. The suite fails when the first entry's cost at 64 or 256
+entries exceeds 1.15 times the cost at 16, or when the last entry's cost beyond the first's,
+divided by its index, does. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
 
 The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
