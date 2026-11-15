@@ -50,7 +50,7 @@ manifest's `historicalDivergences` field: the expectation is the zero-extension 
 the extractor rejects the case.
 
 `NativeOperands` rejects mixed `bne.un`, `blt.un`, `bgt.un`, `ble.un`, and `bge.un`, including
-every short form. The checked native wrapper rejects them too. The diagnostic requires explicit
+every short form. `CIL.step` and the checked interpreter reject them too. The diagnostic requires explicit
 `conv.i` or `conv.u`; those same-width forms are supported and tested. Accepting argument-only
 cases would require an extra runtime assumption: inlining can expose constant actual arguments,
 and propagation can change local provenance. Neither inlining nor propagation is part of the

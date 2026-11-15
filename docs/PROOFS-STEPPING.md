@@ -693,7 +693,9 @@ layers.
 
 Prefer a small `change` or an instruction equation over repeatedly unfolding `run`,
 `CIL.Safety.step` and `CIL.step`. For generic opcode proofs, split the opcode and stack shape before
-splitting operand constructors, and close definitionally equal cases early. Share the remaining
+splitting operand constructors, and close definitionally equal cases early. `CIL.step` widens a
+mixed int32 and native pair before it selects an arm, so for an instruction
+`CIL.nativePureBinary` admits the arm is reached only once both operand constructors are split. Share the remaining
 family-level reasoning. For concrete execution, compose steps first and simplify the resulting value
 equation separately when needed.
 

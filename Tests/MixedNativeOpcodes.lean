@@ -6,7 +6,7 @@ import CIL.Extraction.Scalars
 
 Bare decoded arithmetic instructions widen admitted mixed operands. The reference step and the
 checked step agree on every instruction `widenMixed` widens, in both operand orders, and on
-overflow-checked arithmetic. Scalar admission keeps native integers distinct from fixed-width
+division and overflow-checked arithmetic. Scalar admission keeps native integers distinct from fixed-width
 integers and rejects mixed unsigned branches.
 -/
 
@@ -110,7 +110,7 @@ def Branches (op : Nat → Instruction) (left right : CIL.Value) (taken : Prop) 
       .ok (.next (if taken then target else pc + 1) rest frame memory)
 
 /-- Wrapping arithmetic and bitwise operations sign-extend the int32 operand of a mixed pair in
-    either stack position and compute at native width (ECMA-335 III.1.5, table 2 and table 5). -/
+    either stack position and compute at native width (ECMA-335 III.1.5). -/
 theorem signed_arithmetic (int32 : W32) (native : W64) :
     Agree .add (.i32 int32) (.i64 native) (.i64 (int32.signExtend 64 + native)) ∧
     Agree .add (.i64 native) (.i32 int32) (.i64 (native + int32.signExtend 64)) ∧
@@ -195,6 +195,21 @@ theorem checked_arithmetic :
   and_intros <;> intros <;> rfl
 #print axioms checked_arithmetic
 
+/-- Division and remainder sign-extend the int32 operand of a mixed pair, as numerator or
+    divisor, for the signed and the unsigned forms; both interpreters agree in either order. -/
+theorem division :
+    Agree .div (.i32 0xFFFFFFF9) (.i64 2) (.i64 0xFFFFFFFFFFFFFFFD) ∧
+    Agree .div (.i64 7) (.i32 0xFFFFFFFE) (.i64 0xFFFFFFFFFFFFFFFD) ∧
+    Agree .div_un (.i32 0xFFFFFFF9) (.i64 2) (.i64 0x7FFFFFFFFFFFFFFC) ∧
+    Agree .div_un (.i64 0xFFFFFFFFFFFFFFFF) (.i32 0xFFFFFFFE) (.i64 1) ∧
+    Agree .rem (.i32 0xFFFFFFF9) (.i64 2) (.i64 0xFFFFFFFFFFFFFFFF) ∧
+    Agree .rem (.i64 7) (.i32 0xFFFFFFFE) (.i64 1) ∧
+    Agree .rem_un (.i32 0xFFFFFFF9) (.i64 2) (.i64 1) ∧
+    Agree .rem_un (.i64 0xFFFFFFFFFFFFFFFF) (.i32 0xFFFFFFFE) (.i64 1) := by
+  unfold Agree
+  and_intros <;> intros <;> rfl
+#print axioms division
+
 /-- The instructions whose operands `widenMixed` changes are exactly those listed by the
     theorems above; every other instruction leaves any stack as it is. -/
 theorem widened_instructions (op : Instruction) (stack : List CIL.Value) :
@@ -204,11 +219,14 @@ theorem widened_instructions (op : Instruction) (stack : List CIL.Value) :
   cases op <;> simp [widenMixed, nativePureBinary]
 #print axioms widened_instructions
 
-/-- Unsigned branches refuse a mixed pair in both interpreters. -/
+/-- Unsigned branches refuse a mixed pair in both interpreters and both operand orders. -/
 theorem unsigned_branches_refused (int32 : W32) (native : W64) :
     ([Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
       (CIL.step op false none 0 [] [.i32 int32, .i64 native] (fun _ => none)).isNone &&
-      (CIL.step op false none 0 [] [.i64 native, .i32 int32] (fun _ => none)).isNone) = true := by
+      (CIL.step op false none 0 [] [.i64 native, .i32 int32] (fun _ => none)).isNone &&
+      !(step body op 0 [] frame [.scalar (.i32 int32), .scalar (.i64 native)] Memory.empty).isOk &&
+      !(step body op 0 [] frame [.scalar (.i64 native), .scalar (.i32 int32)] Memory.empty).isOk) =
+      true := by
   rfl
 #print axioms unsigned_branches_refused
 
