@@ -146,6 +146,15 @@ homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewe
 accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
 size.
 
+The suite also declares `cil_resolution_facts` for a method whose raw method names one struct
+element type per layout, at 8, 32 and 128 layouts, and reads every element's
+`Method.elementShape` through the facts with `simp only [cil_code]`. Each struct fact reads its
+raw and computed layout entries from named 16-entry suffixes of the layout lists, declared once
+for the environment constant. The suite fails when the heartbeats per element type of the facts,
+or of the reads, grow more than 1.35 times from one size to the next. The facts cost about 8,700,
+11,300 and 11,400 heartbeats per element type, and the reads 14,200, 13,100 and 14,000; a size
+below one block walks fewer entries, which accounts for the lower cost of the facts at 8.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the

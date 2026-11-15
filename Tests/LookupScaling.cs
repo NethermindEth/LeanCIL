@@ -17,6 +17,11 @@ if (args.Contains("--argument-resolution-only", StringComparer.Ordinal))
     ArgumentResolutionCosts();
     return;
 }
+if (args.Contains("--element-shape-only", StringComparer.Ordinal))
+{
+    ElementShapeCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -28,6 +33,7 @@ CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
 ArgumentResolutionCosts();
+ElementShapeCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -284,6 +290,81 @@ void ArgumentResolutionCosts()
                     $"{AllowedArgumentGrowth} times the cost per argument at the size before.");
             Console.WriteLine($"PASS argument {name} {label}: {measured} heartbeats per argument");
         }
+    }
+}
+
+// Fails when the element shape facts, or the reads through them, of a method naming one struct element per layout at
+// 8, 32 and 128 layouts cost over 1.35 times more per element type than at the size before; reading each layout entry
+// by walking the layout lists gives 2.19x and 3.29x.
+void ElementShapeCosts()
+{
+    const double AllowedElementGrowth = 1.35;
+    var shapeDirectory = At("artifacts/LookupScaling/ElementShapes");
+    Directory.CreateDirectory(shapeDirectory);
+    var samples = new List<(int Size, long Facts, long Reads)>();
+    foreach (var size in new[] { 8, 32, 128 })
+    {
+        var indices = Enumerable.Range(0, size).ToArray();
+        var raw = string.Join(",\n  ", indices.Select(index =>
+            $$"""{ identity := "Cell{{index}}", explicit := false, packing := 0, declaredSize := 0, fields := [] }"""));
+        var computed = string.Join(",\n  ", indices.Select(index =>
+            $$"""{ layout := { size := {{4 * (index + 1)}}, fields := [] }, alignment := 4 }"""));
+        var sites = string.Join(", ", indices.Select(index =>
+            $$"""⟨{{5 * index}}, 163, .type (.aggregate "Cell{{index}}" {{index}})⟩"""));
+        var reads = string.Join(", ", indices.Select(index =>
+            $$"""body.elementShape (.aggregate "Cell{{index}}" {{index}})"""));
+        var shapes = string.Join(", ", indices.Select(index =>
+            $$""".value (.aggregate "Cell{{index}}" {{4 * (index + 1)}})"""));
+        var source = $$"""
+            import CIL.Safety.ValueSteps
+            open CIL CIL.Extraction Lean Elab Command
+            set_option maxRecDepth 8192
+            /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+            elab "#resolution_cost " label:str " in " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              logInfo m!"resolution {label.getString} {after - before} heartbeats"
+            def rawLayouts : List RawLayout := [
+              {{raw}}]
+            def computedLayouts : Array ComputedLayout := #[
+              {{computed}}]
+            def environment : LayoutEnvironment := { rawLayouts := rawLayouts, layouts := computedLayouts }
+            def body : Method := { code := [.ret], locals := [], returnsValue := false, environment := environment }
+            theorem body_returnsValue : body.returnsValue = false := rfl
+            theorem body_declared : body.declared = {} := rfl
+            def bodyClosed : RawMethod := {
+              token := 1, owner := "Scaling", hasThis := false, explicitThis := false, callingConvention := 0,
+              attributes := 0, implementation := 0, returnType := .void, parameters := [], locals := [],
+              initLocals := true, maxStack := 2, genericParameters := [], code := [{{sites}}] }
+            #resolution_cost "fact" in cil_resolution_facts body
+            #resolution_cost "simplifier" in
+            theorem body_reads : [{{reads}}] = [{{shapes}}] := by simp only [cil_code]
+            #print axioms body_elementShape{{size - 1}}
+            #print axioms body_reads
+            """ + "\n";
+        var path = Path.Combine(shapeDirectory, $"Elements{size}.lean");
+        File.WriteAllText(path, source);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("Element shape facts introduced an unproved theorem.");
+        var costs = LookupPatterns.ReturnResolution().Matches(output).Cast<Match>().ToArray();
+        if (costs.Length != 2)
+            throw new InvalidOperationException("Missing element shape costs: " + output);
+        samples.Add((size, long.Parse(costs[0].Groups[2].Value, CultureInfo.InvariantCulture),
+            long.Parse(costs[1].Groups[2].Value, CultureInfo.InvariantCulture)));
+    }
+    foreach (var (name, cost) in new (string, Func<(int Size, long Facts, long Reads), long>)[]
+        { ("facts", sample => sample.Facts), ("reads", sample => sample.Reads) })
+    {
+        var perElement = samples.Select(sample => (double)cost(sample) / sample.Size).ToArray();
+        var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+            $"{sample.Size} = {(double)cost(sample) / sample.Size:F0}")));
+        if (perElement.Skip(1).Zip(perElement).Any(pair => pair.First > pair.Second * AllowedElementGrowth))
+            throw new InvalidOperationException(
+                $"Element shape {name} cost {measured} heartbeats per element type; the limit is " +
+                $"{AllowedElementGrowth} times the cost per element type at the size before.");
+        Console.WriteLine($"PASS element shape {name}: {measured} heartbeats per element type");
     }
 }
 
