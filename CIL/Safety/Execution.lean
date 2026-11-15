@@ -217,9 +217,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Faulting arithmetic and type tests are matched apart from the rest; the native table arms lead
-  -- this match so that the match under its catch-all stays within the 79 alternatives `split`
-  -- handles.
+  -- Native table offsets, faulting arithmetic and type tests are matched apart from the rest, so
+  -- that the match under the catch-all stays within the 79 alternatives `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
