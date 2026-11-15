@@ -91,15 +91,18 @@ the same statements closed with `sorry`. The clause reads the name's code back i
 the cost per byte grows more than 1.15 times from one length to the next. Run this row alone with
 `dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
 
-The suite also measures `decide +kernel` on a runtime model lookup in a table of 16 and of 256
-entries, less the same statement closed with `sorry`. `model_table%` writes the table as a literal
-balanced tree keyed by method name code, so the lookup walks four more levels in the larger table
-and compares one method reference at the leaf: about 66,700 and 68,600 heartbeats. The suite fails
-when the cost at 256 entries exceeds 1.05 times the cost at 16. The same file measures
-`ModelsAgree` over methods of 8, 32 and 128 live call sites, each calling a distinct modelled
-method: about 211,000, 682,700 and 2,576,300 heartbeats, or 26,400, 21,300 and 20,100 per site.
-The suite fails when the cost per site grows more than 1.15 times from one count to the next. Run
-these rows alone with `dotnet run --file Tests/LookupScaling.cs -- --model-table-only`.
+The suite also measures `decide +kernel` on runtime model lookups of the first, middle and last
+entry of a table of 16 and of 256 entries, less the same statements closed with `sorry`.
+`model_table%` writes the table as a literal balanced tree keyed by method name code, so a lookup
+walks at most four more levels in the larger table and compares one method reference at the leaf:
+about 67,100 and 69,000 heartbeats for the first entry, 65,400 at both sizes for the middle entry,
+which is the root, and 67,000 and 69,200 for the last. A scan of the entries would make the last
+entry cost more. The suite fails when any position costs more than 1.05 times as much at 256
+entries as at 16. The same file measures `ModelsAgree` over methods of 8, 32 and 128 live call
+sites, each calling a distinct modelled method: about 212,000, 687,100 and 2,593,900 heartbeats, or
+26,500, 21,500 and 20,300 per site. The suite fails when the cost per site grows more than 1.15
+times from one count to the next. Run these rows alone with
+`dotnet run --file Tests/LookupScaling.cs -- --model-table-only`.
 
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
 `calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
