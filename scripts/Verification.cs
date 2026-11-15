@@ -4452,6 +4452,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
             // are not built yet, a conservative source snapshot safely widens the key.
             var supportSources = SupportInputs(session, support, before);
             var supportKey = ContentKey("support-audit-v1\n" + VerificationPolicy + "\n" + libraryKey + "\n" +
+                extraction.Sha256 + "\n" +
                 string.Join("\n", support.Order(StringComparer.Ordinal)) + "\n" + JsonSerializer.Serialize(supportSources));
             if (!preparedSupport.Contains(supportKey))
             {

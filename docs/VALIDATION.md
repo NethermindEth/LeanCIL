@@ -53,7 +53,7 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 
 | Suite | Checks |
 | --- | --- |
-| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, replay diagnostics, return narrowing and metadata restrictions, value opcode decoding, methods decoded from body bytes, object array steps, embedding retention and profiles, full transfer, SHA-1 and assembly and pin index scaling, binding catalogs and certified integer binding families, gate plans and required results, method selectors, caches, batched extraction and joint kernel replay |
+| `core` | the runner's own checks: example proofs and their rejections, the shared Lean test libraries including the public proof surface, replay diagnostics, return narrowing and metadata restrictions, value opcode decoding, methods decoded from body bytes, object array steps, embedding retention and profiles, full transfer, SHA-1 and assembly and pin index scaling, binding catalogs and certified integer binding families, gate plans and required results, method selectors, caches, support audit reuse bound to extraction identity, batched extraction and joint kernel replay |
 | `templates` | shared profile templates, exact instruction equations and checked bindings |
 | `workspace` | per-method editor extractions, watch refresh and ordinary fresh certification |
 | `imports` | implementation-bound contract imports and conditional caller verification |
