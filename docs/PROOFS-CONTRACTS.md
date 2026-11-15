@@ -135,6 +135,8 @@ Pass the `writable` projection to the general snapshot lemmas.
 The snapshot forms of the stepping tactics (`CIL.Safety.LocalSnapshotSteps`, part of `import CIL`)
 take numeric local stores and loads through a `LocalSnapshots` hypothesis and pass the updated
 snapshots to each later step. A load pushes the latest remembered value; a store replaces it.
+A homed argument's `starg` and `ldarg` are the store and load of its home slot, so the snapshots
+remember the argument at that slot.
 
 #### Tactic forms
 

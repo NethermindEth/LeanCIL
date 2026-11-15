@@ -191,17 +191,19 @@ def loopFetch (facts : Array Term) : TacticM LoopFetched := withMainContext do
 
 /-- Instructions that only move values, which no case split decides. -/
 def loopMovesOnly : List Lean.Name :=
-  [``CIL.Instruction.nop, ``CIL.Instruction.ldarg, ``CIL.Instruction.ldloc,
-    ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
+  [``CIL.Instruction.nop, ``CIL.Instruction.ldarg, ``CIL.Instruction.starg,
+    ``CIL.Instruction.ldarga, ``CIL.Instruction.ldloc, ``CIL.Instruction.ldloca,
+    ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
     ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br, ``CIL.Instruction.skipInit,
     ``CIL.Instruction.initAggregate, ``CIL.Instruction.fieldAddress]
 
 /-- Instructions that read no reference: they compare or compute on scalars, or move a value
     that `loopReadsReferences` shows is a scalar. -/
 def loopScalarOnly : List Lean.Name :=
-  [``CIL.Instruction.nop, ``CIL.Instruction.ldarg, ``CIL.Instruction.ldloc,
-    ``CIL.Instruction.ldloca, ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4,
-    ``CIL.Instruction.ldc_i8, ``CIL.Instruction.br,
+  [``CIL.Instruction.nop, ``CIL.Instruction.ldarg, ``CIL.Instruction.starg,
+    ``CIL.Instruction.ldarga, ``CIL.Instruction.ldloc, ``CIL.Instruction.ldloca,
+    ``CIL.Instruction.stloc, ``CIL.Instruction.ldc_i4, ``CIL.Instruction.ldc_i8,
+    ``CIL.Instruction.br,
     ``CIL.Instruction.div, ``CIL.Instruction.div_un, ``CIL.Instruction.rem,
     ``CIL.Instruction.rem_un, ``CIL.Instruction.add_ovf, ``CIL.Instruction.add_ovf_un,
     ``CIL.Instruction.sub_ovf, ``CIL.Instruction.sub_ovf_un, ``CIL.Instruction.mul_ovf,
@@ -253,10 +255,17 @@ def loopLocalAt (locals : Expr) (index : Nat) : StateT LoopLocalIndex MetaM (Opt
   return none
 
 open Lean Meta in
+/-- The frame slot of the home of argument `indexTerm` of `body`, when the body reads it from a
+    home. -/
+def loopHomeSlot? (body indexTerm : Expr) : MetaM (Option Nat) := do
+  let some (slot, _) ← ResolutionFacts.argumentHome? body indexTerm | return none
+  literalNat? slot
+
+open Lean Meta in
 /-- Whether the step obligation `step` of the fetched `op` can check a reference or span: any
-    instruction but `loopScalarOnly`, a homed argument load, an argument load or local store of a
-    non-scalar, a load of a local that is not a byte home or holds a reference, and the address of
-    a local that is not a byte home. -/
+    instruction but `loopScalarOnly`, an argument load or local store of a non-scalar, a load of a
+    local that is not a byte home or holds a reference, and the address of a local that is not a
+    byte home. A homed argument is loaded, stored and addressed as its home's local. -/
 def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex MetaM Bool := do
   let op ← whnfR op
   let some name := op.getAppFn.constName? | return true
@@ -264,31 +273,43 @@ def loopReadsReferences (op : Expr) (step : MVarId) : StateT LoopLocalIndex Meta
   let scalar (value : Expr) : MetaM Bool := return (← whnfR value).isAppOf ``Value.scalar
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
   let some #[body, _, _, args, frame, stack, _] := argumentsOf? lhs ``step 7 | return true
-  if name == ``CIL.Instruction.ldarg then
-    -- An argument is checked as it is loaded, so a reference argument's `form` is read; a homed
-    -- argument reads its frame slot, which this check does not inspect.
+  let argumentOp := name == ``CIL.Instruction.ldarg || name == ``CIL.Instruction.starg ||
+    name == ``CIL.Instruction.ldarga
+  let home ← if argumentOp then
+      match argument? op 0 with
+      | some indexTerm => loopHomeSlot? body indexTerm
+      | none => pure none
+    else pure none
+  if argumentOp && home.isNone then
+    -- An argument is checked as it is loaded, so a reference argument's `form` is read; a store
+    -- or address of an argument without a home faults.
+    unless name == ``CIL.Instruction.ldarg do return true
     let some indexTerm := argument? op 0 | return true
     let some index ← literalNat? indexTerm | return true
-    let some access ← ResolutionFacts.argumentProof? body index | return true
-    let some (_, _, access) := (← inferType access).eq? | return true
-    unless (← whnfD access).isAppOf ``CIL.ArgumentAccess.value do return true
+    let some (access, _) ← ResolutionFacts.resolvedArgumentAccess? body indexTerm | return true
+    unless access.isAppOf ``CIL.ArgumentAccess.value do return true
     let entries ← listEntries args
     let some (_, value) := entries.find? (·.1 == index) | return true
     return !(← scalar value)
-  if name == ``CIL.Instruction.stloc then
+  if name == ``CIL.Instruction.stloc || name == ``CIL.Instruction.starg then
     let stack ← whnfR stack
     let some #[_, top, _] := argumentsOf? stack ``List.cons 3 | return true
     return !(← scalar top)
-  if name == ``CIL.Instruction.ldloc || name == ``CIL.Instruction.ldloca then
+  let loads := name == ``CIL.Instruction.ldloc || name == ``CIL.Instruction.ldarg
+  if loads || name == ``CIL.Instruction.ldloca || name == ``CIL.Instruction.ldarga then
     -- Loading a span or reference local checks it, and so does taking a span local's address.
-    let some indexTerm := argument? op 0 | return true
-    let some index ← literalNat? indexTerm | return true
+    let mut index := 0
+    if let some slot := home then index := slot
+    else
+      let some indexTerm := argument? op 0 | return true
+      let some literal ← literalNat? indexTerm | return true
+      index := literal
     let frame ← whnfR frame
     let some #[_, locals, _, _] := argumentsOf? frame ``Frame.mk 4 | return true
     let some slot ← loopLocalAt locals index | return true
     let slot ← whnfR slot
     let some #[kind, _] := argumentsOf? slot ``LocalSlot.bytes 2 | return true
-    return name == ``CIL.Instruction.ldloc && (← whnfR kind).isConstOf ``CIL.LocalKind.reference
+    return loads && (← whnfR kind).isConstOf ``CIL.LocalKind.reference
   return false
 
 open Lean Meta in
@@ -300,12 +321,15 @@ def loopStoreKnown (op : Expr) (step : MVarId) (known : Array Expr) :
     step.withContext do
   let op ← whnfR op
   let some (_, lhs, _) := (← instantiateMVars (← step.getType)).consumeMData.eq? | return true
-  let some #[_, _, _, _, frame, _, memory] := argumentsOf? lhs ``CIL.Safety.step 7
+  let some #[body, _, _, _, frame, _, memory] := argumentsOf? lhs ``CIL.Safety.step 7
     | return true
-  if op.isAppOf ``CIL.Instruction.stloc then
-    -- A span or reference local's store reduces without a fact.
+  let homed := op.isAppOf ``CIL.Instruction.starg
+  if op.isAppOf ``CIL.Instruction.stloc || homed then
+    -- A span or reference local's store reduces without a fact; a homed argument's store is the
+    -- store to its home's local.
     let some indexTerm := argument? op 0 | return true
-    let some index ← literalNat? indexTerm | return true
+    let some index ← (if homed then loopHomeSlot? body indexTerm else literalNat? indexTerm)
+      | return true
     let frame ← whnfR frame
     let some #[_, locals, _, _] := argumentsOf? frame ``Frame.mk 4 | return true
     let some slot ← loopLocalAt locals index | return true
@@ -328,7 +352,8 @@ def LoopFacts.readBy (facts : LoopFacts) (op : Lean.Name) (references : Bool) :
     Array (Array Lean.Syntax.Term) :=
   if op == ``CIL.Instruction.ret then
     #[facts.addresses, facts.fields, facts.cases, facts.references] else
-  #[if op == ``CIL.Instruction.ldloca then facts.addresses else #[],
+  #[if op == ``CIL.Instruction.ldloca || op == ``CIL.Instruction.ldarga then facts.addresses
+      else #[],
     if op == ``CIL.Instruction.fieldAt then facts.fields else #[],
     if loopMovesOnly.contains op then #[] else facts.cases,
     if references then facts.references else #[]]
@@ -458,7 +483,7 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
   -- A struct store no fact steps ends any walk but `.reach`, for the frame lemmas to take.
   let yields : Lean.Name → Bool := fun op => stops op || (mode != .reach &&
     (op == ``CIL.Instruction.setFieldAt || op == ``CIL.Instruction.initAggregate ||
-      op == ``CIL.Instruction.stloc))
+      op == ``CIL.Instruction.stloc || op == ``CIL.Instruction.starg))
   let mut taken := 0
   let mut localIndex : LoopLocalIndex := {}
   repeat
@@ -484,8 +509,8 @@ private def loopStepsRun (tactic : String) (mode : LoopStepping) (facts : LoopFa
     let saved ← saveState
     let fetched? ← observing? do
       let fetched ← loopFetch core
-      let stores := [``CIL.Instruction.stloc, ``CIL.Instruction.setFieldAt,
-        ``CIL.Instruction.initAggregate]
+      let stores := [``CIL.Instruction.stloc, ``CIL.Instruction.starg,
+        ``CIL.Instruction.setFieldAt, ``CIL.Instruction.initAggregate]
       let classify : StateT LoopLocalIndex MetaM (Bool × Bool) := do
         let unknownStore ← if stores.any (← whnfR fetched.op).isAppOf then
             pure !(← loopStoreKnown fetched.op fetched.step facts.known)

@@ -330,6 +330,33 @@ def instructionStep (op : CIL.Instruction) (pc : Nat) (frame : Frame) (stack : L
       return FrameAction.next (pc + 1) rest { frame with locals := frame.locals.set index slot }
         memory := id rfl
 
+/-- A homed argument load steps as `ldloc` of its home slot. -/
+theorem step_ldarg_home_ldloc (index : Nat) (stack : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.ldarg index) pc args frame stack memory =
+      step body (.ldloc slot) pc args frame stack memory := by
+  rw [step_ldarg_home_eq body pc args frame memory index stack slot access, step_ldloc_eq]
+
+#print axioms step_ldarg_home_ldloc
+
+/-- A homed argument store steps as `stloc` of its home slot. -/
+theorem step_starg_home_stloc (index : Nat) (value : Value) (rest : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.starg index) pc args frame (value :: rest) memory =
+      step body (.stloc slot) pc args frame (value :: rest) memory := by
+  rw [step_starg_home_eq body pc args frame memory index value rest slot access, step_stloc_eq]
+
+#print axioms step_starg_home_stloc
+
+/-- A homed argument's address steps as `ldloca` of its home slot. -/
+theorem step_ldarga_home_ldloca (index : Nat) (stack : List Value) (slot : Nat)
+    (access : body.argumentAccess index = .home slot) :
+    step body (.ldarga index) pc args frame stack memory =
+      step body (.ldloca slot) pc args frame stack memory := by
+  rw [step_ldarga_home_eq body pc args frame memory index stack slot access, step_ldloca_eq]
+
+#print axioms step_ldarga_home_ldloca
+
 /-- A constructor checks its arguments and replaces its typed local at the call instruction. -/
 @[cil_step] theorem step_initializeSpanLocal_eq (index : Nat)
     (constructor : CIL.SpanConstructor) (stack : List Value) :

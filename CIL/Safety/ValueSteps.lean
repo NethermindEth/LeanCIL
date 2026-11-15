@@ -260,14 +260,10 @@ open Lean Meta in
     be, with its proof: from the declared fact or signature, or else as simp rewrites the access
     with the facts in scope. -/
 def argumentAccessIn (body index : Expr) : SimpM (Option (Expr × Expr)) := do
-  let (access, proof) ← match ← ResolutionFacts.argumentAccessProof? body index with
-    | some proof =>
-      let some (_, _, access) := (← inferType proof).eq? | return none
-      pure (access, proof)
-    | none =>
-      let access ← Simp.simp (mkApp2 (mkConst ``CIL.Method.argumentAccess) body index)
-      pure (access.expr, ← access.getProof)
-  return some (← whnfR (← instantiateMVars access), proof)
+  if let some resolved ← ResolutionFacts.resolvedArgumentAccess? body index then
+    return some resolved
+  let access ← Simp.simp (mkApp2 (mkConst ``CIL.Method.argumentAccess) body index)
+  return some (← whnfR (← instantiateMVars access.expr), ← access.getProof)
 
 open Lean Meta in
 /-- The step an argument instruction takes by `equation`, whose right side is the result. -/
