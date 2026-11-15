@@ -35,6 +35,9 @@ def named : List (RawInstruction × Instruction) := [
   (⟨0, 2, .none⟩, .ldarg 0), (⟨0, 3, .none⟩, .ldarg 1), (⟨0, 4, .none⟩, .ldarg 2),
   (⟨0, 5, .none⟩, .ldarg 3), (⟨0, 14, .argument 5⟩, .ldarg 5),
   (⟨0, 14, .argument 255⟩, .ldarg 255), (⟨0, 65033, .argument 300⟩, .ldarg 300),
+  (⟨0, 15, .argument 5⟩, .ldarga 5), (⟨0, 15, .argument 255⟩, .ldarga 255),
+  (⟨0, 65034, .argument 65535⟩, .ldarga 65535), (⟨0, 16, .argument 5⟩, .starg 5),
+  (⟨0, 16, .argument 255⟩, .starg 255), (⟨0, 65035, .argument 65535⟩, .starg 65535),
   -- Locals.
   (⟨0, 6, .none⟩, .ldloc 0), (⟨0, 7, .none⟩, .ldloc 1), (⟨0, 8, .none⟩, .ldloc 2),
   (⟨0, 9, .none⟩, .ldloc 3), (⟨0, 17, .local 4⟩, .ldloc 4), (⟨0, 17, .local 255⟩, .ldloc 255),
@@ -100,7 +103,7 @@ def undecoded : List Name := [
   ``Instruction.callVirtual, ``Instruction.newAggregate, ``Instruction.newObject,
   ``Instruction.objectTest, ``Instruction.skipInit, ``Instruction.feature,
   ``Instruction.intrinsic, ``Instruction.memory, ``Instruction.throw,
-  ``Instruction.unsupported, ``Instruction.starg, ``Instruction.ldarga]
+  ``Instruction.unsupported]
 
 /-- What each named opcode decodes to. -/
 def decodedNamed : List (Option Instruction) := named.map (Instruction.ofRaw? ·.1)
@@ -139,19 +142,23 @@ def mutations : List (RawInstruction × Instruction) := [
   (⟨0, 32, .integer (2^31)⟩, .ldc_i4 (BitVec.ofInt 32 (2^31))),
   (⟨0, 33, .integer (2^63)⟩, .ldc_i8 (BitVec.ofInt 64 (2^63))),
   (⟨0, 33, .integer (-1)⟩, .ldc_i4 (BitVec.ofInt 32 (-1))),
-  -- Another constant, local or target than the operand names.
+  -- Another constant, argument, local or target than the operand names.
   (⟨0, 25, .none⟩, .ldc_i4 2), (⟨0, 31, .integer (-5)⟩, .ldc_i4 5),
+  (⟨0, 16, .argument 1⟩, .starg 2), (⟨0, 65034, .argument 300⟩, .ldarga 299),
   (⟨0, 6, .none⟩, .ldloc 1), (⟨0, 65036, .local 300⟩, .ldloc 299),
   (⟨0, 43, .target 1⟩, .br 2), (⟨0, 69, .targets [1, 2]⟩, .switch [2, 1]),
   (⟨0, 69, .targets [1, 2]⟩, .switch [1, 2, 3]),
   -- Another constructor with the same stack effect.
   (⟨0, 88, .none⟩, .sub), (⟨0, 38, .none⟩, .skipInit), (⟨0, 19, .local 4⟩, .ldloc 4),
-  (⟨0, 18, .local 4⟩, .ldloc 4), (⟨0, 58, .target 1⟩, .brfalse 1),
+  (⟨0, 18, .local 4⟩, .ldloc 4), (⟨0, 16, .argument 4⟩, .stloc 4),
+  (⟨0, 15, .argument 4⟩, .ldloca 4), (⟨0, 58, .target 1⟩, .brfalse 1),
   (⟨0, 138, .none⟩, .conv_ovf_un .i8), (⟨0, 211, .none⟩, .conv_i8),
   (⟨0, 130, .none⟩, .conv_ovf .i1), (⟨0, 215, .none⟩, .add_ovf), (⟨0, 65027, .none⟩, .cgt),
   -- A local or argument index wider than its form encodes.
   (⟨0, 17, .local 256⟩, .ldloc 256), (⟨0, 65036, .local 65536⟩, .ldloc 65536),
   (⟨0, 14, .argument 256⟩, .ldarg 256), (⟨0, 65033, .argument 65536⟩, .ldarg 65536),
+  (⟨0, 15, .argument 256⟩, .ldarga 256), (⟨0, 65034, .argument 65536⟩, .ldarga 65536),
+  (⟨0, 16, .argument 256⟩, .starg 256), (⟨0, 65035, .argument 65536⟩, .starg 65536),
   -- A malformed operand, another argument, an argument address, or an opcode outside the family.
   (⟨0, 42, .integer 0⟩, .ret), (⟨0, 17, .argument 4⟩, .ldloc 4), (⟨0, 6, .local 0⟩, .ldloc 0),
   (⟨0, 43, .targets [1]⟩, .br 1), (⟨0, 2, .none⟩, .ldarg 1), (⟨0, 15, .argument 1⟩, .ldarg 1),
@@ -208,7 +215,7 @@ private def decodedHeads : MetaM (List Name) := do
     list ← whnf (list.getArg! 2)
   return heads
 
-/-- info: decoded 63, undecoded 32 of 95 constructors -/
+/-- info: decoded 65, undecoded 30 of 95 constructors -/
 #guard_msgs in
 run_meta do
   let constructors := (← getConstInfoInduct ``Instruction).ctors
