@@ -220,7 +220,7 @@ def constrainedTargetSite (receiver : TypeExpr) (site : CallSite) (target : Cons
     CallSite :=
   { site with
     target := .managed target.method.token,
-    declaringType := target.declaringType receiver,
+    method.owner := target.declaringType receiver,
     typeArguments := siteMethodArguments site ++ target.method.ownerArguments,
     ownerArgumentCount := target.method.ownerArguments.length }
 

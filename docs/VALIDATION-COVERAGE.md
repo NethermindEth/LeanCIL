@@ -784,8 +784,8 @@ and a list-returning function must fail extraction. These examples use the share
 
 `Tests/StackAllocation.cs` extracts compiled pointer and span stack allocations, checks results
 with and without localsinit, rejects uninitialized reads and escaped storage, and checks
-insufficient-budget failure. Mutating the emitted initialization flag is rejected by the Lean
-certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
+insufficient-budget failure. Mutating the localsinit flag of the emitted declared signature is
+rejected by the Lean certificate. `Tests/StackAllocation.lean` covers alignment, repeated allocations and expiry;
 `Tests/StackAllocationEvidence.lean` rejects forged flags, injected allocations, extra stack items
 and non-native 64-bit size operands. These run in the `dispatch` suite.
 

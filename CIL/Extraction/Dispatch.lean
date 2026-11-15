@@ -59,10 +59,6 @@ private def unique : List α → Option α
   | [value] => some value
   | _ => none
 
-/-- The method type arguments of a call: the prefix of `typeArguments` before the owner's. -/
-def siteMethodArguments (site : CallSite) : List TypeExpr :=
-  site.typeArguments.take (site.typeArguments.length - site.ownerArgumentCount)
-
 /-- The ECMA-335 calling-convention bit of a generic method signature. -/
 private def genericCallingConvention : Nat := 16
 
