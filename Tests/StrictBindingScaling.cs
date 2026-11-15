@@ -11,7 +11,7 @@ partial class Program
     /// <summary>The most the check may take longer, as a multiple, for a larger image with the same claims.</summary>
     const double MaximumImageGrowth = 4;
 
-    /// <summary>The most a carried heap byte may cost more, per byte, when the carried name and key double.</summary>
+    /// <summary>The most a carried key byte may cost more, per byte, when the carried key grows fourfold.</summary>
     const double MaximumPerByteGrowth = 1.25;
 
     /// <summary>
@@ -78,16 +78,17 @@ partial class Program
     }
 
     /// <summary>
-    /// The check of a carried Assembly block reads each carried byte of the name and key once, so its kernel
-    /// heartbeats grow linearly with them. Images whose name and key take 64, 128 and 256 bytes each are checked,
-    /// and the heartbeats of preparing each image, which also spells its identity, are subtracted. A byte added
-    /// from 128 to 256 may cost at most 1.25 times a byte added from 64 to 128, where a cost quadratic in the bytes
-    /// would give twice; reruns differ by a few heartbeats, far inside that bound.
+    /// The check of a carried Assembly block reads each carried entry byte once, so its kernel heartbeats grow
+    /// linearly with them. Images with a short name and a public key blob of 256, 1024 and 4096 bytes are checked,
+    /// and the heartbeats of preparing each image are subtracted; the name stays short because preparing spells
+    /// the identity at a cost quadratic in its length. A byte added from 1024 to 4096 may cost at most 1.25 times
+    /// a byte added from 256 to 1024, where a cost quadratic in the bytes would give four times; reruns differ by
+    /// a few heartbeats, far inside that bound.
     /// </summary>
     static void CheckAssemblyBlockScaling(string root, string package)
     {
         const string report = "#eval show IO Nat from IO.getNumHeartbeats";
-        int[] sizes = [64, 128, 256];
+        int[] sizes = [256, 1024, 4096];
         Run(["lake", "build", "StrictBinding.Rows"], package, progress: "Building the carried metadata checks");
         var cases = string.Concat(sizes.Select(size =>
         {
@@ -129,19 +130,19 @@ partial class Program
         if (smaller <= 0 || larger / smaller > MaximumPerByteGrowth)
             throw new InvalidOperationException($"The carried Assembly block check costs {measured}; a byte costs " +
                 $"{growth} times as much from {sizes[1]} to {sizes[2]} bytes as from {sizes[0]} to {sizes[1]}");
-        Console.WriteLine($"PASS the carried Assembly block check is linear in its heap bytes ({measured}; " +
+        Console.WriteLine($"PASS the carried Assembly block check is linear in its key bytes ({measured}; " +
             $"{growth} times per byte)");
     }
 
     /// <summary>
-    /// A library whose Assembly row names a string and a public key blob that each take <paramref name="size"/>
-    /// bytes of their heaps, with the length prefix of the blob and the terminator of the string.
+    /// A library named Synthetic whose Assembly row names a public key blob that takes <paramref name="size"/>
+    /// bytes of the `#Blob` heap, with its length prefix.
     /// </summary>
     static byte[] SyntheticAssembly(int size)
     {
         const int shortBlob = 0x80;
         var metadata = new MetadataBuilder();
-        var name = metadata.GetOrAddString(new string('n', size - 1));
+        var name = metadata.GetOrAddString("Synthetic");
         var keyLength = size <= shortBlob ? size - 1 : size - 2;
         var keyBytes = Enumerable.Range(0, keyLength).Select(index => (byte)(index * 7 + 1)).ToArray();
         var key = metadata.GetOrAddBlob(keyBytes);
