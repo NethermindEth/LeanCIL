@@ -18,15 +18,16 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/Strings");
 Directory.CreateDirectory(root);
 
-foreach (var (proof, entry) in new[]
+foreach (var (source, entry) in new[]
 {
-    ("StringValues", "Strings::Pick(System.Boolean,System.String,System.String)"),
-    ("StringLabel", "Strings::Relabel(Examples.Labelled,System.String)"),
-    ("StringLiterals", "Strings::SameText()"),
-    ("StringDefault", "Strings::OrNone(System.String)")
+    ("Examples/Proofs/StringValues.lean", "Strings::Pick(System.Boolean,System.String,System.String)"),
+    ("Examples/Proofs/StringLabel.lean", "Strings::Relabel(Examples.Labelled,System.String)"),
+    ("Examples/Proofs/StringLiterals.lean", "Strings::SameText()"),
+    ("Examples/Proofs/StringDefault.lean", "Strings::OrNone(System.String)")
 })
 {
-    verification.Verify(assembly, "Examples", entry, At($"Examples/Proofs/{proof}.lean"), Path.Combine(root, proof));
+    var proof = Path.GetFileNameWithoutExtension(source);
+    verification.Verify(assembly, "Examples", entry, At(source), Path.Combine(root, proof));
     Console.WriteLine($"PASS {proof}: {entry}");
 }
 

@@ -57,8 +57,10 @@ internal static class VerificationSuites
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),
         new("evidence", "Tests/ExtractionEvidence.cs",
-            "independent extraction certificates, malformed evidence rejection, and the metadata decoder's method " +
-            "names against Cecil's"),
+            "independent extraction certificates, malformed evidence rejection, the metadata decoder's method " +
+            "names against Cecil's, framework argument guards, strings as opaque references, typed identity " +
+            "display, and the certificate index, feature getter, layout accumulation and projection, extraction " +
+            "home and generic owner index libraries"),
         // Split from evidence so neither job approaches the CI timeout.
         new("dispatch", "Tests/DispatchEvidence.cs",
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
@@ -81,8 +83,8 @@ internal static class VerificationSuites
             "layout-based Unsafe sizes, reference offsets and metadata validation"),
         new("math", "Tests/IntegerMath.cs", "integer Math helpers, BigMul, runtime faults and universal minimum"),
         new("intrinsics", "Tests/ExactIntrinsics.cs",
-            "exact SIMD call signatures, byte shuffles, AES rounds, unspecified lanes, opaque locals and " +
-            "profile rejection"),
+            "exact SIMD call signatures, byte shuffles, AES rounds, unspecified lanes, opaque locals, profile " +
+            "rejection and the library of generated runtime comparisons"),
         new("divrem", "Tests/TupleDivision.cs",
             "X86Base.X64.DivRem and Math.DivRem through ValueTuple fields, divide faults and layout rejection"),
         new("fsharp", "Tests/FSharp.cs", "F# arithmetic, branches, calls, references and struct construction"),
@@ -148,7 +150,8 @@ internal static class VerificationSuites
             "scalar and checked-memory stepping with per-instruction work, proof-size and latency budgets"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
-            "substitution rejection, and the strict binding library and audit"),
+            "substitution rejection, the strict binding library and audit, and the checked-in strict binding " +
+            "fixture module"),
         new("pool", "Tests/ItemPool.cs",
             "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
             "they reject"),
