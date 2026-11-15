@@ -243,7 +243,9 @@ theorem findIdx?_of_keysAscend {α : Type} {entries rest : List (Nat × α)}
     | zero =>
       simp only [List.drop_zero, List.cons.injEq, Prod.mk.injEq] at placed
       obtain ⟨⟨rfl, -⟩, -⟩ := placed
-      simp [List.findIdx?_cons]
+      -- `simp` closes this through Nat's LawfulBEq instance, which depends on Classical.choice.
+      rw [List.findIdx?_cons, show ∀ same : Nat, (same == same) = true from Nat.beq_refl]
+      rfl
     | succ position =>
       simp only [List.drop_succ_cons] at placed
       have later := keysAscend_bound tail (first + 1) ascending.2 (key, value)

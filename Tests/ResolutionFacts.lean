@@ -413,7 +413,7 @@ info: 'Tests.ResolutionFacts.twoParameters_argumentAccess0' depends on axioms:
 
 /--
 info: 'Tests.ResolutionFacts.twoParameters_argumentAccess1' depends on axioms:
-[propext, Classical.choice, Quot.sound]
+[propext, Quot.sound]
 -/
 #guard_msgs (whitespace := lax) in
 #print axioms twoParameters_argumentAccess1
