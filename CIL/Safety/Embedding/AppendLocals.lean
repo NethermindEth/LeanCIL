@@ -569,6 +569,18 @@ theorem step_appendLocals_ldc_i8 (value : W64) :
 
 #print axioms step_appendLocals_ldc_i8
 
+/-- `ldnull` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldnull :
+    StepAppendLocals .ldnull := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  clear kept
+  unfold step
+  apply observed_appendLocals
+  exact fallback_appendLocals body.profile .ldnull pc stack frame extra memory
+
+#print axioms step_appendLocals_ldnull
+
 /-- `conv_i1` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_conv_i1 :
     StepAppendLocals .conv_i1 := by
@@ -1304,6 +1316,8 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_ldc_i4 value
     case ldc_i8 value =>
       exact step_appendLocals_ldc_i8 value
+    case ldnull =>
+      exact step_appendLocals_ldnull
     case conv_i1 =>
       exact step_appendLocals_conv_i1
     case conv_i2 =>

@@ -177,8 +177,6 @@ inductive MemoryOp where
   | arrayTransfer (element : ArrayElement) (store : Bool)
   /-- `Unsafe.NullRef<T>` pushes the null reference; `Unsafe.IsNullRef<T>` tests for it. -/
   | nullRef | isNullRef
-  /-- `ldnull` pushes the null object reference, distinct from a null byref. -/
-  | nullObject
   /-- `ldstr`: the interned string object the caller bound to `text`. No operation reads its
       characters. -/
   | stringLiteral (text : String)
@@ -246,7 +244,7 @@ def MemoryOp.argumentCount : MemoryOp → Nat
   | .referenceArrayLoad => 2
   | .store128 | .store256 | .store512 | .add .. | .spanCreate | .spanItem _
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => 2
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _
+  | .staticAddress _ | .staticValue _ | .nullRef | .stringLiteral _
   | .spanEmpty .. => 0
   | .load128 | .load256 | .load512 | .asRef | .bitcastByteBool | .bitcastValue .. | .createSpan _
   | .spanReference | .spanLength | .isNullRef

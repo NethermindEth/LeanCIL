@@ -69,6 +69,12 @@ theorem byref_null_not_object :
     storeLocal memory (.object none) (.reference .null) = .error .invalidState := ⟨rfl, rfl⟩
 #print axioms byref_null_not_object
 
+/-- `ldnull` pushes the object null above the stack and leaves memory unchanged. -/
+theorem ldnull_pushes_object_null :
+    CIL.Safety.step body .ldnull 0 [] frame [.object live] memory =
+      .ok (.next 1 [.object .null, .object live] frame memory) := rfl
+#print axioms ldnull_pushes_object_null
+
 /-- An object home never exposes an address. -/
 theorem object_local_has_no_address :
     localAddress memory (.object (some live)) =

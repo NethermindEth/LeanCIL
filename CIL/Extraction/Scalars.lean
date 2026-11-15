@@ -308,7 +308,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
   else if instruction.opcode == 65054 then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
-    instruction.operand == .none && match emitted with | .memory .nullObject => true | _ => false
+    instruction.operand == .none && match emitted with | .ldnull => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
     match instruction.operand, stack, emitted with
     | .target target, value :: _, .brfalse actual =>

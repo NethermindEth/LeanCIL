@@ -36,7 +36,7 @@ private def memoryFeatureEffect : MemoryOp → Nat × Nat
   | .arrayStore _ => (3, 0)
   | .copyBlock _ | .initBlock _ => (3, 0)
   | .store128 | .store256 | .store512 => (2, 0)
-  | .staticAddress _ | .staticValue _ | .nullRef | .nullObject | .stringLiteral _ => (0, 1)
+  | .staticAddress _ | .staticValue _ | .nullRef | .stringLiteral _ => (0, 1)
   | .objectField .. | .objectReferenceField .. | .referenceArrayLength | .arrayField .. => (1, 1)
   | .setObjectField .. | .setObjectReferenceField .. | .setArrayField .. => (2, 0)
   | .referenceArrayLoad => (2, 1)
@@ -60,7 +60,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)
   -- Pushes and one-operand operations.
   | .nop => some (0, 0)
-  | .ldc_i4 _ | .ldc_i8 _ | .ldarg _ | .ldloc .. => some (0, 1)
+  | .ldc_i4 _ | .ldc_i8 _ | .ldnull | .ldarg _ | .ldloc .. => some (0, 1)
   | .neg | .not | .conv_i1 | .conv_i2 | .conv_u2 | .conv_i8 | .conv_i4 | .conv_u1
   | .conv_u4 | .conv_u8 | .conv_u | .conv_i | .conv_ovf _ | .conv_ovf_un _
   | .loadAggregate _ | .loadScalar .. | .load64 | .fieldAt .. | .fieldAddress _

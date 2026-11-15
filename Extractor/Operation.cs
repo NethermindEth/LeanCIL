@@ -430,6 +430,12 @@ internal sealed record NewReferenceArray(string Scope, string Name) : Operation
         $".newReferenceArray ({GenericEvidence.ObjectType(Scope, Name)})";
 }
 
+/// <summary>An <c>ldnull</c>: the null object reference.</summary>
+internal sealed record LoadNull : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => ".ldnull";
+}
+
 /// <summary>A cast or test of the top reference against the class <paramref name="Type"/>.</summary>
 internal sealed record ObjectTest(string Type, bool Throwing) : Operation
 {

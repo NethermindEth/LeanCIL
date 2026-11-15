@@ -68,11 +68,11 @@ theorem length_of_fresh :
 
 /-- `ldlen`, `ldelem.ref` and `stelem.ref` of a null array throw `NullReferenceException`. -/
 theorem null_array_throws :
-    runs [.memory .nullObject, .memory .referenceArrayLength, .ret] [] budgeted =
+    runs [.ldnull, .memory .referenceArrayLength, .ret] [] budgeted =
       .error ⟨0, 1, .thrown "System.NullReferenceException"⟩ ∧
-    runs [.memory .nullObject, .ldc_i4 0, .memory .referenceArrayLoad, .ret] [] budgeted =
+    runs [.ldnull, .ldc_i4 0, .memory .referenceArrayLoad, .ret] [] budgeted =
       .error ⟨0, 2, .thrown "System.NullReferenceException"⟩ ∧
-    runs [.memory .nullObject, .ldc_i4 0, .memory .nullObject, .memory .referenceArrayStore,
+    runs [.ldnull, .ldc_i4 0, .ldnull, .memory .referenceArrayStore,
       .ldc_i4 0, .ret] [] budgeted =
       .error ⟨0, 3, .thrown "System.NullReferenceException"⟩ := ⟨rfl, rfl, rfl⟩
 #print axioms null_array_throws
@@ -91,7 +91,7 @@ theorem index_out_of_range :
 theorem null_elements :
     (runs [.ldc_i4 1, .newReferenceArray node, .ldc_i4 0, .memory .referenceArrayLoad,
       .ret] [] budgeted).map Prod.snd = .ok [.object .null] ∧
-    (runs [.ldc_i4 1, .newReferenceArray circle, .dup, .ldc_i4 0, .memory .nullObject,
+    (runs [.ldc_i4 1, .newReferenceArray circle, .dup, .ldc_i4 0, .ldnull,
       .memory .referenceArrayStore, .ldc_i4 0, .memory .referenceArrayLoad, .ret] []
       budgeted).map Prod.snd = .ok [.object .null] := ⟨rfl, rfl⟩
 #print axioms null_elements

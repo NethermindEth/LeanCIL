@@ -688,7 +688,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     step_relabel_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | load64 | store64 | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | load64 | store64 | dup | pop | skipInit =>
     step_relabel_fallback (fun absent => absurd rfl absent)
       (fun _ _ ran => ⟨ran, context.next rfl⟩)
 
@@ -1243,7 +1243,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     step_raise_fallback (fun _ => by base_relabels) (fun absent => nomatch absent)
   case loadAggregate | copyObject | storeAggregate | initAggregate | loadScalar | storeScalar
     | fieldAt | fieldAddress | setFieldAt | aggregateFieldAt | setAggregateFieldAt | ldc_i4
-    | ldc_i8 | load64 | store64 | dup | pop | skipInit =>
+    | ldc_i8 | ldnull | load64 | store64 | dup | pop | skipInit =>
     exact step_raise_instruction _ (fun _ => rfl) (fun _ _ _ _ _ _ => rfl)
 
 #print axioms step_raise

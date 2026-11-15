@@ -103,7 +103,7 @@ def observerCount : CIL.Instruction → Nat
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
-  | .nop | .ldarg _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _ | .ldc_i8 _
+  | .nop | .ldarg _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _ | .ldc_i8 _ | .ldnull
   | .dup | .pop | .br _ | .feature _ | .intrinsic ..
   | .throw _ | .unsupported _ => 0
 
@@ -851,7 +851,6 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (memory, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
   -- Null references
   | .nullRef, _ => return (memory, .reference .null :: stack)
-  | .nullObject, _ => return (memory, .object .null :: stack)
   -- A pure comparison: no access, so a live, expired or end reference all answer false.
   | .isNullRef, .reference r :: rest | .isNullRef, .readOnlyReference r :: rest =>
     return (memory, .scalar (.i32 (match r with | .null => 1 | .address _ => 0)) :: rest)
@@ -1247,6 +1246,7 @@ def instruction (op : CIL.Instruction) (stack : List Value) (m : Memory) :
   | .memory operation, _ => memoryInstruction operation stack m
   | .ldc_i4 bits, _ => return (m, .scalar (.i32 bits) :: stack)
   | .ldc_i8 bits, _ => return (m, .scalar (.i64 bits) :: stack)
+  | .ldnull, _ => return (m, .object .null :: stack)
   | .load64, .reference r :: rest | .load64, .readOnlyReference r :: rest =>
     return (m, .scalar (← loadValue m r 8) :: rest)
   | .store64, .scalar (.i64 bits) :: .reference r :: rest =>

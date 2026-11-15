@@ -512,7 +512,7 @@ theorem local_slot_sites :
     ¬ ScalarFlowValid #[] (slotRaw (i 22) 1) slotFeatures (slotStates .word32)
       (slotCode (.ldc_i4 0) 1) ∧
     ¬ ScalarFlowValid #[] (slotRaw (i 20) 0) slotFeatures (slotStates .nullObject)
-      (slotCode (.memory .nullObject) 0) := by
+      (slotCode .ldnull 0) := by
   decide +kernel
 #print axioms local_slot_sites
 
@@ -771,7 +771,7 @@ private def pushHoleStates : ScalarCertificate := [some [], some [.other], some 
 private def pushHoleCode (emitted : Instruction) : List Instruction :=
   [emitted, .pop, .ldarg 0, .ret]
 example : ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures
-    (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullObject)) := by decide
+    (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode .ldnull) := by decide
 -- `ldnull` has one canonical null; the byref null of `Unsafe.NullRef` is a different value.
 example : ¬ ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures
     (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullRef)) := by decide

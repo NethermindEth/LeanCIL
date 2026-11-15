@@ -273,12 +273,9 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return .next (pc + 1) (.object (.address array) :: rest) frame allocated := id rfl
 
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
-@[cil_step high] theorem step_nullObject_eq (stack : List Value) :
-    step body (.memory .nullObject) pc args frame stack memory =
-      .ok (.next (pc + 1) (.object .null :: stack) frame memory) := by
-  simp only [step, observerCount, staticInstruction, memoryInstruction,
-    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any]
-  rfl
+@[cil_step high] theorem step_ldnull_eq (stack : List Value) :
+    step body .ldnull pc args frame stack memory =
+      .ok (.next (pc + 1) (.object .null :: stack) frame memory) := id rfl
 
 /-- `ldstr` pushes the object bound to its text and leaves memory unchanged. -/
 @[cil_step high] theorem step_stringLiteral_eq (text : String) (stack : List Value) :
@@ -699,7 +696,7 @@ end ObjectEquations
 #print axioms step_brfalse_object_eq
 #print axioms step_brtrue_object_eq
 #print axioms step_objectTest_eq
-#print axioms step_nullObject_eq
+#print axioms step_ldnull_eq
 #print axioms step_newReferenceArray_i32_eq
 #print axioms step_newReferenceArray_i64_eq
 #print axioms step_stringLiteral_eq
