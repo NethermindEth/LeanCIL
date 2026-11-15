@@ -312,11 +312,15 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     cases observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
-    -- Past the faulting-arithmetic arms, the dispatcher's catch-all holds every other arm. Its
-    -- exclusions are cleared so the arms' own names stay the newest inaccessible ones.
+    -- Past the table-offset and faulting-arithmetic arms, the catch-all holds every other arm.
+    -- Its exclusions are named so the arms' own names stay the newest inaccessible ones;
+    -- `fixed_fallback` reads the table-offset ones and the faulting ones are cleared.
     all_goals try (
-      rename_i addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
-        convOvf convOvfUn
+      rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
+        mulOvfUn div divUn rem remUn convOvf convOvfUn
+      guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
+        (rest : List Value), operation = .add →
+        stack = Value.methodTable table :: Value.scalar offset :: rest → False
       guard_hyp div : ∀ (y x : CIL.Value) (rest : List Value), operation = .div →
         stack = Value.scalar y :: Value.scalar x :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf

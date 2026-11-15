@@ -202,9 +202,18 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     | _ => false
   if unspecifiedOperands (observerCount op) stack || unknownArgument then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Faulting arithmetic is matched apart from the rest: every arm of one match adds to the cost
-  -- of the match equations each importer that splits `step` regenerates.
+  -- Native table offsets and faulting arithmetic are matched apart from the rest: every arm of one
+  -- match adds to the cost of the match equations each importer that splits `step` regenerates.
   match op, stack with
+  -- A native table offset is a byte count; the cursor keeps the table's identities.
+  | .add, .scalar offset :: .methodTable table :: rest
+  | .add, .methodTable table :: .scalar offset :: rest =>
+    let offset ← match offset with
+      | .i32 bits => .ok (bits.signExtend 64)
+      | .i64 bits => .ok bits
+      | _ => .error .invalidState
+    let selected ← checkedAt .null nativeMethodWidth (addNativeTable table m offset)
+    return .next (pc + 1) (.methodTable selected :: rest) frame m
   -- One arm per overflow-checked arithmetic constructor, flags as `checkedKind?` gives them.
   | .add_ovf, .scalar y :: .scalar x :: rest =>
     let value ← (CIL.checkedValues .add true x y).mapError ExecutionFault.arithmetic
@@ -255,15 +264,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .add, .readOnlyReference _ :: .scalar _ :: _ =>
     let (memory, values) ← referenceAddInstruction 1 true stack m
     return .next (pc + 1) values frame memory
-  -- A native table offset is a byte count; the cursor keeps the table's identities.
-  | .add, .scalar offset :: .methodTable table :: rest
-  | .add, .methodTable table :: .scalar offset :: rest =>
-    let offset ← match offset with
-      | .i32 bits => .ok (bits.signExtend 64)
-      | .i64 bits => .ok bits
-      | _ => .error .invalidState
-    let selected ← checkedAt .null nativeMethodWidth (addNativeTable table m offset)
-    return .next (pc + 1) (.methodTable selected :: rest) frame m
   | .sub, .scalar offset :: .reference value :: rest =>
     let result ← referenceSubtract m value offset
     return .next (pc + 1) (.reference result :: rest) frame m
