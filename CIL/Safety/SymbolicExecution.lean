@@ -34,6 +34,15 @@ open Lean Elab Tactic Conv in
 elab "cil_reduce_fuel" : conv => do
   changeLhs (← Meta.reduce (← getLhs))
 
+open Lean Elab Tactic Conv in
+/-- Replaces the focused closed natural number by its literal. A call's continuation resumes at
+    `pc + 1`, so without it the pc would grow by one addition per call and so would every lookup. -/
+elab "cil_literal_nat" : conv => do
+  let lhs ← instantiateMVars (← getLhs)
+  if lhs.hasFVar || lhs.hasMVar then return
+  let some value ← (Meta.evalNat lhs).run | return
+  changeLhs (mkNatLit value)
+
 open Lean Elab Tactic in
 /-- Runs `tactic` so that a failed candidate proof fails and can backtrack, rather than be
     recovered as an admitted term. Only the candidate's own errors count, so an earlier failed
@@ -1441,6 +1450,7 @@ macro "cil_checked_call_open_at " methodFound:term:max instructionFound:term:max
       (by cil_checked_step_normalized [$[$facts:term],*])
       (by first | cil_checked_child [$[$facts:term],*]
                 | (cil_checked_steps_normalized [$[$facts:term],*]; done)) ?_
+    try (conv => lhs; arg 4; cil_literal_nat)
     cil_stack_cleanup))
 
 open Lean Elab Tactic Meta in
