@@ -192,15 +192,23 @@ example : featureOpMatches #[] booleanRaw (i 10) (.stloc 0) = true := by decide 
 example : featureOpMatches #[] booleanRaw (i 6) (.ldloc 1) = false := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 10) (.ldloc 0) = false := by decide +kernel
 example : featureOpMatches #[] booleanRaw (i 6) (.stloc 0) = false := by decide +kernel
--- Taking the address of a span local or of an argument home binds only the address instruction,
--- whose step pushes the span's view; a load in its place is rejected.
+-- Taking the address of a span local or of a span argument binds only the address instruction of
+-- the same local or argument, whose step pushes the span's view; a load in its place is rejected.
 private def spanRaw := raw [i 18 (.local 0), i 15 (.argument 0)]
   [.apply (.constructor runtimeScope "System.Span`1") (.atom runtimeScope "System.UInt32")] .void
 example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloca 0) = true := by decide +kernel
 example : featureOpMatches #[] spanRaw (i 18 (.local 0)) (.ldloc 0) = false := by decide +kernel
-example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloca 1) = true := by
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarga 0) = true := by
   decide +kernel
-example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloc 1) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarga 1) = false := by
+  decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldloca 1) = false := by
+  decide +kernel
+example : featureOpMatches #[] spanRaw (i 15 (.argument 0)) (.ldarg 0) = false := by decide +kernel
+-- An argument store binds only `starg` of the same argument, not a store to its home slot.
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.starg 0) = true := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.stloc 1) = false := by decide +kernel
+example : featureOpMatches #[] spanRaw (i 16 (.argument 0)) (.starg 1) = false := by decide +kernel
 example : emittedFeatureEffect (.memory (.copyBlock 8)) false = some (3, 0) := by decide
 example : emittedFeatureEffect (.newAggregate 1 2 ⟨8, by decide⟩) false = some (2, 1) := by decide
 /-- Indexed facts retain boolean bounds, exact type identity, address exclusions and absence. -/

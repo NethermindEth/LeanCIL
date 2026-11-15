@@ -84,37 +84,37 @@ private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 getItem, i 74, i 
 private def itemStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none, none], state [none], state [none]]
 private def itemOps : List Instruction :=
-  [.ldarg 0, .nop, .nop, .ldarg 1, .memory (.spanItem 4), .ldind .i4, .ret]
+  [.ldarg 0, .stloc 0, .ldloca 0, .ldarg 1, .memory (.spanItem 4), .ldind .i4, .ret]
 
-example : foldRoles [words] itemCode = [none, some .head, some .interior, none, none, none, none] := by decide
-example : foldRoles [intType] itemCode = List.replicate 7 none := by decide
-example : foldRoles [words] [i 10, i 18 (.local 1)] = [none, none] := by decide
+/-- Storing and addressing a span receiver leaves every instruction outside a fold. -/
+theorem length_receiver_roles :
+    foldRoles [words] [i 10, i 18 (.local 0), i 40 (.call {
+      method := {
+        owner := words, name := name!"get_Length", hasThis := true, genericArity := 0,
+        returnType := intType, parameters := [] },
+      name := "get_Length",
+      target := .external (runtime ++
+        "::System.Int32 System.ReadOnlySpan`1<System.UInt32>::get_Length()"),
+      typeArguments := [], parameterCount := 0, returnsValue := true })] =
+        [none, none, none] := by decide +kernel
+#print axioms length_receiver_roles
 
-/-- A third decoded local use disallows receiver folding anywhere in the body. -/
-theorem extra_local_use : foldRoles [words] (itemCode ++ [i 6]) =
-    List.replicate 8 none := by decide +kernel
-#print axioms extra_local_use
-
-/-- A malformed local-load operand does not count as a decoded use of local zero. -/
-theorem malformed_local_operand :
-    foldRoles [words] (itemCode ++ [i 65036 (.argument 0)]) =
-      [none, some .head, some .interior, none, none, none, none, none] := by decide +kernel
-#print axioms malformed_local_operand
--- Only the store may be entered from elsewhere.
-example : foldEntry (foldRoles [words] itemCode)[1]? ∧
-    ¬ foldEntry (foldRoles [words] itemCode)[2]? := by decide
+/-- Indexed span receivers retain every raw instruction outside a fold. -/
+theorem item_receiver_roles : foldRoles [words] itemCode = List.replicate 7 none := by
+  decide +kernel
+#print axioms item_receiver_roles
 
 example : FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true) itemOps := by decide
--- The receiver must stay on the stack: a real store or address is not the fold.
+-- Erasing either receiver instruction fails its raw opcode check.
 example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true)
-    (itemOps.set 1 (.stloc 0)) := by decide
+    (itemOps.set 1 .nop) := by decide
 example : ¬ FeatureFlowValid #[] (fun _ => none) (raw [words] itemCode) .scalar itemStates
     (List.replicate 7 true)
-    (itemOps.set 2 (.ldloca 0)) := by decide
+    (itemOps.set 2 .nop) := by decide
 
--- Span locals outside a receiver fold retain ordinary load/store flow.
+-- Span locals retain ordinary load/store flow.
 private def loadCode := [i 2, i 10, i 6, i 42]
 private def loadOps : List Instruction := [.ldarg 0, .stloc 0, .ldloc 0, .ret]
 private def loadStates : FeatureCertificate := [state [], state [none], state [], state [none]]

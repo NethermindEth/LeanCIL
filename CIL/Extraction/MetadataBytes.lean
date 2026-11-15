@@ -1,4 +1,5 @@
 import CIL.Extraction.KernelEquation
+import CIL.Extraction.ByteLiterals
 
 /-!
 # Metadata tables and heaps

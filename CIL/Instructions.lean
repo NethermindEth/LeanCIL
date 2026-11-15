@@ -1,4 +1,5 @@
 import CIL.Types
+import CIL.ExceptionType
 import CIL.IntegerArithmetic
 import CIL.Features
 import CIL.SIMD.Availability
@@ -175,6 +176,10 @@ inductive Instruction where
   -- Arguments and locals.
   /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/
   | ldarg (index : Nat)
+  /-- Stores the top of the stack into argument `index`'s home, as `storeArgument` says. -/
+  | starg (index : Nat)
+  /-- Pushes the address of argument `index`'s home, as `addressArgument` says. -/
+  | ldarga (index : Nat)
   | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)
@@ -227,7 +232,7 @@ inductive Instruction where
   | memory (operation : MemoryOp)
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
-  | throw (exception : String)
+  | throw (exception : ExceptionType)
   /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
       outside the code the extractor reaches under the selected profile. It faults when stepped. -/
   | unadmitted (opcode : Nat)

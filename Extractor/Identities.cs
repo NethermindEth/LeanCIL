@@ -11,6 +11,83 @@ using Srm = System.Reflection.Metadata;
 
 namespace Nethermind.LeanCIL;
 
+/// <summary>
+/// The .NET exceptions the model raises, in the order of <c>CIL.ExceptionType</c>. Each stands for the type of
+/// namespace <c>System</c> in the runtime assembly; no member is zero, so <c>default</c> is none of them.
+/// </summary>
+internal enum ExceptionType
+{
+    BaseException = 1, SystemException, ApplicationException, Arithmetic, DivideByZero, Overflow, InvalidOperation,
+    NotSupported, NotImplemented, Argument, ArgumentNull, ArgumentOutOfRange, IndexOutOfRange, NullReference,
+    Format, InvalidCast, ArrayTypeMismatch,
+}
+
+internal static class ExceptionTypeText
+{
+    /// <summary>The Lean constructor term naming this exception type.</summary>
+    internal static string ToLean(this ExceptionType exception) => "." + exception.LeanName();
+
+    /// <summary>Every member, in the order of <c>CIL.ExceptionType.all</c>.</summary>
+    internal static readonly ExceptionType[] All =
+    [
+        ExceptionType.BaseException, ExceptionType.SystemException, ExceptionType.ApplicationException,
+        ExceptionType.Arithmetic, ExceptionType.DivideByZero, ExceptionType.Overflow,
+        ExceptionType.InvalidOperation, ExceptionType.NotSupported, ExceptionType.NotImplemented,
+        ExceptionType.Argument, ExceptionType.ArgumentNull, ExceptionType.ArgumentOutOfRange,
+        ExceptionType.IndexOutOfRange, ExceptionType.NullReference, ExceptionType.Format, ExceptionType.InvalidCast,
+        ExceptionType.ArrayTypeMismatch
+    ];
+
+    /// <summary>The name column of the member's <c>TypeDef</c> row, such as <c>OverflowException</c>.</summary>
+    internal static string MetadataName(this ExceptionType exception) => exception switch
+    {
+        ExceptionType.BaseException => "Exception",
+        ExceptionType.SystemException => "SystemException",
+        ExceptionType.ApplicationException => "ApplicationException",
+        ExceptionType.Arithmetic => "ArithmeticException",
+        ExceptionType.DivideByZero => "DivideByZeroException",
+        ExceptionType.Overflow => "OverflowException",
+        ExceptionType.InvalidOperation => "InvalidOperationException",
+        ExceptionType.NotSupported => "NotSupportedException",
+        ExceptionType.NotImplemented => "NotImplementedException",
+        ExceptionType.Argument => "ArgumentException",
+        ExceptionType.ArgumentNull => "ArgumentNullException",
+        ExceptionType.ArgumentOutOfRange => "ArgumentOutOfRangeException",
+        ExceptionType.IndexOutOfRange => "IndexOutOfRangeException",
+        ExceptionType.NullReference => "NullReferenceException",
+        ExceptionType.Format => "FormatException",
+        ExceptionType.InvalidCast => "InvalidCastException",
+        ExceptionType.ArrayTypeMismatch => "ArrayTypeMismatchException",
+        _ => throw new ArgumentOutOfRangeException(nameof(exception))
+    };
+
+    /// <summary>The Lean constructor name, such as <c>overflow</c>.</summary>
+    internal static string LeanName(this ExceptionType exception) => exception switch
+    {
+        ExceptionType.BaseException => "baseException",
+        ExceptionType.SystemException => "systemException",
+        ExceptionType.ApplicationException => "applicationException",
+        ExceptionType.Arithmetic => "arithmetic",
+        ExceptionType.DivideByZero => "divideByZero",
+        ExceptionType.Overflow => "overflow",
+        ExceptionType.InvalidOperation => "invalidOperation",
+        ExceptionType.NotSupported => "notSupported",
+        ExceptionType.NotImplemented => "notImplemented",
+        ExceptionType.Argument => "argument",
+        ExceptionType.ArgumentNull => "argumentNull",
+        ExceptionType.ArgumentOutOfRange => "argumentOutOfRange",
+        ExceptionType.IndexOutOfRange => "indexOutOfRange",
+        ExceptionType.NullReference => "nullReference",
+        ExceptionType.Format => "format",
+        ExceptionType.InvalidCast => "invalidCast",
+        ExceptionType.ArrayTypeMismatch => "arrayTypeMismatch",
+        _ => throw new ArgumentOutOfRangeException(nameof(exception))
+    };
+
+    /// <summary>The full type name a reader sees, such as <c>System.OverflowException</c>; for display only.</summary>
+    internal static string FullName(this ExceptionType exception) => "System." + exception.MetadataName();
+}
+
 /// <summary>Identity columns read directly from the module image named by a metadata token.</summary>
 internal static class IdentityRows
 {

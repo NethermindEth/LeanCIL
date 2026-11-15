@@ -20,7 +20,7 @@ def percentExact : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post value _ _ output := output = value
-  raises value _ := if value ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises value _ := if value ≤ 100 then none else some .argumentOutOfRange
 
 /-- Each input returns itself or throws the named exception. -/
 theorem percent_exact : percentExact.Holds Extracted.program 0 := by
@@ -63,7 +63,7 @@ namespace Rejected
 
 /-- Two outcomes of one invocation that both raise name the same exception. -/
 theorem raises_unique {method : Nat} {args : List Value} {memory : Memory}
-    {one other : String} (first : Raises Extracted.program method args memory one)
+    {one other : CIL.ExceptionType} (first : Raises Extracted.program method args memory one)
     (second : Raises Extracted.program method args memory other) : one = other := by
   obtain ⟨_, fault, ran, thrown⟩ := first
   obtain ⟨_, otherFault, otherRan, otherThrown⟩ := second
@@ -76,7 +76,7 @@ theorem raises_unique {method : Nat} {args : List Value} {memory : Memory}
 
 /-- An invocation that raises never also returns. -/
 theorem raises_not_returns {method fuel : Nat} {args : List Value} {memory : Memory}
-    {exception : String} {result : Memory × List Value}
+    {exception : CIL.ExceptionType} {result : Memory × List Value}
     (raised : Raises Extracted.program method args memory exception)
     (returned : invoke Extracted.program fuel method args memory = .ok result) : False := by
   obtain ⟨_, fault, ran, thrown⟩ := raised
@@ -98,7 +98,7 @@ theorem percent_hundred : ∃ fuel final,
 
 /-- `Percent(101)` raises `ArgumentOutOfRangeException`. -/
 theorem percent_above : Raises Extracted.program 0 [.scalar (.i64 101)] Memory.empty
-    "System.ArgumentOutOfRangeException" :=
+    .argumentOutOfRange :=
   percent_exact.raising (input := 101) trivial (by decide)
 
 #print axioms percent_above
@@ -166,7 +166,7 @@ theorem weaker_pre_rejected : ¬ percentUnguarded.Holds Extracted.program 0 := f
     `ArgumentException`. -/
 def percentRenamed : OutcomeContract CIL.W64 CIL.W64 :=
   { DerivedInterface.percentBounded with
-    raises := fun value _ => if value ≤ 100 then none else some "System.ArgumentException" }
+    raises := fun value _ => if value ≤ 100 then none else some .argument }
 
 /-- The exact contract does not refine a renamed exception. -/
 theorem changed_exception_not_refines : ¬ percentExact.Refines percentRenamed :=
@@ -176,7 +176,7 @@ theorem changed_exception_not_refines : ¬ percentExact.Refines percentRenamed :
 theorem changed_exception_rejected : ¬ percentRenamed.Holds Extracted.program 0 :=
   fun holds => by
     have renamed : Raises Extracted.program 0 [.scalar (.i64 101)] Memory.empty
-        "System.ArgumentException" :=
+        .argument :=
       holds.raising (input := 101) Memory.empty_wellFormed (by decide)
     exact absurd (raises_unique renamed percent_above) (by decide)
 

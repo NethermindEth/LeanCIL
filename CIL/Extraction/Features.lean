@@ -557,14 +557,16 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     return match localIndex instruction, emitted with
       | some index, .ldloca actual => index == actual
       | _, _ => false
-  -- Argument homes are appended after all raw locals. Their precise mapping is
-  -- independently checked by ParameterHomesValid; they cannot alias tracked locals.
+  -- An argument's address and store name the argument itself; ParameterHomesValid checks that
+  -- it has a home, so neither can alias a tracked local.
   if instruction.opcode ∈ [15, 65034] then
-    return match emitted with
-      | .ldloca index => raw.locals.length <= index
-      | _ => false
+    return match argumentOperation instruction, emitted with
+      | some (.address index), .ldarga actual => index == actual
+      | _, _ => false
   if instruction.opcode ∈ [16, 65035] then
-    return match emitted with | .stloc index => raw.locals.length <= index | _ => false
+    return match argumentOperation instruction, emitted with
+      | some (.store index), .starg actual => index == actual
+      | _, _ => false
   -- A span address on the stack is already the view it names, so copying the span emits nothing.
   if instruction.opcode == 113 then
     if let .type type := instruction.operand then
@@ -614,7 +616,7 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
   | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
-  | some (.raise name), .throw exception => name == exception
+  | some (.raise raised), .throw exception => raised == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
     index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with

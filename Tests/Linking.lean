@@ -139,7 +139,7 @@ theorem root_prefix_relocated : rootContract.Holds relocatedCompletion (root + 1
   rfl
 
 /-- The relocated helper's exception reaches `Root` through two relocated calls. -/
-example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m "System.ArgumentOutOfRangeException" :=
+example (m : CIL.Safety.Memory) : Raises linked root [.scalar (.i64 101)] m .argumentOutOfRange :=
   root_composed.raising (input := 101) trivial (by simp only [rootContract, strictRaises]; decide)
 
 /-- Two libraries: entries fill slots 0 and 1, then each library's helpers follow in order. -/

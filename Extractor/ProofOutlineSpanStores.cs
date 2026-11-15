@@ -11,7 +11,7 @@ internal static partial class ProofOutline
     static (int Width, Operation Op)? SpanStores(Extraction extraction, int index)
     {
         var method = extraction.Methods[index];
-        var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
+        var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
         if (method.HasThis || method.ReturnType.FullName != "System.Void" || method.Parameters.Count != 2 ||
             WrittenSpanWidth(method.Parameters[0].ParameterType) is not { } width ||
             ElementWidth(method.Parameters[1].ParameterType) != width ||

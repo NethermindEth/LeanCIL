@@ -107,7 +107,7 @@ if (suite is "all" or "core")
         "Tests/MethodSelectors.cs", "Tests/LibraryCache.cs", "Tests/BuildReuse.cs", "Tests/VerificationCache.cs",
         "Tests/VerificationReuse.cs", "Tests/ExtractionBatch.cs", "Tests/InstructionIndexes.cs", "Tests/TemplateIndexes.cs", "Tests/OutlineStops.cs", "Tests/ImportIndexes.cs", "Tests/StaticValueIndexes.cs",
         "Tests/BatchVerification.cs", "Tests/JointReplay.cs", "Tests/AllocationImports.cs", "scripts/Verify.cs",
-        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs"]);
+        "Tests/EnvironmentLimit.cs", "Tests/ConsumerSupportCandidates.cs", "Tests/SupportExtractionCache.cs"]);
 if (suite is "all" or "evidence")
     projects.AddRange(["Tests/MemorySpans.cs", "Tests/ReferenceInstructions.cs", "Tests/PointerOperations.cs",
         "Tests/PrimitiveArrays.cs", "Tests/ArrayElementReferences.cs", "Tests/ReadOnlyArrayReferences.cs",
@@ -184,6 +184,9 @@ Passed("prepared extractor source and output identity");
 
 RunFixture("Tests/VerificationCache.cs", [], streamOutput: true, progress: "Certified verification cache checks");
 Passed("certified artifact receipts and cache tampering rejection");
+
+RunFixture("Tests/SupportExtractionCache.cs", [], streamOutput: true, progress: "Support extraction cache checks");
+Passed("support audit reuse bound to extraction identity");
 
 RunFixture("Tests/VerificationReuse.cs", [], streamOutput: true, progress: "Certified verification reuse checks");
 Passed("cold and warm verification, proof-edit invalidation and unchecked helper rejection");

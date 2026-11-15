@@ -52,7 +52,7 @@ inductive ExecutionFault where
       unspecified vector bits or an overlapping block copy. -/
   | unsupported (description : String)
   /-- The method raised the CLR exception named `exception`. -/
-  | thrown (exception : String)
+  | thrown (exception : ExceptionType)
   /-- `run` ran out of fuel before the method returned. -/
   | fuelExhausted
   /-- Dynamic stack demand exceeded the caller-supplied per-activation quota.
@@ -107,8 +107,8 @@ def observerCount : CIL.Instruction → Nat
   | .memory operation => operation.argumentCount
   | .initializeSpanLocal _ constructor => constructor.operation.argumentCount
   -- Internal forwarders preserve unspecified bits; stores and intrinsic consumers guard them.
-  | .nop | .ldarg _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _ | .ldc_i8 _
-  | .dup | .pop | .br _ | .feature _ | .intrinsic ..
+  | .nop | .ldarg _ | .starg _ | .ldarga _ | .ldloc .. | .ldloca _ | .stloc .. | .ldc_i4 _
+  | .ldc_i8 _ | .dup | .pop | .br _ | .feature _ | .intrinsic ..
   | .throw _ | .unadmitted _ => 0
 
 /-- A memory check as an execution result; a fault is attributed to `reference` and `width`. -/
@@ -308,7 +308,7 @@ def formObject (memory : Memory) (reference : ManagedReference) : ExecutionResul
 def objectFieldAddress (memory : Memory) (reference : ManagedReference)
     (owner : CIL.Extraction.TypeExpr) (offset : Nat) : ExecutionResult Reference :=
   match reference with
-  | .null => .error (.thrown "System.NullReferenceException")
+  | .null => .error (.thrown .nullReference)
   | .address address => do
     let allocation ← checkedAt reference 0 (liveAllocation memory address.allocation)
     match allocation.kind with
@@ -347,8 +347,8 @@ def arrayElement (memory : Memory) (view : ArrayView) (index width : Nat) :
     ExecutionResult Reference := do
   if width != view.elementType.width then .error .invalidState else pure ()
   let _ ← checkedAt view.reference 0 (view.validate memory)
-  if view.reference == .null then .error (.thrown "System.NullReferenceException") else pure ()
-  if index < view.length then pure () else .error (.thrown "System.IndexOutOfRangeException")
+  if view.reference == .null then .error (.thrown .nullReference) else pure ()
+  if index < view.length then pure () else .error (.thrown .indexOutOfRange)
   checkedAt view.reference width (view.element memory index)
 /-- Span copying snapshots every source byte before writing, including for overlapping views.
     A short destination returns false or throws without reading or modifying either range. -/
@@ -361,7 +361,7 @@ def spanCopyInstruction (width : Nat) (tryCopy : Bool) (stack : List Value) (mem
   if !destination.writable then .error .invalidState else
   if source.length > destination.length then
     if tryCopy then return (memory, .scalar (.i32 0) :: rest)
-    else .error (.thrown "System.ArgumentException")
+    else .error (.thrown .argument)
   else
   let values := if tryCopy then .scalar (.i32 1) :: rest else rest
   if source.length == 0 then return (memory, values) else
@@ -423,16 +423,16 @@ def arrayFillInstruction (element : CIL.ArrayElement) (counted : Bool)
   | .array view =>
     if view.elementType != element then .error .invalidState else do
       let _ ← checkedAt view.reference 0 (view.validate memory)
-      if view.reference == .null then .error (.thrown "System.ArgumentNullException") else do
+      if view.reference == .null then .error (.thrown .argumentNull) else do
         let storage ← match range with
           | none => pure view.storage
           | some (start, count) => do
             if start ≤ view.length && count ≤ view.length - start then pure ()
-              else .error (.thrown "System.ArgumentOutOfRangeException")
+              else .error (.thrown .argumentOutOfRange)
             checkedAt view.reference 0 (view.storage.slice memory start count)
         spanFillInstruction element.width false
           (.scalar value :: .bufferSpan storage :: rest) memory
-  | .object .null => .error (.thrown "System.ArgumentNullException")
+  | .object .null => .error (.thrown .argumentNull)
   | _ => .error .invalidState
 
 /-- A fixed-width integer in the requested byte order, with the required narrow extension. -/
@@ -455,7 +455,7 @@ def binaryTransferInstruction (width : Nat) (signed bigEndian read trying : Bool
   | true, false, .bufferSpan view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)
     if view.width != 1 then .error .invalidState else
-    if view.length < width then .error (.thrown "System.ArgumentOutOfRangeException") else
+    if view.length < width then .error (.thrown .argumentOutOfRange) else
     let value ← loadTransfer memory view.reference (.scalar width false)
     return (memory, .scalar (← endianValue width signed bigEndian value) :: rest)
   | true, true, .reference destination :: .bufferSpan view :: rest =>
@@ -473,7 +473,7 @@ def binaryTransferInstruction (width : Nat) (signed bigEndian read trying : Bool
     if !view.writable then .error (.memory .unwritable view.reference width) else
     if view.length < width then
       if trying then return (memory, .scalar (.i32 0) :: rest)
-      else .error (.thrown "System.ArgumentOutOfRangeException")
+      else .error (.thrown .argumentOutOfRange)
     else
       let ordered ← endianValue width false bigEndian value
       let result ← storeTransfer memory view.reference (.scalar width false) ordered
@@ -495,10 +495,10 @@ def viewObservationInstruction (observation : CIL.ViewObservation) (stack : List
       else .readOnlyReference reference) :: rest)
   | .arrayData, .array view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)
-    if view.reference == .null then .error (.thrown "System.NullReferenceException") else
+    if view.reference == .null then .error (.thrown .nullReference) else
     return (memory, (← formValue memory view.reference) :: rest)
   | .arrayData, .object .null :: _ =>
-    .error (.thrown "System.NullReferenceException")
+    .error (.thrown .nullReference)
   | _, _ => .error .invalidState
 
 /-- Typed array transfers share the checked snapshot reads and writes used by byref transfers. -/
@@ -512,7 +512,7 @@ def arrayTransferInstruction (element : CIL.ArrayElement) (store : Bool)
   let some index := arrayIndex index | .error .invalidState
   let view ← match array with
     | .array view => pure view
-    | .object .null => .error (.thrown "System.NullReferenceException")
+    | .object .null => .error (.thrown .nullReference)
     | _ => .error .invalidState
   if view.elementType != element then .error .invalidState else pure ()
   let shape ← match element with
@@ -636,7 +636,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
   | .marshalRead kind false, .bufferSpan view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)
     if view.width != 1 then .error .invalidState else
-    if view.length < kind.width then .error (.thrown "System.ArgumentOutOfRangeException") else
+    if view.length < kind.width then .error (.thrown .argumentOutOfRange) else
     return (memory, .scalar (← loadTransfer memory view.reference kind) :: rest)
   | .marshalRead kind true, .reference destination :: .bufferSpan view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)
@@ -652,7 +652,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     if !view.writable then .error (.memory .unwritable view.reference kind.width) else
     if view.length < kind.width then
       if trying then return (memory, .scalar (.i32 0) :: rest)
-      else .error (.thrown "System.ArgumentOutOfRangeException")
+      else .error (.thrown .argumentOutOfRange)
     else
       let value ← loadTransfer memory source kind
       let result ← storeTransfer memory view.reference kind value
@@ -725,7 +725,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let view : SpanView := ⟨array.reference, array.length, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     if start.toNat ≤ view.length then pure ()
-      else .error (.thrown "System.ArgumentOutOfRangeException")
+      else .error (.thrown .argumentOutOfRange)
     let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat
       (view.length - start.toNat))
     return (memory, .bufferSpan sliced :: rest)
@@ -735,7 +735,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let view : SpanView := ⟨array.reference, array.length, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     if start.toNat ≤ view.length && length.toNat ≤ view.length - start.toNat then pure ()
-      else .error (.thrown "System.ArgumentOutOfRangeException")
+      else .error (.thrown .argumentOutOfRange)
     let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat length.toNat)
     return (memory, .bufferSpan sliced :: rest)
   | .arraySpan element writable .whole, .object .null :: rest =>
@@ -743,14 +743,14 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
   | .arraySpan element writable .fromStart, .scalar (.i32 start) :: .object .null :: rest =>
-    if start == 0 then pure () else .error (.thrown "System.ArgumentOutOfRangeException")
+    if start == 0 then pure () else .error (.thrown .argumentOutOfRange)
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
   | .arraySpan element writable .counted,
       .scalar (.i32 length) :: .scalar (.i32 start) :: .object .null :: rest =>
     if start == 0 && length == 0 then pure ()
-      else .error (.thrown "System.ArgumentOutOfRangeException")
+      else .error (.thrown .argumentOutOfRange)
     let view : SpanView := ⟨.null, 0, element.width, writable⟩
     let _ ← checkedAt view.reference 0 (view.validate memory)
     return (memory, .bufferSpan view :: rest)
@@ -762,7 +762,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       else .readOnlyReference (.address reference)) :: rest)
   | .arrayLength, .array view :: rest =>
     let _ ← checkedAt view.reference 0 (view.validate memory)
-    if view.reference == .null then .error (.thrown "System.NullReferenceException") else
+    if view.reference == .null then .error (.thrown .nullReference) else
       return (memory, .scalar (.i64 (BitVec.ofNat 64 view.length)) :: rest)
   | .arrayLoad width signed, .scalar index :: .array view :: rest =>
     let some index := arrayIndex index | .error .invalidState
@@ -779,14 +779,14 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     let updated ← checkedAt (.address reference) width
       (write memory reference (numberBytes number width) 1)
     return (updated, rest)
-  | .arrayLength, .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | .arrayLength, .object .null :: _ => .error (.thrown .nullReference)
   | .arrayLoad .., .scalar index :: .object .null :: _
   | .arrayAddress .., .scalar index :: .object .null :: _ =>
     let some _ := arrayIndex index | .error .invalidState
-    .error (.thrown "System.NullReferenceException")
+    .error (.thrown .nullReference)
   | .arrayStore _, .scalar _ :: .scalar index :: .object .null :: _ =>
     let some _ := arrayIndex index | .error .invalidState
-    .error (.thrown "System.NullReferenceException")
+    .error (.thrown .nullReference)
   -- Spans
   | .spanEmpty width writable, rest =>
     let view : SpanView := ⟨.null, 0, width, writable⟩
@@ -797,18 +797,18 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
         (0 < targetWidth ∧ targetWidth < 2^64) then pure () else .error .invalidState
     let _ ← checkedAt view.reference 0 (view.validate memory)
     let length := view.length * sourceWidth / targetWidth
-    if length < 2^31 then pure () else .error (.thrown "System.OverflowException")
+    if length < 2^31 then pure () else .error (.thrown .overflow)
     let result : SpanView := { view with width := targetWidth, length }
     let _ ← checkedAt result.reference 0 (result.validate memory)
     return (memory, .bufferSpan result :: rest)
   | .spanFromReference width writable, .scalar (.i32 length) :: .reference reference :: rest =>
-    if length.toInt < 0 then .error (.thrown "System.ArgumentOutOfRangeException") else pure ()
+    if length.toInt < 0 then .error (.thrown .argumentOutOfRange) else pure ()
     let view : SpanView := ⟨reference, length.toNat, width, writable⟩
     let _ ← checkedAt reference (length.toNat * width) (view.validate memory)
     return (memory, .bufferSpan view :: rest)
   | .spanFromReference width false,
       .scalar (.i32 length) :: .readOnlyReference reference :: rest =>
-    if length.toInt < 0 then .error (.thrown "System.ArgumentOutOfRangeException") else pure ()
+    if length.toInt < 0 then .error (.thrown .argumentOutOfRange) else pure ()
     let view : SpanView := ⟨reference, length.toNat, width, false⟩
     let _ ← checkedAt reference (length.toNat * width) (view.validate memory)
     return (memory, .bufferSpan view :: rest)
@@ -817,18 +817,18 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
     return (memory, .bufferSpan view.asReadOnly :: rest)
   | .spanSlice true, .scalar (.i32 length) :: .scalar (.i32 start) :: .bufferSpan view :: rest =>
     if start.toNat ≤ view.length && length.toNat ≤ view.length - start.toNat then pure ()
-      else .error (.thrown "System.ArgumentOutOfRangeException")
+      else .error (.thrown .argumentOutOfRange)
     let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat length.toNat)
     return (memory, .bufferSpan sliced :: rest)
   | .spanSlice false, .scalar (.i32 start) :: .bufferSpan view :: rest =>
     if start.toNat ≤ view.length then pure ()
-      else .error (.thrown "System.ArgumentOutOfRangeException")
+      else .error (.thrown .argumentOutOfRange)
     let sliced ← checkedAt view.reference 0 (view.slice memory start.toNat (view.length - start.toNat))
     return (memory, .bufferSpan sliced :: rest)
   | .spanItem width, .scalar (.i32 index) :: .bufferSpan view :: rest =>
     if width == view.width then pure () else .error .invalidState
     if index.toNat < view.length then pure ()
-      else .error (.thrown "System.IndexOutOfRangeException")
+      else .error (.thrown .indexOutOfRange)
     let reference ← checkedAt view.reference width (view.element memory index.toNat)
     return (memory, (if view.writable then .reference (.address reference)
       else .readOnlyReference (.address reference)) :: rest)
@@ -850,7 +850,7 @@ def otherMemoryInstruction (operation : CIL.MemoryOp) (stack : List Value) (memo
       let address ← referenceAt r
       let result ← checkedAt r 0 (add memory address width (BitVec.ofNat 64 index.toNat))
       return (memory, .reference (.address result) :: rest)
-    else .error (.thrown "System.IndexOutOfRangeException")
+    else .error (.thrown .indexOutOfRange)
   | .spanLength, .span _ length :: rest =>
     return (memory, .scalar (.i32 (BitVec.ofNat 32 length)) :: rest)
   -- Null references
@@ -899,7 +899,7 @@ def storeSlot (memory : Memory) (field : Reference) (value : ManagedReference) :
 def referenceArrayOf (memory : Memory) (array : ManagedReference) :
     ExecutionResult (Reference × CIL.Extraction.TypeExpr × Nat) :=
   match array with
-  | .null => .error (.thrown "System.NullReferenceException")
+  | .null => .error (.thrown .nullReference)
   | .address address => do
     let allocation ← checkedAt array 0 (liveAllocation memory address.allocation)
     match allocation.kind with
@@ -915,7 +915,7 @@ def referenceArraySlot (memory : Memory) (array : ManagedReference) (index : Nat
     ExecutionResult (Reference × CIL.Extraction.TypeExpr) := do
   let (origin, element, length) ← referenceArrayOf memory array
   if index < length then return (⟨origin.allocation, objectFieldSlot * index⟩, element)
-  else .error (.thrown "System.IndexOutOfRangeException")
+  else .error (.thrown .indexOutOfRange)
 
 /-- The covariance check of `stelem.ref` storing `value` into an array of class `element`. Null
     is always storable; an instance of an admitted class is storable exactly when `element` is in
@@ -932,7 +932,7 @@ def storableIn (memory : Memory) (element : CIL.Extraction.TypeExpr) (value : Ma
       match type.identity, element with
       | .object .., .object .. =>
         if element ∈ type.lineage then .ok ()
-        else .error (.thrown "System.ArrayTypeMismatchException")
+        else .error (.thrown .arrayTypeMismatch)
       | _, _ => .error (.unsupported "Array store outside the admitted classes")
     | _ => .error .invalidState
 
@@ -1048,7 +1048,7 @@ def stringLiteralInstruction (text : String) (stack : List Value) (memory : Memo
 def throwIfNullInstruction (stack : List Value) (memory : Memory) :
     ExecutionResult (Memory × List Value) :=
   match stack with
-  | .object _ :: .object .null :: _ => .error (.thrown "System.ArgumentNullException")
+  | .object _ :: .object .null :: _ => .error (.thrown .argumentNull)
   | .object _ :: .object (.address _) :: rest => .ok (memory, rest)
   | _ => .error .invalidState
 
@@ -1062,7 +1062,7 @@ def zeroGuardInstruction (guard : ZeroGuard) (width : Nat) (signed : Bool)
     match guardOperand width signed value with
     | some number =>
       match guard.throws number with
-      | true => .error (.thrown "System.ArgumentOutOfRangeException")
+      | true => .error (.thrown .argumentOutOfRange)
       | false => .ok (memory, rest)
     | none => .error .invalidState
   | _ => .error .invalidState
@@ -1077,7 +1077,7 @@ def comparisonGuardInstruction (guard : ComparisonGuard) (width : Nat) (signed :
     match guardOperand width signed value, guardOperand width signed other with
     | some number, some bound =>
       match guard.throws number bound with
-      | true => .error (.thrown "System.ArgumentOutOfRangeException")
+      | true => .error (.thrown .argumentOutOfRange)
       | false => .ok (memory, rest)
     | _, _ => .error .invalidState
   | _ => .error .invalidState

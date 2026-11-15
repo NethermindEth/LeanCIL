@@ -83,7 +83,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
     else if (name == "NullLength")
     {
         claims.Add($"(match {RunCase("")} with | .error fault => some fault.fault | " +
-            ".ok _ => none) = some (.thrown \"System.NullReferenceException\")");
+            ".ok _ => none) = some (.thrown .nullReference)");
     }
     else
     {
@@ -102,10 +102,10 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         claims.Add($"({RunCase(Args(table, 0, 3))}).map Prod.snd = .ok [.scalar (.i32 17)]");
         string Fault(string args, int fuel = 128) =>
             $"(match {RunCase(args, fuel)} with | .error fault => some fault.fault | .ok _ => none)";
-        claims.Add($"{Fault(Args(table, 1, 2))} = some (.thrown \"System.ArgumentException\")");
-        claims.Add($"{Fault(Args(table, 2, 0))} = some (.thrown \"System.IndexOutOfRangeException\")");
+        claims.Add($"{Fault(Args(table, 1, 2))} = some (.thrown .argument)");
+        claims.Add($"{Fault(Args(table, 2, 0))} = some (.thrown .indexOutOfRange)");
         claims.Add($"{Fault(Args(".methodTable ⟨dispatchSignature, none, none, 0, by decide⟩", 0, 0))} = " +
-            "some (.thrown \"System.NullReferenceException\")");
+            "some (.thrown .nullReference)");
         claims.Add($"{Fault(Args(Table(Identity(uint.MaxValue)), 0, 0))} = some .invalidState");
         claims.Add($"({RunCase(Args(table, 0, 3), 1)}).isOk = false");
     }

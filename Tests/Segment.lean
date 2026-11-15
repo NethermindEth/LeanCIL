@@ -202,7 +202,8 @@ theorem multiply_inputs {program : CIL.Program} {method : Nat} {body : CIL.Metho
 
 
 /-- Two actual vector stores preserve every other remembered local in one frame-rule use. -/
-theorem multiply_untouched {before middle after entered : Memory} {boundary : Nat}
+theorem multiply_untouched {body : CIL.Method} {before middle after entered : Memory}
+    {boundary : Nat}
     {kinds : List CIL.LocalKind} {slots : List LocalSlot}
     {known : Nat → Option CIL.Value} {leftHome rightHome : Reference}
     (homes : WritableHomes entered boundary kinds slots)
@@ -212,10 +213,10 @@ theorem multiply_untouched {before middle after entered : Memory} {boundary : Na
     (leftVector rightVector : BitVec 256)
     (leftWritten : write before leftHome (numberBytes leftVector.toNat 32) 1 = .ok middle)
     (rightWritten : write middle rightHome (numberBytes rightVector.toNat 32) 1 = .ok after) :
-    LocalSnapshots after slots (untouchedLocals [.stloc 23, .stloc 24] known) := by
-  have first : SegmentLocalEffects [.stloc 23] slots before middle :=
+    LocalSnapshots after slots (untouchedLocals body [.stloc 23, .stloc 24] known) := by
+  have first : SegmentLocalEffects body [.stloc 23] slots before middle :=
     .store 23 .vector256 leftHome _ 1 (by simp [segmentStores]) leftSlot leftWritten
-  have second : SegmentLocalEffects [.stloc 24] slots middle after :=
+  have second : SegmentLocalEffects body [.stloc 24] slots middle after :=
     .store 24 .vector256 rightHome _ 1 (by simp [segmentStores]) rightSlot rightWritten
   exact (first.append second).frame homes snapshots.untouched
 
@@ -231,8 +232,8 @@ theorem aliased_homes_rejected (memory : Memory) (boundary : Nat) (home : Refere
 #print axioms aliased_homes_rejected
 
 /-- A region with no direct stores cannot certify a hidden memory mutation. -/
-theorem no_hidden_write {slots : List LocalSlot} {before after : Memory}
-    (effects : SegmentLocalEffects [.stind .i8] slots before after) : before = after := by
+theorem no_hidden_write {body : CIL.Method} {slots : List LocalSlot} {before after : Memory}
+    (effects : SegmentLocalEffects body [.stind .i8] slots before after) : before = after := by
   induction effects with
   | refl => rfl
   | store index kind home bytes alignment destination => simp [segmentStores] at destination
@@ -241,12 +242,30 @@ theorem no_hidden_write {slots : List LocalSlot} {before after : Memory}
 #print axioms no_hidden_write
 
 /-- A declared destination cannot preserve its own old snapshot through the frame mask. -/
-theorem stored_local_not_framed (known : Nat → Option CIL.Value) :
-    untouchedLocals [.stloc 23, .stloc 24] known 23 = none ∧
-      untouchedLocals [.stloc 23, .stloc 24] known 7 = known 7 := by
+theorem stored_local_not_framed (body : CIL.Method) (known : Nat → Option CIL.Value) :
+    untouchedLocals body [.stloc 23, .stloc 24] known 23 = none ∧
+      untouchedLocals body [.stloc 23, .stloc 24] known 7 = known 7 := by
   simp [untouchedLocals, segmentStores]
 
 #print axioms stored_local_not_framed
+
+/-- A body whose one argument has its home in slot 0, as a store to the argument requires. -/
+private def homedArgumentBody : CIL.Method :=
+  { locals := [], parameterHomes := [(0, .word32)], returnsValue := false,
+    code := [.ldc_i4 7, .starg 0, .ret] }
+
+/-- A store to a homed argument names its home slot: its write is a segment effect, and the
+    slot's old snapshot is not framed, as for the `stloc` of that slot. -/
+theorem argument_store_effect {slots : List LocalSlot} {before after : Memory}
+    {home : Reference} {bytes : List (BitVec 8)} {alignment : Nat}
+    (known : Nat → Option CIL.Value) (slot : slots[0]? = some (.bytes .word32 home))
+    (written : write before home bytes alignment = .ok after) :
+    SegmentLocalEffects homedArgumentBody [.ldc_i4 7, .starg 0] slots before after ∧
+      untouchedLocals homedArgumentBody [.ldc_i4 7, .starg 0] known 0 = none :=
+  ⟨.store 0 .word32 home bytes alignment (by decide) slot written,
+    by rw [untouchedLocals, if_pos (by decide)]⟩
+
+#print axioms argument_store_effect
 
 /-- Segment composition requires the exact intermediate position and postcondition. -/
 theorem composition_boundaries {program : CIL.Program} {method : Nat}
@@ -298,7 +317,8 @@ theorem framed_store {program : CIL.Program} {method start : Nat} {body : CIL.Me
     Segment program method start (start + 1)
       (SegmentState.exact arguments ⟨frame, [.scalar (.v256 vector)], before⟩)
       (fun actual state => SegmentState.exact arguments ⟨frame, [], after⟩ actual state ∧
-        LocalSnapshots state.memory state.frame.locals (untouchedLocals [.stloc 23] known)) := by
+        LocalSnapshots state.memory state.frame.locals
+          (untouchedLocals body [.stloc 23] known)) := by
   apply Segment.frameLocals found placed rfl homes snapshots
   apply (store256 found placed arguments frame before after vector stored).consequence
     (fun _ _ valid => valid)
@@ -321,13 +341,13 @@ theorem framing_boundaries {program : CIL.Program} {method start : Nat}
     (snapshots : LocalSnapshots initial slots known)
     (contract : Segment program method start (start + 1) pre fun arguments state =>
       post arguments state ∧ state.frame.locals = slots ∧
-        SegmentLocalEffects [.stloc 23] slots initial state.memory)
+        SegmentLocalEffects body [.stloc 23] slots initial state.memory)
     (_wrongEnd : Segment program method start (start + 2) pre fun arguments state =>
       post arguments state ∧ state.frame.locals = slots ∧
-        SegmentLocalEffects [.stloc 23] slots initial state.memory) :
+        SegmentLocalEffects body [.stloc 23] slots initial state.memory) :
     Segment program method start (start + 1) pre fun arguments state =>
       post arguments state ∧ LocalSnapshots state.memory state.frame.locals
-        (untouchedLocals [.stloc 23] known) := by
+        (untouchedLocals body [.stloc 23] known) := by
   fail_if_success
     have := Segment.frameLocals found _wrongBody rfl homes snapshots contract
   fail_if_success

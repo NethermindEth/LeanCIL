@@ -104,6 +104,26 @@ theorem narrow_round_trip {entered memory : Memory} {frame : Frame} {boundary : 
 
 #print axioms narrow_round_trip
 
+/-- A homed int32 parameter that the body overwrites with the second argument and reads back. -/
+@[cil_code] def homedArgument : CIL.Method := {
+  code := [.ldarg 1, .starg 0, .ldarg 0, .ret]
+  locals := [], parameterHomes := [(0, .word32)], returnsValue := true }
+
+/-- A homed argument's store and load go through its home slot's snapshot, as `stloc` and
+    `ldloc` of that slot do. -/
+theorem homed_argument_round_trip {entered memory : Memory} {frame : Frame} {boundary : Nat}
+    {home : Reference}
+    (homes : WritableHomes entered boundary [.word32] frame.locals)
+    (formed : memory.WellFormed)
+    (slot : frame.locals[0]? = some (.bytes .word32 home))
+    (ready : access memory home 4 1 true = .ok ()) (passed stored : BitVec 32) :
+    ∃ after, run [homedArgument] 5 0 0 [.scalar (.i32 passed), .scalar (.i32 stored)] frame []
+      memory = .ok (after, [.scalar (.i32 stored)]) := by
+  have snapshots := LocalSnapshots.empty memory frame.locals
+  cil_checked_steps (snapshots := snapshots) [slot, ready]
+
+#print axioms homed_argument_round_trip
+
 /-- An isolated store has no later argument or load obligations. -/
 @[cil_code] def storeOnly : CIL.Method := {
   code := [.stloc 0, .ret], locals := [.v128 0], returnsValue := false }

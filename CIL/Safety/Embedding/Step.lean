@@ -144,7 +144,7 @@ private theorem observer_ok {observed : Bool} {result : ExecutionResult FrameAct
 
 /-- A step that throws passed the unspecified-bits guard. -/
 private theorem observer_thrown {observed : Bool} {result : ExecutionResult FrameAction}
-    {exception : String}
+    {exception : ExceptionType}
     (h : (if observed then .error (.unsupported "Instruction observes unspecified vector bits")
       else result) = .error (.thrown exception)) :
     observed = false ∧ result = .error (.thrown exception) := by
@@ -255,14 +255,17 @@ macro "lookup_lockstep" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
-set_option maxHeartbeats 400000 in
 /-- Division, remainder and overflow-checked arithmetic step in lockstep with their relabeling. -/
 theorem step_relabel_faulting (op : Instruction)
     (faulting : op.divideKind?.isSome || op.checkedKind?.isSome) : StepRelabel op := by
   cases op <;> simp only [Instruction.divideKind?, Instruction.checkedKind?, Option.isSome_none,
     Option.isSome_some, Bool.or_false, Bool.false_or, Bool.false_eq_true] at faulting
-  all_goals stack_cases =>
-    first | fallback_vacuous | lockstep
+  -- One goal per arm of the dispatcher's first match, so its cost does not grow with the values.
+  all_goals
+    explicit_intro
+    (try rw [context.profile])
+    split at h
+    all_goals first | contradiction | lockstep | fallback_vacuous
 
 #print axioms step_relabel_faulting
 
@@ -288,6 +291,26 @@ theorem step_relabel_ldarg (index : Nat) : StepRelabel (.ldarg index) := by
   lockstep
 
 #print axioms step_relabel_ldarg
+
+/-- An argument store writes the home `Method.argumentAccess` gives, which both methods share. -/
+theorem step_relabel_starg (index : Nat) : StepRelabel (.starg index) := by
+  stack_cases =>
+    first
+    | fallback_vacuous
+    | (rw [show ∀ value, storeArgument actual index value frame m =
+          storeArgument expected index value frame m by
+        intro value
+        simp only [storeArgument, context.arguments]]
+       lockstep)
+#print axioms step_relabel_starg
+
+/-- An argument address is the home `Method.argumentAccess` gives, which both methods share. -/
+theorem step_relabel_ldarga (index : Nat) : StepRelabel (.ldarga index) := by
+  plain_cases
+  rw [show addressArgument actual index frame m = addressArgument expected index frame m by
+    simp only [addressArgument, context.arguments]]
+  lockstep
+#print axioms step_relabel_ldarga
 
 theorem step_relabel_ldloc (index : Nat) : StepRelabel (.ldloc index) := by
   plain_cases
@@ -423,7 +446,7 @@ theorem step_relabel_unadmitted (opcode : Nat) : StepRelabel (.unadmitted opcode
   explicit_intro
   cases h
 
-theorem step_relabel_throw (exception : String) : StepRelabel (.throw exception) := by
+theorem step_relabel_throw (exception : ExceptionType) : StepRelabel (.throw exception) := by
   explicit_intro
   cases h
 
@@ -658,6 +681,8 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case conv_ovf target => exact step_relabel_conv_ovf target
   case conv_ovf_un target => exact step_relabel_conv_ovf_un target
   case ldarg index => exact step_relabel_ldarg index
+  case starg index => exact step_relabel_starg index
+  case ldarga index => exact step_relabel_ldarga index
   case ldloc index => exact step_relabel_ldloc index
   case initializeSpanLocal index constructor =>
     exact step_relabel_initializeSpanLocal index constructor
@@ -765,7 +790,7 @@ theorem step_relabel_feature (id : Feature) : StepRelabel (.feature id) := step_
     renamed pc. -/
 def StepRaise (op : CIL.Instruction) : Prop :=
   ∀ (expected actual : CIL.Method) (r : Nat → Nat) (pc q : Nat) (args : List Value)
-    (frame : Frame) (stack : List Value) (m : Memory) (exception : String),
+    (frame : Frame) (stack : List Value) (m : Memory) (exception : ExceptionType),
     StepContext expected actual r op pc q →
     step expected op pc args frame stack m = .error (.thrown exception) →
     step actual (op.relabel r) q args frame stack m = .error (.thrown exception)
@@ -781,13 +806,15 @@ theorem except_bind_error {x : Except ε α} {f : α → Except ε β} {e : ε}
     (Except.error e >>= f) = .error e := rfl
 
 /-- An arithmetic fault is never a thrown exception. -/
-theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α} {exception : String} :
+theorem mapError_arithmetic_ne_thrown {x : Except CIL.ArithmeticFault α}
+    {exception : ExceptionType} :
     x.mapError ExecutionFault.arithmetic ≠ .error (.thrown exception) := by
   cases x <;> simp [Except.mapError]
 
 /-- The shared tail of `step` throws only from `instruction`, which both steps share. -/
 theorem fallback_raise {r : Nat → Nat} {pc q : Nat} {profile : FeatureProfile}
-    {stack : List Value} {frame : Frame} {m : Memory} {exception : String} (op : CIL.Instruction)
+    {stack : List Value} {frame : Frame} {m : Memory} {exception : ExceptionType}
+    (op : CIL.Instruction)
     (arity : pureArity (op.relabel r) = pureArity op)
     (base : pureArity op ≠ none → BaseRelabel op)
     (plain : pureArity op = none → instruction op stack m = .error (.thrown exception) →
@@ -1200,6 +1227,20 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     plain_cases
     rw [show loadArgument actual index args frame m = loadArgument expected index args frame m by
       simp only [loadArgument, context.arguments]]
+    raise_lockstep
+  case starg index =>
+    stack_cases =>
+      first
+      | fallback_raise_vacuous
+      | (rw [show ∀ value, storeArgument actual index value frame m =
+            storeArgument expected index value frame m by
+          intro value
+          simp only [storeArgument, context.arguments]]
+         raise_lockstep)
+  case ldarga index =>
+    plain_cases
+    rw [show addressArgument actual index frame m = addressArgument expected index frame m by
+      simp only [addressArgument, context.arguments]]
     raise_lockstep
   case ldloc | ldloca =>
     plain_cases

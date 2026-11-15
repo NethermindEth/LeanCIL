@@ -46,7 +46,7 @@ internal static partial class ProofOutline
     static MethodDefinition? ElementAddress(Extraction extraction, int index, Arrays.Element element)
     {
         var method = extraction.Methods[index];
-        var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
+        var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
         return !method.HasThis && method.Parameters.Count == 2 && method.ReturnType is ByReferenceType &&
             method.Parameters[0].ParameterType is ArrayType { Rank: 1 } array &&
             WordArrayElement(array.ElementType) == element &&

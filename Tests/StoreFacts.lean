@@ -158,12 +158,13 @@ theorem contract_normalize_once (words : Nat → Nat) (memory : Memory) (_zero :
   exact ⟨rfl, rfl⟩
 
 @[cil_code] def twentySevenRaises : CIL.Method :=
-  { code := List.replicate 26 .nop ++ [.throw "Test.Exception"], locals := [], returnsValue := false }
+  { code := List.replicate 26 .nop ++ [.throw .baseException], locals := [],
+    returnsValue := false }
 
 @[cil_code] def twentySevenRaisesProgram : CIL.Program := [twentySevenRaises]
 
 theorem raise_normalize_once (words : Nat → Nat) (memory : Memory) (_zero : words 0 = 0) :
-    Raises twentySevenRaisesProgram 0 [] memory "Test.Exception" := by
+    Raises twentySevenRaisesProgram 0 [] memory .baseException := by
   fact_normalizations 1 in
     cil_raise_steps [_zero]
 

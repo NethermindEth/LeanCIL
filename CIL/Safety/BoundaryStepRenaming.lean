@@ -314,7 +314,48 @@ theorem Memory.Renamed.loadArgument {mapping : AllocationRenaming}
         exact related.checkedValue _ trivial
 #print axioms Memory.Renamed.loadArgument
 
-/-- Argument loads, calls and returns preserve their checked values and control flow. -/
+/-- The source body reads every argument as it arrives, so `starg` has no home to write. -/
+theorem StepMetadata.storeArgument_source {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (index : Nat) (value : Value) (frame : Frame)
+    (memory : Memory) :
+    storeArgument sourceBody index value frame memory =
+      .error (.unsupported "Store to an argument without a home") := by
+  obtain ⟨_, sourceAccess, -⟩ := metadata.arguments index
+  simp only [storeArgument, sourceAccess]
+#print axioms StepMetadata.storeArgument_source
+
+/-- The source body reads every argument as it arrives, so `ldarga` has no home to address. -/
+theorem StepMetadata.addressArgument_source {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (index : Nat) (frame : Frame)
+    (memory : Memory) :
+    addressArgument sourceBody index frame memory =
+      .error (.unsupported "Address of an argument without a home") := by
+  obtain ⟨_, sourceAccess, -⟩ := metadata.arguments index
+  simp only [addressArgument, sourceAccess]
+#print axioms StepMetadata.addressArgument_source
+
+/-- The target body reads every argument as it arrives, so `starg` has no home to write. -/
+theorem StepMetadata.storeArgument_target {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (index : Nat) (value : Value) (frame : Frame)
+    (memory : Memory) :
+    storeArgument targetBody index value frame memory =
+      .error (.unsupported "Store to an argument without a home") := by
+  obtain ⟨_, -, targetAccess⟩ := metadata.arguments index
+  simp only [storeArgument, targetAccess]
+#print axioms StepMetadata.storeArgument_target
+
+/-- The target body reads every argument as it arrives, so `ldarga` has no home to address. -/
+theorem StepMetadata.addressArgument_target {sourceBody targetBody : CIL.Method}
+    (metadata : StepMetadata sourceBody targetBody) (index : Nat) (frame : Frame)
+    (memory : Memory) :
+    addressArgument targetBody index frame memory =
+      .error (.unsupported "Address of an argument without a home") := by
+  obtain ⟨_, -, targetAccess⟩ := metadata.arguments index
+  simp only [addressArgument, targetAccess]
+#print axioms StepMetadata.addressArgument_target
+
+/-- Argument loads, calls and returns preserve their checked values and control flow; argument
+    stores and addresses cannot succeed or throw without a home. -/
 theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
@@ -357,6 +398,11 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
       | exact False.elim (tested ⟨_, _, rfl⟩)
+      -- Both bodies read every argument without a home, so a store or an address faults alike.
+      | (simp only [metadata.storeArgument_source, metadata.storeArgument_target,
+           metadata.addressArgument_source, metadata.addressArgument_target, Bind.bind,
+           Except.bind]
+         exact .error _)
       | (rename_i position
          obtain ⟨_, sourceAccess, targetAccess⟩ := metadata.arguments position
          apply (related.loadArgument sourceAccess targetAccess arguments argumentBounds).bind

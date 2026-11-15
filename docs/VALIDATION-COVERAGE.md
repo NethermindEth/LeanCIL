@@ -151,10 +151,18 @@ workflow.
   kernel decides 128 references per theorem, one theorem at a time, so the memory of a run does
   not grow with the assembly, and the cost per added reference must stay within 1.25 times from
   64 to 128 references.
-  Tests/BodyLiteral.lean writes the evidence of one method as literals, proves its body check with
-  the kernel, rejects a changed byte, and requires the elaborator's decide to refuse the check
-  within a small heartbeat budget. Tests/ScalarEvidence.lean does the same for the whole
-  certificate, and reduces the fixture encoder in the elaborator at two method sizes.
+  Tests/BodyLiteral.lean writes the evidence of one method with `fixedBytes` byte literals, with
+  literals over 32 bytes split into 32-byte ones to keep lines short, proves in the kernel that
+  each kind of literal equals its list literal, proves its body check with the kernel, rejects a
+  changed byte of the body literal, and requires the elaborator's decide to refuse the check within
+  a small heartbeat budget. Its cost rows write literals as the extractor does, in numerals of at
+  most 256 bytes. Elaborating the literal of a body of 16384, 65536 and 262144 `nop`s must stay
+  within 4.5 times the heartbeats and, taking the fastest of three runs, 8 times the time at 4 times
+  the body, and within 200 heartbeats per byte; a numeral parse quadratic in its digits grows 16
+  times. Body-checking the literal of a body of 128, 512 and 2048 `nop`s must stay within 4.5
+  times the heartbeats at 4 times the body. Tests/ScalarEvidence.lean requires the same
+  refusal and kernel decision for a whole certificate, and reduces the fixture encoder in the
+  elaborator at two method sizes.
   Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
   string and field tokens and for 25 and 100 call tokens.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
@@ -644,7 +652,7 @@ These tests cover preparation:
 | Invalid packing, oversized layout, auto layout, reference/float fields, inline arrays, generics, explicit offsets on sequential fields, nested reference-bearing and recursive fields | Ten intended metadata rejections |
 | Synchronized methods, wrong framework/identity, invalid field layout, unsupported locals, static initializer and forged runtime scope | Seven intended metadata rejections |
 | Identity-bound static RVA data | Regression checks |
-| Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; forged receiver folds fail the feature certificate; tampered RVA bytes change the proved word; branches into the fold rejected |
+| Static `ReadOnlySpan<uint>`/`<ulong>` tables | Indexed reads, length and first element compared with .NET, including negative and past-end indices faulting with `System.IndexOutOfRangeException`; receiver stores and addresses remain local instructions, and erased stores fail the feature certificate; tampered RVA bytes change the proved word |
 | Memory-backed primitive spans | Compiled readonly and writable slices to helpers; sequence-content read and update contracts, and readonly/writable caller composition without unfolding helper bodies; creation over an existing reference; forged element widths and write capabilities rejected by specialization evidence; empty end slices, invalid indexes and slices, alias visibility, missing write authority, uninitialized reads and expired local storage; by-reference and floating-point span signatures rejected |
 | Static readonly struct values | `Zero`, `One` and `MinValue` limbs proved and compared with the values .NET's static constructor stored, also through an out parameter; a changed constructor argument changes the proved limbs; forged value bytes fail `Extracted.translation_valid`; a missing initialization assumption, a `newobj` initializer, `ldsflda`, a store outside the static constructor and a second store rejected; Lean regressions for the load semantics and a self-justifying initializer |
 | Static `ReadOnlySpan<byte>` lookup tables | First and last byte proved; past-end read and write to immutable data rejected; tampered RVA bytes change the proved value; four intended span metadata rejections and positive stored-span parameter/local fixtures |

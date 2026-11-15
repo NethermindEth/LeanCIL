@@ -44,7 +44,7 @@ theorem null_samples (memory : Memory) (values : Reference) (length : Nat)
     (valid : ArrayView.validate ⟨.address values, length, .signed32⟩ memory = .ok ()) :
     ∃ fuel, invoke Extracted.program fuel refill
         [.object .null, .array ⟨.address values, length, .signed32⟩] memory =
-      .error ⟨refill, 2, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨refill, 2, .thrown .nullReference⟩ := by
   cil_checked_steps [valid]
 
 #print axioms null_samples

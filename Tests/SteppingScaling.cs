@@ -56,7 +56,7 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
-    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false)
+    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false), ("homes", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -99,7 +99,7 @@ foreach (var workload in rows.GroupBy(row => row.Workload))
         continue;
     }
     for (var index = 1; index < measurements.Length; index++)
-        CheckGrowth(measurements[index - 1], measurements[index], workload.Key == "arguments");
+        CheckGrowth(measurements[index - 1], measurements[index], workload.Key is "arguments" or "homes");
 }
 Console.WriteLine("PASS stepping growth budgets for " +
     string.Join(", ", rows.Select(row => row.Workload).Distinct()) + "; results: " + reportPath);
@@ -112,6 +112,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // length. The faulting body divides, takes a remainder, adds with an overflow check and converts
 // with one, each from the arguments, so each step reads a fact of constant size. The arguments body
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
+// The homes body gives each of as many reference parameters a home and loads each argument once,
+// which reads its home.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".ldarg 0", ".ldarg 1", ".stind .i8", ".ldarg 0", ".ldind .i8", ".pop"],
@@ -139,7 +141,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var parameters = Math.Max(2, requested / 2);
     var cycles = workload == "hypotheses" ? HypothesisBodyCycles
         : workload == "depth" ? depth - 1
-        : workload == "arguments" ? parameters - 1
+        : workload is "arguments" or "homes" ? parameters - 1
         : Math.Max(1, (requested - opening.Length - ending.Length) / cycle.Length);
     var operations = workload switch
     {
@@ -147,11 +149,20 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             .ToArray(),
         "arguments" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".ldarg {index}", ".add" })
             .Prepend(".ldarg 0").Append(".ret").ToArray(),
+        "homes" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".ldarg {index}", ".pop" })
+            .Prepend(".ldarg 0").Append(".ret").ToArray(),
         _ => opening.Concat(Enumerable.Range(0, cycles).SelectMany(_ => cycle)).Concat(ending).ToArray()
     };
-    var parameterTypes = string.Join(", ", Enumerable.Repeat(Int32Type, parameters));
-    var signature = $"{{ parameters := [{parameterTypes}], returnType := {Int32Type} }}";
-    var declaredField = workload == "arguments" ? $" declared := {signature}," : "";
+    var parameterType = workload == "homes" ? $".byref ({Int32Type})" : Int32Type;
+    var parameterTypes = string.Join(", ", Enumerable.Repeat(parameterType, parameters));
+    var signature = $"{{ parameters := [{parameterTypes}], returnType := {parameterType} }}";
+    var homes = string.Join(", ", Enumerable.Range(0, parameters).Select(index => $"({index}, .reference)"));
+    var declaredField = workload switch
+    {
+        "arguments" => $" declared := {signature},",
+        "homes" => $" declared := {signature}, parameterHomes := [{homes}],",
+        _ => ""
+    };
     var module = "Stepping" + workload + requested;
     var path = Path.Combine(directory, module + ".lean");
     var extraImports = workload switch
@@ -171,7 +182,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
           locals := [], returnsValue := true,{{declaredField}}
           code := [{{string.Join(",\n    ", operations)}}] }
         cil_instruction_equations body
-        """ + "\n" + (workload == "arguments" ? $$"""
+        """ + "\n" + (workload is "arguments" or "homes" ? $$"""
         theorem body_returnsValue : body.returnsValue = true := rfl
         theorem body_declared : body.declared = {{signature}} := rfl
         cil_resolution_facts body
@@ -179,6 +190,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var incoming = string.Join(", ",
         Enumerable.Range(0, parameters).Select(index => $".scalar (.i32 (argument {index}))"));
     var sum = string.Join(" + ", Enumerable.Range(0, parameters).Select(index => $"argument {index}"));
+    var homeSlots = string.Join(", ", Enumerable.Repeat(".root (some target)", parameters));
     var statement = workload switch
     {
         "reference" => $$"""
@@ -303,6 +315,15 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 invoke [body] {{operations.Length + 1}} 0 [{{incoming}}] memory =
                   .ok (memory, [.scalar (.i32 ({{sum}}))]) := by
               cil_checked_steps
+            """,
+        "homes" => $$"""
+            /-- Each reference parameter is read once from the home slot of a literal frame. -/
+            theorem checked (memory : Memory) (target : ManagedReference) (activation : Nat)
+                (formed : formValue memory target = .ok (.reference target)) :
+                run [body] {{operations.Length + 1}} 0 0 [.reference target]
+                  { activation := activation, locals := [{{homeSlots}}], owned := [] } [] memory =
+                  .ok (memory, [.reference target]) := by
+              cil_checked_steps [formed]
             """,
         "locals" => $$"""
             /-- Every cycle replaces all eight reference locals of a literal frame. -/

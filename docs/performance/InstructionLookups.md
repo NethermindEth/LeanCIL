@@ -62,6 +62,10 @@ characters long and differ only in their last character, less the same statement
 than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
 check takes about 5 seconds.
 
+Exception decisions compare `CIL.ExceptionType` constructors. The equality, inequality,
+CLR mapping and optional outcome rows each allow 2,000 to 9,500 kernel heartbeats. Using
+`applicationException` instead of `format` may increase the cost by at most 1.05 times.
+
 The suite also measures `decide +kernel` on one `add` of an int32 offset to a native method
 table of 16, 64 and 256 entries, less the same statement closed with `sorry`. Each table and its
 static storage are definitions outside the decision, so the proof of `MethodTable.counted` is
@@ -110,7 +114,7 @@ at each address measures 2.6 for plain and 3.4 for prefixed addresses without th
 It also checks the kernel heartbeats per instruction of `ScalarFlowValid` on generated bodies of
 128, 256 and 512 locals, each stored once and then loaded or addressed once, less the heartbeats
 of stating the same certificate. Integer locals take a constant and are popped after a load or
-after `ldloca`, which also makes each a receiver fold candidate; native-int locals take a method
+after `ldloca`; native-int locals take a method
 address and are consumed by `calli`, which makes each a pointer local. For the pointer locals it
 also checks `closedArguments`. The suite fails when the cost per instruction at 256 or 512 locals
 exceeds 1.25 times the cost at 128. The scalar check and fold discovery read local types from a

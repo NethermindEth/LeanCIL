@@ -152,19 +152,19 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
   match operation, stack with
   | .tableLength, .object .null :: _
   | .tableElement _, .scalar _ :: .object .null :: _ =>
-    .error (.thrown "System.NullReferenceException")
+    .error (.thrown .nullReference)
   | .address target signature, _ =>
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
   | .tableLength, .methodTable table :: rest =>
-    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    let some targets := table.targets | .error (.thrown .nullReference)
     if targets.size >= 2^31 then .error .invalidState else pure ()
     return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 targets.size)) :: rest) frame memory
   | .tableElement signature, .scalar index :: .methodTable table :: rest =>
     if table.signature != signature then .error .invalidState else pure ()
     let some index := arrayIndex index | .error .invalidState
-    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    let some targets := table.targets | .error (.thrown .nullReference)
     if targets.size >= 2^31 then .error .invalidState else pure ()
-    let some target := targets[index]? | .error (.thrown "System.IndexOutOfRangeException")
+    let some target := targets[index]? | .error (.thrown .indexOutOfRange)
     if let some backing := table.backing then
       let selected := { table with backing := some { backing with
         byteOffset := nativeMethodWidth * index } }
@@ -231,6 +231,27 @@ def loadArgument (body : CIL.Method) (index : Nat) (args : List Value) (frame : 
     let .scalar (.i32 bits) := value | .error .invalidState
     checkedValue memory (.scalar (.i32 (kind.extend bits)))
 
+/-- The frame and memory after `starg index` stores `value`: a homed argument's frame slot is
+    written as `stloc` of that slot writes it. An argument without a home has no slot to write. -/
+def storeArgument (body : CIL.Method) (index : Nat) (value : Value) (frame : Frame)
+    (memory : Memory) : ExecutionResult (Frame × Memory) :=
+  match body.argumentAccess index with
+  | .home slot => do
+    let some home := frame.locals[slot]? | .error .invalidState
+    let (home, memory) ← storeLocal memory home value
+    return ({ frame with locals := frame.locals.set slot home }, memory)
+  | .value _ => .error (.unsupported "Store to an argument without a home")
+
+/-- The address `ldarga index` pushes: a homed argument's frame slot, as `ldloca` of that slot
+    takes it. An argument without a home has no address. -/
+def addressArgument (body : CIL.Method) (index : Nat) (frame : Frame) (memory : Memory) :
+    ExecutionResult Value :=
+  match body.argumentAccess index with
+  | .home slot => do
+    let some home := frame.locals[slot]? | .error .invalidState
+    localAddress memory home
+  | .value _ => .error (.unsupported "Address of an argument without a home")
+
 /-- `localloc` of the byte count alone on the stack: fresh storage owned by `frame`, zeroed when
     `initLocals` is set. Any other stack is an invalid state. -/
 def localAllocation (initLocals : Bool) (pc : Nat) (frame : Frame) (stack : List Value)
@@ -249,8 +270,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Native table offsets, faulting arithmetic and object identity are matched apart from the
-  -- rest, so that neither match exceeds the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic, object identity, argument homes and `localloc`
+  -- are matched apart, so that neither match exceeds the 79 alternatives `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -324,6 +345,13 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .objectTest type throwing, .object value :: rest =>
     let result ← objectTest m type throwing value
     return .next (pc + 1) (.object result :: rest) frame m
+  -- An argument's home is written and addressed as the local slot it is.
+  | .starg index, value :: rest =>
+    let (frame, memory) ← storeArgument body index value frame m
+    return .next (pc + 1) rest frame memory
+  | .ldarga index, _ =>
+    return .next (pc + 1) ((← addressArgument body index frame m) :: stack) frame m
+
   -- Dynamic frame storage, zeroed as the body's declared localsinit flag says.
   | .localloc, _ => localAllocation body.declared.initLocals pc frame stack m
   -- A hole faults on every stack.
@@ -449,7 +477,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       -- The receiver is the deepest argument; anything but an object reference is ill-typed.
       match arguments with
       | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
-      | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+      | .object .null :: _ => .error (.thrown .nullReference)
       | _ => .error .invalidState
   | .callVirtual targets argc, _ =>
     if stack.length < argc then .error .invalidState else
@@ -457,7 +485,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       match arguments with
       | .object (.address receiver) :: _ =>
         return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
-      | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+      | .object .null :: _ => .error (.thrown .nullReference)
       | _ => .error .invalidState
   | .newAggregate callee argc size, _ =>
     if size = 0 || stack.length < argc then .error .invalidState else

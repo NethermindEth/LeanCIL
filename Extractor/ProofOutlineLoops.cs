@@ -510,7 +510,7 @@ internal static partial class ProofOutline
                     : inputs.Any(input => input.Object is not null) ? "it takes an object, whose fields need facts"
                     : output is null ? "it returns nothing to state"
                     : !extraction.Emitted[index].Frame.HasNoLocals ? "it has locals"
-                    : Unstepped(callee, extraction.Emitted[index].Operations, []);
+                    : Unstepped(callee, SlotOperations(extraction.Emitted[index]), []);
                 lean.Noted("  ", "sorry", $"{NotOutlined}{callee.Name}'s body against the contract, since " +
                     reason);
             }
@@ -522,7 +522,7 @@ internal static partial class ProofOutline
         (int Slot, int Value, int Width, Operation Op)? Stores(int index)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
+            var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
             if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
                 !extraction.Emitted[index].Frame.HasNoLocals || ops[3] is not Return) return null;
             if (ops[0] is not Arg { Index: var reference } || ops[1] is not Arg { Index: var word } ||
@@ -538,7 +538,8 @@ internal static partial class ProofOutline
         {
             var plainReturn = LeanEmitter.Narrow(extraction.Methods[index].ReturnType) is null;
             return extraction.Emitted[index].Frame.HasNoLocals &&
-                extraction.Emitted[index].Operations.All(op => Body.Pure(op, extraction.Methods[index], plainReturn));
+                SlotOperations(extraction.Emitted[index])
+                    .All(op => Body.Pure(op, extraction.Methods[index], plainReturn));
         }
 
         /// <summary>The `Holds` proof of a callee of words that `Computes` or `Branches`, its inputs bound by
@@ -565,7 +566,7 @@ internal static partial class ProofOutline
         internal static bool Branches(Extraction extraction, int index)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Operations;
+            var ops = SlotOperations(extraction.Emitted[index]);
             var plainReturn = LeanEmitter.Narrow(callee.ReturnType) is null;
             return !callee.HasThis &&
                 callee.Parameters.All(parameter => ElementWidth(parameter.ParameterType) is not null) &&
@@ -617,7 +618,7 @@ internal static partial class ProofOutline
             string indent, ref int sides, bool kept)
         {
             var callee = extraction.Methods[index];
-            var ops = extraction.Emitted[index].Operations;
+            var ops = SlotOperations(extraction.Emitted[index]);
             string Where() => facts.Count == 0 ? "" : " where " + string.Join(" and ", facts.Select(fact => fact.Text));
             while (true)
             {

@@ -161,10 +161,10 @@ internal sealed record Return : Operation
     internal override string Render(Func<int, string> calleeName) => ".ret";
 }
 
-/// <summary>A fault of the named CLR exception type.</summary>
-internal sealed record Throw(string Exception) : Operation
+/// <summary>A fault of the modelled CLR exception type.</summary>
+internal sealed record Throw(ExceptionType Exception) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".throw \"{Exception}\"";
+    internal override string Render(Func<int, string> calleeName) => $".throw {Exception.ToLean()}";
 }
 
 /// <summary>The width and signedness a narrow integer is truncated to when it is read.</summary>
@@ -187,21 +187,48 @@ internal sealed record Arg(int Index) : Operation
     internal override string Render(Func<int, string> calleeName) => $".ldarg {Index}";
 }
 
+/// <summary>An argument assigned from the stack into its home, whose kind gives any narrowing.</summary>
+internal sealed record Starg(int Index) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".starg {Index}";
+}
+
+/// <summary>The address of an argument's home.</summary>
+internal sealed record Ldarga(int Index) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".ldarga {Index}";
+}
+
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>
 internal sealed record Local(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".ldloc {Index}";
+    /// <summary>The load of the argument homed in this slot when the body names the argument, as diagnostics show it.
+    /// </summary>
+    internal Arg? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".ldloc {Index}";
 }
 
 /// <summary>A local assigned from the stack; the slot's kind gives any narrowing.</summary>
 internal sealed record SetLocal(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".stloc {Index}";
+    /// <summary>The store to the argument homed in this slot when the body names the argument, as diagnostics show it.
+    /// </summary>
+    internal Starg? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".stloc {Index}";
 }
 
 internal sealed record LocalAddress(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".ldloca {Index}";
+    /// <summary>The address of the argument homed in this slot when the body names the argument, as diagnostics show
+    /// it.</summary>
+    internal Ldarga? Argument { get; init; }
+
+    internal override string Render(Func<int, string> calleeName) =>
+        Argument?.Render(calleeName) ?? $".ldloca {Index}";
 }
 
 /// <summary>

@@ -135,6 +135,8 @@ Pass the `writable` projection to the general snapshot lemmas.
 The snapshot forms of the stepping tactics (`CIL.Safety.LocalSnapshotSteps`, part of `import CIL`)
 take numeric local stores and loads through a `LocalSnapshots` hypothesis and pass the updated
 snapshots to each later step. A load pushes the latest remembered value; a store replaces it.
+A homed argument's `starg` and `ldarg` are the store and load of its home slot, so the snapshots
+remember the argument at that slot.
 
 #### Tactic forms
 
@@ -882,9 +884,11 @@ struct.
 
 ## Name exceptional outcomes
 
-An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds `raises : Input → Memory → Option String`
+An `OutcomeContract` (`CIL.Safety.OutcomeContract`) adds `raises : Input → Memory → Option ExceptionType`
 to a `MethodContract`: where it is `some exception` the method must end in exactly `.thrown
-exception` (`Raises`), and elsewhere the normal clause applies. Fuel exhaustion, unsupported
+exception` (`Raises`), and elsewhere the normal clause applies. `CIL.ExceptionType` lists the
+exceptions the model raises, such as `.argumentOutOfRange`; each member stands for one type of
+namespace `System` in the runtime assembly (`CIL.ExceptionType.typeIdentity`). Fuel exhaustion, unsupported
 instructions and memory faults never satisfy `Raises`, so a contract cannot be met by getting stuck.
 Memory after a throw is not observable to the caller, so `Raises` states none; runtime exceptions
 count only where the semantics models them as `.thrown`.
@@ -900,7 +904,7 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 ```
 
 | Name | Use |
@@ -912,7 +916,7 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
 | `invoke_unique` | Ties a computed fault to the contract's existential one |
 
 [CountUntil](../Examples/Proofs/CountUntil.lean) proves `bumpContract`, which raises
-`System.InvalidOperationException` when its two arguments are equal, with `cil_raise_steps` and
+`.invalidOperation` when its two arguments are equal, with `cil_raise_steps` and
 `cil_checked_steps`, then proves its loop returns or propagates that exception through the contract
 alone.
 
@@ -924,8 +928,8 @@ normal-return clause, footprint and `raises` field unchanged. Its fixed
 | Fault | Named CLR exception |
 | --- | --- |
 | `.thrown exception` | `exception` |
-| `.arithmetic .overflow` | `System.OverflowException` |
-| `.arithmetic .divideByZero` | `System.DivideByZeroException` |
+| `.arithmetic .overflow` | `.overflow` |
+| `.arithmetic .divideByZero` | `.divideByZero` |
 | Every other fault | None |
 
 Checked add, subtract, multiply and integer conversions report overflow through this mapping.
@@ -935,7 +939,7 @@ arithmetic operands, invalid bounds, memory faults, unsupported instructions, in
 exhaustion have no name in this mode. The mode does not change `Raises` or `.thrown`.
 `OutcomeContract.Holds.clr` lifts a thrown-outcome proof (`Holds`) to `HoldsCLR`.
 
-For a wide-integer `Divide` or `Mod` contract, select `some "System.DivideByZeroException"` in
+For a wide-integer `Divide` or `Mod` contract, select `some .divideByZero` in
 `raises` when its divisor is zero and prove `HoldsCLR`. Both an explicit throw and the mapped
 arithmetic failure can establish this exact outcome. The proof must reach that fault through the
 actual extracted program. `run_fault_raisesCLR`, `run_next_raisesCLR` and `raisesCLR_of_run`
