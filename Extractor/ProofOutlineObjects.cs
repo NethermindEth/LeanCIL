@@ -370,7 +370,7 @@ internal static partial class ProofOutline
                         Steps.Add(new LocalAccess(local.Index, value, word.Width, stores, false));
                     stack.Add(item);
                 }
-                else if (op is Memory { Operation: NullObject }) stack.Add(new Null());
+                else if (op is LoadNull) stack.Add(new Null());
                 else if (op is StackOperation { Kind: StackOpcode.Dup })
                 {
                     if (stack.Count == 0) return Stop("a duplicate of an empty stack");

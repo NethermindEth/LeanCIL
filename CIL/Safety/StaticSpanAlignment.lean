@@ -22,16 +22,18 @@ theorem staticSpanAligned_divides {allocation : Allocation} {width : Nat}
 
 /-- A successful typed static span starts a live allocation whose guaranteed alignment is a
     multiple of the element width. -/
-theorem createSpan_aligned {body : CIL.Method} {pc width : Nat} {stack values : List Value}
-    {m result : Memory}
-    (created : staticInstruction body pc (.createSpan width) stack m = .ok (result, values)) :
+theorem createSpan_aligned {width : Nat} {stack values : List Value} {m result : Memory}
+    (created : memoryInstruction (.createSpan width) stack m = .ok (result, values)) :
     ∃ (reference : Reference) (rest : List Value) (allocation : Allocation),
       stack = .reference (.address reference) :: rest ∧ reference.offset = 0 ∧
       m.allocations reference.allocation = some allocation ∧ allocation.live = true ∧
       0 < width ∧ width ∣ allocation.layout.alignment := by
-  unfold staticInstruction at created
+  simp only [memoryInstruction] at created
+  split at created
+  · cases created
+  unfold staticSpanInstruction at created
   split at created <;> try contradiction
-  · rename_i reference rest same
+  · rename_i reference rest same _
     cases same
     cases live : liveAllocation m reference.allocation with
     | error fault => simp [live, checkedAt, Except.mapError, Bind.bind, Except.bind] at created
@@ -51,17 +53,12 @@ theorem createSpan_aligned {body : CIL.Method} {pc width : Nat} {stack values : 
             staticSpanAligned_divides (by assumption)⟩
         · cases created
       · cases created
-  · unfold memoryInstruction at created
-    split at created
-    · cases created
-    · unfold otherMemoryInstruction at created
-      split at created <;> simp_all
 
 /-- Under every valid placement, a successful typed static span's base address is a multiple
     of its element width, which is the condition CoreCLR's `CreateSpan<T>` enforces. -/
-theorem createSpan_aligned_at_placement {body : CIL.Method} {pc width : Nat}
-    {stack values : List Value} {m result : Memory}
-    (created : staticInstruction body pc (.createSpan width) stack m = .ok (result, values))
+theorem createSpan_aligned_at_placement {width : Nat} {stack values : List Value}
+    {m result : Memory}
+    (created : memoryInstruction (.createSpan width) stack m = .ok (result, values))
     (placement : Placement) (placed : placement.Valid m) :
     ∃ (reference : Reference) (rest : List Value),
       stack = .reference (.address reference) :: rest ∧ 0 < width ∧

@@ -46,7 +46,7 @@ theorem signed_short {memory : Memory} {source : Reference} {bits : BitVec 16}
 theorem conjoined_read {memory : Memory} {source : Reference} {bits : CIL.W64}
     (facts : True ∧ (read memory source 8 1 = .ok (numberBytes bits.toNat 8) ∧ True))
     (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body .load64 pc args frame (.reference (.address source) :: rest) memory =
+    step body (.ldind .i8) pc args frame (.reference (.address source) :: rest) memory =
       .ok (.next (pc + 1) (.scalar (.i64 bits) :: rest) frame memory) := by
   cil_checked_step [facts]
 #print axioms conjoined_read
@@ -55,7 +55,7 @@ theorem conjoined_read {memory : Memory} {source : Reference} {bits : CIL.W64}
 theorem conjoined_write {memory after : Memory} {target : Reference} {bits : CIL.W64}
     (facts : True ∧ (write memory target (numberBytes bits.toNat 8) 1 = .ok after ∧ True))
     (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body .store64 pc args frame
+    step body (.stind .i8) pc args frame
         (.scalar (.i64 bits) :: .reference (.address target) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by
   cil_checked_step [facts]
@@ -226,7 +226,7 @@ theorem named_report_write (condition : Prop) [Decidable condition]
     {memory after : Memory} {target : Reference}
     (written : write memory target (numberBytes (reportedWord condition).toNat 8) 1 = .ok after)
     (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
-    step body .store64 pc args frame
+    step body (.stind .i8) pc args frame
         (.scalar (.i64 ((if condition then (1 : BitVec 32) else 0).signExtend 64)) ::
           .reference (.address target) :: rest) memory =
       .ok (.next (pc + 1) rest frame after) := by

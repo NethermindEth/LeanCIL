@@ -6,7 +6,7 @@ import CIL.Safety.ObjectAllocationLemmas
 
 `cil_step` equations for the instructions that observe class instance references: identity
 comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`),
-`isinst` and `castclass` (`objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
+`isinst` and `castclass` (through `objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
 `ldstr` of a caller-bound literal (`literalObject_of_lookup`), `ldfld`/`stfld` of scalar class
 fields, and `newobj` of a class, which calls the constructor with a fresh instance that
 `allocateObject_ok` or `allocateObject_insufficient` decides, and `callvirt` of a non-virtual
@@ -249,12 +249,21 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return .next (if present then target else pc + 1) rest frame memory :=
   id rfl
 
-/-- `isinst` and `castclass` replace an object reference by its tested form: itself when its
-    runtime lineage holds the class, else null or `InvalidCastException`. -/
-@[cil_step high] theorem step_objectTest_eq (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+/-- `castclass` keeps an object reference whose runtime lineage holds the class, and null;
+    any other object throws `InvalidCastException`. -/
+@[cil_step high] theorem step_castclass_eq (type : CIL.Extraction.TypeExpr)
     (value : ManagedReference) (rest : List Value) :
-    step body (.objectTest type throwing) pc args frame (.object value :: rest) memory = do
-      let result ← objectTest memory type throwing value
+    step body (.castclass type) pc args frame (.object value :: rest) memory = do
+      let result ← objectTest memory type true value
+      return .next (pc + 1) (.object result :: rest) frame memory :=
+  id rfl
+
+/-- `isinst` keeps an object reference whose runtime lineage holds the class, and null; any
+    other object becomes null. -/
+@[cil_step high] theorem step_isinst_eq (type : CIL.Extraction.TypeExpr)
+    (value : ManagedReference) (rest : List Value) :
+    step body (.isinst type) pc args frame (.object value :: rest) memory = do
+      let result ← objectTest memory type false value
       return .next (pc + 1) (.object result :: rest) frame memory :=
   id rfl
 
@@ -286,12 +295,9 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return (.object (.address array), allocated) := rfl
 
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
-@[cil_step high] theorem step_nullObject_eq (stack : List Value) :
-    step body (.memory .nullObject) pc args frame stack memory =
-      .ok (.next (pc + 1) (.object .null :: stack) frame memory) := by
-  simp only [step, observerCount, staticInstruction, memoryInstruction,
-    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any]
-  rfl
+@[cil_step high] theorem step_ldnull_eq (stack : List Value) :
+    step body .ldnull pc args frame stack memory =
+      .ok (.next (pc + 1) (.object .null :: stack) frame memory) := id rfl
 
 /-- `ldstr` pushes the object bound to its text and leaves memory unchanged. -/
 @[cil_step high] theorem step_stringLiteral_eq (text : String) (stack : List Value) :
@@ -714,8 +720,9 @@ end ObjectEquations
 #print axioms step_cgt_un_object_eq
 #print axioms step_brfalse_object_eq
 #print axioms step_brtrue_object_eq
-#print axioms step_objectTest_eq
-#print axioms step_nullObject_eq
+#print axioms step_castclass_eq
+#print axioms step_isinst_eq
+#print axioms step_ldnull_eq
 #print axioms step_newarr_i32_eq
 #print axioms step_newarr_i64_eq
 #print axioms allocateElements_value

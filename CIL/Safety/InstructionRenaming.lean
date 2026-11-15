@@ -1,14 +1,35 @@
 import CIL.Safety.MemoryInstructionRenaming
+import CIL.Safety.NativeMethodTableRenaming
 
 /-!
 # Ordinary instruction simulation under allocation renaming
 
-Typed fields, aggregates, lanes and stack operations preserve successful values and named
-exceptions while accessing corresponding allocation identities.
+Typed fields, aggregates, lanes, native table loads and stack operations preserve successful
+values and named exceptions while accessing corresponding allocation identities.
 Primitive matching tries writes before reads to avoid reducing a write while rejecting a read lemma.
 -/
 
 namespace CIL.Safety
+
+/-- Observable execution through a native table requires a successful checked memory step. -/
+theorem checkedNative_bind {mapping : AllocationRenaming} {relation : β → γ → Prop}
+    (source target : Checked α) (sourceNext : α → ExecutionResult β)
+    (targetNext : α → ExecutionResult γ)
+    (preserved : ∀ value, source = .ok value → target = .ok value)
+    (observable : SuccessOrThrow (checkedAt .null nativeMethodWidth source >>= sourceNext))
+    (next : ∀ value, source = .ok value → SuccessOrThrow (sourceNext value) →
+      ResultRenamed mapping relation (sourceNext value) (targetNext value)) :
+    ResultRenamed mapping relation (checkedAt .null nativeMethodWidth source >>= sourceNext)
+      (checkedAt .null nativeMethodWidth target >>= targetNext) := by
+  cases checked : source with
+  | error fault =>
+    simp [checked, checkedAt, Except.mapError, Bind.bind, Except.bind, SuccessOrThrow]
+      at observable
+  | ok value =>
+    simp only [checked, checkedAt, Except.mapError, Bind.bind, Except.bind] at observable ⊢
+    rw [preserved value checked]
+    exact next value checked observable
+#print axioms checkedNative_bind
 
 set_option maxHeartbeats 600000 in
 /-- Ordinary instructions preserve mapped successful values and named CLR exceptions. -/
@@ -34,6 +55,11 @@ theorem Memory.Renamed.instructionResult {mapping : AllocationRenaming}
       [List.map_cons, AllocationRenaming.value]
     all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
     all_goals try exact related.memoryInstructionResult _ formed _ bounds observable
+    all_goals try solve
+      | (apply checkedNative_bind _ _ _ _
+          (fun value proof => related.loadNativeTable_success formed _ value proof) observable
+         intro value found observable
+         exact .ok ⟨related, rfl⟩)
     all_goals try solve | repeat first | contradiction | cases observable | split at observable
     all_goals clear observable
     all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below,

@@ -182,12 +182,12 @@ def platformConstant (site : CallSite) : Option W32 := do
           "::" ++ site.name ++ "()") then none
     else some (if site.name == "get_Size" then 8 else 1)
 
-/-- `ldsfld` of the System.Runtime `BitConverter` static Boolean, whose only such field is
-    `IsLittleEndian`; the raw operand omits field names, so the extractor checks the member.
-    Valid profiles are little-endian, so the load is the constant 1. -/
+/-- `ldsfld` of the System.Runtime `BitConverter` static Boolean `IsLittleEndian`. Valid
+    profiles are little-endian, so the load is the constant 1. -/
 def platformField (instruction : RawInstruction) : Option W32 :=
   if instruction.opcode == 126 && instruction.operand ==
-      .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean") true
+      .field (.atom runtimeScope "System.BitConverter") 0 (.atom runtimeScope "System.Boolean")
+        name!"IsLittleEndian" true
   then some 1 else none
 
 /-- Classify reference-free storage against a table whose `LayoutsValid` is checked separately.
@@ -508,7 +508,8 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Inst
     | .call .. => instruction.opcode == 40 || instruction.opcode == 111
     | .callInstance .. | .callVirtual .. => instruction.opcode == 111
     | .newAggregate .. | .newObject .. => instruction.opcode == 115
-    | .objectTest .. => instruction.opcode ∈ [116, 117]
+    | .castclass _ | .isinst _ =>
+      (typeTestSource emitted).any fun (opcode, _) => opcode == instruction.opcode
     | _ => true
   properCall && match rawFeatureEffect instruction, emittedFeatureEffect emitted returnsValue with
     | some rawEffect, some emittedEffect => rawEffect == emittedEffect

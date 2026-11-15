@@ -357,14 +357,14 @@ allocation records. Lean admits a `callVirtual` only at `callvirt` and only into
 with the slot's signature and an object receiver
 ([AnimalLegs](../Examples/Proofs/AnimalLegs.lean)).
 
-`castclass` and `isinst` of an admitted class other than `System.Object` are an `objectTest` of
-that class. It keeps a reference whose runtime type, its own class or one of the admitted bases
+`castclass` and `isinst` of an admitted class other than `System.Object` test against that
+class. Each keeps a reference whose runtime type, its own class or one of the admitted bases
 the allocation records, is the class, passes null through, and otherwise gives null (`isinst`)
 or throws `System.InvalidCastException` (`castclass`) (ECMA-335 III.4.3, III.4.6). Those classes
 are the instance's whole lineage below `System.Object`, so the test is exact. For an instance
 the method does not construct, the runtime type, class and bases alike, is the theorem's
 hypothesis, as for field access and dispatch; one it constructs records its constructor's bases.
-Lean admits an `objectTest` only at `castclass` or `isinst` of the same class, on an object reference, and only
+Lean admits each only at the raw opcode of the same name and class, on an object reference, and only
 against a pinned catalog class that is no interface
 ([DogTest](../Examples/Proofs/DogTest.lean), [DogCast](../Examples/Proofs/DogCast.lean)).
 

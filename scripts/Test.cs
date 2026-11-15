@@ -18,9 +18,7 @@ using System.Text.Json;
 
 // A relocated shared runner must not execute an older suite plan after its source changes.
 var fixtureManifest = Environment.GetEnvironmentVariable(FixtureManifestEnvironment);
-if (!string.IsNullOrEmpty(fixtureManifest) &&
-    typeof(Program).Assembly.Location.StartsWith(Path.GetDirectoryName(Path.GetFullPath(fixtureManifest))! +
-        Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+if (!string.IsNullOrEmpty(fixtureManifest) && RunsFromFixtures(fixtureManifest) &&
     PreparedFixtureCommand("scripts/Test.cs", []) is null)
 {
     Run(["dotnet", "run", "--file", At("scripts/Test.cs"), "--", .. args], streamOutput: true,
@@ -240,13 +238,15 @@ Run(["lake", "build", "Tests.Semantics", "Tests.Automation", "Tests.MethodBindin
     "Tests.ValidCallTransport", "Tests.BufferContents", "Tests.Linking",
     "Tests.ModularStatics", "Tests.StepFlow", "Tests.RegionRun", "Tests.StoreFacts",
     "Tests.ProfileContract", "Tests.InstructionEquations", "Tests.CodeAt", "Tests.Segment", "Tests.SimdLanes",
+    "Tests.SegmentContract",
     "Tests.LiteralDisplay", "Tests.Identity", "Tests.PublicProofSurface", "Tests.BodyDecoding",
     "Tests.MetadataDecoding", "Tests.MetadataBinding", "Tests.KernelEquation",
     "Tests.ResolutionFacts", "Tests.ValueDecoding", "Tests.DecodedMethod", "Tests.ReplayDiagnostics",
     "Tests.BodyLiteral",
     "Tests.ReturnOpcode", "Tests.ReturnMetadataBinding", "Tests.ReferenceArrays", "Tests.ArrayFields",
     "Tests.RetainedNumericLocals", "Tests.ProfileEmbedding", "Tests.FullTransfer", "Tests.Crypto",
-    "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.FieldShape"],
+    "Tests.MetadataAssemblies", "Tests.PinnedIndexScaling", "Tests.FieldRef", "Tests.FieldShape",
+    "Tests.RuntimeModels"],
     verification.CheckoutPackage(), streamOutput: true, progress: "Building semantics and automation tests");
 Passed("library, semantic, method-body binding, embedding, shared equation, method identity, structural label, "
     + "debug name, method contract, constructor contract, outcome contract, contract import, loop outcome, footprint, "
@@ -255,7 +255,7 @@ Passed("library, semantic, method-body binding, embedding, shared equation, meth
     + "store fact, profile contract, instruction equation, code placement, SIMD lane, typed identity, method body "
     + "decoding, declared narrowing, value opcode decoding, decoded method, replay diagnostic, literal body "
     + "evidence, return metadata, object array, embedding retention and profile, full transfer, SHA-1, assembly "
-    + "index and pin index scaling and field reference tests");
+    + "index, pin index scaling, field reference and runtime model tests");
 
 verification.VerifyCoreExamples(At("artifacts"), Passed);
 

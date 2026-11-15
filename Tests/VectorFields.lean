@@ -88,15 +88,15 @@ def vector (scope : String) : TypeExpr := .apply
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
     (vector "System.Runtime.Intrinsics, Version=11.0.0.0, Culture=neutral, \
       PublicKeyToken=cc7b13ffcd2ddd51")
-    false⟩ =
+    name!"value" false⟩ =
     some [.field 0 0 0 .load] := by decide
 
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
-    (vector "Spoofed.Intrinsics") false⟩ = none := by decide
+    (vector "Spoofed.Intrinsics") name!"value" false⟩ = none := by decide
 
 example : instructionLayoutUses raw 0 ⟨0, 0x7b, .field (.aggregate "VectorHolder" 0) 0
     (.atom "System.Runtime, Version=11.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
       "System.UInt64")
-    false⟩ = none := by decide
+    name!"value" false⟩ = none := by decide
 
 end Tests.VectorFields

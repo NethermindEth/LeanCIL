@@ -257,7 +257,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
             case FieldReference field:
                 var (owner, index, held, isStatic) = FieldOperand(instruction, field);
-                return $".field ({owner}) {index} ({held}) {Bool(isStatic)}";
+                var name = MetadataName.OfText(field.Name).ToLean();
+                return $".field ({owner}) {index} ({held}) {name} {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";
             case double number: return $".text {Quote("double:" + BitConverter.DoubleToInt64Bits(number).ToString(CultureInfo.InvariantCulture))}";

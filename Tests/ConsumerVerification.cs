@@ -17,6 +17,8 @@
 #:include ConsumerComponents.cs
 #:include ConsumerFingerprintReuse.cs
 #:include CertifiedFingerprints.cs
+#:include ConsumerPackagePaths.cs
+#:include DirectoryLinks.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -24,6 +26,7 @@ using System.Text.Json.Nodes;
 var checks = new Dictionary<string, Action<string[]>>(StringComparer.Ordinal)
 {
     ["source-resolution"] = CheckConsumerSourceResolution,
+    ["package-paths"] = CheckConsumerPackagePaths,
     ["import-directories"] = CheckConsumerImportDirectories,
     ["support-union"] = CheckConsumerSupportUnion,
     ["certificate-reuse"] = CheckConsumerCertificateReuse,
@@ -40,7 +43,8 @@ if (args is ["--check", var check, .. var options])
 }
 // Compile the harness once; separate processes retain private environment and verifier state.
 foreach (var name in checks.Keys)
-    Run(["dotnet", typeof(Program).Assembly.Location, "--check", name], streamOutput: name == "compile-check");
+    Run(["dotnet", typeof(Program).Assembly.Location, "--check", name],
+        streamOutput: name is "compile-check" or "package-paths");
 
 var cli = new[] { "dotnet", args.Length == 0 ? ExtractorPath : Path.GetFullPath(args[0]) };
 var root = Path.GetFullPath(At("artifacts/ConsumerPackage"));

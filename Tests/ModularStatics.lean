@@ -16,7 +16,7 @@ private def libField : StaticDescriptor :=
 
 @[cil_code] def libBody : Method :=
   { returnsValue := true, locals := [], staticSites := [(0, libField)],
-    code := [.memory (.staticAddress (numberBytes 17 8)), .load64, .ret] }
+    code := [.memory (.staticAddress (numberBytes 17 8)), .ldind .i8, .ret] }
 @[cil_code] def appBody : Method :=
   { returnsValue := true, locals := [], staticSites := [(0, appField)],
     code := [.memory (.staticAddress (numberBytes 7 8)), .pop, .call 1 0, .ret] }
@@ -90,10 +90,11 @@ private theorem libBody_reads (memory : Safety.Memory) (formed : memory.WellForm
       .ok (.next 1 [.reference (.address reference)] frame result) := by
     rw [step_memory_eq, addressed]
     rfl
-  have second : step libBody .load64 1 [] frame [.reference (.address reference)] result =
+  have second : step libBody (.ldind .i8) 1 [] frame [.reference (.address reference)] result =
       .ok (.next 2 [.scalar (.i64 17)] frame result) := by
-    rw [step_load64_eq]
-    simp only [instructionStep, instruction, load, Bind.bind, Except.bind, Pure.pure, Except.pure]
+    rw [step_ldind_eq]
+    simp only [instructionStep, instruction, CIL.NumericKind.width, CIL.NumericKind.signed, load,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
     rfl
   have returned : step libBody .ret 2 [] frame [.scalar (.i64 17)] result =
       .ok (.returned [.scalar (.i64 17)] result) := rfl

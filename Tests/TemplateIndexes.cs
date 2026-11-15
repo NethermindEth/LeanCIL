@@ -52,7 +52,7 @@ object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadat
     "{ parameters := [], returnType := .void }");
 object MethodIn(string identity, object frame, params object[] ops) => Activator.CreateInstance(
     emitter.GetNestedType("Method", BindingFlags.NonPublic)!, identity, frame,
-    Typed(Model("Operation"), ops.Select(Operation)))!;
+    Typed(Model("Operation"), ops.Select(Operation)), new int[ops.Length])!;
 object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), ops);
 var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 {

@@ -381,7 +381,7 @@ open CIL.Safety
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
   code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldarg 0, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldarg 0, .ldc_i4 1,
+    .memory (.spanItem 8), .ldind .i8, .add, .stloc 0, .ldarg 0, .ldc_i4 1,
     .memory (.spanSlice false), .starg 0, .ldarg 0, .memory .spanLength, .brtrue 4,
     .ldloc 0, .ret] }
 
@@ -505,7 +505,7 @@ theorem constant_measure (memory : Memory) (view : SpanView) (values : List CIL.
   locals := [.i64 0], localKinds := [.word64], returnsValue := true
   parameterHomes := [(0, .span 8 false)]
   code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldarga 0, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldarga 0, .ldc_i4 1,
+    .memory (.spanItem 8), .ldind .i8, .add, .stloc 0, .ldarga 0, .ldc_i4 1,
     .memory (.spanSlice false), .starg 0, .ldarga 0, .memory .spanLength, .brtrue 4,
     .ldloc 0, .ret] }
 

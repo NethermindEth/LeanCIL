@@ -6,6 +6,7 @@ import CIL.Safety.ReferenceObservations
 import CIL.Safety.HeapObjects
 import CIL.Safety.NativeMethodTables
 import CIL.Resolution
+import CIL.RuntimeModel
 
 /-!
 # Checked interpreter
@@ -14,7 +15,8 @@ The interpreter that safety proofs reason about. It runs over allocation-aware m
 checked values, and it reports why it stopped: every fault is an `ExecutionFault` located at a
 method and pc instead of `none`. Value-only instructions are delegated to `CIL.step` through
 `pureArity`, so the two interpreters cannot disagree on arithmetic. Locals have only the meaning
-given here, through the kinds of their slots.
+given here, through the kinds of their slots. `runModel` runs a runtime model through the same
+named functions as the instructions emitted for its call.
 -/
 
 namespace CIL.Safety
@@ -183,10 +185,6 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
     if table.signature != signature then .error .invalidState else pure ()
     let pointer ← methodTableElement table index memory
     return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
-  | .tableLoad signature, .methodTable table :: rest =>
-    if table.signature != signature then .error .invalidState else pure ()
-    let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table memory)
-    return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
   | .call signature catalog tail, .methodPointer pointer :: values =>
     let some method := indirectTarget signature catalog pointer | .error .invalidState
     let count := signature.parameters.length
@@ -268,6 +266,107 @@ def addressArgument (body : CIL.Method) (index : Nat) (frame : Frame) (memory : 
     localAddress memory home
   | .value _ => .error (.unsupported "Address of an argument without a home")
 
+/-- Runs `next` unless one of the top `count` operands has unspecified bits, which `step` rejects
+    with the same fault before every instruction. -/
+def observedCall (count : Nat) (stack : List Value) (next : Unit → ExecutionResult FrameAction) :
+    ExecutionResult FrameAction :=
+  if unspecifiedOperands count stack then
+    .error (.unsupported "Instruction observes unspecified vector bits") else next ()
+
+/-- An intrinsic must be available in `profile`; its `argc` operands are taken deepest first. -/
+def intrinsicCall (profile : CIL.FeatureProfile) (operation : CIL.Intrinsic) (argc pc : Nat)
+    (frame : Frame) (stack : List Value) (memory : Memory) : ExecutionResult FrameAction :=
+  if !operation.available profile then
+    .error (.unsupported "Intrinsic unavailable in target profile")
+  else if stack.length < argc then .error .invalidState else do
+    let operands ← scalars (stack.take argc).reverse
+    let value ← checkedIntrinsic operation operands
+    return .next (pc + 1) ((← checkedValue memory (.scalar value)) :: stack.drop argc) frame memory
+
+/-- A feature test pushes 1 when `profile` has `feature`, and 0 otherwise. -/
+def featureCall (profile : CIL.FeatureProfile) (feature : CIL.Feature) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory : Memory) : ExecutionResult FrameAction :=
+  .ok (.next (pc + 1) (.scalar (.i32 (if profile.evaluate feature then 1 else 0)) :: stack) frame
+    memory)
+
+/-- A reference comparison pushes 1 when the two references, deepest first, stand in
+    `relation`, and 0 otherwise; a readonly reference compares as its address. -/
+def referenceCompareCall (relation : CIL.ReferenceRelation) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
+  match stack with
+  | .reference right :: .reference left :: rest
+  | .reference right :: .readOnlyReference left :: rest
+  | .readOnlyReference right :: .reference left :: rest
+  | .readOnlyReference right :: .readOnlyReference left :: rest =>
+    let holds ← match relation with
+      | .same => referenceEqual memory left right
+      | .less => referenceLess memory left right
+      | .greater => referenceLess memory right left
+    return .next (pc + 1) (.scalar (.i32 (if holds then 1 else 0)) :: rest) frame memory
+  | _ => .error .invalidState
+
+/-- A reference below a byte offset moves back by that offset and keeps its readonly
+    restriction. -/
+def referenceSubtractCall (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
+    ExecutionResult FrameAction := do
+  match stack with
+  | .scalar offset :: .reference value :: rest =>
+    let result ← referenceSubtract memory value offset
+    return .next (pc + 1) (.reference result :: rest) frame memory
+  | .scalar offset :: .readOnlyReference value :: rest =>
+    let result ← referenceSubtract memory value offset
+    return .next (pc + 1) (.readOnlyReference result :: rest) frame memory
+  | _ => .error .invalidState
+
+/-- The typed load or store an unaligned transfer of `kind` performs. -/
+def typedTransferInstruction : CIL.TransferKind → Bool → CIL.Instruction
+  | .scalar width signed, false => .loadScalar width signed
+  | .scalar width _, true => .storeScalar width
+  | .snapshot (.aggregate size), false => .loadAggregate size
+  | .snapshot (.aggregate size), true => .storeAggregate size
+  | .snapshot .vector128, false => .memory .load128
+  | .snapshot .vector128, true => .memory .store128
+  | .snapshot .vector256, false => .memory .load256
+  | .snapshot .vector256, true => .memory .store256
+  | .snapshot .vector512, false => .memory .load512
+  | .snapshot .vector512, true => .memory .store512
+
+/-- An unaligned transfer of `kind` runs as its typed load or store. -/
+def typedTransferCall (kind : CIL.TransferKind) (store : Bool) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory : Memory) : ExecutionResult FrameAction := do
+  let (memory, values) ← instruction (typedTransferInstruction kind store) stack memory
+  return .next (pc + 1) values frame memory
+
+/-- `Unsafe.SkipInit` pops its out reference once it forms; nothing is written. Any other operand
+    faults as the `skipInit` instruction does. -/
+def skipInitCall (pc : Nat) (frame : Frame) (stack : List Value) (memory : Memory) :
+    ExecutionResult FrameAction := do
+  match stack with
+  | .reference reference :: rest =>
+    let _ ← formValue memory reference
+    return .next (pc + 1) rest frame memory
+  | _ => .error (.unsupported "Not a memory instruction")
+
+/-- Executes `model` as the call at `pc` of `body`. The caller applies `observedCall` with
+    `model.observerCount` first. On the stacks a model admits this equals `step` on the
+    instruction emitted for the call, and it refuses every other stack. -/
+def runModel (body : CIL.Method) (model : CIL.RuntimeModel) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory : Memory) : ExecutionResult FrameAction :=
+  match model with
+  | .intrinsic operation argc => intrinsicCall body.profile operation argc pc frame stack memory
+  | .memory operation => do
+    let (memory, values) ← memoryInstruction operation stack memory
+    return .next (pc + 1) values frame memory
+  | .feature feature => featureCall body.profile feature pc frame stack memory
+  | .constant value => .ok (.next (pc + 1) (.scalar (.i32 value) :: stack) frame memory)
+  | .referenceCompare relation => referenceCompareCall relation pc frame stack memory
+  | .referenceSubtract => referenceSubtractCall pc frame stack memory
+  | .typedTransfer kind store => typedTransferCall kind store pc frame stack memory
+  | .skipInit => skipInitCall pc frame stack memory
+  | .objectConstructor => match stack with
+    | _ :: rest => .ok (.next (pc + 1) rest frame memory)
+    | [] => .error (.unsupported "Not a memory instruction")
+
 /-- `localloc` of the byte count alone on the stack: fresh storage owned by `frame`, zeroed when
     `initLocals` is set. Any other stack is an invalid state. -/
 def localAllocation (initLocals : Bool) (pc : Nat) (frame : Frame) (stack : List Value)
@@ -300,8 +399,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Native table offsets, faulting arithmetic, object identity, argument homes, `localloc` and
-  -- `newarr` are matched apart, so that neither match exceeds the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic, object identity, type tests, argument homes,
+  -- `localloc` and `newarr` are matched apart, so neither match exceeds the 79 alternatives
+  -- `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -372,8 +472,12 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .brtrue target, .object value :: rest =>
     let present ← objectNonNull m value
     return .next (if present then target else pc + 1) rest frame m
-  | .objectTest type throwing, .object value :: rest =>
-    let result ← objectTest m type throwing value
+  -- Class type tests: null and an instance of `type` pass; another object fails the test.
+  | .castclass type, .object value :: rest =>
+    let result ← objectTest m type true value
+    return .next (pc + 1) (.object result :: rest) frame m
+  | .isinst type, .object value :: rest =>
+    let result ← objectTest m type false value
     return .next (pc + 1) (.object result :: rest) frame m
   -- An argument's home is written and addressed as the local slot it is.
   | .starg index, value :: rest =>
@@ -399,30 +503,24 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .add, .readOnlyReference _ :: .scalar _ :: _ =>
     let (memory, values) ← referenceAddInstruction 1 true stack m
     return .next (pc + 1) values frame memory
-  | .sub, .scalar offset :: .reference value :: rest =>
-    let result ← referenceSubtract m value offset
-    return .next (pc + 1) (.reference result :: rest) frame m
-  | .sub, .scalar offset :: .readOnlyReference value :: rest =>
-    let result ← referenceSubtract m value offset
-    return .next (pc + 1) (.readOnlyReference result :: rest) frame m
+  | .sub, .scalar _ :: .reference _ :: _
+  | .sub, .scalar _ :: .readOnlyReference _ :: _ => referenceSubtractCall pc frame stack m
   | .sub, .reference right :: .reference left :: rest
   | .sub, .reference right :: .readOnlyReference left :: rest
   | .sub, .readOnlyReference right :: .reference left :: rest
   | .sub, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let result ← referenceDifference m left right
     return .next (pc + 1) (.scalar (.i64 result) :: rest) frame m
-  | .clt_un, .reference right :: .reference left :: rest
-  | .clt_un, .reference right :: .readOnlyReference left :: rest
-  | .clt_un, .readOnlyReference right :: .reference left :: rest
-  | .clt_un, .readOnlyReference right :: .readOnlyReference left :: rest =>
-    let less ← referenceLess m left right
-    return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
-  | .cgt_un, .reference right :: .reference left :: rest
-  | .cgt_un, .reference right :: .readOnlyReference left :: rest
-  | .cgt_un, .readOnlyReference right :: .reference left :: rest
-  | .cgt_un, .readOnlyReference right :: .readOnlyReference left :: rest =>
-    let less ← referenceLess m right left
-    return .next (pc + 1) (.scalar (.i32 (if less then 1 else 0)) :: rest) frame m
+  | .clt_un, .reference _ :: .reference _ :: _
+  | .clt_un, .reference _ :: .readOnlyReference _ :: _
+  | .clt_un, .readOnlyReference _ :: .reference _ :: _
+  | .clt_un, .readOnlyReference _ :: .readOnlyReference _ :: _ =>
+    referenceCompareCall .less pc frame stack m
+  | .cgt_un, .reference _ :: .reference _ :: _
+  | .cgt_un, .reference _ :: .readOnlyReference _ :: _
+  | .cgt_un, .readOnlyReference _ :: .reference _ :: _
+  | .cgt_un, .readOnlyReference _ :: .readOnlyReference _ :: _ =>
+    referenceCompareCall .greater pc frame stack m
   | .blt_un target, .reference right :: .reference left :: rest
   | .blt_un target, .reference right :: .readOnlyReference left :: rest
   | .blt_un target, .readOnlyReference right :: .reference left :: rest
@@ -456,12 +554,11 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .brtrue target, .readOnlyReference value :: rest =>
     let present ← referenceNonNull m value
     return .next (if present then target else pc + 1) rest frame m
-  | .ceq, .reference right :: .reference left :: rest
-  | .ceq, .reference right :: .readOnlyReference left :: rest
-  | .ceq, .readOnlyReference right :: .reference left :: rest
-  | .ceq, .readOnlyReference right :: .readOnlyReference left :: rest =>
-    let equal ← referenceEqual m left right
-    return .next (pc + 1) (.scalar (.i32 (if equal then 1 else 0)) :: rest) frame m
+  | .ceq, .reference _ :: .reference _ :: _
+  | .ceq, .reference _ :: .readOnlyReference _ :: _
+  | .ceq, .readOnlyReference _ :: .reference _ :: _
+  | .ceq, .readOnlyReference _ :: .readOnlyReference _ :: _ =>
+    referenceCompareCall .same pc frame stack m
   | .beq target, .reference right :: .reference left :: rest
   | .beq target, .reference right :: .readOnlyReference left :: rest
   | .beq target, .readOnlyReference right :: .reference left :: rest
@@ -474,12 +571,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .bne_un target, .readOnlyReference right :: .readOnlyReference left :: rest =>
     let equal ← referenceEqual m left right
     return .next (if equal then pc + 1 else target) rest frame m
-  | .intrinsic operation argc, _ =>
-    if !operation.available body.profile then .error (.unsupported "Intrinsic unavailable in target profile") else
-    if stack.length < argc then .error .invalidState else
-      let operands ← scalars (stack.take argc).reverse
-      let value ← checkedIntrinsic operation operands
-      return .next (pc + 1) ((← checkedValue m (.scalar value)) :: stack.drop argc) frame m
+  | .intrinsic operation argc, _ => intrinsicCall body.profile operation argc pc frame stack m
   | .ldarg index, _ =>
     return .next (pc + 1) ((← loadArgument body index args frame m) :: stack) frame m
   | .ldloc i, _ =>

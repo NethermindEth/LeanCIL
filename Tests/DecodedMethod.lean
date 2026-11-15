@@ -151,6 +151,22 @@ theorem refused_body_has_no_method :
   decide +kernel
 #print axioms refused_body_has_no_method
 
+/-- A class outside the metadata world, as a type argument. -/
+private def dogClass : TypeExpr := .object "Fixture" "Fixture.Dog"
+
+/-- `ldnull; castclass !!0; pop; ret`, generic over one method type parameter. -/
+private def genericCastRaw : RawMethod :=
+  { method 8 false [] [instr 0 0x14, instr 1 0x74 (.type (.parameter 0)), instr 6 0x26,
+      instr 7 0x2A] with genericParameters := [{ flags := 0, types := [] }] }
+
+/-- The code is decoded from the instantiated definition, so the cast tests the type argument
+    rather than the open parameter. -/
+theorem generic_cast_tests_its_argument :
+    (Method.ofRaw? .scalar {} genericCastRaw [dogClass]).map (·.code) =
+      some [.ldnull, .castclass dogClass, .pop, .ret] := by
+  cil_kernel_rfl
+#print axioms generic_cast_tests_its_argument
+
 /-- `ldc.i4.1; newarr object; pop; ret`, with the type token of the world's `System.Object`. -/
 private def newarrBytes : List Nat :=
   [0x22, 0x17, 0x8D] ++ littleEndian 4 tokens.objectRef ++ [0x26, 0x2A]

@@ -4,8 +4,8 @@ import CIL.Safety.GuardNormalization
 /-!
 # Instruction step equations
 
-One `@[cil_instruction_step]` equation per `instruction` arm and operand shape for the 64-bit
-word, scalar-store, field, reference and aggregate-initialization opcodes, so a step rewrites
+One `@[cil_instruction_step]` equation per `instruction` arm and operand shape for the indirect
+integer, scalar-store, field, reference and aggregate-initialization opcodes, so a step rewrites
 to that arm's body at the level of `loadValue`, `storeValue`, `add`, `write` and `formValue`,
 where callers state their memory facts, and never unfolds `instruction`. Other operand shapes
 keep the generic `instructionStep` equations in `StepComposition`, which these outrank. The
@@ -27,34 +27,62 @@ section InstructionEquations
 
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
 
--- 64-bit words through a reference.
-/-- `load64` reads the word behind a writable reference. -/
+-- Indirect integer loads and stores.
+/-- `ldind` reads its kind's width behind a writable reference, sign-extending a narrow signed
+    kind. -/
 @[cil_instruction_step high]
-theorem step_load64_reference_eq (reference : ManagedReference)
+theorem step_ldind_reference_eq (kind : CIL.NumericKind) (reference : ManagedReference)
     (rest : List Value) :
-    step body .load64 pc args frame (.reference reference :: rest) memory = do
-      let value ← loadValue memory reference 8
+    step body (.ldind kind) pc args frame (.reference reference :: rest) memory = do
+      let value ← loadValue memory reference kind.width kind.signed
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  instruction_step_proof step_load64_eq
+  instruction_step_proof step_ldind_eq
 
-/-- `load64` reads the word behind a readonly reference without write authority. -/
+/-- `ldind` reads behind a readonly reference exactly as behind a writable one. -/
 @[cil_instruction_step high]
-theorem step_load64_readOnlyReference_eq (reference : ManagedReference)
+theorem step_ldind_readOnlyReference_eq (kind : CIL.NumericKind) (reference : ManagedReference)
     (rest : List Value) :
-    step body .load64 pc args frame (.readOnlyReference reference :: rest) memory = do
-      let value ← loadValue memory reference 8
+    step body (.ldind kind) pc args frame (.readOnlyReference reference :: rest) memory = do
+      let value ← loadValue memory reference kind.width kind.signed
       return .next (pc + 1) (.scalar value :: rest) frame memory := by
-  instruction_step_proof step_load64_eq
+  instruction_step_proof step_ldind_eq
 
-/-- `store64` writes an i64 through a writable reference. -/
+/-- A native `ldind` on a method table cursor loads the authenticated entry it names. -/
 @[cil_instruction_step high]
-theorem step_store64_reference_eq (bits : CIL.W64) (reference : ManagedReference)
-    (rest : List Value) :
-    step body .store64 pc args frame (.scalar (.i64 bits) :: .reference reference :: rest)
+theorem step_ldind_table_eq (table : CIL.MethodTable) (rest : List Value) :
+    step body (.ldind .i) pc args frame (.methodTable table :: rest) memory = do
+      let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable table memory)
+      return .next (pc + 1) (.methodPointer pointer :: rest) frame memory := by
+  instruction_step_proof step_ldind_eq
+
+/-- `stind.i8` writes an i64 through a writable reference. -/
+@[cil_instruction_step high]
+theorem step_stind_i8_eq (bits : CIL.W64) (reference : ManagedReference) (rest : List Value) :
+    step body (.stind .i8) pc args frame (.scalar (.i64 bits) :: .reference reference :: rest)
       memory = do
       let stored ← storeValue memory reference (.i64 bits)
       return .next (pc + 1) rest frame stored := by
-  instruction_step_proof step_store64_eq
+  instruction_step_proof step_stind_eq
+
+/-- `stind.i` writes a native int, an i64 on every admitted profile, as `stind.i8` does. -/
+@[cil_instruction_step high]
+theorem step_stind_i_eq (bits : CIL.W64) (reference : ManagedReference) (rest : List Value) :
+    step body (.stind .i) pc args frame (.scalar (.i64 bits) :: .reference reference :: rest)
+      memory = do
+      let stored ← storeValue memory reference (.i64 bits)
+      return .next (pc + 1) rest frame stored := by
+  instruction_step_proof step_stind_eq
+
+/-- A one-, two- or four-byte `stind` writes the low bytes of an i32 through the reference. -/
+theorem step_stind_i32_eq (kind : CIL.NumericKind) (narrow : kind.width ≠ 8) (bits : CIL.W32)
+    (reference : ManagedReference) (rest : List Value) :
+    step body (.stind kind) pc args frame (.scalar (.i32 bits) :: .reference reference :: rest)
+      memory = do
+      let address ← referenceAt reference
+      let stored ← checkedAt reference kind.width
+        (write memory address (numberBytes bits.toNat kind.width) ordinaryAccessAlignment)
+      return .next (pc + 1) rest frame stored := by
+  cases kind <;> first | exact absurd rfl narrow | instruction_step_proof step_stind_eq
 
 -- Scalar stores through a reference.
 /-- An i32 store of width 1, 2 or 4 writes the value's low bytes through the reference. -/
@@ -286,9 +314,12 @@ theorem step_initAggregate_reference_eq (size : Nat)
 
 end InstructionEquations
 
-#print axioms step_load64_reference_eq
-#print axioms step_load64_readOnlyReference_eq
-#print axioms step_store64_reference_eq
+#print axioms step_ldind_reference_eq
+#print axioms step_ldind_readOnlyReference_eq
+#print axioms step_ldind_table_eq
+#print axioms step_stind_i8_eq
+#print axioms step_stind_i_eq
+#print axioms step_stind_i32_eq
 #print axioms step_storeScalar_i32_eq
 #print axioms step_storeScalar_i32_1_eq
 #print axioms step_storeScalar_i32_2_eq

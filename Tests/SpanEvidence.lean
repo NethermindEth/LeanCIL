@@ -79,12 +79,12 @@ theorem exact_array_span_call :
       (.memory (.arraySpan .signed32 true .fromStart)) = false := by decide
 #print axioms exact_array_span_call
 
--- 0: ldarg.0; 1: stloc.0; 2: ldloca.s 0; 3: ldarg.1; 4: get_Item; 5: ldind.u4; 6: ret
+-- 0: ldarg.0; 1: stloc.0; 2: ldloca.s 0; 3: ldarg.1; 4: get_Item; 5: ldind.i4; 6: ret
 private def itemCode := [i 2, i 10, i 18 (.local 0), i 3, i 40 getItem, i 74, i 42]
 private def itemStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none, none], state [none], state [none]]
 private def itemOps : List Instruction :=
-  [.ldarg 0, .stloc 0, .ldloca 0, .ldarg 1, .memory (.spanItem 4), .loadScalar 4, .ret]
+  [.ldarg 0, .stloc 0, .ldloca 0, .ldarg 1, .memory (.spanItem 4), .ldind .i4, .ret]
 
 /-- Storing and addressing a span receiver leaves every instruction outside a fold. -/
 theorem length_receiver_roles :
@@ -124,7 +124,8 @@ example : FeatureFlowValid #[] (fun _ => none) (raw [words] loadCode) .scalar lo
     (List.replicate 4 true) loadOps := by decide
 
 -- `ldtoken` of a field is static data; only a type handle belongs to a type test.
-example : ¬ typeTestInstruction (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType true)) ∧
+example : ¬ typeTestInstruction
+      (i 208 (.field (.atom owner "<PrivateImplementationDetails>") 0 intType name!"Data" true)) ∧
     typeTestInstruction (i 208 (.type intType)) := by decide
 
 /-- The exact writable int32 span member used by whole-region initialization. -/

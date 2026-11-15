@@ -69,11 +69,8 @@ private def numericMemory : Memory :=
 /-- Every admitted numeric suffix, including distinct signed and unsigned encodings. -/
 private def numericKinds : List CIL.NumericKind := [.i1, .u1, .i2, .u2, .i4, .u4, .i8, .i]
 
-/-- A numeric load description selects the existing checked scalar operation. -/
-private def numericLoad (kind : CIL.NumericKind) : MemoryStep :=
-  match kind.load? with
-  | some (width, signed) => instruction (.loadScalar width signed)
-  | none => fun _ _ => .error .invalidState
+/-- The `ldind` of a kind. -/
+private def numericLoad (kind : CIL.NumericKind) : MemoryStep := instruction (.ldind kind)
 
 /-- Every suffix loads its exact value, with sign or zero extension for the narrow kinds. -/
 theorem numeric_kind_load_values :
@@ -87,12 +84,8 @@ theorem numeric_kind_load_values :
       .ok [.scalar (.i64 0x8786858483828180)]] := rfl
 #print axioms numeric_kind_load_values
 
-/-- A numeric store description selects the existing scalar or word store operation. -/
-private def numericStore (kind : CIL.NumericKind) : MemoryStep :=
-  match kind.store? with
-  | some 8 => instruction .store64
-  | some width => instruction (.storeScalar width)
-  | none => fun _ _ => .error .invalidState
+/-- The `stind` of a kind. -/
+private def numericStore (kind : CIL.NumericKind) : MemoryStep := instruction (.stind kind)
 
 /-- Each store keeps the low bytes in little-endian order and preserves the following bytes. -/
 theorem numeric_kind_store_bytes :

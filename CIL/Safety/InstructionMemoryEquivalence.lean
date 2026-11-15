@@ -1,4 +1,5 @@
 import CIL.Safety.FrameEquivalence
+import CIL.Safety.NativeMethodTableEquivalence
 
 /-!
 # Equivalent memories run instructions alike
@@ -454,6 +455,20 @@ theorem Memory.Equivalent.vector128UnsafeInstruction {m n : Memory} (same : m.Eq
     | split
 #print axioms Memory.Equivalent.vector128UnsafeInstruction
 
+/-- A static span reads only equivalent allocation metadata and leaves memory unchanged. -/
+theorem Memory.Equivalent.staticSpanInstruction {m n : Memory} (same : m.Equivalent n)
+    (operation : CIL.MemoryOp) (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (staticSpanInstruction operation stack m)
+      (staticSpanInstruction operation stack n) := by
+  unfold CIL.Safety.staticSpanInstruction
+  split <;> try simp only [checkedAt, liveAllocation, same.allocations, same.formValue]
+  all_goals repeat first
+    | exact .ok ⟨same, rfl⟩
+    | exact .error _
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.staticSpanInstruction
+
 /-- Opcode dispatch preserves the memory equivalence of each checked family. -/
 theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent n)
     (operation : CIL.MemoryOp) (stack : List Value) :
@@ -476,6 +491,8 @@ theorem Memory.Equivalent.memoryInstruction {m n : Memory} (same : m.Equivalent 
     · exact same.arrayFillInstruction _ _ _
     · exact same.wideArithmeticInstruction _ _
     · exact same.wideArithmeticInstruction _ _
+    · exact same.staticSpanInstruction _ _
+    · exact same.staticSpanInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
     · exact same.objectFieldInstruction _ _
@@ -497,7 +514,7 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
       (instruction operation stack n) := by
   unfold CIL.Safety.instruction
   split <;> try simp only [same.read, same.dereference, same.loadValue, same.loadSnapshot,
-    same.formValue, same.add]
+    same.formValue, same.add, same.loadNativeTable]
   all_goals repeat first
     | exact same.memoryInstruction _ _
     | exact .error _

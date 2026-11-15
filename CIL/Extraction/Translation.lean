@@ -102,7 +102,7 @@ private def staticLoadMatches (opcode : Nat) (instruction : Option RawInstructio
   | some instruction, some descriptor =>
     if instruction.opcode != opcode then false else
     match instruction.operand with
-    | .field _ _ type _ =>
+    | .field _ _ type _ _ =>
       match staticScalarType type with
       | some (width, signed) => descriptor.bytes.length == width && descriptor.scalar == some signed
       | none => descriptor.scalar.isNone

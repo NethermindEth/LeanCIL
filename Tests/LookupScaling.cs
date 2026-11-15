@@ -672,7 +672,7 @@ void ExceptionDecisionCosts()
         open CIL CIL.Safety Lean Elab Command
 
         """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
-    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: At("."));
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var costs = LookupPatterns.ExceptionDecision().Matches(output).ToDictionary(
         match => match.Groups[1].Value,
         match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
@@ -953,18 +953,16 @@ foreach (var outcome in new[] { "equal", "unequal" })
 }
 MetadataNameCosts();
 
-// The heartbeats `decide +kernel` adds to the two metadata name computations every call and field operand check
-// reduces: the call check's name clause, which reads a typed name back and compares its bytes with the row's, and
-// `MetadataName.ofBytes?`, which encodes a field row's bytes as a name. Names of 20, 80 and 320 bytes share all but
-// their last byte. Both read one byte per step, so the cost per byte may grow at most `AllowedGrowth` times from one
-// length to the next; an encoder that indexes an array literal reads byte i in i kernel steps and grows 3 to 4 times.
+// The heartbeats `decide +kernel` adds to the name clause of the call and field operand checks, which reads a typed
+// name back and compares its bytes with the row's. Names of 20, 80 and 320 bytes share all but their last byte. The
+// clause reads one byte per step, so the cost per byte may grow at most `AllowedGrowth` times from one length to the
+// next.
 void MetadataNameCosts()
 {
     var nameDirectory = At("artifacts/LookupScaling/MetadataNames");
     Directory.CreateDirectory(nameDirectory);
     const string Prefix = "WriteLineToTheConsoleOfTheRuntimeEachValueThatTheCallerPassesAsAnIntegerOfThirtyTwoBits";
     int[] lengths = [20, 80, 320];
-    string[] computations = ["spells", "encodes"];
     string Statement(int length)
     {
         var name = string.Concat(Enumerable.Repeat(Prefix, length / Prefix.Length + 1))[..(length - 1)] + "0";
@@ -975,7 +973,6 @@ void MetadataNameCosts()
             /-- The metadata name of those bytes. -/
             def name{{length}} : MetadataName := name!"{{name}}"
             #kernel_cost "name spells {{length}}" (name{{length}}.spells bytes{{length}} = true)
-            #kernel_cost "name encodes {{length}}" (MetadataName.ofBytes? bytes{{length}} = some name{{length}})
             """;
     }
     var path = Path.Combine(nameDirectory, "MetadataNames.lean");
@@ -987,23 +984,19 @@ void MetadataNameCosts()
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var costs = LookupPatterns.MetadataNameCost().Matches(output).ToDictionary(
-        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
-        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
-    if (costs.Count != lengths.Length * computations.Length)
+        match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != lengths.Length)
         throw new InvalidOperationException("Missing metadata name costs:\n" + output);
-    foreach (var computation in computations)
-    {
-        double PerByte(int length) => (double)costs[(computation, length)] / length;
-        var measured = string.Join(", ", lengths.Select(length =>
-            string.Create(CultureInfo.InvariantCulture, $"{costs[(computation, length)]} at {length} bytes")));
-        var flat = lengths.Zip(lengths.Skip(1))
-            .All(pair => PerByte(pair.Second) <= PerByte(pair.First) * AllowedGrowth);
-        if (lengths.Min(length => costs[(computation, length)]) < KernelDecisionFloor || !flat)
-            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-                $"A metadata name {computation} its bytes at {measured} heartbeats; per byte, the limit is " +
-                $"{AllowedGrowth} times the cost at the shorter length."));
-        Console.WriteLine($"PASS a metadata name {computation} its bytes at {measured} heartbeats");
-    }
+    double PerByte(int length) => (double)costs[length] / length;
+    var measured = string.Join(", ", lengths.Select(length =>
+        string.Create(CultureInfo.InvariantCulture, $"{costs[length]} at {length} bytes")));
+    var flat = lengths.Zip(lengths.Skip(1)).All(pair => PerByte(pair.Second) <= PerByte(pair.First) * AllowedGrowth);
+    if (lengths.Min(length => costs[length]) < KernelDecisionFloor || !flat)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"A metadata name spells its bytes at {measured} heartbeats; per byte, the limit is " +
+            $"{AllowedGrowth} times the cost at the shorter length."));
+    Console.WriteLine($"PASS a metadata name spells its bytes at {measured} heartbeats");
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -2064,7 +2057,7 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex TypeDecision();
 
-    [GeneratedRegex(@"\bname (spells|encodes) ([0-9]+) (-?[0-9]+) heartbeats")]
+    [GeneratedRegex(@"\bname spells ([0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex MetadataNameCost();
 
     [GeneratedRegex(@"\b((?:thrownEqual|thrownUnequal|clrUnequal|raisesEqual) [A-Za-z]+) (-?[0-9]+) heartbeats")]

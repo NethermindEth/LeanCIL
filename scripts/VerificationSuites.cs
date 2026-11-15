@@ -160,7 +160,8 @@ internal static class VerificationSuites
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +
             "changed-source selection and mutation expectations"),
         new("stepping", "Tests/SteppingScaling.cs",
-            "scalar and checked-memory stepping with per-instruction work, proof-size and latency budgets"),
+            "stepping of scalar, memory, hypotheses-in-scope and snapshot bodies with per-instruction work and " +
+            "proof-size budgets and a per-hypothesis heartbeat limit"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
             "substitution rejection, the strict binding library and audit, and the checked-in strict binding " +
