@@ -144,14 +144,16 @@ def depositSite : CallSite := {
 -- Only `callvirt` emits a receiver-checked call, counting the receiver, and only into a method
 -- whose receiver is an object; a `callvirt` that skips the null check as a plain call is rejected.
 theorem receiver_checked_calls :
-    validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) ∧
-    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (.call 0 2) ∧
+    validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (some (.direct 0))
+        (.callInstance 0 2) ∧
+    ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true (some (.direct 0))
+        (.call 0 2) ∧
     ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 40, .call depositSite⟩ true
-      (.callInstance 0 2) ∧
+      (some (.direct 0)) (.callInstance 0 2) ∧
     ¬ validateManagedCall [⟨[], deposit⟩] [] ⟨0, 111, .call depositSite⟩ true
-      (.callInstance 0 1) ∧
+      (some (.direct 0)) (.callInstance 0 1) ∧
     ¬ validateManagedCall [⟨[], { deposit with objectReceiver := false }⟩] []
-      ⟨0, 111, .call depositSite⟩ true (.callInstance 0 2) := by decide +kernel
+      ⟨0, 111, .call depositSite⟩ true (some (.direct 0)) (.callInstance 0 2) := by decide +kernel
 #print axioms receiver_checked_calls
 
 /-- `deposit` marked virtual, as an override or a `virtual` member is. -/
@@ -160,9 +162,10 @@ def virtualDeposit : RawMethod := { deposit with attributes := virtualMethodAttr
 -- A virtual body is admitted as the target of a plain `call`, which runs exactly that body, but a
 -- `callvirt` of it can never become a fixed-target receiver-checked call.
 theorem virtual_bodies_called_directly :
-    validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 40, .call depositSite⟩ true (.call 0 2) ∧
+    validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 40, .call depositSite⟩ true
+        (some (.direct 0)) (.call 0 2) ∧
     ¬ validateManagedCall [⟨[], virtualDeposit⟩] [] ⟨0, 111, .call depositSite⟩ true
-      (.callInstance 0 2) := by decide +kernel
+      (some (.direct 0)) (.callInstance 0 2) := by decide +kernel
 #print axioms virtual_bodies_called_directly
 
 /-- A method with a class instance local and parameter beside a scalar of each. -/

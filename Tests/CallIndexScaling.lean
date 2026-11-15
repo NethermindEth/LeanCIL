@@ -44,7 +44,8 @@ theorem managedNew128 : ManagedCallsValid (methods 128) [] (calls 128)
   decide +kernel
 #print axioms managedNew128
 /-- Original managed calls. -/
-theorem managedOld128 : all3 (validateManagedCall (methods 128) []) (calls 128).code
+theorem managedOld128 : all3 (fun raw live op => validateManagedCall (methods 128) [] raw live
+    op.link? op) (calls 128).code
     (List.replicate 128 true) (callCode 128).code = true := by
   decide +kernel
 #print axioms managedOld128
@@ -66,7 +67,8 @@ theorem managedNew512 : ManagedCallsValid (methods 512) [] (calls 512)
   decide +kernel
 #print axioms managedNew512
 /-- Original managed calls. -/
-theorem managedOld512 : all3 (validateManagedCall (methods 512) []) (calls 512).code
+theorem managedOld512 : all3 (fun raw live op => validateManagedCall (methods 512) [] raw live
+    op.link? op) (calls 512).code
     (List.replicate 512 true) (callCode 512).code = true := by
   decide +kernel
 #print axioms managedOld512
