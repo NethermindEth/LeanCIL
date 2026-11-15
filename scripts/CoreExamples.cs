@@ -5,6 +5,7 @@ partial class Program
     {
         ["Add"] = "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
         ["AddModel"] = "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
+        ["DecodedAdd"] = "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
         ["Choose"] = "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)",
         ["Calls"] = "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)",
         ["Alias"] = "System.UInt64 Examples.Arithmetic::Alias(System.UInt64&,System.UInt64&)",
@@ -16,21 +17,29 @@ partial class Program
         ["Escape"] = "System.UInt64& Examples.Arithmetic::Escape()"
     };
 
+    // The theorem of each core example that does not prove ExampleProof.correctness.
+    static readonly Dictionary<string, string> CoreExampleTheorems = new()
+    {
+        ["DecodedAdd"] = "ExampleProof.correctness_decoded"
+    };
+
     // Each output retains its own checked extraction, proof identity and certificate.
     void VerifyCoreExamples(string outputRoot, Action<string> passed, bool separate = false)
     {
         var assembly = At("Examples/Assembly/bin/Examples.dll");
         var requests = CoreExampleSignatures.Select(pair => new GeneratedVerification(
             pair.Key == "Add" ? "Arithmetic::Add(ulong,ulong)" : pair.Value,
-            At($"Examples/Proofs/{pair.Key}.lean"), Path.Combine(outputRoot, pair.Key))).ToArray();
+            At($"Examples/Proofs/{pair.Key}.lean"), Path.Combine(outputRoot, pair.Key),
+            CoreExampleTheorems.GetValueOrDefault(pair.Key, "ExampleProof.correctness"))).ToArray();
         if (separate)
             foreach (var request in requests)
-                Verify(assembly, "Examples", request.Entry, request.Proof, request.Output);
+                Verify(assembly, "Examples", request.Entry, request.Proof, request.Output, theorem: request.Theorem);
         else VerifyGeneratedBatch(assembly, "Examples", requests);
         foreach (var request in requests)
         {
             var name = Path.GetFileName(request.Output);
-            Verify(assembly, "Examples", CoreExampleSignatures[name], request.Proof, request.Output, check: true);
+            Verify(assembly, "Examples", CoreExampleSignatures[name], request.Proof, request.Output,
+                theorem: request.Theorem, check: true);
             passed(name + " kernel proof and artifact identity");
         }
     }

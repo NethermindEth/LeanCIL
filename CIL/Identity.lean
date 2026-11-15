@@ -11,7 +11,8 @@ function of the entity it names and holds no row number, heap offset or per-extr
 A name or literal is one natural number: its UTF-8 bytes or UTF-16 code units read as a
 big-endian number after a leading 1, so the number fixes the length and every digit. Equality
 of every identity is the derived `DecidableEq`, which the kernel decides with `Nat.beq` on codes
-and constructor matches; its cost does not grow with the length of a name.
+and constructor matches. Code comparison reads numeric limbs rather than reducing a digit list;
+runtime comparison still depends on the number of limbs.
 
 Text appears only in the `name!` and `str!` elaborators, which turn a literal into a code when
 the term is elaborated, and in the display functions and delaborators, which turn a value back
@@ -30,8 +31,8 @@ def byteBase : Nat := 256
 /-- The number of values one UTF-16 code unit can take. -/
 def codeUnitBase : Nat := 65536
 
-/-- The number that `digits` continue in `base`, most significant first, after the digits
-    already read into `code`; `none` when a digit is not below `base`. Linear in the digits. -/
+/-- Read `digits` in `base` into `code`, most significant first; reject digits not below `base`.
+    Each step scales a growing code. -/
 def radixCode? (base : Nat) : List Nat → Nat → Option Nat
   | [], code => some code
   | digit :: rest, code =>
@@ -182,6 +183,331 @@ theorem radixCode?_of_radixDigits?_self {base : Nat} (wide : 2 ≤ base) {code :
 
 #print axioms radixCode?_of_radixDigits?_self
 
+/-- Exactly `count` base-2^bits digits when the code fits, most significant first, then `tail`.
+    Balanced splits keep bit operations within O(payload bits * log count). -/
+def fixedDigits (bits count code : Nat) (tail : List Nat) : List Nat :=
+  match count with
+  | 0 => tail
+  | 1 => code :: tail
+  | count + 2 =>
+    let lowCount := (count + 2) / 2
+    let highCount := count + 2 - lowCount
+    let lowBits := bits * lowCount
+    let upper := code >>> lowBits
+    fixedDigits bits highCount upper
+      (fixedDigits bits lowCount (code - (upper <<< lowBits)) tail)
+termination_by count
+decreasing_by all_goals omega
+
+/-- The digit count is independent of the code and includes every leading zero. -/
+theorem fixedDigits_length (bits count code : Nat) (tail : List Nat) :
+    (fixedDigits bits count code tail).length = count + tail.length := by
+  induction count using Nat.strongRecOn generalizing code tail with
+  | ind count ih =>
+    match count with
+    | 0 => simp [fixedDigits]
+    | 1 => simp [fixedDigits, Nat.add_comm]
+    | count + 2 =>
+      rw [fixedDigits, ih _ (by omega), ih _ (by omega)]
+      omega
+
+#print axioms fixedDigits_length
+
+/-- Reading bounded fixed-width digits continues any initial code with their exact value. -/
+theorem fixedDigits_spec (bits count code : Nat) (bounded : code < (2^bits)^count)
+    (tail : List Nat) (start : Nat) :
+    radixCode? (2^bits) (fixedDigits bits count code tail) start =
+      radixCode? (2^bits) tail (start * (2^bits)^count + code) := by
+  induction count using Nat.strongRecOn generalizing code tail start with
+  | ind count ih =>
+    match count with
+    | 0 => simp_all [fixedDigits]
+    | 1 => simp_all [fixedDigits, radixCode?]
+    | count + 2 =>
+      let low := (count + 2) / 2
+      let high := count + 2 - low
+      have splitCount : high + low = count + 2 := by dsimp [high, low]; omega
+      have lowSmall : low < count + 2 := by dsimp [low]; omega
+      have highSmall : high < count + 2 := by dsimp [high, low]; omega
+      have power : 2^(bits*low) = (2^bits)^low := by rw [Nat.pow_mul]
+      have positive : 0 < (2^bits)^low := Nat.pow_pos (Nat.pow_pos (by decide))
+      have upper : code / (2^bits)^low < (2^bits)^high := by
+        apply (Nat.div_lt_iff_lt_mul positive).mpr
+        rw [← Nat.pow_add, splitCount]
+        exact bounded
+      have lower : code % (2^bits)^low < (2^bits)^low := Nat.mod_lt _ positive
+      rw [fixedDigits]
+      change radixCode? (2^bits)
+        (fixedDigits bits high (code >>> (bits*low))
+          (fixedDigits bits low (code - ((code >>> (bits*low)) <<< (bits*low))) tail))
+        start = _
+      simp only [Nat.shiftRight_eq_div_pow, Nat.shiftLeft_eq]
+      rw [← Nat.mod_eq_sub_div_mul, power]
+      rw [ih high highSmall _ upper, ih low lowSmall _ lower]
+      congr 1
+      rw [Nat.add_mul, Nat.mul_assoc, ← Nat.pow_add, splitCount]
+      have joined := Nat.div_add_mod code ((2^bits)^low)
+      rw [Nat.mul_comm] at joined
+      omega
+
+
+#print axioms fixedDigits_spec
+
+/-- Every digit accepted by the radix reader is below its base. -/
+theorem radixCode?_digits {base : Nat} {digits : List Nat} {start code : Nat}
+    (read : radixCode? base digits start = some code) :
+    ∀ digit ∈ digits, digit < base := by
+  induction digits generalizing start with
+  | nil => simp
+  | cons head rest ih =>
+    simp only [radixCode?] at read
+    split at read
+    next small =>
+      intro digit member
+      rcases List.mem_cons.mp member with same | member
+      · simpa [same] using small
+      · exact ih read digit member
+    next => simp at read
+
+#print axioms radixCode?_digits
+
+/-- Every digit of a bounded code fits the requested digit width, including zero-width digits. -/
+theorem fixedDigits_bound (bits count code : Nat) (bounded : code < (2^bits)^count) :
+    ∀ digit ∈ fixedDigits bits count code [], digit < 2^bits := by
+  apply radixCode?_digits (start := 0) (code := code)
+  simpa [radixCode?] using fixedDigits_spec bits count code bounded [] 0
+
+#print axioms fixedDigits_bound
+
+/-- The value of a bounded array range, with O(n log n) bit work and logarithmic recursion. -/
+def encodeRange (bits : Nat) (digits : Array Nat) (offset count : Nat) : Nat :=
+  match count with
+  | 0 => 0
+  | 1 => digits[offset]!
+  | count + 2 =>
+    let lowCount := (count + 2) / 2
+    let highCount := count + 2 - lowCount
+    (encodeRange bits digits offset highCount <<< (bits * lowCount)) +
+      encodeRange bits digits (offset + highCount) lowCount
+termination_by count
+decreasing_by all_goals omega
+
+/-- Reading an array range appends its exact value to any initial code. -/
+theorem encodeRange_spec (bits : Nat) (digits : Array Nat) (offset count : Nat)
+    (within : offset + count ≤ digits.size)
+    (bounded : ∀ digit ∈ digits.toList, digit < 2^bits) (start : Nat) :
+    radixCode? (2^bits) ((digits.toList.drop offset).take count) start =
+      some (start * (2^bits)^count + encodeRange bits digits offset count) := by
+  induction count using Nat.strongRecOn generalizing offset start with
+  | ind count ih =>
+    match count with
+    | 0 => simp [encodeRange, radixCode?]
+    | 1 =>
+      have index : offset < digits.size := by omega
+      have small := bounded digits[offset] (Array.getElem_mem_toList index)
+      rw [List.drop_eq_getElem_cons (by simpa using index)]
+      simp [encodeRange, radixCode?, small, getElem!_pos, index]
+    | count + 2 =>
+      let low := (count + 2) / 2
+      let high := count + 2 - low
+      have splitCount : high + low = count + 2 := by dsimp [high, low]; omega
+      have lowSmall : low < count + 2 := by dsimp [low]; omega
+      have highSmall : high < count + 2 := by dsimp [high, low]; omega
+      have splitList : (digits.toList.drop offset).take (count + 2) =
+          (digits.toList.drop offset).take high ++
+            (digits.toList.drop (offset + high)).take low := by
+        have splitTake (entries : List Nat) (first second : Nat) :
+            entries.take (first + second) =
+              entries.take first ++ (entries.drop first).take second := by
+          induction first generalizing entries with
+          | zero => simp only [Nat.zero_add, List.take_zero, List.drop_zero, List.nil_append]
+          | succ first ih =>
+            cases entries with
+            | nil => simp only [List.take_nil, List.drop_nil, List.nil_append]
+            | cons head rest =>
+              simp only [Nat.succ_add, List.take_succ_cons, List.drop_succ_cons,
+                List.cons_append, ih]
+        rw [← splitCount, splitTake, List.drop_drop]
+      rw [splitList, radixCode?_append, ih high highSmall offset (by omega) start]
+      simp only [Option.bind_some]
+      rw [ih low lowSmall (offset + high) (by omega)]
+      simp only [encodeRange, Nat.shiftLeft_eq, Nat.pow_mul]
+      change some ((start * (2^bits)^high + encodeRange bits digits offset high) *
+          (2^bits)^low + encodeRange bits digits (offset + high) low) = _
+      rw [Nat.add_mul, Nat.mul_assoc, ← Nat.pow_add, splitCount]
+      simp only [Nat.add_assoc]
+      rfl
+
+#print axioms encodeRange_spec
+
+/-- A leading one followed by bounded fixed-width digits, read one digit at a time, so the kernel
+    reduces it in steps linear in the digits. Compiled code runs `balancedBitCode?`. -/
+def bitCode? (bits : Nat) (digits : List Nat) : Option Nat :=
+  radixCode? (2^bits) digits 1
+
+/-- The code `bitCode?` gives, from one array conversion and a balanced split whose bit work grows
+    as n log n. The kernel holds an array as a list and reads entry i in i steps, so only compiled
+    code runs this form. -/
+def balancedBitCode? (bits : Nat) (digits : List Nat) : Option Nat :=
+  if digits.all (· < 2^bits) then
+    let entries := digits.toArray
+    some ((1 <<< (bits * entries.size)) + encodeRange bits entries 0 entries.size)
+  else none
+
+/-- The balanced encoder has exactly the acceptance and value of the digit-by-digit reading, so
+    compiled code may run it in place of `bitCode?`. -/
+@[csimp] theorem bitCode?_eq_balancedBitCode? : @bitCode? = @balancedBitCode? := by
+  funext bits digits
+  unfold bitCode? balancedBitCode?
+  split
+  next valid =>
+    have bounded : ∀ digit ∈ digits, digit < 2^bits := by simpa using valid
+    have spec := encodeRange_spec bits digits.toArray 0 digits.length
+      (by simp) (by simpa using bounded) 1
+    simpa [Nat.shiftLeft_eq, Nat.pow_mul] using spec
+  next invalid =>
+    cases read : radixCode? (2^bits) digits 1 with
+    | none => rfl
+    | some code =>
+      have bounded := radixCode?_digits read
+      have valid : digits.all (· < 2^bits) = true := by simpa using bounded
+      exact False.elim (invalid valid)
+
+#print axioms bitCode?_eq_balancedBitCode?
+
+/-- `bitCode?` reads its digits as `radixCode?` does from a leading one. -/
+theorem bitCode?_eq_radixCode? (bits : Nat) (digits : List Nat) :
+    bitCode? bits digits = radixCode? (2^bits) digits 1 := rfl
+
+#print axioms bitCode?_eq_radixCode?
+
+/-- Reading bounded digits preserves the interval fixed by the initial code and digit count. -/
+theorem radixCode?_interval {base : Nat} (digits : List Nat) (start code : Nat)
+    (read : radixCode? base digits start = some code) :
+    start * base^digits.length ≤ code ∧ code < (start + 1) * base^digits.length := by
+  induction digits generalizing start with
+  | nil => simp [radixCode?] at read; subst code; simp
+  | cons digit rest ih =>
+    simp only [radixCode?] at read
+    split at read
+    next small =>
+      obtain ⟨lower, upper⟩ := ih (start * base + digit) read
+      have lowerScale := Nat.mul_le_mul_right (base^rest.length)
+        (Nat.le_add_right (start * base) digit)
+      have upperScale := Nat.mul_le_mul_right (base^rest.length)
+        (show start * base + digit + 1 ≤ (start + 1) * base by
+          rw [Nat.add_mul, Nat.one_mul]; omega)
+      simp only [List.length_cons, Nat.pow_succ', ← Nat.mul_assoc]
+      exact ⟨Nat.le_trans lowerScale lower, Nat.lt_of_lt_of_le upper upperScale⟩
+    next => simp at read
+
+#print axioms radixCode?_interval
+
+/-- Fixed-width payload digits exist exactly when the highest set bit is a digit boundary. -/
+def bitDigits? (bits code : Nat) : Option (List Nat) :=
+  if code = 0 then none
+  else
+    let top := code.log2
+    if top % bits = 0 then
+      some (fixedDigits bits (top / bits) (code - (1 <<< top)) [])
+    else none
+
+/-- Every accepted digit list encodes the exact positive input code. -/
+theorem bitDigits?_sound (bits code : Nat) (_width : 0 < bits) (digits : List Nat)
+    (read : bitDigits? bits code = some digits) :
+    radixCode? (2^bits) digits 1 = some code := by
+  unfold bitDigits? at read
+  split at read
+  next zero => simp at read
+  next positive =>
+    dsimp only at read
+    split at read
+    next aligned =>
+      simp only [Option.some.injEq] at read
+      subst digits
+      have count : bits * (code.log2 / bits) = code.log2 :=
+        Nat.mul_div_cancel' (Nat.dvd_of_mod_eq_zero aligned)
+      have power : (2^bits)^(code.log2 / bits) = 2^code.log2 := by
+        rw [← Nat.pow_mul, count]
+      have lower := Nat.log2_self_le positive
+      have upper : code < 2^code.log2 * 2 := by
+        simpa [Nat.pow_succ] using (Nat.lt_log2_self (n := code))
+      have quotient : code / 2^code.log2 = 1 := by
+        apply Nat.div_eq_of_lt_le (by simpa using lower)
+        simpa [Nat.mul_comm] using upper
+      have remainder : code - 2^code.log2 = code % 2^code.log2 := by
+        rw [Nat.mod_eq_sub_div_mul, quotient, Nat.one_mul]
+      simp only [Nat.shiftLeft_eq, Nat.one_mul, remainder]
+      rw [fixedDigits_spec bits (code.log2 / bits) _
+        (by rw [power]; exact Nat.mod_lt _ (Nat.pow_pos (by decide)))]
+      simp only [radixCode?, Nat.one_mul, power]
+      have joined := Nat.div_add_mod code (2^code.log2)
+      rw [quotient, Nat.mul_one] at joined
+      rw [joined]
+    next => simp at read
+
+#print axioms bitDigits?_sound
+
+/-- Every code built from a leading one is accepted and yields every original payload digit. -/
+theorem bitDigits?_complete (bits : Nat) (width : 0 < bits) (digits : List Nat) (code : Nat)
+    (read : radixCode? (2^bits) digits 1 = some code) :
+    bitDigits? bits code = some digits := by
+  obtain ⟨lower, upper⟩ := radixCode?_interval digits 1 code read
+  simp only [Nat.one_mul, ← Nat.pow_mul] at lower upper
+  have positive : code ≠ 0 := by
+    have := Nat.pow_pos (a := 2) (n := bits * digits.length) (by decide)
+    omega
+  have top : code.log2 = bits * digits.length := by
+    apply (Nat.log2_eq_iff positive).mpr
+    constructor
+    · exact lower
+    · simpa [Nat.pow_succ, Nat.mul_comm] using upper
+  have accepted : ∃ found, bitDigits? bits code = some found := by
+    simp [bitDigits?, positive, top]
+  obtain ⟨found, foundRead⟩ := accepted
+  have same := radixCode?_injective
+    (base := 2^bits) (by exact Nat.le_self_pow (by omega) 2)
+    (bitDigits?_sound bits code width found foundRead) read
+  simpa [same] using foundRead
+
+#print axioms bitDigits?_complete
+
+/-- A fixed-width digit suffix follows the same digits with an empty suffix. -/
+theorem fixedDigits_tail (bits count code : Nat) (tail : List Nat) :
+    fixedDigits bits count code tail = fixedDigits bits count code [] ++ tail := by
+  induction count using Nat.strongRecOn generalizing code tail with
+  | ind count ih =>
+    match count with
+    | 0 => simp [fixedDigits]
+    | 1 => simp [fixedDigits]
+    | count + 2 =>
+      rw [fixedDigits, ih (count + 2 - (count + 2) / 2) (by omega),
+        ih ((count + 2) / 2) (by omega)]
+      conv => rhs; rw [fixedDigits, ih _ (by omega)]
+      rw [List.append_assoc]
+
+#print axioms fixedDigits_tail
+
+/-- Removing the least significant fixed-width digit preserves every higher digit. -/
+theorem fixedDigits_peel (bits count code : Nat) (width : 0 < bits)
+    (bounded : code < (2^bits)^(count + 1)) :
+    fixedDigits bits (count + 1) code [] =
+      fixedDigits bits count (code / 2^bits) [] ++ [code % 2^bits] := by
+  have positive : 0 < 2^bits := Nat.pow_pos (by decide)
+  have upper : code / 2^bits < (2^bits)^count := by
+    apply (Nat.div_lt_iff_lt_mul positive).mpr
+    simpa [Nat.pow_succ] using bounded
+  have left := fixedDigits_spec bits (count + 1) code bounded [] 1
+  have right := fixedDigits_spec bits count (code / 2^bits) upper [code % 2^bits] 1
+  rw [fixedDigits_tail] at right
+  simp only [radixCode?, Nat.mod_lt _ positive, ↓reduceIte, Nat.one_mul] at left right
+  have joined := Nat.div_add_mod code (2^bits)
+  rw [Nat.mul_comm] at joined
+  simp only [Nat.add_mul, ← Nat.pow_succ, Nat.add_assoc, joined] at right
+  exact radixCode?_injective (Nat.le_self_pow (by omega) 2) left right
+
+#print axioms fixedDigits_peel
+
 /-! ## Names and literals -/
 
 /-- One metadata name, such as `Int32` or `System.Collections`: its UTF-8 bytes read as a
@@ -195,31 +521,97 @@ structure MetadataName where
 /-- The number of values one 64-bit limb of a code takes. -/
 def hashLimbBase : Nat := 2 ^ 64
 
-/-- `seed` mixed with every 64-bit limb of `code`, least significant first, so a hash depends
-    on every byte of a name; the derived `Hashable Nat` keeps only the last eight. -/
-def mixCodeLimbs (seed : UInt64) (code : Nat) : UInt64 :=
+/-- Mathematical specification of least-significant-first hashing, with no zero padding. -/
+def mixCodeLimbsSpec (seed : UInt64) (code : Nat) : UInt64 :=
   if code = 0 then seed
-  else mixCodeLimbs (mixHash seed (UInt64.ofNat code)) (code / hashLimbBase)
+  else mixCodeLimbsSpec (mixHash seed (UInt64.ofNat code)) (code / hashLimbBase)
 termination_by code
 decreasing_by exact Nat.div_lt_self (by omega) (by unfold hashLimbBase; decide)
 
+/-- `seed` mixed with every 64-bit limb, least significant first; O(n log n) bit work. -/
+def mixCodeLimbs (seed : UInt64) (code : Nat) : UInt64 :=
+  if code = 0 then seed
+  else
+    let limbs := fixedDigits 64 (code.log2 / 64 + 1) code []
+    limbs.reverse.foldl (fun hash limb => mixHash hash (UInt64.ofNat limb)) seed
+
+/-- A fixed-width limb list with no zero padding hashes exactly the specified limb sequence. -/
+theorem fixedDigits_hash (count code : Nat) (seed : UInt64)
+    (bounded : code < hashLimbBase^count)
+    (minimal : count = 0 ∨ hashLimbBase^(count - 1) ≤ code) :
+    (fixedDigits 64 count code []).reverse.foldl
+      (fun hash limb => mixHash hash (UInt64.ofNat limb)) seed = mixCodeLimbsSpec seed code := by
+  induction count generalizing code seed with
+  | zero =>
+    have zero : code = 0 := by simpa using bounded
+    simp [zero, fixedDigits, mixCodeLimbsSpec]
+  | succ count ih =>
+    have lower : hashLimbBase^count ≤ code := by
+      rcases minimal with impossible | lower
+      · omega
+      · simpa using lower
+    have positive : 0 < hashLimbBase := by unfold hashLimbBase; decide
+    have nonzero : code ≠ 0 := by
+      have := Nat.pow_pos (n := count) positive
+      omega
+    rw [fixedDigits_peel 64 count code (by decide) bounded, List.reverse_append]
+    simp only [List.reverse_cons, List.reverse_nil, List.nil_append, List.cons_append,
+      List.foldl_cons]
+    have remainder : UInt64.ofNat (code % 2^64) = UInt64.ofNat code := by
+      exact UInt64.ofNat_mod_size
+    rw [remainder, ih]
+    · conv => rhs; rw [mixCodeLimbsSpec]
+      simp only [nonzero, ↓reduceIte]
+      rfl
+    · apply (Nat.div_lt_iff_lt_mul positive).mpr
+      simpa [hashLimbBase, Nat.pow_succ] using bounded
+    · cases count with
+      | zero => exact Or.inl rfl
+      | succ count =>
+        apply Or.inr
+        apply (Nat.le_div_iff_mul_le positive).mpr
+        simpa [hashLimbBase, Nat.pow_succ] using lower
+
+#print axioms fixedDigits_hash
+
+/-- Balanced extraction preserves the seed, every limb, and the exact hash mixing order. -/
+theorem mixCodeLimbs_eq (seed : UInt64) (code : Nat) :
+    mixCodeLimbs seed code = mixCodeLimbsSpec seed code := by
+  unfold mixCodeLimbs
+  split
+  next zero => simp [mixCodeLimbsSpec, zero]
+  next positive =>
+    apply fixedDigits_hash
+    · unfold hashLimbBase
+      rw [← Nat.pow_mul]
+      apply Nat.lt_of_lt_of_le Nat.lt_log2_self
+      apply Nat.pow_le_pow_right (by decide)
+      omega
+    · apply Or.inr
+      simp only [Nat.add_sub_cancel, hashLimbBase, ← Nat.pow_mul]
+      apply Nat.le_trans _ (Nat.log2_self_le positive)
+      apply Nat.pow_le_pow_right (by decide)
+      exact Nat.mul_div_le _ _
+
+#print axioms mixCodeLimbs_eq
+
 instance : Hashable MetadataName := ⟨fun name => mixCodeLimbs 0 name.code⟩
 
-/-- The name whose UTF-8 bytes are `bytes`, or `none` when an entry is not a byte. Linear in
-    the number of bytes. -/
+/-- The name whose UTF-8 bytes are `bytes`, or `none` when an entry is not a byte. -/
 def MetadataName.ofBytes? (bytes : List Nat) : Option MetadataName :=
-  (radixCode? byteBase bytes 1).map MetadataName.mk
+  (bitCode? 8 bytes).map MetadataName.mk
 
 /-- The UTF-8 bytes a name holds, or `none` when its code is zero or its leading base-256 digit
-    is not 1. Linear in the number of bytes. -/
+    is not 1. -/
 def MetadataName.bytes? (name : MetadataName) : Option (List Nat) :=
-  radixDigits? byteBase name.code name.code []
+  bitDigits? 8 name.code
 
 /-- The bytes a name was built from come back from the name. -/
 theorem MetadataName.bytes?_ofBytes? {bytes : List Nat} {name : MetadataName}
     (encoded : MetadataName.ofBytes? bytes = some name) : name.bytes? = some bytes := by
   obtain ⟨code, read, rfl⟩ := Option.map_eq_some_iff.mp encoded
-  exact radixDigits?_of_radixCode? (by decide) read
+  rw [bitCode?_eq_radixCode?] at read
+  exact bitDigits?_complete 8 (by decide) bytes code read
 
 #print axioms MetadataName.bytes?_ofBytes?
 
@@ -227,7 +619,8 @@ theorem MetadataName.bytes?_ofBytes? {bytes : List Nat} {name : MetadataName}
     when no byte list gives it. -/
 theorem MetadataName.ofBytes?_bytes? {bytes : List Nat} {name : MetadataName}
     (decoded : name.bytes? = some bytes) : MetadataName.ofBytes? bytes = some name := by
-  simp [ofBytes?, radixCode?_of_radixDigits?_self (by decide) decoded]
+  simp [ofBytes?, bitCode?_eq_radixCode?,
+    bitDigits?_sound 8 name.code (by decide) bytes decoded]
 
 #print axioms MetadataName.ofBytes?_bytes?
 
@@ -235,12 +628,26 @@ theorem MetadataName.ofBytes?_bytes? {bytes : List Nat} {name : MetadataName}
 theorem MetadataName.ofBytes?_injective {left right : List Nat} {name : MetadataName}
     (fromLeft : MetadataName.ofBytes? left = some name)
     (fromRight : MetadataName.ofBytes? right = some name) : left = right := by
-  obtain ⟨_, readLeft, rfl⟩ := Option.map_eq_some_iff.mp fromLeft
-  obtain ⟨_, readRight, sameCode⟩ := Option.map_eq_some_iff.mp fromRight
-  cases sameCode
-  exact radixCode?_injective (by decide) readLeft readRight
+  exact Option.some.inj ((bytes?_ofBytes? fromLeft).symm.trans (bytes?_ofBytes? fromRight))
 
 #print axioms MetadataName.ofBytes?_injective
+
+/-- Whether `name` is the metadata name of `bytes`, decided by reading the name back, which costs
+    time linear in the bytes in the kernel. -/
+def MetadataName.spells (name : MetadataName) (bytes : List Nat) : Bool :=
+  name.bytes? == some bytes
+
+/-- A name spells exactly the bytes it is the metadata name of. -/
+theorem MetadataName.spells_iff {name : MetadataName} {bytes : List Nat} :
+    name.spells bytes = true ↔ MetadataName.ofBytes? bytes = some name := by
+  unfold MetadataName.spells
+  constructor
+  · intro spelled
+    exact MetadataName.ofBytes?_bytes? (by simpa using spelled)
+  · intro encoded
+    simpa using MetadataName.bytes?_ofBytes? encoded
+
+#print axioms MetadataName.spells_iff
 
 /-- A `#US` literal: its UTF-16 code units read as a big-endian base-65536 number after a
     leading 1. -/
@@ -252,20 +659,21 @@ structure UserString where
 instance : Hashable UserString := ⟨fun literal => mixCodeLimbs 0 literal.code⟩
 
 /-- The literal whose UTF-16 code units are `units`, or `none` when an entry is not a code
-    unit. Linear in the number of units. -/
+    unit. -/
 def UserString.ofUnits? (units : List Nat) : Option UserString :=
-  (radixCode? codeUnitBase units 1).map UserString.mk
+  (bitCode? 16 units).map UserString.mk
 
 /-- The UTF-16 code units a literal holds, or `none` when its code is zero or its leading
-    base-65536 digit is not 1. Linear in the number of units. -/
+    base-65536 digit is not 1. -/
 def UserString.units? (literal : UserString) : Option (List Nat) :=
-  radixDigits? codeUnitBase literal.code literal.code []
+  bitDigits? 16 literal.code
 
 /-- The code units a literal was built from come back from the literal. -/
 theorem UserString.units?_ofUnits? {units : List Nat} {literal : UserString}
     (encoded : UserString.ofUnits? units = some literal) : literal.units? = some units := by
   obtain ⟨code, read, rfl⟩ := Option.map_eq_some_iff.mp encoded
-  exact radixDigits?_of_radixCode? (by decide) read
+  rw [bitCode?_eq_radixCode?] at read
+  exact bitDigits?_complete 16 (by decide) units code read
 
 #print axioms UserString.units?_ofUnits?
 
@@ -273,7 +681,8 @@ theorem UserString.units?_ofUnits? {units : List Nat} {literal : UserString}
     malformed exactly when no unit list gives it. -/
 theorem UserString.ofUnits?_units? {units : List Nat} {literal : UserString}
     (decoded : literal.units? = some units) : UserString.ofUnits? units = some literal := by
-  simp [ofUnits?, radixCode?_of_radixDigits?_self (by decide) decoded]
+  simp [ofUnits?, bitCode?_eq_radixCode?,
+    bitDigits?_sound 16 literal.code (by decide) units decoded]
 
 #print axioms UserString.ofUnits?_units?
 
@@ -281,10 +690,7 @@ theorem UserString.ofUnits?_units? {units : List Nat} {literal : UserString}
 theorem UserString.ofUnits?_injective {left right : List Nat} {literal : UserString}
     (fromLeft : UserString.ofUnits? left = some literal)
     (fromRight : UserString.ofUnits? right = some literal) : left = right := by
-  obtain ⟨_, readLeft, rfl⟩ := Option.map_eq_some_iff.mp fromLeft
-  obtain ⟨_, readRight, sameCode⟩ := Option.map_eq_some_iff.mp fromRight
-  cases sameCode
-  exact radixCode?_injective (by decide) readLeft readRight
+  exact Option.some.inj ((units?_ofUnits? fromLeft).symm.trans (units?_ofUnits? fromRight))
 
 #print axioms UserString.ofUnits?_injective
 
@@ -312,6 +718,49 @@ structure AssemblyName where
   /-- The strong-name token as a big-endian number, or `none` for a null token. -/
   publicKeyToken : Option Nat
   deriving DecidableEq, Hashable
+
+section AssemblyOrder
+
+attribute [local instance] lexOrd
+
+/-- Raw identity components in lexicographic comparison order. -/
+private def AssemblyName.orderKey (assembly : AssemblyName) :
+    Nat × Nat × Nat × Nat × Nat × Nat × Option Nat :=
+  (assembly.name.code, assembly.version.major, assembly.version.minor,
+    assembly.version.build, assembly.version.revision, assembly.culture.code,
+    assembly.publicKeyToken)
+
+/-- Assembly order compares raw name codes, version components, culture and optional token. -/
+instance : Ord AssemblyName where
+  compare := compareOn AssemblyName.orderKey
+
+/-- Assembly comparison is transitive and reverses when its arguments are exchanged. -/
+instance : Std.TransOrd AssemblyName :=
+  inferInstanceAs (Std.TransCmp (compareOn AssemblyName.orderKey))
+
+/-- Assembly comparison identifies exactly equal raw identity components. -/
+instance : Std.LawfulEqOrd AssemblyName where
+  compare_self := Std.ReflCmp.compare_self (cmp := compareOn AssemblyName.orderKey)
+  eq_of_compare {left right} equal := by
+    have keys : left.orderKey = right.orderKey := Std.LawfulEqOrd.eq_of_compare equal
+    cases left with | mk leftName leftVersion leftCulture leftToken =>
+      cases right with | mk rightName rightVersion rightCulture rightToken =>
+        cases leftName; cases rightName; cases leftVersion; cases rightVersion
+        cases leftCulture; cases rightCulture
+        simpa only [AssemblyName.orderKey, Prod.mk.injEq, AssemblyName.mk.injEq,
+          MetadataName.mk.injEq, Version.mk.injEq, and_assoc] using keys
+
+/-- Equal assembly comparison results preserve every raw identity component. -/
+theorem AssemblyName.compare_eq_iff (left right : AssemblyName) :
+    compare left right = .eq ↔ left = right :=
+  Std.LawfulEqOrd.compare_eq_iff_eq
+
+/-- info: 'CIL.AssemblyName.compare_eq_iff' depends on axioms:
+[propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms AssemblyName.compare_eq_iff
+
+end AssemblyOrder
 
 /-- One row of a type's nesting chain: its namespace column and its name column. -/
 structure TypeLevel where
@@ -434,10 +883,33 @@ def readableText? (text : String) : Option String := do
 def quotedText? (text : String) : Option String :=
   (fun escaped => "\"" ++ escaped ++ "\"") <$> escapedText? true text
 
+/-- The hexadecimal digit count obtained from the highest set bit contains the complete code. -/
+theorem hexCode_bound (code : Nat) : code < (2 ^ 4) ^ (code.log2 / 4 + 1) := by
+  rw [← Nat.pow_mul]
+  apply Nat.lt_of_lt_of_le Nat.lt_log2_self
+  apply Nat.pow_le_pow_right (by decide)
+  omega
+
+#print axioms hexCode_bound
+
+/-- The digits used by raw hexadecimal display retain the exact natural code. -/
+theorem fixedDigits_hex_exact (code : Nat) :
+    radixCode? 16 (fixedDigits 4 (code.log2 / 4 + 1) code []) 0 = some code := by
+  simpa [radixCode?] using
+    fixedDigits_spec 4 (code.log2 / 4 + 1) code (hexCode_bound code) [] 0
+
+#print axioms fixedDigits_hex_exact
+
+/-- Minimal lowercase hexadecimal digits of a natural code, including one digit for zero. -/
+def rawCodeHex (code : Nat) : String :=
+  let count := code.log2 / 4 + 1
+  let digits := fixedDigits 4 count code []
+  String.ofList (digits.map Nat.digitChar)
+
 /-- The raw structure of a code, for a value that no text shows faithfully. Its leading `{`
     sets it apart from every `readableText?`. -/
 def rawCodeDisplay (code : Nat) : String :=
-  "{ code := " ++ toString code ++ " }"
+  "{ code := 0x" ++ rawCodeHex code ++ " }"
 
 /-- The text of a name, or `none` when its code is malformed or its bytes are not UTF-8. -/
 def MetadataName.text? (name : MetadataName) : Option String := do
@@ -451,7 +923,9 @@ def MetadataName.readable? (name : MetadataName) : Option String :=
 /-- The text of a name as `readableText?` writes it, or the raw structure of its code; distinct
     names never display alike. -/
 def MetadataName.display (name : MetadataName) : String :=
-  name.readable?.getD (rawCodeDisplay name.code)
+  match name.readable? with
+  | some text => text
+  | none => rawCodeDisplay name.code
 
 /-- The `name!` literal of a name, or `none` when it has no text, holds a NUL, which no
     `#Strings` entry can, or holds an invisible character above U+FFFF. -/
@@ -469,7 +943,9 @@ def UserString.text? (literal : UserString) : Option String := do
 /-- The text of a literal as `readableText?` writes it, or the raw structure of its code;
     distinct literals never display alike. -/
 def UserString.display (literal : UserString) : String :=
-  (literal.text? >>= readableText?).getD (rawCodeDisplay literal.code)
+  match literal.text? >>= readableText? with
+  | some text => text
+  | none => rawCodeDisplay literal.code
 
 /-- The `str!` literal of a literal, or `none` when it has no text or holds an invisible
     character above U+FFFF. -/
@@ -685,8 +1161,11 @@ def typeIdentityLiteral? (term : Expr) : MetaM (Option TypeIdentity) := do
   if ← getPPOption getPPAll then failure
   let #[codeTerm] := (← getExpr).getAppArgs | failure
   let some code := natLiteral? codeTerm | failure
-  let some quoted := (MetadataName.mk code).literal? | failure
-  `(name! $(⟨Syntax.mkLit strLitKind quoted⟩))
+  if let some quoted := (MetadataName.mk code).literal? then
+    `(name! $(⟨Syntax.mkLit strLitKind quoted⟩))
+  else
+    let field ← `(Parser.Term.structInstLVal| $(mkIdent `code):ident)
+    `({ $field := $(Syntax.mkNumLit ("0x" ++ rawCodeHex code)) })
 
 /-- Prints a literal as its `UserString.literal?`, which elaborates back to it; any other
     literal keeps its raw structure. -/
@@ -694,8 +1173,11 @@ def typeIdentityLiteral? (term : Expr) : MetaM (Option TypeIdentity) := do
   if ← getPPOption getPPAll then failure
   let #[codeTerm] := (← getExpr).getAppArgs | failure
   let some code := natLiteral? codeTerm | failure
-  let some quoted := (UserString.mk code).literal? | failure
-  `(str! $(⟨Syntax.mkLit strLitKind quoted⟩))
+  if let some quoted := (UserString.mk code).literal? then
+    `(str! $(⟨Syntax.mkLit strLitKind quoted⟩))
+  else
+    let field ← `(Parser.Term.structInstLVal| $(mkIdent `code):ident)
+    `({ $field := $(Syntax.mkNumLit ("0x" ++ rawCodeHex code)) })
 
 /-- Prints a type whose components are all literals as `type!"..."` when `TypeIdentity.text?`
     reads it, so the printed text determines the type; any other type keeps its structure. -/

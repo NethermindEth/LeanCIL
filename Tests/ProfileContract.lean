@@ -22,9 +22,10 @@ def avx512Profile : FeatureProfile :=
 /-- x86-64-v3 with 256-bit vectors disabled: agrees on AVX2, differs in acceleration. -/
 def narrowProfile : FeatureProfile := { avx2Profile with vector256Accelerated := false }
 
-/-- The x86-64 baseline: AVX2 is off, so the feature test answers differently. -/
+/-- The x86-64-v2 baseline: AVX2 is off, so the feature test answers differently. -/
 def baselineProfile : FeatureProfile :=
-  { architecture := .x64, x86Base64 := true, sse2 := true, vector128Accelerated := true }
+  { architecture := .x64, x86Base64 := true, sse2 := true, ssse3 := true, sse41 := true,
+    sse42 := true, vector128Accelerated := true }
 
 /-- Every profile the contract is carried between is a supported runtime configuration. -/
 theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowProfile.Valid ∧
@@ -35,7 +36,7 @@ theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowPro
   [{ profile := avx2Profile, returnsValue := true, locals := [],
      code := [.feature .avx2, .ret] },
    { profile := avx2Profile, returnsValue := false, locals := [],
-     code := [.throw "System.PlatformNotSupportedException"] }]
+     code := [.throw .notSupported] }]
 
 /-- Calling with no arguments returns `1` and changes no memory. -/
 def avx2Contract : MethodContract Unit where
@@ -67,7 +68,7 @@ theorem narrow_holds : avx2Contract.Holds (reprofile program narrowProfile) 0 :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
      code := [.feature .avx2, .ret] },
    { profile := avx512Profile, returnsValue := false, locals := [],
-     code := [.throw "System.PlatformNotSupportedException"] }]
+     code := [.throw .notSupported] }]
 
 /-- A per-profile program is certified once it is shown to be the reprofiling. -/
 theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by
@@ -94,7 +95,7 @@ def throwContract : OutcomeContract Unit where
   pre _ _ := True
   footprint _ := []
   post _ _ _ _ := False
-  raises _ _ := some "System.PlatformNotSupportedException"
+  raises _ _ := some .notSupported
 
 /-- Under `avx2Profile` method 1 raises the named exception. -/
 theorem throw_holds : throwContract.Holds program 1 := by
@@ -155,7 +156,7 @@ theorem baseline_rejected : ¬ avx2Contract.Holds (reprofile program baselinePro
 /-- An AVX-512 DQ multiply needs four flags, all of which the agreement check reads. -/
 def intrinsicProgram : Program :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
-     code := [.arg 0, .arg 1, .intrinsic (.avx512DQ .mul64) 2, .ret] }]
+     code := [.ldarg 0, .ldarg 1, .intrinsic (.avx512DQ .mul64) 2, .ret] }]
 
 /-- Profiles that agree on the four flags agree on the multiply. -/
 theorem intrinsic_agrees : intrinsicProgram.ProfileAgreement avx512Profile

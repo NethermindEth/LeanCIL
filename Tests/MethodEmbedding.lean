@@ -11,7 +11,7 @@ open CIL
 
 private def byteHomeBody : Method := {
   locals := [.v128 0], localKinds := [.vector128], returnsValue := false,
-  code := [.local 0, .pop, .ret] }
+  code := [.ldloc 0, .pop, .ret] }
 private def opaqueHomeBody : Method := { byteHomeBody with opaqueVectorLocals := [0] }
 
 example : CIL.MethodBinding.embedFailure byteHomeBody byteHomeBody [0, 1, 2] = none := by decide +kernel
@@ -25,13 +25,13 @@ example : MethodEmbeds [opaqueHomeBody] 0 opaqueHomeBody := by cil_embed
 
 /-- Returns argument 1 on both paths; pc 4 is reached only by the branch. -/
 @[cil_code] def body : Method := {
-  code := [.arg 0, .brfalse 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.ldarg 0, .brfalse 4, .ldarg 1, .ret, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 /-- `body` with a dead block before the branch target, as a profile-specific extraction emits it. -/
 def inserted : Method := {
-  code := [.arg 0, .brfalse 6, .arg 1, .ret,
-    .unsupported "Unreachable under selected profile", .ldc_i4 9, .arg 1, .ret]
+  code := [.ldarg 0, .brfalse 6, .ldarg 1, .ret,
+    .unadmitted 0, .ldc_i4 9, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 -- Each `cil_embed` proof is kernel checked against the extracted method, never against `expected`.
@@ -41,13 +41,13 @@ theorem dead_block_inserted : MethodEmbeds [inserted] 0 body := by cil_embed
 
 /-- A placed canonical suffix reuses its proof at the checked embedding's new position. -/
 theorem relocated_suffix (frame : Safety.Frame) (memory : Safety.Memory) (value : W32) :
-    Safety.CodeAt inserted 6 [.arg 1, .ret] ∧
+    Safety.CodeAt inserted 6 [.ldarg 1, .ret] ∧
     Safety.WP (Safety.Execution (fun fuel => Safety.run [inserted] fuel 0 6
       [.scalar (.i32 0), .scalar (.i32 value)] frame [] memory))
       (fun (final, values) => final = Safety.leaveFrame frame memory ∧
         values = [.scalar (.i32 value)]) := by
   refine ⟨rfl, ?_⟩
-  have placed : Safety.CodeAt body 4 [.arg 1, .ret] := rfl
+  have placed : Safety.CodeAt body 4 [.ldarg 1, .ret] := rfl
   have canonical : Safety.WP (Safety.Execution (fun fuel =>
       Safety.run ([inserted].set 0 body) fuel 0 4
       [.scalar (.i32 0), .scalar (.i32 value)] frame [] memory))
@@ -62,8 +62,8 @@ theorem relocated_suffix (frame : Safety.Frame) (memory : Safety.Memory) (value 
 
 /-- An expected body that still carries a dead block the extraction no longer emits. -/
 def withDeadBlock : Method := {
-  code := [.arg 0, .brfalse 6, .arg 1, .ret, .unsupported "Unreachable under selected profile",
-    .unsupported "Unreachable under selected profile", .arg 1, .ret]
+  code := [.ldarg 0, .brfalse 6, .ldarg 1, .ret, .unadmitted 0,
+    .unadmitted 0, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem dead_block_removed : MethodEmbeds [body] 0 withDeadBlock := by cil_embed
@@ -91,13 +91,14 @@ theorem inserted_invocation (memory : Safety.Memory) (condition value : W32) :
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 2 maps to actual pc 2
-  expected: CIL.Instruction.arg 1 none
-  actual:   CIL.Instruction.arg 0 none
+  expected: CIL.Instruction.ldarg 1
+  actual:   CIL.Instruction.ldarg 0
   the instructions differ
   expected pc 1 falls through to it, so it must be actual pc 2
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ inserted with code := inserted.code.set 2 (.arg 0 none) }] 0 body := by cil_embed
+example : MethodEmbeds [{ inserted with code := inserted.code.set 2 (.ldarg 0) }] 0 body := by
+  cil_embed
 
 /--
 error: cil_embed: the expected body does not embed into the extracted method
@@ -123,7 +124,8 @@ expected pc 1 maps to actual pc 1
   code target differs: expected target 4 maps to actual pc 6, but the actual instruction targets 4; actual pc 4 (CIL.Instruction.ldc_i4 0x00000009#32) is not the image of any live expected pc
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ body with code := [.arg 0, .brfalse 4, .arg 1, .ret, .ldc_i4 9, .ret, .arg 1, .ret] }] 0 body := by
+example : MethodEmbeds [{ body with code := [.ldarg 0, .brfalse 4, .ldarg 1, .ret, .ldc_i4 9,
+    .ret, .ldarg 1, .ret] }] 0 body := by
   cil_embed
 
 -- The fallthrough of the branch reaches an inserted instruction.
@@ -131,13 +133,14 @@ example : MethodEmbeds [{ body with code := [.arg 0, .brfalse 4, .arg 1, .ret, .
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 2 maps to actual pc 2
-  expected: CIL.Instruction.arg 1 none
+  expected: CIL.Instruction.ldarg 1
   actual:   CIL.Instruction.ldc_i4 0x00000009#32
   the instructions differ
   expected pc 1 falls through to it, so it must be actual pc 2
 -/
 #guard_msgs (substring := true) in
-example : MethodEmbeds [{ body with code := [.arg 0, .brfalse 5, .ldc_i4 9, .arg 1, .ret, .arg 1, .ret] }] 0 body := by
+example : MethodEmbeds [{ body with code := [.ldarg 0, .brfalse 5, .ldc_i4 9, .ldarg 1, .ret,
+    .ldarg 1, .ret] }] 0 body := by
   cil_embed
 
 /--
@@ -184,7 +187,7 @@ section DeadLocals
 
 /-- Reads its one local, a null reference, then returns argument 0. -/
 @[cil_code] def stored : Method := {
-  code := [.local 0, .pop, .arg 0, .ret]
+  code := [.ldloc 0, .pop, .ldarg 0, .ret]
   locals := [.nullRef], localKinds := [.reference], returnsValue := true }
 
 /-- `stored` as extracted with two unused reference locals after its own, as a profile-specific
@@ -220,26 +223,26 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 
 /-- Jumps to a throw. -/
 def thrower : Method :=
-  { code := [.br 1, .throw "Overflow"], locals := [], returnsValue := false }
+  { code := [.br 1, .throw .overflow], locals := [], returnsValue := false }
 
 /-- `thrower` with a dead block before the throw and unused reference and span locals. -/
 def throwerDead : Method := {
-  code := [.br 2, .unsupported "Unreachable under selected profile", .throw "Overflow"]
+  code := [.br 2, .unadmitted 0, .throw .overflow]
   locals := [.nullRef, .nullRef], localKinds := [.reference, .span 1 false], returnsValue := false }
 
 /-- A throw of the expected body is raised by the extraction with the dead local. -/
 theorem thrower_dead_raises (memory : Safety.Memory) :
-    Safety.Raises [throwerDead] 0 [] memory "Overflow" :=
+    Safety.Raises [throwerDead] 0 [] memory .overflow :=
   have embeds : MethodEmbedsDeadLocals [throwerDead] 0 thrower := by cil_embed
   embeds.raises ⟨2, _, rfl, rfl⟩
 
 /-- The relocated fault names the throw's pc in the extraction, past the dead block. -/
 theorem thrower_dead_fault (memory : Safety.Memory) :
-    Safety.invoke [throwerDead] 2 0 [] memory = .error ⟨0, 2, .thrown "Overflow"⟩ := by
+    Safety.invoke [throwerDead] 2 0 [] memory = .error ⟨0, 2, .thrown .overflow⟩ := by
   have embeds : EmbedsDeadLocals thrower throwerDead [0, 2] := by
     refine ⟨?_, rfl, rfl, rfl, rfl, rfl, rfl⟩
     constructor <;> rfl
-  exact embeds.invoke_raise (index := 0) rfl (fault := ⟨0, 1, .thrown "Overflow"⟩) rfl rfl
+  exact embeds.invoke_raise (index := 0) rfl (fault := ⟨0, 1, .thrown .overflow⟩) rfl rfl
 
 -- A dead numeric local allocates a home and shifts later allocation identities.
 /--
@@ -360,7 +363,7 @@ example : MethodEmbedsDeadLocals
 
 /-- Returns argument 0 past an opaque 128-bit vector local it never reads. -/
 @[cil_code] def vectorKept : Method := {
-  code := [.arg 0, .ret]
+  code := [.ldarg 0, .ret]
   locals := [.unmodeled], localKinds := [.vector128], opaqueVectorLocals := [0]
   returnsValue := true }
 
@@ -390,13 +393,13 @@ theorem vector_dead_returns (memory : Safety.Memory) (value : W32) :
 error: cil_embed: the expected body does not embed into the extracted method
 method index 0
 expected pc 2 maps to actual pc 2
-  expected: CIL.Instruction.arg 0 none
-  actual:   CIL.Instruction.arg 1 none
+  expected: CIL.Instruction.ldarg 0
+  actual:   CIL.Instruction.ldarg 1
   the instructions differ
 -/
 #guard_msgs (substring := true) in
 example : MethodEmbedsDeadLocals
-    [{ storedDead with code := [.local 0, .pop, .arg 1, .ret] }] 0 stored := by
+    [{ storedDead with code := [.ldloc 0, .pop, .ldarg 1, .ret] }] 0 stored := by
   cil_embed
 
 /-- A numeric dead local fails the kernel-checked condition itself, not only the tactic. -/
@@ -507,7 +510,7 @@ open CIL
 
 /-- Calls method 1 at pc 1 and enters a virtual table at pc 3. -/
 def caller : Method := {
-  code := [.arg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .ret]
+  code := [.ldarg 0, .call 1 1, .pop, .callVirtual [(.void, 2)] 1, .ret]
   locals := [], returnsValue := false }
 
 /-- The pc map of a body onto itself. -/
@@ -519,7 +522,7 @@ theorem caller_links :
 #print axioms caller_links
 
 /-- Only linking instructions have entries, keyed by their pc. -/
-example : linksOfCode [.nop, .call 1 2, .arg 0, .newAggregate 4 0 8, .ret] =
+example : linksOfCode [.nop, .call 1 2, .ldarg 0, .newAggregate 4 0 8, .ret] =
     [(1, .direct 1), (3, .aggregate 4 8)] := rfl
 
 /-- A table written out in a literal wins over the default. -/
@@ -609,14 +612,14 @@ example : (MethodBinding.methodDifferences caller otherLink).head?.map
 
 /-- What an extraction emits when a dead block puts the call at pc 3. -/
 def moved : Method := {
-  code := [.arg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret]
+  code := [.ldarg 0, .br 3, .unadmitted 0, .call 1 1, .ret]
   locals := [], returnsValue := true }
 
 /-- The body a proof uses, with its call at pc 2. `withCode` gives it that pc's link. -/
-def viaWithCode : Method := moved.withCode [.arg 0, .br 2, .call 1 1, .ret]
+def viaWithCode : Method := moved.withCode [.ldarg 0, .br 2, .call 1 1, .ret]
 
 /-- The same code through a structure update, which keeps the link table of the call at pc 3. -/
-def viaUpdate : Method := { moved with code := [.arg 0, .br 2, .call 1 1, .ret] }
+def viaUpdate : Method := { moved with code := [.ldarg 0, .br 2, .call 1 1, .ret] }
 
 theorem with_code_embeds : MethodEmbeds [moved] 0 viaWithCode := by cil_embed
 
@@ -645,7 +648,7 @@ def staticField : StaticDescriptor :=
 
 /-- What an extraction emits when a dead block puts a static read at pc 2. -/
 def staticMoved : Method := {
-  code := [.br 2, .unsupported "Unreachable under selected profile",
+  code := [.br 2, .unadmitted 0,
     .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
   locals := [], returnsValue := false, staticSites := [(2, staticField)] }
 
@@ -676,7 +679,7 @@ theorem static_sites_embed :
 def unsortedTable : List (Nat × Link) := [(3, .direct 1), (1, .direct 2), (3, .direct 9)]
 
 /-- The table takes the scan, since its keys do not ascend. -/
-example : Extraction.linkKeysAscend 0 unsortedTable = false := by decide
+example : Extraction.keysAscend 0 unsortedTable = false := by decide
 
 /-- The scan answers each query with the first entry for it, in query order. -/
 example : Extraction.linkReads unsortedTable [1, 3, 2] =
@@ -706,13 +709,13 @@ example : Extraction.linkWalk evenTable evenTable 0 (List.range 42).reverse =
 
 /-- An extraction that places the block the head branches to before the block after the head. -/
 def reorderedExtraction : Method := {
-  code := [.br 1, .arg 1, .call 2 1, .pop, .ret, .arg 0, .call 1 1, .pop, .ret]
+  code := [.br 1, .ldarg 1, .call 2 1, .pop, .ret, .ldarg 0, .call 1 1, .pop, .ret]
   locals := [], returnsValue := false }
 
 /-- The body a proof uses, with the blocks in source order. -/
 def reorderedWritten : Method :=
   reorderedExtraction.withCode
-    [.br 5, .arg 0, .call 1 1, .pop, .ret, .arg 1, .call 2 1, .pop, .ret]
+    [.br 5, .ldarg 0, .call 1 1, .pop, .ret, .ldarg 1, .call 2 1, .pop, .ret]
 
 -- The map sends the second block back to pc 1, so the link reads descend once.
 #guard MethodBinding.alignLive reorderedWritten.code.toArray reorderedExtraction.code.toArray ==

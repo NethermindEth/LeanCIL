@@ -95,7 +95,7 @@ def localSlot (method : Nat) (name : String) (pc : Option Nat) : MetaM Nat := do
       \n{listing named}"
 
 /-- `local_named method "name"` is the slot of a PDB-named local, and `at pc` resolves it in
-the innermost scope containing `pc`, e.g. `.local (local_named root "carry" at reduce)`. -/
+the innermost scope containing `pc`, e.g. `.ldloc (local_named root "carry" at reduce)`. -/
 syntax (name := localNamed) "local_named " term:max ppSpace str (" at " term:max)? : term
 
 /-- Elaborates `local_named` to the slot number as a literal. -/

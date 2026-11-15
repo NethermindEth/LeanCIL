@@ -18,7 +18,7 @@ theorem local_address {memory other : Memory} {reference : Reference} {kind : CI
     (slot : frame.locals[index]? = some (.bytes kind reference))
     (wrongMemory : form other reference = .ok reference)
     (formed : form memory reference = .ok reference) :
-    step body (.localAddr index) pc args frame rest memory =
+    step body (.ldloca index) pc args frame rest memory =
       .ok (.next (pc + 1) (.reference (.address reference) :: rest) frame memory) := by
   fail_if_success solve | cil_checked_step [slot, wrongMemory]
   cil_checked_step [slot, formed]
@@ -153,7 +153,7 @@ theorem field_store_literal_conversion (left right : CIL.W64)
 /-- A truth-tested branch selects one of two distinct scalar results. -/
 @[cil_code] def truthBranchBody (branch : CIL.Instruction) : CIL.Method := {
   locals := [], returnsValue := true,
-  code := [.arg 0, branch, .ldc_i8 1, .ret, .ldc_i8 2, .ret] }
+  code := [.ldarg 0, branch, .ldc_i8 1, .ret, .ldc_i8 2, .ret] }
 
 /-- A negative 64-bit case fact decides the next pc before it becomes a conditional term. -/
 theorem branch_nonzero_literal (word unrelated : CIL.W64) (memory : Memory)
@@ -199,7 +199,7 @@ theorem branch_closed_zero (memory : Memory) :
 /-- A signed comparison follows a narrowing conversion of a symbolic natural literal. -/
 @[cil_code] def narrowedBranchBody : CIL.Method := {
   locals := [], returnsValue := true,
-  code := [.arg 0, .arg 1, .conv_i4, .blt 6, .ldc_i8 1, .ret, .ldc_i8 2, .ret] }
+  code := [.ldarg 0, .ldarg 1, .conv_i4, .blt 6, .ldc_i8 1, .ret, .ldc_i8 2, .ret] }
 
 /-- Narrowed branch operands match the supplied comparison without expanding symbolic arithmetic. -/
 theorem branch_narrowed_literal (index : CIL.W32) (length : Nat) (memory : Memory)
@@ -238,7 +238,9 @@ def forwardedResults (values : List Value) : List Value := values
 
 /-- Narrowed return equations accept a stack hidden behind a named result projection. -/
 theorem projected_return (memory : Memory) (frame : Frame) :
-    step { code := [], locals := [], returnsValue := true } (.ret (some .unsigned8))
+    step
+      { code := [], locals := [], returnsValue := true,
+        declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Byte" } } .ret
       1 [] frame (forwardedResults [.scalar (.i32 1)] ++ []) memory =
       .ok (.returned [.scalar (.i32 1)] memory) := by
   cil_checked_step []

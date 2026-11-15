@@ -26,7 +26,7 @@ private def forward : RawMethod := raw
 
 /-- Pruned sites retain explicit holes. -/
 private def forwardCode : List Instruction :=
-  [.br 3, .unsupported "hole", .unsupported "hole", .ret]
+  [.br 3, .unadmitted 0, .unadmitted 0, .ret]
 
 /-- Only the branch and its destination are reachable. -/
 private def forwardFeatures : FeatureCertificate := [emptyState, none, none, emptyState]

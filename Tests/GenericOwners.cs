@@ -2,9 +2,15 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -15,8 +21,9 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/GenericOwners");
 Directory.CreateDirectory(root);
 // Foreign owners cannot be serialized as distinct CLI slots; check the in-memory metadata boundary.
-using (var module = ModuleDefinition.ReadModule(assembly))
+using (var pinned = new PinnedMetadata(Assembly.LoadFrom(ExtractorPath), assembly))
 {
+    var module = pinned.Module;
     var caller = module.Types.Single(type => type.Name == "GenericOwners").Methods
         .Single(method => method.Name == "Identity");
     var target = (MethodReference)caller.Body.Instructions.Single(instruction =>
@@ -69,7 +76,8 @@ foreach (var name in new[] { "Identity", "Combined", "Nested", "NestedHelper", "
         theorem generic_owner_result :
             (CIL.Safety.invoke Extracted.program 64 0 [.scalar (.i32 42)]
               { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
-                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] := rfl
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 {{expected}})] :=
+              by cil_kernel_rfl
         #print axioms generic_owner_result
         """;
     if (name == "Combined")
@@ -235,10 +243,11 @@ foreach (var (name, fixture, definition, change) in targetCases)
         theorem generic_table_entry :
             (CIL.Safety.invoke Extracted.program 64 0
               [.methodTable ⟨⟨.atom CIL.Extraction.runtimeScope "System.UInt32",
-                [.atom CIL.Extraction.runtimeScope "System.UInt32"]⟩, some #[{{target.Groups[1].Value}}], none⟩,
+                [.atom CIL.Extraction.runtimeScope "System.UInt32"]⟩, some #[{{target.Groups[1].Value}}], none, 1,
+                by decide⟩,
                 .scalar (.i32 42)]
               { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
-                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := by rfl
+                views := [], nextIdentity := 0 }).map Prod.snd = .ok [.scalar (.i32 42)] := by cil_kernel_rfl
         #print axioms generic_table_entry
         """);
     evidence.Add(tablePath, "PASS generic entry over a supplied table: TableFirst<ulong>");

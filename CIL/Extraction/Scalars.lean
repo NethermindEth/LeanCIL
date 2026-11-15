@@ -5,6 +5,7 @@ import CIL.Extraction.SpanCalls
 import CIL.Extraction.ViewObservations
 import CIL.Extraction.ObjectConstruction
 import CIL.Extraction.GuardCalls
+import CIL.Resolution
 
 /-!
 # Scalar flow
@@ -280,13 +281,6 @@ private def referenceComparison (opcode : Nat) (left right : ScalarKind) : Bool 
       right ∈ [.object, .nullObject]) ||
     (opcode == 65027 && left == .object && right == .nullObject)
 
-/-- Mixed native/int32 operands require exactly one `nativeBinary` wrapper; any other pair
-    forbids it. -/
-private def nativeWrapped (left right : ScalarKind) (encoding : Instruction → Bool) :
-    Instruction → Bool
-  | .nativeBinary operation => mixedNative left right && encoding operation
-  | operation => !mixedNative left right && encoding operation
-
 /-- The constant an `ldc` instruction must emit; an out-of-range operand has none. -/
 private def literal (instruction : RawInstruction) : Option Instruction :=
   match instruction.opcode, instruction.operand with
@@ -334,13 +328,13 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
     | .target target, right :: left :: _ =>
         (compatibleBinary left right || referenceComparison instruction.opcode left right) &&
         !(mixedNative left right && unsignedBranch instruction.opcode) &&
-        nativeWrapped left right (branchEncodingMatches instruction.opcode target) emitted
+        branchEncodingMatches instruction.opcode target emitted
     | _, _ => false
   else if instruction.operand != .none then false
   else if instruction.opcode == 88 &&
       (stack[0]? == some .reference || stack[1]? == some .reference) then
     match stack, emitted with
-    | right :: left :: _, .memory (.add 1 true) => referenceAddition left right
+    | right :: left :: _, .add => referenceAddition left right
     | _, _ => false
   else if instruction.opcode == 89 && (stack.drop 1).head? == some .reference then
     match stack.head?, emitted with
@@ -349,7 +343,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
   else if scalarBinary instruction.opcode then match stack with
     | right :: left :: _ =>
         (compatibleBinary left right || referenceComparison instruction.opcode left right) &&
-        nativeWrapped left right (scalarEncodingMatches instruction.opcode) emitted
+        scalarEncodingMatches instruction.opcode emitted
     | _ => false
   else if instruction.opcode ∈ [98, 99, 100] then match stack with
     | right :: left :: _ =>
@@ -368,7 +362,7 @@ private def scalarEmission : Instruction → Bool
   | .conv_i2 | .conv_i4 | .conv_i8 | .conv_u1 | .conv_u2 | .conv_u4 | .conv_u8 | .conv_u
   | .conv_i | .conv_ovf _ | .conv_ovf_un _
   | .div | .div_un | .rem | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un
-  | .mul_ovf | .mul_ovf_un | .nativeBinary _
+  | .mul_ovf | .mul_ovf_un
   | .beq _ | .bge _ | .bgt _ | .ble _ | .blt _ | .bne_un _ | .bge_un _ | .bgt_un _
   | .ble_un _ | .blt_un _ => true
   | _ => false
@@ -403,37 +397,16 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
-/-- The width and sign extension of a class instance field of `type`: integer, Boolean, Char
-    and enum fields only, each fitting one `objectFieldSlot`. -/
-private def objectFieldShape (type : TypeExpr) : Option (Nat × Bool) :=
-  match typeStorage [] type with
-  | some (.field kind) => (primitiveFieldWidth kind).map fun width =>
-    (width, kind == .signed8 || kind == .signed16)
-  | _ => none
-
 /-- An instance field instruction on a class, or an emitted class field operation. -/
 private def objectFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
-    | .field (.object _ _) _ _ false => true
+    | .field (.object _ _) _ _ _ false => true
     | _ => false) ||
   match emitted with
   | .memory (.objectField ..) | .memory (.setObjectField ..)
   | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..)
   | .memory (.arrayField ..) | .memory (.setArrayField ..) => true
   | _ => false
-
-/-- A class instance field whose slot holds an object reference: one typed as an admitted class
-    or as an array of one, which is itself an object on the heap. -/
-private def referenceFieldType : TypeExpr → Bool
-  | .object _ _ | .array (.object _ _) => true
-  | _ => false
-
-/-- The element of a class instance field typed as an array of a value type, as the evaluation
-    stack records it: a struct element by its identity alone. -/
-private def valueArrayFieldElement (type : TypeExpr) : Option ArrayElement :=
-  match type with
-  | .array element => arrayElementType element
-  | _ => none
 
 /-- An emitted field element is the declared one; a struct element's width is the layout's,
     which `MethodLayoutsValid` checks at the layout use naming the field access. -/
@@ -450,29 +423,29 @@ private def fieldElementMatches (declared emitted : ArrayElement) : Bool :=
 private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Instruction) : Bool :=
   match instruction.opcode, instruction.operand, stack, emitted with
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.objectField owner offset width signed) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && objectFieldShape type == some (width, signed)
-  | 125, .field (.object scope name) index type false, _ :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, _ :: receiver :: _,
       .memory (.setObjectField owner offset width) =>
     receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.objectReferenceField owner offset) =>
     referenceFieldType type && receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
-  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, value :: receiver :: _,
       .memory (.setObjectReferenceField owner offset) =>
     referenceFieldType type && value ∈ [.object, .nullObject] &&
       receiver ∈ [.object, .nullObject] && owner == .object scope name &&
       offset == objectFieldOffset index
-  | 123, .field (.object scope name) index type false, receiver :: _,
+  | 123, .field (.object scope name) index type _ false, receiver :: _,
       .memory (.arrayField owner offset element) =>
     (valueArrayFieldElement type).any (fieldElementMatches · element) &&
       receiver ∈ [.object, .nullObject] &&
       owner == .object scope name && offset == objectFieldOffset index
-  | 125, .field (.object scope name) index type false, value :: receiver :: _,
+  | 125, .field (.object scope name) index type _ false, value :: receiver :: _,
       .memory (.setArrayField owner offset element) =>
     (valueArrayFieldElement type).any (fun declared =>
       fieldElementMatches declared element && value == .array declared) &&
@@ -516,16 +489,13 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     | _, _ => false
   else if instruction.opcode == 88 && (match stack with
       | .nativeMethodTable _ :: _ | _ :: .nativeMethodTable _ :: _ => true | _ => false) then
-    match stack, emitted with
-    | offset :: .nativeMethodTable _ :: _, .managed .tableOffset
-    | .nativeMethodTable _ :: offset :: _, .managed .tableOffset => offset ∈ [.word32, .native]
+    instruction.operand == .none && match stack, emitted with
+    | offset :: .nativeMethodTable _ :: _, .add
+    | .nativeMethodTable _ :: offset :: _, .add => offset ∈ [.word32, .native]
     | _, _ => false
   else if let .managed operation := emitted then match operation, stack with
     | .address .., _ => instruction.opcode == 65030
     | .call .., _ => instruction.opcode == 41
-    | .tableOffset, offset :: .nativeMethodTable _ :: _
-    | .tableOffset, .nativeMethodTable _ :: offset :: _ =>
-      instruction.opcode == 88 && offset ∈ [.word32, .native]
     | .tableLoad signature, .nativeMethodTable actual :: _ =>
       instruction.opcode == 77 && signature == actual
     | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
@@ -836,7 +806,7 @@ private def pushedKind (raw : RawMethod)
     else if instruction.opcode ∈ [124, 127] then some .reference
     -- `ldfld` and `ldsfld`, then `ldobj`.
     else if instruction.opcode == 123 || instruction.opcode == 126 then
-      let .field _ _ type _ := instruction.operand | none
+      let .field _ _ type _ _ := instruction.operand | none
       return scalarType type
     else if instruction.opcode == 113 then
       let .type type := instruction.operand | none
@@ -1019,7 +989,7 @@ def scalarStoreFault (raw : RawMethod) (instruction : RawInstruction)
     let value :: _ := stack | none
     return scalarType type == .word32 && value ∈ [.word64, .native] &&
       match emitted with
-      | .setLocal actual => actual == index
+      | .stloc actual => actual == index
       | _ => false) : Option Bool).getD false
 
 /-- Whether the immediately preceding raw instruction is a readonly prefix. -/
@@ -1077,15 +1047,16 @@ theorem readOnlySiteWindow_eq (raw : RawMethod) :
 
 /-- One pc of the certificate: an unreachable pc must emit a hole; a reachable one must
     agree with the feature stack depth, emit the right encoding, satisfy the readonly rule
-    `readOnly`, and give every successor, which must be reachable, exactly the resulting stack
-    kinds, with local slots read through `locals`. -/
+    `readOnly` and the indirect access rule over the raw instructions `rawAt` gives, and give
+    every successor, which must be reachable, exactly the resulting stack kinds, with local slots
+    read through `locals`. -/
 private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
     (context : NativeDispatchContext) (locals : ScalarLocals)
-    (readOnly : Nat → RawInstruction → Instruction → Bool)
+    (readOnly : Nat → RawInstruction → Instruction → Bool) (rawAt : Nat → Option RawInstruction)
     (successor : List ScalarKind → Nat → Bool) :
     (RawInstruction × Option FoldRole) × Nat → Option FeatureState → Option (List ScalarKind) →
       Instruction → Bool
-  | _, none, none, .unsupported _ => true
+  | _, none, none, .unadmitted _ => true
   | ((instruction, role), pc), some feature, some stack, emitted =>
     stack.length == feature.stack.length && stack.length <= raw.maxStack &&
       (match role with
@@ -1094,10 +1065,11 @@ private def checkScalarSite (layouts : Array RawLayout) (raw : RawMethod)
           | _ => false
         | _ => spanCreateMatches instruction emitted && spanCallMatches instruction emitted) &&
       readOnly pc instruction emitted &&
+      indirectSiteWindow rawAt pc instruction emitted &&
       scalarEmissionMatches layouts role instruction stack emitted &&
       (scalarStoreFault raw instruction stack emitted locals ||
       match scalarTransfer raw instruction stack role context locals,
-          featureSuccessors role pc instruction feature with
+          featureSuccessors role pc instruction feature.stack with
       | some after, some successors =>
         successors.all (successor after)
       | _, _ => false)
@@ -1109,13 +1081,14 @@ def ScalarFlowValid (layouts : Array RawLayout) (raw : RawMethod) (features : Fe
     (certificate : ScalarCertificate) (code : List Instruction) : Prop :=
   let context := nativeDispatchContext raw
   let locals := ScalarLocals.indexed raw context
-  let readOnly := readOnlySiteWindow (FlowIndex.ofList raw.code).get?
-    (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
+  let rawAt := (FlowIndex.ofList raw.code).get?
+  let readOnly :=
+    readOnlySiteWindow rawAt (Std.TreeSet.ofList (branchTargets raw.code) compare).contains
   raw.code.length = features.length ∧ raw.code.length = certificate.length ∧
     raw.code.length = code.length ∧
   certificate[0]? = some (some []) ∧
   all3Flow (fun lookup instruction (feature, stack) emitted =>
-      checkScalarSite layouts raw context locals readOnly
+      checkScalarSite layouts raw context locals readOnly rawAt
         (fun after target => match lookup target with
           | some (some _, incoming) => incoming == some after
           | _ => false) instruction feature stack emitted)
@@ -1160,6 +1133,7 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
       all3 (fun (instruction, feature) stack emitted =>
           checkScalarSite layouts raw (nativeDispatchContext raw)
             (ScalarLocals.ofLists raw (nativeDispatchContext raw)) (readOnlySiteMatches raw)
+            (fun target => raw.code[target]?)
             (fun after target => match features[target]? with
             | some (some _) => certificate[target]? == some (some after)
             | _ => false)
@@ -1167,7 +1141,9 @@ theorem ScalarFlowValid_iff_list (layouts : Array RawLayout) (raw : RawMethod)
         ((raw.code.zip (foldRoles raw.locals raw.code)).zipIdx.zip features) certificate code =
         true := by
   dsimp only [ScalarFlowValid]
-  rw [ScalarLocals.indexed_eq, readOnlySiteWindow_eq,
+  have rawAt : (FlowIndex.ofList raw.code).get? = (fun target => raw.code[target]?) :=
+    funext (FlowIndex.get?_ofList raw.code)
+  rw [ScalarLocals.indexed_eq, readOnlySiteWindow_eq, rawAt,
     all3Flow_eq _ _ _ _ _ _ List.drop_zero.symm]
   simp only [scalarSuccessor_zip]
   by_cases featureLength : raw.code.length = features.length

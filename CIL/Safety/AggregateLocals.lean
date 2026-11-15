@@ -20,7 +20,7 @@ theorem step_store_aggregate {body : CIL.Method} {pc index watermark : Nat}
     (ready : access memory reference size 1 true = .ok ())
     (privateHome : watermark ≤ reference.allocation) :
     ∃ result,
-      step body (.setLocal index) pc args frame (.scalar (.aggregate bytes) :: rest) memory =
+      step body (.stloc index) pc args frame (.scalar (.aggregate bytes) :: rest) memory =
         .ok (.next (pc + 1) rest frame result) ∧
       write memory reference bytes 1 = .ok result ∧
       read result reference size 1 = .ok bytes ∧
@@ -40,7 +40,7 @@ theorem step_store_aggregate {body : CIL.Method} {pc index watermark : Nat}
   refine ⟨result, ?_, written, loaded, value, allocations,
     write_preserves_memory_below _ _ _ _ _ _ privateHome written⟩
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, unchanged, Bind.bind,
+    Bool.false_eq_true, ite_false, slot, stored, unchanged, Bind.bind,
     Except.bind, Pure.pure, Except.pure]
 
 /-- Loading an aggregate local pushes the bytes its home currently reads. -/
@@ -49,10 +49,10 @@ theorem step_load_aggregate {body : CIL.Method} {pc index : Nat}
     {size : Fin (2^64)} {bytes : List (BitVec 8)}
     (slot : frame.locals[index]? = some (.bytes (.aggregate size) reference))
     (loaded : read memory reference size 1 = .ok bytes) :
-    step body (.local index) pc args frame stack memory =
+    step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: stack) frame memory) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false, slot, load_local_aggregate_of_read loaded,
+    Bool.false_eq_true, ite_false, slot, load_local_aggregate_of_read loaded,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_store_aggregate

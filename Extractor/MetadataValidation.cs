@@ -18,7 +18,7 @@ internal static class MetadataValidation
         var marker = markers[0];
         var constructor = marker.Constructor;
         if (markers.Length != 1 || marker.AttributeType is TypeSpecification ||
-            !RuntimeModels.ExactScope(marker.AttributeType.Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(marker.AttributeType, PlatformAssemblies.SystemRuntime) ||
             constructor.Name != ".ctor" || !constructor.HasThis || constructor.ExplicitThis ||
             constructor.CallingConvention != MethodCallingConvention.Default ||
             constructor.HasGenericParameters || constructor.Parameters.Count != 0 ||
@@ -69,8 +69,8 @@ internal static class MetadataValidation
     internal static int? IntegerVectorWidth(TypeReference type)
     {
         if (type is not GenericInstanceType { GenericArguments.Count: 1 } vector ||
-            !RuntimeModels.ExactScope(vector.ElementType.Scope, "System.Runtime.Intrinsics") ||
-            !RuntimeModels.ExactScope(vector.GenericArguments[0].Scope, "System.Runtime") ||
+            !RuntimeModels.ExactScope(vector.ElementType, PlatformAssemblies.SystemRuntimeIntrinsics) ||
+            !RuntimeModels.ExactScope(vector.GenericArguments[0], PlatformAssemblies.SystemRuntime) ||
             vector.GenericArguments[0].FullName is not ("System.Byte" or "System.Int32" or "System.UInt32" or
                 "System.Int64" or "System.UInt64")) return null;
         return vector.ElementType.FullName switch
@@ -102,8 +102,8 @@ internal static class MetadataValidation
     {
         var definition = reference.Resolve() ?? throw new InvalidDataException("Unresolved aggregate field");
         if (definition.IsStatic || reference.Name != definition.Name ||
-            MethodSpecialization.SignatureType(reference.FieldType) !=
-                MethodSpecialization.SignatureType(definition.FieldType))
+            StructuralSignatures.Current.Type(reference.FieldType) !=
+                StructuralSignatures.Current.Type(definition.FieldType))
             throw new InvalidDataException("Mismatched aggregate field signature: " + reference.FullName);
         // The owner and the field resolve separately and must reach one definition, or the field is not the owner's.
         return Array.Find(Fields(reference.DeclaringType), field => field.Definition == definition) ??

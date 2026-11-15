@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Reflection;
@@ -10,6 +15,7 @@ using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 using var verification = new Program();
+Run(["dotnet", "run", "--file", At("Tests/StructuralSignatures.cs")]);
 var assembly = At("Examples/Assembly/bin/Examples.dll");
 var fsharp = At("Examples/FSharp/bin/Examples.FSharp.dll");
 var root = At("artifacts/GenericMethods");

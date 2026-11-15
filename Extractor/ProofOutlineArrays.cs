@@ -20,10 +20,11 @@ internal static partial class ProofOutline
     static ArrayAccess? ArrayRead(Extraction extraction, Specification spec, Operation[] all)
     {
         var ops = all.Where(op => !op.IsNop).ToArray();
-        if (spec.Method.HasThis || spec.Result is not { Boolean: false, Object: false } || ops.Length < 4 ||
+        if (LeanEmitter.Narrow(spec.Method.ReturnType) is not null || spec.Method.HasThis ||
+            spec.Result is not { Boolean: false, Object: false } || ops.Length < 4 ||
             Argument(ops[0]) is not { Shape: ParameterShape.WordArray } array ||
             Argument(ops[1]) is not { Shape: ParameterShape.Scalar, Width: 4 } index ||
-            spec.Result.Lean != WordType(array.Width) || ops[^1] is not Return { Narrow: null })
+            spec.Result.Lean != WordType(array.Width) || ops[^1] is not Return)
             return null;
         if (ops.Length == 4 &&
             ops[2] is Memory { Operation: ArrayLoad { Signed: false } load } && load.Width == array.Width)
@@ -37,7 +38,7 @@ internal static partial class ProofOutline
             ? new(array, index, new(call.Method, method, "")) : null;
 
         Parameter? Argument(Operation op) =>
-            op is Arg { Narrow: null } load ? spec.Parameters[load.Index] : null;
+            op is Arg load && MethodArguments.Plain(spec.Method, load.Index) ? spec.Parameters[load.Index] : null;
     }
 
     /// <summary>Method `index` when it is static `(T[] values, int index)` returning `ref values[index]` of
@@ -45,14 +46,14 @@ internal static partial class ProofOutline
     static MethodDefinition? ElementAddress(Extraction extraction, int index, Arrays.Element element)
     {
         var method = extraction.Methods[index];
-        var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
+        var ops = SlotOperations(extraction.Emitted[index]).Where(op => !op.IsNop).ToArray();
         return !method.HasThis && method.Parameters.Count == 2 && method.ReturnType is ByReferenceType &&
             method.Parameters[0].ParameterType is ArrayType { Rank: 1 } array &&
             WordArrayElement(array.ElementType) == element &&
             method.Parameters[1].ParameterType.FullName is "System.Int32" &&
             extraction.Emitted[index].Frame.HasNoLocals && ops is
-                [Arg { Index: 0, Narrow: null }, Arg { Index: 1, Narrow: null },
-                    Memory { Operation: ArrayAddress { ReadOnly: false } address }, Return { Narrow: null }] &&
+                [Arg { Index: 0 }, Arg { Index: 1 },
+                    Memory { Operation: ArrayAddress { ReadOnly: false } address }, Return] &&
             address.Element == element
             ? method : null;
     }

@@ -49,7 +49,7 @@ theorem wrong_identity :
 /-- Array indexing preserves named bounds exceptions. -/
 theorem past_end :
     memoryInstruction (.arrayTransfer element false) [.scalar (.i32 2), .array view] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms past_end
 
 /-- Expired storage cannot yield a typed element, even when its bytes remain present. -/

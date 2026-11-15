@@ -9,17 +9,28 @@ private def scope :=
 private def unsafeType : TypeExpr := .atom scope "System.Runtime.CompilerServices.Unsafe"
 private def word : TypeExpr := .atom scope "System.UInt64"
 private def call : CallSite := {
-  declaringType := unsafeType, name := "SkipInit"
-  target := .external (scope ++ "::System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(!!0&)")
-  typeArguments := [word], parameterCount := 1, hasThis := false, returnsValue := false }
+  method := {
+    owner := unsafeType, name := name!"SkipInit", hasThis := false, genericArity := 1,
+    returnType := .void, parameters := [], methodArguments := [word] },
+  name := "SkipInit",
+  target := .external (scope ++ "::System.Void System.Runtime.CompilerServices.Unsafe::SkipInit(\
+    !!0&)"),
+  typeArguments := [word], parameterCount := 1, returnsValue := false }
 private def nullCall : CallSite := {
-  declaringType := unsafeType, name := "NullRef"
-  target := .external (scope ++ "::!!0& System.Runtime.CompilerServices.Unsafe::NullRef()")
-  typeArguments := [word], parameterCount := 0, hasThis := false, returnsValue := true }
+  method := {
+    owner := unsafeType, name := name!"NullRef", hasThis := false, genericArity := 1,
+    returnType := .void, parameters := [], methodArguments := [word] },
+  name := "NullRef",
+  target := .external (scope ++ "::!!0& System.Runtime.CompilerServices.Unsafe::NullRef()"),
+  typeArguments := [word], parameterCount := 0, returnsValue := true }
 private def testCall : CallSite := {
-  declaringType := unsafeType, name := "IsNullRef"
-  target := .external (scope ++ "::System.Boolean System.Runtime.CompilerServices.Unsafe::IsNullRef(!!0&)")
-  typeArguments := [word], parameterCount := 1, hasThis := false, returnsValue := true }
+  method := {
+    owner := unsafeType, name := name!"IsNullRef", hasThis := false, genericArity := 1,
+    returnType := .void, parameters := [], methodArguments := [word] },
+  name := "IsNullRef",
+  target := .external (scope ++ "::System.Boolean System.Runtime.CompilerServices.Unsafe::\
+    IsNullRef(!!0&)"),
+  typeArguments := [word], parameterCount := 1, returnsValue := true }
 private def raw (site : CallSite) : RawMethod := {
   token := 1, owner := "Fixture", hasThis := false, explicitThis := false,
   callingConvention := 0, attributes := 0, implementation := 0,
@@ -31,8 +42,11 @@ example : UnsafeCallsValid [] (raw call) [true] [.skipInit] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw call) [true] [.pop] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { call with name := "Other" }) [true] [.skipInit] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { call with target := .external "forged" }) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with declaringType := .atom "forged" "System.Runtime.CompilerServices.Unsafe" }) [true] [.skipInit] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { call with hasThis := true }) [true] [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with
+    method.owner := .atom "forged" "System.Runtime.CompilerServices.Unsafe" }) [true]
+    [.skipInit] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { call with method.hasThis := true }) [true] [.skipInit] := by
+  decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { call with parameterCount := 2 }) [true] [.skipInit] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { call with returnsValue := true }) [true] [.skipInit] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { call with typeArguments := [.byref word] }) [true] [.skipInit] := by decide +kernel
@@ -48,7 +62,8 @@ example : ¬ UnsafeCallsValid [] (raw nullCall) [true] [.memory .isNullRef] := b
 example : ¬ UnsafeCallsValid [] (raw { nullCall with target := .external "forged" }) [true] [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { nullCall with parameterCount := 1 }) [true] [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { nullCall with returnsValue := false }) [true] [.memory .nullRef] := by decide +kernel
-example : ¬ UnsafeCallsValid [] (raw { nullCall with hasThis := true }) [true] [.memory .nullRef] := by decide +kernel
+example : ¬ UnsafeCallsValid [] (raw { nullCall with method.hasThis := true }) [true]
+    [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] (raw { nullCall with typeArguments := [.byref word] }) [true] [.memory .nullRef] := by decide +kernel
 
 -- `IsNullRef` must test for null: a constant or a reinterpretation cannot stand in for it.
@@ -65,8 +80,8 @@ example : ¬ UnsafeCallsValid [] (raw { testCall with typeArguments := [word, wo
 example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .nullRef] := by decide +kernel
 example : ¬ UnsafeCallsValid [] nonCall [true] [.memory .isNullRef] := by decide +kernel
 example : UnsafeCallsValid [] nonCall [true] [.pop] := by decide +kernel
--- Unreachable sites are emitted as unsupported placeholders and are not bound.
-example : UnsafeCallsValid [] (raw nullCall) [false] [.unsupported "excluded"] := by decide +kernel
+-- Unreachable sites are emitted as holes and are not bound.
+example : UnsafeCallsValid [] (raw nullCall) [false] [.unadmitted 0x28] := by decide +kernel
 
 end Tests.UnsafeCallEvidence
 
@@ -75,16 +90,18 @@ namespace Tests.UnsafeCallEvidence
 /-- A genuine managed call to a local lookalike is not reserved as a lowered runtime helper. -/
 theorem local_reference_helper_name :
     UnsafeCallsValid [] (raw { call with
-      declaringType := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe",
+      method.owner := .atom "Fixture" "System.Runtime.CompilerServices.Unsafe",
       name := "AreSame", parameterCount := 2, returnsValue := true }) [true] [.call 1 2] := by
   decide +kernel
 #print axioms local_reference_helper_name
 
 /-- The `System.Object` constructor a class constructor calls on its receiver. -/
 private def objectConstructor : CallSite := {
-  declaringType := .atom scope "System.Object", name := ".ctor"
-  target := .external (scope ++ "::System.Void System.Object::.ctor()")
-  typeArguments := [], parameterCount := 0, hasThis := true, returnsValue := false }
+  method := {
+    owner := .atom scope "System.Object", name := name!".ctor", hasThis := true, genericArity := 0,
+    returnType := .void, parameters := [] },
+  name := ".ctor", target := .external (scope ++ "::System.Void System.Object::.ctor()"),
+  typeArguments := [], parameterCount := 0, returnsValue := false }
 
 -- Only the exact `System.Object` constructor may emit `pop`, and it must.
 theorem object_constructor_pop :
@@ -92,11 +109,11 @@ theorem object_constructor_pop :
 #print axioms object_constructor_pop
 theorem object_constructor_elsewhere_rejected :
     ¬ UnsafeCallsValid [] (raw { objectConstructor with
-      declaringType := .atom "forged" "System.Object" }) [true] [.pop] ∧
+      method.owner := .atom "forged" "System.Object" }) [true] [.pop] ∧
     ¬ UnsafeCallsValid [] (raw { objectConstructor with
       target := .external "forged" }) [true] [.pop] ∧
     ¬ UnsafeCallsValid [] (raw { objectConstructor with parameterCount := 1 }) [true] [.pop] ∧
-    ¬ UnsafeCallsValid [] (raw { objectConstructor with hasThis := false }) [true] [.pop] ∧
+    ¬ UnsafeCallsValid [] (raw { objectConstructor with method.hasThis := false }) [true] [.pop] ∧
     ¬ UnsafeCallsValid [] (raw objectConstructor) [true] [.nop] ∧
     ¬ UnsafeCallsValid [] (raw call) [true] [.pop] := by decide +kernel
 #print axioms object_constructor_elsewhere_rejected

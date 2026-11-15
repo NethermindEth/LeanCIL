@@ -116,7 +116,7 @@ equivalence theorem or property stated for each index and the regression that co
 | Region suffix membership | Fallthrough closure is automatic, since `lower ≤ pc` implies `lower ≤ pc + 1`, so the checker looks up only explicit branch targets and callees. Its equivalence theorem covers every instruction, including a final fallthrough beyond the body; instruction availability is a separate execution obligation. | `Tests.RegionRun` |
 | Constrained validation and lowering | Balanced instruction/reachability indexes and a set of all decoded branch destinations, including unreachable instructions and switch arms; lowering also indexes predecessor instructions. `lowerConstrainedRaw_eq_original` proves identical output for arbitrary raw bodies, including malformed prefixes. `ConstrainedCallsValid_iff_original` preserves the list-based rules. | Constrained evidence suites |
 | Sequential constrained evidence | Validation consumes the raw, reachability and emitted lists together, keeping the previous instruction and reading the next from the tail; lowering keeps the raw predecessor before rewriting it. Malformed-neighbor and length rejection, method-target lookup, branch membership and dispatch metadata resolution are unchanged checks. | Constrained evidence suites |
-| Managed-call validation | Indexes extracted methods and imported slots once per method check. `ManagedCallsValid_iff_original` preserves the list-based rules, including absent entries, import offsets and malformed lengths. `cil_managed_calls` uses structural metadata equalities before its kernel-decision fallback. | Import evidence suites |
+| Managed-call validation | Indexes extracted methods and imported slots once per method check, requires the link table's keys to ascend and to be pcs of the code, and reads each pc's link by one walk beside the code. `ManagedCallsValid_iff_original` shows the check accepts exactly the bodies whose table is the one their code implies and whose calls pass the list-based rules, including absent entries, import offsets and malformed lengths. `cil_managed_calls` uses structural metadata equalities before its kernel-decision fallback. | Import evidence suites; the `lookups` call check row |
 | Home discovery, static sites, opaque locals | Balanced indexes: `Std.TreeSet`/`Std.TreeMap` for keyed membership and `FlowIndex` for positional lookup. Home discovery collects live stores and addresses once and keeps argument order while filtering the argument range. Static sites keep the first descriptor at a duplicate pc. Opaque-local discovery considers addresses in the complete raw body, including dead instructions, and reads each type from `zipIdx`. Equivalence theorems cover arbitrary input lists, including malformed indexes, duplicate sites and truncated masks; they require no new assumptions. | `Tests.ExtractionHomeIndexes` |
 | Parameter home enumeration | Enumerates the collected ordered set and filters by the argument bound. The proved list equality keeps ascending order, duplicate elimination, out-of-range filtering and truncated reachability semantics. | `Tests/HomeEnumerationScaling.lean` compares both algorithms |
 | Argument instruction validation | Shares indexes for argument types and appended home slots; expected home kinds use the argument-type index. The home-slot map keeps the first occurrence for duplicate home lists; missing argument indexes, hidden home accesses and unsupported replacements are rejected. Exact lookup/check equivalence theorems preserve the semantic consequence statements. | `Tests.ExtractionHomeIndexes` |
@@ -168,8 +168,9 @@ These regressions cover the extractor's own C# indexes:
   mutation visibility, distinct x64/arm64 vector layouts and nesting rejection after warming a
   child.
 - C# argument translation indexes argument home positions once per method in validation,
-  emission and exception lint. Duplicate inputs keep their first position, missing homes stay
-  absent, and raw locals are added to the home position when emitting local-slot instructions.
+  emission and exception lint. Duplicate inputs keep their first position and missing homes stay
+  absent. A homed argument's load, store and address keep the argument index, and a store or
+  address of an argument without a home is refused.
   `Tests/InstructionIndexes.cs` exercises loads, stores, addresses, duplicate homes and
   missing-store rejection.
 - Interface-module merging detects spelling collisions ignoring ordinal case and writes its
@@ -427,16 +428,13 @@ These regressions cover joint replay:
 
 ### Fold discovery
 
-Fold discovery counts decoded local references once and reads local types and receiver fold
-candidates from `FlowIndex`es built once per body. `foldRoles_eq_filter` proves exact equality to
-the specification that reads the locals list and filters the whole body at every site, including
-malformed operands and out-of-range local indexes. Methods without locals skip count
-construction.
+Fold discovery reads local types from a `FlowIndex` built once per body. Span receiver stores and
+addresses have no fold roles; their raw opcodes bind the emitted local instructions independently.
 
 Exception folds inspect at most three message loads, since admitted constructors accept at most
 two. `throwFold_eq_takeWhile` proves equality to the unrestricted prefix scan. A long rejected
-prefix does not prevent an admitted fold starting later. Span and throw evidence tests cover extra
-uses, malformed local operands, oversized prefixes and valid suffix folds.
+prefix does not prevent an admitted fold starting later. Span and throw evidence tests cover exact
+constructors, receiver instructions, oversized prefixes and valid suffix folds.
 
 ### Transitive composition replay
 

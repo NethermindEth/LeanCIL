@@ -46,11 +46,16 @@ structure MethodTableBacking where
   deriving DecidableEq, Repr
 
 /-- Supplied immutable handler entries sharing one closed signature; `none` is a null table.
-    Native cursors additionally retain the backing allocation and table origin. -/
+    Native cursors additionally retain the backing allocation and table origin. The entry count
+    is carried beside the entries, so a native table step reads it without walking them. -/
 structure MethodTable where
   signature : ManagedSignature
   targets : Option (Array ManagedIdentity)
   backing : Option MethodTableBacking := none
+  /-- The number of supplied entries. -/
+  entryCount : Nat
+  /-- The supplied entries number exactly `entryCount`, proved once where the table is built. -/
+  counted : ∀ entries ∈ targets, entries.size = entryCount := by decide
   deriving DecidableEq, Repr
 
 /-- Managed pointer operations preserve metadata provenance instead of encoding addresses. -/
@@ -58,7 +63,6 @@ inductive ManagedOp where
   | address (target : ManagedTarget) (signature : ManagedSignature)
   | tableLength
   | tableElement (signature : ManagedSignature)
-  | tableOffset
   | tableLoad (signature : ManagedSignature)
   | call (signature : ManagedSignature) (catalog : List ManagedTarget) (tail : Bool)
   deriving DecidableEq, Repr

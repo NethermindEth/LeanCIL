@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
@@ -69,8 +74,10 @@ void Reject(string name, string mutated)
 
 // Mutate lookup lemmas along with code so their rfl proofs cannot cause the rejection.
 Reject("omitted-home", baseline.Replace("[(0, .word32)]", "[]"));
-Reject("wrong-slot", baseline.Replace(".setLocal 0", ".setLocal 1").Replace(".local 0", ".local 1"));
-Reject("omitted-redirection", baseline.Replace(".local 0", ".arg 0"));
+Reject("wrong-argument", baseline.Replace(".starg 0", ".starg 1"));
+// The home slot follows the declared locals, so naming it as a local is refused for a store and a load.
+Reject("home-slot-store", baseline.Replace(".starg 0", ".stloc 0"));
+Reject("home-slot-load", baseline.Replace(".ldarg 0", ".ldloc 0"));
 Reject("wrong-home-type", baseline.Replace("[(0, .word32)]", "[(0, .word64)]"));
 Reject("omitted-raw-site", baseline.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"));
 rejected.Check();

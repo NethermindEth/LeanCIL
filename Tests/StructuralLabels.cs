@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 // One proof file, unedited, must verify against two builds of a method with two loops and
 // two calls to one helper; the second inserts a statement before the first loop.
@@ -42,9 +47,9 @@ string Proof(string name, string bindings, string count, string countLatch, stri
 
     -- Each loop body and back edge, and the final call, stated at its label.
     theorem correctness :
-        (rootBody.code.drop {{count}}).take 4 = [.local 1, .ldc_i4 1, .sub, .setLocal 1] ∧
+        (rootBody.code.drop {{count}}).take 4 = [.ldloc 1, .ldc_i4 1, .sub, .stloc 1] ∧
         rootBody.code[{{countLatch}}]? = some (.brtrue {{count}}) ∧
-        (rootBody.code.drop {{reduce}}).take 4 = [.local 0, .ldc_i4 3, .sub, .setLocal 0] ∧
+        (rootBody.code.drop {{reduce}}).take 4 = [.ldloc 0, .ldc_i4 3, .sub, .stloc 0] ∧
         rootBody.code[{{reduceLatch}}]? = some (.bgt_un {{reduce}}) ∧
         (rootBody.code.drop {{after}}).take 2 = [.call {{callee}} 1, .ret] :=
       ⟨rfl, rfl, rfl, rfl, rfl⟩

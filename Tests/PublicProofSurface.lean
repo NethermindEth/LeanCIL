@@ -62,10 +62,12 @@ theorem vector_literal_rewrite (memory : Memory) (frame : Frame) (vector reverse
 
 /-- An aggregate is reinterpreted as a vector and compared with zero before a narrow return. -/
 @[cil_code] def aggregateZero : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.loadAggregate 32,
+  {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  locals := [], returnsValue := true, code := [.loadAggregate 32,
     .memory (.bitcastValue (.aggregate 32) .vector256),
     .intrinsic (.vector (.zero 256)) 0, .intrinsic (.vector (.equalsAll 256)) 2,
-    .ret (some .unsigned8)] }
+    .ret] }
 
 /-- Snapshot map rewrites and symbolic intrinsic results remain usable after checked stepping. -/
 theorem aggregate_boolean_return (memory : Memory) (frame : Frame) (input : Reference)
@@ -81,8 +83,10 @@ theorem aggregate_boolean_return (memory : Memory) (frame : Frame) (input : Refe
 
 /-- A vector comparison returns its scalar Boolean through the narrow return instruction. -/
 @[cil_code] def equalVector : CIL.Method :=
-  { locals := [], returnsValue := true,
-    code := [.intrinsic (.vector (.equalsAll 128)) 2, .ret (some .unsigned8)] }
+  {
+  declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
+  locals := [], returnsValue := true,
+    code := [.intrinsic (.vector (.equalsAll 128)) 2, .ret] }
 
 /-- An intrinsic's private result helper does not obstruct a symbolic scalar return. -/
 theorem vector_boolean_return (memory : Memory) (frame : Frame) (left right : BitVec 128) :
@@ -115,8 +119,8 @@ def pairView (reference : Reference) : ArgumentView := ⟨reference, 16⟩
 
 /-- Both source fields are loaded before any output could overwrite them. -/
 @[cil_code] def readPair : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.arg 2, .skipInit,
-      .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 8 8, .add, .ret] }
+  { locals := [], returnsValue := true, code := [.ldarg 2, .skipInit,
+      .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 8 8, .add, .ret] }
 
 /-- Named call validity supplies field reads even when output aliases an entire input. -/
 theorem overlapping_fields (memory : Memory) (left right : Reference)
@@ -139,7 +143,7 @@ theorem mixed_local_snapshot {caller current final : Memory} {word vector : Refe
     (confined : Confined [(word, 8)] current final) (formed : final.WellFormed)
     (loaded : read final word 8 1 = .ok (numberBytes value.toNat 8))
     (body : CIL.Method) (pc : Nat) (arguments stack : List Value) :
-    step body (.local 1) pc arguments
+    step body (.ldloc 1) pc arguments
       { activation := 0, locals := [.bytes .word64 word, .bytes .vector256 vector], owned := [] }
       stack final = .ok (.next (pc + 1) (.scalar (.v256 saved) :: stack)
         { activation := 0, locals := [.bytes .word64 word, .bytes .vector256 vector], owned := [] }

@@ -1,13 +1,13 @@
-import CIL.Extraction.Generics
+import CIL.ExceptionType
+import CIL.Extraction.ValueDecoding
 import CIL.Extraction.SpanCalls
-import Std.Data.TreeMap.Lemmas
 
 /-!
 # Folded instruction sequences
 
 Some raw instruction sequences have no instruction-by-instruction translation and are
 emitted as a unit: `typeof(A) == typeof(B)` becomes its decided Boolean, `throw new E(...)`
-becomes one `throw`, and `stloc s; ldloca s` over a span local keeps the span on the stack.
+becomes one `throw`, and span constructors initialize typed local storage.
 `foldRoles` finds these sequences from the raw body alone and gives each instruction its
 role, which the feature and scalar checks then enforce.
 -/
@@ -46,19 +46,23 @@ private def typeHandle : RawInstruction → Option TypeExpr
   | ⟨_, 208, .type type⟩ => some type
   | _ => none
 
-/-- The exact call site of a static `System.Type` method with `parameters` parameters. -/
-private def typeMethod (name signature : String) (parameters : Nat) : CallSite := {
-  declaringType := .atom runtimeScope "System.Type", name,
-  target := .external (runtimeScope ++ "::" ++ signature),
-  typeArguments := [], parameterCount := parameters, hasThis := false, returnsValue := true,
-  returnType := .atom runtimeScope
-    (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
-  parameterTypes := if name == "GetTypeFromHandle" then
-      [.atom runtimeScope "System.RuntimeTypeHandle"]
-    else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] }
+/-- The exact call site of a static `System.Type` method with `parameters` parameters;
+    `methodName` is the metadata name spelling `name`. -/
+private def typeMethod (name : String) (methodName : MetadataName) (signature : String)
+    (parameters : Nat) : CallSite := {
+  method := {
+    owner := .atom runtimeScope "System.Type", name := methodName, hasThis := false,
+    genericArity := 0,
+    returnType := .atom runtimeScope
+      (if name == "GetTypeFromHandle" then "System.Type" else "System.Boolean"),
+    parameters := if name == "GetTypeFromHandle" then
+        [.atom runtimeScope "System.RuntimeTypeHandle"]
+      else [.atom runtimeScope "System.Type", .atom runtimeScope "System.Type"] },
+  name, target := .external (runtimeScope ++ "::" ++ signature),
+  typeArguments := [], parameterCount := parameters, returnsValue := true }
 
 private def getTypeFromHandle : CallSite :=
-  typeMethod "GetTypeFromHandle"
+  typeMethod "GetTypeFromHandle" name!"GetTypeFromHandle"
     "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle)" 1
 
 /-- Exactly `call Type.GetTypeFromHandle`. -/
@@ -74,9 +78,9 @@ private def typeComparison (instruction : RawInstruction) : Option Bool :=
     | .target _ => some (instruction.opcode == 46 || instruction.opcode == 59)
     | _ => none
   else if instruction.opcode != 40 then none
-  else if instruction.operand == .call (typeMethod "op_Equality"
+  else if instruction.operand == .call (typeMethod "op_Equality" name!"op_Equality"
       "System.Boolean System.Type::op_Equality(System.Type,System.Type)" 2) then some true
-  else if instruction.operand == .call (typeMethod "op_Inequality"
+  else if instruction.operand == .call (typeMethod "op_Inequality" name!"op_Inequality"
       "System.Boolean System.Type::op_Inequality(System.Type,System.Type)" 2) then some false
   else none
 
@@ -100,82 +104,82 @@ def typeTestInstruction (instruction : RawInstruction) : Bool :=
       | _ => false
     | _ => false
 
-/-- The local a `ldloc`, `stloc` or `ldloca` instruction names, in any of its forms. -/
-def localIndex (instruction : RawInstruction) : Option Nat :=
-  match instruction.opcode, instruction.operand with
-  -- `ldloc.0` to `ldloc.3` and `stloc.0` to `stloc.3`.
-  | 6, .none | 10, .none => some 0
-  | 7, .none | 11, .none => some 1
-  | 8, .none | 12, .none => some 2
-  | 9, .none | 13, .none => some 3
-  -- `ldloc`, `ldloca` and `stloc`, short and long forms.
-  | 17, .local n | 18, .local n | 19, .local n
-  | 65036, .local n | 65037, .local n | 65038, .local n => some n
-  | _, _ => none
-
-/-- Whether `instruction` names a typed span local, with each local's type given by `localAt`. -/
-def spanLocalOp (localAt : Nat → Option TypeExpr) (instruction : RawInstruction) : Bool :=
-  match localIndex instruction with
-  | some index => ((localAt index).map spanLocal).getD false
-  | none => false
-
-/-- `stloc s; ldloca s` over a span local `s`: the span stays on the stack as the receiver. -/
-def receiverFold (localAt : Nat → Option TypeExpr) (a b : RawInstruction) : Bool :=
-  a.opcode ∈ [10, 11, 12, 13, 19, 65038] && (b.opcode == 18 || b.opcode == 65037) &&
-    localIndex a == localIndex b && spanLocalOp localAt a
-
-/-- A receiver fold ends at a length call or an item call with a single index push. -/
-private def spanReceiverUse (code : List RawInstruction) : Bool :=
-  let member (instruction : RawInstruction) (name : String) :=
-    match instruction with
-    | ⟨_, 40, .call site⟩ => site.hasThis && site.name == name && spanLocal site.declaringType
-    | _ => false
-  match code with
-  | call :: _ =>
-    member call "get_Length" || match code with
-    | index :: call :: _ =>
-      index.opcode ∈ [2, 3, 4, 5, 14, 65033, 6, 7, 8, 9, 17, 65036,
-        21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32] && member call "get_Item"
-    | _ => false
-  | _ => false
-
 /-- `ldstr` (114) or `ldnull` (20): a message argument of a folded `throw`. -/
 private def messageLoad (instruction : RawInstruction) : Bool :=
   instruction.opcode == 114 || instruction.opcode == 20
 
-/-- Admitted framework exceptions with parameterless/string constructors, plus the three
-    argument exceptions' two-string overloads. Other constructors remain unsupported. -/
-private def stringExceptionConstructor (name : String) (count : Nat) : Bool :=
-  (count ≤ 1 && name ∈ ["System.Exception", "System.SystemException",
-    "System.ApplicationException", "System.ArithmeticException",
-    "System.DivideByZeroException", "System.OverflowException",
-    "System.InvalidOperationException", "System.NotSupportedException",
-    "System.NotImplementedException", "System.ArgumentException",
-    "System.ArgumentNullException", "System.ArgumentOutOfRangeException",
-    "System.IndexOutOfRangeException", "System.NullReferenceException",
-    "System.FormatException"]) ||
-  (count == 2 && name ∈ ["System.ArgumentException", "System.ArgumentNullException",
-    "System.ArgumentOutOfRangeException"])
+/-- The member a constructor's owner spells, the scope compared once; `none` for any other type. -/
+def exceptionOwner? : TypeExpr → Option ExceptionType
+  | .atom scope name =>
+    if scope == runtimeScope then ExceptionType.all.find? (·.ownerName == name) else none
+  | _ => none
 
-/-- Exact framework signatures whose literal/null arguments cannot change the raised type. -/
-def exceptionConstructor (name : String) (parameters : List TypeExpr) : Bool :=
-  let string := TypeExpr.object runtimeScope "System.String"
-  let exception := TypeExpr.atom runtimeScope "System.Exception"
-  (parameters.all (· == string) && stringExceptionConstructor name parameters.length) ||
-    (parameters == [string, exception] && name ∈ ["System.Exception",
-      "System.InvalidOperationException", "System.ArgumentException",
-      "System.ArgumentOutOfRangeException"]) ||
-    (name == "System.ArgumentException" && parameters == [string, string, exception]) ||
-    (name == "System.ArgumentOutOfRangeException" &&
-      parameters == [string, .atom runtimeScope "System.Object", string])
+/-- A constructor owner that names a member is that member's runtime type. -/
+theorem exceptionOwner?_eq_some {type : TypeExpr} {raised : ExceptionType}
+    (found : exceptionOwner? type = some raised) : type = .atom runtimeScope raised.ownerName := by
+  cases type with
+  | atom scope name =>
+    simp only [exceptionOwner?] at found
+    split at found
+    next sameScope =>
+      have named := List.find?_some found
+      simp only [beq_iff_eq] at named sameScope
+      rw [sameScope, named]
+    next => simp at found
+  | _ => simp [exceptionOwner?] at found
+
+#print axioms exceptionOwner?_eq_some
+
+/-- Each member's owner name identifies that member: no member shadows another. -/
+theorem exceptionOwner?_ownerName (raised : ExceptionType) :
+    exceptionOwner? (.atom runtimeScope raised.ownerName) = some raised := by
+  have sameOwner : ∀ other : ExceptionType,
+      (other.ownerName == raised.ownerName) = (other == raised) := by
+    intro other
+    by_cases equal : other = raised
+    · subst equal
+      simp
+    · have names : other.ownerName ≠ raised.ownerName := ExceptionType.ownerName_injective.ne equal
+      simp only [beq_eq_false_iff_ne.mpr names, beq_eq_false_iff_ne.mpr equal]
+  simp only [exceptionOwner?, beq_self_eq_true, ↓reduceIte, sameOwner]
+  cases raised <;> decide
+
+#print axioms exceptionOwner?_ownerName
+
+/-- The `System.String` parameter of an exception constructor: a message or a parameter name. -/
+def messageParameter : TypeExpr := .object runtimeScope "System.String"
+
+/-- The `System.Exception` parameter of an exception constructor: the inner exception. -/
+def innerParameter : TypeExpr := .atom runtimeScope "System.Exception"
+
+/-- The `System.Object` parameter of an exception constructor: the actual argument value. -/
+def actualParameter : TypeExpr := .atom runtimeScope "System.Object"
+
+/-- The parameter lists of the constructors a folded `throw` may call for each member; the
+    members only instructions raise admit none. -/
+def admittedParameters : ExceptionType → List (List TypeExpr)
+  | .baseException | .invalidOperation =>
+    [[], [messageParameter], [messageParameter, innerParameter]]
+  | .systemException | .applicationException | .arithmetic | .divideByZero | .overflow
+  | .notSupported | .notImplemented | .indexOutOfRange | .nullReference | .format =>
+    [[], [messageParameter]]
+  | .argument =>
+    [[], [messageParameter], [messageParameter, messageParameter],
+      [messageParameter, innerParameter], [messageParameter, messageParameter, innerParameter]]
+  | .argumentNull => [[], [messageParameter], [messageParameter, messageParameter]]
+  | .argumentOutOfRange =>
+    [[], [messageParameter], [messageParameter, messageParameter],
+      [messageParameter, innerParameter], [messageParameter, actualParameter, messageParameter]]
+  | .invalidCast | .arrayTypeMismatch => []
 
 /-- An exact allowlisted `System.Runtime` constructor, including its complete signature. -/
 private def raisedType (count : Nat) (arguments : List RawInstruction)
-    (instruction : RawInstruction) : Option String :=
+    (instruction : RawInstruction) : Option ExceptionType :=
   if 3 < count then none else match instruction with
   | ⟨_, 115, .call site⟩ => match site.declaringType, site.target with
-    | .atom scope name, .external signature =>
-      if scope == runtimeScope && exceptionConstructor name site.parameterTypes &&
+    | .atom _ name, .external signature => do
+      let raised ← exceptionOwner? site.declaringType
+      if site.parameterTypes ∈ admittedParameters raised &&
         site.parameterTypes.length == count && arguments.length == count &&
         (arguments.zip site.parameterTypes).all (fun (argument, parameter) =>
           parameter == .object runtimeScope "System.String" || argument.opcode == 20) &&
@@ -184,7 +188,7 @@ private def raisedType (count : Nat) (arguments : List RawInstruction)
             match type with | .atom _ name | .object _ name => name | _ => "") ++ ")" &&
         site.name == ".ctor" && site.hasThis && !site.returnsValue &&
         site.returnType == .void && site.typeArguments.isEmpty &&
-        site.parameterCount == count then some name else none
+        site.parameterCount == count then some raised else none
     | _, _ => none
   | _ => none
 
@@ -192,7 +196,7 @@ private def raisedType (count : Nat) (arguments : List RawInstruction)
 private def throwMessageLimit : Nat := 4
 
 /-- `throw new E(...)` with only string or null arguments: the argument count and raised type. -/
-def throwFold (code : List RawInstruction) : Option (Nat × String) :=
+def throwFold (code : List RawInstruction) : Option (Nat × ExceptionType) :=
   let count := ((code.take throwMessageLimit).takeWhile messageLoad).length
   if count == throwMessageLimit then none else
   match code.drop count with
@@ -241,7 +245,7 @@ inductive FoldRole where
   /-- A reference-equality branch over two closed typeof values takes this decided edge. -/
   | typeBranch (taken : Bool)
   /-- The raw `throw`: raises the type bound by the exact folded operands. -/
-  | raise (exception : String)
+  | raise (exception : ExceptionType)
   /-- An unchanged argument push protected from non-fallthrough entry. -/
   | argument
   /-- A checked constructor initializes the local whose address starts the fold. -/
@@ -279,15 +283,14 @@ private def spanConstructorFold (localAt : Nat → Option TypeExpr) (head : RawI
     some (some .head :: List.replicate pushes.length (some .argument) ++
       [some (.spanConstructor index constructor)])
 
-/-- The roles of a fold starting at `a`, if any; type tests take precedence. `localAt` gives
-    each local's type and `receiverAt` the type of each local a receiver fold may name. -/
-private def foldAt (localAt receiverAt : Nat → Option TypeExpr)
+/-- The roles of a fold starting at `a`, with local types supplied by `localAt`. -/
+private def foldAt (localAt : Nat -> Option TypeExpr)
     (a : RawInstruction) (tail : List RawInstruction) :
     Option (List (Option FoldRole)) :=
   spanDefaultFold localAt a tail <|> spanConstructorFold localAt a tail <|>
   (match a, tail with
     | ⟨_, 20, .none⟩, ⟨_, 122, .none⟩ :: _ =>
-      some [some .head, some (.raise "System.NullReferenceException")]
+      some [some .head, some (.raise .nullReference)]
     | ⟨_, 65044, .none⟩, ⟨_, 41, .indirectCall _ _ false false 0⟩ ::
         ⟨_, 42, .none⟩ :: _ => some [some .head, some .tailCall, some .argument]
     | ⟨_, 65044, .none⟩, ⟨_, 40, .call site⟩ :: ⟨_, 42, .none⟩ :: _ =>
@@ -296,76 +299,27 @@ private def foldAt (localAt receiverAt : Nat → Option TypeExpr)
       | _ => none
     | _, _ => none) <|>
   (match tail with
-    | b :: rest => if receiverFold receiverAt a b && spanReceiverUse rest then
-        some [some .head, some .interior] else none
-    | _ => none) <|>
-  (match tail with
     | b :: c :: d :: e :: _ => (typeTest a b c d e).map fun value =>
         [some .head, some .interior, some .interior, some .interior,
           some (if e.opcode == 40 || e.opcode == 65025 then .result value else .typeBranch value)]
     | _ => none) <|>
-  (throwFold (a :: tail)).map fun (count, name) =>
-    some .head :: List.replicate count (some .interior) ++ [some (.raise name)]
+  (throwFold (a :: tail)).map fun (count, raised) =>
+    some .head :: List.replicate count (some .interior) ++ [some (.raise raised)]
 
 /-- Assign `pending` roles first; each step consumes one instruction, so the walk is structural.
-    Local types come from `localAt` and receiver fold candidates from `receiverAt`. -/
-def foldRolesFrom (localAt receiverAt : Nat → Option TypeExpr) :
+    Local types come from `localAt`. -/
+def foldRolesFrom (localAt : Nat -> Option TypeExpr) :
     List (Option FoldRole) → List RawInstruction → List (Option FoldRole)
   | _, [] => []
-  | role :: pending, _ :: tail => role :: foldRolesFrom localAt receiverAt pending tail
-  | [], a :: tail => match foldAt localAt receiverAt a tail with
-    | some (role :: pending) => role :: foldRolesFrom localAt receiverAt pending tail
-    | _ => none :: foldRolesFrom localAt receiverAt [] tail
+  | role :: pending, _ :: tail => role :: foldRolesFrom localAt pending tail
+  | [], a :: tail => match foldAt localAt a tail with
+    | some (role :: pending) => role :: foldRolesFrom localAt pending tail
+    | _ => none :: foldRolesFrom localAt [] tail
 
-/-- Exact counts of decoded local operands, including indexes outside the declared locals. -/
-private def localUseCounts : List RawInstruction → Std.TreeMap Nat Nat
-  | [] => ∅
-  | instruction :: rest =>
-    let counts := localUseCounts rest
-    match localIndex instruction with
-    | none => counts
-    | some index => counts.insert index (counts.getD index 0 + 1)
-
-/-- Each indexed count equals the original raw-instruction filter, even for malformed operands. -/
-private theorem localUseCounts_get (code : List RawInstruction) (index : Nat) :
-    (localUseCounts code).getD index 0 =
-      (code.filter fun instruction => localIndex instruction == some index).length := by
-  induction code with
-  | nil => simp [localUseCounts]
-  | cons instruction rest ih =>
-    cases decoded : localIndex instruction with
-    | none => simp [localUseCounts, decoded, ih]
-    | some decodedIndex =>
-      simp only [localUseCounts, decoded, Std.TreeMap.getD_insert, Nat.compare_eq_eq]
-      by_cases same : decodedIndex = index
-      · simp [same, decoded, ih]
-      · simp [same, decoded, ih]
-
-#print axioms localUseCounts_get
-
-/-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold. Local
-    types and receiver fold candidates are read from `FlowIndex`es built once per body. -/
+/-- Roles derived from the raw body alone; extraction evidence cannot add or move a fold.
+    Local types are read from a `FlowIndex` built once per body. -/
 def foldRoles (locals : List TypeExpr) (code : List RawInstruction) : List (Option FoldRole) :=
-  if locals.isEmpty then foldRolesFrom (fun _ => none) (fun _ => none) [] code else
-  let counts := localUseCounts code
-  let singleUse := locals.zipIdx.map fun (type, index) =>
-    if counts.getD index 0 == 2 then type else .void
-  foldRolesFrom (FlowIndex.ofList locals).get? (FlowIndex.ofList singleUse).get? [] code
-
-/-- Indexed role discovery agrees with reading the locals list and filtering the whole body
-    separately for each local at every site. -/
-theorem foldRoles_eq_filter (locals : List TypeExpr) (code : List RawInstruction) :
-    foldRoles locals code = foldRolesFrom (locals[·]?)
-      ((locals.zipIdx.map fun (type, index) =>
-        if (code.filter fun instruction => localIndex instruction == some index).length == 2
-          then type else .void)[·]?) [] code := by
-  have indexed (values : List TypeExpr) : (FlowIndex.ofList values).get? = (values[·]?) :=
-    funext (FlowIndex.get?_ofList values)
-  cases locals <;> simp only [foldRoles, List.isEmpty_nil, List.isEmpty_cons,
-    Bool.false_eq_true, ↓reduceIte, List.zipIdx_nil, List.map_nil, List.getElem?_nil, indexed,
-    localUseCounts_get]
-
-#print axioms foldRoles_eq_filter
+  foldRolesFrom (FlowIndex.ofList locals).get? [] code
 
 /-- A non-fallthrough edge may enter a fold only at its first instruction. -/
 def foldEntry (role : Option (Option FoldRole)) : Bool :=

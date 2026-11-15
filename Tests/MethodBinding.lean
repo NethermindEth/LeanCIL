@@ -6,7 +6,7 @@ open CIL
 
 /-- An extraction-independent body whose branch target depends on a shift. -/
 def body (shift : Nat) (locals : List Value := [.i32 0]) : Method := {
-  code := [.arg 0, .brfalse (4 + shift), .arg 1, .ret, .arg 1, .ret]
+  code := [.ldarg 0, .brfalse (4 + shift), .ldarg 1, .ret, .ldarg 1, .ret]
   locals, returnsValue := true }
 
 def program : Program := [{ code := [.ret], locals := [], returnsValue := false }, body 6]
@@ -62,16 +62,17 @@ def field : StaticDescriptor :=
 
 /-- An extracted method whose call sits at pc 2, behind a branch, and which reads no static. -/
 def calling : Method := {
-  code := [.arg 0, .br 2, .call 7 1, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .br 2, .call 7 1, .ret], locals := [], returnsValue := true }
 
 /-- An extracted method that reads a static at pc 0 and calls at pc 3. -/
 def reading : Method := {
-  code := [.memory (.staticAddress (List.replicate 8 0)), .pop, .arg 0, .call 7 1, .ret]
+  code := [.memory (.staticAddress (List.replicate 8 0)), .pop, .ldarg 0, .call 7 1, .ret]
   locals := [], returnsValue := true, staticSites := [(0, field)] }
 
 /-- Another method whose frame fields a body is built on, with a call and a static at other pcs. -/
 def donor : Method := {
-  code := [.arg 0, .memory (.staticAddress (List.replicate 8 0)), .pop, .arg 0, .call 3 1, .ret]
+  code := [.ldarg 0, .memory (.staticAddress (List.replicate 8 0)), .pop, .ldarg 0, .call 3 1,
+      .ret]
   locals := [], returnsValue := true, staticSites := [(1, field)] }
 
 def withCodeProgram : Program := [calling, reading]

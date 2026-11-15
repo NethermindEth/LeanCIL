@@ -2,6 +2,7 @@ import Tests.AggregateSetup
 import Tests.ValueBitCasts
 import Tests.ViewReuse
 import Tests.Support
+import Tests.MixedNativeOpcodes
 import CIL.Safety.ExecutionInvariants
 import CIL.Safety.NumericLocalLoad
 
@@ -14,7 +15,7 @@ theorem vector_lane_add :
       some (.v128 (CIL.Vector.pack128 4 6)) := rfl
 
 theorem disabled_intrinsic :
-    (CIL.step (.intrinsic (.avx2 .add64) 2) false 0 []
+    (CIL.step (.intrinsic (.avx2 .add64) 2) false none 0
       [.v256 1, .v256 2] (fun _ => none)).isSome = false := rfl
 
 /-- A memory whose every address holds an initialized word, so only the instruction can fail. -/
@@ -22,14 +23,14 @@ private def initializedMemory : CIL.Memory := fun _ => some (.i32 1)
 
 -- Locals have no meaning in `CIL.step`: only the checked step reads and writes their slots.
 theorem local_unstepped :
-    (CIL.step (.local 0) false 0 [] [] initializedMemory).isSome = false := rfl
+    (CIL.step (.ldloc 0) false none 0 [] initializedMemory).isSome = false := rfl
 #print axioms local_unstepped
-theorem setLocal_unstepped :
-    (CIL.step (.setLocal 0) false 0 [] [.i32 1] initializedMemory).isSome = false := rfl
-#print axioms setLocal_unstepped
-theorem localAddr_unstepped :
-    (CIL.step (.localAddr 0) false 0 [] [] initializedMemory).isSome = false := rfl
-#print axioms localAddr_unstepped
+theorem stloc_unstepped :
+    (CIL.step (.stloc 0) false none 0 [.i32 1] initializedMemory).isSome = false := rfl
+#print axioms stloc_unstepped
+theorem ldloca_unstepped :
+    (CIL.step (.ldloca 0) false none 0 [] initializedMemory).isSome = false := rfl
+#print axioms ldloca_unstepped
 
 theorem integer_wrap : CIL.binary .add (.i32 4294967295) (.i32 1) = some (.i32 0) := rfl
 
@@ -50,12 +51,73 @@ theorem write_overwrites (m : CIL.Memory) (a : CIL.Address) (x y : CIL.Value) :
 private def scalarBody : CIL.Method := { code := [], locals := [], returnsValue := true }
 private def scalarFrame : Frame := { activation := 0, locals := [], owned := [] }
 
+/-- A method whose one parameter is declared `System.Byte`. -/
+private def byteParameter : CIL.Method :=
+  { code := [.ldarg 0, .ret], locals := [], returnsValue := true,
+    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Byte"] } }
+
+/-- `ldarg` narrows an argument as its declared type requires: a Byte keeps its low 8 bits. -/
+theorem ldarg_narrows_declared_byte :
+    step byteParameter (.ldarg 0) 0 [.scalar (.i32 0x1FF)] scalarFrame [] Memory.empty =
+      .ok (.next 1 [.scalar (.i32 0xFF)] scalarFrame Memory.empty) := rfl
+#print axioms ldarg_narrows_declared_byte
+
+/-- An argument declared narrow whose vector bits are unspecified faults instead of narrowing. -/
+theorem ldarg_rejects_unspecified_narrow (low : CIL.W64) :
+    step byteParameter (.ldarg 0) 0 [.scalar (.v128Low64 low)] scalarFrame [] Memory.empty =
+      .error (.unsupported "Instruction observes unspecified vector bits") := rfl
+#print axioms ldarg_rejects_unspecified_narrow
+
+/-- A method whose one argument lives in a frame home, which the body overwrites with 9. -/
+private def homedParameter : CIL.Method :=
+  { code := [.ldc_i4 9, .stloc 0, .ldarg 0, .ret], locals := [], returnsValue := true,
+    parameterHomes := [(0, .word32)],
+    declared := { parameters := [.atom CIL.Extraction.runtimeScope "System.Int32"] } }
+
+/-- `ldarg` of a homed argument reads the home, not the value the caller passed. -/
+theorem ldarg_reads_home :
+    (invoke [homedParameter] 8 0 [.scalar (.i32 5)] Memory.empty).map Prod.snd =
+      .ok [.scalar (.i32 9)] := rfl
+#print axioms ldarg_reads_home
+
+/-- A method whose one argument is homed: it stores 7 to the argument and returns the argument. -/
+private def storedParameter : CIL.Method :=
+  { homedParameter with code := [.ldc_i4 7, .starg 0, .ldarg 0, .ret] }
+
+/-- `starg` of a homed argument writes the home that `ldarg` reads back. -/
+theorem starg_writes_home :
+    (invoke [storedParameter] 8 0 [.scalar (.i32 5)] Memory.empty).map Prod.snd =
+      .ok [.scalar (.i32 7)] := rfl
+#print axioms starg_writes_home
+
+/-- A method that writes 11 through the address of its homed argument, then returns it. -/
+private def addressedParameter : CIL.Method :=
+  { homedParameter with code := [.ldarga 0, .ldc_i4 11, .storeScalar 4, .ldarg 0, .ret] }
+
+/-- `ldarga` of a homed argument is the address of the home that `ldarg` reads. -/
+theorem ldarga_addresses_home :
+    (invoke [addressedParameter] 8 0 [.scalar (.i32 5)] Memory.empty).map Prod.snd =
+      .ok [.scalar (.i32 11)] := rfl
+#print axioms ldarga_addresses_home
+
+/-- An argument without a home has no slot to write, so a store to it faults. -/
+theorem starg_without_home_unsupported :
+    step byteParameter (.starg 0) 0 [.scalar (.i32 1)] scalarFrame [.scalar (.i32 3)]
+      Memory.empty = .error (.unsupported "Store to an argument without a home") := rfl
+#print axioms starg_without_home_unsupported
+
+/-- An argument without a home has no address, so taking one faults. -/
+theorem ldarga_without_home_unsupported :
+    step byteParameter (.ldarga 0) 0 [.scalar (.i32 1)] scalarFrame [] Memory.empty =
+      .error (.unsupported "Address of an argument without a home") := rfl
+#print axioms ldarga_without_home_unsupported
+
 theorem checked_disabled_intrinsic (body : CIL.Method) (operation : CIL.Intrinsic)
     (disabled : operation.available body.profile = false) (argc pc : Nat)
     (args stack : List Value) (frame : Frame) (memory : Memory) :
     step body (.intrinsic operation argc) pc args frame stack memory =
       .error (.unsupported "Intrinsic unavailable in target profile") := by
-  simp [step, disabled, observerCount, unspecifiedOperands]
+  simp [step, intrinsicCall, disabled, observerCount, unspecifiedOperands]
 
 theorem checked_avx2_enabled :
     step { scalarBody with profile := { avx2 := true } } (.intrinsic (.avx2 .add64) 2)
@@ -68,7 +130,8 @@ theorem checked_avx512_disabled :
       .error (.unsupported "Intrinsic unavailable in target profile") := rfl
 
 theorem checked_avx512_invocation_disabled (memory : Memory) :
-    invoke [{ code := [.arg 0, .arg 1, .intrinsic (.avx512 .ltu64) 2, .ret], locals := [], returnsValue := true }] 4 0
+    invoke [{ code := [.ldarg 0, .ldarg 1, .intrinsic (.avx512 .ltu64) 2, .ret], locals := [],
+              returnsValue := true }] 4 0
       [.scalar (.v256 1), .scalar (.v256 2)] memory =
       .error ⟨0, 2, .unsupported "Intrinsic unavailable in target profile"⟩ := rfl
 
@@ -82,9 +145,11 @@ theorem neg_underflow :
 theorem neg_reference_rejected :
     (step scalarBody .neg 0 [] scalarFrame [Tests.reference] Tests.caller).isOk = false := rfl
 
-theorem cgt_mixed_width_rejected :
+/-- Signed scalar comparison widens mixed native/int32 operands. -/
+theorem cgt_mixed_width :
     (step scalarBody .cgt 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)]
-      Memory.empty).isOk = false := rfl
+      Memory.empty).isOk = true := rfl
+#print axioms cgt_mixed_width
 
 theorem branches_reject_underflow :
     ([CIL.Instruction.bgt 1, .ble 1, .ble_un 1].all fun op =>
@@ -96,9 +161,11 @@ theorem signed_branches_reject_references :
 
 #print axioms signed_branches_reject_references
 
-theorem branches_reject_mixed_widths :
-    ([CIL.Instruction.bgt 1, .ble 1, .ble_un 1].all fun op =>
+/-- Mixed unsigned comparison branches remain unsupported. -/
+theorem unsigned_branches_reject_mixed_widths :
+    ([CIL.Instruction.bgt_un 1, .ble_un 1].all fun op =>
       !(step scalarBody op 0 [] scalarFrame [.scalar (.i32 0), .scalar (.i64 0)] Memory.empty).isOk) = true := rfl
+#print axioms unsigned_branches_reject_mixed_widths
 
 theorem narrow_conversions_reject_references :
     ([CIL.Instruction.conv_i1, .conv_i2, .conv_u2].all fun op =>
@@ -153,8 +220,8 @@ theorem scalar_store_load {memory : Memory} {reference : Reference} (bits : CIL.
         Bind.bind, Except.bind, Pure.pure, Except.pure]
   · cases hr : checkedAt (.address reference) 4 (read result reference 4 1) <;>
       simp_all [instruction, loadValue, localResult, dereference, ordinaryAccessAlignment,
-        observerCount, unspecifiedOperands, Value.hasUnspecified, CIL.Value.hasUnspecified,
-        Bind.bind, Except.bind, Pure.pure, Except.pure]
+        observerCount, unspecifiedOperands, Value.hasUnspecified, Bind.bind, Except.bind,
+        Pure.pure, Except.pure]
 
 theorem switch_unsigned_default :
     step scalarBody (.switch [10, 20]) 3 [] scalarFrame [.scalar (.i32 4294967295)] Memory.empty =
@@ -203,7 +270,14 @@ theorem gc_slot_rejected :
       ⟨0, 0⟩ 8 1 = .error .unsupportedLayout := rfl
 
 theorem unknown_instruction_rejected :
-    (instruction (.unsupported "test") [] Memory.empty).isOk = false := rfl
+    (instruction (.unadmitted 0) [] Memory.empty).isOk = false := rfl
+
+/-- A hole faults on every stack, so no frame, memory or operand makes it a step. -/
+theorem unadmitted_faults (body : CIL.Method) (pc : Nat) (args stack : List Value)
+    (frame : Frame) (memory : Memory) :
+    CIL.Safety.step body (.unadmitted 123) pc args frame stack memory =
+      .error (.unsupported "Opcode not admitted") := rfl
+#print axioms unadmitted_faults
 
 -- Generic round-trip theorem now covers arbitrary bounded aggregate lengths.
 theorem aggregate_roundtrip {memory : Memory} {reference : Reference}
@@ -409,45 +483,52 @@ end Tests
 
 namespace Tests
 
-theorem division_mixed_widths_rejected :
-    CIL.divideValues false false (.i32 6) (.i64 2) = .error .invalidOperands := rfl
+/-- Division widens a mixed int32 numerator. -/
+theorem division_mixed_widths :
+    CIL.divideValues false false (.i32 6) (.i64 2) = .ok (.i64 3) := rfl
+#print axioms division_mixed_widths
 
-theorem checked_mixed_widths_rejected :
-    CIL.checkedValues .add false (.i32 6) (.i64 2) = .error .invalidOperands := rfl
+/-- Checked addition widens a mixed int32 operand. -/
+theorem checked_mixed_widths :
+    CIL.checkedValues .add false (.i32 6) (.i64 2) = .ok (.i64 8) := rfl
+#print axioms checked_mixed_widths
 
 theorem checked_conversion_bad_width :
     CIL.convertInteger 7 false true (.i32 1) = .error .invalidOperands := rfl
 
-theorem native_memory_dispatch_rejected :
-    CIL.nativeBinaryValues .load64 0 (.i64 0) (.i32 0) = .error .invalidOperands := rfl
+/-- Memory operations do not widen scalar operands. -/
+theorem native_memory_unchanged :
+    CIL.widenMixed .load64 [.i32 0, .i64 0] = [.i32 0, .i64 0] := rfl
+#print axioms native_memory_unchanged
 
-theorem native_nested_dispatch_rejected :
-    CIL.nativeBinaryValues (.nativeBinary .add) 0 (.i64 0) (.i32 0) = .error .invalidOperands := rfl
+/-- Reference operands do not qualify for integer widening. -/
+theorem native_reference_unchanged :
+    CIL.widenMixed .add [.i32 0, .nullRef] = [.i32 0, .nullRef] := rfl
+#print axioms native_reference_unchanged
 
-theorem native_reference_operand_rejected :
-    CIL.nativeBinaryValues .add 0 .nullRef (.i32 0) = .error .invalidOperands := rfl
-
+/-- Pure mixed arithmetic sign-extends int32. -/
 theorem native_mixed_signed_extension :
-    CIL.nativeBinaryValues .add 0 (.i64 1) (.i32 4294967295) = .ok (1, [.i64 0]) := rfl
+    CIL.widenMixed .add [.i32 4294967295, .i64 1] =
+      [.i64 18446744073709551615, .i64 1] := rfl
+#print axioms native_mixed_signed_extension
 
+/-- Unsigned checked arithmetic zero-extends int32. -/
 theorem native_checked_unsigned_extension :
-    CIL.nativeBinaryValues .add_ovf_un 0 (.i64 1) (.i32 4294967295) =
-      .ok (1, [.i64 4294967296]) := rfl
+    CIL.checkedValues .add false (.i64 1) (.i32 4294967295) = .ok (.i64 4294967296) := rfl
+#print axioms native_checked_unsigned_extension
 
-theorem native_unsigned_branch_rejected :
-    CIL.nativeBinaryValues (.bne_un 9) 0 (.i64 18446744073709551615) (.i32 4294967295) =
-      .error .invalidOperands := rfl
-
+/-- The reference step refuses a mixed pair for every unsigned branch. -/
 theorem native_unsigned_branch_family_rejected :
-    CIL.nativeBinaryValues (.blt_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bgt_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.ble_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands ∧
-    CIL.nativeBinaryValues (.bge_un 9) 0 (.i64 0) (.i32 4294967295) = .error .invalidOperands :=
-  ⟨rfl, rfl, rfl, rfl⟩
+    ([CIL.Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
+      (CIL.step op false none 0 [.i32 4294967295, .i64 0] (fun _ => none)).isNone) = true :=
+  rfl
+#print axioms native_unsigned_branch_family_rejected
 
+/-- Unsigned scalar comparisons sign-extend int32 before comparing. -/
 theorem native_unsigned_compare_extension :
-    CIL.nativeBinaryValues .cgt_un 0 (.i64 18446744073709551615) (.i32 4294967295) =
-      .ok (1, [.i32 0]) := rfl
+    CIL.step .cgt_un false none 0 [.i32 4294967295, .i64 18446744073709551615]
+      (fun _ => none) = some (.next 1 [.i32 0] (fun _ => none)) := rfl
+#print axioms native_unsigned_compare_extension
 
 theorem checked_conversion_reference_rejected :
     CIL.convertInteger 32 false true .nullRef = .error .invalidOperands := rfl

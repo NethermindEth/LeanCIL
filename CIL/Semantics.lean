@@ -1,6 +1,7 @@
 import CIL.Memory
 import CIL.Instructions
 import CIL.IntegerArithmetic
+import CIL.NativeEvaluation
 
 /-!
 # Instruction evaluation
@@ -142,23 +143,20 @@ def returnFromStack (narrow : Option NarrowKind) (returns : Bool)
   else if narrow.isNone && stack.isEmpty then return .returned [] memory else none
 
 /-- Executes instruction `op` at `pc`. Binary operands are popped as `b :: a :: rest`, so
-    `a` was pushed first. `returns` says whether the method returns a value; `profile`
-    decides feature tests and intrinsic availability. -/
-def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value)
+    `a` was pushed first; a mixed int32 and native pair is first widened by `widenMixed`
+    (ECMA-335 III.1.5). `returns` says whether the method returns a value; `profile` decides
+    feature tests and intrinsic availability. `narrow` is the method's return storage. -/
+def step (op : Instruction) (returns : Bool)
+    (narrow : Option NarrowKind) (pc : Nat)
     (stack : List Value) (memory : Memory)
     (profile : FeatureProfile := FeatureProfile.scalar) : Option Action := do
-  match op, stack with
+  match op, widenMixed op stack with
   -- Constants and stack shuffling.
   | .nop, _ => return .next (pc + 1) stack memory
   | .ldc_i4 w, _ => return .next (pc + 1) (.i32 w :: stack) memory
   | .ldc_i8 w, _ => return .next (pc + 1) (.i64 w :: stack) memory
   | .dup, v :: rest => return .next (pc + 1) (v :: v :: rest) memory
   | .pop, _ :: rest => return .next (pc + 1) rest memory
-  -- Arguments; a read must be initialized.
-  | .arg i narrow, _ =>
-    let value ← args[i]?
-    let value ← narrowValue narrow value
-    if !value.initialized then none else return .next (pc + 1) (value :: stack) memory
   -- Arithmetic, through `unary` and `binary`.
   | .neg, v :: rest | .not, v :: rest
   | .conv_ovf _, v :: rest | .conv_ovf_un _, v :: rest
@@ -247,7 +245,7 @@ def step (op : Instruction) (returns : Bool) (pc : Nat) (args : List Value)
   | .skipInit, .object _ :: rest => return .next (pc + 1) rest memory
   | .skipInit, .ref _ :: rest => return .next (pc + 1) rest memory
   -- Return.
-  | .ret narrow, _ => returnFromStack narrow returns stack memory
+  | .ret, _ => returnFromStack narrow returns stack memory
   | _, _ => none
 
 end CIL

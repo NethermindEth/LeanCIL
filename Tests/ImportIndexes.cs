@@ -1,9 +1,18 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
+#:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include PinnedMetadata.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Collections;
 using System.Reflection;
+using System.Reflection.PortableExecutable;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -98,5 +107,86 @@ try
             rejected.Message == "Conflicting contract interface module: " + pair.Item3) { }
     }
     Console.WriteLine("PASS module ordering, exact deduplication, conflicting contents and ordinal case collisions");
+
+    var implementation = At("Examples/Assembly/bin/Examples.dll");
+    var implementationHash = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(implementation)));
+    var sourceType = resolutionType.GetNestedType("Source", BindingFlags.NonPublic)!;
+    var directory = At("artifacts/ImportIndexes");
+    Directory.CreateDirectory(directory);
+    var sidecar = Path.Combine(directory, "Examples.leancil.contracts");
+    using (var pinned = new PinnedMetadata(assembly, implementation))
+    {
+        var description = value.DeepClone().AsObject();
+        description["assemblyIdentity"] = pinned.Module.Assembly.Name.FullName;
+        description["mvid"] = pinned.Module.Mvid;
+        description["implementationSha256"] = implementationHash;
+        var descriptionValue = JsonSerializer.Deserialize(description.ToJsonString(), contractType, json)!;
+        var interfaceHash = (string)contractType.GetMethod("ComputeInterfaceDigest", hiddenInstance)!
+            .Invoke(descriptionValue, null)!;
+        description["interfaceDigest"] = interfaceHash;
+        File.WriteAllText(sidecar, description.ToJsonString());
+        var importedContract = Read(description);
+        object Source(string hash) => Activator.CreateInstance(sourceType,
+            hiddenInstance | BindingFlags.Public, null, [sidecar, implementation, hash, interfaceHash, false], null)!;
+        IDisposable Resolution(params object[] sources)
+        {
+            var entries = Array.CreateInstance(sourceType, sources.Length);
+            for (int index = 0; index < sources.Length; index++) entries.SetValue(sources[index], index);
+            return (IDisposable)Activator.CreateInstance(resolutionType, hiddenInstance, null, [entries], null)!;
+        }
+        var registry = (IDictionary)pinned.Context.GetType().GetField("identityImages", hiddenInstance)!
+            .GetValue(pinned.Context)!;
+        var baselineCount = registry.Count;
+        PEReader[] Readers() => registry.Values.Cast<object>().Select(entry =>
+            (PEReader)entry.GetType().GetField("Item1")!.GetValue(entry)!).ToArray();
+        void Released(PEReader[] readers)
+        {
+            if (registry.Count != baselineCount) throw new Exception("Disposed import retained identity metadata.");
+            foreach (var reader in readers)
+            {
+                try { reader.GetMetadata(); }
+                catch (ObjectDisposedException) { continue; }
+                throw new Exception("Disposed import retained an open metadata reader.");
+            }
+        }
+        for (int repeat = 0; repeat < 32; repeat++)
+        {
+            var resolution = Resolution(Source(implementationHash));
+            if (registry.Count != baselineCount + 1) throw new Exception("Import metadata was not registered.");
+            var readers = Readers();
+            using (var child = (IDisposable)Activator.CreateInstance(resolutionType, hiddenInstance, null,
+                [resolution, importedContract], null)!) { }
+            if (registry.Count != baselineCount + 1) throw new Exception("A child released its parent's metadata.");
+            using (var other = new PinnedMetadata(assembly, implementation)) resolution.Dispose();
+            Released(readers);
+            resolution.Dispose();
+            Released(readers);
+        }
+        var first = Source(implementationHash);
+        var invalid = Source(new string('0', 64));
+        PEReader[] failedReaders = [];
+        IEnumerable<object> FailingSources()
+        {
+            yield return first;
+            failedReaders = Readers();
+            yield return invalid;
+        }
+        var failingSources = typeof(Enumerable).GetMethod("Cast")!.MakeGenericMethod(sourceType)
+            .Invoke(null, [FailingSources()]);
+        try
+        {
+            using var failed = (IDisposable)Activator.CreateInstance(resolutionType, hiddenInstance, null,
+                [failingSources], null)!;
+            throw new Exception("Import with a wrong implementation hash was accepted.");
+        }
+        catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
+            rejected.Message.StartsWith("Import implementation SHA-256 mismatch:", StringComparison.Ordinal)) { }
+        if (failedReaders.Length != 1) throw new Exception("Failure did not follow a registered import.");
+        Released(failedReaders);
+        Console.WriteLine("PASS import metadata release, child ownership, changed context " +
+            "and failed constructor cleanup");
+    }
+    using (var empty = (IDisposable)Activator.CreateInstance(resolutionType, hiddenInstance, null,
+        [Array.CreateInstance(sourceType, 0)], null)!) { }
 }
 finally { AppContext.SetData("APP_CONTEXT_BASE_DIRECTORY", savedBaseDirectory); }

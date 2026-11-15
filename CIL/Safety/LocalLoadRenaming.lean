@@ -88,18 +88,6 @@ theorem Memory.Renamed.loadSnapshot {mapping : AllocationRenaming}
     | ok bytes => exact .ok rfl
 #print axioms Memory.Renamed.loadSnapshot
 
-/-- Taking a retained byte home's address preserves its mapped pointer and all checks. -/
-theorem Memory.Renamed.localAddress {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory}
-    (related : Memory.Renamed mapping scopes source target) (slot : LocalSlot)
-    (bound : slot.Below mapping.sourceLimit) :
-    ResultRenamed mapping (fun source target => target = mapping.value source)
-      (localAddress source slot) (localAddress target (mapping.localSlot slot)) := by
-  cases slot with
-  | bytes kind reference => exact related.formValue (.address reference) bound
-  | root _ | readOnlyRoot _ | opaque128 _ | span _ _ _ | array _ _
-  | methodPointer _ _ | methodTable _ _ | object _ => exact .error _
-#print axioms Memory.Renamed.localAddress
 
 /-- Reading a retained local preserves its value, including restricted references and snapshots. -/
 theorem Memory.Renamed.loadLocal {mapping : AllocationRenaming}
@@ -176,5 +164,20 @@ theorem Memory.Renamed.loadLocal {mapping : AllocationRenaming}
               (fun _ _ equal => by cases equal; exact .ok rfl)
       | ok bytes => cases kind <;> first | exact .ok rfl | exact .error .invalidState
 #print axioms Memory.Renamed.loadLocal
+
+/-- Taking a retained local's address preserves its mapped byte home pointer or span view and all
+    checks. -/
+theorem Memory.Renamed.localAddress {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (slot : LocalSlot)
+    (bound : slot.Below mapping.sourceLimit) :
+    ResultRenamed mapping (fun source target => target = mapping.value source)
+      (localAddress source slot) (localAddress target (mapping.localSlot slot)) := by
+  cases slot with
+  | bytes kind reference => exact related.formValue (.address reference) bound
+  | span width writable contents => exact related.loadLocal (.span width writable contents) bound
+  | root _ | readOnlyRoot _ | opaque128 _ | array _ _
+  | methodPointer _ _ | methodTable _ _ | object _ => exact .error _
+#print axioms Memory.Renamed.localAddress
 
 end CIL.Safety

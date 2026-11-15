@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -35,7 +40,7 @@ object Operation(object operation) => operation is not string text ? operation :
 {
     ".feature .avx2" => Create("FeatureTest", Enum.Parse(Model("Feature"), "Avx2")),
     ".nop" => Create("StackOperation", Enum.Parse(Model("StackOpcode"), "Nop")),
-    ".ret" => Create("Return", [null]),
+    ".ret" => Create("Return"),
     ".call 0 0" => Create("Call", Enum.Parse(Model("CallKind"), "Static"), 0, 0),
     ".tailCall 0 0" => Create("Call", Enum.Parse(Model("CallKind"), "Tail"), 0, 0),
     ".tailCall 1 0" => Create("Call", Enum.Parse(Model("CallKind"), "Tail"), 1, 0),
@@ -47,7 +52,7 @@ object FrameOf(bool returnsValue, params object[] sites) => Create("FrameMetadat
     "{ parameters := [], returnType := .void }");
 object MethodIn(string identity, object frame, params object[] ops) => Activator.CreateInstance(
     emitter.GetNestedType("Method", BindingFlags.NonPublic)!, identity, frame,
-    Typed(Model("Operation"), ops.Select(Operation)))!;
+    Typed(Model("Operation"), ops.Select(Operation)), new int[ops.Length])!;
 object Method(string identity, params object[] ops) => MethodIn(identity, FrameOf(false), ops);
 var variants = new Dictionary<string, object>(StringComparer.Ordinal)
 {
@@ -142,9 +147,10 @@ var (tailFirst, tailSecond, tailOutput) = (Path.Combine(tailRoot, "First"), Path
 variants[tailFirst] = Variant(tailFirst, false, [Method("Target", ".ret"), Method("Tail", ".tailCall 0 0")]);
 variants[tailSecond] = Variant(tailSecond, true, [Method("Tail", ".tailCall 1 0"), Method("Target", ".ret")]);
 run.Invoke(null, [(string[])[tailOutput, tailFirst, tailSecond], read]);
-if (!File.ReadAllText(Path.Combine(tailOutput, "Templates.lean")).Contains(".tailCall callee0 0",
-    StringComparison.Ordinal))
-    throw new Exception("A tail call kept its profile's callee index in the template");
+var tailTemplate = File.ReadAllText(Path.Combine(tailOutput, "Templates.lean"));
+if (!tailTemplate.Contains(".tailCall callee0 0", StringComparison.Ordinal) ||
+    !tailTemplate.Contains("links := ([(0, .direct callee0)])", StringComparison.Ordinal))
+    throw new Exception("A tail call kept its profile's callee index in the template or lost its link");
 Console.WriteLine("PASS template tail calls take the callee parameter of the profile-specific index");
 
 // A virtual dispatch, a callable pointer and a static initializer name their methods by the template's callee
@@ -232,30 +238,43 @@ if (!Differing("Frame", FrameOf(false), [".ret"], FrameOf(true), [".ret"])
     throw new Exception("Profiles that differ in frame, length or an unflagged instruction were merged");
 Console.WriteLine("PASS template merge rejects differing frames, lengths and unflagged instructions");
 
-// The template merge and renderer are linear in a method's instructions: four times the code must cost far less
-// than the sixteen times a quadratic pass over it would.
-TimeSpan EmitTime(int length)
+// At 64x instructions, a quadratic merge or renderer costs 4096x, above the 256x bound.
+TimeSpan EmitTime(int length, ref int iterations, bool calibrate)
 {
     var scaleRoot = Path.Combine(root, "Scale" + length);
     var (one, two) = (Path.Combine(scaleRoot, "First"), Path.Combine(scaleRoot, "Second"));
-    string[] ops = [.. Enumerable.Repeat(".nop", length), ".ret"];
+    string[] ops = [.. Enumerable.Repeat(".nop", length - 1), ".ret"];
     variants[one] = Variant(one, false, [Method("Long", ops)]);
     variants[two] = Variant(two, true, [Method("Long", ops)]);
-    var best = TimeSpan.MaxValue;
-    for (var attempt = 0; attempt < 3; attempt++)
+    TimeSpan Measure(int repeats)
     {
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        run.Invoke(null, [(string[])[Path.Combine(scaleRoot, "Out" + attempt), one, two], read]);
-        best = TimeSpan.FromTicks(Math.Min(best.Ticks, clock.Elapsed.Ticks));
+        var best = TimeSpan.MaxValue;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            for (var iteration = 0; iteration < repeats; iteration++)
+                run.Invoke(null, [(string[])[Path.Combine(scaleRoot, "Out" + attempt), one, two], read]);
+            best = TimeSpan.FromTicks(Math.Min(best.Ticks, clock.Elapsed.Ticks));
+        }
+        return best;
     }
-    return best;
+    var elapsed = Measure(iterations);
+    const double minimumMilliseconds = 25;
+    while (calibrate && elapsed.TotalMilliseconds < minimumMilliseconds)
+    {
+        iterations = checked(iterations * 2);
+        elapsed = Measure(iterations);
+    }
+    return elapsed;
 }
-var (small, large) = (EmitTime(20_000), EmitTime(80_000));
-if (large.TotalMilliseconds > 8 * Math.Max(small.TotalMilliseconds, 5))
-    throw new Exception($"Template emission grew faster than linearly: {small.TotalMilliseconds:F0} ms for 20000 " +
+var iterations = 1;
+var small = EmitTime(1_250, ref iterations, calibrate: true);
+var large = EmitTime(80_000, ref iterations, calibrate: false);
+if (large.TotalMilliseconds > 256 * small.TotalMilliseconds)
+    throw new Exception($"Template emission grew faster than linearly: {small.TotalMilliseconds:F0} ms for 1250 " +
         $"instructions, {large.TotalMilliseconds:F0} ms for 80000");
 Console.WriteLine("PASS template emission is linear in the instructions " +
-    $"({small.TotalMilliseconds:F0} ms, {large.TotalMilliseconds:F0} ms)");
+    $"({small.TotalMilliseconds:F0} ms, {large.TotalMilliseconds:F0} ms for {iterations} emissions)");
 
 partial class Program
 {

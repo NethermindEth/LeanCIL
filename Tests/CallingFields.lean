@@ -19,11 +19,11 @@ def words (reference : Reference) : ArgumentView := ⟨reference, 32⟩
 /-- Read every input field before any output could be written. -/
 @[cil_code] def reader : CIL.Method :=
   { locals := [], returnsValue := true, code := [
-    .arg 2, .skipInit,
-    .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .add,
-    .arg 0, .fieldAt 8 8, .arg 1, .fieldAt 8 8, .add, .add,
-    .arg 0, .fieldAt 16 8, .arg 1, .fieldAt 16 8, .add, .add,
-    .arg 0, .fieldAt 24 8, .arg 1, .fieldAt 24 8, .add, .add, .ret] }
+    .ldarg 2, .skipInit,
+    .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 0 8, .add,
+    .ldarg 0, .fieldAt 8 8, .ldarg 1, .fieldAt 8 8, .add, .add,
+    .ldarg 0, .fieldAt 16 8, .ldarg 1, .fieldAt 16 8, .add, .add,
+    .ldarg 0, .fieldAt 24 8, .ldarg 1, .fieldAt 24 8, .add, .add, .ret] }
 
 /-- Field evidence is gathered with no per-field hypotheses or stepper arguments. -/
 theorem reads_four_words (memory : Memory) (left right output : Reference)
@@ -54,7 +54,7 @@ theorem overlapping_read (memory : Memory) (left right : Reference)
 /-- Sum all input words and write the result only after reading every input. -/
 @[cil_code] def writer : CIL.Method :=
   { locals := [], returnsValue := false,
-    code := [.arg 2] ++ reader.code.dropLast ++ [.store64, .ret] }
+    code := [.ldarg 2] ++ reader.code.dropLast ++ [.store64, .ret] }
 
 /-- The checksum uses the original input snapshots, including when output overlaps an input. -/
 def checksum (memory : Memory) (left right : Reference) : CIL.W64 :=
@@ -80,11 +80,11 @@ theorem writes_after_reads (memory : Memory) (left right output : Reference)
 /-- Four writes followed by a read exercise argument evidence at each new memory. -/
 @[cil_code] def repeatedWriter : CIL.Method :=
   { locals := [], returnsValue := true, code := [
-    .arg 2, .ldc_i8 1, .storeScalar 8,
-    .arg 2, .ldc_i8 2, .setFieldAt 8 8,
-    .arg 2, .ldc_i8 3, .setFieldAt 16 8,
-    .arg 2, .ldc_i8 4, .setFieldAt 24 8,
-    .arg 0, .fieldAt 0 8, .ret] }
+    .ldarg 2, .ldc_i8 1, .storeScalar 8,
+    .ldarg 2, .ldc_i8 2, .setFieldAt 8 8,
+    .ldarg 2, .ldc_i8 3, .setFieldAt 16 8,
+    .ldarg 2, .ldc_i8 4, .setFieldAt 24 8,
+    .ldarg 0, .fieldAt 0 8, .ret] }
 
 /-- Later loads observe the current memory, even when output aliases either input. -/
 theorem reads_after_writes (memory : Memory) (left right output : Reference)
@@ -141,7 +141,7 @@ theorem output_bounds_and_permissions (memory : Memory) (output _other : Referen
 /-- The two scalar helpers differ only in their checked arithmetic instruction. -/
 @[cil_code] def helper (subtract : Bool) : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.arg 0, .arg 1, if subtract then .sub else .add, .ret] }
+    code := [.ldarg 0, .ldarg 1, if subtract then .sub else .add, .ret] }
 
 /-- A helper preserves memory and returns its specified wrapping arithmetic result. -/
 def arithmetic (subtract : Bool) : MethodContract (CIL.W64 × CIL.W64) CIL.W64 where
@@ -187,7 +187,7 @@ theorem composed (subtract : Bool) : Composed subtract := by
   apply WP.load_call_store (helper_checked subtract rfl)
     ((⟨left, 8⟩ : ArgumentView).word memory 0,
       (⟨right, 8⟩ : ArgumentView).word memory 0) id left right output
-    rfl (by rfl) call rfl trivial (fun _ => rfl)
+    rfl (by rfl) (fun _ _ => rfl) call rfl trivial (fun _ => rfl)
   intro middle value after result written
   have readback := write_readback _ _ _ _ _ written
   simp only [numberBytes, List.length_map, List.length_range] at readback
@@ -217,11 +217,17 @@ def viewResult (value : CIL.Value) : MethodContract Reference Unit where
 
 /-- The result helper keeps the argument's exact scalar or aggregate encoding. -/
 @[cil_code] def resultHelper : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.arg 1, .ret] }
+  { locals := [], returnsValue := true, code := [.ldarg 1, .ret] }
 
 /-- A wrapper forwards both arguments and the helper's checked result. -/
 @[cil_code] def resultWrapper (narrow : Option CIL.NarrowKind) : CIL.Method :=
-  { locals := [], returnsValue := true, code := forwarderCode (plainLoads [0, 1]) 1 narrow }
+  { locals := [], returnsValue := true, code := forwarderCode [0, 1] 1,
+    declared := { returnType := match narrow with
+      | none => .atom CIL.Extraction.runtimeScope "System.Int64"
+      | some .signed8 => .atom CIL.Extraction.runtimeScope "System.SByte"
+      | some .unsigned8 => .atom CIL.Extraction.runtimeScope "System.Byte"
+      | some .signed16 => .atom CIL.Extraction.runtimeScope "System.Int16"
+      | some .unsigned16 => .atom CIL.Extraction.runtimeScope "System.UInt16" } }
 
 /-- The same forwarding proof preserves the valid-call precondition and exact result encoding. -/
 theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind)
@@ -240,15 +246,16 @@ theorem forwards_view_result (value : CIL.Value) (narrow : Option CIL.NarrowKind
     apply WP.enter (body := resultHelper) rfl
       (by simp [viewResult, checkedValue, formValue, checkedAt, numeric, formed,
         Except.mapError, Bind.bind, Except.bind, Pure.pure, Except.pure]) rfl
-    apply WP.step rfl rfl (step_load_unchanged (narrow := none) rfl (valid memory) trivial)
+    apply WP.step rfl rfl (step_load_unchanged rfl (valid memory) (.plain rfl))
     apply WP.returned rfl rfl
-      (step_return_unchanged (narrow := none) rfl
+      (step_return_unchanged (narrow := none) rfl rfl
         (by simpa [Value.hasUnspecified] using known)
         (by simp [valid] <;> rfl) trivial) (by simp [valid] <;> rfl)
     exact ⟨Confined.refl [] memory, (), rfl, rfl⟩
-  exact helperHolds.forward (loads := plainLoads [0, 1]) (narrow := narrow)
-    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl⟩ (fun _ => rfl)
-    (fun _ _ _ => plainLoads_unchanged _ _)
+  exact helperHolds.forward (loads := [0, 1]) (narrow := narrow)
+    rfl rfl ⟨rfl, rfl, rfl, rfl, rfl,
+      by cases narrow with | none => rfl | some kind => cases kind <;> rfl⟩ (fun _ => rfl)
+    (fun _ _ _ => plainLoads_unchanged (fun _ _ => rfl) _)
     (fun _ _ _ _ member => .inl member)
     (fun _ _ _ => by simpa only [viewResult, List.any_cons, List.any_nil,
       Value.hasUnspecified, Bool.false_or, Bool.or_false] using known)

@@ -2,8 +2,15 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/ConsumerVerification.cs
 #:include ../scripts/LeanDiagnostics.cs
+#:include PinnedMetadata.cs
+#:include GenericImportIdentities.cs
+#:include ../Extractor/ExternalIdentityEvidence.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -46,11 +53,14 @@ public static class Library
         destination.Head.Value = source.Head.Value;
     }
     public static T Identity<T>(T value) where T : unmanaged => value;
+    public static void Ignore<T>(T value) where T : unmanaged { }
+    public static T First<T, U>(T left, U right) where T : unmanaged where U : unmanaged => left;
     public static T Overload<T>(T value) where T : unmanaged => value;
     public static ulong Overload<T>(ulong value) where T : unmanaged => value + 1;
     public static T Unsupported<T>(T value) where T : class => value;
 }
 public static class Generic<T> { public static ulong Value(ulong value) => value; }
+public static class \u03A9wner { public static T \u03A9dentity<T>(T value) where T : unmanaged => value; }
 """;
 File.WriteAllText(libSource, libSourceText);
 File.WriteAllText(Path.Combine(appRoot, "Application.cs"), """
@@ -103,8 +113,9 @@ string app = Path.Combine(appRoot, "bin", "TypedFixture.App.dll");
 Type methodMetadata = Assembly.LoadFrom(ExtractorPath).GetType("Nethermind.LeanCIL.ContractMethodMetadata", throwOnError: true)!;
 MethodInfo selectMethod = methodMetadata.GetMethod("Select", BindingFlags.Static | BindingFlags.NonPublic)!;
 List<(string Selector, string Definition, string Closed, string Identity)> overloads = [];
-using (ModuleDefinition module = ModuleDefinition.ReadModule(lib))
+using (var pinned = new PinnedMetadata(methodMetadata.Assembly, lib))
 {
+    var module = pinned.Module;
     foreach (string selector in new[] { "TypedFixture.Library::Overload(T)", "TypedFixture.Library::Overload(ulong)" })
     {
         object selection = selectMethod.Invoke(null, [module, selector, new[] { "System.UInt64" }, "scalar"])!;
@@ -133,6 +144,8 @@ for (int index = 0; index < overloads.Count; index++)
 if (overloadBodies[0] == overloadBodies[1])
     throw new InvalidOperationException("Generic overload regression requires distinct actual method bodies.");
 Console.WriteLine("PASS distinct generic definitions retain distinct closed contract identities");
+CheckGenericImportIdentities(lib, root, methodMetadata);
+if (args is ["--identities-only"]) return;
 
 string revision = Run(["git", "rev-parse", "HEAD"], Root).Trim();
 File.WriteAllText(Path.Combine(package, "lakefile.toml"),
@@ -275,7 +288,9 @@ foreach (string modifierScope in new[] { "ModifierA", "ModifierB" })
         MethodReference call = module.GetType("TypedFixture.Application").Methods.Single(method => method.Name == "Forward")
             .Body.Instructions.Where(instruction => instruction.OpCode.Code == Code.Call).Select(instruction => (MethodReference)instruction.Operand).Single();
         ByReferenceType parameter = (ByReferenceType)call.Parameters[0].ParameterType;
-        TypeReference modifier = new("System.Runtime.InteropServices", "InAttribute", module, new AssemblyNameReference(modifierScope, new Version(1, 0, 0, 0)));
+        AssemblyNameReference scope = new(modifierScope, new Version(1, 0, 0, 0));
+        module.AssemblyReferences.Add(scope);
+        TypeReference modifier = new("System.Runtime.InteropServices", "InAttribute", module, scope);
         call.Parameters[0].ParameterType = new ByReferenceType(new RequiredModifierType(modifier, parameter.ElementType));
         module.Write(malformed);
     }
@@ -287,8 +302,9 @@ using (ModuleDefinition module = ModuleDefinition.ReadModule(app))
 {
     GenericInstanceMethod call = module.GetType("TypedFixture.Application").Methods.Single(method => method.Name == "Identity")
         .Body.Instructions.Select(instruction => instruction.Operand).OfType<GenericInstanceMethod>().Single();
-    call.GenericArguments[0] = new TypeReference("System", "UInt64", module,
-        new AssemblyNameReference("Other", new Version(1, 0, 0, 0))) { IsValueType = true };
+    AssemblyNameReference otherScope = new("Other", new Version(1, 0, 0, 0));
+    module.AssemblyReferences.Add(otherScope);
+    call.GenericArguments[0] = new TypeReference("System", "UInt64", module, otherScope) { IsValueType = true };
     module.Write(wrongScope);
 }
 Reject("WrongScope", "exact scoped", wrongScope, "TypedFixture.Application::Identity(ulong)", sidecar, interfaceDigest);

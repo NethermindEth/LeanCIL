@@ -97,7 +97,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
       if stack.length < argc then Except.error ExecutionFault.invalidState else do
         let values ← scalars (stack.take argc)
         let some (.next target result _) :=
-          CIL.step op false pc [] values (fun _ => none) profile |
+          CIL.step op false none pc values (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
         let result ← (result.map Value.scalar).mapM (checkedValue memory)
         pure (FrameAction.next target (result ++ stack.drop argc) (frame.appendLocals extra) memory)
@@ -110,7 +110,7 @@ theorem fallback_appendLocals (profile : FeatureProfile) (op : Instruction) (pc 
         if stack.length < argc then Except.error ExecutionFault.invalidState else do
           let values ← scalars (stack.take argc)
           let some (.next target result _) :=
-            CIL.step op false pc [] values (fun _ => none) profile |
+            CIL.step op false none pc values (fun _ => none) profile |
             Except.error ExecutionFault.invalidState
           let result ← (result.map Value.scalar).mapM (checkedValue memory)
           pure (FrameAction.next target (result ++ stack.drop argc) frame memory)
@@ -149,19 +149,6 @@ local macro "append_stack_cases" " using " fallback:term : tactic => `(tactic| (
     | exact $fallback
     | (rcases rest with _ | ⟨second, rest⟩ <;> (try cases second)
        all_goals first | exact $fallback | frame_natural)))
-
-/-- `nativeBinary` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_nativeBinary (operation : Instruction) :
-    StepAppendLocals (.nativeBinary operation) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  unfold step
-  apply observed_appendLocals
-  append_stack_cases using
-    fallback_appendLocals body.profile (.nativeBinary operation) pc _ frame extra memory
-
-#print axioms step_appendLocals_nativeBinary
 
 set_option hygiene false in
 /-- Proves `StepAppendLocals op` for one faulting arithmetic constructor `op`; the fallback
@@ -220,16 +207,15 @@ theorem step_appendLocals_conv_ovf_un (target : ConvTarget) :
 
 #print axioms step_appendLocals_conv_ovf_un
 
-/-- `stackAlloc` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_stackAlloc (initLocals : Bool) :
-    StepAppendLocals (.stackAlloc initLocals) := by
+/-- `localloc` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_localloc : StepAppendLocals .localloc := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step, allocateStack_appendLocals, bind_map_left]
+  simp only [step, localAllocation, allocateStack_appendLocals, bind_map_left]
   frame_natural
 
-#print axioms step_appendLocals_stackAlloc
+#print axioms step_appendLocals_localloc
 
 /-- Heap array allocation does not inspect or change a frame's local slots. -/
 theorem step_appendLocals_newArray (element : CIL.ArrayElement) :
@@ -461,19 +447,99 @@ theorem step_appendLocals_setAggregateFieldAt (offset size : Nat) :
 
 #print axioms step_appendLocals_setAggregateFieldAt
 
-/-- `arg` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_arg (index : Nat) (narrow : Option NarrowKind) :
-    StepAppendLocals (.arg index narrow) := by
+/-- `ldarg` preserves outcomes under trailing local slots: a homed argument's slot precedes
+    them, and an argument value does not involve the frame. -/
+theorem step_appendLocals_ldarg (index : Nat) : StepAppendLocals (.ldarg index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
-  clear kept
-  unfold step
-  frame_natural
+  have loaded : loadArgument body index args (frame.appendLocals extra) memory =
+      loadArgument body index args frame memory ∨
+      loadArgument body index args frame memory = .error .invalidState := by
+    unfold loadArgument
+    split
+    · rename_i slot _
+      cases found : frame.locals[slot]? with
+      | none => exact Or.inr rfl
+      | some home => exact Or.inl (by simp only [Frame.appendLocals_getElem? found])
+    all_goals exact Or.inl rfl
+  have unfolded : ∀ current : Frame, step body (.ldarg index) pc args current stack memory =
+      (do
+        let value ← loadArgument body index args current memory
+        return FrameAction.next (pc + 1) (value :: stack) current memory) := fun _ => rfl
+  revert kept
+  rw [unfolded, unfolded]
+  rcases loaded with same | missing
+  · rw [same]
+    intro
+    frame_natural
+  · rw [missing]
+    simp [StepKept, Functor.map, Except.map]
 
-#print axioms step_appendLocals_arg
+#print axioms step_appendLocals_ldarg
 
-/-- `local` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_local (index : Nat) : StepAppendLocals (.local index) := by
+/-- `starg` preserves outcomes under trailing local slots: a homed argument's slot precedes
+    them, and an argument without a home faults alike. -/
+theorem step_appendLocals_starg (index : Nat) : StepAppendLocals (.starg index) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  cases stack with
+  | nil =>
+    revert kept
+    simp only [step]
+    repeat' split
+    all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
+  | cons value rest =>
+    have unfolded : ∀ current : Frame,
+        step body (.starg index) pc args current (value :: rest) memory = (do
+          let (current, memory) ← storeArgument body index value current memory
+          return FrameAction.next (pc + 1) rest current memory) := fun _ => rfl
+    revert kept
+    rw [unfolded, unfolded]
+    unfold storeArgument
+    split
+    · rename_i slot _
+      cases found : frame.locals[slot]? with
+      | some home =>
+        simp only [Frame.appendLocals_getElem? found, Frame.appendLocals_set found]
+        intro
+        cases storeLocal memory home value <;> rfl
+      | none => simp [StepKept, Bind.bind, Except.bind]
+    · simp [StepKept, Bind.bind, Except.bind]
+
+#print axioms step_appendLocals_starg
+
+/-- `ldarga` preserves outcomes under trailing local slots: a homed argument's slot precedes
+    them, and an argument without a home faults alike. -/
+theorem step_appendLocals_ldarga (index : Nat) : StepAppendLocals (.ldarga index) := by
+  intro body pc args frame extra stack memory outcome stepped kept
+  subst stepped
+  have addressed : addressArgument body index (frame.appendLocals extra) memory =
+      addressArgument body index frame memory ∨
+      addressArgument body index frame memory = .error .invalidState := by
+    unfold addressArgument
+    split
+    · rename_i slot _
+      cases found : frame.locals[slot]? with
+      | none => exact Or.inr rfl
+      | some home => exact Or.inl (by simp only [Frame.appendLocals_getElem? found])
+    · exact Or.inl rfl
+  have unfolded : ∀ current : Frame, step body (.ldarga index) pc args current stack memory =
+      (do
+        let value ← addressArgument body index current memory
+        return FrameAction.next (pc + 1) (value :: stack) current memory) := fun _ => rfl
+  revert kept
+  rw [unfolded, unfolded]
+  rcases addressed with same | missing
+  · rw [same]
+    intro
+    frame_natural
+  · rw [missing]
+    simp [StepKept, Functor.map, Except.map]
+
+#print axioms step_appendLocals_ldarga
+
+/-- `ldloc` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldloc (index : Nat) : StepAppendLocals (.ldloc index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   cases found : frame.locals[index]? with
@@ -486,11 +552,11 @@ theorem step_appendLocals_local (index : Nat) : StepAppendLocals (.local index) 
     cases stack <;> simp only [step, found] <;> repeat' split
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
-#print axioms step_appendLocals_local
+#print axioms step_appendLocals_ldloc
 
-/-- `localAddr` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_localAddr (index : Nat) :
-    StepAppendLocals (.localAddr index) := by
+/-- `ldloca` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_ldloca (index : Nat) :
+    StepAppendLocals (.ldloca index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   cases found : frame.locals[index]? with
@@ -503,10 +569,10 @@ theorem step_appendLocals_localAddr (index : Nat) :
     cases stack <;> simp only [step, found] <;> repeat' split
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
-#print axioms step_appendLocals_localAddr
+#print axioms step_appendLocals_ldloca
 
-/-- `setLocal` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_setLocal (index : Nat) : StepAppendLocals (.setLocal index) := by
+/-- `stloc` preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_stloc (index : Nat) : StepAppendLocals (.stloc index) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   cases found : frame.locals[index]? with
@@ -520,7 +586,7 @@ theorem step_appendLocals_setLocal (index : Nat) : StepAppendLocals (.setLocal i
     cases stack <;> simp only [step, found] <;> repeat' split
     all_goals first | (simp [StepKept]; done) | (intro; frame_natural; done)
 
-#print axioms step_appendLocals_setLocal
+#print axioms step_appendLocals_stloc
 
 /-- Span construction updates only its existing typed local slot. -/
 theorem step_appendLocals_initializeSpanLocal (index : Nat) (constructor : CIL.SpanConstructor) :
@@ -703,7 +769,8 @@ theorem step_appendLocals_add :
   clear kept
   unfold step
   apply observed_appendLocals
-  exact fallback_appendLocals body.profile .add pc stack frame extra memory
+  append_stack_cases using
+    fallback_appendLocals body.profile .add pc _ frame extra memory
 
 #print axioms step_appendLocals_add
 
@@ -713,7 +780,7 @@ theorem step_appendLocals_sub :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .sub pc _ frame extra memory
@@ -822,7 +889,7 @@ theorem step_appendLocals_clt_un :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .clt_un pc _ frame extra memory
@@ -835,7 +902,7 @@ theorem step_appendLocals_cgt_un :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .cgt_un pc _ frame extra memory
@@ -848,7 +915,7 @@ theorem step_appendLocals_ceq :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall
   apply observed_appendLocals
   append_stack_cases using
     fallback_appendLocals body.profile .ceq pc _ frame extra memory
@@ -1152,7 +1219,7 @@ theorem step_appendLocals_intrinsic (operation : Intrinsic) (argc : Nat) :
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
+  unfold step intrinsicCall
   frame_natural
 
 #print axioms step_appendLocals_intrinsic
@@ -1169,18 +1236,27 @@ theorem step_appendLocals_memory (operation : MemoryOp) :
 #print axioms step_appendLocals_memory
 
 /-- `ret` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_ret (narrow : Option NarrowKind) :
-    StepAppendLocals (.ret narrow) := by
+theorem step_appendLocals_ret :
+    StepAppendLocals .ret := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  unfold step
-  frame_natural
+  simp only [step, observerCount]
+  simp only [returnFrom]
+  by_cases unknown : unspecifiedOperands 1 stack = true
+  · simp only [unknown, ite_true]
+    rfl
+  simp only [unknown, Bool.false_eq_true, ite_false]
+  repeat' first
+    | rfl
+    | (simp only [map_bind, map_pure, FrameAction.appendLocals]; done)
+    | (apply bind_congr; intro)
+    | split
 
 #print axioms step_appendLocals_ret
 
 /-- `throw` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_throw (exception : String) :
+theorem step_appendLocals_throw (exception : ExceptionType) :
     StepAppendLocals (.throw exception) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
@@ -1190,16 +1266,16 @@ theorem step_appendLocals_throw (exception : String) :
 
 #print axioms step_appendLocals_throw
 
-/-- `unsupported` preserves outcomes under trailing local slots. -/
-theorem step_appendLocals_unsupported (description : String) :
-    StepAppendLocals (.unsupported description) := by
+/-- A hole preserves outcomes under trailing local slots. -/
+theorem step_appendLocals_unadmitted (opcode : Nat) :
+    StepAppendLocals (.unadmitted opcode) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
   unfold step
   frame_natural
 
-#print axioms step_appendLocals_unsupported
+#print axioms step_appendLocals_unadmitted
 
 /-- Managed pointers and tables never inspect the unused trailing frame slots. -/
 theorem step_appendLocals_managed (operation : ManagedOp) :
@@ -1230,16 +1306,14 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
   have padded : StepAppendLocals op := by
     cases op
     case managed operation => exact step_appendLocals_managed operation
-    case nativeBinary operation =>
-      exact step_appendLocals_nativeBinary operation
     case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
       | mul_ovf_un => exact step_appendLocals_faulting _ rfl
     case conv_ovf target =>
       exact step_appendLocals_conv_ovf target
     case conv_ovf_un target =>
       exact step_appendLocals_conv_ovf_un target
-    case stackAlloc initLocals =>
-      exact step_appendLocals_stackAlloc initLocals
+    case localloc =>
+      exact step_appendLocals_localloc
     case newArray element => exact step_appendLocals_newArray element
     case newReferenceArray element => exact step_appendLocals_newReferenceArray element
     case nop =>
@@ -1276,16 +1350,20 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_aggregateFieldAt offset size
     case setAggregateFieldAt offset size =>
       exact step_appendLocals_setAggregateFieldAt offset size
-    case arg index narrow =>
-      exact step_appendLocals_arg index narrow
-    case «local» index =>
-      exact step_appendLocals_local index
+    case ldarg index =>
+      exact step_appendLocals_ldarg index
+    case starg index =>
+      exact step_appendLocals_starg index
+    case ldarga index =>
+      exact step_appendLocals_ldarga index
+    case ldloc index =>
+      exact step_appendLocals_ldloc index
     case initializeSpanLocal index constructor =>
       exact step_appendLocals_initializeSpanLocal index constructor
-    case localAddr index =>
-      exact step_appendLocals_localAddr index
-    case setLocal index =>
-      exact step_appendLocals_setLocal index
+    case ldloca index =>
+      exact step_appendLocals_ldloca index
+    case stloc index =>
+      exact step_appendLocals_stloc index
     case ldc_i4 value =>
       exact step_appendLocals_ldc_i4 value
     case ldc_i8 value =>
@@ -1390,12 +1468,12 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_intrinsic operation argc
     case memory operation =>
       exact step_appendLocals_memory operation
-    case ret narrow =>
-      exact step_appendLocals_ret narrow
+    case ret =>
+      exact step_appendLocals_ret
     case throw exception =>
       exact step_appendLocals_throw exception
-    case unsupported description =>
-      exact step_appendLocals_unsupported description
+    case unadmitted opcode =>
+      exact step_appendLocals_unadmitted opcode
   exact padded body pc args frame extra stack memory outcome stepped kept
 
 #print axioms step_appendLocals

@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -78,7 +83,7 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
     else if (name == "NullLength")
     {
         claims.Add($"(match {RunCase("")} with | .error fault => some fault.fault | " +
-            ".ok _ => none) = some (.thrown \"System.NullReferenceException\")");
+            ".ok _ => none) = some (.thrown .nullReference)");
     }
     else
     {
@@ -89,16 +94,18 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
         var raise = methods.Single(method => method.Name == "Raise").MetadataToken.ToUInt32();
         var owner = module.Assembly.Name.FullName + "::Examples.ManagedDispatch";
         string Identity(uint token) => $"⟨{System.Text.Json.JsonSerializer.Serialize(owner)}, {token}, []⟩";
-        string Table(string targets) => $".methodTable ⟨dispatchSignature, some #[{targets}], none⟩";
-        var table = Table(Identity(repeat) + ", " + Identity(raise));
+        string Table(params string[] targets) =>
+            $".methodTable ⟨dispatchSignature, some #[{string.Join(", ", targets)}], none, " +
+            $"{targets.Length}, by decide⟩";
+        var table = Table(Identity(repeat), Identity(raise));
         string Args(string view, int index, int value) => $"{view}, .scalar (.i32 {index}), .scalar (.i32 {value})";
         claims.Add($"({RunCase(Args(table, 0, 3))}).map Prod.snd = .ok [.scalar (.i32 17)]");
         string Fault(string args, int fuel = 128) =>
             $"(match {RunCase(args, fuel)} with | .error fault => some fault.fault | .ok _ => none)";
-        claims.Add($"{Fault(Args(table, 1, 2))} = some (.thrown \"System.ArgumentException\")");
-        claims.Add($"{Fault(Args(table, 2, 0))} = some (.thrown \"System.IndexOutOfRangeException\")");
-        claims.Add($"{Fault(Args(".methodTable ⟨dispatchSignature, none, none⟩", 0, 0))} = " +
-            "some (.thrown \"System.NullReferenceException\")");
+        claims.Add($"{Fault(Args(table, 1, 2))} = some (.thrown .argument)");
+        claims.Add($"{Fault(Args(table, 2, 0))} = some (.thrown .indexOutOfRange)");
+        claims.Add($"{Fault(Args(".methodTable ⟨dispatchSignature, none, none, 0, by decide⟩", 0, 0))} = " +
+            "some (.thrown .nullReference)");
         claims.Add($"{Fault(Args(Table(Identity(uint.MaxValue)), 0, 0))} = some .invalidState");
         claims.Add($"({RunCase(Args(table, 0, 3), 1)}).isOk = false");
     }
@@ -107,8 +114,8 @@ foreach (var name in new[] { "Address", "LocalEscape", "Dispatch", "DispatchNorm
           ⟨.atom CIL.Extraction.runtimeScope "System.Int32",
             [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
         """ + "\ntheorem managed_dispatch_result :\n" + string.Join(" ∧\n", claims) +
-        " := " + (claims.Count == 1 ? "by rfl" :
-            "by exact ⟨" + string.Join(", ", claims.Select(_ => "by rfl")) + "⟩") +
+        " := " + (claims.Count == 1 ? "by cil_kernel_rfl" :
+            "by exact ⟨" + string.Join(", ", claims.Select(_ => "by cil_kernel_rfl")) + "⟩") +
         "\n#print axioms managed_dispatch_result\n");
     evidence.Add(proof, "PASS compiled typed indirect dispatch: " + name);
     if (name != "Address") continue;

@@ -13,12 +13,13 @@ def method0Signature : String := "System.UInt64 Outcomes.Calls::Root(System.UInt
 def method1Signature : String := "System.UInt64 Outcomes.Calls::Strict(System.UInt64)"
 def method2Signature : String := "System.UInt64 Outcomes.Calls::Percent(System.UInt64)"
 @[cil_code] def method0 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 1 1, .ldc_i4 1, .conv_i8, .add, .ret] }
+  [.ldarg 0, .call 1 1, .ldc_i4 1, .conv_i8, .add, .ret] }
 @[cil_code] def method1 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .call 2 1, .brfalse 5, .arg 0, .ret, .nop, .nop, .throw "System.ArgumentException"] }
+  [.ldarg 0, .call 2 1, .brfalse 5, .ldarg 0, .ret, .nop, .nop,
+      .throw .argument] }
 @[cil_code] def method2 : Method := { returnsValue := true, locals := [], code :=
-  [.arg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
-    .throw "System.ArgumentOutOfRangeException", .arg 0, .ret] }
+  [.ldarg 0, .ldc_i4 (BitVec.ofInt 32 100), .conv_i8, .ble_un 7, .nop, .nop,
+    .throw .argumentOutOfRange, .ldarg 0, .ret] }
 @[cil_code] def program : Program := [method0, method1, method2]
 def signatures : List String := [method0Signature, method1Signature, method2Signature]
 
@@ -40,11 +41,11 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
   pre _ _ := True
   footprint _ := []
   post v _ _ out := out = v
-  raises v _ := if v ≤ 100 then none else some "System.ArgumentOutOfRangeException"
+  raises v _ := if v ≤ 100 then none else some .argumentOutOfRange
 
-def strictRaises (v : CIL.W64) : Option String :=
-  if v ≤ 100 then if v = 0 then some "System.ArgumentException" else none
-  else some "System.ArgumentOutOfRangeException"
+def strictRaises (v : CIL.W64) : Option CIL.ExceptionType :=
+  if v ≤ 100 then if v = 0 then some .argument else none
+  else some .argumentOutOfRange
 
 def strictContract : OutcomeContract CIL.W64 CIL.W64 where
   args v := [.scalar (.i64 v)]
@@ -169,7 +170,7 @@ theorem root_formed (strictHolds : strictContract.Holds Extracted.program strict
 
 /-- The raising-after form: zero returns from `Percent` and then raises here. -/
 example (percentHolds : percentContract.Holds Extracted.program percent) (m : Memory) (formed : m.WellFormed) :
-    Raises Extracted.program strict [.scalar (.i64 0)] m "System.ArgumentException" := by
+    Raises Extracted.program strict [.scalar (.i64 0)] m .argument := by
   cil_raise_steps []
   cil_formed_outcome_call percentHolds 0 at percentSite []
   case precondition => trivial
@@ -184,17 +185,19 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
 
 /-! A raised outcome is exactly `.thrown`: no other fault satisfies it at any fuel. -/
 
-@[cil_code] def stuck : CIL.Method := { returnsValue := false, locals := [], code := [.unsupported "fixture"] }
+@[cil_code] def stuck : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.unadmitted 0] }
 @[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 
-example (m : Memory) : ¬ Raises [stuck] 0 [] m "System.Exception" := by
+example (m : Memory) : ¬ Raises [stuck] 0 [] m .baseException := by
   rintro ⟨fuel, fault, ran, thrown⟩
   cases fuel with
   | zero =>
     rw [show invoke [stuck] 0 0 [] m = .error ⟨0, 0, .fuelExhausted⟩ from rfl] at ran
     cases ran; simp at thrown
   | succ fuel =>
-    rw [show invoke [stuck] (fuel + 1) 0 [] m = .error ⟨0, 0, .unsupported "Not a memory instruction"⟩ from rfl] at ran
+    rw [show invoke [stuck] (fuel + 1) 0 [] m =
+      .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ from rfl] at ran
     cases ran; simp at thrown
 
 theorem spin_exhausts (m : Memory) (frame : Frame) (fuel : Nat) :
@@ -203,7 +206,7 @@ theorem spin_exhausts (m : Memory) (frame : Frame) (fuel : Nat) :
   | zero => rfl
   | succ fuel ih => exact (show run [spin] (fuel + 1) 0 0 [] frame [] m = run [spin] fuel 0 0 [] frame [] m from rfl).trans ih
 
-example (m : Memory) : ¬ Raises [spin] 0 [] m "System.Exception" := by
+example (m : Memory) : ¬ Raises [spin] 0 [] m .baseException := by
   rintro ⟨fuel, fault, ran, thrown⟩
   change run [spin] fuel 0 0 [] _ [] m = _ at ran
   rw [spin_exhausts] at ran

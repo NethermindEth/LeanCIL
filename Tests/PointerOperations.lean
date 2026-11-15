@@ -28,7 +28,7 @@ private def memory : Memory := {
   nextIdentity := 2 }
 
 private def subtract : CIL.Method := {
-  code := [.arg 0, .arg 1, .sub, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .ldarg 1, .sub, .ret], locals := [], returnsValue := true }
 
 /-- Pointer subtraction checks positions without requiring readable storage. -/
 theorem subtract_bytes :
@@ -112,10 +112,10 @@ theorem difference_encoding :
 #print axioms difference_encoding
 
 private def comparison (operation : CIL.Instruction) : CIL.Method := {
-  code := [.arg 0, .arg 1, operation, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .ldarg 1, operation, .ret], locals := [], returnsValue := true }
 
 private def branch (operation : CIL.Instruction) : CIL.Method := {
-  code := [.arg 0, .arg 1, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
+  code := [.ldarg 0, .ldarg 1, operation, .ldc_i4 0, .ret, .ldc_i4 1, .ret]
   locals := [], returnsValue := true }
 
 /-- Both unsigned comparisons agree with offset ordering and preserve memory. -/

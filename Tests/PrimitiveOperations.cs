@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 
 using System.Buffers.Binary;
@@ -354,3 +359,4 @@ if (!failed || File.Exists(Path.Combine(wrongOutput, "verified.json")))
 queue.Flush();
 
 Console.WriteLine($"Primitive operation proofs passed: {cases} cases; incorrect write rejected.");
+Run(["dotnet", "run", "--file", At("Tests/Strings.cs")], streamOutput: true, progress: "Strings as opaque references");

@@ -42,7 +42,7 @@ theorem correctness : copyTagContract.Holds Extracted.program copyTag := by
 theorem copyTag_null_source_throws (memory : Memory) (target : Reference)
     (live : LiveObject memory target) :
     ∃ fuel, invoke Extracted.program fuel copyTag [.object (.address target), .object .null]
-      memory = .error ⟨copyTag, 2, .thrown "System.NullReferenceException"⟩ := by
+      memory = .error ⟨copyTag, 2, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms copyTag_null_source_throws
@@ -52,7 +52,7 @@ theorem copyTag_null_source_throws (memory : Memory) (target : Reference)
 theorem copyTag_null_target_throws (memory : Memory) (source : Reference)
     (readable : Tagged.Tag.Readable memory source) (forms : Tagged.Tag.Forms memory source) :
     ∃ fuel, invoke Extracted.program fuel copyTag [.object .null, .object (.address source)]
-      memory = .error ⟨copyTag, 3, .thrown "System.NullReferenceException"⟩ := by
+      memory = .error ⟨copyTag, 3, .thrown .nullReference⟩ := by
   cil_checked_steps [readable.load_forms forms]
 
 #print axioms copyTag_null_target_throws

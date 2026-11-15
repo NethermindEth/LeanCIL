@@ -2,7 +2,13 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
+#:include PinnedMetadata.cs
 
 using System.Reflection;
 using Mono.Cecil;
@@ -12,9 +18,10 @@ var assembly = At("Examples/Assembly/bin/Examples.dll");
 var root = At("artifacts/IntegerMath");
 Directory.CreateDirectory(root);
 var runtime = Assembly.Load(File.ReadAllBytes(assembly)).GetType("Examples.IntegerMath")!;
-using var metadata = ModuleDefinition.ReadModule(assembly);
 verification.EnsureExtractorBuilt();
 var extractor = Assembly.Load(File.ReadAllBytes(ExtractorPath));
+using var pinned = new PinnedMetadata(extractor, assembly);
+var metadata = pinned.Module;
 var flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 var translate = extractor.GetType("Nethermind.LeanCIL.RuntimeModels", true)!.GetMethod("Translate", flags)!;
 var select = extractor.GetType("Nethermind.LeanCIL.FeatureProfile", true)!.GetMethod("Select", flags)!;

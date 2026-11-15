@@ -30,9 +30,9 @@ internal static class VerificationSuites
         [Core] =
         [
             "Add", "AddModel", "Alias", "Calls", "CertificateReuse", "Choose", "ConsumerBatchA", "ConsumerBatchB",
-            "ConsumerSupportUnion", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
+            "ConsumerSupportUnion", "DecodedAdd", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
             "ProofBindingFamilies",
-            "StaticData", "Struct", "StructCopy", "VerificationReuse", "WrongAdd"
+            "StaticData", "Struct", "StructCopy", "SupportExtractionCache", "VerificationReuse", "WrongAdd"
         ],
         ["loops"] = ["Loops", "WordArrayOutlines"],
         ["outlines-control"] = ["ProofOutlines/control"],
@@ -57,7 +57,8 @@ internal static class VerificationSuites
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),
         new("evidence", "Tests/ExtractionEvidence.cs",
-            "independent extraction certificates and malformed evidence rejection"),
+            "independent extraction certificates, malformed evidence rejection, the metadata decoder's method " +
+            "names against Cecil's and framework argument guards"),
         // Split from evidence so neither job approaches the CI timeout.
         new("dispatch", "Tests/DispatchEvidence.cs",
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
@@ -80,8 +81,8 @@ internal static class VerificationSuites
             "layout-based Unsafe sizes, reference offsets and metadata validation"),
         new("math", "Tests/IntegerMath.cs", "integer Math helpers, BigMul, runtime faults and universal minimum"),
         new("intrinsics", "Tests/ExactIntrinsics.cs",
-            "exact SIMD call signatures, byte shuffles, AES rounds, unspecified lanes, opaque locals and " +
-            "profile rejection"),
+            "exact SIMD call signatures, byte shuffles, AES rounds, unspecified lanes, opaque locals, profile " +
+            "rejection and the library of generated runtime comparisons"),
         new("divrem", "Tests/TupleDivision.cs",
             "X86Base.X64.DivRem and Math.DivRem through ValueTuple fields, divide faults and layout rejection"),
         new("fsharp", "Tests/FSharp.cs", "F# arithmetic, branches, calls, references and struct construction"),
@@ -97,7 +98,8 @@ internal static class VerificationSuites
             "integer opcode encodings, boundary cases and universal negation proofs"),
         new("narrow", "Tests/NarrowIntegers.cs",
             "narrow integer conversions, storage, method boundaries and rejection proofs"),
-        new("primitive", "Tests/PrimitiveOperations.cs", "primitive memory, switch, sizeof and rejection proofs"),
+        new("primitive", "Tests/PrimitiveOperations.cs",
+            "primitive memory, switch, sizeof and rejection proofs, and strings as opaque references"),
         new("division", "Tests/Division.cs", "integer division and remainder runtime comparisons and proofs"),
         new("checked", "Tests/CheckedArithmetic.cs", "checked integer arithmetic runtime comparisons and proofs"),
         new("conversions", "Tests/CheckedConversions.cs",
@@ -110,7 +112,8 @@ internal static class VerificationSuites
         new("arguments", "Tests/Arguments.cs", "argument assignment, addressing, aliases and lifetime proofs"),
         new("native", "Tests/NativeIntegers.cs", "native integer storage, arithmetic and runtime comparisons"),
         new("identity", "Tests/MethodIdentity.cs",
-            "methods bound by signature or call shape that survive renumbering and renaming"),
+            "methods bound by signature or call shape that survive renumbering and renaming, and typed identity " +
+            "display"),
         new("labels", "Tests/StructuralLabels.cs", "loop-head and call-site labels that survive inserted statements"),
         new("names", "Tests/DebugNames.cs", "PDB local names and source locations that never change extraction"),
         new("symbols", "Tests/ConsumerSymbols.cs",
@@ -124,16 +127,32 @@ internal static class VerificationSuites
         // Split from evidence: each fixture alone runs for minutes, so they take separate runners.
         new("scaling", "Tests/TranslationScaling.cs",
             "compositional certificate for a six-method call graph and its consumer replay, and the header and " +
-            "per-method struct layout checks at a per-layout cost that does not grow with the table"),
+            "per-method struct layout checks at a per-layout cost that does not grow with the table, and the " +
+            "generic owner index library"),
         new("excluded", "Tests/ExcludedBranchScaling.cs",
             "hundreds of excluded and live sites at the default heartbeat budget"),
         new("lookups", "Tests/LookupScaling.cs",
             "lookup equations of extracted methods, hand-written bodies and templates, and the scalar " +
-            "certificate of array element addresses, loaded and addressed integer locals and native-int " +
-            "locals consumed by calli, the closed argument storage of those native-int locals, and the " +
-            "feature certificate of local loads and stores, at a per-instruction cost that does not grow " +
-            "with the method, embeddings of bodies with many calls at a per-call kernel cost that does not " +
-            "grow with the calls, and type identity equality at a cost that does not grow with the name"),
+            "certificate of array element addresses, loaded and addressed integer locals and native-int locals " +
+            "consumed by calli, the closed argument storage of those native-int locals, and the feature " +
+            "certificate of local loads, stores and addresses, at a per-instruction cost that does not grow " +
+            "with the method or with locals holding no known word and grows linearly with the known facts, " +
+            "embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, " +
+            "type identity equality at a cost that does not grow with the name, the method name clause of the " +
+            "call operand check and the encoding of a metadata name at a per-byte cost that does not grow with " +
+            "the name, and one native method table step and one load of its first entry at a kernel cost that " +
+            "does not grow with the table's entries; the managed-call check of a body with many call sites at " +
+            "a per-site cost that does not grow with the call sites; the argument facts of " +
+            "cil_resolution_facts and the reads through them at a per-argument cost that does not grow with " +
+            "the parameters; the shape facts of cil_field_shape and the reads through them at a per-field cost " +
+            "that grows less than 1.35 times from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 " +
+            "to 512 fields in a struct each, and the facts of cil_value_shape and their reads at a per-type " +
+            "cost that grows less than 1.35 times from 8 to 32 to 128 to 512 struct types; the kernel check of " +
+            "one body at a cost independent of the methods and metadata rows of its extraction; the kernel's " +
+            "selection of a calli body at a cost linear in the length of the pointer's owner; raw value opcode " +
+            "decoding and the method decoded from a raw body at a per-instruction kernel cost that does not " +
+            "grow with the body; and the certificate index, feature getter, layout accumulation and " +
+            "projection, and extraction home index libraries"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +
@@ -142,12 +161,13 @@ internal static class VerificationSuites
             "scalar and checked-memory stepping with per-instruction work, proof-size and latency budgets"),
         new("assemblies", "Tests/MultiAssembly.cs",
             "bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and " +
-            "substitution rejection, and the strict binding library and audit"),
+            "substitution rejection, the strict binding library and audit, and the checked-in strict binding " +
+            "fixture module"),
         new("pool", "Tests/ItemPool.cs",
             "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
             "they reject"),
         new("blockers", "Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
-            "profile-excluded branches and self-admission"),
+            "profile-excluded branches, runtime-async refusal, self-admission and the admitted hole corpus"),
         new("audit", "Tests/OleanAudit.cs",
             "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts " +
             "cannot forge"),

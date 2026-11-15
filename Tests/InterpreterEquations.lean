@@ -8,8 +8,9 @@ open Lean
 -- A consumer macro naming a reserved equation lemma, which a quotation cannot generate itself.
 macro "unfold_dispatch" : tactic => `(tactic| rw [CIL.step.eq_def])
 
-example (returns : Bool) (pc : Nat) (args stack : List CIL.Value) (memory : CIL.Memory) :
-    CIL.step .nop returns pc args stack memory = CIL.step .nop returns pc args stack memory := by
+example (returns : Bool) (pc : Nat) (stack : List CIL.Value) (memory : CIL.Memory) :
+    CIL.step .nop returns none pc stack memory =
+      CIL.step .nop returns none pc stack memory := by
   unfold_dispatch
 
 -- Each lemma must come from its shared module; one generated here would mean importers rebuild it.
@@ -84,7 +85,7 @@ example : binaryStep .mul_ovf 0xFFFFFFFF 2 = pushes 0xFFFFFFFE := rfl
 example : binaryStep .mul_ovf_un 0xFFFFFFFF 2 = overflows := rfl
 
 -- An unsigned checked op zero-extends a native-int `i32`; sign extension would overflow here.
-example : step body (.nativeBinary .mul_ovf_un) 0 [] frame
+example : step body .mul_ovf_un 0 [] frame
     [.scalar (.i32 0x80000000), .scalar (.i64 2)] Memory.empty =
       .ok (.next 1 [.scalar (.i64 0x100000000)] frame Memory.empty) := rfl
 
@@ -168,10 +169,32 @@ end Guards
 
 end FaultingArithmetic
 
+section LocalAddress
+open CIL CIL.Safety
+
+-- Taking a span local's address pushes the view the local holds, exactly as loading it does.
+example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) (width : Nat) (writable : Bool)
+    (view : Option SpanView)
+    (slot : frame.locals[0]? = some (.span width writable view)) :
+    step body (.ldloca 0) pc args frame stack memory =
+      step body (.ldloc 0) pc args frame stack memory := by
+  simp only [step_ldloca_eq, step_ldloc_eq, slot, localAddress]
+
+-- Taking a byte home's address pushes the formed home reference.
+example (body : CIL.Method) (pc : Nat) (args stack : List CIL.Safety.Value)
+    (frame : CIL.Safety.Frame) (memory : CIL.Safety.Memory) (kind : CIL.LocalKind)
+    (home : CIL.Safety.Reference) (slot : frame.locals[0]? = some (.bytes kind home)) :
+    step body (.ldloca 0) pc args frame stack memory = do
+      let address ← formValue memory (.address home)
+      return FrameAction.next (pc + 1) (address :: stack) frame memory := by
+  simp only [step_ldloca_eq, slot, localAddress]
+
+end LocalAddress
+
 -- Every generated faulting and `conv.i` equation exists and uses only the allowed axioms. At
--- equal widths a faulting equation keeps its helper folded with the operand guard decided, the
--- form the checked bridge reads; an unfolded unsigned bound would expand `2 ^ width`. Mixed
--- widths fault.
+-- all admitted widths a faulting equation keeps its helper folded with the operand guard decided, the
+-- form the checked bridge reads; an unfolded unsigned bound would expand `2 ^ width`.
 run_cmd do
   let binary := ["div", "div_un", "rem", "rem_un", "add_ovf", "add_ovf_un", "sub_ovf",
     "sub_ovf_un", "mul_ovf", "mul_ovf_un"]
@@ -179,14 +202,14 @@ run_cmd do
     if op.startsWith "div" || op.startsWith "rem" then ``CIL.divideValues else ``CIL.checkedValues
   let folded : List (String × Name) :=
     binary.flatMap (fun op =>
-      [(s!"{op}_i32_i32", helperOf op), (s!"{op}_i64_i64", helperOf op)]) ++
+      ["i32_i32", "i64_i64", "i32_i64", "i64_i32"].map fun widths =>
+        (s!"{op}_{widths}", helperOf op)) ++
     ["conv_ovf", "conv_ovf_un"].flatMap fun op =>
       [(s!"{op}_i32", ``CIL.convertInteger), (s!"{op}_i64", ``CIL.convertInteger)]
-  let faulting := binary.map (s!"{·}_i32_i64")
   let plain := ["conv_i_i32", "conv_i_i64"]
-  let names := (folded.map (·.1) ++ faulting ++ plain).map fun suffix =>
+  let names := (folded.map (·.1) ++ plain).map fun suffix =>
     `CIL.Safety ++ Name.mkSimple s!"step_{suffix}_eq"
-  unless names.length == 36 do throwError "expected 36 equations, listed {names.length}"
+  unless names.length == 46 do throwError "expected 46 equations, listed {names.length}"
   let allowed := [``propext, ``Quot.sound, ``Classical.choice]
   for equation in names do
     unless (← getEnv).contains equation do throwError "missing {equation}"
@@ -200,10 +223,81 @@ run_cmd do
     if (type.find? fun term => term.isAppOf ``Bool.rec ||
         term.isConstOf ``CIL.Safety.unspecifiedOperands).isSome then
       throwError "{equation} leaves the operand guard undecided"
-  for suffix in faulting do
-    let equation := `CIL.Safety ++ Name.mkSimple s!"step_{suffix}_eq"
-    let some (_, _, rhs) := (← getConstInfo equation).type.getForallBody.eq?
-      | throwError "{equation} is not an equation"
-    unless rhs.isAppOf ``Except.error do throwError "{equation} does not fault: {rhs}"
+
+section Returns
+
+open CIL CIL.Safety
+
+variable (body : Method) (pc : Nat) (args : List Safety.Value)
+  (frame : Frame) (memory : Safety.Memory)
+
+/-- A narrowed return with an empty stack reports a malformed execution state. -/
+theorem narrowReturnEmpty (kind : NarrowKind) (narrow : body.returnNarrow = some kind) :
+    Safety.step body .ret pc args frame [] memory = .error .invalidState := by
+  rw [step_ret_eq, narrow]
+  rfl
+#print axioms narrowReturnEmpty
+
+/-- A narrowed return rejects a scalar of the wrong width. -/
+theorem narrowReturnWrongWidth (kind : NarrowKind) (bits : W64)
+    (narrow : body.returnNarrow = some kind) :
+    Safety.step body .ret pc args frame [.scalar (.i64 bits)] memory =
+      .error .invalidState := by
+  rw [step_ret_eq, narrow]
+  rfl
+#print axioms narrowReturnWrongWidth
+
+/-- A narrowed return rejects extra stack values. -/
+theorem narrowReturnExtraValue (kind : NarrowKind) (bits extra : W32)
+    (narrow : body.returnNarrow = some kind) :
+    Safety.step body .ret pc args frame
+      [.scalar (.i32 bits), .scalar (.i32 extra)] memory = .error .invalidState := by
+  rw [step_ret_eq, narrow]
+  rfl
+#print axioms narrowReturnExtraValue
+
+/-- Narrowing cannot turn a void method into a value-returning method. -/
+theorem narrowReturnVoid (returns : body.returnsValue = false) (bits : W32) :
+    Safety.step body .ret pc args frame [.scalar (.i32 bits)] memory =
+      .error .invalidState := by
+  rw [step_ret_eq, Method.returnNarrow_of_void returns]
+  change returnFrom none body.returnsValue [.scalar (.i32 bits)] memory = _
+  rw [returnFrom_none_eq, returns]
+  rfl
+#print axioms narrowReturnVoid
+
+/-- A narrowed return extends exactly the single i32 result. -/
+theorem narrowReturnValue (returns : body.returnsValue = true) (kind : NarrowKind) (bits : W32)
+    (narrow : body.returnNarrow = some kind) :
+    Safety.step body .ret pc args frame [.scalar (.i32 bits)] memory =
+      .ok (.returned [.scalar (.i32 (kind.extend bits))] memory) := by
+  rw [step_ret_eq, narrow]
+  change returnFrom (some kind) body.returnsValue [.scalar (.i32 bits)] memory = _
+  rw [returnFrom_narrow_eq, returns]
+  rfl
+#print axioms narrowReturnValue
+
+/-- A plain return preserves its checked scalar result. -/
+theorem plainReturnValue (returns : body.returnsValue = true) (bits : W32)
+    (narrow : body.returnNarrow = none) :
+    Safety.step body .ret pc args frame [.scalar (.i32 bits)] memory =
+      .ok (.returned [.scalar (.i32 bits)] memory) := by
+  rw [step_ret_eq, narrow]
+  change returnFrom none body.returnsValue [.scalar (.i32 bits)] memory = _
+  rw [returnFrom_none_eq, returns]
+  rfl
+#print axioms plainReturnValue
+
+/-- A value-returning method rejects an empty plain return. -/
+theorem plainReturnWrongArity (returns : body.returnsValue = true)
+    (narrow : body.returnNarrow = none) :
+    Safety.step body .ret pc args frame [] memory = .error .invalidState := by
+  rw [step_ret_eq, narrow]
+  change returnFrom none body.returnsValue [] memory = _
+  rw [returnFrom_none_eq, returns]
+  rfl
+#print axioms plainReturnWrongArity
+
+end Returns
 
 end Tests.InterpreterEquations

@@ -26,6 +26,8 @@ structure PreparedImage where
   rvaColumn : Nat × Nat
   /-- The offset and width of the implementation flags column of a MethodDef row. -/
   implementationColumn : Nat × Nat
+  /-- The laid-out columns of each table, indexed by table number, computed once. -/
+  columns : List (Option (List ColumnPlace))
 
 /-- A pinned image decoded, with its identity checked against its Assembly row. -/
 def prepareOne (pinned : PinnedImage) : Except AuditError PreparedImage := do
@@ -34,7 +36,11 @@ def prepareOne (pinned : PinnedImage) : Except AuditError PreparedImage := do
   if (← assemblyIdentity view layout) != asciiOf pinned.identity then
     throw (.identityMismatch pinned.identity)
   pure { identity := pinned.identity, view, layout, rvaColumn := ← layout.columnIn 0x06 0,
-         implementationColumn := ← layout.columnIn 0x06 1 }
+         implementationColumn := ← layout.columnIn 0x06 1, columns := layout.columnTable }
+
+/-- The laid-out columns of `table` in the image's rows. -/
+def PreparedImage.columnsOf (image : PreparedImage) (table : Nat) : Option (List ColumnPlace) :=
+  image.columns.getD table none
 
 /-- The identity of the first prepared image that a later one repeats. -/
 def duplicateIdentity? : List PreparedImage → Option String

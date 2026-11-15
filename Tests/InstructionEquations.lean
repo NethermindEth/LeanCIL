@@ -14,7 +14,7 @@ proved once over the flags is then bound to concrete profiles without restating 
 namespace Tests.InstructionEquations
 
 /-- The instruction a profile extraction emits for code its feature tests exclude. -/
-abbrev unreachable : CIL.Instruction := .unsupported "Unreachable under selected profile"
+abbrev unreachable : CIL.Instruction := .unadmitted 0
 
 /-- `if (Avx2.IsSupported) return Callee(a, b); return Sse42.IsSupported ? b : a;` with the
     paths of the other profile padded as `unreachable`, so every profile has the same pcs. -/
@@ -22,11 +22,11 @@ def dispatchBody (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
     .feature .avx2,
     .brfalse 6,
-    if avx2 then .arg 0 else unreachable,
-    if avx2 then .arg 1 else unreachable,
+    if avx2 then .ldarg 0 else unreachable,
+    if avx2 then .ldarg 1 else unreachable,
     if avx2 then .call callee 2 else unreachable,
     if avx2 then .ret else unreachable,
-    if avx2 then unreachable else if sse42 then .arg 1 else .arg 0,
+    if avx2 then unreachable else if sse42 then .ldarg 1 else .ldarg 0,
     if avx2 then unreachable else .ret] }
 
 cil_instruction_equations dispatchBody
@@ -77,14 +77,14 @@ example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
   ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
 
 example (sse42 avx2 : Bool) (callee : Nat) (scalar : avx2 = false) (narrow : sse42 = true) :
-    ∃ op, (dispatchBody sse42 avx2 callee).code[6]? = some op ∧ op = .arg 1 :=
+    ∃ op, (dispatchBody sse42 avx2 callee).code[6]? = some op ∧ op = .ldarg 1 :=
   ⟨_, by cil_lookup [scalar, narrow], by with_reducible rfl⟩
 
 -- Concrete profiles: literal flags decide the test with no fact.
-example : ∃ op, (dispatchBody true false 3).code[6]? = some op ∧ op = .arg 1 :=
+example : ∃ op, (dispatchBody true false 3).code[6]? = some op ∧ op = .ldarg 1 :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
-example : ∃ op, (dispatchBody false false 3).code[6]? = some op ∧ op = .arg 0 :=
+example : ∃ op, (dispatchBody false false 3).code[6]? = some op ∧ op = .ldarg 0 :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
 example : ∃ op, (dispatchBody false true 3).code[4]? = some op ∧ op = .call 3 2 :=
@@ -163,7 +163,7 @@ def lengthDependsBody (avx2 : Bool) : CIL.Method :=
 error: cil_instruction_equations: the instruction at pc 0 of
 Tests.InstructionEquations.lengthDependsBody is not determined by its parameters, or the body
 does not unfold; state each feature-dependent instruction as an `if` on the instruction,
-padding the shorter side with `.unsupported`, so every profile has the same pcs
+padding the shorter side with `.unadmitted`, so every profile has the same pcs
 -/
 #guard_msgs (whitespace := lax) in cil_instruction_equations lengthDependsBody
 
@@ -176,7 +176,7 @@ def tailDependsBody (avx2 : Bool) : CIL.Method :=
 error: cil_instruction_equations: the instruction at pc 1 of
 Tests.InstructionEquations.tailDependsBody is not determined by its parameters, or the body
 does not unfold; state each feature-dependent instruction as an `if` on the instruction,
-padding the shorter side with `.unsupported`, so every profile has the same pcs
+padding the shorter side with `.unadmitted`, so every profile has the same pcs
 -/
 #guard_msgs (whitespace := lax) in cil_instruction_equations tailDependsBody
 /-- error: Unknown identifier `tailDependsBody_instruction0` -/

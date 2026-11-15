@@ -63,8 +63,6 @@ namespace CIL.Safety
       (value.hasUnspecified || unspecifiedOperands count rest) := rfl
 
 -- How many stack operands each instruction observes.
-@[cil_guard] theorem guard_nativeBinary (op : CIL.Instruction) :
-    observerCount (.nativeBinary op) = 2 := rfl
 /-- A signed division observes both of its operands. -/
 @[cil_guard] theorem guard_div : observerCount .div = 2 := rfl
 #print axioms guard_div
@@ -103,20 +101,27 @@ namespace CIL.Safety
 @[cil_guard] theorem guard_conv_ovf_un (target : CIL.ConvTarget) :
     observerCount (.conv_ovf_un target) = 1 := rfl
 #print axioms guard_conv_ovf_un
-@[cil_guard] theorem guard_arg (index : Nat) (narrow : Option CIL.NarrowKind) :
-    observerCount (.arg index narrow) = 0 := rfl
+@[cil_guard] theorem guard_ldarg (index : Nat) : observerCount (.ldarg index) = 0 := rfl
+#print axioms guard_ldarg
+@[cil_guard] theorem guard_starg (index : Nat) : observerCount (.starg index) = 0 := rfl
+#print axioms guard_starg
+@[cil_guard] theorem guard_ldarga (index : Nat) : observerCount (.ldarga index) = 0 := rfl
+#print axioms guard_ldarga
 @[cil_guard] theorem guard_call (callee argc : Nat) :
     observerCount (.call callee argc) = argc := rfl
 @[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
     observerCount (.newAggregate callee argc size) = argc := rfl
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :
     observerCount (.memory op) = op.argumentCount := rfl
-@[cil_guard] theorem guard_throw (exception : String) : observerCount (.throw exception) = 0 := rfl
-@[cil_guard] theorem guard_unsupported (description : String) :
-    observerCount (.unsupported description) = 0 := rfl
-@[cil_guard] theorem guard_ret : observerCount (.ret none) = 1 := rfl
-@[cil_guard] theorem guard_ret_narrow (kind : CIL.NarrowKind) :
-    observerCount (.ret (some kind)) = 1 := rfl
+@[cil_guard] theorem guard_throw (exception : ExceptionType) :
+    observerCount (.throw exception) = 0 := rfl
+@[cil_guard] theorem guard_unadmitted (opcode : Nat) :
+    observerCount (.unadmitted opcode) = 0 := rfl
+/-- Return observes at most the first stack value, regardless of narrowing. -/
+@[cil_guard] theorem guard_ret :
+    observerCount .ret = 1 := rfl
+
+#print axioms guard_ret
 @[cil_guard] theorem guard_loadAggregate (size : Nat) :
     observerCount (.loadAggregate size) = 1 := rfl
 @[cil_guard] theorem guard_storeAggregate (size : Nat) :

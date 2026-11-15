@@ -79,7 +79,7 @@ internal static class Reachability
                 if (throws.Interior.Contains(target))
                     throw new InvalidDataException($"Branch into a folded throw: {i}");
                 if (spans.Interior.Contains(target))
-                    throw new InvalidDataException($"Branch into a folded span receiver: {i}");
+                    throw new InvalidDataException($"Branch into a folded span constructor: {i}");
             }
 
             if (i.Operand is Instruction target)

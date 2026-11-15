@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:include RuntimeProfileValidation.cs
 #:include Verification.cs
+#:include DeepChecks.cs
+#:include FailureReports.cs
+#:include LeanDiagnostics.cs
+#:include BindingImage.cs
+#:include DeepCheckInputs.cs
 
 if (args.Length < 2) throw new ArgumentException("Usage: ValidateRuntimeProfiles.cs <extractor.dll> <evidence.json>...");
 var output = Path.GetFullPath("artifacts/RuntimeProfileEvidence.lean");

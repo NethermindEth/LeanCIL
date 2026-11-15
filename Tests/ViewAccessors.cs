@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -27,7 +32,7 @@ foreach (var method in metadata.GetType("Examples.ViewAccessors").Methods.Where(
                 $"[.array ⟨.address ⟨0, 0⟩, {length}, .signed32⟩] memory).map Prod.snd = " +
                 ".ok [.reference (.address ⟨0, 0⟩)]");
         claims.Add("(match CIL.Safety.invoke Extracted.program 32 0 [.object .null] memory with " +
-            "| .error ⟨_, _, .thrown \"System.NullReferenceException\"⟩ => true | _ => false) = true");
+            "| .error ⟨_, _, .thrown .nullReference⟩ => true | _ => false) = true");
     }
     else
     {

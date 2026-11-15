@@ -605,7 +605,9 @@ static partial class Documentation
     [
         "pureArity", "scalars", "instructionStep", "staticInstruction", "checkedIntrinsic",
         "checkedValue", "numericValue", "checkedAt", "instruction", "memoryInstruction",
-        "otherMemoryInstruction", "observerCount", "unspecifiedOperands"
+        "otherMemoryInstruction", "observerCount", "unspecifiedOperands", "runModel", "observedCall",
+        "intrinsicCall", "featureCall", "referenceCompareCall", "referenceSubtractCall", "typedTransferCall",
+        "skipInitCall"
     ];
 
     /// <summary>Keep the consumer fixture on the umbrella and away from evaluator implementation names.</summary>
@@ -642,8 +644,10 @@ static partial class Documentation
         "CIL.Safety.checkedIntrinsic", "CIL.Safety.checkedValue", "CIL.Safety.numericValue",
         "CIL.Safety.checkedAt", "CIL.Safety.formValue", "CIL.Safety.storeValue",
         "CIL.Safety.instruction", "CIL.Safety.memoryInstruction", "CIL.Safety.otherMemoryInstruction",
-        "CIL.Safety.observerCount", "CIL.Safety.unspecifiedOperands",
-        "CIL.Value.hasUnspecified", "CIL.Safety.Value.hasUnspecified",
+        "CIL.Safety.observerCount", "CIL.Safety.unspecifiedOperands", "CIL.Safety.runModel",
+        "CIL.Safety.observedCall", "CIL.Safety.intrinsicCall", "CIL.Safety.featureCall",
+        "CIL.Safety.referenceCompareCall", "CIL.Safety.referenceSubtractCall", "CIL.Safety.typedTransferCall",
+        "CIL.Safety.skipInitCall", "CIL.Value.hasUnspecified", "CIL.Safety.Value.hasUnspecified",
         "Except.mapError", "Bind.bind", "Except.bind", "Pure.pure", "Except.pure"
     ];
 

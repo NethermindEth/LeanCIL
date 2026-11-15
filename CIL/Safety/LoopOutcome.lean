@@ -16,7 +16,8 @@ namespace CIL.Safety
 /-- The loop run from `state` returns satisfying `post` when `raises` is `none`, and throws
     exactly the named exception otherwise. -/
 def LoopOutcome (program : CIL.Program) (method : Nat) (args : List Value)
-    (post : Memory → List Value → Prop) (raises : Option String) (state : LoopState) : Prop :=
+    (post : Memory → List Value → Prop) (raises : Option ExceptionType) (state : LoopState) :
+    Prop :=
   match raises with
   | some exception =>
     RunRaises program method state.pc args state.frame state.stack state.memory exception
@@ -28,7 +29,8 @@ theorem loop_outcome_none {program : CIL.Program} {method : Nat} {args : List Va
       LoopTerminates program method args post state := rfl
 
 theorem loop_outcome_some {program : CIL.Program} {method pc : Nat} {args stack : List Value}
-    {post : Memory → List Value → Prop} {frame : Frame} {memory : Memory} {exception : String} :
+    {post : Memory → List Value → Prop} {frame : Frame} {memory : Memory}
+    {exception : ExceptionType} :
     LoopOutcome program method args post (some exception) ⟨pc, frame, stack, memory⟩ =
       RunRaises program method pc args frame stack memory exception := rfl
 
@@ -36,7 +38,7 @@ theorem loop_outcome_some {program : CIL.Program} {method pc : Nat} {args stack 
     proves it directly. -/
 theorem loop_outcome_induction {α : Type} (program : CIL.Program) (method : Nat)
     (args : List Value) (configuration : α → LoopState) (invariant : α → Prop) (measure : α → Nat)
-    (post : Memory → List Value → Prop) (raises : Option String)
+    (post : Memory → List Value → Prop) (raises : Option ExceptionType)
     (progress : ∀ state, invariant state →
       (∀ next, invariant next → measure next < measure state →
         LoopOutcome program method args post raises (configuration next)) →
@@ -53,7 +55,7 @@ theorem loop_outcome_induction {α : Type} (program : CIL.Program) (method : Nat
 theorem loop_outcome_next {program : CIL.Program} {method pc next : Nat}
     {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
     {frame nextFrame : Frame} {memory updated : Memory} {post : Memory → List Value → Prop}
-    {raises : Option String}
+    {raises : Option ExceptionType}
     (found : program[method]? = some body)
     (instruction : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .ok (.next next values nextFrame updated))
@@ -65,7 +67,7 @@ theorem loop_outcome_next {program : CIL.Program} {method pc next : Nat}
 
 /-- A loop path to a state with the outcome gives the outcome at its source. -/
 theorem loop_reaches_outcome {program : CIL.Program} {method : Nat} {args : List Value}
-    {source target : LoopState} {post : Memory → List Value → Prop} {raises : Option String}
+    {source target : LoopState} {post : Memory → List Value → Prop} {raises : Option ExceptionType}
     (path : LoopReaches program method args source target)
     (finished : LoopOutcome program method args post raises target) :
     LoopOutcome program method args post raises source := by
@@ -81,7 +83,7 @@ theorem loop_reaches_outcome {program : CIL.Program} {method : Nat} {args : List
 theorem loop_outcome_call {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
-    {post : Memory → List Value → Prop} {raises : Option String}
+    {post : Memory → List Value → Prop} {raises : Option ExceptionType}
     (holds : c.Holds program callee) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped :
@@ -107,7 +109,7 @@ theorem loop_outcome_call {Input Output : Type} {c : OutcomeContract Input Outpu
 theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
-    {post : Memory → List Value → Prop} {raises : Option String}
+    {post : Memory → List Value → Prop} {raises : Option ExceptionType}
     (holds : c.Holds program callee) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped :
@@ -130,7 +132,7 @@ theorem loop_outcome_call_formed {Input Output : Type} {c : OutcomeContract Inpu
 theorem loop_outcome_call_raises {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
-    {post : Memory → List Value → Prop} {exception : String}
+    {post : Memory → List Value → Prop} {exception : ExceptionType}
     (holds : c.Holds program callee) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped :
@@ -146,7 +148,7 @@ theorem loop_outcome_call_raises {Input Output : Type} {c : OutcomeContract Inpu
 theorem loop_outcome_throw {program : CIL.Program} {method pc : Nat}
     {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value} {frame : Frame}
     {memory : Memory}
-    {post : Memory → List Value → Prop} {exception : String}
+    {post : Memory → List Value → Prop} {exception : ExceptionType}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .error (.thrown exception)) :
     LoopOutcome program method args post (some exception) ⟨pc, frame, stack, memory⟩ :=
@@ -156,7 +158,8 @@ theorem loop_outcome_throw {program : CIL.Program} {method pc : Nat}
     exhaustion is not settled. -/
 theorem loop_outcome_some_refuted {program : CIL.Program} {fuel method pc : Nat}
     {args stack : List Value}
-    {frame : Frame} {memory : Memory} {post : Memory → List Value → Prop} {exception : String}
+    {frame : Frame} {memory : Memory} {post : Memory → List Value → Prop}
+    {exception : ExceptionType}
     {outcome : Except LocatedFault (Memory × List Value)}
     (ran : run program fuel method pc args frame stack memory = outcome) (settled : Settled outcome)
     (other : ∀ fault, outcome = .error fault → fault.fault ≠ .thrown exception) :
@@ -173,7 +176,7 @@ theorem loop_outcome_some_refuted {program : CIL.Program} {fuel method pc : Nat}
 def EnsuresOutcome (program : CIL.Program) (method : Nat)
     (pre : List Value → Memory → Prop)
     (post : List Value → Memory → Memory → List Value → Prop)
-    (raises : List Value → Memory → Option String) : Prop :=
+    (raises : List Value → Memory → Option ExceptionType) : Prop :=
   ∀ args initial, pre args initial →
     match raises args initial with
     | some exception => Raises program method args initial exception
@@ -190,7 +193,7 @@ theorem ensures_outcome_none {program : CIL.Program} {method : Nat}
 theorem ensures_outcome_of_loop (program : CIL.Program) (method : Nat)
     (pre : List Value → Memory → Prop)
     (post : List Value → Memory → Memory → List Value → Prop)
-    (raises : List Value → Memory → Option String)
+    (raises : List Value → Memory → Option ExceptionType)
     (verified : ∀ args initial, pre args initial →
       ∃ body frame entered,
         program[method]? = some body ∧

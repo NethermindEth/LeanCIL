@@ -2,11 +2,17 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include ../scripts/BatchVerification.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../scripts/RuntimeProfileValidation.cs
+#:include PinnedMetadata.cs
 
 using System.Text.RegularExpressions;
 using System.Reflection;
@@ -32,7 +38,7 @@ var sharedCases = RuntimeProfileValidation.Observations(
 // that omit or split a nested flag are refused.
 foreach (var (nested, baseFlag, getter, _) in RuntimeProfileValidation.NestedGetters)
 {
-    var evidence = nested is "advSimd64" or "armAes64" ? "macos-arm64-net10.json" : "windows-x64-net10.json";
+    var evidence = nested is "advSimd64" or "armAes64" ? "macos-arm64-net10.json" : "windows-x64-net11.json";
     var recorded = JsonNode.Parse(File.ReadAllText(At($"docs/evidence/runtime-profiles/{evidence}")))!;
     foreach (var (name, mutate) in new (string, Action<JsonObject>)[]
     {
@@ -53,7 +59,7 @@ foreach (var (nested, baseFlag, getter, _) in RuntimeProfileValidation.NestedGet
         Console.WriteLine($"PASS {getter} observation rejected: {name}");
     }
 }
-foreach (var name in new[] { "scalar", "x64-sse2", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
+foreach (var name in new[] { "scalar", "x64-sse42", "x64-v3", "x64-v4", "arm64-advsimd" })
     sharedCases.Add((JsonSerializer.Serialize(SelectProfile(name), jsonOptions), true));
 foreach (var name in new[] { "x64-avx2", "x64-avx2-bmi1", "x64-avx512", "x64-avx512-bmi1",
     "x64-bmi2", "x64-vector256", "x64-sse41", "arm64-armbase" })
@@ -74,7 +80,7 @@ foreach (var (name, flag, value, accepted) in new[]
     ("x64-v4", "avx512Vbmi", true, true), ("x64-v3", "avx512Vbmi", true, false),
     ("arm64-advsimd", "avx512Vbmi", true, false),
     // AES is an optional group on each architecture that needs only that architecture's base.
-    ("x64-sse2", "aes", true, true), ("x64-v4", "aes", true, true), ("arm64-advsimd", "aes", true, false),
+    ("x64-sse42", "aes", true, true), ("x64-v4", "aes", true, true), ("arm64-advsimd", "aes", true, false),
     ("arm64-advsimd", "armAes", true, true), ("x64-v4", "armAes", true, false), ("scalar", "aes", true, false),
     ("scalar", "armAes", true, false)
 })
@@ -92,6 +98,29 @@ foreach (var (name, flag, value, accepted) in new[]
     catch (TargetInvocationException exception) when (!accepted && exception.InnerException is InvalidDataException) { }
 }
 Console.WriteLine("PASS runtime profile groups, retired profiles and reduced vector width");
+// No .NET 11 x64 process reports SSE2 without SSSE3, SSE4.1 and SSE4.2, so that set is rejected with the gap.
+var belowBaseline = JsonSerializer.SerializeToNode(SelectProfile("x64-sse42"), jsonOptions)!;
+foreach (var flag in new[] { "ssse3", "sse41", "sse42" }) belowBaseline[flag] = false;
+belowBaseline["name"] = "sse2-only";
+sharedCases.Add((belowBaseline.ToJsonString(), false));
+var belowBaselinePath = Path.Combine(output, "sse2-only.json");
+File.WriteAllText(belowBaselinePath, belowBaseline.ToJsonString());
+const string missingBaseline = "sse2-only: below the .NET 11 x64 baseline (x86-64-v2); missing Ssse3, Sse41, Sse42";
+try
+{
+    _ = SelectProfile("@" + belowBaselinePath);
+    throw new InvalidOperationException("Profile below the x64 baseline accepted: " + belowBaselinePath);
+}
+catch (TargetInvocationException exception) when (exception.InnerException is InvalidDataException below &&
+    below.Message.Contains(missingBaseline, StringComparison.Ordinal)) { }
+try
+{
+    _ = SelectProfile("x64-sse2");
+    throw new InvalidOperationException("Built-in profile below the x64 baseline accepted: x64-sse2");
+}
+catch (TargetInvocationException exception) when (exception.InnerException is ArgumentException unknown &&
+    unknown.Message.Contains("Unknown execution profile: x64-sse2", StringComparison.Ordinal)) { }
+Console.WriteLine("PASS x64 feature sets below the .NET 11 baseline rejected with the missing sets");
 RequireLeanFixtures("CIL.Extraction.Features", "CIL.SymbolicExecution", "CIL.Safety.Execution");
 var sharedEvidence = Path.Combine(output, "RuntimeProfiles.lean");
 RuntimeProfileValidation.Check(sharedCases, ExtractorPath, sharedEvidence);
@@ -127,7 +156,7 @@ string MutateState(string source, string update) => Regex.Replace(source,
 Reject("wrong-feature", baseline.Replace(".feature .avx2", ".feature .sse2"));
 Reject("wrong-branch", baseline.Replace(".brfalse 10", ".brfalse 11"));
 Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))]", "stack := [some (BitVec.ofInt 32 (1))]"));
-Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [none], locals := [none] })"));
+Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [], locals := [(0, BitVec.ofInt 32 (0))] })"));
 Reject("false-pruned-successor", MutateState(baseline, "set 10 none"));
 Reject("omitted-states", MutateState(baseline, "take 17"));
 var unsupported = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)",
@@ -313,8 +342,7 @@ foreach (var obligation in new[] { featureObligation, "method0_scalars_validated
         ("byref", "typeArguments := [.atom Extraction.runtimeScope \"System.Int32\"]",
             "typeArguments := [.byref (.atom Extraction.runtimeScope \"System.Int32\")]"),
         ("layout", aggregate, Regex.Replace(aggregate, "\"[^\"]+\"", "\"forged\"")),
-        ("signature", "parameterCount := 0, hasThis := false, returnsValue := true",
-            "parameterCount := 1, hasThis := false, returnsValue := true")
+        ("signature", "parameterCount := 0, returnsValue := true", "parameterCount := 1, returnsValue := true")
     })
     {
         var changed = narrowed.Replace(before, after, StringComparison.Ordinal);
@@ -327,11 +355,11 @@ foreach (var obligation in new[] { featureObligation, "method0_scalars_validated
 }
 queryControls.Check(replay: false);
 // A cached type validation belongs to its module and architecture within this request.
-using (var module = ModuleDefinition.ReadModule(assembly))
-using (var other = ModuleDefinition.CreateModule("OtherQueryOwner", ModuleKind.Dll))
+using (var pinned = new PinnedMetadata(profileType.Assembly, assembly))
 using (var scope = (IDisposable)profileType.Assembly.GetType("Nethermind.LeanCIL.EnumTypes", true)!
     .GetMethod("BeginScope", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!)
 {
+    var module = pinned.Module;
     var validate = profileType.Assembly.GetType("Nethermind.LeanCIL.ReferenceQueries", true)!
         .GetMethod("Constant", BindingFlags.Static | BindingFlags.NonPublic)!;
     var method = module.Types.Single(type => type.FullName == "Examples.Capabilities")
@@ -341,12 +369,12 @@ using (var scope = (IDisposable)profileType.Assembly.GetType("Nethermind.LeanCIL
     if (!Equals(validate.Invoke(null, [validQuery, "scalar"]), 0) ||
         !Equals(validate.Invoke(null, [validQuery, "scalar"]), 0))
         throw new InvalidOperationException("Reference-content cache control failed");
-    var owner = validQuery.DeclaringType;
-    var definition = new MethodReference(validQuery.Name, validQuery.ReturnType,
-        new TypeReference(owner.Namespace, owner.Name, other, owner.Scope))
-        { CallingConvention = MethodCallingConvention.Generic };
-    definition.GenericParameters.Add(new GenericParameter("T", definition));
-    var foreignQuery = new GenericInstanceMethod(definition);
+    using var foreign = new PinnedMetadata(profileType.Assembly, assembly);
+    var foreignMethod = foreign.Module.GetType("Examples.Capabilities")
+        .Methods.Single(candidate => candidate.Name == "ReferenceFree");
+    var foreignQuery = foreignMethod.Body.Instructions.Select(instruction => instruction.Operand)
+        .OfType<GenericInstanceMethod>().Single(call => call.GenericArguments[0].Name == "EnumRecord");
+    foreignQuery.GenericArguments.Clear();
     foreignQuery.GenericArguments.Add(validQuery.GenericArguments[0]);
     try
     {
@@ -385,7 +413,9 @@ foreach (var mutation in new[] { "span", "byref", "pointer", "class", "float", "
             diagnostic = "Unsupported field type";
             break;
         case "scope":
-            query.ElementMethod.DeclaringType.Scope = new AssemblyNameReference("Forged", new Version(10, 0));
+            var forgedQueryScope = new AssemblyNameReference("Forged", new Version(10, 0));
+            module.AssemblyReferences.Add(forgedQueryScope);
+            query.ElementMethod.DeclaringType.Scope = forgedQueryScope;
             diagnostic = "Unsupported reference-content query signature";
             break;
     }
@@ -486,7 +516,11 @@ foreach (var mutation in new[] { "scope", "field", "module-type" })
     var diagnostic = "Only System.Runtime's static readonly BitConverter.IsLittleEndian is a platform constant";
     switch (mutation)
     {
-        case "scope": field.DeclaringType.Scope = new AssemblyNameReference("Forged", new Version(10, 0)); break;
+        case "scope":
+            var forgedScope = new AssemblyNameReference("Forged", new Version(10, 0));
+            module.AssemblyReferences.Add(forgedScope);
+            field.DeclaringType.Scope = forgedScope;
+            break;
         case "field":
             load.Operand = new FieldReference("IsBigEndian", field.FieldType, field.DeclaringType);
             diagnostic = "Only same-assembly static readonly";

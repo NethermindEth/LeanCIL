@@ -1,6 +1,11 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 
 using System.Reflection;
 using System.Text.Json;
@@ -370,6 +375,8 @@ Require(sites.Count == 2 && reaches.Count == 2 && chains.Count == 2 &&
 // LeanCIL's own assembly against its checked-in baseline, then the gate's decisions on altered baselines.
 const string selfAdmission = "Tests/SelfAdmission.cs";
 Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
+Run(["dotnet", "run", "--file", "Tests/HoleCorpus.cs", "--", "--admission-report",
+    At("artifacts/SelfAdmission/blockers.json")], streamOutput: true, progress: "Hole corpus");
 var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))
     .GetProperty("entries").EnumerateArray().ToArray();
 // Source-named methods, so the gate's stable names equal the report's.
@@ -413,6 +420,32 @@ if (admittedMethods.Length != 0)
         gained.Output.Contains("Gained admissions") && gained.Output.Contains(unrecorded),
         "An unrecorded admission passed the gate:\n" + gained.Output);
 }
+// A volatile field is read and written under a `volatile.` prefix, which the single-threaded model gives no meaning:
+// extraction stops at it and names the instruction, the method and the stage.
+var volatileSource = Path.Combine(directory, "VolatileAssembly");
+Directory.CreateDirectory(volatileSource);
+File.WriteAllText(Path.Combine(volatileSource, "Volatile.csproj"),
+    File.ReadAllText(Path.Combine(source, "Fixture.csproj")));
+File.WriteAllText(Path.Combine(volatileSource, "Volatile.cs"), """
+public sealed class Flag { public volatile int Raised; }
+public static class Access
+{
+    public static int Read(Flag flag) => flag.Raised;
+    public static void Write(Flag flag) { flag.Raised = 1; }
+}
+""");
+Run(["dotnet", "build", Path.Combine(volatileSource, "Volatile.csproj"), "-c", "Release"]);
+foreach (var (selector, method) in new[] { ("Access::Read(Flag)", "System.Int32 Access::Read(Flag)"),
+    ("Access::Write(Flag)", "System.Void Access::Write(Flag)") })
+{
+    var refused = Execute(["dotnet", ExtractorPath, "extract", Path.Combine(volatileSource, "bin/Volatile.dll"),
+        selector, Path.Combine(directory, "VolatileExtraction")]);
+    Require(refused.Code != 0 && refused.Output.Contains("Unsupported instruction: IL_", StringComparison.Ordinal) &&
+        refused.Output.Contains("volatile.", StringComparison.Ordinal) &&
+        refused.Output.Contains("Method: " + method, StringComparison.Ordinal) &&
+        refused.Output.Contains("Stage: metadata and CIL validation", StringComparison.Ordinal),
+        "A volatile access was not refused with the unsupported-instruction message:\n" + refused.Output);
+}
 // A virtual call scans the classes of the image for subclasses of its slot. Resolving every class's base from
 // disk makes that scan cost milliseconds per class, so four times the classes would cost four times as long.
 const int FewClasses = 125;
@@ -445,10 +478,15 @@ double VirtualDispatchSeconds(int classes)
         entries = Enumerable.Range(0, VirtualCallers).Select(index =>
             new { signature = $"Callers::Call{index}(Shape,int)", profile = "scalar" })
     }));
-    var timer = System.Diagnostics.Stopwatch.StartNew();
-    Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Dispatch.dll"),
-        "--manifest", callers, "--output", Path.Combine(fixtureDirectory, "blockers.json")]);
-    return timer.Elapsed.TotalSeconds;
+    var seconds = double.MaxValue;
+    for (var sample = 0; sample < 3; sample++)
+    {
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        Run(["dotnet", ExtractorPath, "blockers", Path.Combine(fixtureDirectory, "bin/Dispatch.dll"),
+            "--manifest", callers, "--output", Path.Combine(fixtureDirectory, "blockers.json")]);
+        seconds = Math.Min(seconds, timer.Elapsed.TotalSeconds);
+    }
+    return seconds;
 }
 var fewClassesSeconds = VirtualDispatchSeconds(FewClasses);
 var manyClassesSeconds = VirtualDispatchSeconds(ManyClasses);

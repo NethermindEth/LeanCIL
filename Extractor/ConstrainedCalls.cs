@@ -17,22 +17,25 @@ internal static class ConstrainedCalls
 
     internal sealed class TargetIndex(IEnumerable<MethodDefinition> methods)
     {
-        readonly Dictionary<(MethodDefinition Definition, string Owner, string Arguments), MethodDefinition> targets =
-            methods.Where(method => MethodSpecialization.Source(method) is not null)
-                .ToDictionary(method => (MethodSpecialization.Definition(method),
-                    MethodSpecialization.SignatureType(MethodSpecialization.DeclaringType(method)),
-                    ArgumentKey(MethodSpecialization.Arguments(method)
+        readonly SortedDictionary<StructuralSignatures.Signature, MethodDefinition> targets = Build(methods);
+
+        static SortedDictionary<StructuralSignatures.Signature, MethodDefinition> Build(
+            IEnumerable<MethodDefinition> methods)
+        {
+            var result = new SortedDictionary<StructuralSignatures.Signature, MethodDefinition>();
+            foreach (var method in methods.Where(method => MethodSpecialization.Source(method) is not null))
+                result.Add(StructuralSignatures.Current.Specialization(method,
+                    MethodSpecialization.DeclaringType(method), MethodSpecialization.Arguments(method)
                         .Take(MethodSpecialization.Arguments(method).Count -
-                            MethodSpecialization.OwnerArguments(method).Count))));
+                            MethodSpecialization.OwnerArguments(method).Count)), method);
+            return result;
+        }
 
         internal MethodDefinition Find(Resolution resolution) =>
             !resolution.Specialized ? resolution.Target :
-                targets.GetValueOrDefault((resolution.Target, MethodSpecialization.SignatureType(resolution.Owner),
-                    ArgumentKey(resolution.MethodArguments))) ??
+                targets.GetValueOrDefault(StructuralSignatures.Current.Specialization(
+                    resolution.Target, resolution.Owner, resolution.MethodArguments)) ??
                     throw new InvalidDataException("Unresolved constrained owner specialization");
-
-        static string ArgumentKey(IEnumerable<TypeReference> arguments) =>
-            string.Join(",", arguments.Select(MethodSpecialization.SignatureType));
     }
 
     internal static MethodDefinition Specialize(Resolution resolution, MethodSpecialization specializations)
@@ -76,9 +79,8 @@ internal static class ConstrainedCalls
         if (member.Resolve() is not { } slot ||
             !Extracted(slot.Module, caller.Module) || member.Name != slot.Name ||
             !SameType(member.ReturnType, slot.ReturnType) ||
-            !member.Parameters.Select(parameter => MethodSpecialization.SignatureType(parameter.ParameterType))
-                .SequenceEqual(slot.Parameters.Select(parameter =>
-                    MethodSpecialization.SignatureType(parameter.ParameterType))) ||
+            StructuralSignatures.Current.Ordered(member.Parameters.Select(parameter => parameter.ParameterType)) !=
+                StructuralSignatures.Current.Ordered(slot.Parameters.Select(parameter => parameter.ParameterType)) ||
             member.HasThis != slot.HasThis || slot.HasThis != instance || slot.IsStatic == instance ||
             slot.IsConstructor || slot.GenericParameters.Count != methodArguments.Length ||
             instance && methodArguments.Length != 0 ||
@@ -166,13 +168,13 @@ internal static class ConstrainedCalls
     {
         var listed = concrete.Interfaces.Select(implementation =>
             GenericStructs.Substitute(implementation.InterfaceType, owner)).ToArray();
-        var names = listed.Select(MethodSpecialization.SignatureType).ToHashSet(StringComparer.Ordinal);
+        var names = new SortedSet<StructuralSignatures.Signature>(listed.Select(StructuralSignatures.Current.Type));
         List<(MethodDefinition Body, TypeReference Owner)> candidates = [(slot, closedSlotOwner)];
         foreach (var candidate in listed)
         {
             if (candidate.Resolve() is not { } declared || !Extracted(declared.Module, caller) ||
                 !declared.IsInterface || !BaseInterfaces(candidate).All(parent =>
-                    names.Contains(MethodSpecialization.SignatureType(parent))))
+                    names.Contains(StructuralSignatures.Current.Type(parent))))
                 throw new InvalidDataException("A static virtual slot's interface-level body requires every " +
                     "interface of the receiver, including inherited ones, to be listed and declared in an " +
                     "extracted assembly");
@@ -235,5 +237,5 @@ internal static class ConstrainedCalls
     }
 
     static bool SameType(TypeReference left, TypeReference right) =>
-        MethodSpecialization.SignatureType(left) == MethodSpecialization.SignatureType(right);
+        StructuralSignatures.Current.Type(left) == StructuralSignatures.Current.Type(right);
 }

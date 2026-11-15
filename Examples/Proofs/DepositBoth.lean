@@ -102,7 +102,7 @@ theorem first_null_throws (memory : Memory) (second : Reference) (amount : W64)
     (secondLive : LiveObject memory second) :
     ∃ fuel, invoke Extracted.program fuel depositBoth
         [.object .null, .object (.address second), .scalar (.i64 amount)] memory =
-      .error ⟨depositBoth, 2, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨depositBoth, 2, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms first_null_throws
@@ -121,7 +121,7 @@ theorem second_null_throws (memory : Memory) (first : Reference) (amount : W64)
         Account.Balance.Holds middle first (Account.Balance.of memory first + amount) ∧
         invoke Extracted.program (fuel + 6) depositBoth
             [.object (.address first), .object .null, .scalar (.i64 amount)] memory =
-          .error ⟨depositBoth, 5, .thrown "System.NullReferenceException"⟩ := by
+          .error ⟨depositBoth, 5, .thrown .nullReference⟩ := by
   obtain ⟨middle, values, deposited⟩ := deposit_holds.result (first, amount) owned
   obtain ⟨rfl, held⟩ := deposited.post
   obtain ⟨childFuel, invoked⟩ := deposited.invoked

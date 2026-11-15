@@ -48,6 +48,8 @@ inductive TableError where
   | outsideHeap (key : Nat)
   /-- A string heap entry is not well-formed UTF-8. -/
   | invalidUtf8
+  /-- An unflagged public key token has a nonzero width other than eight bytes. -/
+  | invalidPublicKeyToken (length : Nat)
   deriving DecidableEq, Repr
 
 /-- Why a binding fact does not hold. -/
@@ -72,6 +74,17 @@ inductive AuditError where
   | unpinned (identity : String)
   /-- Two pinned images have the same identity. -/
   | duplicateImage (identity : String)
+  /-- The carried table stream header of the assembly pinned under `identity` is not the image's
+      header through its last row count, or does not decode to the carried decoded header. -/
+  | headerMismatch (identity : String)
+  /-- The carried row of the token is not the image's row under the carried heap numbering. -/
+  | rowMismatch (token : Nat)
+  /-- The carried entry with this key is not the entry of the image at the offset the key names. -/
+  | heapMismatch (heap key : Nat)
+  /-- Two row cells of one offset hold different keys, two of different offsets hold one key, a
+      carried entry has a key no row cell holds, a row key has no carried entry, a key is not
+      below the omitted-entry marker, or the carried entries of the heap do not ascend by key. -/
+  | heapNumbering (heap key : Nat)
   deriving DecidableEq, Repr
 
 /-- Whether a check succeeded; the proposition of each audited theorem is `ok check = true`. -/

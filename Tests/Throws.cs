@@ -2,10 +2,16 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include PreparedLeanFixtures.cs
 #:include RejectedEvidence.cs
 #:include GeneratedEvidence.cs
 #:include ../scripts/BatchVerification.cs
+#:include ExceptionMembers.cs
 
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -38,7 +44,7 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     var extracted = Path.Combine(folder, "Extracted.lean");
     var source = File.ReadAllText(extracted);
     var site = ExtractedInstructions(source)
-        .Select(instruction => (instruction, Throw: Regex.Match(instruction.Op, @"\A\.throw ""([\w.]+)""\z")))
+        .Select(instruction => (instruction, Throw: ThrowPatterns.FoldedThrow().Match(instruction.Op)))
         .FirstOrDefault(candidate => candidate.Throw.Success);
     if (site.instruction is null) throw new InvalidOperationException($"No folded throw in {name}");
     var (method, pc, label) = (site.instruction.Method, site.instruction.Pc, site.Throw.Groups[1].Value);
@@ -67,7 +73,10 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
     {
         string outcome;
         try { outcome = $".ok [.scalar (.i32 {(uint)runtime.GetMethod(name)!.Invoke(null, [.. input.Cast<object>()])!})]"; }
-        catch (TargetInvocationException error) { outcome = $".error ⟨{method}, {pc}, .thrown \"{error.InnerException!.GetType().FullName}\"⟩"; }
+        catch (TargetInvocationException error)
+        {
+            outcome = $".error ⟨{method}, {pc}, .thrown .{ExceptionMember(error.InnerException!)}⟩";
+        }
         return $"(CIL.Safety.invoke Extracted.program 64 0 [{string.Join(", ", input.Select(v => $".scalar (.i32 {v})"))}] CIL.Safety.Memory.empty).map Prod.snd = {outcome}";
     }).ToList();
     var proof = Path.Combine(folder, "BoundaryProof.lean");
@@ -78,9 +87,8 @@ foreach (var (name, selector, inputs) in new (string, string, uint[][])[]
         Console.WriteLine($"PASS {name}: {claims.Count} runtime comparisons, {label} located at method {method} pc {pc}"));
 
     // A forged type must fail the feature certificate, independently of the instruction lemma.
-    var forgedLabel = label == "System.InvalidOperationException"
-        ? "System.DivideByZeroException" : "System.InvalidOperationException";
-    var forged = source.Replace($".throw \"{label}\"", $".throw \"{forgedLabel}\"");
+    var forgedLabel = label == "invalidOperation" ? "divideByZero" : "invalidOperation";
+    var forged = source.Replace($".throw .{label}", $".throw .{forgedLabel}");
     var mutated = Path.Combine(root, name + "-forged.lean");
     File.WriteAllText(mutated, forged);
     rejected.Add(mutated, $"PASS {name}: forged raised type rejected by the feature certificate",
@@ -116,6 +124,7 @@ foreach (var (mutation, marker) in new[]
     ("dead-non-exception", ""),
     ("missing-constructor", "Unsupported exception constructor"),
     ("wrong-parameter", "Unsupported exception constructor"),
+    ("instruction-only", "Unsupported exception constructor"),
     ("explicit-this", "Unsupported exception constructor"),
     ("vararg", "Unsupported exception constructor")
 })
@@ -161,10 +170,16 @@ foreach (var (mutation, marker) in new[]
             case "dead-non-exception":
             case "missing-constructor":
             case "wrong-parameter":
+            case "instruction-only":
             {
                 var original = (MethodReference)code[0].Operand;
-                var type = new TypeReference("System", mutation.EndsWith("non-exception", StringComparison.Ordinal) ? "Object" : "DivideByZeroException",
-                    module, original.DeclaringType.Scope);
+                var typeName = mutation switch
+                {
+                    "non-exception" or "dead-non-exception" => "Object",
+                    "instruction-only" => "InvalidCastException",
+                    _ => "DivideByZeroException"
+                };
+                var type = new TypeReference("System", typeName, module, original.DeclaringType.Scope);
                 var constructor = new MethodReference(".ctor", module.TypeSystem.Void, type) { HasThis = true };
                 code[0].Operand = constructor;
                 if (mutation is "missing-constructor" or "wrong-parameter")
@@ -218,3 +233,9 @@ foreach (var (mutation, marker) in new[]
     Console.WriteLine("PASS rejection: " + mutation);
 }
 Console.WriteLine("PASS folded throws, located faults, runtime comparisons, forged types and exact-pattern rejection");
+
+static partial class ThrowPatterns
+{
+    [GeneratedRegex(@"\A\.throw \.(\w+)\z")]
+    internal static partial Regex FoldedThrow();
+}

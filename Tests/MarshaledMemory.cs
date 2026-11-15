@@ -2,6 +2,11 @@
 #:property PublishAot=false
 #:package Mono.Cecil
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ../scripts/BatchVerification.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
@@ -60,7 +65,7 @@ foreach (var method in methods.Where(method => method.IsPublic))
     else
     {
         claims.Add($"({Run(width - 1)}).map Prod.snd = " +
-            $".error ⟨0, {(read ? 1 : 2)}, .thrown \"System.ArgumentOutOfRangeException\"⟩");
+            $".error ⟨0, {(read ? 1 : 2)}, .thrown .argumentOutOfRange⟩");
         proofs.Add("by rfl");
     }
     if (name == "Read")

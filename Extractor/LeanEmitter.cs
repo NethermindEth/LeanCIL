@@ -185,6 +185,7 @@ internal static class LeanEmitter
             import CIL.SymbolicExecution
             import CIL.InstructionEquations
             import CIL.Safety.Execution
+            import CIL.Safety.ResolutionFacts
 
             namespace Extracted
             open CIL
@@ -215,7 +216,12 @@ internal static class LeanEmitter
         // One shared constant, so a method literal names the tables instead of repeating them.
         lean.AppendLine($"@[cil_code] def {FrameMetadata.EnvironmentLean} : LayoutEnvironment := " +
             "{ rawLayouts := rawLayouts, layouts := computedLayouts }");
+        // The shape facts are written here once every method has been translated, so admission reports its own
+        // refusals first, and every method's components see them.
+        var shapeFactsAt = lean.Length;
+        var operandShapes = new OperandShapes();
         GenericEvidence genericEvidence = new(pinned, layoutEvidence, importResolution);
+        genericEvidence.EmitAssemblyMetadata(lean);
         var fieldAccesses = new List<ClassViews.Access>();
         for (int n = 0; n < methods.Length; n++)
         {
@@ -243,7 +249,7 @@ internal static class LeanEmitter
                 ops.Add(reachable.Contains(i)
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                         scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
-                    : new Unsupported("Unreachable under selected profile"));
+                    : Unadmitted.At(i));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
             var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);
@@ -268,7 +274,8 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
             callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
-            if (collectTemplates) templates.Add(new(m.FullName, frame, [.. ops]));
+            if (collectTemplates)
+                templates.Add(new(m.FullName, frame, [.. ops], [.. m.Body.Instructions.Select(Unadmitted.RawOpcode)]));
             // Each link's text is written once, as a definition the table, the index and its facts name.
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
             foreach (var (pc, link) in linkEntries)
@@ -290,6 +297,7 @@ internal static class LeanEmitter
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
+            operandShapes.Add(m, reachable, genericEvidence);
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
             lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
                 $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
@@ -307,6 +315,7 @@ internal static class LeanEmitter
             ];
             foreach (var (field, value) in facts)
                 lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
+            lean.AppendLine($"cil_resolution_facts method{n}");
             // One fact per call site lets a stepping proof read its link without evaluating the table lookup.
             for (var position = 0; position < linkEntries.Count; position++)
             {
@@ -316,13 +325,7 @@ internal static class LeanEmitter
                     $"Extraction.linkAt_of_entry (position := {position}) method{n}_linkIndex_valid rfl");
             }
         }
-        // Identities only: hashes and MVIDs change with every rebuild, so they stay in identity.json for `check`.
-        PinnedAssemblies.Pin[] pins = pinned.Pins.ToArray();
-        for (var k = 0; k < pins.Length; k++)
-            lean.AppendLine($"def assembly{k} : Extraction.AssemblyPin := " +
-                $"{{ identity := {JsonSerializer.Serialize(pins[k].Identity)} }}");
-        lean.AppendLine("def assemblies : List Extraction.AssemblyPin := [" +
-            string.Join(", ", Enumerable.Range(0, pins.Length).Select(k => $"assembly{k}")) + "]");
+        lean.Insert(shapeFactsAt, operandShapes.Lean());
         lean.AppendLine("def specializedMethods : List Extraction.SpecializedMethod := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"⟨method{n}TypeArgumentsRaw, method{n}Closed⟩")) + "]");
         IReadOnlyList<ImportResolution.Binding> importBindings = importResolution?.Bindings ?? [];
         lean.AppendLine("def imports : List ImportSlot := [" + string.Join(", ", importBindings.Select(ImportResolution.LeanSlot)) + "]");
@@ -335,7 +338,8 @@ internal static class LeanEmitter
                 $"reachable := method{n}Reachable, featureStates := method{n}FeatureStates, " +
                 $"scalarStates := method{n}ScalarStates, layoutUses := method{n}LayoutUses, " +
                 $"dispatchTypes := method{n}DispatchTypes, " +
-                $"assembly := assembly{pinned.Index(methods[n].Module)} }}")) + "]");
+                $"assembly := assembly{pinned.Index(methods[n].Module)}, " +
+                $"signature := method{n}Signature }}")) + "]");
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);
@@ -347,8 +351,9 @@ internal static class LeanEmitter
                 $"method{n}Closed) method{n}Reachable method{n} := {proof}");
         }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
-        // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them.
-        lean.AppendLine("def signatures : List String := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}Signature")) + "]");
+        // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them. Each
+        // entry is its evidence record's, which the body check equates with the full name its metadata row spells.
+        lean.AppendLine("def signatures : List String := methodEvidence.map Extraction.MethodEvidence.signature");
         lean.AppendLine("theorem signatures_length : signatures.length = program.length := rfl");
         lean.AppendLine("def importSignatures : List String := [" + string.Join(", ", importBindings.Select(binding => JsonSerializer.Serialize(binding.Identity))) + "]");
         lean.AppendLine("theorem importSignatures_length : importSignatures.length = imports.length := rfl");
@@ -357,21 +362,25 @@ internal static class LeanEmitter
         {
             lean.AppendLine($"theorem method{n}_coverage_validated : Extraction.LayoutUsesComplete rawLayouts method{n}Closed method{n}RawArguments method{n}Reachable method{n}LayoutUses := {Decide}");
             lean.AppendLine($"theorem method{n}_constrained_validated : Extraction.ConstrainedCallsValid method{n}DispatchTypes specializedMethods method{n}Closed method{n}Reachable method{n} := {Decide}");
-            lean.AppendLine($"theorem method{n}_shape_validated : Extraction.MethodShapeValid rawLayouts method{n}Closed method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_shape_validated : " +
+                $"Extraction.MethodShapeValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_unsafe_validated : Extraction.UnsafeCallsValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
             lean.AppendLine($"theorem method{n}_intrinsics_validated : Extraction.ExactIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +
                 $"Extraction.MethodEnvironmentValid rawLayouts computedLayouts method{n} := rfl");
-            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts computedLayouts methodEvidence imports methodEvidence[{n}] method{n} :=");
+            lean.AppendLine($"theorem method{n}_declared_validated : " +
+                $"Extraction.DeclaredValid method{n}Closed method{n} := rfl");
+            lean.AppendLine($"theorem method{n}_evidence_validated : Extraction.MethodEvidenceValid rawLayouts " +
+                $"computedLayouts assemblies methodEvidence imports methodEvidence[{n}] method{n} :=");
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
                 $"method{n}_intrinsics_validated, method{n}_opaque_validated, " +
                 $"method{n}_vector_initializations_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
-            lean.AppendLine($"    method{n}_environment_validated⟩");
+            lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated⟩");
         }
         lean.AppendLine("theorem import_layouts_validated : Extraction.ImportedLayoutsValid imports profile.architecture := " + Decide);
         lean.AppendLine("#print axioms import_layouts_validated");
@@ -379,7 +388,8 @@ internal static class LeanEmitter
             "Extraction.ImportedLocalLayoutsBound rawLayouts computedLayouts imports := " + Decide);
         lean.AppendLine("theorem attribution_validated : " +
             "Extraction.AttributionValid (Extraction.bodyOwners methodEvidence) = true := " + Decide);
-        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts methodEvidence imports program := by");
+        lean.AppendLine("theorem translation_valid : Extraction.TranslationValid rawLayouts computedLayouts " +
+            "assemblies methodEvidence imports program := by");
         lean.AppendLine("  apply Extraction.translation_of_methods (program := program) layouts_validated statics_validated import_layouts_validated");
         lean.AppendLine("    imported_locals_validated attribution_validated");
         for (int n = 0; n < methods.Length; n++)
@@ -398,5 +408,48 @@ internal static class LeanEmitter
         }
         lean.AppendLine("end Extracted");
         return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts);
+    }
+
+    /// <summary>
+    /// The distinct field and type operands of the reachable field and value-type instructions of every method, each
+    /// written once as a definition beside the fact that states how every method of the extraction resolves it.
+    /// </summary>
+    internal sealed class OperandShapes
+    {
+        readonly Dictionary<FieldRef, int> fields = [];
+        // TypeExpr has no typed C# form, so a type operand is keyed by its rendered term.
+        readonly Dictionary<string, int> types = new(StringComparer.Ordinal);
+        readonly StringBuilder text = new();
+
+        /// <summary>
+        /// Records the operands of <paramref name="method"/>'s reachable instructions not seen before.
+        /// </summary>
+        internal void Add(MethodDefinition method, IReadOnlySet<Instruction> reachable, GenericEvidence evidence)
+        {
+            foreach (var instruction in method.Body.Instructions)
+            {
+                if (!reachable.Contains(instruction)) continue;
+                if (instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld)
+                {
+                    var field = evidence.FieldReferenceOf(method, instruction);
+                    if (!fields.TryAdd(field, fields.Count)) continue;
+                    var name = $"fieldRef{fields[field]}";
+                    text.AppendLine($"def {name} : Extraction.FieldRef := {field.ToLean()}");
+                    text.AppendLine($"cil_field_shape {FrameMetadata.EnvironmentLean} {name}");
+                }
+                else if (instruction.OpCode.Code is
+                    Code.Ldobj or Code.Stobj or Code.Initobj or Code.Cpobj or Code.Sizeof)
+                {
+                    var type = evidence.TypeOperandOf(method, instruction);
+                    if (!types.TryAdd(type, types.Count)) continue;
+                    var name = $"valueType{types[type]}";
+                    text.AppendLine($"def {name} : Extraction.TypeExpr := {type}");
+                    text.AppendLine($"cil_value_shape {FrameMetadata.EnvironmentLean} {name}");
+                }
+            }
+        }
+
+        /// <summary>The definitions and facts of every recorded operand, in the order first seen.</summary>
+        internal string Lean() => text.ToString();
     }
 }

@@ -22,12 +22,13 @@ example (h : step body (.switch [3, 5]) pc args frame stack m = .ok (.next targe
     target = pc + 1 ∨ target = 3 ∨ target = 5 := by
   simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
-example (h : step body (.nativeBinary (.blt 4)) pc args frame stack m = .ok (.next target stack' frame' m')) :
+example (h : step body (.blt 4) pc args frame stack m = .ok (.next target stack' frame' m')) :
     target = pc + 1 ∨ target = 4 := by
   simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 /-- A return never resumes in the frame. -/
-example : step body (.ret none) pc args frame stack m ≠ .ok (.next target stack' frame' m') := fun h => by
+example : step body (.ret) pc args frame stack m ≠ .ok (.next target stack' frame' m') :=
+  fun h => by
   simpa [Instruction.continues, Instruction.targets] using step_next_target h
 
 /-- Both branch outcomes occur, so the disjunction above is not vacuous. -/

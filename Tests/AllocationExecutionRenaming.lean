@@ -31,6 +31,7 @@ def sourceBody (code : List CIL.Instruction) : CIL.Method := {
   returnsValue := true
   locals := [.i32 7, .unmodeled]
   localKinds := [.word32, .word32]
+  declared := { initLocals := false }
   code }
 
 /-- Initialized private word64 homes precede, separate and follow the retained word32 homes. -/
@@ -38,14 +39,28 @@ def targetBody (code : List CIL.Instruction) : CIL.Method := {
   returnsValue := true
   locals := [.i64 17, .i32 7, .i64 23, .unmodeled, .i64 31]
   localKinds := [.word64, .word32, .word64, .word32, .word64]
+  declared := { initLocals := false }
   code := code.map indices.operation }
 
 /-- Retained local operands, all method metadata and exact frame declarations match. -/
 theorem bodies_related (code : List CIL.Instruction) :
     Nonempty (MethodRenaming (sourceBody code) (targetBody code)) := by
-  refine ⟨⟨indices, ⟨rfl, rfl, rfl⟩,
-    .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
-      (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil)))), ?_, ?_, rfl⟩⟩
+  refine Nonempty.intro {
+    indices := indices
+    metadata := {
+      profile := rfl
+      returnsValue := rfl
+      staticSites := rfl
+      returnNarrow := rfl
+      arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
+      declared := rfl
+      environment := rfl }
+    declarations :=
+      .skip _ _ (by simp [InitializerFits]) (.keep _ _ (.skip _ _ (by simp [InitializerFits])
+        (.keep _ _ (.skip _ _ (by simp [InitializerFits]) .nil))))
+    sourceReady := ?_
+    targetReady := ?_
+    code := rfl }
   all_goals constructor <;> first
     | rfl
     | (intro kind member
@@ -81,7 +96,7 @@ theorem invalid_dead_initializers_rejected :
 #print axioms invalid_dead_initializers_rejected
 
 /-- The child reads seven from its retained initializer after allocating its numeric homes. -/
-def childCode : List CIL.Instruction := [.local 0, .ret]
+def childCode : List CIL.Instruction := [.ldloc 0, .ret]
 
 /-- The inserted nonzero initializer really writes the fresh private home during frame entry. -/
 theorem private_initializer_readback :
@@ -91,13 +106,13 @@ theorem private_initializer_readback :
 
 /-- A returned child value is stored before later dynamic allocation changes fresh identities. -/
 def allocationPrefix : List CIL.Instruction :=
-  [.ldc_i4 9, .setLocal 0, .call 1 0, .setLocal 1, .ldc_i4 4, .stackAlloc false, .pop]
+  [.ldc_i4 9, .stloc 0, .call 1 0, .stloc 1, .ldc_i4 4, .localloc, .pop]
 
 /-- The resumed caller reads both retained homes after its child and dynamic allocation. -/
-def returningCode : List CIL.Instruction := allocationPrefix ++ [.local 0, .local 1, .add, .ret]
+def returningCode : List CIL.Instruction := allocationPrefix ++ [.ldloc 0, .ldloc 1, .add, .ret]
 
 /-- The exceptional fixture raises after both the nested call and dynamic allocation finish. -/
-def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw "AfterNestedAllocation"]
+def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw .invalidOperation]
 
 /-- Both methods use the same declaration transformation and preserve their callable indices. -/
 def sourceProgram (code : List CIL.Instruction) : CIL.Program :=
@@ -150,7 +165,7 @@ theorem source_confined : MemoryBelow 1 initial sourceFinal := by
 /-- The actual source raises at the instruction after the nested allocation sequence. -/
 theorem source_throws :
     invoke (sourceProgram throwingCode) fuel 0 [] initial =
-      .error ⟨0, 7, .thrown "AfterNestedAllocation"⟩ := by rfl
+      .error ⟨0, 7, .thrown .invalidOperation⟩ := by rfl
 #print axioms source_throws
 
 /-- The source has consumed five fresh identities across both frames and dynamic storage. -/
@@ -175,7 +190,7 @@ theorem transferred_return : ∃ final,
 
 /-- The checked public exception transfer covers a throw after nested and dynamic allocation. -/
 theorem transferred_exception :
-    Raises (targetProgram throwingCode) 0 [] initial "AfterNestedAllocation" :=
+    Raises (targetProgram throwingCode) 0 [] initial .invalidOperation :=
   (programs_related throwingCode).raises initial_formed
     (by intro binding member; cases member) (by intro binding member; cases member)
     (by intro value member; cases member)
@@ -225,7 +240,7 @@ theorem zero_quota_rejected :
 
 /-- Leaving the first local operand unrelocated violates the exact instruction equation. -/
 theorem unchanged_operand_rejected :
-    ([.local 0] : List CIL.Instruction) ≠ [.local 0].map indices.operation := by
+    ([.ldloc 0] : List CIL.Instruction) ≠ [.ldloc 0].map indices.operation := by
   intro equal; cases equal
 #print axioms unchanged_operand_rejected
 
@@ -274,8 +289,20 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
   cases method with
   | zero =>
     cases found
-    refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil, ⟨rfl, rfl, rfl⟩,
-      .skip kind initial fits .nil, ?_, inserted_ready kind initial fits, rfl⟩⟩⟩
+    refine Exists.intro (inserted kind initial) (And.intro rfl (Nonempty.intro {
+      indices := .skip .nil
+      metadata := {
+        profile := rfl
+        returnsValue := rfl
+        staticSites := rfl
+        returnNarrow := rfl
+        arguments := fun _ => Exists.intro _ (And.intro rfl rfl)
+        declared := rfl
+        environment := rfl }
+      declarations := .skip kind initial fits .nil
+      sourceReady := ?_
+      targetReady := inserted_ready kind initial fits
+      code := rfl }))
     exact ⟨rfl, rfl, by intro selected member; cases member⟩
   | succ method => cases found
 #print axioms inserted_related

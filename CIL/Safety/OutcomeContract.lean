@@ -15,13 +15,13 @@ namespace CIL.Safety
 /-- Exactly a thrown `exception`: fuel exhaustion, unsupported instructions and other
     faults never satisfy it. With no handlers, memory after a throw is unobservable. -/
 def Raises (program : CIL.Program) (method : Nat) (args : List Value) (memory : Memory)
-    (exception : String) : Prop :=
+    (exception : ExceptionType) : Prop :=
   ∃ fuel fault, invoke program fuel method args memory = .error fault ∧
     fault.fault = .thrown exception
 
 /-- `Raises` for a run already in progress at `pc`, used while stepping a method body. -/
 def RunRaises (program : CIL.Program) (method pc : Nat) (args : List Value) (frame : Frame)
-    (stack : List Value) (memory : Memory) (exception : String) : Prop :=
+    (stack : List Value) (memory : Memory) (exception : ExceptionType) : Prop :=
   ∃ fuel fault, run program fuel method pc args frame stack memory = .error fault ∧
     fault.fault = .thrown exception
 
@@ -29,7 +29,7 @@ def RunRaises (program : CIL.Program) (method pc : Nat) (args : List Value) (fra
     return. -/
 structure OutcomeContract (Input : Type) (Output : Type := List Value)
     extends MethodContract Input Output where
-  raises : Input → Memory → Option String
+  raises : Input → Memory → Option ExceptionType
 
 /-- For every input meeting the precondition, the method raises exactly the named exception,
     or, when none is named, returns normally as the underlying `MethodContract` requires. -/
@@ -44,7 +44,8 @@ def OutcomeContract.Holds {Input Output : Type} (c : OutcomeContract Input Outpu
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values
 
 theorem OutcomeContract.Holds.raising {Input Output : Type} {c : OutcomeContract Input Output}
-    {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory} {exception : String}
+    {program : CIL.Program} {method : Nat} {input : Input} {initial : Memory}
+    {exception : ExceptionType}
     (holds : c.Holds program method) (permitted : c.pre input initial)
     (raised : c.raises input initial = some exception) :
     Raises program method (c.args input) initial exception := by
@@ -133,7 +134,7 @@ theorem run_call_error {program : CIL.Program} {fuel method pc callee : Nat}
 
 /-- A method raises when its body, started in the frame `invoke` would set up, raises. -/
 theorem raises_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
-    {args : List Value} {frame : Frame} {memory entered : Memory} {exception : String}
+    {args : List Value} {frame : Frame} {memory entered : Memory} {exception : ExceptionType}
     (found : program[method]? = some body)
     (checked : args.mapM (checkedValue memory) = .ok args)
     (setup : enterFrame body args memory = .ok (frame, entered))
@@ -147,7 +148,7 @@ theorem raises_of_run {program : CIL.Program} {method : Nat} {body : CIL.Method}
 /-- A run raises if it raises after one ordinary step. -/
 theorem run_next_raises {program : CIL.Program} {method pc target : Nat}
     {body : CIL.Method} {op : CIL.Instruction} {args stack values : List Value}
-    {frame nextFrame : Frame} {memory updated : Memory} {exception : String}
+    {frame nextFrame : Frame} {memory updated : Memory} {exception : ExceptionType}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =
       .ok (.next target values nextFrame updated))
@@ -160,7 +161,7 @@ theorem run_next_raises {program : CIL.Program} {method pc target : Nat}
 theorem run_throw_raises {program : CIL.Program} {method pc : Nat}
     {body : CIL.Method} {op : CIL.Instruction} {args stack : List Value} {frame : Frame}
     {memory : Memory}
-    {exception : String}
+    {exception : ExceptionType}
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory = .error (.thrown exception)) :
     RunRaises program method pc args frame stack memory exception :=
@@ -172,7 +173,7 @@ theorem run_throw_raises {program : CIL.Program} {method pc : Nat}
 theorem run_call_raises_of_contract {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
-    {exception : String}
+    {exception : ExceptionType}
     (holds : c.Holds program callee) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =
@@ -219,7 +220,7 @@ theorem run_call_of_outcome {Input Output : Type} {c : OutcomeContract Input Out
 theorem run_call_raises_after_outcome {Input Output : Type} {c : OutcomeContract Input Output}
     {program : CIL.Program} {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
-    {exception : String}
+    {exception : ExceptionType}
     (holds : c.Holds program callee) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =
@@ -276,7 +277,7 @@ theorem run_call_raises_after_outcome_formed {Input Output : Type}
     {c : OutcomeContract Input Output} {program : CIL.Program}
     {method pc callee : Nat} {body : CIL.Method} {op : CIL.Instruction}
     {args stack arguments rest : List Value} {frame : Frame} {memory updated : Memory}
-    {exception : String}
+    {exception : ExceptionType}
     (holds : c.Holds program callee) (input : Input)
     (methodFound : program[method]? = some body) (instructionFound : body.code[pc]? = some op)
     (stepped : step body op pc args frame stack memory =

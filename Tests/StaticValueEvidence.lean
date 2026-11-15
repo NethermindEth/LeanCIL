@@ -9,13 +9,14 @@ private def zeros : List (BitVec 8) := [0, 0]
 
 /-- Returns its zero-initialized two-byte aggregate local. -/
 private def initializer : Method := {
-  code := [.local 0, .ret none], locals := [.aggregate zeros], localKinds := [.aggregate 2], returnsValue := true }
+  code := [.ldloc 0, .ret], locals := [.aggregate zeros], localKinds := [.aggregate 2],
+  returnsValue := true }
 
 private def descriptor (bytes : List (BitVec 8)) (init : Option StaticInitializer) : StaticDescriptor :=
   { identity := 0, fieldName := "Fixture::Zero", bytes, initializer := init }
 
 private def loader (op bytes : List (BitVec 8)) (init : Option StaticInitializer) : Method :=
-  { code := [.memory (.staticValue op), .ret none], locals := [], returnsValue := true,
+  { code := [.memory (.staticValue op), .ret], locals := [], returnsValue := true,
     staticSites := [(0, descriptor bytes init)] }
 
 private def load (op bytes : List (BitVec 8))
@@ -44,7 +45,7 @@ example : StaticValuesValid (load zeros [7] none) := by decide +kernel
 
 /-- A constructor writes through the ordinary checked aggregate temporary. -/
 private def constructor : Method := {
-  code := [.arg 0, .ldc_i4 7, .storeScalar 1, .ret none]
+  code := [.ldarg 0, .ldc_i4 7, .storeScalar 1, .ret]
   locals := [], returnsValue := false }
 
 private def constructed (bytes : List (BitVec 8)) (callee : Method := constructor) : Program :=
@@ -68,14 +69,15 @@ private def rawStatic (opcode : Nat) : RawMethod := {
   token := 0, owner := "Fixture", hasThis := false, explicitThis := false
   callingConvention := 0, attributes := 0, implementation := 0, returnType := .void
   parameters := [], locals := [], initLocals := true, maxStack := 1, genericParameters := []
-  code := [⟨0, opcode, .field (.atom "Fixture" "Holder") 0 (.atom "Fixture" "Pair") true⟩] }
+  code := [⟨0, opcode, .field (.atom "Fixture" "Holder") 0 (.atom "Fixture" "Pair")
+    name!"Value" true⟩] }
 
 /-- Constructor-initialized addresses retain their original raw opcode. -/
 theorem static_address_opcode :
     let address := { loader zeros zeros (some ⟨1, [], none, false⟩) with
       code := [.memory (.staticAddress zeros)] }
-    methodShapeInstructions [] (rawStatic 127) address = true ∧
-    methodShapeInstructions [] (rawStatic 126) address = false := by decide +kernel
+    methodShapeInstructions (rawStatic 127) address = true ∧
+    methodShapeInstructions (rawStatic 126) address = false := by decide +kernel
 #print axioms static_address_opcode
 
 end Tests.StaticValueEvidence

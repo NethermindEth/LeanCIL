@@ -80,7 +80,7 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
         let (object, allocated) ← allocateObject memory ⟨owner, bases⟩ size
         return FrameAction.call callee (.object (.address object) :: arguments)
           (.object (.address object) :: stack.drop argc) allocated := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
 
 #print axioms step_newObject_eq
 
@@ -91,7 +91,7 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
     ExecutionResult FrameAction :=
   match arguments with
   | .object (.address _) :: _ => .ok (.call callee arguments rest memory)
-  | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | .object .null :: _ => .error (.thrown .nullReference)
   | _ => .error .invalidState
 
 /-- `callvirt` of a non-virtual method checks its `argc` arguments and calls with a live receiver;
@@ -104,7 +104,7 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
       else (do
         let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
         receiverCall callee arguments (stack.drop argc) memory) := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
   rfl
 
 #print axioms step_callInstance_eq
@@ -120,7 +120,7 @@ def receiverCall (callee : Nat) (arguments rest : List Value) (memory : Memory) 
 /-- A null receiver throws before the call. -/
 @[cil_checked] theorem receiverCall_null (callee : Nat) (arguments rest : List Value) :
     receiverCall callee (.object .null :: arguments) rest memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 
 #print axioms receiverCall_null
 
@@ -132,7 +132,7 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
   match arguments with
   | .object (.address receiver) :: _ => do
     return .call (← virtualTarget memory targets receiver) arguments rest memory
-  | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+  | .object .null :: _ => .error (.thrown .nullReference)
   | _ => .error .invalidState
 
 /-- `callvirt` of a virtual method checks its `argc` arguments and enters the body its table
@@ -146,7 +146,7 @@ def virtualCall (targets : List (CIL.Extraction.TypeExpr × Nat)) (arguments res
       else (do
         let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
         virtualCall targets arguments (stack.drop argc) memory) := by
-  simp only [step, observerCount, Bool.or_false]
+  simp only [step, observerCount]
   rfl
 
 #print axioms step_callVirtual_eq
@@ -196,7 +196,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
 @[cil_checked] theorem virtualCall_null (targets : List (CIL.Extraction.TypeExpr × Nat))
     (arguments rest : List Value) :
     virtualCall targets (.object .null :: arguments) rest memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 
 #print axioms virtualCall_null
 
@@ -276,7 +276,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
 @[cil_step high] theorem step_nullObject_eq (stack : List Value) :
     step body (.memory .nullObject) pc args frame stack memory =
       .ok (.next (pc + 1) (.object .null :: stack) frame memory) := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+  simp only [step, observerCount, staticInstruction, memoryInstruction,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any]
   rfl
 
@@ -285,7 +285,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.memory (.stringLiteral text)) pc args frame stack memory = do
       let value ← literalObject memory text
       return .next (pc + 1) (value :: stack) frame memory := by
-  simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
+  simp only [step, observerCount, staticInstruction, memoryInstruction,
     stringLiteralInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
     List.any, Bool.false_eq_true, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases literalObject memory text <;> rfl
@@ -297,7 +297,7 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
     step body (.memory .throwIfNull) pc args frame (.object name :: .object argument :: rest)
         memory =
       match argument with
-      | .null => .error (.thrown "System.ArgumentNullException")
+      | .null => .error (.thrown .argumentNull)
       | .address _ => .ok (.next (pc + 1) rest frame memory) := by
   cases argument <;> rfl
 
@@ -307,7 +307,7 @@ def zeroGuardOutcome (guard : ZeroGuard) (width : Nat) (signed : Bool) (value : 
   match guardOperand width signed value with
   | some number =>
     match guard.throws number with
-    | true => .error (.thrown "System.ArgumentOutOfRangeException")
+    | true => .error (.thrown .argumentOutOfRange)
     | false => .ok ()
   | none => .error .invalidState
 
@@ -317,7 +317,7 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
   match guardOperand width signed value, guardOperand width signed other with
   | some number, some bound =>
     match guard.throws number bound with
-    | true => .error (.thrown "System.ArgumentOutOfRangeException")
+    | true => .error (.thrown .argumentOutOfRange)
     | false => .ok ()
   | _, _ => .error .invalidState
 

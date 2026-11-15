@@ -142,8 +142,9 @@ theorem expectedHomes_eq_scan (layouts : Array ComputedLayout) (raw : RawArgumen
   simp only [expectedHomes, FlowIndex.get?_ofList]
 
 #print axioms expectedHomes_eq_scan
-/-- The narrowing a load of a small-integer argument applies. -/
-private def argumentNarrow : StorageType → Option NarrowKind
+/-- The narrowing a value held in this storage takes: a small-integer field's own width and
+    signedness, and `none` for every other storage. -/
+def StorageType.narrow : StorageType → Option NarrowKind
   | .field .signed8 => some .signed8
   | .field .unsigned8 | .field .boolean => some .unsigned8
   | .field .signed16 => some .signed16
@@ -174,38 +175,36 @@ theorem argumentHomeIndex_get (homes : List Nat) (offset index : Nat) :
 
 #print axioms argumentHomeIndex_get
 
-/-- Check one argument instruction against a precomputed home set; hidden accesses
-    to appended home slots are rejected. -/
+/-- Check one argument instruction against a precomputed home set. An argument instruction
+    names its own argument, and a store or address needs a home; a local instruction cannot
+    reach the home slots appended after the locals. -/
 def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option StorageType)
     (homeAt : Nat → Option Nat)
     (operation : ArgumentOp) (live : Bool) (emitted : Instruction) : Bool :=
-  if !live then match emitted with | .unsupported _ => true | _ => false
+  if !live then match emitted with | .unadmitted _ => true | _ => false
   else match operation with
   | .load index => (do
-      let type ← argumentAt index
-      match homeAt index, emitted with
-      | some slot, .local actual => return actual == slot
-      | none, .arg actual narrow => return actual == index && narrow == argumentNarrow type
-      | _, _ => return false).getD false
+      let _ ← argumentAt index
+      match emitted with
+      | .ldarg actual => return actual == index
+      | _ => return false).getD false
   | .store index => (do
       let _ ← argumentAt index
-      let slot ← homeAt index
+      let _ ← homeAt index
       match emitted with
-      | .setLocal actual => return actual == slot
+      | .starg actual => return actual == index
       | _ => return false).getD false
   | .address index => (do
       let type ← argumentAt index
       let rootOnly := match type with | .array _ | .object => true | _ => false
       if type == StorageType.reference || rootOnly then return false
-      let slot ← homeAt index
+      let _ ← homeAt index
       match emitted with
-      | .localAddr actual => return actual == slot
-      | .local actual => return actual == slot && match type with
-          | .span .. | .aggregateSpan .. => true | _ => false
+      | .ldarga actual => return actual == index
       | _ => return false).getD false
   | .other => match emitted with
-      | .arg .. => false
-      | .local index | .setLocal index | .localAddr index | .initializeSpanLocal index _ =>
+      | .ldarg _ | .starg _ | .ldarga _ => false
+      | .ldloc index | .stloc index | .ldloca index | .initializeSpanLocal index _ =>
         index < localCount
       | _ => true
 
@@ -284,12 +283,16 @@ theorem validated_argument_access {layouts : Array ComputedLayout} {raw : RawArg
   rw [argumentInstructionsValid_eq_scan] at checked
   exact all3_at checked rawAt reachableAt emittedAt
 
-/-- Once a parameter has a home, loading its original argument slot is rejected. -/
-theorem home_load_rejects_original_arg (raw : RawArguments) (reachable : List Bool)
-    (index actual : Nat) (narrow : Option NarrowKind)
-    (home : index ∈ requiredHomeIndices raw reachable) :
-    validateArgumentOp raw reachable (.load index) true (.arg actual narrow) = false := by
-  cases found : raw.arguments[index]? <;>
-    simp [validateArgumentOp, validateArgumentOpIn, validateArgumentOpAt, homeSlot, home, found]
+/-- A local instruction the check accepts outside an argument access names a declared local,
+    so it never reaches the home slots appended after the locals. -/
+theorem ldloc_rejects_home_slot (raw : RawArguments) (reachable : List Bool)
+    (op : Instruction) (index : Nat)
+    (checked : validateArgumentOp raw reachable .other true op = true)
+    (named : op = .ldloc index ∨ op = .stloc index ∨ op = .ldloca index) :
+    index < raw.locals.length := by
+  rcases named with rfl | rfl | rfl <;>
+    simpa [validateArgumentOp, validateArgumentOpIn, validateArgumentOpAt] using checked
+
+#print axioms ldloc_rejects_home_slot
 
 end CIL.Extraction

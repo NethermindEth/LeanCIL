@@ -132,7 +132,7 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     if table.signature != signature then .error .invalidState else
       return (.methodTable signature (some table), m)
   | .methodTable signature _, .object .null =>
-    return (.methodTable signature (some ⟨signature, none, none⟩), m)
+    return (.methodTable signature (some { signature, targets := none, entryCount := 0 }), m)
   | .object _, .object reference =>
     let _ ← formObject m reference
     return (.object (some reference), m)
@@ -217,15 +217,16 @@ def loadLocal (m : Memory) (slot : LocalSlot) : ExecutionResult Value := do
     | .reference | .span .. | .array _ | .methodPointer _ | .methodTable _ | .object =>
       .error .invalidState
 
-/-- The address of a local's byte home. Root and opaque vector slots have no bytes and
-    cannot be addressed. -/
+/-- What taking a local's address pushes: the address of its byte home, or for a span local the
+    view it holds, which the model uses in place of the span's address. Root, array, opaque
+    vector, callable and object slots have no address the model forms. -/
 def localAddress (m : Memory) (slot : LocalSlot) : ExecutionResult Value :=
   match slot with
   | .bytes _ reference => formValue m (.address reference)
+  | .span width writable view => loadLocal m (.span width writable view)
   | .root _ | .readOnlyRoot _ => .error (.unsupported "Address of managed-reference local")
   | .array .. => .error (.unsupported "Address of array root local")
   | .opaque128 _ => .error (.unsupported "Address of opaque vector local")
-  | .span .. => .error (.unsupported "Address of span local outside a validated receiver")
   | .methodPointer .. | .methodTable .. =>
     .error (.unsupported "Address of callable provenance root")
   | .object _ => .error (.unsupported "Address of object reference local")
@@ -258,7 +259,8 @@ def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m
     | .unmodeled => .ok (.methodPointer signature none, [], m)
     | _ => .error .invalidState
   | .methodTable signature => match initial with
-    | .nullRef => .ok (.methodTable signature (some ⟨signature, none, none⟩), [], m)
+    | .nullRef =>
+      .ok (.methodTable signature (some { signature, targets := none, entryCount := 0 }), [], m)
     | .unmodeled => .ok (.methodTable signature none, [], m)
     | _ => .error .invalidState
   | .array element => match initial with

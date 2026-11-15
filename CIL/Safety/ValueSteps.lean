@@ -1,5 +1,6 @@
 import CIL.Safety.StepComposition
 import CIL.Safety.GuardNormalization
+import CIL.Safety.ResolutionFacts
 
 /-!
 # Value step equations
@@ -29,8 +30,8 @@ elab_rules : command
   let widths := match arity.getNat with
     | 0 => [[]]
     | 1 => [[false], [true]]
-    -- Top of stack first: equal widths, and an i32 count over an i64 value for shifts.
-    | _ => [[false, false], [true, true], [false, true]]
+    -- Top of stack first: equal widths and both mixed operand orders.
+    | _ => [[false, false], [true, true], [false, true], [true, false]]
   let params ← (paramName.zip paramType).mapM fun (name, type) =>
     `(Lean.Parser.Term.bracketedBinderF| ($name : $type))
   let paramTerms : Array Term := paramName.map fun name => ⟨name.raw⟩
@@ -114,7 +115,7 @@ elab_rules : command
         let specific ← instantiateMVars (← Term.elabType (← statementOver false))
         -- On fixed-width operands `whnf` and the kernel evaluate an unsigned overflow bound
         -- `2 ^ width` in unary, so faulting ops reduce over `Value`s and are instantiated.
-        let (type, value) ← if checked && (shape.all id || shape.all (!·)) then
+        let (type, value) ← if checked then
             let (generalType, generalProof) ←
               reduceEquation (← instantiateMVars (← Term.elabType (← statementOver true)))
             forallTelescope specific fun xs _ => do
@@ -158,7 +159,7 @@ cil_value_steps (target : Nat) [bgt, ble, ble_un, blt_un, bge_un, bgt_un, bge, b
 cil_value_steps (targets : List Nat) [switch] 1
 cil_value_steps (target : Nat) [br] 0
 cil_value_steps [nop] 0
-cil_value_steps (exception : String) [throw] 0
+cil_value_steps (exception : ExceptionType) [throw] 0
 #print axioms step_throw_eq
 
 cil_value_steps (id : CIL.Feature) [feature] 0
@@ -231,5 +232,102 @@ dsimproc [cil_step] reduceMethodProfile (CIL.Method.profile _) := fun e => do
   let head ← withDefault <| whnf body
   unless head.isAppOf ``CIL.Method.mk do return .continue
   return .done (← withReducible <| whnf (mkApp (mkConst ``CIL.Method.profile) head))
+
+open Lean Meta in
+/-- Known return signatures simplify by checked storage lemmas without traversing method code. -/
+simproc [cil_step] reduceReturnNarrow (CIL.Method.returnNarrow _) := fun expression => do
+  let_expr CIL.Method.returnNarrow method := expression | return .continue
+  let returns ← withDefault <| whnf (mkApp (mkConst ``CIL.Method.returnsValue) method)
+  unless returns.isConstOf ``Bool.true || returns.isConstOf ``Bool.false do return .continue
+  let some proof ← ResolutionFacts.returnProof? method
+      (← mkEqRefl (mkApp (mkConst ``CIL.Method.returnsValue) method))
+      (← mkEqRefl (mkApp (mkConst ``CIL.Method.declared) method)) | return .continue
+  let some (_, _, result) := (← inferType proof).eq? | return .continue
+  return .done { expr := ← withDefault <| whnf result, proof? := some proof }
+
+open Lean Meta in
+/-- How a literal body reads a literal argument index, by the storage lemmas and premises the
+    kernel decides over its homes, local kinds and parameters; a symbolic part is left for a
+    caller's fact. -/
+simproc [cil_step] reduceArgumentAccess (CIL.Method.argumentAccess _ _) := fun expression => do
+  let_expr CIL.Method.argumentAccess method index := expression | return .continue
+  let some proof ← ResolutionFacts.argumentAccessProof? method index | return .continue
+  let some (_, _, result) := (← inferType proof).eq? | return .continue
+  return .done { expr := ← withDefault <| whnf result, proof? := some proof }
+
+open Lean Meta in
+/-- How `body` reads argument `index`, reduced to an `ArgumentAccess` constructor where it can
+    be, with its proof: from the declared fact or signature, or else as simp rewrites the access
+    with the facts in scope. -/
+def argumentAccessIn (body index : Expr) : SimpM (Option (Expr × Expr)) := do
+  if let some resolved ← ResolutionFacts.resolvedArgumentAccess? body index then
+    return some resolved
+  let access ← Simp.simp (mkApp2 (mkConst ``CIL.Method.argumentAccess) body index)
+  return some (← whnfR (← instantiateMVars access.expr), ← access.getProof)
+
+open Lean Meta in
+/-- The step an argument instruction takes by `equation`, whose right side is the result. -/
+def argumentStep (equation : Expr) : SimpM Simp.Step := do
+  let some (_, _, stepped) := (← inferType equation).eq? | return .continue
+  return .visit { expr := stepped, proof? := some equation }
+
+open Lean Meta in
+/-- An argument load steps by the equation for how the body reads that argument, as
+    `argumentAccessIn` finds it. A load whose access stays unknown steps to `loadArgument`,
+    whose match a later fact can decide. -/
+simproc [cil_step] reduceArgumentLoad (step _ (.ldarg _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.ldarg index := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, index, stack]
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
+  let known? ← match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      match (← whnfR narrow).getAppFnArgs with
+      | (``Option.none, _) =>
+        pure (some (mkAppN (mkConst ``step_ldarg_value_eq) (leading.push proof)))
+      | (``Option.some, #[_, kind]) =>
+        pure (some (mkAppN (mkConst ``step_ldarg_narrow_eq) (leading ++ #[kind, proof])))
+      | _ => pure none
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      pure (some (mkAppN (mkConst ``step_ldarg_home_eq) (leading ++ #[slot, proof])))
+    | _ => pure none
+  argumentStep (known?.getD (mkAppN (mkConst ``step_ldarg_eq) leading))
+
+open Lean Meta in
+/-- An argument store steps as `stloc` of the argument's home, or faults without one, as
+    `argumentAccessIn` finds it. A store whose access stays unknown steps to `storeArgument`. -/
+simproc [cil_step] reduceArgumentStore (step _ (.starg _) _ _ _ (_ :: _) _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.starg index := operation | return .continue
+  let_expr List.cons _ value rest := stack | return .continue
+  let leading := #[body, pc, args, frame, memory, index, value, rest]
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
+  let known? := match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      some (mkAppN (mkConst ``step_starg_value_eq) (leading ++ #[narrow, proof]))
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      some (mkAppN (mkConst ``step_starg_home_eq) (leading ++ #[slot, proof]))
+    | _ => none
+  argumentStep (known?.getD (mkAppN (mkConst ``step_starg_eq) leading))
+
+open Lean Meta in
+/-- An argument address steps as `ldloca` of the argument's home, or faults without one, as
+    `argumentAccessIn` finds it. An address whose access stays unknown steps to
+    `addressArgument`. -/
+simproc [cil_step] reduceArgumentAddress (step _ (.ldarga _) _ _ _ _ _) := fun expression => do
+  let_expr CIL.Safety.step body operation pc args frame stack memory := expression
+    | return .continue
+  let_expr CIL.Instruction.ldarga index := operation | return .continue
+  let leading := #[body, pc, args, frame, memory, index, stack]
+  let some (resolved, proof) ← argumentAccessIn body index | return .continue
+  let known? := match resolved.getAppFnArgs with
+    | (``CIL.ArgumentAccess.value, #[narrow]) =>
+      some (mkAppN (mkConst ``step_ldarga_value_eq) (leading ++ #[narrow, proof]))
+    | (``CIL.ArgumentAccess.home, #[slot]) =>
+      some (mkAppN (mkConst ``step_ldarga_home_eq) (leading ++ #[slot, proof]))
+    | _ => none
+  argumentStep (known?.getD (mkAppN (mkConst ``step_ldarga_eq) leading))
 
 end CIL.Safety

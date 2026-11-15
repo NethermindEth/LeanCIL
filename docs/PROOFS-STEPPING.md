@@ -21,7 +21,7 @@ import CIL.Safety.SymbolicExecution
 namespace ProofGuide
 
 @[cil_code] def arithmeticMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
+  code := [.ldarg 0, .ldarg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
   locals := [], returnsValue := true }
 
 theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
@@ -161,7 +161,7 @@ monadic binds. The tactics accept these fact forms:
 | Situation | Fact |
 | --- | --- |
 | A branch on a symbolic condition | `v = 0` or `Not (v = 0)` on the condition value; no `CIL.truth` restatement is needed. A literal condition, such as the `1` a decided feature test pushes, decides itself and continues at a numeral program counter |
-| An opcode index stated as closed arithmetic, such as `.local (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.local 7`, the form a fetched opcode has |
+| An opcode index stated as closed arithmetic, such as `.ldloc (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.ldloc 7`, the form a fetched opcode has |
 | A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1` | Fact preparation derives its load at the numeral width an opcode carries |
 | A value known only as `argument : CIL.Value`, loaded as an argument or passed to a call | `numericValue argument = true`; preparation also states it over the unfolded definition, the form the checked value test has when the step reaches it |
 | `bitcastByteBool`, whose operand must be `0` or `1` | None for a comparison result `if c then 1 else 0`; for any other int32, `bits.toNat ≤ 1`. The fact may bound a value inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32` |
@@ -194,6 +194,17 @@ from the cleaned `returned ++ rest` stack. Over symbolic caller memory, frame se
 with numeric locals is not a closed term; `bind_entry ... allocating` supplies its setup equation
 and home facts instead (see [loop
 scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding)).
+
+A closed run through an indirect call through a method pointer, `calli`, is proved by
+`cil_kernel_rfl` on the equation `(CIL.Safety.invoke program fuel method args memory).map
+Prod.snd = .ok results`: the kernel evaluates the run, including the comparison of the pointer's
+owner string with each catalog entry's, and the elaborator evaluates none of it. A single step
+uses `CIL.Safety.step_managed_call_eq`, which states the step over `CIL.Safety.indirectTarget`:
+the catalog body selected for the pointer, or `none`, which faults with `invalidState`. Supply
+the selection as a fact `CIL.Safety.indirectTarget signature catalog pointer = some method`
+proved by `cil_kernel_rfl`. `simp only [cil_step, fact]` then leaves the operand guard, the
+arity check and the checked arguments, which reduce as for a direct call once the signature's
+parameter count is a numeral.
 
 At a fetched `.ret`, narrow returns included, the tactic leaves the equation between the computed
 checked result and the stated result as a goal over the returned values, with no unexecuted `run`.
@@ -269,6 +280,20 @@ profile projection, including one quantified over every feature, is normalized t
 Elsewhere, including `simp only [cil_step, facts]` and `cil_checked_step_equations`, state the
 fact on the field or first run `simp only [CIL.Safety.reduceMethodProfile, cil_feature] at h`.
 
+A `.ldarg index` step reads the argument as `body.argumentAccess index` says. `cil_step` takes that
+access from the method's `cil_resolution_facts` fact, from a literal body's homes and signature, or
+from a supplied fact such as `body.argumentAccess 0 = .value none`, and steps by
+`step_ldarg_value_eq`, `step_ldarg_narrow_eq` or `step_ldarg_home_eq`
+([StepComposition](../CIL/Safety/StepComposition.lean)), so the goal shows the incoming value,
+its narrowing or the load of the home slot. An access that none of these decides leaves the match
+of `loadArgument` on `body.argumentAccess index`, which a later fact decides. A `.starg index` or
+`.ldarga index` step reads the access the same way: a home steps by `step_starg_home_eq` or
+`step_ldarga_home_eq` to the store to or address of the home slot, an argument without a home by
+`step_starg_value_eq` or `step_ldarga_value_eq` to the unsupported fault, and an undecided access
+to `storeArgument` or `addressArgument`. Under a home, `step_ldarg_home_ldloc`,
+`step_starg_home_stloc` and `step_ldarga_home_ldloca` state each argument instruction as the
+local instruction of its slot.
+
 ### Consumer stepping regressions
 
 The public tactics handle store and load facts, branch conditions, memory operations, profile
@@ -342,13 +367,62 @@ Neither tactic assumes a memory or availability premise. `LoopReaches` uses the 
 relation with an exact-target postcondition.
 
 For numeric-local framing, record successful write equations in `SegmentLocalEffects`. The
-destinations must occur in `segmentStores code`, read from the placed instructions.
-`Segment.frameLocals` combines these effects with the initial `LocalSnapshots` and `WritableHomes`
-to derive snapshots for `untouchedLocals code known`. Effects compose through `append` or `trans`;
+destinations must occur in `segmentStores body code`, read from the placed instructions: the slot
+of each `stloc` and the home slot of each `starg` to a homed argument. `Segment.frameLocals`
+combines these effects with the initial `LocalSnapshots` and `WritableHomes` to derive snapshots
+for `untouchedLocals body code known`. Effects compose through `append` or `trans`;
 one frame-rule application replaces separate disjoint-read proofs for all retained locals. The
 numeric slot identities must remain fixed, and the frame-rule placement must belong to the running
 method and end at the contract boundary. Indirect writes and calls need a proved memory effect;
-absence of a direct `setLocal` is not evidence that an aliased byte-backed local keeps its value.
+absence of a direct `stloc` is not evidence that an aliased byte-backed local keeps its value.
+
+### Contracts for segment exits
+
+`CIL.Safety.SegmentContract` describes an incoming boundary state, permitted memory writes and
+an exit predicate. Its precondition can constrain the arguments, stack, frame, allocation
+lifetimes and memory authority. `SegmentContract.Holds` requires interpreter evidence for every
+permitted input, together with confinement to the declared footprint and the postcondition.
+See [segment contracts](../CIL/Safety/SegmentContract.lean).
+
+`SegmentExit` distinguishes a continuing boundary, a return, a located fault and divergence.
+`SegmentExit.Raises` names CLR exceptions through `ExecutionFault.clrException`, retaining
+the distinction between thrown and arithmetic faults. Fault exits exclude fuel exhaustion;
+divergence requires exhaustion at every fuel budget. Returns compare the memory after frame
+release. `SegmentState.localFootprint body code` names the byte homes and widths of the slots that
+`segmentStores body code` lists.
+
+`ReachesRun` relates settled outcomes before and after a prefix, including prefixes with calls.
+`ReachesRun.call` takes the caller stack and the callee arguments separately. Its checked step
+premise establishes argument order and the retained stack, including a constructor's receiver.
+A reaching exit supplies continuation equivalence and a positive fuel lower bound. Its boundary
+state need not be an observed execution state, and any promised state invariant belongs in the
+postcondition. `SegmentContract.Holds.wp` requires a successful continuation or return to prove
+success; `SegmentContract.Holds.raises` consumes a named exception or a raising continuation.
+`Segment.contract` converts an exact segment between increasing pcs when its postcondition
+justifies the footprint. `ReachesRun.congr_region` transports reaching through the existing
+closed-region agreement rule.
+
+A reusable summary takes the containing method and a `CodeAt` premise for its exact instructions.
+Instructions that read the method's declared signature, environment, links or runtime profile
+require the corresponding facts in the theorem. Branch targets depend on the placement pc.
+Changing a required instruction or fact makes the proof application fail kernel checking.
+The theorem also depends on the library definitions of `run` and `step`.
+
+`SegmentContract.Holds.seq` composes a head with a contract at each reachable pc. The link
+premise proves the successor's precondition. For a stopping exit, the stopping premise receives
+confinement to the head's footprint and must establish both confinement to the composed footprint
+and the composed postcondition. For a reaching exit, the join premise receives both contracts'
+confinement facts and must establish the same two conclusions. Unused pcs can use
+`SegmentContract.unreachable`.
+
+`SegmentContract.Holds.then` specializes composition to two continuing contracts. It requires
+the composed footprint to contain each part's footprint, with the second evaluated at the
+intermediate state. Composition applies the named contract proofs without stepping their code.
+
+`SegmentContract.branch` uses a conditional instruction's checked step equation to expose its
+selected successor while preserving memory. `SegmentContract.branch_seq` composes that branch
+with the successor contracts. Its join premise receives successor confinement and establishes
+confinement to the composed footprint together with the composed postcondition.
 
 ## Step loops
 
@@ -599,8 +673,8 @@ type, so an unrelated context adds nothing to simp. It gathers:
 - `elementWidth` of a `SpanContents`;
 - for a [`LoopFrame`](../CIL/Safety/LoopFrames.lean) over `knownLocals` of a list, and for the
   entry frame `bind_entry ... allocating` proves for every footprint, the `form` of each home
-  (`LoopFrame.form_home`), so `ldloca` steps, and the load of each remembered home through
-  `LoopFrame.load`, with `localResult`;
+  (`LoopFrame.form_home`), so `ldloca` and a homed `ldarga` step, and the load of each
+  remembered home through `LoopFrame.load`, with `localResult`;
 - for a struct local remembered as `.aggregate (layout.encode fields)`, the read of each field by
   value (`ldloc` then `ldfld`, [`step_fieldAt_encode`](../CIL/Safety/FieldValues.lean)) and by
   address (`LoopFrame.load_field`), as that field's value;
@@ -611,7 +685,7 @@ type, so an unrelated context adds nothing to simp. It gathers:
 Only hypotheses reachable by name are read: a shadowed state of an earlier iteration and
 hygienic hypotheses are skipped. A fact is kept only when stepping can meet every variable it is
 about. [`loopGoalScope`](../CIL/Safety/LoopFacts.lean) starts from the goal's states and
-postcondition, and from the method arguments only when the program reads one with `.arg`; the
+postcondition, and from the method arguments only when the program reads one with `.ldarg`; the
 right side of each kept equation then extends it. A derived fact must be about variables reached
 without an equation. A fact about a memory that no state of the goal holds and no kept equation
 produces, such as the caller's memory once the frame has stored, is dropped; a frame fact at a
@@ -620,9 +694,9 @@ carries, such as a span's validity, so a span local loads after a word local's s
 facts are added as hygienic hypotheses, and a statement already gathered is not added again.
 `SpanSum` names no fact but its invariant equation.
 
-Each instruction is given only the facts it can read: home forms reach only `ldloca`, field reads
-only `ldfld`, and the negative sides of case splits only instructions that test or compute on
-data, while `ret` reads them all.
+Each instruction is given only the facts it can read: home forms reach only `ldloca` and
+`ldarga`, field reads only `ldfld`, and the negative sides of case splits only instructions that
+test or compute on data, while `ret` reads them all.
 
 A loop over symbolic caller memory keeps the frame part of its state as the
 [`LoopFrame`](../CIL/Safety/LoopFrames.lean) that `bind_entry ... allocating` returns, in a
@@ -695,9 +769,12 @@ layers.
 
 Prefer a small `change` or an instruction equation over repeatedly unfolding `run`,
 `CIL.Safety.step` and `CIL.step`. For generic opcode proofs, split the opcode and stack shape before
-splitting operand constructors, and close definitionally equal cases early. Share the remaining
-family-level reasoning. For concrete execution, compose steps first and simplify the resulting value
-equation separately when needed.
+splitting operand constructors, and close definitionally equal cases early. `CIL.step` matches on
+the instruction and on `CIL.widenMixed` applied to the stack, so `simp only [CIL.step]` needs
+`CIL.widenMixed` and `CIL.nativePureBinary` in its simp set for every arm that matches the stack;
+the smallest case is `.div` on `b :: a :: rest`. Share the remaining family-level reasoning. For
+concrete execution, compose steps first and simplify the resulting value equation separately when
+needed.
 
 `cil_checked_steps` in every form (including the snapshot forms), `cil_contract_steps` in every
 form, `cil_raise_steps`, `cil_loop_steps`, `cil_loop_advance`, `cil_loop_finish`,

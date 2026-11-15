@@ -1,9 +1,15 @@
 #!/usr/bin/env dotnet
 #:property PublishAot=false
 #:include ../scripts/Verification.cs
+#:include ../scripts/DeepChecks.cs
+#:include ../scripts/FailureReports.cs
+#:include ../scripts/LeanDiagnostics.cs
+#:include ../scripts/BindingImage.cs
+#:include ../scripts/DeepCheckInputs.cs
 #:include ConsumerTraceDirectory.cs
 #:include ConsumerBatchOutcomes.cs
 
+// Standalone timing runner for the mixed-outcome batch that core checks; no suite runs it.
 using System.Text.Json;
 
 var separate = args.Contains("--separate", StringComparer.Ordinal);

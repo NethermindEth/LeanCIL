@@ -1,50 +1,31 @@
-import CIL.Semantics
+import CIL.Instructions
 
 /-!
 # Mixed-width native operands
 
-Binary instructions whose operands are an `i32` and a native-width `i64`, as CoreCLR
-accepts them. The `i32` operand is widened the way the runtime widens it, then the
-instruction runs through the ordinary `step`, `divideValues` or `checkedValues`, so the
-mixed path adds no arithmetic of its own. The checked interpreter dispatches here.
+Binary instructions whose operands are an `i32` and a native-width `i64`, as ECMA-335 III.1.5
+admits them. `CIL.step` widens the `i32` operand the way the runtime widens it before it
+selects an arm, so a mixed pair runs the same-width arithmetic and adds none of its own.
+Division, remainder and overflow-checked arithmetic widen inside `divideValues` and
+`checkedValues` instead.
 -/
 
 namespace CIL
 
-/-- Only mixed integer arithmetic, comparisons and branches may use this path.
-    It cannot dispatch memory, calls, features or another native wrapper. -/
+/-- The instructions whose mixed operands `step` widens: wrapping arithmetic, bitwise
+    operations, comparisons and signed compare-and-branch. Memory operations, calls, feature
+    queries and unsigned branches keep their operands. -/
 def nativePureBinary : Instruction → Bool
   | .add | .sub | .mul | .and | .or | .xor | .clt | .clt_un | .cgt | .cgt_un | .ceq
     | .bgt _ | .ble _ | .bge _ | .blt _ | .beq _ => true
   | _ => false
 
-/-- The admitted .NET runtime zero-extends for unsigned checked arithmetic.
-    Other admitted mixed operations sign-extend, including scalar clt.un/cgt.un.
-    Mixed unsigned branches are rejected: CoreCLR's widening depends on whether
-    its importer sees a constant, which can change through inlining. -/
-def widenNativeOperand (op : Instruction) (bits : W32) : W64 :=
-  match op.checkedKind? with
-  | some (_, false) => bits.zeroExtend 64
-  | _ => bits.signExtend 64
-
-/-- Runs a mixed `i32`/`i64` binary instruction at `pc`: the next pc and the values it
-    pushes, or the arithmetic fault. Any other operand pair is `invalidOperands`. -/
-def nativeBinaryValues (op : Instruction) (pc : Nat) (x y : Value) :
-    Except ArithmeticFault (Nat × List Value) := do
-  let (x, y) ← match x, y with
-    | .i32 a, .i64 b => .ok (Value.i64 (widenNativeOperand op a), Value.i64 b)
-    | .i64 a, .i32 b => .ok (Value.i64 a, Value.i64 (widenNativeOperand op b))
-    | _, _ => .error .invalidOperands
-  match op.divideKind?, op.checkedKind? with
-  | some (signed, remainder), _ =>
-    return (pc + 1, [← divideValues signed remainder x y])
-  | none, some (kind, signed) =>
-    return (pc + 1, [← checkedValues kind signed x y])
-  | none, none =>
-    if nativePureBinary op then
-      match step op false pc [] [y, x] (fun _ => none) with
-      | some (.next target values _) => .ok (target, values)
-      | _ => .error .invalidOperands
-    else .error .invalidOperands
+/-- The stack with the int32 operand of a mixed int32 and native pair on top sign-extended to
+    64 bits, for an instruction `nativePureBinary` admits; any other stack is unchanged. -/
+def widenMixed (operation : Instruction) (stack : List Value) : List Value :=
+  match nativePureBinary operation, stack with
+  | true, .i64 right :: .i32 left :: rest => .i64 right :: .i64 (left.signExtend 64) :: rest
+  | true, .i32 right :: .i64 left :: rest => .i64 (right.signExtend 64) :: .i64 left :: rest
+  | _, stack => stack
 
 end CIL

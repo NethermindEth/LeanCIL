@@ -1,4 +1,5 @@
 import CIL.Types
+import CIL.ExceptionType
 import CIL.IntegerArithmetic
 import CIL.Features
 import CIL.SIMD.Availability
@@ -15,6 +16,27 @@ and `Program` the list a call index refers into.
 -/
 
 namespace CIL
+
+/-- The admitted integer suffixes of `ldind.*`, `stind.*`, `ldelem.*` and `stelem.*`. -/
+inductive NumericKind where
+  | i1 | u1 | i2 | u2 | i4 | u4 | i8 | i
+  deriving DecidableEq, Repr
+
+/-- The load width in bytes and whether a narrow value is sign-extended to i32. -/
+def NumericKind.load? : NumericKind -> Option (Prod Nat Bool)
+  | .i1 => some (1, true)
+  | .u1 => some (1, false)
+  | .i2 => some (2, true)
+  | .u2 => some (2, false)
+  | .i4 | .u4 => some (4, false)
+  | .i8 | .i => some (8, false)
+
+/-- The store width in bytes; narrow stores keep the low bytes of an i32 value. -/
+def NumericKind.store? : NumericKind -> Option Nat
+  | .i1 | .u1 => some 1
+  | .i2 | .u2 => some 2
+  | .i4 | .u4 => some 4
+  | .i8 | .i => some 8
 
 /-- Small integer storage types; all extend to the 32-bit evaluation-stack type. -/
 inductive NarrowKind where
@@ -120,16 +142,14 @@ def ConvTarget.signed : ConvTarget → Bool
     and in the `Program`. Constructors that `CIL.step` does not execute are handled by the
     checked interpreter in `CIL.Safety`. -/
 inductive Instruction where
-  /-- Widen the int32 operand of a metadata-validated mixed native operation. -/
-  | nativeBinary (operation : Instruction)
   -- Division and remainder; `divideKind?` gives their flags.
   | div | div_un | rem | rem_un
   -- Overflow-checked arithmetic; `checkedKind?` gives their flags.
   | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf | mul_ovf_un
   -- Overflow-checked conversion to `target`, reading the operand as signed or as unsigned.
   | conv_ovf (target : ConvTarget) | conv_ovf_un (target : ConvTarget)
-  /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
-  | stackAlloc (initLocals : Bool)
+  /-- Fresh frame storage of the popped byte count, zeroed when `declared.initLocals` is set. -/
+  | localloc
   /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
   | newArray (element : ArrayElement)
   /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
@@ -152,10 +172,15 @@ inductive Instruction where
   | aggregateFieldAt (offset size : Nat)
   | setAggregateFieldAt (offset size : Nat)
   -- Arguments and locals.
-  | arg (index : Nat) (narrow : Option NarrowKind := none)
-  | local (index : Nat)
-  | localAddr (index : Nat)
-  | setLocal (index : Nat)
+  /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/
+  | ldarg (index : Nat)
+  /-- Stores the top of the stack into argument `index`'s home, as `storeArgument` says. -/
+  | starg (index : Nat)
+  /-- Pushes the address of argument `index`'s home, as `addressArgument` says. -/
+  | ldarga (index : Nat)
+  | ldloc (index : Nat)
+  | ldloca (index : Nat)
+  | stloc (index : Nat)
   | initializeSpanLocal (index : Nat) (constructor : SpanConstructor)
   /-- Transfer to a managed method after retiring the current activation. -/
   | tailCall (callee argc : Nat)
@@ -203,10 +228,12 @@ inductive Instruction where
   | feature (id : Feature)
   | intrinsic (operation : Intrinsic) (argc : Nat)
   | memory (operation : MemoryOp)
-  | ret (narrow : Option NarrowKind := none)
+  | ret
   /-- Raises an exception of the named type; there are no handlers. -/
-  | throw (exception : String)
-  | unsupported (description : String)
+  | throw (exception : ExceptionType)
+  /-- A hole carrying the raw `opcode` at its pc: an opcode no instruction family admits, or one
+      outside the code the extractor reaches under the selected profile. It faults when stepped. -/
+  | unadmitted (opcode : Nat)
   deriving Repr
 
 /-- The name of the instruction type, for tactics that recognise its constructors. -/
@@ -266,13 +293,15 @@ inductive Receiver where
   deriving DecidableEq, Repr
 
 /-- A method's declared signature after its type arguments are closed. Aggregate types refer
-    to `LayoutEnvironment.rawLayouts`. -/
+    to `LayoutEnvironment.rawLayouts`. Only implicit receiver signatures are supported. -/
 structure DeclaredSignature where
   /-- `some` exactly for an instance method. -/
   receiver : Option Receiver := none
   /-- Declared parameter types in order, `this` excluded. -/
   parameters : List Extraction.TypeExpr := []
   returnType : Extraction.TypeExpr := .void
+  /-- The body's localsinit flag: `localloc` storage and locals start zeroed when set. -/
+  initLocals : Bool := true
   deriving DecidableEq, Repr
 
 /-- The declared type of argument `index`, counting `this` as argument 0; `none` for `this`. -/
@@ -439,13 +468,21 @@ theorem linksOfCode_find (code : List Instruction) (start pc : Nat) :
 
 #print axioms linksOfCode_find
 
+/-- The table a code list implies gives each pc the link of the instruction there. -/
+theorem linkLookup_linksOfCode (code : List Instruction) (pc : Nat) :
+    linkLookup (linksOfCode code) pc = (code[pc]?).bind Instruction.link? := by
+  simp only [linkLookup, linksOfCode_eq_zipIdx]
+  rw [linksOfCode_find code 0 pc]
+  simp
+
+#print axioms linkLookup_linksOfCode
+
 /-- A body whose table is the one its code implies has a link exactly at its linking
     instructions. -/
 theorem Method.linkAt_of_implied {body : Method} (implied : body.links = linksOfCode body.code)
     (pc : Nat) : body.linkAt pc = (body.code[pc]?).bind Instruction.link? := by
-  simp only [Method.linkAt, linkLookup, implied, linksOfCode_eq_zipIdx]
-  rw [linksOfCode_find body.code 0 pc]
-  simp
+  rw [Method.linkAt, implied]
+  exact linkLookup_linksOfCode body.code pc
 
 #print axioms Method.linkAt_of_implied
 
@@ -466,14 +503,21 @@ theorem Method.linkAt_of_instruction {body : Method}
 
 #print axioms Method.linkAt_of_instruction
 
-/-- A body's table has no entry at a pc the table lists no key for. -/
-theorem Method.linkAt_of_unlisted {body : Method} {pc : Nat}
-    (unlisted : ∀ entry ∈ body.links, entry.1 ≠ pc) : body.linkAt pc = none := by
-  have none_found : (body.links.find? fun entry => entry.1 == pc) = none := by
+/-- A table that lists no key `pc` gives it no link. -/
+theorem linkLookup_of_unlisted {links : List (Nat × Link)} {pc : Nat}
+    (unlisted : ∀ entry ∈ links, entry.1 ≠ pc) : linkLookup links pc = none := by
+  have none_found : (links.find? fun entry => entry.1 == pc) = none := by
     rw [List.find?_eq_none]
     intro entry member
     simpa using unlisted entry member
-  simp [Method.linkAt, linkLookup, none_found]
+  simp [linkLookup, none_found]
+
+#print axioms linkLookup_of_unlisted
+
+/-- A body's table has no entry at a pc the table lists no key for. -/
+theorem Method.linkAt_of_unlisted {body : Method} {pc : Nat}
+    (unlisted : ∀ entry ∈ body.links, entry.1 ≠ pc) : body.linkAt pc = none :=
+  linkLookup_of_unlisted unlisted
 
 #print axioms Method.linkAt_of_unlisted
 

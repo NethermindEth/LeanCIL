@@ -82,7 +82,7 @@ theorem LocalSnapshots.store_at {body : CIL.Method} {pc index target : Nat}
     (fits : localNumber kind value = .ok number)
     (slot : frame.locals[index]? = some (.bytes kind home))
     (ready : access memory home (localWidth kind) 1 true = .ok ())
-    (stored : step body (.setLocal index) pc args frame (.scalar value :: stack) memory =
+    (stored : step body (.stloc index) pc args frame (.scalar value :: stack) memory =
       .ok (.next target values nextFrame after)) :
     LocalSnapshots after frame.locals (rememberLocal known index (localResult kind value)) ∧
       after.WellFormed ∧ MemoryBelow boundary memory after ∧
@@ -577,6 +577,43 @@ private structure SnapshotStored where
   /-- The name of the store's `MemoryBelow` evidence from `source`. -/
   below : Ident
 
+/-- The local index the snapshots track for `operation` of `method`: a `stloc` (`ldloc` unless
+    `store`) by its index, or a homed `starg` (`ldarg`) at its home slot with the proof of that
+    home. None for any other instruction, including an argument without a home. -/
+private def snapshotLocal? (method operation : Expr) (store : Bool) :
+    MetaM (Option (Expr × Option Expr)) := do
+  let (localOp, argumentOp) := if store then (``CIL.Instruction.stloc, ``CIL.Instruction.starg)
+    else (``CIL.Instruction.ldloc, ``CIL.Instruction.ldarg)
+  let some index := argument? operation 0 | return none
+  if operation.isAppOfArity localOp 1 then return some (index, none)
+  unless operation.isAppOfArity argumentOp 1 do return none
+  let some (slot, access) ← ResolutionFacts.argumentHome? method index | return none
+  return some (slot, some access)
+
+/-- The method `methodFound` finds and the instruction `instructionFound` fetches from it. -/
+private def snapshotFetched (methodFound instructionFound : Term) : TacticM (Expr × Expr) :=
+  withMainContext do
+    let methodProof ← Term.elabTerm methodFound none
+    let some (_, _, found) := (← instantiateMVars (← inferType methodProof)).eq?
+      | throwError "Expected a method lookup"
+    let instructionProof ← Term.elabTerm instructionFound none
+    let some (_, _, instruction) := (← instantiateMVars (← inferType instructionProof)).eq?
+      | throwError "Expected an instruction lookup"
+    let some operation ← cilReducedOp? (← lastArgument snapshotReader instruction)
+      | throwError "The local instruction is not concrete"
+    return (← lastArgument snapshotReader found, operation)
+
+/-- Whether the snapshots track the fetched instruction named `operation` as a numeric local
+    store, or as a load unless `store`; an argument instruction counts only with a home. -/
+private def snapshotTracks (operation : Name) (methodFound instructionFound : Term)
+    (store : Bool) : TacticM Bool := do
+  if operation == (if store then ``CIL.Instruction.stloc else ``CIL.Instruction.ldloc) then
+    return true
+  unless operation == (if store then ``CIL.Instruction.starg else ``CIL.Instruction.ldarg) do
+    return false
+  let (method, fetched) ← snapshotFetched methodFound instructionFound
+  return (← snapshotLocal? method fetched store).isSome
+
 /-- Store one numeric local and return its updated snapshot collection with the step taken.
     With `supplied`, the step is the one `facts` prove, to the memory they state, and the
     snapshots are about that memory. -/
@@ -587,10 +624,8 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
     | throwError "Expected a checked run equality"
   let some #[_, _, _, runPc, runArgs, runFrame, runStack, memory] := argumentsOf? runTerm ``run 8
     | throwError "Expected a checked run"
-  let methodProof ← Term.elabTerm methodFound none
-  let some (_, _, found) := (← instantiateMVars (← inferType methodProof)).eq?
-    | throwError "Expected a method lookup"
-  let body ← Term.exprToSyntax (← lastArgument snapshotReader found)
+  let (method, operation) ← snapshotFetched methodFound instructionFound
+  let body ← Term.exprToSyntax method
   let pc ← Term.exprToSyntax runPc
   let args ← Term.exprToSyntax runArgs
   let frame ← Term.exprToSyntax runFrame
@@ -602,16 +637,17 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
     | throwError "The local store is not numeric"
   let value ← Term.exprToSyntax scalar
   let rest ← Term.exprToSyntax remaining
-  let instructionProof ← Term.elabTerm instructionFound none
-  let some (_, _, instruction) := (← instantiateMVars (← inferType instructionProof)).eq?
-    | throwError "Expected an instruction lookup"
-  let some operation ← cilReducedOp? (← lastArgument snapshotReader instruction)
-    | throwError "The local store instruction is not concrete"
-  let storedIndex ← argumentAt snapshotReader operation 0
+  let some (storedIndex, home) ← snapshotLocal? method operation true
+    | throwError "The instruction is not a numeric local store"
+  let memoryTerm ← Term.exprToSyntax memory
+  -- A homed argument's store is the store to its home slot, which the snapshot lemmas state.
+  let bridge ← home.mapM fun access => do
+    let access ← Term.exprToSyntax access
+    `(term| step_starg_home_stloc $body $pc $args $frame $memoryTerm _ (.scalar $value) $rest _
+      $access)
   let known ← if supplied then
       let operationTerm ← Term.exprToSyntax operation
       let stackTerm ← Term.exprToSyntax runStack
-      let memoryTerm ← Term.exprToSyntax memory
       let known ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm (← `(term|
         (by cil_strict cil_checked_step_normalized [$facts,*] :
           step $body $operationTerm $pc $args $frame $stackTerm $memoryTerm =
@@ -623,7 +659,10 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
   let scope ← SnapshotScope.start
   if automatic then prepareSnapshotHome scope memory runFrame storedIndex facts
   let index ← Term.exprToSyntax storedIndex
-  let evidence ← match known with
+  let localKnown ← known.mapM fun known => match bridge with
+    | some bridge => `(term| ($bridge).symm.trans $known)
+    | none => pure known
+  let evidence ← match localKnown with
     | some known => `(term| LocalSnapshots.store_at
         (body := $body) (pc := $pc) (args := $args) (frame := $frame)
         (stack := $rest) (index := $index)
@@ -657,7 +696,9 @@ private def snapshotStore (snapshot methodFound instructionFound : Term)
       let located := mkIdent (← mkFreshUserName `snapshotStored)
       evalTactic (← `(tactic| cil_have_by $located := $(← Term.exprToSyntax proof)))
       introWitness scope located after #[taken, updated, formed, below, retained, written]
-      pure (taken : Term)
+      match bridge with
+      | some bridge => `(term| ($bridge).trans $taken)
+      | none => pure (taken : Term)
   -- The remembered value is stated as the value a load pushes, not as its `localResult`. Only
   -- this store's value is restated: rebuilding the earlier updates would copy each of them again.
   withMainContext do
@@ -694,26 +735,27 @@ private def snapshotLoad (snapshot methodFound instructionFound : Term)
     (facts : Array Term) : TacticM Term := withMainContext do
   let some runTerm := (← getMainTarget).find? (·.isAppOf ``run)
     | throwError "Expected a checked run"
-  let some #[_, _, _, runPc, runArgs, runFrame, runStack, _] := argumentsOf? runTerm ``run 8
+  let some #[_, _, _, runPc, runArgs, runFrame, runStack, memory] := argumentsOf? runTerm ``run 8
     | throwError "Expected a checked run"
-  let methodProof ← Term.elabTerm methodFound none
-  let some (_, _, found) := (← instantiateMVars (← inferType methodProof)).eq?
-    | throwError "Expected a method lookup"
-  let body ← Term.exprToSyntax (← lastArgument snapshotReader found)
+  let (method, operation) ← snapshotFetched methodFound instructionFound
+  let body ← Term.exprToSyntax method
   let pc ← Term.exprToSyntax runPc
   let args ← Term.exprToSyntax runArgs
   let frame ← Term.exprToSyntax runFrame
   let stack ← Term.exprToSyntax runStack
-  let instructionProof ← Term.elabTerm instructionFound none
-  let some (_, _, instruction) := (← instantiateMVars (← inferType instructionProof)).eq?
-    | throwError "Expected an instruction lookup"
-  let some operation ← cilReducedOp? (← lastArgument snapshotReader instruction)
-    | throwError "The local load instruction is not concrete"
-  let loadedIndex ← argumentAt snapshotReader operation 0
+  let some (loadedIndex, home) ← snapshotLocal? method operation false
+    | throwError "The instruction is not a numeric local load"
   let snapshotProof ← Term.withoutErrToSorry <| Term.elabTerm snapshot none
   let snapshotType ← instantiateMVars (← inferType snapshotProof)
   let some #[_, _, known] := argumentsOf? snapshotType ``LocalSnapshots 3
     | throwError "Expected local snapshots at the current memory"
+  -- A homed argument's load is the load of its home slot, which the snapshot lemma states.
+  let bridged (loaded : Term) : TacticM Term := do
+    let some access := home | return loaded
+    let access ← Term.exprToSyntax access
+    let memory ← Term.exprToSyntax memory
+    `(term| (step_ldarg_home_ldloc $body $pc $args $frame $memory _ $stack _ $access).trans
+      $loaded)
   -- A value remembered by a store is read from the chain of updates itself, which a simp over the
   -- whole chain would unfold at each load.
   if let some position ← getNatValue? (← whnfR loadedIndex) then
@@ -721,8 +763,9 @@ private def snapshotLoad (snapshot methodFound instructionFound : Term)
       if (stored.find? (·.isConstOf ``localResult)).isNone then
         let value ← Term.exprToSyntax stored
         let index ← Term.exprToSyntax loadedIndex
-        return ← `(term| LocalSnapshots.load (body := $body) (pc := $pc) (args := $args)
+        let load ← `(term| LocalSnapshots.load (body := $body) (pc := $pc) (args := $args)
           (frame := $frame) (stack := $stack) (index := $index) $snapshot $value rfl)
+        return ← bridged load
   let selected := mkApp known loadedIndex
   if (← whnfD selected).isAppOf ``Option.none then
     throwError "The snapshots do not establish a value at this local index"
@@ -740,8 +783,9 @@ private def snapshotLoad (snapshot methodFound instructionFound : Term)
   let value ← Term.exprToSyntax loaded
   let checked ← Term.exprToSyntax (← remembered.getProof)
   let index ← Term.exprToSyntax loadedIndex
-  `(term| LocalSnapshots.load (body := $body) (pc := $pc) (args := $args) (frame := $frame)
-      (stack := $stack) (index := $index) $snapshot $value $checked)
+  let loaded ← `(term| LocalSnapshots.load (body := $body) (pc := $pc) (args := $args)
+      (frame := $frame) (stack := $stack) (index := $index) $snapshot $value $checked)
+  bridged loaded
 
 /-- The memory of the goal's run, when the goal has one. -/
 private def snapshotRunMemory : TacticM (Option Expr) := do
@@ -782,12 +826,12 @@ elab_rules : tactic
           let updated ← withNormalNodes prepared <| withMainContext do
             let (methodFound, instructionFound, operation) ←
               cilFetchedOp ``run_next (fun target => target.find? (·.isAppOf ``run)) 3 prepared
-            if operation == ``CIL.Instruction.setLocal then
+            if ← snapshotTracks operation methodFound instructionFound true then
               let stored ← snapshotStore snapshot methodFound instructionFound prepared
               evalTactic (← `(tactic| cil_strict rw
                 [run_next $methodFound $instructionFound $(stored.stepped)]))
               pure stored.snapshots
-            else if operation == ``CIL.Instruction.local then
+            else if ← snapshotTracks operation methodFound instructionFound false then
               let loaded ← snapshotLoad snapshot methodFound instructionFound prepared
               evalTactic (← `(tactic| cil_strict rw
                 [run_next $methodFound $instructionFound $loaded]))
@@ -887,11 +931,12 @@ private def snapshotContractWalkSteps (initial : Term) (facts : Array Term)
       withNormalNodes stepFacts <| withMainContext do
         let (found, instruction, operation) ←
           cilFetchedOp ``run_next_exists some 4 stepFacts
-        let (updated, checked, stored) ← if operation == ``CIL.Instruction.setLocal then do
+        let tracksStore ← snapshotTracks operation found instruction true
+        let (updated, checked, stored) ← if tracksStore then do
             let stored ← snapshotStore snapshot found instruction stepFacts true supplied
             pure (stored.snapshots, stored.stepped, some stored)
           else if supplied then throwError "The instruction is not a numeric store"
-          else if operation == ``CIL.Instruction.local then do
+          else if ← snapshotTracks operation found instruction false then do
             pure (snapshot, ← snapshotLoad snapshot found instruction stepFacts, none)
           else throwError "The instruction is not a numeric local"
         evalTactic (← `(tactic| (

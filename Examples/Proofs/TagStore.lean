@@ -74,7 +74,7 @@ theorem index_out_of_range (memory : Memory) (tags tagged : Reference) (length :
     (forms : Tagged.Tag.Forms memory tagged) :
     ∃ fuel, invoke Extracted.program fuel put
         [.object (.address tags), .scalar (.i32 index), .object (.address tagged)] memory =
-      .error ⟨put, 4, .thrown "System.IndexOutOfRangeException"⟩ := by
+      .error ⟨put, 4, .thrown .indexOutOfRange⟩ := by
   cil_checked_steps [readable.load_forms forms, live.slot_outside outside]
 
 #print axioms index_out_of_range
@@ -84,7 +84,7 @@ theorem null_array (memory : Memory) (tagged : Reference) (index : BitVec 32)
     (readable : Tagged.Tag.Readable memory tagged) (forms : Tagged.Tag.Forms memory tagged) :
     ∃ fuel, invoke Extracted.program fuel put
         [.object .null, .scalar (.i32 index), .object (.address tagged)] memory =
-      .error ⟨put, 4, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨put, 4, .thrown .nullReference⟩ := by
   cil_checked_steps [readable.load_forms forms]
 
 #print axioms null_array

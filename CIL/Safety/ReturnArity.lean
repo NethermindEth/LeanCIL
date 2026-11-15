@@ -35,9 +35,12 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
     (executed : step body operation pc args frame stack memory = .ok (.returned values final)) :
     values.length = (if body.returnsValue then 1 else 0) ∧
       values.any Value.hasUnspecified = false := by
-  unfold step at executed
+  unfold step intrinsicCall referenceCompareCall referenceSubtractCall at executed
   dsimp only at executed
+  generalize narrowing : body.returnNarrow = narrow at executed
   repeat' first
+    | unfold returnFrom at executed
+    | unfold localAllocation at executed
     | solve | exact False.elim (managedStep_not_returned _ _ _ _ _ _ _ executed)
     | solve |
         simp only [Bind.bind, Pure.pure, Except.pure, bind_success, Except.ok.injEq,
@@ -49,7 +52,7 @@ theorem step_return_properties (body : CIL.Method) (operation : CIL.Instruction)
       simp_all [observerCount, unspecifiedOperands, List.take_of_length_le,
         Value.hasUnspecified, CIL.Value.hasUnspecified]
     | solve |
-        simp_all only [reduceCtorEq, implies_true, Bool.or_false, Bool.not_eq_true,
+        simp_all only [reduceCtorEq, implies_true, Bool.not_eq_true,
           List.reverse_cons, List.reverse_nil, List.nil_append, List.length_cons,
           List.length_nil, Nat.zero_add, ↓reduceIte, List.any_cons, Value.hasUnspecified,
           CIL.Value.hasUnspecified, List.any_nil, Bool.or_self, and_self]
@@ -125,7 +128,7 @@ theorem step_call_known {body : CIL.Method} {callee argc pc : Nat}
     (executed : step body (.call callee argc) pc args frame stack memory =
       .ok (.call callee arguments rest final)) :
     arguments.any Value.hasUnspecified = false := by
-  simp only [step, observerCount, Bool.or_false] at executed
+  simp only [step] at executed
   split at executed
   · cases executed
   · rename_i known
@@ -138,7 +141,7 @@ theorem step_call_known {body : CIL.Method} {callee argc pc : Nat}
           Except.ok.injEq, FrameAction.call.injEq] at executed
         obtain ⟨_, rfl, rfl, rfl⟩ := executed
         rw [(checkedValues_valid _ _ _ checked).1]
-        simpa [unspecifiedOperands] using known
+        simpa [unspecifiedOperands, observerCount] using known
 
 #print axioms step_call_known
 end CIL.Safety
