@@ -383,6 +383,8 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     | split at executed
 #print axioms managedStep_contract
 
+-- The walk splits every arm of both dispatcher matches, argument homes included.
+set_option maxHeartbeats 400000 in
 /-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
     so it is the place that breaks when an instruction is added without an effect. -/
 theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Nat)
