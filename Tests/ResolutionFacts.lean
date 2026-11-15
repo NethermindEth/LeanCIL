@@ -955,7 +955,8 @@ example : uncomputedArrays.elementShape (.aggregate "Examples.Point" 0) =
 
 /-- A managed function pointer taking a struct at a layout index that no raw layout holds. -/
 def unboundPointer : TypeExpr :=
-  .functionPointer .void (.signatureParameter (.aggregate "Examples.Missing" 7) .void) 0 false false
+  .functionPointer .void (.signatureParameter (.aggregate "Examples.Missing" 7) .void) 0 false
+    false
 
 -- A function pointer whose struct parameter no layout binds has no shape, as it has no storage.
 example : literalArrays.elementShape unboundPointer =
