@@ -683,8 +683,11 @@ foreach (var mutation in new[]
         var modified = (RequiredModifierType)method.Parameters[0].ParameterType;
         var reference = (ByReferenceType)modified.ElementType;
         var runtime = (AssemblyNameReference)modified.ModifierType.Scope;
-        TypeReference Forged(AssemblyNameReference scope) =>
-            new(modified.ModifierType.Namespace, modified.ModifierType.Name, module, scope);
+        TypeReference Forged(AssemblyNameReference scope)
+        {
+            module.AssemblyReferences.Add(scope);
+            return new(modified.ModifierType.Namespace, modified.ModifierType.Name, module, scope);
+        }
         method.Parameters[0].ParameterType = mutation switch
         {
             "flattened-name" => new RequiredModifierType(new TypeReference("",

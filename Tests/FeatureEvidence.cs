@@ -391,6 +391,8 @@ foreach (var mutation in new[] { "span", "byref", "pointer", "class", "float", "
             diagnostic = "Unsupported field type";
             break;
         case "scope":
+            var forgedQueryScope = new AssemblyNameReference("Forged", new Version(10, 0));
+            module.AssemblyReferences.Add(forgedQueryScope);
             query.ElementMethod.DeclaringType.Scope = new AssemblyNameReference("Forged", new Version(10, 0));
             diagnostic = "Unsupported reference-content query signature";
             break;
@@ -492,7 +494,11 @@ foreach (var mutation in new[] { "scope", "field", "module-type" })
     var diagnostic = "Only System.Runtime's static readonly BitConverter.IsLittleEndian is a platform constant";
     switch (mutation)
     {
-        case "scope": field.DeclaringType.Scope = new AssemblyNameReference("Forged", new Version(10, 0)); break;
+        case "scope":
+            var forgedScope = new AssemblyNameReference("Forged", new Version(10, 0));
+            module.AssemblyReferences.Add(forgedScope);
+            field.DeclaringType.Scope = forgedScope;
+            break;
         case "field":
             load.Operand = new FieldReference("IsBigEndian", field.FieldType, field.DeclaringType);
             diagnostic = "Only same-assembly static readonly";
