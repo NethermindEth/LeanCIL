@@ -17,6 +17,9 @@ partial class Program
     /// <summary>The most a carried row may cost more, per row, when the carried rows grow fourfold.</summary>
     const double MaximumPerRowGrowth = 1.5;
 
+    /// <summary>The most an added metadata page may cost relative to an earlier added page.</summary>
+    const double MaximumPerPageGrowth = 1.25;
+
     /// <summary>
     /// Body-check heartbeats grow linearly with claims and cover decoding the image once per page.
     /// The fixture's heartbeat count is the fixed cost subtracted from each larger case.
@@ -39,6 +42,7 @@ partial class Program
         CheckAssemblyBlockScaling(root, package);
         CheckSliceRowsScaling(root, package);
         CheckUserStringScaling(root, package);
+        CheckMetadataPageScaling(root, package);
         var examples = File.ReadAllBytes(At("Examples/Assembly/bin/Examples.dll"));
         var larger = new byte[examples.Length + 770 * 1024];
         examples.CopyTo(larger, 0);
@@ -214,6 +218,65 @@ partial class Program
         var measured = RequireGrowth(sizes, CheckHeartbeats(path, package, sizes.Length, "carried user strings"),
             MaximumPerByteGrowth, "user-string metadata check", "byte");
         Console.WriteLine($"PASS the complete metadata check is linear in its user-string bytes ({measured})");
+    }
+
+    /// <summary>Complete metadata proofs at 1, 4 and 16 pages have flat marginal cost per page.</summary>
+    static void CheckMetadataPageScaling(string root, string package)
+    {
+        const string report = "#eval show IO Nat from IO.getNumHeartbeats";
+        const int characters = 512;
+        int[] sizes = [1, 4, 16];
+        var file = SyntheticUserString(characters);
+        var cases = string.Concat(sizes.Select(pages =>
+        {
+            var lemmas = string.Concat(Enumerable.Range(0, pages).Select(index => $$"""
+                /-- This page's method metadata belongs to the pinned image. -/
+                theorem metadataPage{{index}} :
+                    StrictBinding.ClaimsHold StrictBinding.methodMetadataBound pinned
+                    (StrictBinding.claimPage claims 1 {{index}}) := by decide +kernel
+                #print axioms metadataPage{{index}}
+
+                """));
+            var chain = string.Concat(Enumerable.Range(0, pages).Reverse()
+                .Select(index => $"(.succ metadataPage{index} "));
+            return $$"""
+                namespace Pages{{pages}}
+                {{BindingImage.Definitions(file)}}
+                /-- The synthetic image under its assembly identity. -/
+                def pinned : List StrictBinding.PinnedImage :=
+                  [{ identity := "{{StrictBindingFacts.Identity(file)}}", image := image }]
+                /-- The independently numbered Assembly block. -/
+                def assemblyBlock : CIL.Extraction.AssemblyMetadata :=
+                  {{StrictBindingFacts.AssemblyBlock(file)}}
+                /-- A two-byte prefix and a 1025-byte UTF-16 payload, including the terminal byte. -/
+                def entry : List Nat := [132, 1] ++ (List.replicate {{characters}} [65, 0]).flatten ++ [0]
+                /-- Each method carries a complete Assembly block and one user string. -/
+                def metadata : CIL.Extraction.MethodMetadata :=
+                  { own := { assembly := assemblyBlock, userStrings := [(1, entry)] } }
+                /-- One method per page keeps the compared byte count fixed per page. -/
+                def claims : List CIL.Extraction.MethodMetadata := List.replicate {{pages}} metadata
+                {{report}}
+                /-- The pinned image has a supported container and metadata layout. -/
+                theorem prepared : StrictBinding.ok (StrictBinding.prepare pinned) = true := by decide +kernel
+                {{report}}
+                {{lemmas}}
+                /-- The pages cover every metadata claim. -/
+                theorem checked : StrictBinding.ClaimsHold StrictBinding.methodMetadataBound pinned claims :=
+                  StrictBinding.claimsHold_of_pages (size := 1) (count := {{pages}}) prepared
+                    (by decide +kernel) {{chain}}.zero{{new string(')', pages)}}
+                {{report}}
+                #print axioms prepared
+                #print axioms checked
+                end Pages{{pages}}
+
+                """;
+        }));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "MetadataPages.lean");
+        File.WriteAllText(path, $"import StrictBinding.Evidence\n\n{cases}");
+        var measured = RequireGrowth(sizes, CheckHeartbeats(path, package, sizes.Length, "metadata pages"),
+            MaximumPerPageGrowth, "metadata page check", "page");
+        Console.WriteLine($"PASS the complete metadata proof has flat cost per page ({measured})");
     }
 
     /// <summary>A library whose user-string heap holds one repeated UTF-16 string at offset 1.</summary>
