@@ -276,7 +276,8 @@ theorem inserted_related (kind : CIL.LocalKind) (initial : CIL.Value)
   cases method with
   | zero =>
     cases found
-    refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil, ⟨rfl, rfl, rfl, rfl, fun _ => ⟨_, rfl, rfl⟩, rfl⟩,
+    refine ⟨inserted kind initial, rfl, ⟨⟨.skip .nil,
+      ⟨rfl, rfl, rfl, rfl, fun _ => ⟨_, rfl, rfl⟩, rfl⟩,
       .skip kind initial fits .nil, ?_, inserted_ready kind initial fits, rfl⟩⟩⟩
     exact ⟨rfl, rfl, by intro selected member; cases member⟩
   | succ method => cases found
