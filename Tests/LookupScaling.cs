@@ -572,7 +572,7 @@ void ExceptionDecisionCosts()
         open CIL CIL.Safety Lean Elab Command
 
         """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
-    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: At("."));
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var costs = LookupPatterns.ExceptionDecision().Matches(output).ToDictionary(
         match => match.Groups[1].Value,
         match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
