@@ -73,6 +73,12 @@ from raw local uses, excluding address-taken locals. Opaque by-value helper para
 Agreement between the permitted consumers and the actual JIT remains a runtime assumption.
 See [intrinsic semantics and coverage](SIMD.md) and the [runtime-call inventory](COMPILER-COVERAGE.md).
 
+`runtimeModel` resolves the typed method reference of a `call` or `newobj` through a table of
+model entries, searched by method name and compared in full at the leaf. `RuntimeModelsAgree`
+requires each live call site to emit exactly the model the table gives its reference, and a site
+the table does not model to emit none of the models the table accounts for. The table is empty;
+the per-family certificates above tie each model emission to its call.
+
 ### Arrays, views and bulk memory
 
 Supplied arrays carry exact element identity, length and allocation-relative backing storage.

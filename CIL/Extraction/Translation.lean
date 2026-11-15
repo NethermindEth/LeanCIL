@@ -2,6 +2,7 @@ import CIL.Extraction.Scalars
 import CIL.Extraction.LayoutCoverage
 import CIL.Extraction.UnsafeCalls
 import CIL.Extraction.ExactIntrinsics
+import CIL.Extraction.RuntimeModels
 import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
 import CIL.Extraction.ImportLayouts
@@ -313,6 +314,7 @@ def MethodEvidenceValid (rawLayouts : List RawLayout) (layouts : Array ComputedL
   MethodShapeValid item.closed method ∧
   UnsafeCallsValid rawLayouts item.closed item.reachable method.code ∧
   ExactIntrinsicsValid item.closed item.reachable method ∧
+  RuntimeModelsAgree item.closed item.reachable method ∧
   OpaqueLocalsValid item.closed method ∧
   VectorInitializationsValid item.closed item.reachable method ∧
   ScalarFlowValid rawLayouts.toArray item.closed item.featureStates item.scalarStates method.code ∧
@@ -326,7 +328,7 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (all : List MethodEvidence) (imports : List ImportSlot)
     (item : MethodEvidence) (method : Method) :
     Decidable (MethodEvidenceValid rawLayouts layouts pins all imports item method) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- `MethodEvidenceValid` for a program lookup; a missing method fails. -/
 private def MethodAtValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
