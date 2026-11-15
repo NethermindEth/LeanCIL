@@ -386,12 +386,6 @@ deriving instance Lean.ToExpr for CIL.ClassSlot
 deriving instance Lean.ToExpr for CIL.FieldShape
 deriving instance Lean.ToExpr for CIL.ValueShape
 
-/-- The literal shape `resolution` evaluates to under the compiled resolver. The kernel still
-    checks the fact that states it, so a wrong evaluation fails the declaration. -/
-unsafe def evaluateShape (α : Type) [ToExpr α] (shapeType : Name) (resolution : Expr) :
-    MetaM Expr :=
-  return toExpr (← evalExpr α (mkConst shapeType) resolution)
-
 /-- The name of the shape fact `cil_field_shape` or `cil_value_shape` declares for `operand`. -/
 def shapeFactName (operand : Name) : Name := operand.appendAfter "_shape"
 
@@ -540,13 +534,36 @@ inductive ShapeOperand where
       `valueShape`. -/
   | value
 
-/-- The method resolver, environment resolver, lemma lifting the environment's resolution to
-    every method sharing it, and shape type of an operand kind. -/
-def ShapeOperand.names : ShapeOperand → Name × Name × Name × Name
-  | .field => (``CIL.Method.fieldShape, ``CIL.LayoutEnvironment.fieldShape,
-      ``CIL.Method.fieldShape_of_environment, ``CIL.FieldShape)
-  | .value => (``CIL.Method.valueShape, ``CIL.LayoutEnvironment.valueShape,
-      ``CIL.Method.valueShape_of_environment, ``CIL.ValueShape)
+/-- The method resolver, lemma lifting the environment's resolution to every method sharing it,
+    and shape type of an operand kind. -/
+def ShapeOperand.names : ShapeOperand → Name × Name × Name
+  | .field => (``CIL.Method.fieldShape, ``CIL.Method.fieldShape_of_environment, ``CIL.FieldShape)
+  | .value => (``CIL.Method.valueShape, ``CIL.Method.valueShape_of_environment, ``CIL.ValueShape)
+
+/-- Layout environments evaluated by the compiled code, by name, so the shape facts of one
+    environment build its value once rather than once per operand. -/
+initialize evaluatedEnvironments : EnvExtension (Std.HashMap Name LayoutEnvironment) ←
+  registerEnvExtension (pure {})
+
+/-- The value of the layout environment `name`, evaluated on its first use in an elaboration. -/
+unsafe def evaluatedEnvironment (name : Name) : MetaM LayoutEnvironment := do
+  if let some environment := (evaluatedEnvironments.getState (← getEnv)).get? name then
+    return environment
+  let environment ← evalExpr LayoutEnvironment (mkConst ``CIL.LayoutEnvironment) (mkConst name)
+  modifyEnv (evaluatedEnvironments.modifyState · (·.insert name environment))
+  return environment
+
+/-- The literal shape the compiled resolver gives `operand` under the environment
+    `environmentName`. The kernel still checks the fact that states it, so a wrong evaluation
+    fails the declaration. -/
+unsafe def evaluateShape (kind : ShapeOperand) (environmentName : Name) (operand : Expr) :
+    MetaM Expr := do
+  let environment ← evaluatedEnvironment environmentName
+  match kind with
+  | .field => return toExpr (environment.fieldShape
+      (← evalExpr Extraction.FieldRef (mkConst ``CIL.Extraction.FieldRef) operand))
+  | .value => return toExpr (environment.valueShape
+      (← evalExpr Extraction.TypeExpr (mkConst ``CIL.Extraction.TypeExpr) operand))
 
 /-- A proof of the environment's resolution of `operand` that reads one layout entry through
     the suffixes, for the struct shapes that have one; `none` for the shapes the resolver gives
@@ -560,17 +577,17 @@ def ShapeOperand.entryProof? (kind : ShapeOperand) (owner : Body) (operand : Exp
   | .value => aggregateValueProof? owner operand
 
 /-- Declares `{operand}_shape`: every method whose environment is `environment` resolves the
-    operand to the shape `evaluate` gives. The kernel checks that shape: from one layout entry
+    operand to the shape `evaluate` gives it. The kernel checks that shape: from one layout entry
     for a struct shape, or by reducing the resolver otherwise. -/
 def declareShapeFact (kind : ShapeOperand) (environmentName operandName : Name)
     (evaluate : Expr → MetaM Expr) : TermElabM Unit := do
-  let (methodResolver, environmentResolver, sharedLemma, shapeType) := kind.names
+  let (methodResolver, sharedLemma, shapeType) := kind.names
   let owner : Body :=
     { name := environmentName, levelParams := [], parameters := #[], syntaxRef := ← getRef }
   declareLayoutSuffixes owner
   let environment := mkConst environmentName
   let operand := mkConst operandName
-  let shape ← evaluate (mkApp2 (mkConst environmentResolver) environment operand)
+  let shape ← evaluate operand
   let resolved ← match ← kind.entryProof? owner operand with
     | some proof => pure proof
     | none => pure (mkApp2 (mkConst ``Eq.refl [.one]) (mkConst shapeType) shape)
@@ -599,13 +616,13 @@ syntax "cil_value_shape " ident ident : command
 
 elab_rules : command
   | `(cil_field_shape $environment:ident $field:ident) => liftTermElabM do
-    declareShapeFact .field (← realizeGlobalConstNoOverloadWithInfo environment)
-      (← realizeGlobalConstNoOverloadWithInfo field)
-      (unsafe evaluateShape FieldShape ``CIL.FieldShape)
+    let environmentName ← realizeGlobalConstNoOverloadWithInfo environment
+    declareShapeFact .field environmentName (← realizeGlobalConstNoOverloadWithInfo field)
+      (unsafe evaluateShape .field environmentName)
   | `(cil_value_shape $environment:ident $type:ident) => liftTermElabM do
-    declareShapeFact .value (← realizeGlobalConstNoOverloadWithInfo environment)
-      (← realizeGlobalConstNoOverloadWithInfo type)
-      (unsafe evaluateShape ValueShape ``CIL.ValueShape)
+    let environmentName ← realizeGlobalConstNoOverloadWithInfo environment
+    declareShapeFact .value environmentName (← realizeGlobalConstNoOverloadWithInfo type)
+      (unsafe evaluateShape .value environmentName)
 
 /-- The shape of `resolver body operand` from `operand_shape`, when `operand` is a constant with
     that fact and a hypothesis states `body`'s environment is the fact's, or `body` unfolds to a
