@@ -18,7 +18,8 @@ structure NativeMethodTable where
   targets : Array CIL.ManagedIdentity
   origin : Reference
   cursor : Reference
-  /-- The number of entries, which the geometry checks read instead of walking `targets`. -/
+  /-- The number of entries, which the geometry checks and loads read instead of walking
+      `targets`. -/
   entryCount : Nat
   /-- The entries number exactly `entryCount`. -/
   counted : targets.size = entryCount
@@ -61,9 +62,11 @@ def NativeMethodTable.load (table : NativeMethodTable) (memory : Memory) :
   let relative := table.cursor.offset - table.origin.offset
   if relative % nativeMethodWidth != 0 then .error .alignment else pure ()
   let index := relative / nativeMethodWidth
-  let some identity := table.targets[index]? | .error .outsideAllocation
-  let _ ← read memory table.cursor nativeMethodWidth nativeMethodWidth
-  return ⟨table.signature, some identity⟩
+  if inside : index < table.entryCount then
+    let identity := table.targets[index]'(by rw [table.counted]; exact inside)
+    let _ ← read memory table.cursor nativeMethodWidth nativeMethodWidth
+    return ⟨table.signature, some identity⟩
+  else .error .outsideAllocation
 
 /-- Moving the cursor never changes the admitted target identities or their signature. -/
 theorem NativeMethodTable.addBytes_provenance (table result : NativeMethodTable)
@@ -92,8 +95,7 @@ theorem NativeMethodTable.load_provenance (table : NativeMethodTable) (memory : 
   split at loaded <;> (try simp_all)
   split at loaded <;> (try simp_all)
   subst pointer
-  refine ⟨rfl, ⟨_, rfl, ?_⟩⟩
-  exact Array.mem_of_getElem? (by assumption)
+  exact ⟨rfl, ⟨_, rfl, Array.getElem_mem _⟩⟩
 
 #print axioms NativeMethodTable.load_provenance
 

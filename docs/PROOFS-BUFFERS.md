@@ -198,7 +198,8 @@ binds the exact implementation.
 For supplied native dispatch tables, provide an immutable allocation binding in
 `MethodTable.backing`, the exact catalog target identities in `MethodTable.targets` and their
 number in `MethodTable.entryCount`. The default proof of `MethodTable.counted` checks that number
-once where the table is built, so a table step reads the count without walking the entries.
+once where the table is built, so a table step, and the bound check of an `ldind.i` load, read
+the count without walking the entries.
 Checked byte offsets and `ldind.i` preserve authenticated callable provenance; numeric address
 bytes alone are insufficient. These tables
 require a unique supported managed indirect-call signature in each body; handler
