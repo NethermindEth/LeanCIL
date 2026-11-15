@@ -197,11 +197,8 @@ void ReturnResolutionCosts(bool stepOnly = false)
     }
 }
 
-// Argument facts walk the parameter types and homes once, so a method's facts and the reads of every argument
-// through them cost about the same per argument at 8, 32 and 128 int32 parameters, with no homes and with every
-// other argument homed. A fact proved by evaluating `parameters[index]?` or by searching the homes costs about four
-// times as much per argument at each step. A fact walks at most one 16-entry block of a named suffix, so below one
-// block a fact walks fewer entries and costs up to a third less.
+// Fails when argument facts or reads at 8, 32 and 128 parameters cost over 1.35 times more per argument than
+// at the size before; evaluating parameters[index]? or searching homes gives 2.40x, 3.40x (2.48x, 3.46x homed).
 void ArgumentResolutionCosts()
 {
     const double AllowedArgumentGrowth = 1.35;
