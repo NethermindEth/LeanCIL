@@ -1,4 +1,4 @@
-import CIL.Safety.Execution
+import CIL.Safety.MemorySteps
 import CIL.Extraction.Scalars
 
 /-! Native handler tables preserve opaque identities across checked backing-memory accesses. -/
@@ -21,7 +21,7 @@ private def memory : CIL.Safety.Memory :=
     nextIdentity := 1
     staticBindings := [(42, ⟨0, 0⟩)] }
 
-private def table : NativeMethodTable := ⟨signature, #[first, second], ⟨0, 0⟩, ⟨0, 0⟩⟩
+private def table : NativeMethodTable := ⟨signature, #[first, second], ⟨0, 0⟩, ⟨0, 0⟩, 2, rfl⟩
 
 /-- Adding an entry stride selects the next authenticated identity. -/
 theorem native_load :
@@ -82,7 +82,7 @@ theorem unrelated_cursor :
 #print axioms unrelated_cursor
 
 private def opaqueTable : MethodTable :=
-  ⟨signature, some #[first, second], some ⟨42, 0⟩⟩
+  { signature, targets := some #[first, second], backing := some ⟨42, 0⟩, entryCount := 2 }
 
 private def frame : Frame := { activation := 0, locals := [], owned := [] }
 
@@ -168,7 +168,8 @@ theorem native_add_storage :
       tableFault .unsupportedLayout ∧
     addStep [.scalar (.i64 8), .methodTable { opaqueTable with backing := none }] =
       tableFault .invalidReference ∧
-    addStep [.scalar (.i64 8), .methodTable { opaqueTable with targets := none }] =
+    addStep [.scalar (.i64 8),
+        .methodTable { opaqueTable with targets := none, counted := nofun }] =
       tableFault .nullDereference ∧
     addStep [.scalar (.i64 8), .methodTable opaqueTable] { memory with staticBindings := [] } =
       tableFault .missingAllocation ∧
@@ -246,5 +247,141 @@ theorem native_add_admission :
 #print axioms native_add_admission
 
 end Admission
+
+section EntryCount
+
+/-- `NativeMethodTable.check` reading the entry count by walking `targets`. -/
+private def walkedCheck (table : NativeMethodTable) (memory : CIL.Safety.Memory) :
+    Checked Unit := do
+  let allocation ← liveAllocation memory table.origin.allocation
+  if allocation.kind != .immutableStatic then .error .unsupportedLayout else pure ()
+  if table.targets.size >= 2^31 ||
+      table.origin.offset + nativeMethodWidth * table.targets.size > allocation.layout.size then
+    .error .outsideAllocation else pure ()
+  if allocation.layout.alignment % nativeMethodWidth != 0 ||
+      table.origin.offset % nativeMethodWidth != 0 then .error .alignment else pure ()
+  if table.cursor.allocation != table.origin.allocation ||
+      table.cursor.offset < table.origin.offset ||
+      table.cursor.offset > table.origin.offset + nativeMethodWidth * table.targets.size then
+    .error .invalidReference else pure ()
+
+/-- `NativeMethodTable.addBytes` with `walkedCheck`. -/
+private def walkedAddBytes (table : NativeMethodTable) (memory : CIL.Safety.Memory)
+    (offset : BitVec 64) : Checked NativeMethodTable := do
+  walkedCheck table memory
+  let cursor := { table.cursor with offset :=
+    (BitVec.ofNat 64 table.cursor.offset + offset).toNat }
+  let result := { table with cursor }
+  walkedCheck result memory
+  return result
+
+/-- `NativeMethodTable.load` with `walkedCheck`, reading the entry with `targets[index]?`, whose
+    bound check walks `targets`. -/
+private def walkedLoadView (table : NativeMethodTable) (memory : CIL.Safety.Memory) :
+    Checked CIL.MethodPointer := do
+  walkedCheck table memory
+  let relative := table.cursor.offset - table.origin.offset
+  if relative % nativeMethodWidth != 0 then .error .alignment else pure ()
+  let index := relative / nativeMethodWidth
+  let some identity := table.targets[index]? | .error .outsideAllocation
+  let _ ← read memory table.cursor nativeMethodWidth nativeMethodWidth
+  return ⟨table.signature, some identity⟩
+
+/-- `nativeTableView` counting the view's entries by walking them; it reads no table count. -/
+private def walkedView (table : MethodTable) (memory : CIL.Safety.Memory) :
+    Checked NativeMethodTable := do
+  let some targets := table.targets | .error .nullDereference
+  let some backing := table.backing | .error .invalidReference
+  let some (_, origin) := memory.staticBindings.find? (·.1 == backing.identity) |
+    .error .missingAllocation
+  let view : NativeMethodTable := ⟨table.signature, targets, origin,
+    { origin with offset := origin.offset + backing.byteOffset }, targets.size, rfl⟩
+  walkedCheck view memory
+  return view
+
+/-- `addNativeTable` over the walked view and checks. -/
+private def walkedAdd (table : MethodTable) (memory : CIL.Safety.Memory) (offset : BitVec 64) :
+    Checked MethodTable := do
+  let view ← walkedView table memory
+  let moved ← walkedAddBytes view memory offset
+  let some backing := table.backing | .error .invalidReference
+  return { table with backing := some { backing with
+    byteOffset := moved.cursor.offset - moved.origin.offset } }
+
+/-- `loadNativeTable` over the walked view and checks. -/
+private def walkedLoad (table : MethodTable) (memory : CIL.Safety.Memory) :
+    Checked CIL.MethodPointer := do
+  let view ← walkedView table memory
+  walkedLoadView view memory
+
+/-- A view's carried count is its entries' size, so its geometry check is the walked one. -/
+private theorem check_eq_walked (view : NativeMethodTable) (memory : CIL.Safety.Memory) :
+    view.check memory = walkedCheck view memory := by
+  rcases view with ⟨signature, targets, origin, cursor, count, counted⟩
+  subst counted
+  rfl
+
+/-- The view a table resolves to is the one that counts its entries by walking them. -/
+private theorem nativeTableView_eq_walked (table : MethodTable) (memory : CIL.Safety.Memory) :
+    nativeTableView table memory = walkedView table memory := by
+  rcases table with ⟨signature, _ | entries, _ | backing, count, counted⟩
+  · rfl
+  · rfl
+  · rfl
+  · obtain rfl : entries.size = count := counted entries rfl
+    unfold nativeTableView walkedView
+    cases found : memory.staticBindings.find? (·.1 == backing.identity) with
+    | none => simp [found]
+    | some binding => simp [found, check_eq_walked]
+
+/-- Reading the carried entry count moves a native cursor exactly as walking the entries does,
+    for every table, memory and offset. -/
+theorem addNativeTable_eq_walked : addNativeTable = walkedAdd := by
+  funext table memory offset
+  unfold addNativeTable walkedAdd NativeMethodTable.addBytes walkedAddBytes
+  simp only [nativeTableView_eq_walked, check_eq_walked]
+  rfl
+#print axioms addNativeTable_eq_walked
+
+/-- Bounding the entry index by the carried count loads exactly the entry, or the fault, that the
+    walked bound check gives, for every view and memory. -/
+theorem load_eq_walked : NativeMethodTable.load = walkedLoadView := by
+  funext view memory
+  rcases view with ⟨signature, targets, origin, cursor, count, counted⟩
+  subst counted
+  unfold NativeMethodTable.load walkedLoadView
+  simp only [check_eq_walked]
+  by_cases inside : (cursor.offset - origin.offset) / nativeMethodWidth < targets.size
+  · simp only [inside, dite_true, Array.getElem?_eq_getElem]
+  · simp only [inside, dite_false, Array.getElem?_eq_none (Nat.le_of_not_lt inside)]
+#print axioms load_eq_walked
+
+/-- Reading the carried entry count loads a native entry exactly as walking the entries does. -/
+theorem loadNativeTable_eq_walked : loadNativeTable = walkedLoad := by
+  funext table memory
+  unfold loadNativeTable walkedLoad
+  simp only [nativeTableView_eq_walked, load_eq_walked]
+#print axioms loadNativeTable_eq_walked
+
+/-- An int32 offset added to a native table steps as the addition that walks the entries. -/
+theorem step_add_table_i32_walked (code : CIL.Method) (offset : CIL.W32) (table : MethodTable)
+    (memory : CIL.Safety.Memory) (frame : Frame) (args rest : List CIL.Safety.Value) (pc : Nat) :
+    step code .add pc args frame (.scalar (.i32 offset) :: .methodTable table :: rest) memory = do
+      let selected ← checkedAt .null nativeMethodWidth
+        (walkedAdd table memory (offset.signExtend 64))
+      return .next (pc + 1) (.methodTable selected :: rest) frame memory := by
+  rw [step_add_table_i32_eq, addNativeTable_eq_walked]
+#print axioms step_add_table_i32_walked
+
+/-- A native-int offset added to a native table steps as the addition that walks the entries. -/
+theorem step_add_table_i64_walked (code : CIL.Method) (offset : CIL.W64) (table : MethodTable)
+    (memory : CIL.Safety.Memory) (frame : Frame) (args rest : List CIL.Safety.Value) (pc : Nat) :
+    step code .add pc args frame (.scalar (.i64 offset) :: .methodTable table :: rest) memory = do
+      let selected ← checkedAt .null nativeMethodWidth (walkedAdd table memory offset)
+      return .next (pc + 1) (.methodTable selected :: rest) frame memory := by
+  rw [step_add_table_i64_eq, addNativeTable_eq_walked]
+#print axioms step_add_table_i64_walked
+
+end EntryCount
 
 end Tests.NativeMethodTables

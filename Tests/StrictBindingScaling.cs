@@ -1,3 +1,8 @@
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
+
 partial class Program
 {
     /// <summary>The most a claim may cost more, per claim, when the claims grow at a fixed image.</summary>
@@ -5,6 +10,9 @@ partial class Program
 
     /// <summary>The most the check may take longer, as a multiple, for a larger image with the same claims.</summary>
     const double MaximumImageGrowth = 4;
+
+    /// <summary>The most a carried key byte may cost more, per byte, when the carried key grows fourfold.</summary>
+    const double MaximumPerByteGrowth = 1.25;
 
     /// <summary>
     /// The body check costs time linear in the number of claims and independent of the image size per claim. The
@@ -29,6 +37,7 @@ partial class Program
         var package = FixturePackage();
         Run(["lake", "build", "StrictBinding.Evidence"], package, progress: "Building the strict binding library");
         CheckGeneratedBodiesModuleElaborates(root, package);
+        CheckAssemblyBlockScaling(root, package);
         var examples = File.ReadAllBytes(At("Examples/Assembly/bin/Examples.dll"));
         var larger = new byte[examples.Length + 770 * 1024];
         examples.CopyTo(larger, 0);
@@ -66,6 +75,88 @@ partial class Program
                 $"claims and {perImage:F1} times as long for 8.8 times the image");
         Console.WriteLine($"PASS the body check is linear in the claims ({perClaim:F1} times per claim) and " +
             $"independent of the image size ({perImage:F1} times for 8.8)");
+    }
+
+    /// <summary>
+    /// The check of a carried Assembly block reads each carried entry byte once, so its kernel heartbeats grow
+    /// linearly with them. Images with a short name and a public key blob of 256, 1024 and 4096 bytes are checked,
+    /// and the heartbeats of preparing each image are subtracted; the name stays short because preparing spells
+    /// the identity at a cost quadratic in its length. A byte added from 1024 to 4096 may cost at most 1.25 times
+    /// a byte added from 256 to 1024, where a cost quadratic in the bytes would give four times; reruns differ by
+    /// a few heartbeats, far inside that bound.
+    /// </summary>
+    static void CheckAssemblyBlockScaling(string root, string package)
+    {
+        const string report = "#eval show IO Nat from IO.getNumHeartbeats";
+        int[] sizes = [256, 1024, 4096];
+        Run(["lake", "build", "StrictBinding.Rows"], package, progress: "Building the carried metadata checks");
+        var cases = string.Concat(sizes.Select(size =>
+        {
+            var file = SyntheticAssembly(size);
+            var pinned = $"{{ identity := \"{StrictBindingFacts.Identity(file)}\", image := image }}";
+            return $$"""
+                namespace Size{{size}}
+                {{BindingImage.Definitions(file)}}
+                def pinned : StrictBinding.PinnedImage := {{pinned}}
+                def block : CIL.Extraction.AssemblyMetadata :=
+                  {{StrictBindingFacts.AssemblyBlock(file)}}
+                {{report}}
+                theorem prepared : StrictBinding.ok (StrictBinding.prepareOne pinned) = true := by decide +kernel
+                {{report}}
+                theorem checked : StrictBinding.ok
+                    (StrictBinding.prepareOne pinned >>= (StrictBinding.assemblyBound · block)) = true := by
+                  decide +kernel
+                {{report}}
+                end Size{{size}}
+
+                """;
+        }));
+        var path = Path.Combine(root, "AssemblyBlocks.lean");
+        File.WriteAllText(path, $"import StrictBinding.Rows\n\n{cases}");
+        // Without the flag the kernel checks on another thread and its heartbeats go uncounted.
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", "-M", "8192", path], cwd: package);
+        var counts = output.Split('\n').Select(line => line.Trim())
+            .Where(line => line.Length > 0 && line.All(char.IsAsciiDigit))
+            .Select(line => long.Parse(line, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        if (counts.Length != 3 * sizes.Length || output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException($"Unchecked carried Assembly blocks:\n{output}");
+        // The check theorem also prepares the image, so the cost of the check is the excess over preparing.
+        var checks = sizes.Select((_, index) =>
+            counts[3 * index + 2] - 2 * counts[3 * index + 1] + counts[3 * index]).ToArray();
+        var smaller = (double)(checks[1] - checks[0]) / (sizes[1] - sizes[0]);
+        var larger = (double)(checks[2] - checks[1]) / (sizes[2] - sizes[1]);
+        var measured = string.Join(", ", sizes.Zip(checks, (size, cost) => $"{cost} heartbeats at {size} bytes"));
+        var growth = (larger / smaller).ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+        if (smaller <= 0 || larger / smaller > MaximumPerByteGrowth)
+            throw new InvalidOperationException($"The carried Assembly block check costs {measured}; a byte costs " +
+                $"{growth} times as much from {sizes[1]} to {sizes[2]} bytes as from {sizes[0]} to {sizes[1]}");
+        Console.WriteLine($"PASS the carried Assembly block check is linear in its key bytes ({measured}; " +
+            $"{growth} times per byte)");
+    }
+
+    /// <summary>
+    /// A library named Synthetic whose Assembly row names a public key blob that takes <paramref name="size"/>
+    /// bytes of the `#Blob` heap, with its length prefix.
+    /// </summary>
+    static byte[] SyntheticAssembly(int size)
+    {
+        const int shortBlob = 0x80;
+        var metadata = new MetadataBuilder();
+        var name = metadata.GetOrAddString("Synthetic");
+        var keyLength = size <= shortBlob ? size - 1 : size - 2;
+        var keyBytes = Enumerable.Range(0, keyLength).Select(index => (byte)(index * 7 + 1)).ToArray();
+        var key = metadata.GetOrAddBlob(keyBytes);
+        metadata.AddAssembly(name, new Version(1, 2, 3, 4), default, key, AssemblyFlags.PublicKey,
+            AssemblyHashAlgorithm.Sha1);
+        metadata.AddModule(0, metadata.GetOrAddString("Synthetic.dll"), metadata.GetOrAddGuid(Guid.Empty), default,
+            default);
+        metadata.AddTypeDefinition(default, default, metadata.GetOrAddString("<Module>"), default,
+            MetadataTokens.FieldDefinitionHandle(1), MetadataTokens.MethodDefinitionHandle(1));
+        var builder = new ManagedPEBuilder(PEHeaderBuilder.CreateLibraryHeader(), new MetadataRootBuilder(metadata),
+            new BlobBuilder());
+        var image = new BlobBuilder();
+        builder.Serialize(image);
+        return image.ToArray();
     }
 
     /// <summary>

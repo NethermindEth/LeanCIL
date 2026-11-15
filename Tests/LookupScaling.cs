@@ -22,6 +22,8 @@ if (args.Contains("--return-step-only", StringComparer.Ordinal))
     ReturnResolutionCosts(stepOnly: true);
     return;
 }
+NativeTableCosts();
+if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
 CheckNarrowedResolution();
 if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
@@ -314,6 +316,113 @@ void CheckNarrowedResolution()
     Console.WriteLine("PASS isolated evidence retains its selected obligation with generated return facts");
 }
 
+// A command that logs the heartbeats `decide +kernel` adds to the same statement closed with `sorry`.
+const string KernelCostCommand = """
+    /-- Logs what `decide +kernel` costs beyond elaborating the statement. -/
+    elab "#kernel_cost " label:str statement:term : command => do
+      let before <- IO.getNumHeartbeats
+      elabCommand (<- `(example : $statement := sorry))
+      let middle <- IO.getNumHeartbeats
+      elabCommand (<- `(example : $statement := by decide +kernel))
+      let after <- IO.getNumHeartbeats
+      let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
+      logInfo m!"{label.getString} {cost} heartbeats"
+    """;
+
+// The heartbeats `decide +kernel` adds to one `add` of an int32 offset to a native method table of 16, 64 and 256
+// entries and to one load of its first and of its last entry, each table and its storage defined once outside the
+// decision. The step and the load's bound read the table's entry count, not its entries, so their cost may grow by at
+// most `AllowedGrowth` between sizes. Reading entry i walks i cells of the literal, so the last entry's cost beyond
+// the first's may grow per index by at most `AllowedGrowth`.
+void NativeTableCosts()
+{
+    var tableDirectory = At("artifacts/LookupScaling/NativeTableStep");
+    Directory.CreateDirectory(tableDirectory);
+    var costs = new List<(int Entries, long Step, long First, long Last)>();
+    foreach (var entries in new[] { 16, 64, 256 })
+    {
+        var targets = string.Join(", ", Enumerable.Range(1, entries).Select(token => $"⟨\"Handlers\", {token}, []⟩"));
+        var path = Path.Combine(tableDirectory, $"Entries{entries}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Safety.Execution
+            set_option maxRecDepth 8192
+            open CIL CIL.Safety Lean Elab Command
+            {{KernelCostCommand}}
+            namespace NativeTableStep
+            /-- The closed signature every entry shares. -/
+            def signature : ManagedSignature := ⟨.void, []⟩
+            /-- The {{entries}} supplied entries, the entry at index i holding token i + 1. -/
+            def targets : Array ManagedIdentity := #[{{targets}}]
+            /-- A supplied native table of the entries whose storage is static binding 42. -/
+            def table : MethodTable :=
+              { signature, targets := some targets, backing := some ⟨42, 0⟩, entryCount := {{entries}} }
+            /-- The table with its cursor on the last entry. -/
+            def lastTable : MethodTable :=
+              { signature, targets := some targets, backing := some ⟨42, {{8 * (entries - 1)}}⟩,
+                entryCount := {{entries}} }
+            /-- Immutable static storage holding exactly the table's entries. -/
+            def memory : CIL.Safety.Memory :=
+              { allocations := fun index => if index == 0 then
+                  some { kind := .immutableStatic, layout := ⟨{{8 * entries}}, 8, []⟩ } else none
+                cells := fun _ _ => ⟨0, true⟩
+                views := [⟨0, 0, {{8 * entries}}, true, false⟩]
+                nextIdentity := 1
+                staticBindings := [(42, ⟨0, 0⟩)] }
+            /-- A body with no code; the step reads only its profile. -/
+            def body : CIL.Method := { code := [], locals := [], returnsValue := false }
+            /-- The frame of the step, which owns nothing. -/
+            def frame : CIL.Safety.Frame := { activation := 0, locals := [], owned := [] }
+            #kernel_cost "table step {{entries}}" (match CIL.Safety.step body .add 0 [] frame
+                [.scalar (.i32 8), .methodTable table] memory with
+              | .ok (.next _ [.methodTable moved] _ _) => moved.backing
+              | _ => none) = some ⟨42, 8⟩
+            #kernel_cost "table load first {{entries}}" (match loadNativeTable table memory with
+              | .ok ⟨_, some ⟨_, token, _⟩⟩ => token == 1
+              | _ => false) = true
+            #kernel_cost "table load last {{entries}}" (match loadNativeTable lastTable memory with
+              | .ok ⟨_, some ⟨_, token, _⟩⟩ => token == {{entries}}
+              | _ => false) = true
+            end NativeTableStep
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        long Measured(Regex pattern, string row)
+        {
+            var cost = pattern.Match(output);
+            if (!cost.Success) throw new InvalidOperationException($"Missing the native table {row} cost:\n{output}");
+            return long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture);
+        }
+        costs.Add((entries, Measured(LookupPatterns.NativeTableStep(), "step"),
+            Measured(LookupPatterns.NativeTableLoadFirst(), "first load"),
+            Measured(LookupPatterns.NativeTableLoadLast(), "last load")));
+    }
+    RequireConstant("one native table step", costs.Select(sample => (sample.Entries, sample.Step)).ToList());
+    RequireConstant("one load of a native table's first entry",
+        costs.Select(sample => (sample.Entries, sample.First)).ToList());
+    // The last entry sits at index entries - 1, so its cost beyond the first entry's is divided by that index.
+    var perIndex = costs.Select(sample => (sample.Entries, sample.Last,
+        PerIndex: (sample.Last - sample.First) / (sample.Entries - 1))).ToList();
+    var walked = string.Join("; ", perIndex.Select(sample =>
+        $"{sample.Last} heartbeats, {sample.PerIndex} per index, at {sample.Entries}"));
+    if (costs.Any(sample => sample.Last < KernelDecisionFloor) ||
+        perIndex.Skip(1).Any(sample => sample.PerIndex > perIndex[0].PerIndex * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Loading a native table's last entry costs {walked}; the limit is {AllowedGrowth} times the cost per " +
+            $"index at {costs[0].Entries} entries."));
+    Console.WriteLine($"PASS loading a native table's last entry costs {walked} entries");
+}
+
+// Fails unless every cost is a real decision and none exceeds `AllowedGrowth` times the cost at the smallest size.
+void RequireConstant(string row, List<(int Entries, long Cost)> costs)
+{
+    var measured = string.Join("; ", costs.Select(sample => $"{sample.Cost} heartbeats at {sample.Entries} entries"));
+    if (costs.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        costs.Skip(1).Any(sample => sample.Cost > costs[0].Cost * AllowedGrowth))
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Deciding {row} costs {measured}; the limit is {AllowedGrowth} times the cost at " +
+            $"{costs[0].Entries} entries."));
+    Console.WriteLine($"PASS deciding {row} costs {measured}");
+}
+
 // The heartbeats `decide +kernel` adds to the same statement closed with `sorry`, for equal and unequal type
 // identities whose names have 20 and 80 characters and share all but their last character. Each statement is
 // distinct, so no decision reuses the auxiliary lemma of another.
@@ -339,17 +448,8 @@ Dictionary<string, long> TypeDecisionCosts()
         def runtime : AssemblyName :=
           { name := name!"System.Runtime", version := { major := 11, minor := 0, build := 0, revision := 0 },
             culture := name!"", publicKeyToken := some 0xb03f5f7f11d50a3a }
-        /-- Logs what `decide +kernel` costs beyond elaborating the statement. -/
-        elab "#kernel_cost " label:str statement:term : command => do
-          let before <- IO.getNumHeartbeats
-          elabCommand (<- `(example : $statement := sorry))
-          let middle <- IO.getNumHeartbeats
-          elabCommand (<- `(example : $statement := by decide +kernel))
-          let after <- IO.getNumHeartbeats
-          let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
-          logInfo m!"{label.getString} {cost} heartbeats"
 
-        """ + string.Join("\n", statements) + "\n");
+        """ + KernelCostCommand + "\n" + string.Join("\n", statements) + "\n");
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
     var costs = LookupPatterns.TypeDecision().Matches(output).ToDictionary(
         match => match.Groups[1].Value, match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
@@ -1304,4 +1404,13 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex TypeDecision();
+
+    [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex NativeTableStep();
+
+    [GeneratedRegex(@"table load first [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex NativeTableLoadFirst();
+
+    [GeneratedRegex(@"table load last [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex NativeTableLoadLast();
 }

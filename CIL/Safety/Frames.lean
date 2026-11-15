@@ -132,7 +132,7 @@ def storeLocal (m : Memory) (slot : LocalSlot) (value : Value) :
     if table.signature != signature then .error .invalidState else
       return (.methodTable signature (some table), m)
   | .methodTable signature _, .object .null =>
-    return (.methodTable signature (some ⟨signature, none, none⟩), m)
+    return (.methodTable signature (some { signature, targets := none, entryCount := 0 }), m)
   | .object _, .object reference =>
     let _ ← formObject m reference
     return (.object (some reference), m)
@@ -259,7 +259,8 @@ def makeLocal (activation : Nat) (kind : CIL.LocalKind) (initial : CIL.Value) (m
     | .unmodeled => .ok (.methodPointer signature none, [], m)
     | _ => .error .invalidState
   | .methodTable signature => match initial with
-    | .nullRef => .ok (.methodTable signature (some ⟨signature, none, none⟩), [], m)
+    | .nullRef =>
+      .ok (.methodTable signature (some { signature, targets := none, entryCount := 0 }), [], m)
     | .unmodeled => .ok (.methodTable signature none, [], m)
     | _ => .error .invalidState
   | .array element => match initial with

@@ -140,6 +140,10 @@ def directoriesOffset (optional magic : Nat) : Except AuditError Nat :=
   else if magic == 0x20B then pure (optional + 112)
   else throw (.pe (.badMagic magic))
 
+/-- The most bytes a metadata root allocates to its version string (II.24.2.1): the string with its
+    terminator is at most 255 bytes, and the allocation rounds it up to a multiple of four. -/
+def maxVersionLength : Nat := 256
+
 /-- The CLI header's data directory is the fifteenth of sixteen, eight bytes each. -/
 def cliDirectoryIndex : Nat := 14
 
@@ -168,7 +172,8 @@ def decodePe (view : ImageView) : Except AuditError PeLayout := do
   let metadata ← mapRva sections (← view.u (cli + 8) 4) metadataSize
   if (← view.u metadata 4) != 0x424A5342 then throw (.pe .badMetadataRoot)
   let versionLength ← view.u (metadata + 12) 4
-  if versionLength % 4 != 0 || versionLength > 255 then throw (.pe .badMetadataRoot)
+  if versionLength % 4 != 0 || versionLength > maxVersionLength then
+    throw (.pe .badMetadataRoot)
   let streamCount ← view.u (metadata + 18 + versionLength) 2
   let streams ← readStreams view metadata metadataSize streamCount
     (metadata + 20 + versionLength) {}
