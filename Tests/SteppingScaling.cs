@@ -20,6 +20,7 @@ const int Repetitions = 3;
 const int LocalCount = 8;
 const int HypothesisBodyCycles = 30;
 const string Int32Type = ".atom CIL.Extraction.runtimeScope \"System.Int32\"";
+const string NodeType = ".object \"Examples\" \"Examples.Node\"";
 var localSlots = string.Join(", ", Enumerable.Repeat(".root (some target)", LocalCount));
 
 ScalingChecks();
@@ -63,7 +64,8 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("hypothesescontract", [16, 64, 256], false), ("hypothesesloop", [16, 64, 256], false),
     ("hypotheseslookup", [16, 64, 256], false), ("hypothesesdirect", [16, 256], false),
     ("snapshots", [10, 20, 40, 80], false), ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false),
-    ("homes", [16, 64, 256], false), ("calls", [16, 64, 256], true), ("tablecalls", [16, 64, 256], true)
+    ("homes", [16, 64, 256], false), ("allocation", [16, 64, 256], false), ("calls", [16, 64, 256], true),
+    ("tablecalls", [16, 64, 256], true)
 };
 if (selectedWorkloads is not null)
 {
@@ -119,9 +121,10 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // with one, each from the arguments, so each step reads a fact of constant size. The arguments body
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
 // The homes body gives each of as many reference parameters a home and loads each argument once,
-// which reads its home. The calls body passes its argument through one call per cycle to a callee
-// that returns it, so each call reads its target from the body's link table; the tablecalls body
-// writes that table out, as a template does.
+// which reads its home. The allocation body allocates an array of two class references per cycle and
+// pops it, so each `newarr` resolves its element shape and reads one allocation fact. The calls body
+// passes its argument through one call per cycle to a callee that returns it, so each call reads its
+// target from the body's link table; the tablecalls body writes that table out, as a template does.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "calls" or "tablecalls" => ([".ldarg 0"], [".call 1 1"], [".ret"]),
@@ -135,6 +138,7 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
         .ToArray(), [".ldloc 0", ".ret"]),
     "faulting" => ([], [".ldarg 0", ".ldarg 1", ".div", ".pop", ".ldarg 0", ".ldarg 1", ".rem", ".pop",
         ".ldarg 0", ".ldarg 1", ".add_ovf", ".pop", ".ldarg 0", ".conv_ovf .i4", ".pop"], [".ldarg 0", ".ret"]),
+    "allocation" => ([], [".ldc_i4 2", $".newarr ({NodeType})", ".pop"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
@@ -208,6 +212,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             "import CIL.Safety.MethodContract\nimport CIL.Safety.LoopAutomation\n",
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
         "snapshots" => "import CIL.Safety.CallingFields\nimport CIL.Safety.LocalSnapshotSteps\n",
+        "allocation" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
         _ => ""
     };
     var localKinds = string.Join(", ", Enumerable.Repeat(".word64", SnapshotLocalCount));
@@ -430,6 +435,13 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                 invoke [body] {{operations.Length + 1}} 0 [{{incoming}}] memory =
                   .ok (memory, [.scalar (.i32 ({{sum}}))]) := by
               cil_checked_steps
+            """,
+        "allocation" => $$"""
+            /-- Every `newarr` resolves its class element and allocates by one fact that keeps the memory. -/
+            theorem checked (memory : Memory) (array : Reference)
+                (allocated : newReferenceArray memory ({{NodeType}}) (.i32 2) = .ok (array, memory)) :
+                invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [allocated]
             """,
         "homes" => $$"""
             /-- Each reference parameter is read once from the home slot of a literal frame. -/

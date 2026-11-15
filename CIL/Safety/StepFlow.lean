@@ -44,7 +44,7 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {link : Option CIL.Link} 
     (enters : action.callee = some callee) :
       (CIL.Instruction.managed operation).link?.isSome = true ∧
         callee ∈ (link.map CIL.Link.callees).getD [] := by
-  unfold managedStep at executed
+  unfold managedStep methodTableLength methodTableElement at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve |

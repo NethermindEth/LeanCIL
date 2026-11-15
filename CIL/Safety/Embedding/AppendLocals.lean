@@ -218,26 +218,17 @@ theorem step_appendLocals_localloc : StepAppendLocals .localloc := by
 #print axioms step_appendLocals_localloc
 
 /-- Heap array allocation does not inspect or change a frame's local slots. -/
-theorem step_appendLocals_newArray (element : CIL.ArrayElement) :
-    StepAppendLocals (.newArray element) := by
+theorem step_appendLocals_newarr (element : CIL.Extraction.TypeExpr) :
+    StepAppendLocals (.newarr element) := by
   intro body pc args frame extra stack memory outcome stepped kept
   subst stepped
   clear kept
-  simp only [step, bind_map_left]
-  frame_natural
+  unfold step
+  apply observed_appendLocals
+  append_stack_cases using
+    fallback_appendLocals body.profile (.newarr element) pc _ frame extra memory
 
-#print axioms step_appendLocals_newArray
-
-/-- Reference array allocation does not inspect or change a frame's local slots. -/
-theorem step_appendLocals_newReferenceArray (element : CIL.Extraction.TypeExpr) :
-    StepAppendLocals (.newReferenceArray element) := by
-  intro body pc args frame extra stack memory outcome stepped kept
-  subst stepped
-  clear kept
-  simp only [step, bind_map_left]
-  frame_natural
-
-#print axioms step_appendLocals_newReferenceArray
+#print axioms step_appendLocals_newarr
 
 /-- `nop` preserves outcomes under trailing local slots. -/
 theorem step_appendLocals_nop :
@@ -1310,7 +1301,7 @@ theorem step_appendLocals_managed (operation : ManagedOp) :
   clear kept
   unfold step
   apply observed_appendLocals
-  unfold managedStep
+  unfold managedStep methodTableLength methodTableElement
   split
   all_goals repeat' first
     | rfl
@@ -1339,8 +1330,7 @@ theorem step_appendLocals (body : Method) (op : Instruction) (pc : Nat) (args : 
       exact step_appendLocals_conv_ovf_un target
     case localloc =>
       exact step_appendLocals_localloc
-    case newArray element => exact step_appendLocals_newArray element
-    case newReferenceArray element => exact step_appendLocals_newReferenceArray element
+    case newarr element => exact step_appendLocals_newarr element
     case nop =>
       exact step_appendLocals_nop
     case neg =>

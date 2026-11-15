@@ -1,4 +1,6 @@
 import CIL.Safety.Execution
+import CIL.Safety.ObjectSteps
+import CIL.Safety.SymbolicExecution
 import CIL.Extraction.Translation
 
 /-! # Supplied-array operations retain null, bounds, initialization and authority checks -/
@@ -8,6 +10,12 @@ open CIL.Safety
 
 private def rawArray (opcode : Nat) (operand : CIL.Extraction.RawOperand := .none) :
     CIL.Extraction.RawInstruction := ⟨0, opcode, operand⟩
+
+/-- The element type `System.Int32`. -/
+private def int32 : CIL.Extraction.TypeExpr := .atom CIL.Extraction.runtimeScope "System.Int32"
+
+/-- The struct `Record`, at layout index 0. -/
+private def record : CIL.Extraction.TypeExpr := .aggregate "Record" 0
 
 /-- A typed load cannot claim an element token differing from the supplied array type. -/
 theorem wrong_element_token :
@@ -302,10 +310,55 @@ theorem byref_like_layout_containment :
 theorem allocation_native_kind :
     CIL.Extraction.scalarOpMatches
       (rawArray 141 (.type (.atom CIL.Extraction.runtimeScope "System.Int32")))
-      [.native] (.newArray .signed32) = true ∧
+      [.native] (.newarr int32) = true ∧
     CIL.Extraction.scalarOpMatches
       (rawArray 141 (.type (.atom CIL.Extraction.runtimeScope "System.Int32")))
-      [.word64] (.newArray .signed32) = false := by decide +kernel
+      [.word64] (.newarr int32) = false := by decide +kernel
 #print axioms allocation_native_kind
+
+/-- `newarr` carries the raw token itself: another element type, even one of equal width, or
+    the same struct under another identity or layout index, does not match it. -/
+theorem allocation_token_mismatch :
+    CIL.Extraction.scalarOpMatches (rawArray 141 (.type int32)) [.word32]
+      (.newarr (.atom CIL.Extraction.runtimeScope "System.UInt32")) = false ∧
+    CIL.Extraction.scalarOpMatches (rawArray 141 (.type record)) [.word32]
+      (.newarr (.aggregate "Other" 0)) = false ∧
+    CIL.Extraction.scalarOpMatches (rawArray 141 (.type record)) [.word32]
+      (.newarr (.aggregate "Record" 1)) = false ∧
+    CIL.Extraction.scalarOpMatches (rawArray 141 (.type record)) [.word32]
+      (.newarr record) = true := by decide +kernel
+#print axioms allocation_token_mismatch
+
+/-- Checked layouts holding one 5-byte struct under the identity `Record`. -/
+private def recordEnvironment : CIL.LayoutEnvironment :=
+  { rawLayouts :=
+      [{ identity := "Record", explicit := false, packing := 0, declaredSize := 0, fields := [] }]
+    layouts := #[⟨⟨5, []⟩, 1⟩] }
+
+/-- `newarr` of two `Record` elements in a body over `recordEnvironment`. -/
+@[cil_code] def aggregating : CIL.Method :=
+  { returnsValue := true, locals := [], environment := recordEnvironment,
+    code := [.ldc_i4 2, .newarr record, .ret] }
+
+/-- A struct array takes its stride from the body's checked layout, not from the instruction;
+    without a layout entry for the struct the allocation is outside the model. -/
+theorem aggregate_stride_from_environment :
+    (match invoke [aggregating] 8 0 [] memory with
+     | .ok (after, [.array view]) => view.elementType == .aggregate "Record" 5 &&
+         view.length == 2 && (view.validate after).isOk
+     | _ => false) = true ∧
+    invoke [{ aggregating with environment := { recordEnvironment with layouts := #[] } }]
+        8 0 [] memory = .error ⟨0, 1, .unsupported CIL.ElementShape.outsideLayouts⟩ :=
+  ⟨by decide +kernel, rfl⟩
+#print axioms aggregate_stride_from_environment
+
+/-- A `newarr` step reduces through the body's element shape to a value allocation of the
+    checked stride. -/
+theorem aggregate_allocation_step (frame : Frame) (rest : List Value) :
+    step aggregating (.newarr record) 1 [] frame (.scalar (.i32 2) :: rest) memory = do
+      let (view, allocated) ← newArray memory (.aggregate "Record" 5) (.i32 2)
+      return .next 2 (.array view :: rest) frame allocated := by
+  simp only [cil_step, bind_assoc, pure_bind, Nat.reduceAdd]
+#print axioms aggregate_allocation_step
 
 end Tests.PrimitiveArrays

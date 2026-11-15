@@ -221,6 +221,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         return Type((TypeReference)instruction.Operand);
     }
 
+    /// <summary>The element type of the <c>newarr</c> <paramref name="instruction"/> in <paramref name="method"/>, as
+    /// its raw operand states it; the executed allocation must carry the same term.</summary>
+    internal string ArrayElementOf(MethodDefinition method, Instruction instruction)
+    {
+        methodParameterCount = method.GenericParameters.Count;
+        return ArrayElement((TypeReference)instruction.Operand);
+    }
+
+    // An element class outside the model is named as an object, as the array's reference slots hold it.
+    string ArrayElement(TypeReference type) => ReferenceArrays.Element(type) ? ObjectType(type) : Type(type);
+
     string Operand(MethodDefinition method, InstructionIndex instructions, Instruction instruction,
         Instruction admittedInstruction, IReadOnlySet<Instruction> reachable)
     {
@@ -236,8 +247,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 if (argument < 0) throw new InvalidDataException("Invalid raw argument index");
                 return $".argument {argument}";
             case VariableDefinition local: return $".local {local.Index}";
-            case TypeReference type when instruction.OpCode.Code == Code.Newarr && ReferenceArrays.Element(type):
-                return $".type ({ObjectType(type)})";
+            case TypeReference type when instruction.OpCode.Code == Code.Newarr:
+                return $".type ({ArrayElement(type)})";
             case TypeReference type: return $".type ({Type(type)})";
             case MethodReference callee: return $".call {Call(callee, admittedInstruction, reachable)}";
             case Mono.Cecil.CallSite site when instruction.OpCode.Code == Code.Calli:

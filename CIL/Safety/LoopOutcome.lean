@@ -155,7 +155,7 @@ theorem loop_outcome_throw {program : CIL.Program} {method pc : Nat}
   run_throw_raises methodFound instructionFound stepped
 
 /-- A run that settles at any fuel without throwing `exception` refutes that outcome;
-    exhaustion is not settled. -/
+    neither exhaustion nor an `unsupported` fault is settled. -/
 theorem loop_outcome_some_refuted {program : CIL.Program} {fuel method pc : Nat}
     {args stack : List Value}
     {frame : Frame} {memory : Memory} {post : Memory → List Value → Prop}
@@ -165,9 +165,10 @@ theorem loop_outcome_some_refuted {program : CIL.Program} {fuel method pc : Nat}
     (other : ∀ fault, outcome = .error fault → fault.fault ≠ .thrown exception) :
     ¬ LoopOutcome program method args post (some exception) ⟨pc, frame, stack, memory⟩ := by
   rintro ⟨later, fault, raised, thrown⟩
-  have up := run_mono program fuel later method pc args frame stack memory outcome settled ran
+  have up :=
+    run_mono program fuel later method pc args frame stack memory outcome settled.stable ran
   have down := run_mono program later fuel method pc args frame stack memory (.error fault)
-    (by simp [Settled, thrown]) raised
+    (by simp [Stable, thrown]) raised
   rw [Nat.add_comm] at down
   exact other fault (up.symm.trans down) thrown
 

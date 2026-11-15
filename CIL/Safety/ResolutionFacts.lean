@@ -1,8 +1,9 @@
 import CIL.Resolution
 import CIL.InstructionEquations
+import CIL.Extraction.Generics
 
 /-!
-# Return and argument metadata facts
+# Return, argument and array element metadata facts
 
 Generated facts and value stepping share a proof-producing chooser for declared narrowing.
 Primitive and non-candidate heads use storage lemmas, without evaluating code or layout tables.
@@ -10,6 +11,11 @@ Primitive and non-candidate heads use storage lemmas, without evaluating code or
 how the method reads it (`CIL.Method.argumentAccess`). The argument facts walk the parameter
 types and the parameter homes once through named suffixes, as `CIL.CodeSuffix` does for code,
 so a method's facts cost time linear in its arguments and homes.
+
+For a method `m` with a raw method `mClosed`, the command also declares the shape of each
+distinct array element type the raw code names (`CIL.Method.elementShape`). A struct element
+reads its layout entries through named suffixes of the layout lists, shared by every method of
+an environment constant, so the facts cost time linear in the layouts and the distinct types.
 
 `cil_field_shape` and `cil_value_shape` declare how every method of an extraction resolves one
 distinct field or type operand, against the environment those methods share, so an operand used
@@ -364,8 +370,193 @@ def declareArgumentFacts (body : Body) (simpSet : SimpExtension) : TermElabM Uni
         (inv := false) .global (eval_prio default)
     if homed then passed := passed + 1
 
-/-- Declares a method's kernel-checked return narrowing from its named signature facts, and
-    how it reads each declared argument. -/
+/-- `value` with every constructor field reduced: a natural number to a literal, and a string kept
+    as written when it is a literal or a named constant and evaluated otherwise; `none` when a
+    part reduces to no constructor or a string mentions a free variable. -/
+partial def constructorForm? (value : Expr) : MetaM (Option Expr) := withDefault do
+  let type ← whnf (← inferType value)
+  if type.isConstOf ``String then
+    let value := value.consumeMData
+    if value.isConst || value matches .lit (.strVal _) then return some value
+    if value.hasFVar || value.hasMVar then return none
+    return some (mkStrLit (← unsafe evalExpr String type value))
+  if type.isConstOf ``Nat then
+    return (← (evalNat (← whnf value)).run).map mkNatLit
+  let head ← whnf value
+  let .const name _ := head.getAppFn | return none
+  let some (.ctorInfo info) := (← getEnv).find? name | return none
+  let arguments := head.getAppArgs
+  let mut parts := arguments.extract 0 info.numParams
+  for field in arguments.extract info.numParams arguments.size do
+    let some reduced ← constructorForm? field | return none
+    parts := parts.push reduced
+  return some (mkAppN head.getAppFn parts)
+
+/-- Reads of a method's layout tables at an index; `none` past the entries a read reaches. -/
+structure LayoutReads where
+  /-- The raw metadata at an index, with a proof of
+      `body.environment.rawLayouts[index]? = some metadata`. -/
+  declared : Nat → MetaM (Option (Expr × Expr))
+  /-- The computed layout at an index, with a proof of
+      `body.environment.layouts.toList[index]? = some layout`. -/
+  computed : Nat → MetaM (Option (Expr × Expr))
+
+/-- `body.elementShape (.aggregate identity index)` by the aggregate or the by-ref-like lemma,
+    when the raw layouts hold the index under the same literal identity. -/
+def aggregateProof? (method identity index : Expr) (reads : LayoutReads) :
+    MetaM (Option Expr) := withDefault do
+  let some position ← (evalNat index).run | return none
+  let some (metadata, declared) ← reads.declared position | return none
+  let .lit (.strVal actual) ← whnf (mkApp (mkConst ``CIL.Extraction.RawLayout.identity) metadata)
+    | return none
+  let .lit (.strVal expected) ← whnf identity | return none
+  unless actual == expected do return none
+  let identified ← mkEqRefl identity
+  let byRefLike ← whnf (mkApp (mkConst ``CIL.Extraction.RawLayout.byRefLike) metadata)
+  if byRefLike.isConstOf ``Bool.true then
+    return some (mkAppN (mkConst ``CIL.Method.elementShape_byRefLike)
+      #[method, identity, index, metadata, declared, identified, ← mkEqRefl byRefLike])
+  unless byRefLike.isConstOf ``Bool.false do return none
+  let some (layout, computed) ← reads.computed position | return none
+  return some (mkAppN (mkConst ``CIL.Method.elementShape_aggregate)
+    #[method, identity, index, metadata, layout, declared, identified, ← mkEqRefl byRefLike,
+      computed])
+
+/-- The shape of `method`'s array elements of type `type` in constructor form, with its proof: by
+    the primitive and enum lemmas, which evaluate no type name, by the class lemma, which compares
+    a literal class name with `System.Object`, by the aggregate lemmas over `reads`, and
+    otherwise by evaluation. -/
+def elementProof? (method type : Expr) (reads : LayoutReads) :
+    MetaM (Option (Expr × Expr)) := withDefault do
+  let head ← whnf type
+  let chosen ← match head.getAppFnArgs with
+    | (``CIL.Extraction.TypeExpr.atom, _) =>
+      pure ((primitive? head).map fun primitive =>
+        mkApp2 (mkConst ``CIL.Method.elementShape_primitive) method (mkConst primitive))
+    | (``CIL.Extraction.TypeExpr.enum, #[identity, underlying]) =>
+      pure ((primitive? (← whnf underlying)).map fun primitive =>
+        mkApp3 (mkConst ``CIL.Method.elementShape_enum) method identity (mkConst primitive))
+    | (``CIL.Extraction.TypeExpr.object, #[scope, name]) => do
+      let .lit (.strVal text) ← whnf name | pure none
+      if text == CIL.ElementShape.rootObjectName then pure none else
+      let derived ← mkDecideProof
+        (mkNot (← mkEq name (mkConst ``CIL.ElementShape.rootObjectName)))
+      pure (some (mkApp4 (mkConst ``CIL.Method.elementShape_object) method scope name derived))
+    | (``CIL.Extraction.TypeExpr.aggregate, #[identity, index]) =>
+      aggregateProof? method identity index reads
+    | _ => pure none
+  let shape := mkApp2 (mkConst ``CIL.Method.elementShape) method type
+  let some proof := chosen | do
+    let some value ← constructorForm? shape | return none
+    return some (value, ← mkEqRefl value)
+  let some (_, _, result) := (← inferType proof).eq? | return none
+  let some value ← constructorForm? result | return none
+  return some (value, proof)
+
+/-- `LayoutReads` that walk a literal body's layout lists, with premises the kernel decides by
+    walking them to the index; for a literal body in a proof. -/
+def literalReads (method : Expr) : LayoutReads :=
+  let environment := mkApp (mkConst ``CIL.Method.environment) method
+  let read (list : Expr) (position : Nat) : MetaM (Option (Expr × Expr)) := do
+    let (elements, _) ← listElements list
+    let some element := elements[position]? | return none
+    return some (element, ← mkEqRefl (← mkAppM ``Option.some #[element]))
+  { declared := read (mkApp (mkConst ``CIL.LayoutEnvironment.rawLayouts) environment)
+    computed := read (mkApp2 (mkConst ``Array.toList [.zero])
+      (mkConst ``CIL.Extraction.ComputedLayout)
+      (mkApp (mkConst ``CIL.LayoutEnvironment.layouts) environment)) }
+
+/-- The opcodes whose type operand is an array element type: `newarr`, `ldelema`, `ldelem` and
+    `stelem`. -/
+def elementOpcodes : List Nat := [141, 143, 163, 164]
+
+/-- The distinct element types the raw method `body{Closed}` names as the type operand of an
+    `elementOpcodes` instruction, in order of first appearance; none without that raw method. -/
+def elementTypes (body : Body) : MetaM (Array Expr) := withDefault do
+  let closed := body.name.appendAfter "Closed"
+  let some info := (← getEnv).find? closed | return #[]
+  unless info.type.isConstOf ``CIL.Extraction.RawMethod do return #[]
+  let code := mkApp (mkConst ``CIL.Extraction.RawMethod.code)
+    (mkConst closed (info.levelParams.map fun _ => .zero))
+  let (instructions, complete) ← listElements code
+  unless complete do throwError "cil_resolution_facts: the raw code of {closed} is unresolved"
+  let mut seen : Std.HashSet Expr := {}
+  let mut types := #[]
+  for instruction in instructions do
+    let (``CIL.Extraction.RawInstruction.mk, #[_, opcode, operand]) :=
+        (← whnf instruction).getAppFnArgs
+      | throwError "cil_resolution_facts: an instruction of {closed} is unresolved"
+    let some opcode ← (evalNat (← whnf opcode)).run
+      | throwError "cil_resolution_facts: an opcode of {closed} is unresolved"
+    unless elementOpcodes.contains opcode do continue
+    let (``CIL.Extraction.RawOperand.type, #[type]) := (← whnf operand).getAppFnArgs | continue
+    let type ← instantiateMVars type
+    unless seen.contains type do
+      seen := seen.insert type
+      types := types.push type
+  return types
+
+/-- `LayoutReads` through named suffixes of the layout lists of `body`'s environment. An
+    environment constant of this module names the suffixes once for all its methods; any other
+    environment names them for `body`. Each read walks at most one block. -/
+def suffixReads (body : Body) : TermElabM LayoutReads := withDefault do
+  let method := body.constant ""
+  let projected := mkApp (mkConst ``CIL.Method.environment) method
+  let named ← whnfR (mkApp (mkConst ``CIL.Method.environment) (← whnf method))
+  let current ← getEnv
+  let shared := match named with
+    | .const name [] => (current.getModuleIdxFor? name).isNone
+    | _ => false
+  let (owner, environment) := if shared then
+      ({ body with name := named.constName!, levelParams := [], parameters := #[] }, named)
+    else (body, projected)
+  let rawType := mkConst ``CIL.Extraction.RawLayout
+  let computedType := mkConst ``CIL.Extraction.ComputedLayout
+  let rawList := mkApp (mkConst ``CIL.LayoutEnvironment.rawLayouts) environment
+  let computedList := mkApp2 (mkConst ``Array.toList [.zero]) computedType
+    (mkApp (mkConst ``CIL.LayoutEnvironment.layouts) environment)
+  let (raw, rawComplete) ← listElements rawList
+  let (computed, computedComplete) ← listElements computedList
+  unless rawComplete && computedComplete do
+    throwError "cil_resolution_facts: the layouts of {body.name} are unresolved"
+  unless (← getEnv).contains (owner.name.appendAfter "_rawLayoutSuffix0") do
+    declareSuffixes owner rawType "_rawLayoutSuffix"
+      (fun start => s!"The raw layouts of `{owner.name}` from entry {start} on") rawList raw
+    declareSuffixes owner computedType "_layoutSuffix"
+      (fun start => s!"The computed layouts of `{owner.name}` from entry {start} on")
+      computedList computed
+  let read (stem : String) (elementType list : Expr) (elements : Array Expr) (position : Nat) :
+      MetaM (Option (Expr × Expr)) := do
+    let some element := elements[position]? | return none
+    return some (element, ← foundAt owner stem elementType list elements position)
+  return { declared := read "_rawLayoutSuffix" rawType rawList raw
+           computed := read "_layoutSuffix" computedType computedList computed }
+
+/-- Declares `body_elementShape{k}` for the `k`-th distinct element type the raw method
+    `body{Closed}` names and adds each to `cil_code`. A struct element reads its layouts through
+    named suffixes, so the facts cost time linear in the layouts and the distinct types. -/
+def declareElementFacts (body : Body) (simpSet : SimpExtension) : TermElabM Unit := do
+  let types ← elementTypes body
+  if types.isEmpty then return
+  let method := body.constant ""
+  let aggregate ← types.anyM fun type => do
+    return (← whnf type).isAppOf ``CIL.Extraction.TypeExpr.aggregate
+  let reads ← if aggregate then suffixReads body else pure (literalReads method)
+  for h : position in [0:types.size] do
+    let type := types[position]
+    -- A window per fact, so the facts of many element types do not exhaust the command's.
+    withCurrHeartbeats do
+      let some (shape, proof) ← elementProof? method type reads
+        | throwError "cil_resolution_facts: the shape of element type {position} of \
+            {body.name} is unresolved"
+      body.prove s!"_elementShape{position}"
+        s!"The shape of `{body.name}`'s array elements of type {position}."
+        (← mkEq (mkApp2 (mkConst ``CIL.Method.elementShape) method type) shape) proof
+      addSimpTheorem simpSet (body.name.appendAfter s!"_elementShape{position}") (post := false)
+        (inv := false) .global (eval_prio default)
+
+/-- Declares a method's kernel-checked return narrowing from its named signature facts, how it
+    reads each declared argument and the shape of each array element type its raw method names. -/
 syntax "cil_resolution_facts " ident : command
 
 elab_rules : command
@@ -391,6 +582,7 @@ elab_rules : command
       addSimpTheorem simpSet (name.appendAfter "_returnNarrow") (post := false)
         (inv := false) .global (eval_prio default)
       declareArgumentFacts body simpSet
+      declareElementFacts body simpSet
 
 /-! ## Field and value shapes -/
 

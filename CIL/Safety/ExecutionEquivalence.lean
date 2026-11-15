@@ -92,7 +92,7 @@ theorem Memory.Equivalent.managedStep {m n : Memory} (same : m.Equivalent n)
     (stack : List Value) :
     ResultEquivalent FrameActionEquivalent (managedStep operation link pc frame stack m)
       (managedStep operation link pc frame stack n) := by
-  unfold CIL.Safety.managedStep
+  unfold CIL.Safety.managedStep CIL.Safety.methodTableLength CIL.Safety.methodTableElement
   split <;> try simp only [same.checkedValues, same.loadNativeTable]
   all_goals repeat' first
     | exact .error _
@@ -214,6 +214,30 @@ theorem Memory.Equivalent.newReferenceArray {m n : Memory} (same : m.Equivalent 
     | split
 #print axioms Memory.Equivalent.newReferenceArray
 
+/-- `newarr` of either array shape preserves exact outcomes over equivalent memories. -/
+theorem Memory.Equivalent.allocateElements {m n : Memory} (same : m.Equivalent n)
+    (shape : ElementShape) (length : CIL.Value) :
+    ResultEquivalent MemoryLastEquivalent (allocateElements shape length m)
+      (allocateElements shape length n) := by
+  cases shape with
+  | value element =>
+    apply ResultEquivalent.bind (same.newArray element length)
+    intro left right related
+    obtain ⟨view, memory⟩ := left
+    obtain ⟨otherView, otherMemory⟩ := right
+    obtain ⟨rfl, equivalent⟩ := related
+    exact .ok ⟨rfl, equivalent⟩
+  | reference element =>
+    apply ResultEquivalent.bind (same.newReferenceArray element length)
+    intro left right related
+    obtain ⟨array, memory⟩ := left
+    obtain ⟨otherArray, otherMemory⟩ := right
+    obtain ⟨rfl, equivalent⟩ := related
+    exact .ok ⟨rfl, equivalent⟩
+  | method signature => exact .error _
+  | unsupported reason => exact .error _
+#print axioms Memory.Equivalent.allocateElements
+
 /-- Equivalent memories load every argument alike, from its home or the incoming list. -/
 theorem Memory.Equivalent.loadArgument {m n : Memory} (same : m.Equivalent n)
     (body : CIL.Method) (index : Nat) (args : List Value) (frame : Frame) :
@@ -263,13 +287,7 @@ theorem Memory.Equivalent.step {m n : Memory} (same : m.Equivalent n)
     | unfold returnFrom
     | unfold localAllocation
     | simp only [same.checkedValues]
-    | (apply ResultEquivalent.bind (same.newArray _ _)
-       intro left right related
-       obtain ⟨view, memory⟩ := left
-       obtain ⟨otherView, otherMemory⟩ := right
-       obtain ⟨rfl, equivalent⟩ := related
-       exact .ok (.next equivalent _ _ _))
-    | (apply ResultEquivalent.bind (same.newReferenceArray _ _)
+    | (apply ResultEquivalent.bind (same.allocateElements _ _)
        intro left right related
        obtain ⟨array, memory⟩ := left
        obtain ⟨otherArray, otherMemory⟩ := right

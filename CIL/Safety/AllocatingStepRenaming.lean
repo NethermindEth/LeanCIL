@@ -139,63 +139,6 @@ theorem allocateArray_not_thrown (memory : Memory) (element : CIL.ArrayElement) 
   all_goals split at found <;> cases found
 #print axioms allocateArray_not_thrown
 
-/-- Array allocation transports its fresh heap identity and retains the current frame. -/
-theorem Memory.Renamed.stepNewArray {indices : LocalIndexMap} {mapping : AllocationRenaming}
-    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
-    (related : Memory.Renamed mapping scopes source target)
-    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
-    (staticBounds : ∀ binding ∈ source.staticBindings,
-      binding.2.allocation < mapping.sourceLimit)
-    (sourceBody targetBody : CIL.Method) (element : CIL.ArrayElement) (pc : Nat)
-    (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
-    (observable : SuccessOrThrow
-      (step sourceBody (.newArray element) pc arguments sourceFrame stack source)) :
-    ∃ later, mapping.Extends later ∧
-      ResultRenamed later (FrameAction.Renamed indices later scopes)
-        (step sourceBody (.newArray element) pc arguments sourceFrame stack source)
-        (step targetBody (.newArray element) pc (arguments.map mapping.value)
-          targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands] at observable ⊢
-  split at observable
-  · cases observable
-  · rename_i guard
-    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
-    split at observable <;> try contradiction
-    · rename_i length rest same
-      cases same
-      simp only [List.map_cons, AllocationRenaming.value]
-      have restBounds : ∀ value ∈ rest, value.Below mapping.sourceLimit :=
-        fun value member => bounds value (List.mem_cons_of_mem _ member)
-      cases length <;> simp only [newArray, Bind.bind, Except.bind, Pure.pure, Except.pure]
-        at observable ⊢
-      all_goals cases supported : element.allocationSupported
-      all_goals simp only [supported, Bool.not_true, Bool.not_false, Bool.true_eq,
-        Bool.false_eq_true, ite_true, ite_false] at observable ⊢
-      all_goals try cases observable
-      all_goals rename_i bits
-      all_goals by_cases negative : bits.toInt < 0
-      all_goals simp only [negative, ite_true, ite_false] at observable ⊢
-      all_goals first
-      | exact ⟨mapping, .refl mapping, .error _⟩
-      | (cases allocated : CIL.Safety.allocateArray source element bits.toInt.toNat with
-         | error fault =>
-           cases fault <;> simp only [allocated, SuccessOrThrow] at observable
-           rename_i exception
-           exact False.elim (allocateArray_not_thrown source element _ exception allocated)
-         | ok result =>
-           obtain ⟨view, sourceAfter⟩ := result
-           obtain ⟨targetAfter, targetAllocated, memories⟩ := related.allocateArray sourceFormed
-             targetFormed staticBounds element _ view sourceAfter allocated
-           refine ⟨mapping.allocate, mapping.allocate_extends, ?_⟩
-           simp only [allocated, targetAllocated, Bind.bind, Except.bind]
-           rw [← mapping.allocate_extends.values rest restBounds]
-           exact .ok (.next memories
-             (frames.extend mapping.allocate_extends (fun _ _ scope => scope))))
-    · simp only [pureArity, instruction] at observable
-      split at observable <;> cases observable
-
-#print axioms Memory.Renamed.stepNewArray
 
 /-- Heap-budget and allocator faults cannot discharge a named exception obligation. -/
 theorem allocateObject_not_thrown (memory : Memory) (type : RuntimeType) (size : Nat)
@@ -292,24 +235,27 @@ theorem Memory.Renamed.stepNewObject {indices : LocalIndexMap} {mapping : Alloca
 
 #print axioms Memory.Renamed.stepNewObject
 
-/-- `newarr` of a class transports its fresh array identity and retains the current frame. -/
-theorem Memory.Renamed.stepNewReferenceArray {indices : LocalIndexMap}
-    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
-    {sourceFrame targetFrame : Frame}
+/-- `newarr` transports its fresh heap identity and retains the current frame: both bodies give
+    the element the same shape, since their layout environments are equal. -/
+theorem Memory.Renamed.stepNewarr {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
     (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
     (sourceFormed : source.WellFormed) (targetFormed : target.WellFormed)
     (staticBounds : ∀ binding ∈ source.staticBindings,
       binding.2.allocation < mapping.sourceLimit)
-    (sourceBody targetBody : CIL.Method) (element : CIL.Extraction.TypeExpr) (pc : Nat)
+    (sourceBody targetBody : CIL.Method) (metadata : StepMetadata sourceBody targetBody)
+    (element : CIL.Extraction.TypeExpr) (pc : Nat)
     (arguments stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
     (observable : SuccessOrThrow
-      (step sourceBody (.newReferenceArray element) pc arguments sourceFrame stack source)) :
+      (step sourceBody (.newarr element) pc arguments sourceFrame stack source)) :
     ∃ later, mapping.Extends later ∧
       ResultRenamed later (FrameAction.Renamed indices later scopes)
-        (step sourceBody (.newReferenceArray element) pc arguments sourceFrame stack source)
-        (step targetBody (.newReferenceArray element) pc (arguments.map mapping.value)
+        (step sourceBody (.newarr element) pc arguments sourceFrame stack source)
+        (step targetBody (.newarr element) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
+  have shaped : targetBody.elementShape element = sourceBody.elementShape element := by
+    simp only [CIL.Method.elementShape, metadata.environment]
   simp only [step, mapping.unspecifiedOperands] at observable ⊢
   split at observable
   · cases observable
@@ -318,40 +264,72 @@ theorem Memory.Renamed.stepNewReferenceArray {indices : LocalIndexMap}
     split at observable <;> try contradiction
     · rename_i length rest same
       cases same
-      simp only [List.map_cons, AllocationRenaming.value]
+      simp only [List.map_cons, AllocationRenaming.value, shaped]
       have restBounds : ∀ value ∈ rest, value.Below mapping.sourceLimit :=
         fun value member => bounds value (List.mem_cons_of_mem _ member)
-      cases length <;> simp only [newReferenceArray, Bind.bind, Except.bind, Pure.pure,
-        Except.pure] at observable ⊢
-      all_goals try cases observable
-      all_goals rename_i bits
-      all_goals by_cases negative : bits.toInt < 0
-      all_goals simp only [negative, ite_true, ite_false] at observable ⊢
-      all_goals by_cases large : maxArrayLength < bits.toInt.toNat
-      all_goals try simp only [gt_iff_lt, large, ite_true, ite_false] at observable ⊢
-      all_goals first
-      | exact ⟨mapping, .refl mapping, .error _⟩
-      | (cases allocated : CIL.Safety.allocateObject source (referenceArrayType element)
-            (objectFieldSlot * bits.toInt.toNat) with
-         | error fault =>
-           cases fault <;> simp only [allocated, SuccessOrThrow] at observable
-           rename_i exception
-           exact False.elim (allocateObject_not_thrown source _ _ exception allocated)
-         | ok result =>
-           obtain ⟨array, sourceAfter⟩ := result
-           obtain ⟨targetAfter, targetAllocated, memories⟩ := related.allocateObject
-             sourceFormed targetFormed staticBounds _ _ array sourceAfter allocated
-           refine ⟨mapping.allocate, mapping.allocate_extends, ?_⟩
-           simp only [allocated, targetAllocated, Bind.bind, Except.bind]
-           rw [← mapping.allocate_extends.values rest restBounds]
-           simpa only [List.map_cons, AllocationRenaming.value,
-             AllocationRenaming.managedReference, Pure.pure, Except.pure] using
-             ResultRenamed.ok (FrameAction.Renamed.next (pc := pc + 1)
-               (stack := .object (.address array) :: rest) memories
+      generalize sourceBody.elementShape element = shape at observable ⊢
+      cases shape with
+      | value inline =>
+        cases length <;> simp only [allocateElements, newArray, Bind.bind, Except.bind, Pure.pure,
+          Except.pure] at observable ⊢
+        all_goals cases supported : inline.allocationSupported
+        all_goals simp only [supported, Bool.not_true, Bool.not_false, Bool.false_eq_true,
+          ite_true, ite_false] at observable ⊢
+        all_goals try cases observable
+        all_goals rename_i bits
+        all_goals by_cases negative : bits.toInt < 0
+        all_goals simp only [negative, ite_true, ite_false] at observable ⊢
+        all_goals first
+        | exact ⟨mapping, .refl mapping, .error _⟩
+        | (cases allocated : CIL.Safety.allocateArray source inline bits.toInt.toNat with
+           | error fault =>
+             cases fault <;> simp only [allocated, SuccessOrThrow] at observable
+             rename_i exception
+             exact False.elim (allocateArray_not_thrown source inline _ exception allocated)
+           | ok result =>
+             obtain ⟨view, sourceAfter⟩ := result
+             obtain ⟨targetAfter, targetAllocated, memories⟩ := related.allocateArray
+               sourceFormed targetFormed staticBounds inline _ view sourceAfter allocated
+             refine ⟨mapping.allocate, mapping.allocate_extends, ?_⟩
+             simp only [targetAllocated]
+             rw [← mapping.allocate_extends.values rest restBounds]
+             exact .ok (.next memories
                (frames.extend mapping.allocate_extends (fun _ _ scope => scope))))
-    · simp only [pureArity, instruction] at observable
+      | reference classElement =>
+        cases length <;> simp only [allocateElements, newReferenceArray, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at observable ⊢
+        all_goals try cases observable
+        all_goals rename_i bits
+        all_goals by_cases negative : bits.toInt < 0
+        all_goals simp only [negative, ite_true, ite_false] at observable ⊢
+        all_goals by_cases large : maxArrayLength < bits.toInt.toNat
+        all_goals try simp only [gt_iff_lt, large, ite_true, ite_false] at observable ⊢
+        all_goals first
+        | exact ⟨mapping, .refl mapping, .error _⟩
+        | (cases allocated : CIL.Safety.allocateObject source (referenceArrayType classElement)
+              (objectFieldSlot * bits.toInt.toNat) with
+           | error fault =>
+             cases fault <;> simp only [allocated, SuccessOrThrow] at observable
+             rename_i exception
+             exact False.elim (allocateObject_not_thrown source _ _ exception allocated)
+           | ok result =>
+             obtain ⟨array, sourceAfter⟩ := result
+             obtain ⟨targetAfter, targetAllocated, memories⟩ := related.allocateObject
+               sourceFormed targetFormed staticBounds _ _ array sourceAfter allocated
+             refine ⟨mapping.allocate, mapping.allocate_extends, ?_⟩
+             simp only [targetAllocated]
+             rw [← mapping.allocate_extends.values rest restBounds]
+             simpa only [List.map_cons, AllocationRenaming.value,
+               AllocationRenaming.managedReference, Pure.pure, Except.pure] using
+               ResultRenamed.ok (FrameAction.Renamed.next (pc := pc + 1)
+                 (stack := .object (.address array) :: rest) memories
+                 (frames.extend mapping.allocate_extends (fun _ _ scope => scope))))
+      | method signature => exact ⟨mapping, .refl mapping, .error _⟩
+      | unsupported reason => exact ⟨mapping, .refl mapping, .error _⟩
+    · rw [show pureArity (.newarr element) = none from rfl] at observable
+      simp only [instruction] at observable
       split at observable <;> cases observable
 
-#print axioms Memory.Renamed.stepNewReferenceArray
+#print axioms Memory.Renamed.stepNewarr
 
 end CIL.Safety
