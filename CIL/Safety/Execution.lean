@@ -280,14 +280,28 @@ def localAllocation (initLocals : Bool) (pc : Nat) (frame : Frame) (stack : List
   let (reference, owner, memory) ← allocateStack memory frame bytes initLocals
   return .next (pc + 1) [.reference reference] owner memory
 
+/-- `newarr` of `length` elements of `shape`: an inline value array or an array of null class
+    references; a method-table or unsupported shape allocates nothing. -/
+def allocateElements (shape : ElementShape) (length : CIL.Value) (memory : Memory) :
+    ExecutionResult (Value × Memory) := do
+  match shape with
+  | .value element =>
+    let (view, memory) ← newArray memory element length
+    return (.array view, memory)
+  | .reference element =>
+    let (array, memory) ← newReferenceArray memory element length
+    return (.object (.address array), memory)
+  | .method _ => .error (.unsupported ElementShape.methodAllocation)
+  | .unsupported reason => .error (.unsupported reason)
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Native table offsets, faulting arithmetic, object identity, argument homes and `localloc`
-  -- are matched apart, so that neither match exceeds the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic, object identity, argument homes, `localloc` and
+  -- `newarr` are matched apart, so that neither match exceeds the 79 alternatives `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -370,6 +384,10 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
 
   -- Dynamic frame storage, zeroed as the body's declared localsinit flag says.
   | .localloc, _ => localAllocation body.declared.initLocals pc frame stack m
+  -- A fresh array of the storage the layouts give its declared element type.
+  | .newarr element, .scalar length :: rest =>
+    let (array, memory) ← allocateElements (body.elementShape element) length m
+    return .next (pc + 1) (array :: rest) frame memory
   -- A hole faults on every stack.
   | .unadmitted _, _ => .error (.unsupported "Opcode not admitted")
   | _, _ =>
@@ -523,12 +541,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     return .next (pc + 1) values frame memory
   | .throw exception, _ => .error (.thrown exception)
   | .ret, _ => returnFrom body.returnNarrow body.returnsValue stack m
-  | .newArray element, .scalar length :: rest =>
-    let (view, memory) ← newArray m element length
-    return .next (pc + 1) (.array view :: rest) frame memory
-  | .newReferenceArray element, .scalar length :: rest =>
-    let (array, memory) ← newReferenceArray m element length
-    return .next (pc + 1) (.object (.address array) :: rest) frame memory
   | _, _ =>
     match pureArity op with
     | some argc =>

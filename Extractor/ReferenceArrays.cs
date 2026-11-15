@@ -29,7 +29,7 @@ internal static class ReferenceArrays
     internal static Operation? Translate(Instruction instruction, bool arrayOperand) => instruction.OpCode.Code switch
     {
         Code.Newarr when instruction.Operand is TypeReference element && Element(element) =>
-            new NewReferenceArray(LayoutEvidence.Scope(element), element.FullName),
+            new NewArray(new(LayoutEvidence.Scope(element), element.FullName)),
         Code.Ldlen when arrayOperand => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Length)),
         Code.Ldelem_Ref => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Load)),
         Code.Stelem_Ref => MemoryOperation.Of(new ReferenceArrayOperation(ReferenceArrayAccess.Store)),

@@ -423,8 +423,9 @@ def aggregateProof? (method identity index : Expr) (reads : LayoutReads) :
       computed])
 
 /-- The shape of `method`'s array elements of type `type` in constructor form, with its proof: by
-    the primitive, enum and class lemmas, which evaluate no type name, by the aggregate lemmas
-    over `reads`, and otherwise by evaluation. -/
+    the primitive and enum lemmas, which evaluate no type name, by the class lemma, which compares
+    a literal class name with `System.Object`, by the aggregate lemmas over `reads`, and
+    otherwise by evaluation. -/
 def elementProof? (method type : Expr) (reads : LayoutReads) :
     MetaM (Option (Expr × Expr)) := withDefault do
   let head ← whnf type
@@ -435,8 +436,12 @@ def elementProof? (method type : Expr) (reads : LayoutReads) :
     | (``CIL.Extraction.TypeExpr.enum, #[identity, underlying]) =>
       pure ((primitive? (← whnf underlying)).map fun primitive =>
         mkApp3 (mkConst ``CIL.Method.elementShape_enum) method identity (mkConst primitive))
-    | (``CIL.Extraction.TypeExpr.object, #[scope, name]) =>
-      pure (some (mkApp3 (mkConst ``CIL.Method.elementShape_object) method scope name))
+    | (``CIL.Extraction.TypeExpr.object, #[scope, name]) => do
+      let .lit (.strVal text) ← whnf name | pure none
+      if text == CIL.ElementShape.rootObjectName then pure none else
+      let derived ← mkDecideProof
+        (mkNot (← mkEq name (mkConst ``CIL.ElementShape.rootObjectName)))
+      pure (some (mkApp4 (mkConst ``CIL.Method.elementShape_object) method scope name derived))
     | (``CIL.Extraction.TypeExpr.aggregate, #[identity, index]) =>
       aggregateProof? method identity index reads
     | _ => pure none

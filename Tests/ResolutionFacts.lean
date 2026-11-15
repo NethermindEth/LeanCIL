@@ -759,7 +759,7 @@ example (body : Method) :
 example (body : Method) :
     body.elementShape (.object "Examples" "Examples.Box") =
       .reference (.object "Examples" "Examples.Box") :=
-  Method.elementShape_object body _ _
+  Method.elementShape_object body (by decide)
 
 -- A function-pointer array holds method-table entries of the pointer's managed signature.
 example (body : Method) : body.elementShape unaryPointer = .method ⟨int32Type, [int32Type]⟩ :=

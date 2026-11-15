@@ -493,16 +493,29 @@ def byRefLikeElement : String := "By-ref-like array element"
 /-- Why any other element type without array storage has no shape. -/
 def unsupportedType : String := "Array element type"
 
+/-- The full name of the root class, whose arrays have no shape. -/
+def rootObjectName : String := "System.Object"
+
+/-- Why an array of `System.Object` has no shape: its elements may be interface or value-type
+    instances, whose covariance the model cannot decide. -/
+def rootObjectElement : String := "System.Object array element"
+
+/-- Why `newarr` allocates no method-table array: the model builds tables only from bindings. -/
+def methodAllocation : String := "Allocation of a method pointer array"
+
 end ElementShape
 
-/-- The shape of an array element of declared type `type`: a class reference for a class, the
-    size the checked layout gives for a struct that the raw layouts hold under its identity and
-    that is not by-ref-like, the managed signature of a function pointer whose struct parameters
-    the raw layouts bind, and the storage `arrayElementType` gives for every other type. -/
+/-- The shape of an array element of declared type `type`: a class reference for a class other
+    than `System.Object`, the size the checked layout gives for a struct that the raw layouts
+    hold under its identity and that is not by-ref-like, the managed signature of a function
+    pointer whose struct parameters the raw layouts bind, and the storage `arrayElementType`
+    gives for every other type. -/
 def LayoutEnvironment.elementShape (environment : LayoutEnvironment)
     (type : Extraction.TypeExpr) : ElementShape :=
   match type with
-  | .object .. => .reference type
+  | .object _ name =>
+    if name = ElementShape.rootObjectName then .unsupported ElementShape.rootObjectElement
+    else .reference type
   | .aggregate identity index =>
     match environment.rawLayouts[index]? with
     | none => .unsupported ElementShape.outsideLayouts
@@ -562,9 +575,11 @@ theorem Method.elementShape_enum (body : Method) (identity : String) (type : Pri
 
 #print axioms Method.elementShape_enum
 
-/-- An array of a class holds references to its instances. -/
-theorem Method.elementShape_object (body : Method) (scope name : String) :
-    body.elementShape (.object scope name) = .reference (.object scope name) := rfl
+/-- An array of a class other than `System.Object` holds references to its instances. -/
+theorem Method.elementShape_object (body : Method) {scope name : String}
+    (derived : name ≠ ElementShape.rootObjectName) :
+    body.elementShape (.object scope name) = .reference (.object scope name) := by
+  simp [Method.elementShape, LayoutEnvironment.elementShape, derived]
 
 #print axioms Method.elementShape_object
 

@@ -16,6 +16,7 @@ const int Repetitions = 3;
 const int LocalCount = 8;
 const int HypothesisBodyCycles = 30;
 const string Int32Type = ".atom CIL.Extraction.runtimeScope \"System.Int32\"";
+const string NodeType = ".object \"Examples\" \"Examples.Node\"";
 var localSlots = string.Join(", ", Enumerable.Repeat(".root (some target)", LocalCount));
 
 ScalingChecks();
@@ -56,7 +57,8 @@ var workloads = new (string Name, int[] Sizes, bool Full)[]
     ("locals", [16, 64, 256], true), ("contract", [16, 64, 256], false), ("loop", [16, 64, 256], false),
     ("loopfacts", [16, 64, 256], false), ("outcome", [16, 64, 256], false),
     ("lemma", [16, 64, 256], false), ("depth", [16, 64, 256], false), ("hypotheses", [16, 64, 256], false),
-    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false), ("homes", [16, 64, 256], false)
+    ("faulting", [16, 64], false), ("arguments", [16, 64, 256], false), ("homes", [16, 64, 256], false),
+    ("allocation", [16, 64, 256], false)
 };
 if (selectedWorkloads is not null)
 {
@@ -113,7 +115,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // with one, each from the arguments, so each step reads a fact of constant size. The arguments body
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
 // The homes body gives each of as many reference parameters a home and loads each argument once,
-// which reads its home.
+// which reads its home. The allocation body allocates an array of two class references per cycle and
+// pops it, so each `newarr` resolves its element shape and reads one allocation fact.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".ldarg 0", ".ldarg 1", ".store64", ".ldarg 0", ".load64", ".pop"],
@@ -126,6 +129,7 @@ static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload
         .ToArray(), [".ldloc 0", ".ret"]),
     "faulting" => ([], [".ldarg 0", ".ldarg 1", ".div", ".pop", ".ldarg 0", ".ldarg 1", ".rem", ".pop",
         ".ldarg 0", ".ldarg 1", ".add_ovf", ".pop", ".ldarg 0", ".conv_ovf .i4", ".pop"], [".ldarg 0", ".ret"]),
+    "allocation" => ([], [".ldc_i4 2", $".newarr ({NodeType})", ".pop"], [".ldc_i4 0", ".ret"]),
     _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
@@ -169,6 +173,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     {
         "contract" or "loop" or "loopfacts" => "import CIL.Safety.MethodContract\nimport CIL.Safety.LoopAutomation\n",
         "outcome" => "import CIL.Safety.LoopOutcome\nimport CIL.Safety.LoopFrameSteps\n",
+        "allocation" => "import CIL.Safety.ObjectSteps\nimport CIL.Safety.SymbolicExecution\n",
         _ => ""
     };
     var header = extraImports + $$"""
@@ -316,7 +321,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   .ok (memory, [.scalar (.i32 ({{sum}}))]) := by
               cil_checked_steps
             """,
-        "homes" => $$"""
+        "allocation" => $"""
+            /-- Every `newarr` resolves its class element and allocates by one fact that keeps the memory. -/
+            theorem checked (memory : Memory) (array : Reference)
+                (allocated : newReferenceArray memory ({{NodeType}}) (.i32 2) = .ok (array, memory)) :
+                invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 0)]) := by
+              cil_checked_steps [allocated]
+            """,
+        "homes" => $"""
             /-- Each reference parameter is read once from the home slot of a literal frame. -/
             theorem checked (memory : Memory) (target : ManagedReference) (activation : Nat)
                 (formed : formValue memory target = .ok (.reference target)) :
