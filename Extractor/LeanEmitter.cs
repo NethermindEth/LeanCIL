@@ -418,7 +418,9 @@ internal static class LeanEmitter
         readonly Dictionary<string, int> types = new(StringComparer.Ordinal);
         readonly StringBuilder text = new();
 
-        /// <summary>Records the operands of <paramref name="method"/>'s reachable instructions not seen before.</summary>
+        /// <summary>
+        /// Records the operands of <paramref name="method"/>'s reachable instructions not seen before.
+        /// </summary>
         internal void Add(MethodDefinition method, IReadOnlySet<Instruction> reachable, GenericEvidence evidence)
         {
             foreach (var instruction in method.Body.Instructions)
