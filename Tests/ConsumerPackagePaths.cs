@@ -120,6 +120,10 @@ partial class Program
             Require(TryLinkDirectory(alias, Path.Combine(package, ".lake")), "Could not link inside the package.");
             Require(Within(package, "alias/packages") == Path.Combine(package, ".lake", "packages"),
                 "A link that stays inside its package was rejected or not followed.");
+            // POSIX reads `..` where a link leads and Windows where it is spelled; a path both place inside stays.
+            Reject(package, "escape/../outside/Secret.lean", "a link followed by ..");
+            Require(Within(package, "alias/../.lake") == Path.Combine(package, ".lake"),
+                "A path whose .. after a link stays inside its package under both readings was rejected.");
             Console.WriteLine("PASS a link inside a package that leaves it is rejected, also when dangling");
 
             var first = Path.Combine(package, "first");

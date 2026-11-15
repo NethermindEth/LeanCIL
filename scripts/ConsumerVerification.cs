@@ -513,7 +513,8 @@ partial class Program
     static string Within(string root, string relative)
     {
         var spelledRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
-        var inside = ResolvedRelativePath(spelledRoot, Path.GetFullPath(relative, spelledRoot))
+        // Not made full first: Path.GetFullPath would drop a `..` before the link it follows is read.
+        var inside = ResolvedRelativePath(spelledRoot, Path.Combine(spelledRoot, relative))
             ?? throw new InvalidDataException("Consumer path escapes its package: " + relative);
         return inside == "." ? spelledRoot : Path.Join(spelledRoot, inside);
     }

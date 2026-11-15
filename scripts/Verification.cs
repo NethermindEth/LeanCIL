@@ -704,12 +704,13 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
 
     /// <summary>
     /// The absolute location `path` names, with every symbolic link and junction among its existing components
-    /// followed, the last one included; the components below the deepest existing one follow as spelled.
+    /// followed, the last one included; the components below the deepest existing one follow as spelled. A `..`
+    /// names the parent of the location reached so far, as POSIX reads it, so a link before it is followed first.
     /// </summary>
     internal static string ResolvedPath(string path)
     {
         char[] separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
-        var full = Path.GetFullPath(path);
+        var full = AbsolutePath(path);
         var resolved = Path.GetPathRoot(full)!;
         // The components still to resolve, the next one on top.
         var pending = new Stack<string>(full[resolved.Length..]
@@ -743,11 +744,28 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     }
 
     /// <summary>
-    /// `path` relative to `root` once both are resolved through their links, or null when it lies outside `root`:
-    /// two spellings of one location agree, and a link cannot carry a path out of `root` unnoticed.
+    /// `path` made absolute against the working directory with its `.` and `..` components kept, which
+    /// Path.GetFullPath would remove before any link is followed.
     /// </summary>
-    internal static string? ResolvedRelativePath(string root, string path) =>
-        RelativeBelow(ResolvedPath(root), ResolvedPath(path));
+    static string AbsolutePath(string path)
+    {
+        var absolute = Path.IsPathFullyQualified(path) ? path
+            : Path.IsPathRooted(path) ? Path.GetFullPath(path) : Path.Join(Environment.CurrentDirectory, path);
+        return Path.DirectorySeparatorChar == '\\' ? absolute.Replace('/', '\\') : absolute;
+    }
+
+    /// <summary>
+    /// `path` relative to `root` once both are resolved through their links, or null when it lies outside `root`:
+    /// two spellings of one location agree, and a link cannot carry a path out of `root` unnoticed. Windows reads
+    /// `..` before following links and POSIX after, so a path the two readings place apart is refused.
+    /// </summary>
+    internal static string? ResolvedRelativePath(string root, string path)
+    {
+        var relative = RelativeBelow(ResolvedPath(root), ResolvedPath(path));
+        if (relative is null || !PathNames(root).Contains("..") && !PathNames(path).Contains("..")) return relative;
+        return RelativeBelow(ResolvedPath(Path.GetFullPath(root)), ResolvedPath(Path.GetFullPath(path))) == relative
+            ? relative : null;
+    }
 
     /// <summary>
     /// `path` relative to `root`, or null when it lies outside; both are taken as already resolved. Two names
@@ -3650,7 +3668,7 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
     // Lean reports the file with links followed, so both sides are compared that way.
     static void RequireAuditedModule(AuditedOleans audited, string module, string path)
     {
-        if (!LocationComparer.Equals(ResolvedPath(audited.modules[module]), ResolvedPath(path)))
+        if (!SameLocation(audited.modules[module], path))
             throw new InvalidDataException($"Audited module {module} resolved to {audited.modules[module]}, not {path}");
     }
 
