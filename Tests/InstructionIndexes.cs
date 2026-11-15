@@ -10,6 +10,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -317,3 +318,114 @@ foreach (var (constant, property, newValue) in new (object, string, object)[]
     }
     catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
 Console.WriteLine("PASS typed operations keep the spellings and shapes the outline generators branch on");
+
+// A stage learns an instruction's category, callee and target from the typed Operation, never from the Lean text
+// that renders it. Each place that reads generated Lean text is listed here with what it reads.
+var sourceFiles = Directory.GetFiles(At("Extractor"), "*.cs").Concat(Directory.GetFiles(At("scripts"), "*.cs")
+    .Where(path => !Path.GetFileName(path).StartsWith("Test", StringComparison.Ordinal)))
+    .ToDictionary(path => Path.GetRelativePath(Root, path).Replace('\\', '/'), File.ReadAllText);
+var constructors = RenderedLeanReaders.Constructors(sourceFiles["Extractor/Operation.cs"]);
+foreach (var rendered in new[] { "ret", "ldloc", "switch", "br", "brtrue", "call", "callInstance", "tailCall" })
+    if (!constructors.Contains(rendered)) throw new Exception("Operation no longer renders ." + rendered);
+var readers = RenderedLeanReaders.Scan(sourceFiles, constructors);
+(string File, int Reads, string Reason)[] allowedReaders =
+[
+    ("Extractor/ProofGates.cs", 2, "compares whole method definitions and signatures of two extractions"),
+    ("scripts/ConsumerVerification.cs", 3, "the component splitter cuts module text at declaration boundaries"),
+    ("scripts/VerifyReports.cs", 1, "reads the source location table of Symbols.lean, not an instruction"),
+    ("scripts/BenchmarkExternalIdentities.cs", 1, "reads identity byte arrays from baseline extractions"),
+];
+var actualReaders = readers.Where(finding => finding.Kind == "reads generated Lean")
+    .GroupBy(finding => finding.File).Select(group => (group.Key, group.Count())).Order().ToArray();
+var expectedReaders = allowedReaders.Select(entry => (entry.File, entry.Reads)).Order().ToArray();
+if (!actualReaders.SequenceEqual(expectedReaders) || readers.Any(finding => finding.Kind != "reads generated Lean"))
+    throw new Exception("Stages read generated Lean text outside the allowed list:\n" +
+        string.Join("\n", readers.Select(finding => $"{finding.File}:{finding.Line}: {finding.Kind}")));
+// Each rule must fail on a scratch source, so that a weakened pattern cannot pass unnoticed.
+foreach (var (scratchFile, scratchText, rule) in new (string, string, string)[]
+{
+    ("Extractor/Scratch.cs", "var calls = Regex.Matches(emitted, @\"^\\s*\\.call \\d+\");",
+        "reads generated Lean"),
+    ("Extractor/Scratch.cs", "if (line.StartsWith(\".ret\", StringComparison.Ordinal)) returns++;",
+        "reads generated Lean"),
+    ("Extractor/Scratch.cs", "var bodies = Regex.Matches(module, @\"^def method\\d+ : Method := \");",
+        "reads generated Lean"),
+    ("Extractor/Scratch.cs", "var text = op.ToLean(); // parsed below",
+        "renders an operation outside emission and messages"),
+    ("Extractor/ProofOutlineLoops.cs", "if (op.ToLean().StartsWith(\".br\")) return Stop(\"x\");",
+        "renders an operation outside emission and messages"),
+    ("Extractor/LeanEmitter.cs", "var first = ops.Select(op => op.ToLean()).First(text => text.Contains(\"x\"));",
+        "searches a rendered operation"),
+})
+    if (!RenderedLeanReaders.Scan(new Dictionary<string, string> { [scratchFile] = scratchText }, constructors)
+            .Any(finding => finding.Kind == rule))
+        throw new Exception("Not found as " + rule + ": " + scratchText);
+if (RenderedLeanReaders.Scan(new Dictionary<string, string> { ["Extractor/Scratch.cs"] =
+        "var calls = operations.Count(operation => operation is Call);" }, constructors).Count != 0)
+    throw new Exception("A typed read of calls was reported");
+Console.WriteLine("PASS no stage reads opcode, call or target information back from generated Lean text");
+
+/// <summary>Finds code that reads generated Lean text or reads back what an Operation renders.</summary>
+static partial class RenderedLeanReaders
+{
+    internal sealed record Finding(string File, int Line, string Kind);
+
+    /// <summary>Files that write an operation into the generated module.</summary>
+    static readonly string[] Emitters = ["Extractor/LeanEmitter.cs", "Extractor/TemplateEmitter.cs"];
+
+    /// <summary>Files that quote an operation in a message that stops an outline or reports a lint.</summary>
+    static readonly string[] Messengers =
+    [
+        "Extractor/ExceptionLint.cs", "Extractor/ProofOutlineGenerate.cs", "Extractor/ProofOutlineLoops.cs",
+        "Extractor/ProofOutlineObjects.cs", "Extractor/ProofOutlineStructLoops.cs", "Extractor/ProofOutlineStructs.cs"
+    ];
+
+    [GeneratedRegex("\"\\.([a-z][A-Za-z0-9]*)")]
+    private static partial Regex RenderedConstructor();
+
+    [GeneratedRegex(@"(?:Contains|StartsWith|EndsWith|IndexOf|Split|Matches|Replace|IsMatch|Match|" +
+        @"GeneratedRegex|new Regex)\((?<rest>.*)$")]
+    private static partial Regex SearchCall();
+
+    [GeneratedRegex(@"""[^""]*(?:\b(?:def|theorem|lemma|namespace|structure|instance)\s*\(?[A-Za-z.]|" +
+        @"method\\?d|method\[0-9\])[^""]*""")]
+    private static partial Regex GeneratedDeclaration();
+
+    [GeneratedRegex(@"\b(?:op|operation|ops\[\w+\]|values\[\w+\])\.ToLean\(|\bop\.Link\(|" +
+        @"new Unsupported\(.*\)\.ToLean\(")]
+    private static partial Regex RenderedOperation();
+
+    [GeneratedRegex(@"\$""[^""]*\{(?:op|ops\[\w+\])\.ToLean\(\)\}|""\s*\+\s*operation\.ToLean\(\)")]
+    private static partial Regex OperationInMessage();
+
+    /// <summary>The Lean constructor names that Operation.cs renders, without their dot.</summary>
+    internal static string[] Constructors(string operationSource) =>
+        [.. RenderedConstructor().Matches(operationSource).Select(match => match.Groups[1].Value).Distinct()];
+
+    /// <summary>One finding per line that reads generated Lean or misuses a rendered operation.</summary>
+    internal static List<Finding> Scan(IReadOnlyDictionary<string, string> files, string[] constructors)
+    {
+        var constructor = new Regex("\"[^\"]*(?<![\\w.])\\\\?\\.(?:" + string.Join("|", constructors) +
+            @")\b[^""]*""");
+        var found = new List<Finding>();
+        foreach (var (file, text) in files)
+        {
+            if (file == "Extractor/Operation.cs") continue;
+            var lines = text.Split('\n');
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var line = lines[index];
+                var search = SearchCall().Match(line);
+                var searched = search.Success && (GeneratedDeclaration().IsMatch(search.Groups["rest"].Value) ||
+                    constructor.IsMatch(search.Groups["rest"].Value));
+                if (searched) found.Add(new(file, index + 1, "reads generated Lean"));
+                if (!RenderedOperation().IsMatch(line)) continue;
+                var allowed = Emitters.Contains(file) ||
+                    (Messengers.Contains(file) && OperationInMessage().IsMatch(line));
+                if (!allowed) found.Add(new(file, index + 1, "renders an operation outside emission and messages"));
+                else if (search.Success) found.Add(new(file, index + 1, "searches a rendered operation"));
+            }
+        }
+        return found;
+    }
+}
