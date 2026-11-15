@@ -321,14 +321,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
                   .ok (memory, [.scalar (.i32 ({{sum}}))]) := by
               cil_checked_steps
             """,
-        "allocation" => $"""
+        "allocation" => $$"""
             /-- Every `newarr` resolves its class element and allocates by one fact that keeps the memory. -/
             theorem checked (memory : Memory) (array : Reference)
                 (allocated : newReferenceArray memory ({{NodeType}}) (.i32 2) = .ok (array, memory)) :
                 invoke [body] {{operations.Length + 1}} 0 [] memory = .ok (memory, [.scalar (.i32 0)]) := by
               cil_checked_steps [allocated]
             """,
-        "homes" => $"""
+        "homes" => $$"""
             /-- Each reference parameter is read once from the home slot of a literal frame. -/
             theorem checked (memory : Memory) (target : ManagedReference) (activation : Nat)
                 (formed : formValue memory target = .ok (.reference target)) :

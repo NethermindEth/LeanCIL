@@ -142,7 +142,8 @@ theorem ObjectAllocationEffect.classesConsistent {catalog : List RuntimeType}
 theorem StepEffect.classesConsistent {catalog : List RuntimeType} {body : CIL.Method}
     {operation : CIL.Instruction} {frame final : Frame} {before after : Memory}
     (effect : StepEffect body operation frame before final after)
-    (site : SiteConsistent catalog body operation) (consistent : before.ClassesConsistent catalog) :
+    (site : SiteConsistent catalog body operation)
+    (consistent : before.ClassesConsistent catalog) :
     after.ClassesConsistent catalog := by
   cases effect with
   | arrayAllocation effect => exact consistent.kept effect.objectsKept
