@@ -13,12 +13,16 @@ to the image instead, with the fixture's block carried unchanged. The fixture ha
 no public key, so variants whose culture is a suffix of the name, or whose eight-byte key is at
 `#Blob` offset 1, cover two numbered string entries and a key entry at a nonzero offset. A carried
 entry no row cell holds is refused by the check and by the proposition.
+
+The rows and entries of `StrictFixture.slice`, every row of the carried tables with the entries
+only its Field rows name omitted, are the image's under `rowsMatch_of_rowsBound`. A changed row,
+token, key or entry is refused, and an image changed only in a MethodDef RVA is accepted.
 -/
 
 namespace Tests.StrictBinding.Rows
 
 open _root_.StrictBinding
-open CIL.Extraction (AssemblyMetadata stringsHeap blobHeap)
+open CIL.Extraction (AssemblyMetadata ByteEntry MetadataSlice stringsHeap blobHeap)
 
 /-- The fixture, prepared as the audit prepares a pinned image. -/
 private def fixture : Except AuditError PreparedImage :=
@@ -206,20 +210,23 @@ theorem rejects_an_entry_no_row_names :
 private theorem fixture_string_keys :
     (match fixture with
      | .ok image =>
-       (columnsOf image (assemblyToken / 2 ^ 24)).map (rowKeys stringsHeap · block.assemblyRow)
+       (image.columnsOf (assemblyToken / 2 ^ 24)).map (rowKeys stringsHeap · block.assemblyRow)
      | .error _ => none) = some [1, 0] := by
   decide +kernel
+#print axioms fixture_string_keys
 
 /-- No numbering makes the suffix block the fixture's, since its key 2 is held by no row cell. -/
 theorem the_suffix_block_does_not_match {image : PreparedImage} (prepared : fixture = .ok image) :
     ¬ AssemblyMatches image suffixBlock := by
-  rintro ⟨_, _, strings, _, _, _, _, entries, _, _, _, ⟨columns, found, held⟩, _⟩
-  have keys := fixture_string_keys
-  simp only [prepared, found, Option.map_some, Option.some.injEq] at keys
+  rintro ⟨_, _, _, _, _, _, _, entries, _, _, _, held, _⟩
   obtain ⟨offset, named, _⟩ := entries (2, suffixBytes) (by simp [suffixBlock])
   rcases named with ⟨two, _⟩ | given
   · cases two
-  · have inRow := held offset 2 given
+  · obtain ⟨row, member, columns, found, inRow⟩ := held offset 2 given
+    simp only [List.mem_singleton] at member
+    subst member
+    have keys := fixture_string_keys
+    simp only [prepared, found, Option.map_some, Option.some.injEq] at keys
     change 2 ∈ rowKeys stringsHeap columns block.assemblyRow at inRow
     rw [keys] at inRow
     simp at inRow
@@ -266,7 +273,7 @@ theorem rejects_two_keys_for_one_offset :
     failsWith (checked (cultured nameOffset "StrictFixture")
       { block with assemblyRow := rowWithNames 1 2,
                    strings := [(0, [0]), (1, nameBytes), (2, nameBytes)] })
-      (.heapNumbering stringsHeap 1) = true := by
+      (.heapNumbering stringsHeap 2) = true := by
   decide +kernel
 #print axioms rejects_two_keys_for_one_offset
 
@@ -336,5 +343,292 @@ theorem accepts_the_marker_only_without_the_entry :
       (.heapNumbering blobHeap 1) = true := by
   decide +kernel
 #print axioms accepts_the_marker_only_without_the_entry
+
+/-! ## Rows of a slice -/
+
+/-- The slice an extraction could carry for the fixture. -/
+private def slice : MetadataSlice := StrictFixture.slice
+
+/-- The rows check of carried rows and entries against a prepared image. -/
+private def rowsChecked (prepared : Except AuditError PreparedImage)
+    (rows strings blobs : List ByteEntry) : Except AuditError Unit :=
+  prepared >>= (rowsBound · rows strings blobs)
+
+/-- The slice's rows with the row of `token` changed by `change`. -/
+private def withRow (token : Nat) (change : List Nat → List Nat) : List ByteEntry :=
+  slice.rows.map fun row => if row.1 == token then (row.1, change row.2) else row
+
+/-- The token of the `Arithmetic.Tiny` MethodDef row. -/
+private def tinyToken : Nat := 0x06000001
+
+/-- The token of the `Arithmetic.Fat` MethodDef row. -/
+private def fatToken : Nat := 0x06000002
+
+/-- The token of the first `.ctor` MethodDef row. -/
+private def constructorToken : Nat := 0x06000006
+
+/-- The token of the `<Module>` TypeDef row, whose namespace is at `#Strings` offset 0. -/
+private def moduleTypeToken : Nat := 0x02000001
+
+/-- The token of the `Small` TypeDef row. -/
+private def smallToken : Nat := 0x02000002
+
+/-- The token of the `Overlay` TypeDef row. -/
+private def overlayToken : Nat := 0x02000003
+
+/-- The offset of the RVA in a MethodDef row. -/
+private def rvaAt : Nat := 0
+
+/-- The offset of the implementation flags in a MethodDef row, the byte after its RVA. -/
+private def implementationAt : Nat := 4
+
+/-- The offset of the flags in a MethodDef row. -/
+private def flagsAt : Nat := 6
+
+/-- The offset of the name key in a MethodDef row with two-byte heap indexes. -/
+private def methodNameAt : Nat := 8
+
+/-- The offset of the name key in a TypeDef row with two-byte heap indexes. -/
+private def typeNameAt : Nat := 4
+
+/-- The offset of the namespace key in a TypeDef row with two-byte heap indexes. -/
+private def typeNamespaceAt : Nat := 6
+
+/-- The slice's key of `Small`. -/
+private def smallKey : Nat := 19
+
+/-- The slice's key of `Fat`. -/
+private def fatKey : Nat := 11
+
+/-- The slice's key of `Tiny`. -/
+private def tinyKey : Nat := 28
+
+/-- The first `#Strings` key the slice does not use. -/
+private def unusedKey : Nat := 32
+
+/-- `.ctor` with its terminator. -/
+private def constructorBytes : List Nat := [46, 99, 116, 111, 114, 0]
+
+/-- The fixture with the byte at `column` of the row of `token` changed. -/
+private def changedRow (token column : Nat) : Except AuditError PreparedImage :=
+  match fixture with
+  | .ok image =>
+    match image.layout.rowAt token with
+    | .ok (offset, _) =>
+      prepareOne { identity := StrictFixture.identity,
+                   image := flipByte StrictFixture.image (offset + column) 1 }
+    | .error error => .error error
+  | .error error => .error error
+
+/-- The slice's rows, MethodDef RVAs zeroed and Field entries omitted, pass the check. -/
+theorem accepts_the_carried_slice_rows :
+    ok (rowsChecked fixture slice.rows slice.strings slice.blobs) = true := by
+  decide +kernel
+#print axioms accepts_the_carried_slice_rows
+
+/-- The slice's rows and entries are the fixture's in the sense of `RowsMatch`. -/
+theorem the_carried_slice_rows_match_the_fixture {image : PreparedImage}
+    (prepared : fixture = .ok image) : RowsMatch image slice.rows slice.strings slice.blobs := by
+  apply rowsMatch_of_rowsBound (prepareOne_bounded prepared)
+  have accepted := accepts_the_carried_slice_rows
+  simp only [rowsChecked, prepared, bind, Except.bind] at accepted
+  cases checkedRows : rowsBound image slice.rows slice.strings slice.blobs with
+  | error _ => simp [checkedRows, ok] at accepted
+  | ok _ => rfl
+#print axioms the_carried_slice_rows_match_the_fixture
+
+/-- Where a body is placed is not a row fact: an image whose `Tiny` RVA differs still matches. -/
+theorem accepts_an_image_with_a_changed_rva :
+    ok (rowsChecked (changedRow tinyToken rvaAt) slice.rows slice.strings slice.blobs) = true := by
+  decide +kernel
+#print axioms accepts_an_image_with_a_changed_rva
+
+/-- The mask is the four RVA bytes: an image change to the last of them is accepted, and a change
+    to the first byte of ImplFlags after them is refused in the image and in the carried row. -/
+theorem masks_exactly_the_rva :
+    ok (rowsChecked (changedRow tinyToken (implementationAt - 1)) slice.rows slice.strings
+      slice.blobs) = true ∧
+    failsWith
+      (rowsChecked (changedRow tinyToken implementationAt) slice.rows slice.strings slice.blobs)
+      (.rowMismatch tinyToken) = true ∧
+    failsWith
+      (rowsChecked fixture (withRow tinyToken (flipAt · implementationAt 1)) slice.strings
+        slice.blobs)
+      (.rowMismatch tinyToken) = true := by
+  decide +kernel
+#print axioms masks_exactly_the_rva
+
+/-- The mask reaches no other table: a TypeDef flags byte of `Small` changed in the image, or in
+    the carried row, is refused. -/
+theorem rejects_a_changed_typedef_flags_byte :
+    failsWith (rowsChecked (changedRow smallToken 0) slice.rows slice.strings slice.blobs)
+      (.rowMismatch smallToken) = true ∧
+    failsWith
+      (rowsChecked fixture (withRow smallToken (flipAt · 0 1)) slice.strings slice.blobs)
+      (.rowMismatch smallToken) = true := by
+  decide +kernel
+#print axioms rejects_a_changed_typedef_flags_byte
+
+/-- A carried MethodDef row holds its RVA as zero. -/
+theorem rejects_a_carried_nonzero_rva :
+    failsWith
+      (rowsChecked fixture (withRow tinyToken (flipAt · rvaAt 1)) slice.strings slice.blobs)
+      (.rowMismatch tinyToken) = true := by
+  decide +kernel
+#print axioms rejects_a_carried_nonzero_rva
+
+/-- A flags byte of `Tiny` changed in the carried row, or in the image. -/
+theorem rejects_a_changed_flags_byte :
+    failsWith
+      (rowsChecked fixture (withRow tinyToken (flipAt · flagsAt 1)) slice.strings slice.blobs)
+      (.rowMismatch tinyToken) = true ∧
+    failsWith (rowsChecked (changedRow tinyToken flagsAt) slice.rows slice.strings slice.blobs)
+      (.rowMismatch tinyToken) = true := by
+  decide +kernel
+#print axioms rejects_a_changed_flags_byte
+
+/-- The rows of `Tiny` and `Fat` carried under each other's tokens. -/
+theorem rejects_swapped_row_tokens :
+    failsWith
+      (rowsChecked fixture
+        (slice.rows.map fun row =>
+          if row.1 == tinyToken then (fatToken, row.2)
+          else if row.1 == fatToken then (tinyToken, row.2) else row)
+        slice.strings slice.blobs)
+      (.rowMismatch fatToken) = true := by
+  decide +kernel
+#print axioms rejects_swapped_row_tokens
+
+/-- The row of `Tiny` one byte short. -/
+theorem rejects_a_row_one_byte_short :
+    failsWith (rowsChecked fixture (withRow tinyToken (·.dropLast)) slice.strings slice.blobs)
+      (.rowMismatch tinyToken) = true := by
+  decide +kernel
+#print axioms rejects_a_row_one_byte_short
+
+/-- A GenericParam row, a table the fixture does not have; an eleventh MethodDef row; MethodDef row
+    0; and a row of table 0x2D, above the tables the schema covers. -/
+theorem rejects_a_token_the_tables_do_not_have :
+    failsWith
+      (rowsChecked fixture (slice.rows ++ [(0x2A000001, List.replicate 8 0)])
+        slice.strings slice.blobs)
+      (.tokenOutOfScope 0x2A000001) = true ∧
+    failsWith
+      (rowsChecked fixture (slice.rows ++ [(0x0600000B, List.replicate 14 0)])
+        slice.strings slice.blobs)
+      (.tokenOutOfScope 0x0600000B) = true ∧
+    failsWith
+      (rowsChecked fixture (slice.rows ++ [(0x06000000, List.replicate 14 0)])
+        slice.strings slice.blobs)
+      (.tokenOutOfScope 0x06000000) = true ∧
+    failsWith
+      (rowsChecked fixture (slice.rows ++ [(0x2D000001, List.replicate 4 0)])
+        slice.strings slice.blobs)
+      (.tokenOutOfScope 0x2D000001) = true := by
+  decide +kernel
+#print axioms rejects_a_token_the_tables_do_not_have
+
+/-- Key 0 says the name of `Small` is at offset 0, where it is not. -/
+theorem rejects_key_zero_for_a_nonzero_row_offset :
+    failsWith
+      (rowsChecked fixture (withRow smallToken (writeLittle · typeNameAt 2 0))
+        slice.strings slice.blobs)
+      (.rowMismatch smallToken) = true := by
+  decide +kernel
+#print axioms rejects_key_zero_for_a_nonzero_row_offset
+
+/-- The marker says the namespace of `<Module>` is at a nonzero offset, where it is at 0. -/
+theorem rejects_the_marker_for_a_zero_row_offset :
+    failsWith
+      (rowsChecked fixture (withRow moduleTypeToken (writeLittle · typeNamespaceAt 2 0xFFFF))
+        slice.strings slice.blobs)
+      (.rowMismatch moduleTypeToken) = true := by
+  decide +kernel
+#print axioms rejects_the_marker_for_a_zero_row_offset
+
+/-- The key of `Small` for the name of `Overlay`, which is at another offset. -/
+theorem rejects_one_row_key_for_two_offsets :
+    failsWith
+      (rowsChecked fixture (withRow overlayToken (writeLittle · typeNameAt 2 smallKey))
+        slice.strings slice.blobs)
+      (.heapNumbering stringsHeap smallKey) = true := by
+  decide +kernel
+#print axioms rejects_one_row_key_for_two_offsets
+
+/-- A second key for `.ctor`, with its entry carried, in one of the rows that name it. -/
+theorem rejects_two_row_keys_for_one_offset :
+    failsWith
+      (rowsChecked fixture (withRow constructorToken (writeLittle · methodNameAt 2 unusedKey))
+        (slice.strings ++ [(unusedKey, constructorBytes)]) slice.blobs)
+      (.heapNumbering stringsHeap unusedKey) = true := by
+  decide +kernel
+#print axioms rejects_two_row_keys_for_one_offset
+
+/-- An entry under a key no row cell holds. -/
+theorem rejects_a_slice_entry_no_row_names :
+    failsWith
+      (rowsChecked fixture slice.rows (slice.strings ++ [(unusedKey, [65, 0])]) slice.blobs)
+      (.heapNumbering stringsHeap unusedKey) = true := by
+  decide +kernel
+#print axioms rejects_a_slice_entry_no_row_names
+
+/-- The key of `Fat` without the entry it ranks. -/
+theorem rejects_a_row_key_without_its_entry :
+    failsWith
+      (rowsChecked fixture slice.rows (slice.strings.filter (·.1 != fatKey)) slice.blobs)
+      (.heapNumbering stringsHeap fatKey) = true := by
+  decide +kernel
+#print axioms rejects_a_row_key_without_its_entry
+
+/-- The name of `Tiny` carried under the omitted-entry marker, in its row cell and as its entry:
+    no numbering gives the marker, so the entry is one no row cell holds. -/
+theorem rejects_an_entry_at_the_marker :
+    failsWith
+      (rowsChecked fixture (withRow tinyToken (writeLittle · methodNameAt 2 0xFFFF))
+        (slice.strings.filter (·.1 != tinyKey) ++ [(0xFFFF, [84, 105, 110, 121, 0])]) slice.blobs)
+      (.heapNumbering stringsHeap 0xFFFF) = true := by
+  decide +kernel
+#print axioms rejects_an_entry_at_the_marker
+
+/-- The first two `#Blob` entries, keys 0 and 1, carried in descending order. -/
+theorem rejects_entries_out_of_order :
+    failsWith
+      (rowsChecked fixture slice.rows slice.strings
+        ((slice.blobs.take 2).reverse ++ slice.blobs.drop 2))
+      (.heapNumbering blobHeap 0) = true := by
+  decide +kernel
+#print axioms rejects_entries_out_of_order
+
+/-- The signature `int (int)` with its last byte changed, and the name `Fat` with a byte after
+    its terminator. -/
+theorem rejects_a_changed_slice_entry :
+    failsWith
+      (rowsChecked fixture slice.rows slice.strings (slice.blobs.set 3 (3, [3, 32, 0, 9])))
+      (.heapMismatch blobHeap 3) = true ∧
+    failsWith
+      (rowsChecked fixture slice.rows (slice.strings.set fatKey (fatKey, [70, 97, 116, 0, 0]))
+        slice.blobs)
+      (.heapMismatch stringsHeap fatKey) = true := by
+  decide +kernel
+#print axioms rejects_a_changed_slice_entry
+
+/-- Where `Tiny` names its own entry with the marker, the entry is one no row cell holds. -/
+theorem rejects_the_marker_for_a_carried_entry :
+    failsWith
+      (rowsChecked fixture (withRow tinyToken (writeLittle · methodNameAt 2 0xFFFF))
+        slice.strings slice.blobs)
+      (.heapNumbering stringsHeap tinyKey) = true := by
+  decide +kernel
+#print axioms rejects_the_marker_for_a_carried_entry
+
+/-- The marker in one `.ctor` row while the other rows name `.ctor` by its key: the offset of
+    `.ctor` would be both numbered and omitted. -/
+theorem rejects_a_marker_beside_a_key :
+    failsWith
+      (rowsChecked fixture (withRow constructorToken (writeLittle · methodNameAt 2 0xFFFF))
+        slice.strings slice.blobs)
+      (.heapNumbering stringsHeap 1) = true := by
+  decide +kernel
+#print axioms rejects_a_marker_beside_a_key
 
 end Tests.StrictBinding.Rows

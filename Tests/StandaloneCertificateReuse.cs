@@ -8,6 +8,7 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include ConsumerTraceDirectory.cs
 
+// Standalone measurement of complete CLI requests against a certified library; no suite runs it.
 using System.Diagnostics;
 using System.Text.Json;
 

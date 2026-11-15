@@ -4,8 +4,8 @@ using Mono.Cecil;
 partial class Program
 {
     /// <summary>Generic structs and static methods of generic classes across their own SDK-built Lib and
-    /// App pair, run by the assemblies suite after the non-generic cases.</summary>
-    static void CheckGenericAssemblies()
+    /// App pair, run by the assemblies suite after the non-generic cases; returns the App and Lib it built.</summary>
+    static (string App, string Lib) CheckGenericAssemblies()
     {
         const string libName = "GenericFixture.Lib";
         const string appName = "GenericFixture.App";
@@ -345,5 +345,6 @@ partial class Program
             throw new InvalidOperationException("Lean accepted a moved generic layout owner: " + kernel.Output);
         Console.WriteLine("PASS Lean rejected moved generic owner");
         Console.WriteLine("PASS cross-assembly generics: structs, generic classes, entries, addresses and rejections");
+        return (app, lib);
     }
 }

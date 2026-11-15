@@ -20,6 +20,7 @@ using Mono.Cecil;
 using X86Aes = System.Runtime.Intrinsics.X86.Aes;
 
 using Program verification = new();
+Run(["lake", "build", "Tests.ExactIntrinsics"], verification.CheckoutPackage());
 string assembly = At("Examples/Assembly/bin/Examples.dll");
 using ModuleDefinition metadata = ModuleDefinition.ReadModule(assembly);
 Dictionary<string, string> selectors = metadata.GetType("Examples.DivisionIntrinsics").Methods

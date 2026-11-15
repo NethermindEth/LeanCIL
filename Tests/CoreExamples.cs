@@ -13,6 +13,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
+// Standalone runner of the core example proofs; the core suite runs them through scripts/CoreExamples.cs.
 if (args is ["--check-existing", var existing])
 {
     using var checker = new Program();

@@ -805,7 +805,10 @@ An entry of a whole library holds about 1.2 GB; a closure entry holds only its m
 entry directory's write time and holds a lock on a file beside the entry (`<key>.use`) until it
 ends; the lock files are never deleted. A process that cannot create the lock file for want of
 permission runs without it. `LEANCIL_CACHE_DIR` should name an absolute directory that only
-LeanCIL uses.
+LeanCIL uses. On Windows Lake cannot read a file whose full path is longer than 259 characters,
+so a run refuses a library, cached or supplied, that holds a compiled module file beyond that
+length and names the file; for a whole library this limits the cache directory's path to about
+120 characters.
 
 A run that publishes an entry removes cache directories that it judges unused, once, before it
 continues; there is no setting that turns this off. When the pass chooses any directory, fails or
