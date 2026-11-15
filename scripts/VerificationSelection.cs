@@ -137,7 +137,8 @@ internal static class VerificationSelection
         inputs["core"].Add("Tests/ModularStatics.lean");
         inputs["docs"].UnionWith(WalkthroughInputs(root));
         inputs["evidence"].UnionWith(new[] { "LayoutEvidence", "ParameterEvidence", "GenericEvidence", "FeatureEvidence", "TypeTests",
-            "Throws", "SpanTables", "StaticValues", "StaticScalarValues", "TranslationAudit", "MetadataDifferential" }
+            "Throws", "SpanTables", "StaticValues", "StaticScalarValues", "TranslationAudit", "MetadataDifferential",
+            "Guards" }
             .Select(name => $"Tests/{name}.cs"));
         inputs["evidence"].UnionWith(new[] { "ExtractionLayout", "ExtractionParameters", "FeatureEvidence", "ScalarEvidence", "TypeTestEvidence",
             "ThrowEvidence", "SpanEvidence", "StaticValueEvidence", "LayoutCoverage", "ImportEvidence", "ImportedLayouts", "AssemblyPins",

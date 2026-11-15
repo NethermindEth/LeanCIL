@@ -57,8 +57,8 @@ internal static class VerificationSuites
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),
         new("evidence", "Tests/ExtractionEvidence.cs",
-            "independent extraction certificates, malformed evidence rejection and the metadata decoder's method " +
-            "names against Cecil's"),
+            "independent extraction certificates, malformed evidence rejection, the metadata decoder's method " +
+            "names against Cecil's and framework argument guards"),
         // Split from evidence so neither job approaches the CI timeout.
         new("dispatch", "Tests/DispatchEvidence.cs",
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
