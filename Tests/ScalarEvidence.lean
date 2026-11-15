@@ -898,7 +898,8 @@ private def storeSite : CallSite :=
   { method := {
       owner := .atom runtime "Words", name := name!"Store", hasThis := false, genericArity := 0,
       returnType := .void, parameters := [word, word] },
-    target := .managed 0x06000002, typeArguments := [], parameterCount := 2, returnsValue := false }
+    target := .managed 0x06000002, typeArguments := [], parameterCount := 2,
+    returnsValue := false }
 
 /-- The emissions extraction gives these accesses, none of which carries a metadata token. -/
 private def indirectEmitted : List IndirectCase := [

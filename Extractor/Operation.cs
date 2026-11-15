@@ -381,7 +381,7 @@ internal sealed record StoreScalar(int Width) : Operation
 /// <summary>The integer element an <c>ldind</c> or <c>stind</c> opcode names; <c>I</c> is native-sized.</summary>
 internal enum NumericKind { I1, U1, I2, U2, I4, U4, I8, I }
 
-/// <summary>An <c>ldind</c> or <c>stind</c> of <paramref name="Kind"/>, rendered as its opcode's constructor.</summary>
+/// <summary>An <c>ldind</c> or <c>stind</c> of <paramref name="Kind"/>, rendered as its constructor.</summary>
 internal sealed record IndirectAccess(NumericKind Kind, bool Store) : Operation
 {
     /// <summary>Bytes the access moves; native int is eight bytes on every admitted profile.</summary>

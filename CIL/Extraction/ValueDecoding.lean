@@ -7,8 +7,9 @@ import CIL.Extraction.Generics
 shuffling, return, constants, locals, branches, integer arithmetic, conversions, comparisons and
 integer indirect loads and stores, with every short and macro form folded into its constructor.
 `valueEncodingMatches` accepts an emitted instruction exactly when it is that decoded instruction,
-and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand. Instantiation leaves every decoded value
-unchanged (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original.
+and `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand.
+Instantiation leaves every decoded value unchanged (`Instruction.ofRaw?_substitute`), so a
+closed generic body decodes like its original.
 -/
 
 namespace CIL.Extraction
