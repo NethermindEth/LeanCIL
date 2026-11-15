@@ -217,11 +217,21 @@ void RejectDeclared(int sample, string name, string definition, Func<string, str
 // The metadata rows of a body shift with the assembly, so each byte is found by its position in the emitted list.
 string ChangeByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
     match => match.Groups[1].Value + (int.Parse(match.Groups[2].Value) + change) + match.Groups[3].Value);
+// A byte list is emitted as `(CIL.Extraction.fixedBytes <count> 0x<digits>)`; a pattern's second group is one byte.
+const string literalHead = """\(CIL\.Extraction\.fixedBytes """;
+const string byteLiteral = literalHead + """\d+ 0x""";
+string ChangeLiteralByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
+    match => match.Groups[1].Value + ((Convert.ToInt32(match.Groups[2].Value, 16) + change) % 256).ToString("X2"));
 // Sample 0 starts `ldarg.0; call <token>` under a tiny header: header, ldarg.0, call, then the token bytes.
-RejectBody(0, "altered-body-byte", bodyTheorem, "method0Bytes", line => ChangeByte(line, @"(\[\d+, )(\d+)(,)", 1));
-RejectBody(0, "altered-body-header", bodyTheorem, "method0Bytes", line => ChangeByte(line, @"(\[)(\d+)(,)", 4));
+RejectBody(0, "altered-body-byte", bodyTheorem, "method0Bytes",
+    line => ChangeLiteralByte(line, $$"""({{byteLiteral}}[0-9A-F]{2})([0-9A-F]{2})""", 1));
+RejectBody(0, "altered-body-header", bodyTheorem, "method0Bytes",
+    line => ChangeLiteralByte(line, $$"""({{byteLiteral}})([0-9A-F]{2})""", 4));
 RejectBody(0, "altered-token-operand-byte", bodyTheorem, "method0Bytes",
-    line => ChangeByte(line, @"(\[\d+, 2, 40, )(\d+)(,)", 1));
+    line => ChangeLiteralByte(line, $$"""({{byteLiteral}}[0-9A-F]{2}0228)([0-9A-F]{2})""", 1));
+// A count one short of the digits keeps the code but drops its leading byte, the body header.
+RejectBody(0, "altered-literal-count", bodyTheorem, "method0Bytes",
+    line => ChangeByte(line, $$"""({{literalHead}})(\d+)( 0x)""", -1));
 RejectBody(0, "altered-token-table-key", bodyTheorem, "method0Body",
     line => ChangeByte(line, @"(\()(\d+)(, \.call)", 1));
 RejectBody(0, "altered-token-table-operand", bodyTheorem, "method0Body",
@@ -244,15 +254,16 @@ void RejectTables(string name, string definition, Func<string, string> change)
         "method0_tables_refuted");
 }
 RejectTables("altered-metadata-row", "method0Metadata",
-    line => ChangeByte(line, @"(rows := \[\(\d+, \[)(\d+)(,)", 1));
-RejectTables("altered-metadata-string", "method0Metadata",
-    line => ChangeByte(line, @"(strings := \[\(0, \[0\]\), \(\d+, \[)(\d+)(,)", 1));
-RejectTables("altered-lookup-row", "method0Tables", line => ChangeByte(line, @"(rows := .*?\[)(\d+)(,)", 1));
+    line => ChangeLiteralByte(line, $$"""(rows := \[\(\d+, {{byteLiteral}})([0-9A-F]{2})""", 1));
+RejectTables("altered-metadata-string", "method0Metadata", line => ChangeLiteralByte(line,
+    $$"""(strings := \[\(0, {{literalHead}}1 0x00\)\), \(\d+, {{byteLiteral}})([0-9A-F]{2})""", 1));
+RejectTables("altered-lookup-row", "method0Tables",
+    line => ChangeLiteralByte(line, $$"""(rows := .*?{{byteLiteral}})([0-9A-F]{2})""", 1));
 // A leaf entry of the rows tree removed, and one added before another.
 RejectTables("missing-lookup-row", "method0Tables",
-    line => new Regex(@"\(\.node \.leaf \d+ \[[^\]]*\] \.leaf\)").Replace(line, ".leaf", 1));
+    line => new Regex($$"""\(\.node \.leaf \d+ {{byteLiteral}}[0-9A-F]+\) \.leaf\)""").Replace(line, ".leaf", 1));
 RejectTables("extra-lookup-row", "method0Tables",
-    line => new Regex(@"\(\.node \.leaf (\d+) (\[[^\]]*\]) \.leaf\)").Replace(line,
+    line => new Regex($$"""\(\.node \.leaf (\d+) ({{byteLiteral}}[0-9A-F]+\)) \.leaf\)""").Replace(line,
         "(.node (.node .leaf 1 [0] .leaf) $1 $2 .leaf)", 1));
 RejectBody(4, "altered-body-branch-index", "method1_body_validated", "method1Original",
     line => line.Replace("operand := .target 4", "operand := .target 3"));
@@ -297,8 +308,10 @@ void ReturnMutations()
 const string word = "Extraction.runtimeScope \"System.UInt64\"";
 RejectDeclared(0, "wrong-declared-parameter", "method0", line =>
     line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]"));
-RejectDeclared(0, "wrong-declared-return", "method0", line =>
-    line.Replace($"returnType := .atom {word} }}", $"returnType := .atom {word.Replace("UInt64", "UInt32")} }}"));
+// The declared signature's own return type, whatever fields follow it.
+RejectDeclared(0, "wrong-declared-return", "method0", line => Regex.Replace(line,
+    $$"""(declared := {[^}]*returnType := .atom ){{Regex.Escape(word)}}""",
+    match => match.Groups[1].Value + word.Replace("UInt64", "UInt32"), RegexOptions.None));
 RejectDeclared(14, "missing-declared-receiver", "method1", line =>
     line.Replace("receiver := some .reference, ", ""));
 RejectDeclared(14, "wrong-declared-receiver-kind", "method1", line =>
