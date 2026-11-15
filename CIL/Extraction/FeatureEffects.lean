@@ -54,7 +54,7 @@ def emittedFeatureEffect (op : Instruction) (returnsValue : Bool) : Option (Nat 
   match op with
   | .managed (.address ..) => some (0, 1)
   | .managed .tableLength | .managed (.tableLoad _) => some (1, 1)
-  | .managed (.tableElement _) | .managed .tableOffset => some (2, 1)
+  | .managed (.tableElement _) => some (2, 1)
   | .managed (.call signature _ _) =>
     some (signature.parameters.length + 1, if signature.result == .void then 0 else 1)
   | .stackAlloc _ | .newArray _ | .newReferenceArray _ => some (1, 1)

@@ -457,11 +457,6 @@ internal abstract record ManagedPointer : Operation
     internal sealed override string Render(Func<int, string> calleeName) => ".managed " + Body(calleeName);
 }
 
-internal sealed record TableOffset : ManagedPointer
-{
-    protected override string Body(Func<int, string> calleeName) => ".tableOffset";
-}
-
 internal sealed record TableLength : ManagedPointer
 {
     protected override string Body(Func<int, string> calleeName) => ".tableLength";

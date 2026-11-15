@@ -509,16 +509,13 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     | _, _ => false
   else if instruction.opcode == 88 && (match stack with
       | .nativeMethodTable _ :: _ | _ :: .nativeMethodTable _ :: _ => true | _ => false) then
-    match stack, emitted with
-    | offset :: .nativeMethodTable _ :: _, .managed .tableOffset
-    | .nativeMethodTable _ :: offset :: _, .managed .tableOffset => offset ∈ [.word32, .native]
+    instruction.operand == .none && match stack, emitted with
+    | offset :: .nativeMethodTable _ :: _, .add
+    | .nativeMethodTable _ :: offset :: _, .add => offset ∈ [.word32, .native]
     | _, _ => false
   else if let .managed operation := emitted then match operation, stack with
     | .address .., _ => instruction.opcode == 65030
     | .call .., _ => instruction.opcode == 41
-    | .tableOffset, offset :: .nativeMethodTable _ :: _
-    | .tableOffset, .nativeMethodTable _ :: offset :: _ =>
-      instruction.opcode == 88 && offset ∈ [.word32, .native]
     | .tableLoad signature, .nativeMethodTable actual :: _ =>
       instruction.opcode == 77 && signature == actual
     | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
