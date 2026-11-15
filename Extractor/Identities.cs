@@ -483,6 +483,16 @@ internal closed record TypeKind
     };
 }
 
+/// <summary>A field operand by its declaring type, its index among the owner's fields as the model counts them,
+/// the type it holds and its <c>#Strings</c> name (<c>CIL.Extraction.FieldRef</c>). Owner and type are
+/// <c>CIL.Extraction.TypeExpr</c> terms.</summary>
+internal sealed record FieldRef(string Owner, int Index, string Type, MetadataName Name)
+{
+    /// <summary>The structure literal of the reference.</summary>
+    internal string ToLean() => string.Create(CultureInfo.InvariantCulture,
+        $"{{ owner := {Owner}, index := {Index}, type := {Type}, name := {Name.ToLean()} }}");
+}
+
 /// <summary>The assemblies of the .NET 11 platform the extractor models, as <c>AssemblyRef</c> rows name them.
 /// System.Runtime forwards its types to System.Private.CoreLib, which holds their <c>TypeDef</c> rows.</summary>
 internal static class PlatformAssemblies

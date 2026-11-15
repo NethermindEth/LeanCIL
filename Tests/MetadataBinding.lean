@@ -570,14 +570,15 @@ private def pairFrame : Frame :=
   { corlib := some (bytesOf "C"), anchor := bytesOf "A", arity := 1, ownerArity := 1 }
 
 /-- The type `name` of scope `scope` with the given kind. -/
-private def namedIn (scope name : String) (kind : TypeKind) (pinned := false) : NamedType :=
+private def namedIn (scope name : String) (kind : Extraction.TypeKind) (pinned := false) :
+    NamedType :=
   { scope := bytesOf scope, name := bytesOf name, parts := [], kind := kind, pinned := pinned }
 
 /-- `System.Int32` of the primitive assembly. -/
 private def int32Atom : TypeExpr := .atom "C" "System.Int32"
 
 /-- `L.G<int>`, with `L.G` of the given kind and pinning. -/
-private def instanceOf (kind : TypeKind) (pinned := false) : ResolvedType :=
+private def instanceOf (kind : Extraction.TypeKind) (pinned := false) : ResolvedType :=
   .genericInst (namedIn "L" "G`1" kind pinned) (.cons (.primitive 8) .nil)
 
 /-- One pairing for each way `typeAdmits` accepts, by resolved and extractor constructor. -/
@@ -815,7 +816,7 @@ theorem tells_nested_types_apart_by_their_namespace_columns :
 /-! ## Kinds against the extractor's constructors -/
 
 /-- `System.Int32` of the runtime scope as a type of the given kind. -/
-private def runtimeInt32 (kind : TypeKind) : ResolvedType :=
+private def runtimeInt32 (kind : Extraction.TypeKind) : ResolvedType :=
   .named (namedIn runtimeScope "System.Int32" kind)
 
 /-- A type that cannot be a value type is never admitted as the runtime's primitive atom, which
