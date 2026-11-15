@@ -1,4 +1,4 @@
-import CIL.Extraction.Generics
+import CIL.Extraction.ValueDecoding
 import CIL.Extraction.SpanCalls
 import Std.Data.TreeMap.Lemmas
 
@@ -99,19 +99,6 @@ def typeTestInstruction (instruction : RawInstruction) : Bool :=
           site.name == "op_Inequality"
       | _ => false
     | _ => false
-
-/-- The local a `ldloc`, `stloc` or `ldloca` instruction names, in any of its forms. -/
-def localIndex (instruction : RawInstruction) : Option Nat :=
-  match instruction.opcode, instruction.operand with
-  -- `ldloc.0` to `ldloc.3` and `stloc.0` to `stloc.3`.
-  | 6, .none | 10, .none => some 0
-  | 7, .none | 11, .none => some 1
-  | 8, .none | 12, .none => some 2
-  | 9, .none | 13, .none => some 3
-  -- `ldloc`, `ldloca` and `stloc`, short and long forms.
-  | 17, .local n | 18, .local n | 19, .local n
-  | 65036, .local n | 65037, .local n | 65038, .local n => some n
-  | _, _ => none
 
 /-- Whether `instruction` names a typed span local, with each local's type given by `localAt`. -/
 def spanLocalOp (localAt : Nat → Option TypeExpr) (instruction : RawInstruction) : Bool :=
