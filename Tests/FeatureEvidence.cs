@@ -393,7 +393,7 @@ foreach (var mutation in new[] { "span", "byref", "pointer", "class", "float", "
         case "scope":
             var forgedQueryScope = new AssemblyNameReference("Forged", new Version(10, 0));
             module.AssemblyReferences.Add(forgedQueryScope);
-            query.ElementMethod.DeclaringType.Scope = new AssemblyNameReference("Forged", new Version(10, 0));
+            query.ElementMethod.DeclaringType.Scope = forgedQueryScope;
             diagnostic = "Unsupported reference-content query signature";
             break;
     }
