@@ -23,129 +23,210 @@ private def raw (site : CallSite) : RawMethod := {
   returnType := .void, parameters := [], locals := [], initLocals := false,
   maxStack := 2, genericParameters := [], code := [⟨0, 40, .call site⟩] }
 private def call0 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "And",
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::And(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", vectorType "256"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"And",
+    hasThis := false, genericArity := 0, returnType := vectorType "256",
+    parameters := [vectorType "256", vectorType "256"] },
+  name := "And",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+    System.Runtime.Intrinsics.X86.Avx2::And(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call0) [true]
     (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid
-    (raw { call0 with returnType := .atom runtimeScope "System.UInt64" })
+    (raw { call0 with method.returnType := .atom runtimeScope "System.UInt64" })
     [true] (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid
-    (raw { call0 with parameterTypes := [vectorType "128", vectorType "256"] })
+    (raw { call0 with method.parameters := [vectorType "128", vectorType "256"] })
     [true] (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call0) [true]
     (body [.intrinsic (.avx2 .band) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call0 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call0 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call0 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx2 .band) 2]) := by decide +kernel
 private def call1 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "Or",
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::Or(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", vectorType "256"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"Or", hasThis := false,
+    genericArity := 0, returnType := vectorType "256",
+    parameters := [vectorType "256", vectorType "256"] },
+  name := "Or",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+    System.Runtime.Intrinsics.X86.Avx2::Or(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call1) [true]
     (body [.intrinsic (.avx2 .bor) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call1) [true]
     (body [.intrinsic (.avx2 .bor) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call1 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call1 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx2 .bor) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call1 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx2 .bor) 2]) := by decide +kernel
 private def call2 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "Xor",
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::Xor(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", vectorType "256"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"Xor",
+    hasThis := false, genericArity := 0, returnType := vectorType "256",
+    parameters := [vectorType "256", vectorType "256"] },
+  name := "Xor",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+    System.Runtime.Intrinsics.X86.Avx2::Xor(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call2) [true]
     (body [.intrinsic (.avx2 .bxor) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call2) [true]
     (body [.intrinsic (.avx2 .bxor) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call2 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call2 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx2 .bxor) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call2 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx2 .bxor) 2]) := by decide +kernel
 private def call3 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "AndNot",
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::AndNot(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", vectorType "256"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"AndNot",
+    hasThis := false, genericArity := 0, returnType := vectorType "256",
+    parameters := [vectorType "256", vectorType "256"] },
+  name := "AndNot",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+    System.Runtime.Intrinsics.X86.Avx2::AndNot(\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call3) [true]
     (body [.intrinsic (.avx2 .andNot) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call3) [true]
     (body [.intrinsic (.avx2 .andNot) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call3 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call3 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx2 .andNot) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call3 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx2 .andNot) 2]) := by decide +kernel
 private def call4 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "ShiftLeftLogical"
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", vectorType "128"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftLeftLogical",
+    hasThis := false, genericArity := 0, returnType := vectorType "256",
+    parameters := [vectorType "256", vectorType "128"] },
+  name := "ShiftLeftLogical",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+    System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call4) [true]
     (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call4) [true]
     (body [.intrinsic (.avx2 .shl64Count) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call4 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call4 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call4 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx2 .shl64Count) 2]) := by decide +kernel
 private def call5 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := "ShiftRightLogical"
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", vectorType "128"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftRightLogical",
+    hasThis := false, genericArity := 0, returnType := vectorType "256",
+    parameters := [vectorType "256", vectorType "128"] },
+  name := "ShiftRightLogical",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+    System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector128`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call5) [true]
     (body [.intrinsic (.avx2 .shr64Count) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call5) [true]
     (body [.intrinsic (.avx2 .shr64Count) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call5 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call5 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx2 .shr64Count) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call5 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx2 .shr64Count) 2]) := by decide +kernel
 private def call6 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx512F", name := "CompareLessThan",
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx512F::CompareLessThan(System.Runtime.Intrinsics.Vector512`1<System.UInt64>,System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "512", parameterTypes := [vectorType "512", vectorType "512"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512F", name := name!"CompareLessThan",
+    hasThis := false, genericArity := 0, returnType := vectorType "512",
+    parameters := [vectorType "512", vectorType "512"] },
+  name := "CompareLessThan",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector512`1<System.UInt64> \
+    System.Runtime.Intrinsics.X86.Avx512F::CompareLessThan(\
+    System.Runtime.Intrinsics.Vector512`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call6) [true]
     (body [.intrinsic (.avx512 .ltu512) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call6) [true]
     (body [.intrinsic (.avx512 .ltu512) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call6 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call6 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx512 .ltu512) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call6 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx512 .ltu512) 2]) := by decide +kernel
 private def call7 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx512F", name := "CompareGreaterThan",
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx512F::CompareGreaterThan(System.Runtime.Intrinsics.Vector512`1<System.UInt64>,System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "512", parameterTypes := [vectorType "512", vectorType "512"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512F",
+    name := name!"CompareGreaterThan", hasThis := false, genericArity := 0,
+    returnType := vectorType "512", parameters := [vectorType "512", vectorType "512"] },
+  name := "CompareGreaterThan",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector512`1<System.UInt64> \
+    System.Runtime.Intrinsics.X86.Avx512F::CompareGreaterThan(\
+    System.Runtime.Intrinsics.Vector512`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call7) [true]
     (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call7) [true]
     (body [.intrinsic (.avx512 .gtu512) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call7 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call7 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call7 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx512 .gtu512) 2]) := by decide +kernel
 private def call8 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := "MoveMask"
-  target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"), typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := true, returnType := .atom runtimeScope "System.Int32", parameterTypes := [vectorType "512"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := name!"MoveMask",
+    hasThis := false, genericArity := 0, returnType := .atom runtimeScope "System.Int32",
+    parameters := [vectorType "512"] },
+  name := "MoveMask",
+  target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(\
+    System.Runtime.Intrinsics.Vector512`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 1, returnsValue := true }
 example : ExactIntrinsicsValid (raw call8) [true]
     (body [.intrinsic (.avx512DQ .moveMask512) 1]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call8) [true]
     (body [.intrinsic (.avx512DQ .moveMask512) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call8 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call8 with method.hasThis := true }) [true]
     (body [.intrinsic (.avx512DQ .moveMask512) 1]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call8 with target := .external "forged" }) [true]
     (body [.intrinsic (.avx512DQ .moveMask512) 1]) := by decide +kernel
 private def call9 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.Vector512", name := "Create",
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector512`1<System.UInt64> System.Runtime.Intrinsics.Vector512::Create(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"), typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "512", parameterTypes := [vectorType "256", vectorType "256"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.Vector512", name := name!"Create",
+    hasThis := false, genericArity := 0, returnType := vectorType "512",
+    parameters := [vectorType "256", vectorType "256"] },
+  name := "Create",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector512`1<System.UInt64> \
+    System.Runtime.Intrinsics.Vector512::Create(\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>,\
+    System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
+  typeArguments := [], parameterCount := 2, returnsValue := true }
 example : ExactIntrinsicsValid (raw call9) [true]
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call9) [true]
     (body [.intrinsic (.vector .combine256) 3]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call9 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call9 with method.hasThis := true }) [true]
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call9 with target := .external "forged" }) [true]
     (body [.intrinsic (.vector .combine256) 2]) := by decide +kernel
 private def call10 : CallSite := {
-  declaringType := .atom scope "System.Runtime.Intrinsics.Vector128", name := "CreateScalarUnsafe",
-  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector128`1<System.UInt64> System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)"), typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := true, returnType := vectorType "128", parameterTypes := [.atom runtimeScope "System.UInt64"] }
+  method := {
+    owner := .atom scope "System.Runtime.Intrinsics.Vector128", name := name!"CreateScalarUnsafe",
+    hasThis := false, genericArity := 0, returnType := vectorType "128",
+    parameters := [.atom runtimeScope "System.UInt64"] },
+  name := "CreateScalarUnsafe",
+  target := .external (scope ++ "::System.Runtime.Intrinsics.Vector128`1<System.UInt64> \
+    System.Runtime.Intrinsics.Vector128::CreateScalarUnsafe(System.UInt64)"),
+  typeArguments := [], parameterCount := 1, returnsValue := true }
 example : ExactIntrinsicsValid (raw call10) [true]
     (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw call10) [true]
     (body [.intrinsic (.vector .createScalarUnsafe64) 2]) := by decide +kernel
-example : ¬ ExactIntrinsicsValid (raw { call10 with hasThis := true }) [true]
+example : ¬ ExactIntrinsicsValid (raw { call10 with method.hasThis := true }) [true]
     (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
 example : ¬ ExactIntrinsicsValid (raw { call10 with target := .external "forged" }) [true]
     (body [.intrinsic (.vector .createScalarUnsafe64) 1]) := by decide +kernel
@@ -295,24 +376,38 @@ example : evalIntrinsic (.avx512 .ltu512)
      .v512 (Vector.pack512 1 1 0 0 0 0 0 0)] = some (.v512 0) := by decide +kernel
 
 example : ExactIntrinsicsValid (raw {
-    declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2"
-    name := "ShiftLeftLogical"
-    target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)"),
-    typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", .atom runtimeScope "System.Byte"] }) [true]
+    method := {
+      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftLeftLogical",
+      hasThis := false, genericArity := 0, returnType := vectorType "256",
+      parameters := [vectorType "256", .atom runtimeScope "System.Byte"] },
+    name := "ShiftLeftLogical",
+    target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::ShiftLeftLogical(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)"),
+    typeArguments := [], parameterCount := 2, returnsValue := true }) [true]
     (body [.intrinsic (.avx2 .shl64) 2]) := by decide +kernel
 
 example : ExactIntrinsicsValid (raw {
-    declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx2"
-    name := "ShiftRightLogical"
-    target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)"),
-    typeArguments := [], parameterCount := 2, hasThis := false, returnsValue := true, returnType := vectorType "256", parameterTypes := [vectorType "256", .atom runtimeScope "System.Byte"] }) [true]
+    method := {
+      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx2", name := name!"ShiftRightLogical",
+      hasThis := false, genericArity := 0, returnType := vectorType "256",
+      parameters := [vectorType "256", .atom runtimeScope "System.Byte"] },
+    name := "ShiftRightLogical",
+    target := .external (scope ++ "::System.Runtime.Intrinsics.Vector256`1<System.UInt64> \
+      System.Runtime.Intrinsics.X86.Avx2::ShiftRightLogical(\
+      System.Runtime.Intrinsics.Vector256`1<System.UInt64>,System.Byte)"),
+    typeArguments := [], parameterCount := 2, returnsValue := true }) [true]
     (body [.intrinsic (.avx2 .shr64) 2]) := by decide +kernel
 
 example : ExactIntrinsicsValid (raw {
-    declaringType := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ"
-    name := "MoveMask"
-    target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::MoveMask(System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
-    typeArguments := [], parameterCount := 1, hasThis := false, returnsValue := true, returnType := .atom runtimeScope "System.Int32", parameterTypes := [vectorType "256"] }) [true]
+    method := {
+      owner := .atom scope "System.Runtime.Intrinsics.X86.Avx512DQ", name := name!"MoveMask",
+      hasThis := false, genericArity := 0, returnType := .atom runtimeScope "System.Int32",
+      parameters := [vectorType "256"] },
+    name := "MoveMask",
+    target := .external (scope ++ "::System.Int32 System.Runtime.Intrinsics.X86.Avx512DQ::\
+      MoveMask(System.Runtime.Intrinsics.Vector256`1<System.UInt64>)"),
+    typeArguments := [], parameterCount := 1, returnsValue := true }) [true]
     (body [.intrinsic (.avx512DQ .moveMask64) 1]) := by decide +kernel
 
 
@@ -394,7 +489,7 @@ theorem exact_call_site :
 theorem malformed_family_without_intrinsic :
     ¬ ExactIntrinsicsValid
       (raw { call0 with
-        declaringType := .atom "forged" "System.Runtime.Intrinsics.X86.Avx2"
+        method.owner := .atom "forged" "System.Runtime.Intrinsics.X86.Avx2"
         target := .external "forged" }) [true] (body [.nop]) := by
   decide +kernel
 #print axioms malformed_family_without_intrinsic
@@ -402,7 +497,7 @@ theorem malformed_family_without_intrinsic :
 /-- An exact intrinsic identity still marks the family when both owner and name are forged. -/
 theorem identity_family_without_intrinsic :
     ¬ ExactIntrinsicsValid
-      (raw { call0 with declaringType := .atom "forged" "Other", name := "Other" })
+      (raw { call0 with method.owner := .atom "forged" "Other", name := "Other" })
       [true] (body [.nop]) := by
   decide +kernel
 #print axioms identity_family_without_intrinsic
@@ -411,7 +506,7 @@ theorem identity_family_without_intrinsic :
 theorem unrelated_call_without_intrinsic :
     ExactIntrinsicsValid
       (raw { call0 with
-        declaringType := .atom "Other" "Other", name := "Other"
+        method.owner := .atom "Other" "Other", name := "Other"
         target := .external "Other" }) [true] (body [.nop]) := by
   decide +kernel
 #print axioms unrelated_call_without_intrinsic
@@ -448,11 +543,11 @@ theorem exact_call_non_ascii_name :
 theorem exact_call_identity_boundaries :
     ExactIntrinsicsValid
       (raw { call0 with
-        declaringType := .atom "Other" "Other", name := "Other"
+        method.owner := .atom "Other" "Other", name := "Other"
         target := .external intrinsicsScope }) [true] (body [.nop]) ∧
     ExactIntrinsicsValid
       (raw { call0 with
-        declaringType := .atom "Other" "Other", name := "Other"
+        method.owner := .atom "Other" "Other", name := "Other"
         target := .external (intrinsicsScope ++ "::λ") }) [true] (body [.nop]) := by
   decide +kernel
 #print axioms exact_call_identity_boundaries

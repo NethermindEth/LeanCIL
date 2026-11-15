@@ -1,6 +1,7 @@
 import CIL.CallSite
 import CIL.Extraction.TypeStorage
 import CIL.Extraction.FlowIndex
+import CIL.Extraction.LinkIndex
 import CIL.Imports
 import CIL.Extraction.MetadataNames
 
@@ -161,13 +162,16 @@ def substituteOperand (arguments : List TypeExpr) (layouts : List RawLayout := [
   | .call site => do
     let declaringType ← substituteType arguments site.declaringType
     return .call { site with
-      declaringType,
+      method := { site.method with
+        owner := declaringType,
+        returnType := ← substituteStorageType layouts arguments site.returnType,
+        parameters := ← site.parameterTypes.mapM (substituteStorageType layouts arguments),
+        methodArguments :=
+          ← site.method.methodArguments.mapM (substituteStorageType layouts arguments) },
       target := ← if mentionsParameter site.declaringType then
         substituteTarget methodArity site.declaringType declaringType site.target
         else pure site.target,
-      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments),
-      returnType := ← substituteStorageType layouts arguments site.returnType,
-      parameterTypes := ← site.parameterTypes.mapM (substituteStorageType layouts arguments) }
+      typeArguments := ← site.typeArguments.mapM (substituteStorageType layouts arguments) }
   | .indirectCall returnType parameters hasThis explicitThis convention => do
     return .indirectCall (← substituteStorageType layouts arguments returnType)
       (← parameters.mapM (substituteStorageType layouts arguments)) hasThis explicitThis convention
@@ -548,6 +552,14 @@ def validateManagedCallWith (methodCount : Nat)
     | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newObject .. => false
     | _ => true
 
+/-- `link` is what the method's link table gives this pc. It must be the link the instruction
+    implies, live or not, so a key sits only at a call-family pc and each call-family pc has one,
+    and the instruction must pass `validateManagedCallWith`. -/
+def validateLinkedCallWith (methodCount : Nat)
+    (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
+    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
+  link == emitted.link? && validateManagedCallWith methodCount methods imports raw live emitted
+
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
 def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
     (opcode : Nat) (site : CallSite) (identity : String) (target count : Nat) : Bool :=
@@ -558,18 +570,25 @@ def validateManagedCall (methods : List SpecializedMethod) (imports : List Impor
     (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
   validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
 
-/-- The emitted link table is the one the emitted code implies. Every call emitted at a live
-    call site of `raw` binds to the method table or an import slot, and no other instruction
+/-- The emitted link table's keys ascend and are pcs of the emitted code, and each pc is checked
+    with the link the table gives it, read by one walk beside the code; so the table gives every
+    call-family pc the link its instruction implies and has no other key. Every call emitted at a
+    live call site of `raw` binds to the method table or an import slot, and no other instruction
     emits a call. An external site may instead emit a non-call translation, which other
     validators check. -/
 def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportSlot)
     (raw : RawMethod) (reachable : List Bool) (emitted : Method) : Prop :=
-  emitted.links = linksOfCode emitted.code ∧
+  keysAscend 0 emitted.links = true ∧
+  emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) = true ∧
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-  all3 (validateManagedCallWith methods.length (FlowIndex.ofList methods).get?
-    (FlowIndex.ofList imports).get?) raw.code reachable emitted.code = true
+  all3 (fun instruction (live, link) op => validateLinkedCallWith methods.length
+      (FlowIndex.ofList methods).get? (FlowIndex.ofList imports).get? instruction live link op)
+    raw.code (reachable.zip (linkWalk emitted.links emitted.links 0
+      (List.range emitted.code.length))) emitted.code = true
 
-/-- Indexed call lookup preserves every metadata check and rejects the same invalid targets. -/
+/-- The check accepts exactly the bodies whose table is the one their code implies and whose
+    instructions pass the list-indexed rules with those links: indexed lookups and links read
+    beside the code lose no evidence the table equality accepted and admit none it rejected. -/
 theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
     (imports : List ImportSlot) (raw : RawMethod) (reachable : List Bool) (emitted : Method) :
     ManagedCallsValid methods imports raw reachable emitted ↔
@@ -580,16 +599,51 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
       (FlowIndex.ofList values).get? = (values[·]?) := by
     funext target
     exact FlowIndex.get?_ofList values target
+  have compares : ∀ instruction live link op,
+      validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) instruction live link op =
+        (link == op.link? && validateLinkedCallWith methods.length (methods[·]?) (imports[·]?)
+          instruction live op.link? op) := by
+    intro instruction live link op
+    simp only [validateLinkedCallWith, beq_self_eq_true, Bool.true_and]
+  have unlinked : ∀ instruction live op,
+      validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) instruction live
+        op.link? op = validateManagedCall methods imports instruction live op := by
+    intro instruction live op
+    simp only [validateLinkedCallWith, validateManagedCall, beq_self_eq_true, Bool.true_and]
+  have reads (ascending : keysAscend 0 emitted.links = true) :
+      linkWalk emitted.links emitted.links 0 (List.range emitted.code.length) =
+        (List.range' 0 emitted.code.length).map (linkLookup emitted.links) := by
+    rw [linkWalk_eq _ ascending _ _ 0 (dropBelow_zero _).symm, List.range_eq_range']
   unfold ManagedCallsValid
   rw [index, index]
-  rfl
+  constructor
+  · rintro ⟨ascending, bounded, statesLength, codeLength, valid⟩
+    rw [reads ascending] at valid
+    obtain ⟨implied, valid⟩ :=
+      (all3_reads_iff _ compares _ 0 _ _ _ statesLength codeLength).mp valid
+    rw [← List.range_eq_range', eq_linksOfCode_iff _ _ ascending bounded] at implied
+    exact ⟨implied, statesLength, codeLength, by simpa only [unlinked] using valid⟩
+  · rintro ⟨implied, statesLength, codeLength, valid⟩
+    have ascending : keysAscend 0 emitted.links = true := by
+      rw [implied]
+      exact keysAscend_linksOfCode _
+    have bounded : emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) =
+        true := by
+      rw [implied]
+      exact linksOfCode_keys _
+    refine ⟨ascending, bounded, statesLength, codeLength, ?_⟩
+    rw [reads ascending]
+    refine (all3_reads_iff _ compares _ 0 _ _ _ statesLength codeLength).mpr
+      ⟨?_, by simpa only [unlinked] using valid⟩
+    rw [← List.range_eq_range', eq_linksOfCode_iff _ _ ascending bounded]
+    exact implied
 
 #print axioms ManagedCallsValid_iff_original
 
 instance (methods : List SpecializedMethod) (imports : List ImportSlot) (raw : RawMethod)
     (reachable : List Bool) (emitted : Method) :
     Decidable (ManagedCallsValid methods imports raw reachable emitted) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Checks generated call bindings structurally, retaining kernel decision for residual checks.
     Reflexive metadata comparisons use equality proofs instead of re-evaluating strings. -/
@@ -633,8 +687,8 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
   obtain ⟨offset, opcode, operand⟩ := raw
   cases operand with
   | call site =>
-    obtain ⟨declaringType, name, method, typeArguments, parameterCount, hasThis, returnsValue,
-      returnType, parameterTypes, ownerArgumentCount⟩ := site
+    obtain ⟨methodRef, name, method, typeArguments, parameterCount, returnsValue,
+      ownerArgumentCount⟩ := site
     cases method with
     | managed token =>
       have missing : methods[target]? = none := List.getElem?_eq_none_iff.mpr outside

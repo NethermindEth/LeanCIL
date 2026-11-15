@@ -275,7 +275,7 @@ foreach (var (methodName, stride) in new[]
         ("return", "returnType := .pointer (.void)",
             "returnType := .byref (.atom Extraction.runtimeScope \"System.UInt64\")"),
         ("identity", "target := .external externalIdentity0", "target := .external \"forged\""),
-        ("scope", "declaringType := .atom Extraction.runtimeScope", "declaringType := .atom \"forged\"")
+        ("scope", "owner := .atom Extraction.runtimeScope", "owner := .atom \"forged\"")
     })
     {
         if (!pointerSource.Contains(before, StringComparison.Ordinal))
@@ -304,7 +304,7 @@ var byteOffsetSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "ByteO
     "method0_unsafe_validated");
 foreach (var (name, before, after) in new[]
 {
-    ("scope", "declaringType := .atom Extraction.runtimeScope", "declaringType := .atom \"forged\""),
+    ("scope", "owner := .atom Extraction.runtimeScope", "owner := .atom \"forged\""),
     ("identity", "target := .external externalIdentity0", "target := .external \"forged\""),
     ("result", "returnType := .atom Extraction.runtimeScope \"System.IntPtr\"",
         "returnType := .atom Extraction.runtimeScope \"System.UIntPtr\""),
@@ -323,8 +323,9 @@ foreach (var (name, before, after) in new[]
 var renamedSource = NarrowEvidence(File.ReadAllText(Path.Combine(root, "AreSame", "Extracted.lean")),
     "method0_scalars_validated")
     .Replace("name := \"AreSame\"", "name := \"Other\"", StringComparison.Ordinal)
-    .Replace("declaringType := .atom Extraction.runtimeScope \"System.Runtime.CompilerServices.Unsafe\"",
-        "declaringType := .atom \"Fixture\" \"Lookalike\"", StringComparison.Ordinal);
+    .Replace("name := name!\"AreSame\"", "name := name!\"Other\"", StringComparison.Ordinal)
+    .Replace("owner := .atom Extraction.runtimeScope \"System.Runtime.CompilerServices.Unsafe\"",
+        "owner := .atom \"Fixture\" \"Lookalike\"", StringComparison.Ordinal);
 var renamedPath = Path.Combine(root, "AreSame", "ForgedNameAndOwner.lean");
 File.WriteAllText(renamedPath, renamedSource);
 rejected.Add(renamedPath, "PASS forged name and owner cannot emit a scalar comparison", "ScalarFlowValid");

@@ -290,18 +290,22 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
     -- The catch-all's exclusions are named so the arms' own names stay the newest inaccessible
-    -- ones; `fixed_fallback` reads the table-offset exclusions, and the faulting and argument home
-    -- ones are cleared. `split` states the `ldarga` exclusion first, as its arm ignores the stack.
+    -- ones; `fixed_fallback` reads the table-offset ones and the others are cleared. `split`
+    -- states the `ldarga` exclusion first, as its arm ignores the stack.
     all_goals try (
       rename_i addressHome offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn
-        mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn storeHome
+        mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual
+        objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue objectTested storeHome
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
       guard_hyp div : ∀ (y x : CIL.Value) (rest : List Value), operation = .div →
         stack = Value.scalar y :: Value.scalar x :: rest → False
+      guard_hyp objectsEqual : ∀ (right left : ManagedReference) (rest : List Value),
+        operation = .ceq → stack = Value.object right :: Value.object left :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
-        convOvfUn storeHome addressHome
+        convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
+        objectBranchFalse objectBranchTrue objectTested storeHome addressHome
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,
