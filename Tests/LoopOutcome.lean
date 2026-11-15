@@ -35,7 +35,9 @@ example (program : CIL.Program) (method : Nat) (pre : List Value → Memory → 
     (post : List Value → Memory → Memory → List Value → Prop) :
     EnsuresOutcome program method pre post (fun _ _ => none) ↔ Ensures program method pre post := .rfl
 
-/-! Unsupported execution, invalid state, fuel exhaustion, normal return and another exception never discharge an expected one. -/
+/-! Unsupported execution, invalid state, fuel exhaustion, normal return and another exception
+    never discharge an expected one. All but unsupported execution also refute it; the model
+    does not cover a run that reaches a hole. -/
 
 @[cil_code] def stuck : CIL.Method :=
   { returnsValue := false, locals := [], code := [.unadmitted 0] }
@@ -45,10 +47,14 @@ example (program : CIL.Program) (method : Nat) (pre : List Value → Memory → 
 
 variable (post : Memory → List Value → Prop) (frame : Frame) (m : Memory)
 
-example : ¬ LoopOutcome [stuck] 0 [] post (some "System.InvalidOperationException") ⟨0, frame, [], m⟩ :=
-  loop_outcome_some_refuted (fuel := 1)
-    (outcome := .error ⟨0, 0, .unsupported "Opcode not admitted"⟩) rfl
-    (by simp [Settled]) (by rintro _ ⟨⟩; simp)
+/-- The hole's fault is not settled, so `loop_outcome_some_refuted` takes no run that reaches
+    it. -/
+theorem stuck_refutes_nothing :
+    run [stuck] 1 0 0 [] frame [] m = .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ ∧
+      ¬ Settled (.error ⟨0, 0, .unsupported "Opcode not admitted"⟩ :
+        Except LocatedFault (Memory × List Value)) :=
+  ⟨rfl, by decide⟩
+#print axioms stuck_refutes_nothing
 
 /-- A pc past the body is invalid state. -/
 example : ¬ LoopOutcome [stuck] 0 [] post (some "System.InvalidOperationException") ⟨1, frame, [], m⟩ :=

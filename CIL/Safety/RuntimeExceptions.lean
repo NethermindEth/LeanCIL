@@ -53,7 +53,7 @@ theorem RaisesCLR.of_invoke {program : CIL.Program} {fuel method : Nat} {args : 
   ⟨fuel, fault, invoked, named⟩
 
 /-- A settled invocation result that names a different exception, or none, refutes
-    `RaisesCLR`. -/
+    `RaisesCLR`. An `unsupported` fault is not settled, so it refutes no expected exception. -/
 theorem RaisesCLR.not_of_invoke {program : CIL.Program} {fuel method : Nat} {args : List Value}
     {memory : Memory} {fault : LocatedFault} {exception : String}
     (settled : Settled (.error fault : Except LocatedFault (Memory × List Value)))

@@ -3,20 +3,40 @@ import CIL.Safety.Execution
 /-!
 # More fuel never changes a settled outcome
 
-Fuel only bounds how long the checked interpreter may run. Once a run succeeds or fails with
-any fault other than `fuelExhausted`, giving it more fuel yields the same outcome
-(`run_mono`, `invoke_mono`). Consequently a semantic fault found at one fuel budget refutes
-success at every budget (`invoke_fault_refutes_success`).
+Fuel only bounds how long the checked interpreter may run. Once a run succeeds or fails with a
+definite fault, giving it more fuel yields the same outcome (`run_mono`, `invoke_mono`).
+Consequently a definite fault found at one fuel budget refutes success at every budget
+(`invoke_fault_refutes_success`). Fuel exhaustion and `unsupported` faults are not definite:
+the first stops a run early and the second marks an operation the model does not cover, so
+neither is evidence about the method and no lemma here concludes anything from one.
 -/
 
 namespace CIL.Safety
 
-/-- An outcome that more fuel cannot change: a success, or any fault except running out of
-    fuel. -/
+/-- Whether a fault is an outcome of the method itself. Running out of fuel and an operation the
+    model does not cover (`unsupported`) are not: a longer or a more complete run could go on. -/
+@[simp] def ExecutionFault.definite : ExecutionFault → Bool
+  | .arithmetic _ => true
+  | .memory .. => true
+  | .invalidState => true
+  | .unsupported _ => false
+  | .thrown _ => true
+  | .fuelExhausted => false
+  | .stackAllocationFailure .. => true
+  | .allocationFailure .. => true
+
+/-- An outcome that stands as evidence about the method and that more fuel cannot change: a
+    success, or a definite fault. Every refutation lemma takes it, so a run that reaches an
+    `unsupported` operation refutes nothing. -/
 def Settled (outcome : Except LocatedFault α) : Prop :=
   match outcome with
   | .ok _ => True
-  | .error fault => fault.fault ≠ .fuelExhausted
+  | .error fault => fault.fault.definite = true
+
+instance (outcome : Except LocatedFault α) : Decidable (Settled outcome) :=
+  match outcome with
+  | .ok _ => isTrue trivial
+  | .error fault => inferInstanceAs (Decidable (fault.fault.definite = true))
 
 section
 
@@ -156,17 +176,17 @@ theorem invoke_mono (program : CIL.Program) (fuel extra method : Nat)
         simpa [invoke, hb, ha, he, Bind.bind, Except.bind, Except.mapError] using
           run_mono program fuel extra method 0 arguments frame [] updated outcome ready h
 
-/-- A classified semantic fault refutes successful execution for every fuel,
-    not merely the concrete budget used to exhibit the fault. -/
+/-- A definite fault refutes successful execution for every fuel, not merely the concrete
+    budget used to exhibit the fault. -/
 theorem invoke_fault_refutes_success (program : CIL.Program) (observed method : Nat)
     (args : List Value) (memory : Memory) (fault : LocatedFault)
-    (semantic : fault.fault ≠ .fuelExhausted)
+    (definite : fault.fault.definite = true)
     (witness : invoke program observed method args memory = .error fault)
     (fuel : Nat) (result : Memory × List Value) :
     invoke program fuel method args memory ≠ .ok result := by
   intro success
   have failure :=
-    invoke_mono program observed fuel method args memory (.error fault) semantic witness
+    invoke_mono program observed fuel method args memory (.error fault) definite witness
   have returned := invoke_mono program fuel observed method args memory (.ok result) trivial success
   rw [Nat.add_comm] at returned
   rw [failure] at returned

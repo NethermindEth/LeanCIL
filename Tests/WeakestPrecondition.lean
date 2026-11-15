@@ -127,4 +127,25 @@ theorem missing_argument_refutes_contract :
 
 #print axioms missing_argument_refutes_contract
 
+/-- `ldc.i4.1; newarr object; pop; ret` as the decoder gives it: `newarr` is a hole. On the CLR
+    the method returns normally, so it meets `returnContract`. -/
+@[cil_code] def newarrHole : CIL.Method :=
+  { locals := [], code := [.ldc_i4 1, .unadmitted 0x8D, .pop, .ret], returnsValue := false }
+
+/-- The run faults at the hole, and that fault is not definite, so `not_holds_of_fault` cannot
+    refute `returnContract` from it. -/
+theorem hole_refutes_nothing :
+    invoke [newarrHole] 4 0 [] Memory.empty = .error ⟨0, 1, .unsupported "Opcode not admitted"⟩ ∧
+      (ExecutionFault.unsupported "Opcode not admitted").definite = false :=
+  ⟨rfl, rfl⟩
+
+#print axioms hole_refutes_nothing
+
+-- Stepping stops at pc 1, the hole, so no proof that the method returns goes through either.
+/-- run [newarrHole] fuel 0 1 [] -/
+#guard_msgs (substring := true) in
+example : returnContract.Holds [newarrHole] 0 := by
+  intro _ initial _
+  cil_contract_steps []
+
 end Tests.WeakestPrecondition

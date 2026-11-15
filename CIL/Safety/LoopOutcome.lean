@@ -153,7 +153,7 @@ theorem loop_outcome_throw {program : CIL.Program} {method pc : Nat}
   run_throw_raises methodFound instructionFound stepped
 
 /-- A run that settles at any fuel without throwing `exception` refutes that outcome;
-    exhaustion is not settled. -/
+    neither exhaustion nor an `unsupported` fault is settled. -/
 theorem loop_outcome_some_refuted {program : CIL.Program} {fuel method pc : Nat}
     {args stack : List Value}
     {frame : Frame} {memory : Memory} {post : Memory → List Value → Prop} {exception : String}

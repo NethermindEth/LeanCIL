@@ -100,14 +100,15 @@ theorem memory_faults_never_named (rule : Fault) (reference : ManagedReference) 
     (exception : String) : ExecutionFault.clrException (.memory rule reference width) ≠ some exception := by
   simp [ExecutionFault.clrException]
 
-theorem unsupported_never_named (exception : String) :
-    ¬ RaisesCLR [{ code := [.unadmitted 0], locals := [], returnsValue := false }] 0 [] empty
-      exception := by
-  apply RaisesCLR.not_of_invoke (fuel := 1)
-    (fault := ⟨0, 0, .unsupported "Opcode not admitted"⟩)
-  · simp [Settled]
-  · rfl
-  · simp [ExecutionFault.clrException]
+/-- A hole's fault names no exception and is not settled, so `RaisesCLR.not_of_invoke` cannot use
+    it: a run that reaches a hole neither raises nor refutes an expected exception. -/
+theorem unsupported_refutes_nothing :
+    invoke [{ code := [.unadmitted 0], locals := [], returnsValue := false }] 1 0 [] empty =
+        .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ ∧
+      ExecutionFault.clrException (.unsupported "Opcode not admitted") = none ∧
+      ¬ Settled (.error ⟨0, 0, .unsupported "Opcode not admitted"⟩ :
+        Except LocatedFault (Memory × List Value)) :=
+  ⟨rfl, rfl, by decide⟩
 
 theorem invalid_state_never_named (exception : String) : ¬ RaisesCLR [] 0 [] empty exception := by
   apply RaisesCLR.not_of_invoke (fuel := 1) (fault := ⟨0, 0, .invalidState⟩)
@@ -122,7 +123,7 @@ theorem thrown_still_named (exception : String) :
 #print axioms named_outcomes
 #print axioms wrong_outcomes
 #print axioms divide_and_mod_zero
-#print axioms unsupported_never_named
+#print axioms unsupported_refutes_nothing
 #print axioms invalid_state_never_named
 
 end Tests.RuntimeExceptions

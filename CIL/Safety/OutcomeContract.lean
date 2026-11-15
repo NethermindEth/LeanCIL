@@ -87,7 +87,8 @@ theorem OutcomeContract.Holds.normal {Input Output : Type} {c : OutcomeContract 
   fun input initial permitted =>
     WP.adequate.mpr (holds.returning permitted (never input initial permitted))
 
-/-- Successful or raised invocations agree at every fuel, so a computed run refutes a contract. -/
+/-- Settled invocations agree at every fuel, so a computed settled run refutes a contract; a run
+    that ends in fuel exhaustion or an `unsupported` fault is not settled and refutes nothing. -/
 theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : List Value}
     {memory : Memory} {first second : Except LocatedFault (Memory × List Value)}
     (firstSettled : Settled first) (secondSettled : Settled second)
