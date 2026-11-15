@@ -14,15 +14,15 @@ the extractor prunes the branches they decide. `FeatureFlowValid` checks that pr
 abstract interpretation tracks known 32-bit words on the stack and in eligible locals, its
 transfer function and successor edges are recomputed here from the raw body, and the
 extractor's per-pc certificate must be closed under them. Only pcs the certificate reaches
-may be live; every other emitted instruction must be an `.unsupported` hole.
+may be live; every other emitted instruction must be a hole (`.unadmitted`).
 
 The same pass binds each raw instruction to its emitted counterpart, exactly for control
 flow, locals and feature tests, and by stack effect for everything else.
 
 A parameterless static Boolean call pushes the word `constantReturn` reads from the callee's own
 certificate, which the whole-program obligation validates alongside the caller's. Known words
-only decide which pcs are live, and every pc they rule out is emitted as an `.unsupported` hole
-that has no step. A wrong claim, cyclic or not, therefore sends execution into a hole that faults:
+only decide which pcs are live, and every pc they rule out is emitted as a hole, whose step
+faults. A wrong claim, cyclic or not, therefore sends execution into a hole that faults:
 it cannot make a successful outcome provable, only unreachable.
 -/
 
@@ -515,7 +515,7 @@ private def fallbackFeatureEffect (instruction : RawInstruction) (emitted : Inst
 
 /-- Bind every control-flow operation and every operation that propagates a known
     feature fact to the actual emitted instruction. Unknown operations may not
-    emit an unsupported hole on a reachable path. -/
+    emit a hole on a reachable path. -/
 def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     (instruction : RawInstruction) (emitted : Instruction) : Bool :=
     Id.run do
@@ -589,7 +589,7 @@ def featureOpMatches (layouts : Array RawLayout) (raw : RawMethod)
     | 69, .targets x, .switch y => x == y
     | 42, _, .ret => true
     -- No other raw instruction may emit control flow, a feature test or a hole.
-    | _, _, .unsupported _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
+    | _, _, .unadmitted _ | _, _, .throw _ | _, _, .feature _ | _, _, .br _ | _, _, .switch _
     | _, _, .brfalse _ | _, _, .brtrue _ => false
     | opcode, _, _ => !(opcode ∈ [37, 95, 96, 97, 42] ||
         (65025 <= opcode && opcode <= 65029) || (43 <= opcode && opcode <= 69)) &&
@@ -639,7 +639,7 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
     (certificate : Nat → Option (Option (FeatureFacts Locals)))
     (roles : Nat → Option (Option FoldRole)) :
     (RawInstruction × Option FoldRole) × Nat → Option (FeatureFacts Locals) → Instruction → Bool
-  | _, none, .unsupported _ => true
+  | _, none, .unadmitted _ => true
   | ((instruction, role), pc), some state, emitted =>
     wellShaped raw facts state &&
       featureOpMatchesAt layouts raw role instruction emitted &&
@@ -663,7 +663,7 @@ private def checkFeatureSiteWith {Locals : Type} (layouts : Array RawLayout)
   | _, none, _ => false
 
 /-- No optional sites: entry, every raw PC, the entire parameter-reachability mask,
-    every successor, and all unsupported holes are covered. The entry state has no known fact.
+    every successor, and all holes are covered. The entry state has no known fact.
     `constants` gives, by emitted method index, the word a parameterless call to that method
     pushes. -/
 def FeatureFlowValid (layouts : Array RawLayout) (constants : Nat → Option W32)

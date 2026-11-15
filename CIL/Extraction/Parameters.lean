@@ -180,7 +180,7 @@ theorem argumentHomeIndex_get (homes : List Nat) (offset index : Nat) :
 def validateArgumentOpAt (localCount : Nat) (argumentAt : Nat → Option StorageType)
     (homeAt : Nat → Option Nat)
     (operation : ArgumentOp) (live : Bool) (emitted : Instruction) : Bool :=
-  if !live then match emitted with | .unsupported _ => true | _ => false
+  if !live then match emitted with | .unadmitted _ => true | _ => false
   else match operation with
   | .load index => (do
       let _ ← argumentAt index

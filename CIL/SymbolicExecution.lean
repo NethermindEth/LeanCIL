@@ -23,10 +23,10 @@ theorem fin_mk_ofNat {n k : Nat} [NeZero n] (bound : k < n) :
   simp [Fin.val_ofNat, Nat.mod_eq_of_lt bound]
 
 /-- A candidate fuel budget for the selected method and later callees: one more than their
-    supported instruction count. Each execution proof establishes that it suffices. -/
+    instruction count, holes excluded. Each execution proof establishes that it suffices. -/
 def executionBound (program : Program) (method : Nat) : Nat :=
   (program.drop method).foldl (fun total body => total +
-    (body.code.filter fun op => match op with | .unsupported _ => false | _ => true).length) 0 + 1
+    (body.code.filter fun op => match op with | .unadmitted _ => false | _ => true).length) 0 + 1
 
 open Lean Elab Command in
 /-- `if_extracted name { commands }` elaborates a summary candidate when `name` exists. It is

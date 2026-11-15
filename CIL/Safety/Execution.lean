@@ -270,6 +270,8 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let value ← (CIL.convertInteger target.width target.signed true x).mapError
       ExecutionFault.arithmetic
     return .next (pc + 1) ((← checkedValue m (.scalar value)) :: rest) frame m
+  -- A hole faults on every stack.
+  | .unadmitted _, _ => .error (.unsupported "Opcode not admitted")
   | _, _ =>
   match op, stack with
   | .managed operation, _ => managedStep operation pc frame stack m

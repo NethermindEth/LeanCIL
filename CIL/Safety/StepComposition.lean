@@ -99,6 +99,14 @@ theorem step_ldarg_home_eq (index : Nat) (stack : List Value) (slot : Nat)
 
 #print axioms step_ret_eq
 
+/-- A hole faults on every stack, before reading the frame or memory. -/
+@[cil_step] theorem step_unadmitted (opcode : Nat) (stack : List Value) :
+    step body (.unadmitted opcode) pc args frame stack memory =
+      .error (.unsupported "Opcode not admitted") :=
+  id rfl
+
+#print axioms step_unadmitted
+
 /-- A plain return validates the declared number of result values. -/
 @[cil_step] theorem returnFrom_none_eq (returnsValue : Bool) (stack : List Value) :
     returnFrom none returnsValue stack memory =

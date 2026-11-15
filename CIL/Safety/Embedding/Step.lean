@@ -418,10 +418,9 @@ theorem step_relabel_ret : StepRelabel .ret := by
 
 #print axioms step_relabel_ret
 
-theorem step_relabel_unsupported (description : String) :
-    StepRelabel (.unsupported description) := by
-  plain_cases
-  fallback_vacuous
+theorem step_relabel_unadmitted (opcode : Nat) : StepRelabel (.unadmitted opcode) := by
+  explicit_intro
+  cases h
 
 theorem step_relabel_throw (exception : String) : StepRelabel (.throw exception) := by
   explicit_intro
@@ -667,7 +666,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case memory operation => exact step_relabel_memory operation
   case ret => exact step_relabel_ret
   case throw exception => exact step_relabel_throw exception
-  case unsupported description => exact step_relabel_unsupported description
+  case unadmitted opcode => exact step_relabel_unadmitted opcode
   case add => exact step_relabel_add
   case sub => exact step_relabel_sub
   case clt_un => exact step_relabel_clt_un
@@ -1220,9 +1219,9 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case throw =>
     explicit_intro
     exact h
-  case unsupported =>
-    plain_cases
-    fallback_raise_vacuous
+  case unadmitted =>
+    explicit_intro
+    exact h
   case add => exact step_raise_add
   case sub => exact step_raise_sub
   case clt_un => exact step_raise_clt_un
