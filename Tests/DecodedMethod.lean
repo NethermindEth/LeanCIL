@@ -1,5 +1,7 @@
 import CIL.Extraction.DecodedDefinition
 import CIL.InstructionEquations
+import CIL.Safety.ResolutionFacts
+import CIL.Safety.SymbolicExecution
 import Tests.BodyEncoding
 import Tests.MetadataWorld
 
@@ -146,10 +148,10 @@ theorem program_needs_every_method :
 
 /-- The profile the decoded definitions below are evaluated under; a named constant passed to
     the decoder stays named in the method. -/
-def testProfile : FeatureProfile := .scalar
+@[cil_code] def testProfile : FeatureProfile := .scalar
 
 /-- The layouts the decoded definitions below are evaluated under. -/
-def testEnvironment : LayoutEnvironment := {}
+@[cil_code] def testEnvironment : LayoutEnvironment := {}
 
 /-- `ldarg.0; ldarg.1; add; ldc.i4.m1; add; ret` over two `uint32` parameters. -/
 private def sumRaw : RawMethod :=
@@ -170,7 +172,13 @@ example : sumMethod =
 /-- info: Tests.DecodedMethod.sumMethod_decoded :
   Method.ofRaw? testProfile testEnvironment sumRaw [] = some sumMethod -/
 #guard_msgs (whitespace := lax) in #check sumMethod_decoded
-#print axioms sumMethod_decoded
+
+-- The kernel proves the decoded fact and the field facts by reduction, with no other axiom.
+/-- info: 'Tests.DecodedMethod.sumMethod_decoded' depends on axioms:
+  [propext, Classical.choice, Quot.sound] -/
+#guard_msgs (whitespace := lax) in #print axioms sumMethod_decoded
+/-- info: 'Tests.DecodedMethod.sumMethod_profile' does not depend on any axioms -/
+#guard_msgs in #print axioms sumMethod_profile
 
 -- Stepping reads each instruction as a constructor over numerals, a negative constant included.
 /-- info: Tests.DecodedMethod.sumMethod_instruction3 :
@@ -186,5 +194,65 @@ example : sumMethod =
   Method.ofRaw? testProfile testEnvironment newarrRaw [] -/
 #guard_msgs (whitespace := lax) in
 cil_decoded_method newarrMethod := Method.ofRaw? testProfile testEnvironment newarrRaw []
+
+-- A decoder with a hole is not evaluated.
+/-- error: cil_decoded_method: the decoder must be a closed term
+  Method.ofRaw? ?m.1 testEnvironment sumRaw [] -/
+#guard_msgs (whitespace := lax) in
+cil_decoded_method openMethod := Method.ofRaw? _ testEnvironment sumRaw []
+
+/-- A number the kernel cannot reduce; compiled code evaluates it to its default. -/
+opaque stuckIndex : Nat
+
+/-- A list the kernel cannot reduce; compiled code evaluates it to its default. -/
+opaque stuckLocals : List Value
+
+/-- An empty method under the given profile and layouts with the given locals and opaque vector
+    locals, a decoder whose fields the kernel may not reduce. -/
+private def emptyMethod (profile : FeatureProfile) (environment : LayoutEnvironment)
+    (locals : List Value) (opaqueVectorLocals : List Nat) : Option Method :=
+  some { code := [], locals, returnsValue := false, opaqueVectorLocals, profile, environment }
+
+-- A value the kernel does not reduce to the evaluated literal is refused, never kept unreduced.
+/-- error: cil_decoded_method: the kernel does not reduce both sides of
+  Tests.DecodedMethod.stuckIndexMethod_decoded to one term -/
+#guard_msgs (whitespace := lax) in
+cil_decoded_method stuckIndexMethod := emptyMethod testProfile testEnvironment [] [stuckIndex]
+
+-- A constant passed to the decoder is written by name, so the opaque list is passed inside a term.
+/-- error: cil_decoded_method: the kernel does not reduce both sides of
+  Tests.DecodedMethod.stuckLocalsMethod_decoded to one term -/
+#guard_msgs (whitespace := lax) in
+cil_decoded_method stuckLocalsMethod :=
+  emptyMethod testProfile testEnvironment (stuckLocals ++ []) []
+
+/-- `ldarg.0; stloc.0; br 7; ldloc.0; ldc.i4.1; sub; stloc.0; ldloc.0; brtrue 3; ldloc.0; ret`:
+    a `uint32` count copied to an initialized local and decremented to zero. -/
+private def countdownRaw : RawMethod :=
+  { method true [uint32] [instr 0 2, instr 1 10, instr 2 0x2B (.target 7), instr 3 6,
+      instr 4 0x17, instr 5 0x59, instr 6 10, instr 7 6, instr 8 0x2D (.target 3), instr 9 6,
+      instr 10 0x2A]
+    with parameters := [uint32], returnType := uint32 }
+
+cil_decoded_method countdownMethod := Method.ofRaw? testProfile testEnvironment countdownRaw []
+cil_instruction_equations countdownMethod
+cil_resolution_facts countdownMethod
+
+-- The frame facts hold the decoded local, initialized by the body's flag.
+/-- info: Tests.DecodedMethod.countdownMethod_locals : countdownMethod.locals = [Value.i32 0] -/
+#guard_msgs in #check countdownMethod_locals
+/-- info: Tests.DecodedMethod.countdownMethod_localKinds :
+  countdownMethod.localKinds = [LocalKind.word32] -/
+#guard_msgs (whitespace := lax) in #check countdownMethod_localKinds
+
+cil_resolution_facts sumMethod
+
+/-- Stepping reads the decoded definition through its `cil_code` facts: the sum of the two
+    arguments and the constant `-1`, with memory unchanged. -/
+theorem sum_returns (memory : Safety.Memory) (left right : W32) :
+    ∃ fuel, Safety.invoke [sumMethod] fuel 0 [.scalar (.i32 left), .scalar (.i32 right)] memory =
+      .ok (memory, [.scalar (.i32 (left + right + 0xFFFFFFFF))]) := by
+  cil_checked_steps
+#print axioms sum_returns
 
 end Tests.DecodedMethod
