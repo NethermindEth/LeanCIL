@@ -50,10 +50,11 @@ Console.WriteLine($"PASS the extractor's {table.Length} decoded opcodes are thos
 // out, so a body of decoded opcodes with an unreachable tail must keep its literal and still build.
 var deadDirectory = Path.Combine(directory, "UnreachableTail");
 Directory.CreateDirectory(deadDirectory);
-var deadAssembly = Path.Combine(deadDirectory, "UnreachableTail.dll");
-using (var module = Mono.Cecil.ModuleDefinition.CreateModule("UnreachableTail", Mono.Cecil.ModuleKind.Dll))
+var deadAssembly = Path.Combine(deadDirectory, "Examples.dll");
+// The examples assembly carries the identity and target framework extraction admits.
+using (var module = Mono.Cecil.ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Examples.dll")))
 {
-    var owner = new Mono.Cecil.TypeDefinition("", "UnreachableTail", Mono.Cecil.TypeAttributes.Public |
+    var owner = new Mono.Cecil.TypeDefinition("Examples", "UnreachableTail", Mono.Cecil.TypeAttributes.Public |
         Mono.Cecil.TypeAttributes.Abstract | Mono.Cecil.TypeAttributes.Sealed, module.TypeSystem.Object);
     module.Types.Add(owner);
     var method = new Mono.Cecil.MethodDefinition("One",
