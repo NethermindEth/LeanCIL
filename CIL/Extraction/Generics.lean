@@ -498,14 +498,12 @@ def managedIndirectMatches (methods : Nat → Option SpecializedMethod)
       | none => false
   | _ => false
 
-/-- `link` is what the method's link table gives this pc, and it must be the link the instruction
-    implies, live or not: a key sits only at a call-family pc and each call-family pc has one.
-    Every live managed call must select the independently instantiated definition with the exact
-    substituted type arguments and signature; an external one, a matching import slot. -/
+/-- Every live managed call must select the independently instantiated definition
+with the exact substituted type arguments and signature; an external one, a matching import slot. -/
 def validateManagedCallWith (methodCount : Nat)
     (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
-    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
-  link == emitted.link? && (if !live then true else
+    (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
+  if !live then true else
   match emitted with
   | .managed (.address target signature) => managedAddressMatches methods raw target signature
   | .managed (.call signature catalog _) => managedIndirectMatches methods raw signature catalog
@@ -549,7 +547,15 @@ def validateManagedCallWith (methodCount : Nat)
   | .indirectCall .. => false
   | _ => match emitted with
     | .call .. | .callInstance .. | .tailCall .. | .newAggregate .. | .newObject .. => false
-    | _ => true)
+    | _ => true
+
+/-- `link` is what the method's link table gives this pc. It must be the link the instruction
+    implies, live or not, so a key sits only at a call-family pc and each call-family pc has one,
+    and the instruction must pass `validateManagedCallWith`. -/
+def validateLinkedCallWith (methodCount : Nat)
+    (methods : Nat → Option SpecializedMethod) (imports : Nat → Option ImportSlot)
+    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
+  link == emitted.link? && validateManagedCallWith methodCount methods imports raw live emitted
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
 def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
@@ -558,8 +564,8 @@ def validateImportCall (methods : List SpecializedMethod) (imports : List Import
 
 /-- The call rule stated against the original lists for use in semantic consequences. -/
 def validateManagedCall (methods : List SpecializedMethod) (imports : List ImportSlot)
-    (raw : RawInstruction) (live : Bool) (link : Option Link) (emitted : Instruction) : Bool :=
-  validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live link emitted
+    (raw : RawInstruction) (live : Bool) (emitted : Instruction) : Bool :=
+  validateManagedCallWith methods.length (methods[·]?) (imports[·]?) raw live emitted
 
 /-- The emitted link table's keys ascend and are pcs of the emitted code, and each pc is checked
     with the link the table gives it, read by one walk beside the code; so the table gives every
@@ -572,7 +578,7 @@ def ManagedCallsValid (methods : List SpecializedMethod) (imports : List ImportS
   keysAscend 0 emitted.links = true ∧
   emitted.links.all (fun entry => decide (entry.1 < emitted.code.length)) = true ∧
   raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-  all3 (fun instruction (live, link) op => validateManagedCallWith methods.length
+  all3 (fun instruction (live, link) op => validateLinkedCallWith methods.length
       (FlowIndex.ofList methods).get? (FlowIndex.ofList imports).get? instruction live link op)
     raw.code (reachable.zip (linkWalk emitted.links emitted.links 0
       (List.range emitted.code.length))) emitted.code = true
@@ -585,18 +591,22 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
     ManagedCallsValid methods imports raw reachable emitted ↔
       emitted.links = linksOfCode emitted.code ∧
       raw.code.length = reachable.length ∧ raw.code.length = emitted.code.length ∧
-        all3 (fun instruction live op =>
-          validateManagedCall methods imports instruction live op.link? op)
-          raw.code reachable emitted.code = true := by
+        all3 (validateManagedCall methods imports) raw.code reachable emitted.code = true := by
   have index {α : Type} (values : List α) :
       (FlowIndex.ofList values).get? = (values[·]?) := by
     funext target
     exact FlowIndex.get?_ofList values target
   have compares : ∀ instruction live link op,
-      validateManagedCall methods imports instruction live link op = (link == op.link? &&
-        validateManagedCall methods imports instruction live op.link? op) := by
+      validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) instruction live link op =
+        (link == op.link? && validateLinkedCallWith methods.length (methods[·]?) (imports[·]?)
+          instruction live op.link? op) := by
     intro instruction live link op
-    simp only [validateManagedCall, validateManagedCallWith, beq_self_eq_true, Bool.true_and]
+    simp only [validateLinkedCallWith, beq_self_eq_true, Bool.true_and]
+  have unlinked : ∀ instruction live op,
+      validateLinkedCallWith methods.length (methods[·]?) (imports[·]?) instruction live
+        op.link? op = validateManagedCall methods imports instruction live op := by
+    intro instruction live op
+    simp only [validateLinkedCallWith, validateManagedCall, beq_self_eq_true, Bool.true_and]
   have reads (ascending : keysAscend 0 emitted.links = true) :
       linkWalk emitted.links emitted.links 0 (List.range emitted.code.length) =
         (List.range' 0 emitted.code.length).map (linkLookup emitted.links) := by
@@ -609,7 +619,7 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
     obtain ⟨implied, valid⟩ :=
       (all3_reads_iff _ compares _ 0 _ _ _ statesLength codeLength).mp valid
     rw [← List.range_eq_range', eq_linksOfCode_iff _ _ ascending bounded] at implied
-    exact ⟨implied, statesLength, codeLength, valid⟩
+    exact ⟨implied, statesLength, codeLength, by simpa only [unlinked] using valid⟩
   · rintro ⟨implied, statesLength, codeLength, valid⟩
     have ascending : keysAscend 0 emitted.links = true := by
       rw [implied]
@@ -620,7 +630,8 @@ theorem ManagedCallsValid_iff_original (methods : List SpecializedMethod)
       exact linksOfCode_keys _
     refine ⟨ascending, bounded, statesLength, codeLength, ?_⟩
     rw [reads ascending]
-    refine (all3_reads_iff _ compares _ 0 _ _ _ statesLength codeLength).mpr ⟨?_, valid⟩
+    refine (all3_reads_iff _ compares _ 0 _ _ _ statesLength codeLength).mpr
+      ⟨?_, by simpa only [unlinked] using valid⟩
     rw [← List.range_eq_range', eq_linksOfCode_iff _ _ ascending bounded]
     exact implied
 
@@ -649,23 +660,20 @@ macro "cil_managed_calls" "[" facts:term,* "]" : tactic =>
 theorem validated_managed_call {methods : List SpecializedMethod} {imports : List ImportSlot}
     {raw : RawMethod} {reachable : List Bool} {emitted : Method}
     (valid : ManagedCallsValid methods imports raw reachable emitted) (pc : Fin raw.code.length) :
-    validateManagedCall methods imports raw.code[pc] reachable[pc.val]! (emitted.linkAt pc.val)
+    validateManagedCall methods imports raw.code[pc] reachable[pc.val]!
       (emitted.code[pc.val]?.getD (.unsupported "Missing instruction")) = true := by
   have valid := (ManagedCallsValid_iff_original _ _ _ _ _).mp valid
   have live : pc.val < reachable.length := valid.2.1 ▸ pc.isLt
   have present : pc.val < emitted.code.length := valid.2.2.1 ▸ pc.isLt
-  rw [Method.linkAt_of_implied valid.1, getElem!_pos reachable pc.val live,
-    List.getElem?_eq_getElem present, Option.getD_some, Option.bind_some]
-  exact all3_at (check := fun instruction live op =>
-      validateManagedCall methods imports instruction live op.link? op) valid.2.2.2
-    (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
+  rw [getElem!_pos reachable pc.val live, List.getElem?_eq_getElem present, Option.getD_some]
+  exact all3_at valid.2.2.2 (List.getElem?_eq_getElem pc.isLt) (List.getElem?_eq_getElem live)
     (List.getElem?_eq_getElem present)
 
 /-- An accepted live `call` past every extracted method is an external site calling a slot
     with its identity and arity. -/
 theorem validated_import_call {methods : List SpecializedMethod} {imports : List ImportSlot}
-    {raw : RawInstruction} {link : Option Link} {target count : Nat}
-    (valid : validateManagedCall methods imports raw true link (.call target count) = true)
+    {raw : RawInstruction} {target count : Nat}
+    (valid : validateManagedCall methods imports raw true (.call target count) = true)
     (outside : methods.length ≤ target) :
     ∃ site identity slot, raw.operand = .call site ∧ site.target = .external identity ∧
       raw.opcode = 40 ∧ importSignatureMatches slot site = true ∧
@@ -688,8 +696,7 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
     | external identity =>
       simp only [validateManagedCall, validateManagedCallWith, validateImportCallWith,
         Bool.not_true, Bool.false_eq_true,
-        ite_false, Bool.and_eq_true] at valid
-      replace valid := valid.2
+        ite_false] at valid
       cases found : imports[target - methods.length]? with
       | none => simp [found] at valid
       | some slot =>
@@ -701,8 +708,8 @@ theorem validated_import_call {methods : List SpecializedMethod} {imports : List
 
 /-- Every accepted live `call` targets an extracted method or an existing import slot. -/
 theorem validated_call_bound {methods : List SpecializedMethod} {imports : List ImportSlot}
-    {raw : RawInstruction} {link : Option Link} {target count : Nat}
-    (valid : validateManagedCall methods imports raw true link (.call target count) = true) :
+    {raw : RawInstruction} {target count : Nat}
+    (valid : validateManagedCall methods imports raw true (.call target count) = true) :
     target < methods.length + imports.length := by
   by_cases inside : target < methods.length
   · exact Nat.lt_add_right _ inside
