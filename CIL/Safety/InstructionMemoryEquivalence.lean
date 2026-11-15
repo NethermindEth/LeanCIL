@@ -307,6 +307,46 @@ private theorem Memory.Equivalent.objectFieldInstruction {m n : Memory} (same : 
     | split
 #print axioms Memory.Equivalent.objectFieldInstruction
 
+/-- Class field loads locate the same field and read equivalent memories alike. -/
+theorem Memory.Equivalent.classFieldLoad {m n : Memory} (same : m.Equivalent n)
+    (owner : CIL.Extraction.TypeExpr) (offset : Nat) (slot : CIL.ClassSlot)
+    (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (classFieldLoad owner offset slot stack m)
+      (classFieldLoad owner offset slot stack n) := by
+  unfold CIL.Safety.classFieldLoad
+  split <;> try simp only [same.objectFieldAddress, same.loadValue, same.loadSlot,
+    same.loadArraySlot]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | split
+#print axioms Memory.Equivalent.classFieldLoad
+
+/-- Class field stores locate the same field and perform equivalent checked writes. -/
+theorem Memory.Equivalent.classFieldStore {m n : Memory} (same : m.Equivalent n)
+    (owner : CIL.Extraction.TypeExpr) (offset : Nat) (slot : CIL.ClassSlot)
+    (stack : List Value) :
+    ResultEquivalent MemoryFirstEquivalent (classFieldStore owner offset slot stack m)
+      (classFieldStore owner offset slot stack n) := by
+  unfold CIL.Safety.classFieldStore
+  split <;> try simp only [same.objectFieldAddress]
+  all_goals repeat first
+    | exact .error _
+    | exact .ok ⟨same, rfl⟩
+    | (apply ResultEquivalent.bind_same; intro)
+    | (apply ResultEquivalent.bind ((same.write _ _ _).mapError _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeSlot _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | (apply ResultEquivalent.bind (same.storeArraySlot _ _ _)
+       intro left right related
+       exact .ok ⟨related, rfl⟩)
+    | split
+#print axioms Memory.Equivalent.classFieldStore
+
 /-- A string literal loads the same bound object from equivalent memories. -/
 private theorem Memory.Equivalent.stringLiteralInstruction {m n : Memory} (same : m.Equivalent n)
     (text : String) (stack : List Value) :

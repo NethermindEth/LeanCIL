@@ -223,6 +223,13 @@ inductive Instruction where
       of its bases is `type` stays on the stack, as does null; any other object becomes null,
       or throws `System.InvalidCastException` for `castclass`. -/
   | objectTest (type : Extraction.TypeExpr) (throwing : Bool)
+  -- Instance fields, reached as `Method.fieldShape` resolves the field for the body.
+  /-- `ldfld`: replaces the receiver on top of the stack with the value its field holds. -/
+  | ldfld (field : Extraction.FieldRef)
+  /-- `ldflda`: replaces the receiver with its field's address; a class field has none. -/
+  | ldflda (field : Extraction.FieldRef)
+  /-- `stfld`: pops a value and a receiver below it and stores the value into the field. -/
+  | stfld (field : Extraction.FieldRef)
   | skipInit
   /-- Pushes `1` when the method's feature profile has the feature, else `0`. -/
   | feature (id : Feature)

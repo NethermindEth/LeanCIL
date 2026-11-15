@@ -383,6 +383,28 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     | split at executed
 #print axioms managedStep_contract
 
+/-- An instance field load that succeeds preserves checked effects and stack validity. -/
+theorem fieldLoad_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
+    (stack values : List Value) (memory result : Memory)
+    (executed : fieldLoad body field stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold fieldLoad at executed
+  split at executed
+  · exact classFieldLoad_contract _ _ _ _ _ _ _ executed
+  all_goals cases executed
+#print axioms fieldLoad_contract
+
+/-- An instance field store that succeeds preserves checked effects and stack validity. -/
+theorem fieldStore_contract (body : CIL.Method) (field : CIL.Extraction.FieldRef)
+    (stack values : List Value) (memory result : Memory)
+    (executed : fieldStore body field stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold fieldStore at executed
+  split at executed
+  · exact classFieldStore_contract _ _ _ _ _ _ _ executed
+  all_goals cases executed
+#print axioms fieldStore_contract
+
 -- The walk splits every arm of both dispatcher matches, argument homes included.
 set_option maxHeartbeats 400000 in
 /-- Every successful checked step has a `StepContract`. The proof walks every dispatcher arm,
@@ -418,6 +440,11 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
         apply StepContract.instruction
         apply referenceAddInstruction_contract
         assumption
+    | solve |
+        apply StepContract.instruction
+        first
+          | (apply fieldLoad_contract; assumption)
+          | (apply fieldStore_contract; assumption)
     | solve |
         refine StepContract.of_effect ?_ ?_
         · first

@@ -155,7 +155,8 @@ inductive FixedStepFamily where
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newArray _
-  | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
+  | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _
+  | .ldfld _ | .ldflda _ | .stfld _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference

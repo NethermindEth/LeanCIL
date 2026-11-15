@@ -212,6 +212,43 @@ theorem step_ldarga_value_eq (index : Nat) (stack : List Value) (narrow : Option
 
 #print axioms step_localloc_eq
 
+/-- `ldfld` reads the field as the body resolves it, behind the unspecified-bits guard. -/
+theorem step_ldfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.ldfld field) pc args frame stack memory =
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (memory, stack) ← fieldLoad body field stack memory
+        return .next (pc + 1) stack frame memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_ldfld_eq
+
+/-- `stfld` writes the field as the body resolves it, behind the unspecified-bits guard. -/
+theorem step_stfld_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.stfld field) pc args frame stack memory =
+      if unspecifiedOperands 2 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else do
+        let (memory, stack) ← fieldStore body field stack memory
+        return .next (pc + 1) stack frame memory := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_stfld_eq
+
+/-- `ldflda` faults as the body's resolution of the field says, behind the guard. -/
+theorem step_ldflda_eq (field : CIL.Extraction.FieldRef) (stack : List Value) :
+    step body (.ldflda field) pc args frame stack memory =
+      if unspecifiedOperands 1 stack then
+        .error (.unsupported "Instruction observes unspecified vector bits")
+      else .error (fieldAddressFault body field) := by
+  simp only [step, observerCount]
+  rfl
+
+#print axioms step_ldflda_eq
+
 attribute [cil_step] localAllocation
 
 /-- An indirect call through a method pointer enters the body `indirectTarget` selects; a fact

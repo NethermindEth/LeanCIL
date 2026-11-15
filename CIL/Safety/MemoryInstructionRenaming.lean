@@ -741,6 +741,129 @@ private theorem Memory.Renamed.objectFieldInstructionResult {mapping : Allocatio
     | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
 #print axioms Memory.Renamed.objectFieldInstructionResult
 
+/-- Class field loads read the mapped field and leave the related memories as they were. -/
+theorem Memory.Renamed.classFieldLoadResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (owner : CIL.Extraction.TypeExpr)
+    (offset : Nat) (slot : CIL.ClassSlot) (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (classFieldLoad owner offset slot stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (classFieldLoad owner offset slot stack source)
+      (classFieldLoad owner offset slot (stack.map mapping.value) target) := by
+  unfold classFieldLoad at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (related.objectFieldAddress _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound := objectFieldAddress_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.loadValue (.address _) (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.loadSlot formed _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArrayOf _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArraySlot _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
+       have slotBound := referenceArraySlot_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.storableIn _ _ (by assumption)).bind
+       intro first second same
+       subst second)
+    | (apply (related.storeSlot _ (by assumption) _ (by assumption)).bind
+       intro first second memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.loadArraySlot formed _ (by assumption) _).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.storeArraySlot _ (by assumption) _ (by assumption) _).bind
+       intro first second memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
+#print axioms Memory.Renamed.classFieldLoadResult
+
+/-- Class field stores write the mapped field and relate the memories after the write. -/
+theorem Memory.Renamed.classFieldStoreResult {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory}
+    (related : Memory.Renamed mapping scopes source target) (owner : CIL.Extraction.TypeExpr)
+    (offset : Nat) (slot : CIL.ClassSlot) (formed : source.WellFormed)
+    (stack : List Value) (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow (classFieldStore owner offset slot stack source)) :
+    ResultRenamed mapping
+      (fun left right => Memory.Renamed mapping scopes left.1 right.1 ∧
+        right.2 = left.2.map mapping.value)
+      (classFieldStore owner offset slot stack source)
+      (classFieldStore owner offset slot (stack.map mapping.value) target) := by
+  unfold classFieldStore at observable ⊢
+  split at observable
+  all_goals try simp only [List.map_cons, AllocationRenaming.value]
+  all_goals try solve | repeat first | contradiction | cases observable | split at observable
+  all_goals clear observable
+  all_goals simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
+  all_goals repeat' rcases bounds with ⟨_, bounds⟩
+  all_goals repeat first
+    | exact .ok ⟨related, rfl⟩
+    | exact .error _
+    | (apply (related.objectFieldAddress _ (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       have addressBound := objectFieldAddress_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.loadValue (.address _) (by assumption) _ _).bindWithSuccess
+       intro first second sourceStep same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.checkedWrite _ (by assumption) _ _ _ _).bindWithSuccess
+       intro first second sourceStep memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.loadSlot formed _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArrayOf _ (by assumption)).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.referenceArraySlot _ (by assumption) _).bindWithSuccess
+       intro first second sourceStep same
+       have slotBound := referenceArraySlot_below (by assumption) sourceStep
+       subst second)
+    | (apply (related.storableIn _ _ (by assumption)).bind
+       intro first second same
+       subst second)
+    | (apply (related.storeSlot _ (by assumption) _ (by assumption)).bind
+       intro first second memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (apply (related.loadArraySlot formed _ (by assumption) _).bind
+       intro first second same
+       subst second
+       exact .ok ⟨related, rfl⟩)
+    | (apply (related.storeArraySlot _ (by assumption) _ (by assumption) _).bind
+       intro first second memoryRelated
+       exact .ok ⟨memoryRelated, rfl⟩)
+    | (split <;> try simp only [*, AllocationRenaming.managedReference, Bind.bind, Except.bind])
+#print axioms Memory.Renamed.classFieldStoreResult
+
+
 /-- Looking up a renamed literal table gives the renamed binding. -/
 theorem lookup_renamedLiterals (bindings : List (String × Reference))
     (mapping : AllocationRenaming) (text : String) :

@@ -359,6 +359,32 @@ def runModel (body : CIL.Method) (model : CIL.RuntimeModel) (pc : Nat) (frame : 
     | _ :: rest => .ok (.next (pc + 1) rest frame memory)
     | [] => .error (.unsupported "Not a memory instruction")
 
+/-- `ldfld` of `field` as `body` resolves it: a class slot through the receiver. A field outside
+    the checked layouts and class slots faults with its reason, and a value-type field is not
+    reached through this instruction. -/
+def fieldLoad (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match body.fieldShape field with
+  | .classSlot offset slot => classFieldLoad field.owner offset slot stack memory
+  | .unsupported reason => .error (.unsupported reason)
+  | .value .. | .aggregate .. => .error (.unsupported "Value-type field instruction")
+
+/-- `stfld` of `field` as `body` resolves it, faulting as `fieldLoad` does. -/
+def fieldStore (body : CIL.Method) (field : CIL.Extraction.FieldRef) (stack : List Value)
+    (memory : Memory) : ExecutionResult (Memory × List Value) :=
+  match body.fieldShape field with
+  | .classSlot offset slot => classFieldStore field.owner offset slot stack memory
+  | .unsupported reason => .error (.unsupported reason)
+  | .value .. | .aggregate .. => .error (.unsupported "Value-type field instruction")
+
+/-- The fault of `ldflda` of `field` as `body` resolves it: a class field's address is never
+    formed, and a value-type field is not reached through this instruction. -/
+def fieldAddressFault (body : CIL.Method) (field : CIL.Extraction.FieldRef) : ExecutionFault :=
+  match body.fieldShape field with
+  | .classSlot .. => .unsupported "Class field address"
+  | .unsupported reason => .unsupported reason
+  | .value .. | .aggregate .. => .unsupported "Value-type field instruction"
+
 /-- `localloc` of the byte count alone on the stack: fresh storage owned by `frame`, zeroed when
     `initLocals` is set. Any other stack is an invalid state. -/
 def localAllocation (initLocals : Bool) (pc : Nat) (frame : Frame) (stack : List Value)
@@ -377,8 +403,9 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Native table offsets, faulting arithmetic, object identity, argument homes and `localloc`
-  -- are matched apart, so that neither match exceeds the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic, object identity, instance fields, argument homes
+  -- and `localloc` are matched apart, so that neither match exceeds the 79 alternatives `split`
+  -- handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -452,6 +479,14 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .objectTest type throwing, .object value :: rest =>
     let result ← objectTest m type throwing value
     return .next (pc + 1) (.object result :: rest) frame m
+  -- Instance fields, as the body's layout environment resolves them.
+  | .ldfld field, _ =>
+    let (memory, stack) ← fieldLoad body field stack m
+    return .next (pc + 1) stack frame memory
+  | .ldflda field, _ => .error (fieldAddressFault body field)
+  | .stfld field, _ =>
+    let (memory, stack) ← fieldStore body field stack m
+    return .next (pc + 1) stack frame memory
   -- An argument's home is written and addressed as the local slot it is.
   | .starg index, value :: rest =>
     let (frame, memory) ← storeArgument body index value frame m

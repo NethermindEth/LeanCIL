@@ -854,6 +854,32 @@ theorem objectFieldInstruction_contract (operation : CIL.MemoryOp)
     | split at executed
 #print axioms objectFieldInstruction_contract
 
+/-- Class instance field loads preserve checked effects and stack validity. -/
+theorem classFieldLoad_contract (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (slot : CIL.ClassSlot) (stack values : List Value) (memory result : Memory)
+    (executed : classFieldLoad owner offset slot stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold classFieldLoad at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms classFieldLoad_contract
+
+/-- Class instance field stores preserve checked effects and stack validity. -/
+theorem classFieldStore_contract (owner : CIL.Extraction.TypeExpr) (offset : Nat)
+    (slot : CIL.ClassSlot) (stack values : List Value) (memory result : Memory)
+    (executed : classFieldStore owner offset slot stack memory = .ok (result, values)) :
+    InstructionContract memory result stack values := by
+  unfold classFieldStore at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | solve | cases executed; instruction_contract_close
+    | cases executed
+    | split at executed
+#print axioms classFieldStore_contract
+
 /-- A string literal leaves memory unchanged and pushes a formed object reference. -/
 theorem stringLiteralInstruction_contract (text : String)
     (stack values : List Value) (memory result : Memory)

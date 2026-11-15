@@ -59,6 +59,102 @@ theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : Allocatio
     exact .ok (.next memories (frames.extend extension (fun _ _ scope => scope)))
 #print axioms Memory.Renamed.stepMemory
 
+/-- An instance field load reads the related field, which both bodies resolve alike. -/
+theorem Memory.Renamed.stepFieldLoad {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceFormed : source.WellFormed)
+    (sourceBody targetBody : CIL.Method) (metadata : StepMetadata sourceBody targetBody)
+    (field : CIL.Extraction.FieldRef) (pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody (.ldfld field) pc arguments sourceFrame stack source)) :
+    ∃ later, mapping.Extends later ∧
+      ResultRenamed later (FrameAction.Renamed indices later scopes)
+        (step sourceBody (.ldfld field) pc arguments sourceFrame stack source)
+        (step targetBody (.ldfld field) pc (arguments.map mapping.value)
+          targetFrame (stack.map mapping.value) target) := by
+  refine ⟨mapping, .refl mapping, ?_⟩
+  have shape : targetBody.fieldShape field = sourceBody.fieldShape field := by
+    simp only [CIL.Method.fieldShape, metadata.environment]
+  simp only [step_ldfld_eq, mapping.unspecifiedOperands] at observable ⊢
+  split at observable
+  · cases observable
+  · rename_i guard
+    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+    unfold fieldLoad at observable ⊢
+    rw [shape]
+    cases resolved : sourceBody.fieldShape field
+    case classSlot offset slot =>
+      simp only [resolved] at observable ⊢
+      apply (related.classFieldLoadResult field.owner offset slot sourceFormed stack bounds
+        observable.bind_left).bind
+      intro first second result
+      rcases first with ⟨sourceAfter, values⟩
+      rcases second with ⟨targetAfter, targetValues⟩
+      rcases result with ⟨memories, rfl⟩
+      exact .ok (.next memories frames)
+    all_goals simp only [resolved]
+    all_goals exact .error _
+#print axioms Memory.Renamed.stepFieldLoad
+
+/-- An instance field store writes the related field, which both bodies resolve alike. -/
+theorem Memory.Renamed.stepFieldStore {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (sourceFormed : source.WellFormed)
+    (sourceBody targetBody : CIL.Method) (metadata : StepMetadata sourceBody targetBody)
+    (field : CIL.Extraction.FieldRef) (pc : Nat) (arguments stack : List Value)
+    (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit)
+    (observable : SuccessOrThrow
+      (step sourceBody (.stfld field) pc arguments sourceFrame stack source)) :
+    ∃ later, mapping.Extends later ∧
+      ResultRenamed later (FrameAction.Renamed indices later scopes)
+        (step sourceBody (.stfld field) pc arguments sourceFrame stack source)
+        (step targetBody (.stfld field) pc (arguments.map mapping.value)
+          targetFrame (stack.map mapping.value) target) := by
+  refine ⟨mapping, .refl mapping, ?_⟩
+  have shape : targetBody.fieldShape field = sourceBody.fieldShape field := by
+    simp only [CIL.Method.fieldShape, metadata.environment]
+  simp only [step_stfld_eq, mapping.unspecifiedOperands] at observable ⊢
+  split at observable
+  · cases observable
+  · rename_i guard
+    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+    unfold fieldStore at observable ⊢
+    rw [shape]
+    cases resolved : sourceBody.fieldShape field
+    case classSlot offset slot =>
+      simp only [resolved] at observable ⊢
+      apply (related.classFieldStoreResult field.owner offset slot sourceFormed stack bounds
+        observable.bind_left).bind
+      intro first second result
+      rcases first with ⟨sourceAfter, values⟩
+      rcases second with ⟨targetAfter, targetValues⟩
+      rcases result with ⟨memories, rfl⟩
+      exact .ok (.next memories frames)
+    all_goals simp only [resolved]
+    all_goals exact .error _
+#print axioms Memory.Renamed.stepFieldStore
+
+/-- A field address faults alike in both bodies, which resolve the field alike. -/
+theorem Memory.Renamed.stepFieldAddress {indices : LocalIndexMap} {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (sourceBody targetBody : CIL.Method) (metadata : StepMetadata sourceBody targetBody)
+    (field : CIL.Extraction.FieldRef) (pc : Nat) (arguments stack : List Value) :
+    ∃ later, mapping.Extends later ∧
+      ResultRenamed later (FrameAction.Renamed indices later scopes)
+        (step sourceBody (.ldflda field) pc arguments sourceFrame stack source)
+        (step targetBody (.ldflda field) pc (arguments.map mapping.value)
+          targetFrame (stack.map mapping.value) target) := by
+  refine ⟨mapping, .refl mapping, ?_⟩
+  simp only [step_ldflda_eq, mapping.unspecifiedOperands, fieldAddressFault,
+    CIL.Method.fieldShape, metadata.environment]
+  split <;> exact .error _
+#print axioms Memory.Renamed.stepFieldAddress
+
 /-- Stack allocation faults are resource or memory failures, never named CLR exceptions. -/
 theorem allocateStack_not_thrown (memory : Memory) (frame : Frame) (size : Nat)
     (initLocals : Bool) (exception : ExceptionType) :
