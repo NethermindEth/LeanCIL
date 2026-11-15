@@ -22,9 +22,24 @@ if (args.Contains("--indirect-access-only", StringComparer.Ordinal))
     IndirectAccessCosts();
     return;
 }
+if (args.Contains("--call-check-only", StringComparer.Ordinal))
+{
+    CallCheckCosts();
+    return;
+}
+if (args.Contains("--decode-only", StringComparer.Ordinal))
+{
+    DecodeCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
+    return;
+}
+if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
+{
+    IndirectTargetCosts();
     return;
 }
 NativeTableCosts();
@@ -34,6 +49,8 @@ if (args.Contains("--return-evidence-only", StringComparer.Ordinal)) return;
 ReturnResolutionCosts();
 ArgumentResolutionCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
+CallCheckCosts();
+DecodeCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
 BuildLeanTestLibraries("Certificate index, feature getter, layout and home index libraries",
@@ -243,7 +260,7 @@ void ArgumentResolutionCosts()
             var homes = string.Join(", ", slots.Keys.Order().Select(index => $"({index}, .word32)"));
             var signature = $"{{ parameters := [{string.Join(", ", Enumerable.Repeat(Int32Type, size))}] }}";
             var code = string.Join(", ", Enumerable.Range(0, size).Select(index =>
-                slots.TryGetValue(index, out var slot) ? $".ldloc {slot}, .pop" : $".arg {index}, .pop")) + ", .ret";
+                slots.TryGetValue(index, out var slot) ? $".ldloc {slot}, .pop" : $".ldarg {index}, .pop")) + ", .ret";
             var accesses = string.Join(", ", Enumerable.Range(0, size).Select(index =>
                 slots.TryGetValue(index, out var slot) ? $".home {slot}" : ".value none"));
             var reads = string.Join(", ", Enumerable.Range(0, size).Select(index => $"body.argumentAccess {index}"));
@@ -295,6 +312,65 @@ void ArgumentResolutionCosts()
     }
 }
 
+// Decides the managed-call check on bodies of call and nop pairs with the extractor's literal table; a per-pc table
+// scan costs the square of the call sites.
+void CallCheckCosts()
+{
+    var checkDirectory = At("artifacts/LookupScaling/CallCheck");
+    Directory.CreateDirectory(checkDirectory);
+    var samples = new List<(int Sites, long Cost)>();
+    foreach (var sites in new[] { 64, 256, 1024 })
+    {
+        var pcs = Enumerable.Range(0, sites).Select(site => 2 * site).ToArray();
+        var raw = string.Join(", ", pcs.Select(_ => "site, ⟨0, 0, .none⟩"));
+        var code = string.Join(", ", pcs.Select(_ => ".call 0 0, .nop"));
+        var links = string.Join(", ", pcs.Select(pc => $"({pc}, .direct 0)"));
+        var statement = $"ManagedCallsValid [⟨[], callee⟩] [] raw (List.replicate {2 * sites} true) body";
+        var source = $$"""
+            import CIL.Extraction.Generics
+            open CIL CIL.Extraction Lean Elab Command
+            set_option maxRecDepth 65536
+            set_option maxHeartbeats 0
+            /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+            elab "#call_check_cost " command:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand command
+              let after <- IO.getNumHeartbeats
+              logInfo m!"call check {after - before} heartbeats"
+            def callee : RawMethod := {
+              token := 1, owner := "Tests::Scaling", hasThis := false, explicitThis := false,
+              callingConvention := 0, attributes := 0, implementation := 0,
+              returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
+              genericParameters := [], code := [] }
+            def site : RawInstruction := ⟨0, 40, .call {
+              declaringType := .atom "Tests" "Scaling", target := .managed 1, typeArguments := [],
+              parameterCount := 0, hasThis := false, returnsValue := false, returnType := .void,
+              parameterTypes := [] }⟩
+            def raw : RawMethod := { callee with code := [{{raw}}] }
+            def body : Method := { locals := [], returnsValue := false, code := [{{code}}], links := [{{links}}] }
+            #call_check_cost
+            theorem checked : {{statement}} := by decide +kernel
+            #print axioms checked
+            """ + "\n";
+        var path = Path.Combine(checkDirectory, $"Sites{sites}.lean");
+        File.WriteAllText(path, source);
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        if (output.Contains("sorryAx", StringComparison.Ordinal))
+            throw new InvalidOperationException("The call check cost fixture introduced an unproved theorem.");
+        var cost = LookupPatterns.CallCheck().Match(output);
+        if (!cost.Success) throw new InvalidOperationException("Missing the call check cost: " + output);
+        samples.Add((sites, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perSite = samples.Select(sample => (double)sample.Cost / sample.Sites).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{sample.Sites} = {(double)sample.Cost / sample.Sites:F0}")));
+    if (perSite.Skip(1).Zip(perSite).Any(pair => pair.First > pair.Second * AllowedCallGrowth))
+        throw new InvalidOperationException(
+            $"The managed-call check costs {measured} heartbeats per call site; the limit is {AllowedCallGrowth} " +
+            "times the cost per call site at the size before.");
+    Console.WriteLine($"PASS the managed-call check costs {measured} heartbeats per call site");
+}
+
 // Isolating one validator must also remove generated facts whose signature premises were removed.
 void CheckNarrowedResolution()
 {
@@ -336,6 +412,67 @@ const string KernelCostCommand = """
       let cost : Int := ((after - middle : Nat) : Int) - ((middle - before : Nat) : Int)
       logInfo m!"{label.getString} {cost} heartbeats"
     """;
+
+// The heartbeats `decide +kernel` adds to deciding that every instruction of a body of 500, 2000 and 8000
+// instructions is the one its raw value opcode decodes to. Decoding costs the same at every instruction and a
+// `switch` its targets, so four times the instructions may cost at most `AllowedLocalGrowth` more per instruction.
+void DecodeCosts()
+{
+    var decodeDirectory = At("artifacts/LookupScaling/ValueDecoding");
+    Directory.CreateDirectory(decodeDirectory);
+    // Raw instructions carry distinct offsets, so the kernel decodes each one instead of reusing a cached decode.
+    const int SegmentLength = 10;
+    var samples = new List<(int Instructions, long Cost, long Milliseconds)>();
+    foreach (var instructions in new[] { 500, 2000, 8000 })
+    {
+        var path = Path.Combine(decodeDirectory, $"Instructions{instructions}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.ValueDecoding
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            {{KernelCostCommand}}
+            namespace ValueDecodingCost
+            /-- The raw instructions of one segment: short and long constants, locals, an argument,
+                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
+            def segment (index : Nat) : List RawInstruction :=
+              let start := {{SegmentLength}} * index
+              [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
+                ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
+                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+                ⟨start + 7, 58, .target index⟩,
+                ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
+            /-- The instructions the translator emits for one segment. -/
+            def codeSegment (index : Nat) : List Instruction :=
+              [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
+                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1, .brtrue index,
+                .switch [index, index + 1, index + 2, index + 3], .ret]
+            /-- A body of {{instructions}} raw instructions. -/
+            def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
+            /-- The {{instructions}} emitted instructions of the body. -/
+            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+            #kernel_cost "decode {{instructions}}"
+              (raw.zip code).all (fun pair => valueEncodingMatches pair.1 pair.2) = true
+            end ValueDecodingCost
+            """ + "\n");
+        var package = FixturePackage();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: package);
+        var cost = LookupPatterns.ValueDecoding().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the value decoding cost:\n{output}");
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture),
+            clock.ElapsedMilliseconds));
+    }
+    var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions} ({sample.Milliseconds} ms)")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+        throw new InvalidOperationException(
+            $"Decoding raw value opcodes costs {measured} heartbeats per instruction; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
+    Console.WriteLine($"PASS decoding raw value opcodes costs {measured} heartbeats per instruction");
+}
 
 // The heartbeats `decide +kernel` adds to one `add` of an int32 offset to a native method table of 16, 64 and 256
 // entries and to one load of its first and of its last entry, each table and its storage defined once outside the
@@ -659,9 +796,9 @@ long EmbeddingCost(string name, string definitions)
 string DeadBlocks(int calls) => $$"""
 /-- What an extraction emits for one call followed by a dead block. -/
 def extractedSegment : List Instruction :=
-  [.arg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
+  [.ldarg 0, .call 1 1, .pop, .ret, .unsupported "Unreachable under selected profile"]
 /-- The hand-written segment without the dead block. -/
-def writtenSegment : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+def writtenSegment : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The extraction, whose calls sit at pcs 1, 6, 11 and so on. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
@@ -675,9 +812,9 @@ def written : Method :=
 // second block first, so the pc map descends once at every size.
 string Reordered(int segments) => $$"""
 /-- The block after the head. -/
-def first : List Instruction := [.arg 0, .call 1 1, .pop, .ret]
+def first : List Instruction := [.ldarg 0, .call 1 1, .pop, .ret]
 /-- The block the head branches to. -/
-def second : List Instruction := [.arg 1, .call 2 1, .pop, .ret]
+def second : List Instruction := [.ldarg 1, .call 2 1, .pop, .ret]
 /-- The extraction, with the second block first. -/
 def extraction : Method :=
   { locals := [], returnsValue := false,
@@ -757,7 +894,7 @@ long ComputedLookupCost(int cases)
         import CIL.InstructionEquations
         import CIL.Safety.SymbolicExecution
         open CIL.Safety
-        def segment : List CIL.Instruction := [.arg 0, .arg 1, .add, .nop, .nop, .nop, .nop]
+        def segment : List CIL.Instruction := [.ldarg 0, .ldarg 1, .add, .nop, .nop, .nop, .nop]
         def body : CIL.Method :=
           { locals := [], returnsValue := true,
             code := [.nop] ++ (List.replicate {{cases}} segment).flatten ++ [.ret] }
@@ -1006,6 +1143,47 @@ for (var step = 1; step < spellingLengths.Length; step++)
             FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
 }
 
+// `indirectTarget` selects the body of a `calli` by comparing the pointer's owner with each catalog entry's, and a
+// proof decides it by `cil_kernel_rfl`: the kernel's cost grows with the owner's length and no faster.
+void IndirectTargetCosts()
+{
+    var targetDirectory = At("artifacts/LookupScaling/IndirectTarget");
+    Directory.CreateDirectory(targetDirectory);
+    int[] ownerLengths = [64, 256, 1024];
+    long Selection(int length, bool proved)
+    {
+        var owner = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
+        var identity = $$"""⟨"{{owner}}", 6, []⟩""";
+        var proof = proved ? "by cil_kernel_rfl" : "sorry";
+        var text = $$"""
+            import CIL.Safety.Execution
+            import CIL.Extraction.KernelEquation
+            def signature : CIL.ManagedSignature :=
+              ⟨.atom CIL.Extraction.runtimeScope "System.Int32", [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
+            theorem selected : CIL.Safety.indirectTarget signature [⟨⟨"other", 6, []⟩, 2⟩, ⟨{{identity}}, 1⟩]
+                ⟨signature, some {{identity}}⟩ = some 1 := {{proof}}
+            """;
+        var path = Path.Combine(targetDirectory, $"Owner{length}{(proved ? "Checked" : "Open")}.lean");
+        return Heartbeats(path, text, equations: false);
+    }
+    var costs = ownerLengths.Select(length => (double)(Selection(length, true) - Selection(length, false))).ToArray();
+    for (var step = 1; step < ownerLengths.Length; step++)
+    {
+        var lengthRatio = ownerLengths[step] / (double)ownerLengths[step - 1];
+        var growth = costs[step] / costs[step - 1];
+        Console.WriteLine(FormattableString.Invariant(
+            $"PASS selecting a calli body for an owner of {ownerLengths[step - 1]} and {ownerLengths[step]} bytes: ") +
+            FormattableString.Invariant($"{costs[step - 1]:F0} and {costs[step]:F0} heartbeats, ") +
+            FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
+        if (growth > AllowedSpellingGrowth * lengthRatio)
+            throw new Exception(FormattableString.Invariant(
+                $"Selecting a calli body for an owner of {ownerLengths[step]} bytes costs {growth:F2} times ") +
+                FormattableString.Invariant($"as much as for {ownerLengths[step - 1]}; ") +
+                FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+    }
+}
+IndirectTargetCosts();
+
 // A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
 // its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from
 // depth 8 to 16 is twice the increment from 4 to 8; a quadratic walk makes it four times.
@@ -1075,7 +1253,7 @@ long ArrayAddressCost(bool prefixed, int sites)
         def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
           (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
         def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
-          [.arg 0, .arg 1] ++ (if prefixed then [.nop] else []) ++
+          [.ldarg 0, .ldarg 1] ++ (if prefixed then [.nop] else []) ++
             [.memory (.arrayAddress .signed32 !prefixed), .pop, .br ((index + 1) * width prefixed)]
         def code (prefixed : Bool) (sites : Nat) : List Instruction :=
           (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
@@ -1147,7 +1325,7 @@ void IndirectAccessCosts()
             def states (prefixed : Bool) (sites : Nat) : ScalarCertificate :=
               (List.replicate sites (stateSegment prefixed)).flatten ++ [some []]
             def codeSegment (prefixed : Bool) (index : Nat) : List Instruction :=
-              [.arg 0, .arg 0, .arg 0] ++ (if prefixed then [.nop] else []) ++
+              [.ldarg 0, .ldarg 0, .ldarg 0] ++ (if prefixed then [.nop] else []) ++
                 [.memory (.copyBlock (if prefixed then 1 else 8)), .br ((index + 1) * width prefixed)]
             def code (prefixed : Bool) (sites : Nat) : List Instruction :=
               (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
@@ -1477,6 +1655,9 @@ static partial class LookupPatterns
     [GeneratedRegex(@"resolution (fact|simplifier) ([0-9]+) heartbeats")]
     internal static partial Regex ReturnResolution();
 
+    [GeneratedRegex(@"call check ([0-9]+) heartbeats")]
+    internal static partial Regex CallCheck();
+
     [GeneratedRegex(@"([0-9]+) lemmas rechecked, ([0-9]+) kernel heartbeats")]
     internal static partial Regex EmbeddingRecheck();
 
@@ -1497,4 +1678,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"table load last [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex NativeTableLoadLast();
+
+    [GeneratedRegex(@"decode [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex ValueDecoding();
 }

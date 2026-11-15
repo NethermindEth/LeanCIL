@@ -63,11 +63,53 @@ example : validateManagedCall methods imports (call site) false (.call 0 3) = tr
 
 /-- The whole-method check: the same forged slot is rejected at the only live call. -/
 def caller : RawMethod := { callee with code := [⟨0, 2, .none⟩, ⟨1, 3, .none⟩, ⟨2, 4, .none⟩, ⟨3, 40, .call site⟩, ⟨8, 42, .none⟩] }
-def emitted : Method := { returnsValue := false, locals := [], code := [.arg 0, .arg 1, .arg 2, .call 1 3, .ret] }
+def emitted : Method :=
+  { returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .ldarg 2, .call 1 3, .ret] }
 example : ManagedCallsValid methods imports caller [true, true, true, true, true] emitted := by decide +kernel
 example : ¬ ManagedCallsValid methods [{ slot with identity := "forged" }] caller [true, true, true, true, true] emitted := by decide +kernel
 example : ¬ ManagedCallsValid methods [] caller [true, true, true, true, true] emitted := by decide +kernel
 example : ManagedCallsValid methods [] caller [true, true, true, false, true] emitted := by decide +kernel
+
+/-- Two calls to the slot, at pcs 3 and 7, among nops. -/
+def callerTwice : RawMethod := { callee with code := [⟨0, 0, .none⟩, ⟨1, 0, .none⟩,
+  ⟨2, 0, .none⟩, ⟨3, 40, .call site⟩, ⟨8, 0, .none⟩, ⟨9, 0, .none⟩, ⟨10, 0, .none⟩,
+  ⟨11, 40, .call site⟩, ⟨16, 42, .none⟩] }
+/-- The emitted body of `callerTwice`, whose default table is the one its code implies. -/
+def emittedTwice : Method := {
+  returnsValue := false, locals := [],
+  code := [.nop, .nop, .nop, .call 1 3, .nop, .nop, .nop, .call 1 3, .ret] }
+/-- Every pc of `callerTwice` is live. -/
+def liveTwice : List Bool := List.replicate 9 true
+/-- `emittedTwice` with the link table `links`. -/
+def linkedTwice (links : List (Nat × Link)) : Method := { emittedTwice with links := links }
+
+-- A table is accepted when its keys ascend, sit at the call pcs and give each its call's link.
+example : ManagedCallsValid methods imports callerTwice liveTwice emittedTwice := by
+  decide +kernel
+example : ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (7, .direct 1)]) := by decide +kernel
+-- A table that omits a call pc, even a dead one.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1)]) := by decide +kernel
+example : ¬ ManagedCallsValid methods imports callerTwice (liveTwice.set 7 false)
+    (linkedTwice [(3, .direct 1)]) := by decide +kernel
+-- A key at a pc that is not a call, or past the code.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (5, .direct 1), (7, .direct 1)]) := by decide +kernel
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (7, .direct 1), (9, .direct 1)]) := by decide +kernel
+-- Keys out of order or repeated.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(7, .direct 1), (3, .direct 1)]) := by decide +kernel
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (3, .direct 1), (7, .direct 1)]) := by decide +kernel
+-- Every key sits at a call pc with its call's link, but key 5 follows the larger key 7.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 1), (7, .direct 1), (5, .direct 1)]) := by decide +kernel
+-- A call pc whose link is not the one its instruction implies.
+example : ¬ ManagedCallsValid methods imports callerTwice liveTwice
+    (linkedTwice [(3, .direct 0), (7, .direct 1)]) := by decide +kernel
+
 
 -- The validator's guarantees, not only these instances.
 example (raw : RawInstruction) (target count : Nat) (valid : validateManagedCall methods imports raw true (.call target count) = true) :

@@ -40,7 +40,7 @@ theorem step_store_aggregate {body : CIL.Method} {pc index watermark : Nat}
   refine ⟨result, ?_, written, loaded, value, allocations,
     write_preserves_memory_below _ _ _ _ _ _ privateHome written⟩
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false, slot, stored, unchanged, Bind.bind,
+    Bool.false_eq_true, ite_false, slot, stored, unchanged, Bind.bind,
     Except.bind, Pure.pure, Except.pure]
 
 /-- Loading an aggregate local pushes the bytes its home currently reads. -/
@@ -52,7 +52,7 @@ theorem step_load_aggregate {body : CIL.Method} {pc index : Nat}
     step body (.ldloc index) pc args frame stack memory =
       .ok (.next (pc + 1) (.scalar (.aggregate bytes) :: stack) frame memory) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false, slot, load_local_aggregate_of_read loaded,
+    Bool.false_eq_true, ite_false, slot, load_local_aggregate_of_read loaded,
     Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 #print axioms step_store_aggregate

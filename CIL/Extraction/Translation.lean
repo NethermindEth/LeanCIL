@@ -173,6 +173,112 @@ theorem returnNarrow_of_shape {rawLayouts : List RawLayout}
 
 #print axioms returnNarrow_of_shape
 
+/-- A list an option-valued function maps entirely holds at each index the image of the input
+    there. -/
+private theorem getElem?_of_mapM {α β : Type} {make : α → Option β} :
+    ∀ {inputs : List α} {outputs : List β}, inputs.mapM make = some outputs →
+      ∀ index : Nat, outputs[index]? = inputs[index]?.bind make
+  | [], outputs, made, index => by
+    simp only [List.mapM_nil, Option.pure_def, Option.some.injEq] at made
+    subst made
+    simp
+  | input :: rest, outputs, made, index => by
+    simp only [List.mapM_cons, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      Option.some.injEq] at made
+    obtain ⟨output, first, others, remaining, rfl⟩ := made
+    cases index with
+    | zero => simp [first]
+    | succ index => simp [getElem?_of_mapM remaining index]
+
+/-- A storage native dispatch chooses is a callable that never narrows, for a pointer type,
+    which never narrows either. -/
+private theorem nativeDispatchStorage_narrow (context : NativeDispatchContext) (type : TypeExpr)
+    (storage : StorageType) (chosen : nativeDispatchStorage context type = some storage) :
+    storage.narrow = none ∧ type.narrowCandidate = false := by
+  unfold nativeDispatchStorage at chosen
+  cases signature : context.signature with
+  | none => simp [signature] at chosen
+  | some value =>
+    simp only [signature, Option.bind_eq_bind, Option.bind_some] at chosen
+    cases type <;> simp_all [Option.any, TypeExpr.narrowCandidate] <;>
+      (try split at chosen) <;> simp_all [StorageType.narrow]
+    all_goals (obtain ⟨_, rfl⟩ := chosen; rfl)
+
+/-- The storage a specialization gives a parameter narrows exactly as its declared type does. -/
+theorem parameterStorage_narrow (layouts : List RawLayout) (context : NativeDispatchContext)
+    (type : TypeExpr) (storage : StorageType)
+    (stored : (nativeDispatchStorage context type <|> typeStorage layouts type) = some storage) :
+    storage.narrow = declaredNarrow layouts type := by
+  cases native : nativeDispatchStorage context type with
+  | some chosen =>
+    rw [native] at stored
+    simp only [Option.some.injEq, HOrElse.hOrElse, OrElse.orElse, Option.orElse] at stored
+    subst stored
+    obtain ⟨wide, shape⟩ := nativeDispatchStorage_narrow context type chosen native
+    rw [wide, declaredNarrow_of_not_candidate _ _ shape]
+  | none =>
+    rw [native] at stored
+    simp only [HOrElse.hOrElse, OrElse.orElse, Option.orElse] at stored
+    rw [declaredNarrow_eq_storage, stored]
+    rfl
+
+#print axioms parameterStorage_narrow
+
+/-- Under validated evidence an argument without a home is read narrowed exactly as its raw
+    storage narrows, so `ldarg` reads it as the evidence check's storage says. -/
+theorem argumentAccess_of_evidence {rawLayouts : List RawLayout} {layouts : Array ComputedLayout}
+    {original closed : RawMethod} {typeArguments : List TypeExpr} {raw : RawArguments}
+    {reachable : List Bool} {method : Method} {index : Nat} {type : StorageType}
+    (specialized : SpecializationValid rawLayouts original typeArguments closed raw)
+    (shape : MethodShapeValid closed method)
+    (environment : MethodEnvironmentValid rawLayouts layouts method)
+    (homes : ParameterHomesValid layouts raw reachable method)
+    (unhomed : index ∉ requiredHomeIndices raw reachable)
+    (found : raw.arguments[index]? = some type) :
+    method.argumentAccess index = .value type.narrow := by
+  have absent : method.parameterHomes.findIdx? (fun home => home.1 == index) = none := by
+    rw [homeKeys_findIdx? homes.2.2.2.2.1, List.findIdx?_eq_none_iff]
+    intro required member
+    rw [beq_eq_false_iff_ne]
+    intro same
+    exact unhomed (same ▸ member)
+  have declared := shape.2.2.1
+  change method.environment = _ at environment
+  have closedEq := specialized.2
+  rw [closedArguments_eq_list] at closedEq
+  simp only [closedArgumentsWith, Option.bind_eq_some_iff, bind, pure, Option.some.injEq]
+    at closedEq
+  obtain ⟨parameters, mapped, _, _, _, _, rfl⟩ := closedEq
+  simp only [Method.argumentAccess, absent, declared, environment, DeclaredSignature.ofRaw]
+  congr 1
+  have entry := getElem?_of_mapM mapped
+  by_cases receiver : closed.hasThis
+  · simp only [receiver, ite_true] at found ⊢
+    cases index with
+    | zero =>
+      simp only [List.cons_append, List.getElem?_cons_zero, Option.some.injEq] at found
+      subst found
+      split <;> rfl
+    | succ position =>
+      simp only [List.cons_append, List.getElem?_cons_succ, List.nil_append] at found
+      rw [entry position] at found
+      simp only [DeclaredSignature.argumentType]
+      cases parameter : closed.parameters[position]? with
+      | none => simp [parameter] at found
+      | some declaredType =>
+        simp only [parameter, Option.bind_some] at found ⊢
+        exact (parameterStorage_narrow _ _ _ _ found).symm
+  · simp only [receiver, Bool.false_eq_true, ite_false, List.nil_append] at found ⊢
+    rw [entry index] at found
+    simp only [DeclaredSignature.argumentType]
+    cases parameter : closed.parameters[index]? with
+    | none => simp [parameter] at found
+    | some declaredType =>
+      simp only [parameter, Option.bind_some] at found ⊢
+      exact (parameterStorage_narrow _ _ _ _ found).symm
+
+#print axioms argumentAccess_of_evidence
+
 -- Generated proofs use `rfl`, which unfolds the two shared constants; deciding this instance
 -- compares the layout tables element by element, once per method.
 instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout) (method : Method) :

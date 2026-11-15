@@ -13,11 +13,11 @@ open CIL.Safety
 
 /-- A scalar addition body used to check postconditions against the actual instructions. -/
 @[cil_code] def addBody : CIL.Method :=
-  { locals := [], code := [.arg 0, .arg 1, .add, .ret], returnsValue := true }
+  { locals := [], code := [.ldarg 0, .ldarg 1, .add, .ret], returnsValue := true }
 
 /-- A scalar subtraction body with the same argument and return convention. -/
 @[cil_code] def subtractBody : CIL.Method :=
-  { locals := [], code := [.arg 0, .arg 1, .sub, .ret], returnsValue := true }
+  { locals := [], code := [.ldarg 0, .ldarg 1, .sub, .ret], returnsValue := true }
 
 /-- Addition terminates with wrapping arithmetic and exactly preserves caller memory. -/
 theorem add (memory : Memory) (left right : CIL.W64) :
@@ -119,7 +119,8 @@ def returnContract : MethodContract Unit where
 
 /-- A located missing-argument fault refutes the contract for all fuel budgets. -/
 theorem missing_argument_refutes_contract :
-    ¬ returnContract.Holds [{ locals := [], code := [.arg 0, .ret], returnsValue := false }] 0 := by
+    ¬ returnContract.Holds [{ locals := [], code := [.ldarg 0, .ret], returnsValue := false }]
+      0 := by
   apply returnContract.not_holds_of_fault (input := ()) (initial := Memory.empty)
     (observed := 1) (fault := ⟨0, 0, .invalidState⟩) trivial (by decide)
   rfl

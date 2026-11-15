@@ -22,11 +22,11 @@ def dispatchBody (sse42 avx2 : Bool) (callee : Nat) : CIL.Method :=
   { profile := { sse42, avx2 }, returnsValue := true, locals := [], code := [
     .feature .avx2,
     .brfalse 6,
-    if avx2 then .arg 0 else unreachable,
-    if avx2 then .arg 1 else unreachable,
+    if avx2 then .ldarg 0 else unreachable,
+    if avx2 then .ldarg 1 else unreachable,
     if avx2 then .call callee 2 else unreachable,
     if avx2 then .ret else unreachable,
-    if avx2 then unreachable else if sse42 then .arg 1 else .arg 0,
+    if avx2 then unreachable else if sse42 then .ldarg 1 else .ldarg 0,
     if avx2 then unreachable else .ret] }
 
 cil_instruction_equations dispatchBody
@@ -77,14 +77,14 @@ example (sse42 avx2 : Bool) (callee : Nat) (wide : avx2 = true) :
   ⟨_, by cil_lookup [wide], by with_reducible rfl⟩
 
 example (sse42 avx2 : Bool) (callee : Nat) (scalar : avx2 = false) (narrow : sse42 = true) :
-    ∃ op, (dispatchBody sse42 avx2 callee).code[6]? = some op ∧ op = .arg 1 :=
+    ∃ op, (dispatchBody sse42 avx2 callee).code[6]? = some op ∧ op = .ldarg 1 :=
   ⟨_, by cil_lookup [scalar, narrow], by with_reducible rfl⟩
 
 -- Concrete profiles: literal flags decide the test with no fact.
-example : ∃ op, (dispatchBody true false 3).code[6]? = some op ∧ op = .arg 1 :=
+example : ∃ op, (dispatchBody true false 3).code[6]? = some op ∧ op = .ldarg 1 :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
-example : ∃ op, (dispatchBody false false 3).code[6]? = some op ∧ op = .arg 0 :=
+example : ∃ op, (dispatchBody false false 3).code[6]? = some op ∧ op = .ldarg 0 :=
   ⟨_, by cil_lookup [], by with_reducible rfl⟩
 
 example : ∃ op, (dispatchBody false true 3).code[4]? = some op ∧ op = .call 3 2 :=

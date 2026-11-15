@@ -34,23 +34,23 @@ abbrev unreachable : Instruction := .unsupported "Unreachable under selected pro
 def template (profile : FeatureProfile) (sse42 avx2 : Bool) (callee : Nat) : Method := {
   profile, returnsValue := true, locals := [], code := [
     .feature .avx2, .brfalse 6,
-    if avx2 then .arg 0 else unreachable,
-    if avx2 then .arg 1 else unreachable,
+    if avx2 then .ldarg 0 else unreachable,
+    if avx2 then .ldarg 1 else unreachable,
     if avx2 then .call callee 2 else unreachable,
     if avx2 then .ret else unreachable,
-    if avx2 then unreachable else if sse42 then .arg 1 else .arg 0,
+    if avx2 then unreachable else if sse42 then .ldarg 1 else .ldarg 0,
     if avx2 then unreachable else .ret] }
 
 /-- An extracted layout has two extra dead instructions before the scalar branch target. -/
 def extracted (profile : FeatureProfile) (callee : Nat) : Method := {
   profile, returnsValue := true, locals := [], code := [
     .feature .avx2, .brfalse 8,
-    if profile.avx2 then .arg 0 else unreachable,
-    if profile.avx2 then .arg 1 else unreachable,
+    if profile.avx2 then .ldarg 0 else unreachable,
+    if profile.avx2 then .ldarg 1 else unreachable,
     if profile.avx2 then .call callee 2 else unreachable,
     if profile.avx2 then .ret else unreachable,
     unreachable, unreachable,
-    if profile.avx2 then unreachable else if profile.sse42 then .arg 1 else .arg 0,
+    if profile.avx2 then unreachable else if profile.sse42 then .ldarg 1 else .ldarg 0,
     if profile.avx2 then unreachable else .ret] }
 
 /-- Local equalities bind an open template to each of three profile extractions. -/

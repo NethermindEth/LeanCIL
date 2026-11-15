@@ -167,16 +167,12 @@ internal static class NarrowingText
         Narrowing.Signed16 => "signed16", Narrowing.Unsigned16 => "unsigned16",
         _ => throw new ArgumentOutOfRangeException(nameof(narrowing))
     };
-
-    /// <summary>The optional narrowing argument of an argument or return instruction.</summary>
-    internal static string Suffix(this Narrowing? narrowing) =>
-        narrowing is { } kind ? $" (some .{kind.LeanName()})" : "";
 }
 
-/// <summary>An argument pushed from its slot, narrowed to <paramref name="Narrow"/> when set.</summary>
-internal sealed record Arg(int Index, Narrowing? Narrow) : Operation
+/// <summary>An argument pushed from its slot; the method's declared parameter type gives any narrowing.</summary>
+internal sealed record Arg(int Index) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".arg {Index}" + Narrow.Suffix();
+    internal override string Render(Func<int, string> calleeName) => $".ldarg {Index}";
 }
 
 /// <summary>A local pushed from its slot; the slot's kind gives any narrowing.</summary>

@@ -45,7 +45,7 @@ example : StaticValuesValid (load zeros [7] none) := by decide +kernel
 
 /-- A constructor writes through the ordinary checked aggregate temporary. -/
 private def constructor : Method := {
-  code := [.arg 0, .ldc_i4 7, .storeScalar 1, .ret]
+  code := [.ldarg 0, .ldc_i4 7, .storeScalar 1, .ret]
   locals := [], returnsValue := false }
 
 private def constructed (bytes : List (BitVec 8)) (callee : Method := constructor) : Program :=

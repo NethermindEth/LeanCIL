@@ -124,6 +124,7 @@ internal static class VerificationSelection
             "Tests/OperationFactAdapters.lean", "Tests/AggregateMemorySteps.lean", "Tests/BodyDecoding.lean",
             "Tests/Identity.lean", "Tests/MetadataDecoding.lean",
             "Tests/MetadataBinding.lean", "Tests/MetadataBuilder.lean", "Tests/ResolutionFacts.lean",
+            "Tests/ValueDecoding.lean",
             "Tests/ReplayDiagnostics.lean", "Tests/BodyLiteral.lean", "Tests/ReturnOpcode.lean",
             "Tests/ReturnMetadataBinding.lean", "Tests/ReferenceArrays.lean", "Tests/ArrayFields.lean",
             "Tests/RetainedNumericLocals.lean", "Tests/ProfileEmbedding.lean", "Tests/FullTransfer.lean",

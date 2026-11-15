@@ -71,7 +71,7 @@ private theorem Memory.Renamed.stepCallInstance {indices : LocalIndexMap}
       (step sourceBody (.callInstance callee argc) pc arguments sourceFrame stack source)
       (step targetBody (.callInstance callee argc) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, Bool.or_false, List.length_map,
+  simp only [step, mapping.unspecifiedOperands, List.length_map,
     ← List.map_take, ← List.map_drop, ← List.map_reverse]
   by_cases guard : unspecifiedOperands (observerCount (.callInstance callee argc)) stack = true
   · simp only [guard, ite_true]
@@ -205,7 +205,7 @@ private theorem Memory.Renamed.stepObjectTest {indices : LocalIndexMap}
       (step sourceBody (.objectTest type throwing) pc arguments sourceFrame stack source)
       (step targetBody (.objectTest type throwing) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, Bool.or_false]
+  simp only [step, mapping.unspecifiedOperands]
   by_cases guard : unspecifiedOperands (observerCount (.objectTest type throwing)) stack = true
   · simp only [guard, ite_true]
     exact .error _
@@ -239,7 +239,7 @@ private theorem Memory.Renamed.stepCallVirtual {indices : LocalIndexMap}
       (step sourceBody (.callVirtual targets argc) pc arguments sourceFrame stack source)
       (step targetBody (.callVirtual targets argc) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, Bool.or_false, List.length_map,
+  simp only [step, mapping.unspecifiedOperands, List.length_map,
     ← List.map_take, ← List.map_drop, ← List.map_reverse]
   by_cases guard : unspecifiedOperands (observerCount (.callVirtual targets argc)) stack = true
   · simp only [guard, ite_true]
@@ -282,6 +282,38 @@ private theorem Memory.Renamed.stepCallVirtual {indices : LocalIndexMap}
           exact .error _
 #print axioms Memory.Renamed.stepCallVirtual
 
+/-- Bodies that read an argument from the incoming list, narrowed alike, load related values. -/
+theorem Memory.Renamed.loadArgument {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
+    (related : Memory.Renamed mapping scopes source target) {sourceBody targetBody : CIL.Method}
+    {index : Nat} {narrow : Option NarrowKind}
+    (sourceAccess : sourceBody.argumentAccess index = .value narrow)
+    (targetAccess : targetBody.argumentAccess index = .value narrow) (arguments : List Value)
+    (argumentBounds : ∀ value ∈ arguments, value.Below mapping.sourceLimit) :
+    ResultRenamed mapping (fun left right => right = mapping.value left)
+      (loadArgument sourceBody index arguments sourceFrame source)
+      (loadArgument targetBody index (arguments.map mapping.value) targetFrame target) := by
+  unfold CIL.Safety.loadArgument
+  rw [sourceAccess, targetAccess, List.getElem?_map]
+  cases found : arguments[index]? with
+  | none => cases narrow <;> exact .error .invalidState
+  | some value =>
+    have bound := argumentBounds value (List.mem_of_getElem? found)
+    cases narrow with
+    | none => exact related.checkedValue value bound
+    | some kind =>
+      dsimp only [Option.map]
+      rw [mapping.hasUnspecified]
+      by_cases unspecified : value.hasUnspecified = true
+      · simp only [unspecified, ↓reduceIte]
+        exact .error _
+      · simp only [unspecified, Bool.false_eq_true, ↓reduceIte]
+        cases value <;> try exact .error .invalidState
+        rename_i scalar
+        cases scalar <;> try exact .error .invalidState
+        exact related.checkedValue _ trivial
+#print axioms Memory.Renamed.loadArgument
+
 /-- Argument loads, calls and returns preserve their checked values and control flow. -/
 theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
@@ -301,7 +333,6 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
   by_cases isManaged : ∃ native, operation = .managed native
   · rcases isManaged with ⟨native, rfl⟩
     unfold CIL.Safety.step at observable ⊢
-    simp only [Bool.or_false] at observable ⊢
     rw [mapping.unspecifiedOperands]
     by_cases guarded : unspecifiedOperands (observerCount (.managed native)) stack = true
     · simp only [guarded, ite_true]
@@ -327,27 +358,11 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
       | exact False.elim (tested ⟨_, _, rfl⟩)
       | (rename_i position
-         rw [List.getElem?_map]
-         cases found : arguments[position]? with
-         | none => exact .error .invalidState
-         | some value =>
-           apply (related.checkedValue value
-             (argumentBounds value (List.mem_of_getElem? found))).bind
-           intro first second same
-           subst second
-           exact .ok (.next related frames))
-      | (rename_i position kind
-         rw [List.getElem?_map]
-         cases found : arguments[position]? with
-         | none => exact .error .invalidState
-         | some value =>
-           cases value <;> try exact .error .invalidState
-           rename_i scalar
-           cases scalar <;> try exact .error .invalidState
-           apply (related.checkedValue _ (by trivial)).bind
-           intro first second same
-           subst second
-           exact .ok (.next related frames))
+         obtain ⟨_, sourceAccess, targetAccess⟩ := metadata.arguments position
+         apply (related.loadArgument sourceAccess targetAccess arguments argumentBounds).bind
+         intro first second same
+         subst second
+         exact .ok (.next related frames))
       | (try simp only [List.length_map, ← List.map_take, ← List.map_drop, ← List.map_reverse]
          repeat first
          | exact .error _

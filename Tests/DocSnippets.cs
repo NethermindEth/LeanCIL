@@ -64,7 +64,7 @@ const string Identity = """
 
     open CIL.Safety
     open CIL (W64 Method)
-    @[cil_code] def identity : Method := { code := [.arg 0, .ret], locals := [], returnsValue := true }
+    @[cil_code] def identity : Method := { code := [.ldarg 0, .ret], locals := [], returnsValue := true }
     """;
 var document = $$"""
     # Stale

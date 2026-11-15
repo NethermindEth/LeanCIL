@@ -150,7 +150,8 @@ inductive Instruction where
   | aggregateFieldAt (offset size : Nat)
   | setAggregateFieldAt (offset size : Nat)
   -- Arguments and locals.
-  | arg (index : Nat) (narrow : Option NarrowKind := none)
+  /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/
+  | ldarg (index : Nat)
   | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)
@@ -437,13 +438,21 @@ theorem linksOfCode_find (code : List Instruction) (start pc : Nat) :
 
 #print axioms linksOfCode_find
 
+/-- The table a code list implies gives each pc the link of the instruction there. -/
+theorem linkLookup_linksOfCode (code : List Instruction) (pc : Nat) :
+    linkLookup (linksOfCode code) pc = (code[pc]?).bind Instruction.link? := by
+  simp only [linkLookup, linksOfCode_eq_zipIdx]
+  rw [linksOfCode_find code 0 pc]
+  simp
+
+#print axioms linkLookup_linksOfCode
+
 /-- A body whose table is the one its code implies has a link exactly at its linking
     instructions. -/
 theorem Method.linkAt_of_implied {body : Method} (implied : body.links = linksOfCode body.code)
     (pc : Nat) : body.linkAt pc = (body.code[pc]?).bind Instruction.link? := by
-  simp only [Method.linkAt, linkLookup, implied, linksOfCode_eq_zipIdx]
-  rw [linksOfCode_find body.code 0 pc]
-  simp
+  rw [Method.linkAt, implied]
+  exact linkLookup_linksOfCode body.code pc
 
 #print axioms Method.linkAt_of_implied
 
@@ -464,14 +473,21 @@ theorem Method.linkAt_of_instruction {body : Method}
 
 #print axioms Method.linkAt_of_instruction
 
-/-- A body's table has no entry at a pc the table lists no key for. -/
-theorem Method.linkAt_of_unlisted {body : Method} {pc : Nat}
-    (unlisted : ∀ entry ∈ body.links, entry.1 ≠ pc) : body.linkAt pc = none := by
-  have none_found : (body.links.find? fun entry => entry.1 == pc) = none := by
+/-- A table that lists no key `pc` gives it no link. -/
+theorem linkLookup_of_unlisted {links : List (Nat × Link)} {pc : Nat}
+    (unlisted : ∀ entry ∈ links, entry.1 ≠ pc) : linkLookup links pc = none := by
+  have none_found : (links.find? fun entry => entry.1 == pc) = none := by
     rw [List.find?_eq_none]
     intro entry member
     simpa using unlisted entry member
-  simp [Method.linkAt, linkLookup, none_found]
+  simp [linkLookup, none_found]
+
+#print axioms linkLookup_of_unlisted
+
+/-- A body's table has no entry at a pc the table lists no key for. -/
+theorem Method.linkAt_of_unlisted {body : Method} {pc : Nat}
+    (unlisted : ∀ entry ∈ body.links, entry.1 ≠ pc) : body.linkAt pc = none :=
+  linkLookup_of_unlisted unlisted
 
 #print axioms Method.linkAt_of_unlisted
 

@@ -16,7 +16,7 @@ open CIL.Safety
 /-- The checked body of an unsigned wide multiply with an out reference. -/
 @[cil_code] def multiplyBody : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.arg 0, .arg 1, .arg 2, .memory (.bigMul64 false), .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldarg 2, .memory (.bigMul64 false), .ret] }
 
 /-- Inputs name the two factors and the actual low-word destination. -/
 structure BinaryOutputInput where
@@ -77,7 +77,7 @@ theorem multiply_updates_mixed_frame {program : CIL.Program} {callee : Nat}
 @[cil_code] def callerBody : CIL.Method :=
   { locals := [.unmodeled, .v256 42], localKinds := [.word64, .vector256],
     returnsValue := true,
-    code := [.arg 0, .arg 1, .ldloca 0, .call 1 3, .pop, .ldloc 0, .ret] }
+    code := [.ldarg 0, .ldarg 1, .ldloca 0, .call 1 3, .pop, .ldloc 0, .ret] }
 
 bind_entry callerEntry (memory : Memory) (left right : CIL.W64)
     (formed : memory.WellFormed) := callerBody
@@ -203,8 +203,8 @@ def arithmeticFlag (subtract : Bool) (left right : CIL.W64) : CIL.W32 :=
 /-- Both helpers store their wrapped word before returning the unsigned carry or borrow. -/
 @[cil_code] def arithmeticBody (subtract : Bool) : CIL.Method :=
   { locals := [], returnsValue := true,
-    code := [.arg 2, .arg 0, .arg 1, if subtract then .sub else .add, .store64] ++
-      (if subtract then [.arg 0, .arg 1] else [.arg 0, .arg 1, .add, .arg 0]) ++
+    code := [.ldarg 2, .ldarg 0, .ldarg 1, if subtract then .sub else .add, .store64] ++
+      (if subtract then [.ldarg 0, .ldarg 1] else [.ldarg 0, .ldarg 1, .add, .ldarg 0]) ++
       [.clt_un, .ret] }
 
 /-- Arithmetic output storage needs write authority, while the returned flag remains exact. -/

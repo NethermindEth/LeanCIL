@@ -20,6 +20,6 @@ theorem correctness (left right : CIL.W@width@) (memory : CIL.Safety.Memory) :
       [.scalar (.i@width@ left), .scalar (.i@width@ right)] memory =
       .ok (memory, [.scalar (@value@)]) :=
   BindingSupport.@shared@ Extracted.program Extracted.profile Extracted.environment declared
-    rfl binding left right memory
+    rfl rfl rfl binding left right memory
 #print axioms correctness
 end Generated

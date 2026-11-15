@@ -229,21 +229,6 @@ theorem findIdx?_none_of_keysAscend {α : Type} {entries : List (Nat × α)} {lo
 
 #print axioms findIdx?_none_of_keysAscend
 
-/-- A table ascending from `lower` ascends from any bound its first key reaches. -/
-theorem keysAscend_raise {α : Type} {entries : List (Nat × α)} {lower higher : Nat}
-    (ascending : keysAscend lower entries = true)
-    (raised : (entries.head?.all fun entry => decide (higher ≤ entry.1)) = true) :
-    keysAscend higher entries = true := by
-  cases entries with
-  | nil => rfl
-  | cons head rest =>
-    obtain ⟨key, value⟩ := head
-    simp only [keysAscend, Bool.and_eq_true, decide_eq_true_eq] at ascending ⊢
-    simp only [List.head?_cons, Option.all_some, decide_eq_true_eq] at raised
-    exact ⟨raised, ascending.2⟩
-
-#print axioms keysAscend_raise
-
 /-- The entry at `position` of an ascending table is the first with its key. -/
 theorem findIdx?_of_keysAscend {α : Type} {entries rest : List (Nat × α)}
     {lower position key : Nat} {value : α} (ascending : keysAscend lower entries = true)
@@ -348,6 +333,15 @@ theorem Method.argumentAccess_undeclared {body : Method} {index : Nat}
 
 #print axioms Method.argumentAccess_undeclared
 
+/-- A method with no parameter homes and no declared receiver or parameters reads every argument
+    as it is; one proof serves every index. -/
+theorem Method.argumentAccess_plain {body : Method} (index : Nat)
+    (homes : body.parameterHomes = []) (parameters : body.declared.parameters = [])
+    (receiver : body.declared.receiver = none) : body.argumentAccess index = .value none := by
+  simp [Method.argumentAccess, homes, DeclaredSignature.argumentType, parameters, receiver]
+
+#print axioms Method.argumentAccess_plain
+
 /-- A homed argument is read from its home's slot, after the declared locals. -/
 theorem Method.argumentAccess_home {body : Method} {index position slot : Nat}
     (homed : body.parameterHomes.findIdx? (fun home => home.1 == index) = some position)
@@ -413,7 +407,7 @@ private theorem length_of_mapM {α β : Type} {inputs : List α} {outputs : List
 #print axioms length_of_mapM
 
 /-- Searching the expected homes for an argument searches the required home indices. -/
-private theorem homeKeys_findIdx? {layouts : Array ComputedLayout} {raw : RawArguments}
+theorem homeKeys_findIdx? {layouts : Array ComputedLayout} {raw : RawArguments}
     {reachable : List Bool} {homes : List (Nat × LocalKind)} {index : Nat}
     (expected : expectedHomes layouts raw reachable = some homes) :
     homes.findIdx? (fun home => home.1 == index) =
