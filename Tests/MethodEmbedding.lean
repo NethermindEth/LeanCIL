@@ -31,7 +31,7 @@ example : MethodEmbeds [opaqueHomeBody] 0 opaqueHomeBody := by cil_embed
 /-- `body` with a dead block before the branch target, as a profile-specific extraction emits it. -/
 def inserted : Method := {
   code := [.ldarg 0, .brfalse 6, .ldarg 1, .ret,
-    .unsupported "Unreachable under selected profile", .ldc_i4 9, .ldarg 1, .ret]
+    .unadmitted 0, .ldc_i4 9, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 -- Each `cil_embed` proof is kernel checked against the extracted method, never against `expected`.
@@ -62,8 +62,8 @@ theorem relocated_suffix (frame : Safety.Frame) (memory : Safety.Memory) (value 
 
 /-- An expected body that still carries a dead block the extraction no longer emits. -/
 def withDeadBlock : Method := {
-  code := [.ldarg 0, .brfalse 6, .ldarg 1, .ret, .unsupported "Unreachable under selected profile",
-    .unsupported "Unreachable under selected profile", .ldarg 1, .ret]
+  code := [.ldarg 0, .brfalse 6, .ldarg 1, .ret, .unadmitted 0,
+    .unadmitted 0, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem dead_block_removed : MethodEmbeds [body] 0 withDeadBlock := by cil_embed
@@ -227,7 +227,7 @@ def thrower : Method :=
 
 /-- `thrower` with a dead block before the throw and unused reference and span locals. -/
 def throwerDead : Method := {
-  code := [.br 2, .unsupported "Unreachable under selected profile", .throw "Overflow"]
+  code := [.br 2, .unadmitted 0, .throw "Overflow"]
   locals := [.nullRef, .nullRef], localKinds := [.reference, .span 1 false], returnsValue := false }
 
 /-- A throw of the expected body is raised by the extraction with the dead local. -/
@@ -612,7 +612,7 @@ example : (MethodBinding.methodDifferences caller otherLink).head?.map
 
 /-- What an extraction emits when a dead block puts the call at pc 3. -/
 def moved : Method := {
-  code := [.ldarg 0, .br 3, .unsupported "Unreachable under selected profile", .call 1 1, .ret]
+  code := [.ldarg 0, .br 3, .unadmitted 0, .call 1 1, .ret]
   locals := [], returnsValue := true }
 
 /-- The body a proof uses, with its call at pc 2. `withCode` gives it that pc's link. -/
@@ -648,7 +648,7 @@ def staticField : StaticDescriptor :=
 
 /-- What an extraction emits when a dead block puts a static read at pc 2. -/
 def staticMoved : Method := {
-  code := [.br 2, .unsupported "Unreachable under selected profile",
+  code := [.br 2, .unadmitted 0,
     .memory (.staticAddress (List.replicate 8 0)), .pop, .ret]
   locals := [], returnsValue := false, staticSites := [(2, staticField)] }
 

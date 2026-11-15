@@ -185,7 +185,8 @@ example (percentHolds : percentContract.Holds Extracted.program percent) (m : Me
 
 /-! A raised outcome is exactly `.thrown`: no other fault satisfies it at any fuel. -/
 
-@[cil_code] def stuck : CIL.Method := { returnsValue := false, locals := [], code := [.unsupported "fixture"] }
+@[cil_code] def stuck : CIL.Method :=
+  { returnsValue := false, locals := [], code := [.unadmitted 0] }
 @[cil_code] def spin : CIL.Method := { returnsValue := false, locals := [], code := [.br 0] }
 
 example (m : Memory) : ¬ Raises [stuck] 0 [] m "System.Exception" := by
@@ -195,7 +196,8 @@ example (m : Memory) : ¬ Raises [stuck] 0 [] m "System.Exception" := by
     rw [show invoke [stuck] 0 0 [] m = .error ⟨0, 0, .fuelExhausted⟩ from rfl] at ran
     cases ran; simp at thrown
   | succ fuel =>
-    rw [show invoke [stuck] (fuel + 1) 0 [] m = .error ⟨0, 0, .unsupported "Not a memory instruction"⟩ from rfl] at ran
+    rw [show invoke [stuck] (fuel + 1) 0 [] m =
+      .error ⟨0, 0, .unsupported "Opcode not admitted"⟩ from rfl] at ran
     cases ran; simp at thrown
 
 theorem spin_exhausts (m : Memory) (frame : Frame) (fuel : Nat) :

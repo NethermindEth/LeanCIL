@@ -24,7 +24,7 @@ def expected : Method := {
   locals := [.unmodeled, .nullRef, .unmodeled]
   localKinds := [.word32, .reference, .word64]
   returnsValue := true
-  code := [.br 3, .unsupported "dead", .unsupported "dead",
+  code := [.br 3, .unadmitted 0, .unadmitted 0,
     .ldloc 1, .pop, .call 1 0, .ret] }
 
 /-- A separately specified body moves the live block past extra unreachable instructions. -/
@@ -71,7 +71,7 @@ def removed : Method := {
   locals := [.nullRef, .unmodeled]
   localKinds := [.reference, .word64]
   returnsValue := true
-  code := [.br 3, .unsupported "dead", .unsupported "dead",
+  code := [.br 3, .unadmitted 0, .unadmitted 0,
     .ldloc 0, .pop, .call 1 0, .ret] }
 
 /-- Deleting a dead numeric local changes later allocation identities despite equal scalars. -/

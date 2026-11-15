@@ -55,11 +55,11 @@ example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldloca 0) = 
 example : validateArgumentOpIn spanArgument [0] (.address 0) true (.ldloc 0) = false := by
   decide
 
--- Dead argument stores create no home; their emitted site must actually be unsupported.
+-- Dead argument stores create no home; their emitted site must be a hole.
 def pruned : RawArguments := {
   arguments := [.field .unsigned32], locals := [], code := [.store 0, .load 0] }
 example : ParameterHomesValid #[] pruned [false, true]
-    { code := [.unsupported "pruned", .ldarg 0], locals := [], returnsValue := true } := by decide
+    { code := [.unadmitted 0x10, .ldarg 0], locals := [], returnsValue := true } := by decide
 example : validateParameterHomes #[] pruned [false, true]
     { code := [.stloc 0, .ldarg 0], locals := [], returnsValue := true } = false := by decide
 
