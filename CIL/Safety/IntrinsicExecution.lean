@@ -7,7 +7,7 @@ import CIL.SIMD.Evaluation256Lemmas
 Execution facts for broadcast arithmetic separate instruction dispatch from vector evaluation.
 Concrete runtime comparisons instantiate these facts without reducing the interpreter again. Each
 method takes the declared signature and layout environment an extraction records. The execution
-facts require return storage that preserves the complete 64-bit result.
+facts require argument and return storage that preserve complete 64-bit values.
 -/
 
 namespace CIL.Safety
@@ -19,8 +19,8 @@ set_option maxRecDepth 4096
     (lane : W32) (declared : DeclaredSignature) (environment : LayoutEnvironment) : Method := {
   profile := profile, returnsValue := true, locals := [], declared := declared,
   environment := environment
-  code := [.arg 0, .intrinsic (.vector (.create64 256)) 1,
-    .arg 1, .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 operation) 2,
+  code := [.ldarg 0, .intrinsic (.vector (.create64 256)) 1,
+    .ldarg 1, .intrinsic (.vector (.create64 256)) 1, .intrinsic (.avx2 operation) 2,
     .ldc_i4 lane, .intrinsic (.vector (.extract64 256)) 2, .ret] }
 
 /-- Broadcasting a word does not observe any unspecified bits. -/
@@ -46,6 +46,10 @@ theorem invoke_broadcastBinary {declared : DeclaredSignature} {environment : Lay
     (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (left right : W64) (bits : BitVec 256) (memory : Memory)
     (returnStorage : Extraction.declaredNarrow environment.rawLayouts declared.returnType = none)
+    (leftStorage : (declared.argumentType 0).bind
+      (Extraction.declaredNarrow environment.rawLayouts) = none)
+    (rightStorage : (declared.argumentType 1).bind
+      (Extraction.declaredNarrow environment.rawLayouts) = none)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 left left left left),
@@ -53,8 +57,8 @@ theorem invoke_broadcastBinary {declared : DeclaredSignature} {environment : Lay
     invoke [broadcastBinaryMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 (Vector.lane64 bits lane.toNat))]) := by
-  cil_checked_steps [returnStorage, Method.returnNarrow, available, evaluated,
-    checked_broadcast256,
+  cil_checked_steps [returnStorage, Method.returnNarrow, Method.argumentAccess, List.findIdx?_nil,
+    leftStorage, rightStorage, available, evaluated, checked_broadcast256,
     checked_extract256 bits lane bound]
 
 #print axioms invoke_broadcastBinary
@@ -72,6 +76,10 @@ theorem invoke_broadcastBinary_word {declared : DeclaredSignature}
     {environment : LayoutEnvironment} (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (left right word : W64) (memory : Memory)
     (returnStorage : Extraction.declaredNarrow environment.rawLayouts declared.returnType = none)
+    (leftStorage : (declared.argumentType 0).bind
+      (Extraction.declaredNarrow environment.rawLayouts) = none)
+    (rightStorage : (declared.argumentType 1).bind
+      (Extraction.declaredNarrow environment.rawLayouts) = none)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 left left left left),
@@ -81,8 +89,8 @@ theorem invoke_broadcastBinary_word {declared : DeclaredSignature}
       [.scalar (.i64 left), .scalar (.i64 right)] memory =
       .ok (memory, [.scalar (.i64 word)]) := by
   simpa only [lane_broadcast256 word lane.toNat bound] using
-    invoke_broadcastBinary profile operation lane left right _ memory returnStorage available bound
-      evaluated
+    invoke_broadcastBinary profile operation lane left right _ memory returnStorage leftStorage
+      rightStorage available bound evaluated
 
 #print axioms invoke_broadcastBinary_word
 
@@ -140,8 +148,8 @@ theorem checked_broadcast_andNot (left right : W64) :
   profile := profile, returnsValue := true, locals := [.v128 0], declared := declared,
   environment := environment
   localKinds := [.vector128], opaqueVectorLocals := [0]
-  code := [.arg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0,
-    .arg 0, .intrinsic (.vector (.create64 256)) 1, .ldloc 0,
+  code := [.ldarg 1, .intrinsic (.vector .createScalarUnsafe64) 1, .stloc 0,
+    .ldarg 0, .intrinsic (.vector (.create64 256)) 1, .ldloc 0,
     .intrinsic (.avx2 operation) 2, .ldc_i4 lane,
     .intrinsic (.vector (.extract64 256)) 2, .ret] }
 
@@ -157,6 +165,10 @@ theorem invoke_broadcastShift {declared : DeclaredSignature} {environment : Layo
     (profile : FeatureProfile) (operation : AVX2Intrinsic)
     (lane : W32) (value count word : W64) (memory : Memory)
     (returnStorage : Extraction.declaredNarrow environment.rawLayouts declared.returnType = none)
+    (valueStorage : (declared.argumentType 0).bind
+      (Extraction.declaredNarrow environment.rawLayouts) = none)
+    (countStorage : (declared.argumentType 1).bind
+      (Extraction.declaredNarrow environment.rawLayouts) = none)
     (available : profile.avx2 = true) (bound : lane.toNat < 4)
     (evaluated : checkedIntrinsic (.avx2 operation)
       [.v256 (Vector.pack256 value value value value), .v128Low64 count] =
@@ -164,9 +176,8 @@ theorem invoke_broadcastShift {declared : DeclaredSignature} {environment : Layo
     invoke [broadcastShiftMethod profile operation lane declared environment] 256 0
       [.scalar (.i64 value), .scalar (.i64 count)] memory =
       .ok (memory, [.scalar (.i64 word)]) := by
-  cil_checked_steps [returnStorage, Method.returnNarrow, available, evaluated,
-    checked_broadcast256,
-    checked_scalarUnsafe,
+  cil_checked_steps [returnStorage, Method.returnNarrow, Method.argumentAccess, List.findIdx?_nil,
+    valueStorage, countStorage, available, evaluated, checked_broadcast256, checked_scalarUnsafe,
     checked_extract256, lane_broadcast256, bound, Opaque128Value.value]
 
 #print axioms invoke_broadcastShift

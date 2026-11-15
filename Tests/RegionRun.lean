@@ -8,13 +8,17 @@ namespace Tests.RegionRun
 open CIL (Method Instruction Embeds)
 open CIL.Safety
 
-def helper : Method := { code := [.arg 0, .ldc_i4 6, .shr, .ret], locals := [], returnsValue := true }
+def helper : Method :=
+  { code := [.ldarg 0, .ldc_i4 6, .shr, .ret], locals := [], returnsValue := true }
 
 /-- Computes `count >> 6` inline, then adds one. -/
-def expected : Method := { code := [.arg 0, .ldc_i4 6, .shr, .ldc_i4 1, .add, .ret], locals := [], returnsValue := true }
+def expected : Method :=
+  { code := [.ldarg 0, .ldc_i4 6, .shr, .ldc_i4 1, .add, .ret], locals := [],
+    returnsValue := true }
 
 /-- The same suffix after a compiled helper call, one pc earlier. -/
-def actual : Method := { code := [.arg 0, .call 1 1, .ldc_i4 1, .add, .ret], locals := [], returnsValue := true }
+def actual : Method :=
+  { code := [.ldarg 0, .call 1 1, .ldc_i4 1, .add, .ret], locals := [], returnsValue := true }
 
 def masked : Method :=
   { expected with code := List.replicate 3 (.unsupported "Outside the region") ++ expected.code.drop 3 }
@@ -39,8 +43,11 @@ theorem suffix_moves (fuel : Nat) (args stack : List Value) (frame : Frame) (m :
     fuel 0 3 args frame stack m result ran
 
 /-- A region may call into a whole method listed from pc 0. -/
-def caller : Method := { code := [.ldc_i4 5, .ret, .arg 0, .call 1 1, .ret], locals := [], returnsValue := true }
-def rewritten : Method := { caller with code := [.unsupported "Outside the region", .throw "System.Exception", .arg 0, .call 1 1, .ret] }
+def caller : Method :=
+  { code := [.ldc_i4 5, .ret, .ldarg 0, .call 1 1, .ret], locals := [], returnsValue := true }
+def rewritten : Method :=
+  { caller with code := [.unsupported "Outside the region", .throw "System.Exception",
+      .ldarg 0, .call 1 1, .ret] }
 
 abbrev calling : Nat → Nat → Prop := fun method pc => inStarts [(0, 2), (1, 0)] method pc = true
 
@@ -63,14 +70,15 @@ def longSuffix : List Instruction :=
   List.replicate 96 .nop ++ [.brfalse 102, .switch [3, 102], .bge 102, .ret]
 
 def longExpected (profile : CIL.FeatureProfile) : Method :=
-  { code := [.arg 0, .ldc_i4 6, .shr] ++ longSuffix, locals := [], returnsValue := true, profile := profile }
+  { code := [.ldarg 0, .ldc_i4 6, .shr] ++ longSuffix, locals := [], returnsValue := true,
+    profile := profile }
 
 def longMasked (profile : CIL.FeatureProfile) : Method :=
   (longExpected profile).withCode
     (List.replicate 3 (.unsupported "Outside the region") ++ longSuffix)
 
 def longActual (profile : CIL.FeatureProfile) (callee : Nat) : Method :=
-  (longExpected profile).withCode ([.arg 0, .call callee 1] ++
+  (longExpected profile).withCode ([.ldarg 0, .call callee 1] ++
     longSuffix.map (Instruction.relabel (fun pc => pc - 3 + 2)))
 
 theorem longSuffix_length : longSuffix.length = 100 := by simp [longSuffix]
@@ -111,14 +119,15 @@ theorem longSuffix_refines (profile : CIL.FeatureProfile) (callee : Nat) :
 
 /-- A call inside the relocated suffix keeps its link at the shifted pc. -/
 def callExpected : Method :=
-  { code := [.arg 0, .ldc_i4 6, .shr, .arg 1, .call 2 1, .ret], locals := [],
+  { code := [.ldarg 0, .ldc_i4 6, .shr, .ldarg 1, .call 2 1, .ret], locals := [],
     returnsValue := true }
 
 def callMasked : Method :=
   callExpected.withCode (List.replicate 3 (.unsupported "Outside the region") ++
     callExpected.code.drop 3)
 
-def callActual : Method := callExpected.withCode ([.arg 0, .call 1 1] ++ callExpected.code.drop 3)
+def callActual : Method :=
+  callExpected.withCode ([.ldarg 0, .call 1 1] ++ callExpected.code.drop 3)
 
 theorem callSuffix_refines :
     CIL.Embedding.BodyRefines callMasked callActual (CIL.Embedding.suffixRename 3 2) := by

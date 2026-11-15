@@ -155,7 +155,7 @@ theorem baseline_rejected : ¬ avx2Contract.Holds (reprofile program baselinePro
 /-- An AVX-512 DQ multiply needs four flags, all of which the agreement check reads. -/
 def intrinsicProgram : Program :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
-     code := [.arg 0, .arg 1, .intrinsic (.avx512DQ .mul64) 2, .ret] }]
+     code := [.ldarg 0, .ldarg 1, .intrinsic (.avx512DQ .mul64) 2, .ret] }]
 
 /-- Profiles that agree on the four flags agree on the multiply. -/
 theorem intrinsic_agrees : intrinsicProgram.ProfileAgreement avx512Profile

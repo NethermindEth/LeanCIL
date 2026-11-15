@@ -36,7 +36,7 @@ theorem Memory.Renamed.stepNewAggregate {indices : LocalIndexMap} {mapping : All
         (step sourceBody (.newAggregate callee argc size) pc arguments sourceFrame stack source)
         (step targetBody (.newAggregate callee argc size) pc (arguments.map mapping.value)
           targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands, Bool.or_false, List.length_map,
+  simp only [step, mapping.unspecifiedOperands, List.length_map,
     ← List.map_take, ← List.map_drop, ← List.map_reverse]
   split
   · exact ⟨mapping, .refl mapping, .error _⟩

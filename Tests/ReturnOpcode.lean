@@ -77,13 +77,13 @@ theorem unspecified_return (frame : Frame) (memory : Safety.Memory) :
 
 /-- The reference interpreter receives narrowing explicitly. -/
 theorem reference_return :
-    CIL.step .ret true (some .unsigned8) 0 [] [.i32 300] (fun _ => none) .scalar =
+    CIL.step .ret true (some .unsigned8) 0 [.i32 300] (fun _ => none) .scalar =
       some (.returned [.i32 44] (fun _ => none)) := rfl
 #print axioms reference_return
 
 /-- Both standalone interpreters reject a narrow return paired with void arity. -/
 theorem inconsistent_void_return (memory : Safety.Memory) :
-    CIL.step .ret false (some .unsigned8) 0 [] [] (fun _ => none) .scalar = none ∧
+    CIL.step .ret false (some .unsigned8) 0 [] (fun _ => none) .scalar = none ∧
     returnFrom (some .unsigned8) false [.scalar (.i32 1)] memory = .error .invalidState :=
   ⟨rfl, rfl⟩
 #print axioms inconsistent_void_return
@@ -124,7 +124,7 @@ private def pairDivRem : Method :=
       returnType := .aggregate "Examples, Version=1.0.0.0, Culture=neutral, \
         PublicKeyToken=null::Examples.StaticPair`1<System.Runtime, Version=11.0.0.0, \
         Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a::System.UInt32>" 0 }
-    code := [.arg 0, .arg 1, .intrinsic (.scalar (.divRem 32 true)) 2, .ret] }
+    code := [.ldarg 0, .ldarg 1, .intrinsic (.scalar (.divRem 32 true)) 2, .ret] }
 
 /-- A generated boundary claim about a struct-returning body is proved by evaluation, with the
     proof term a generated fixture uses and the default recursion limit. -/
@@ -149,7 +149,7 @@ private def sbyteRemainder : Method :=
       parameters := [.atom Extraction.runtimeScope "System.SByte",
         .atom Extraction.runtimeScope "System.SByte"],
       returnType := .atom Extraction.runtimeScope "System.SByte" }
-    code := [.arg 0 (some .signed8), .arg 1 (some .signed8),
+    code := [.ldarg 0, .ldarg 1,
       .intrinsic (.scalar (.divRem 8 true)) 2, .fieldAt 1 1 true, .ret] }
 
 /-- A narrowing return over a non-empty environment is proved by evaluation, and the remainder

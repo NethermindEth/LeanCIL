@@ -13,6 +13,9 @@ unchanged (`Instruction.ofRaw?_substitute`), so a closed generic body decodes li
 
 namespace CIL.Extraction
 
+/-- One-byte opcodes are below this value; two-byte opcodes `0xFE nn` are `0xFE00 + nn`. -/
+def oneByteOpcodes : Nat := 256
+
 /-- The local a `ldloc`, `stloc` or `ldloca` instruction names, in any of its forms. -/
 def localIndex (instruction : RawInstruction) : Option Nat :=
   match instruction.opcode, instruction.operand with
@@ -25,6 +28,15 @@ def localIndex (instruction : RawInstruction) : Option Nat :=
   | 17, .local n | 18, .local n | 19, .local n
   | 65036, .local n | 65037, .local n | 65038, .local n => some n
   | _, _ => none
+
+/-- The indices an index operand of `opcode` can encode: an unsigned int8 after a one-byte
+    opcode and an unsigned int16 after a two-byte one (ECMA-335 III.1.2). -/
+def operandIndexBound (opcode : Nat) : Nat :=
+  if opcode < oneByteOpcodes then 2 ^ 8 else 2 ^ 16
+
+/-- The local a local-variable instruction names, when the instruction's encoding can carry it. -/
+def encodedLocal (instruction : RawInstruction) : Option Nat :=
+  (localIndex instruction).filter (· < operandIndexBound instruction.opcode)
 
 /-- Operand kinds that instantiation rewrites; no value opcode takes one. -/
 def RawOperand.mentionsType : RawOperand → Bool
@@ -71,11 +83,21 @@ namespace CIL
 
 open Extraction
 
+/-- The opcodes `Instruction.ofRaw?` decodes for some operand. -/
+def Instruction.valueOpcode (opcode : Nat) : Bool :=
+  opcode == 0 || (2 <= opcode && opcode <= 14) || (17 <= opcode && opcode <= 19) ||
+    (21 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
+    (42 <= opcode && opcode <= 69) || (88 <= opcode && opcode <= 106) ||
+    opcode == 109 || opcode == 110 || (130 <= opcode && opcode <= 139) ||
+    (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 224 ||
+    (65025 <= opcode && opcode <= 65029) || opcode == 65033 ||
+    (65036 <= opcode && opcode <= 65038)
+
 /-- The instruction a value-family raw instruction denotes: one constructor per ECMA opcode,
     with short and macro forms folded into it. Any other opcode, an operand kind that
     instantiation rewrites, or a malformed or out-of-range operand gives `none`. -/
 def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
-  if raw.operand.mentionsType then none else
+  if raw.operand.mentionsType || !Instruction.valueOpcode raw.opcode then none else
   match raw.opcode, raw.operand with
   -- Stack shuffling and return.
   | 0, .none => some .nop
@@ -92,11 +114,15 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
     if -(2^63) <= value && value < 2^63 then some (.ldc_i8 (BitVec.ofInt 64 value)) else none
   | 22, .none | 23, .none | 24, .none | 25, .none | 26, .none | 27, .none | 28, .none
   | 29, .none | 30, .none => some (.ldc_i4 (BitVec.ofNat 32 (raw.opcode - 22)))
-  -- Argument opcodes 2 to 5, 14 to 16 and 65033 to 65035 decode to nothing.
-  -- Locals; `localIndex` validates the operand of every form.
-  | 6, _ | 7, _ | 8, _ | 9, _ | 17, _ | 65036, _ => Instruction.ldloc <$> localIndex raw
-  | 10, _ | 11, _ | 12, _ | 13, _ | 19, _ | 65038, _ => Instruction.stloc <$> localIndex raw
-  | 18, _ | 65037, _ => Instruction.ldloca <$> localIndex raw
+  -- Argument loads; `ldarga` and `starg` (15, 16, 65034, 65035) decode to nothing.
+  | 2, .none => some (.ldarg 0) | 3, .none => some (.ldarg 1)
+  | 4, .none => some (.ldarg 2) | 5, .none => some (.ldarg 3)
+  | 14, .argument index | 65033, .argument index =>
+    if index < operandIndexBound raw.opcode then some (.ldarg index) else none
+  -- Locals; `encodedLocal` validates the operand of every form and its width.
+  | 6, _ | 7, _ | 8, _ | 9, _ | 17, _ | 65036, _ => Instruction.ldloc <$> encodedLocal raw
+  | 10, _ | 11, _ | 12, _ | 13, _ | 19, _ | 65038, _ => Instruction.stloc <$> encodedLocal raw
+  | 18, _ | 65037, _ => Instruction.ldloca <$> encodedLocal raw
   -- Branches, short and long forms, keep their resolved target.
   | 43, .target target | 56, .target target => some (.br target)
   | 44, .target target | 57, .target target => some (.brfalse target)
@@ -146,14 +172,18 @@ def Instruction.ofRaw? (raw : RawInstruction) : Option Instruction :=
   | 65028, .none => some .clt | 65029, .none => some .clt_un
   | _, _ => none
 
-/-- The opcodes `Instruction.ofRaw?` decodes for some operand. -/
-def Instruction.valueOpcode (opcode : Nat) : Bool :=
-  opcode == 0 || (6 <= opcode && opcode <= 13) || (17 <= opcode && opcode <= 19) ||
-    (21 <= opcode && opcode <= 33) || opcode == 37 || opcode == 38 ||
-    (42 <= opcode && opcode <= 69) || (88 <= opcode && opcode <= 106) ||
-    opcode == 109 || opcode == 110 || (130 <= opcode && opcode <= 139) ||
-    (179 <= opcode && opcode <= 186) || (209 <= opcode && opcode <= 219) || opcode == 224 ||
-    (65025 <= opcode && opcode <= 65029) || (65036 <= opcode && opcode <= 65038)
+/-- `ofRaw?` decodes only the opcodes of `Instruction.valueOpcode`. -/
+theorem Instruction.valueOpcode_of_ofRaw? {raw : RawInstruction} {instruction : Instruction}
+    (decoded : Instruction.ofRaw? raw = some instruction) :
+    Instruction.valueOpcode raw.opcode = true := by
+  cases opcodeValue : Instruction.valueOpcode raw.opcode
+  · unfold Instruction.ofRaw? at decoded
+    rw [opcodeValue, Bool.not_false, Bool.or_true,
+      ite_eq_left_of_eq_true _ _ (eq_true rfl)] at decoded
+    cases decoded
+  · rfl
+
+#print axioms Instruction.valueOpcode_of_ofRaw?
 
 /-- Whether `emitted` is the instruction `decoded`, operands included. Defined only for the
     value constructors `ofRaw?` produces; every other `decoded` gives `false`. -/
@@ -164,9 +194,10 @@ def Instruction.sameValue (decoded emitted : Instruction) : Bool :=
   | .dup => (emitted matches .dup)
   | .pop => (emitted matches .pop)
   | .ret => (emitted matches .ret)
-  -- Constants and locals compare their operand.
+  -- Constants, arguments and locals compare their operand.
   | .ldc_i4 expected => match emitted with | .ldc_i4 actual => expected == actual | _ => false
   | .ldc_i8 expected => match emitted with | .ldc_i8 actual => expected == actual | _ => false
+  | .ldarg expected => match emitted with | .ldarg actual => expected == actual | _ => false
   | .ldloc expected => match emitted with | .ldloc actual => expected == actual | _ => false
   | .stloc expected => match emitted with | .stloc actual => expected == actual | _ => false
   | .ldloca expected => match emitted with | .ldloca actual => expected == actual | _ => false
@@ -252,7 +283,8 @@ theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOpera
   · have typedNow : ({ raw with operand } : RawInstruction).operand.mentionsType = true := by
       rw [show ({ raw with operand } : RawInstruction).operand = operand from rfl, sameKind, typed]
     unfold Instruction.ofRaw?
-    rw [ite_eq_left_of_eq_true _ _ (eq_true typedNow), ite_eq_left_of_eq_true _ _ (eq_true typed)]
+    rw [ite_eq_left_of_eq_true _ _ (eq_true (by rw [typedNow, Bool.true_or])),
+      ite_eq_left_of_eq_true _ _ (eq_true (by rw [typed, Bool.true_or]))]
 
 #print axioms Instruction.ofRaw?_substitute
 

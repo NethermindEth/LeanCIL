@@ -30,11 +30,11 @@ theorem Frame.Renamed.stepInitializeSpanLocal {indices : LocalIndexMap}
         sourceFrame stack source)
       (step targetBody (.initializeSpanLocal (indices.index position) constructor) pc
         (arguments.map mapping.value) targetFrame (stack.map mapping.value) target) := by
-  simp only [step, observerCount, Bool.or_false, mapping.unspecifiedOperands] at observable ⊢
-  split at observable
-  · cases observable
-  · rename_i guard
-    simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
+  simp only [step, observerCount, mapping.unspecifiedOperands] at observable ⊢
+  by_cases guard : unspecifiedOperands constructor.operation.argumentCount stack = true
+  · simp only [guard, ite_true] at observable
+    cases observable
+  · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     have slots := frames.locals.getElem?_all position
     generalize sourceFound : sourceFrame.locals[position]? = sourceSlot at slots observable ⊢
     generalize targetFound : targetFrame.locals[indices.index position]? = targetSlot at slots ⊢
@@ -82,7 +82,7 @@ theorem Frame.Renamed.stepLdloc {indices : LocalIndexMap} {mapping : AllocationR
       (step targetBody (.ldloc (indices.index position)) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false]
+    Bool.false_eq_true, ite_false]
   have slots := frames.locals.getElem?_all position
   generalize sourceFound : sourceFrame.locals[position]? = sourceSlot at slots ⊢
   generalize targetFound : targetFrame.locals[indices.index position]? = targetSlot at slots ⊢
@@ -108,7 +108,7 @@ theorem Frame.Renamed.stepLdloca {indices : LocalIndexMap} {mapping : Allocation
       (step targetBody (.ldloca (indices.index position)) pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false]
+    Bool.false_eq_true, ite_false]
   have slots := frames.locals.getElem?_all position
   generalize sourceFound : sourceFrame.locals[position]? = sourceSlot at slots ⊢
   generalize targetFound : targetFrame.locals[indices.index position]? = targetSlot at slots ⊢
@@ -134,7 +134,7 @@ theorem Frame.Renamed.stepStloc {indices : LocalIndexMap} {mapping : AllocationR
       (step targetBody (.stloc (indices.index position)) pc
         (arguments.map mapping.value) targetFrame ((value :: rest).map mapping.value) target) := by
   simp only [step, observerCount, unspecifiedOperands, List.take_zero, List.any_nil,
-    Bool.false_or, Bool.false_eq_true, ite_false, List.map_cons]
+    Bool.false_eq_true, ite_false, List.map_cons]
   have slots := frames.locals.getElem?_all position
   generalize sourceFound : sourceFrame.locals[position]? = sourceSlot at slots ⊢
   generalize targetFound : targetFrame.locals[indices.index position]? = targetSlot at slots ⊢

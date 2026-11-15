@@ -27,7 +27,8 @@ def arguments : Case → List CIL.Safety.Value
   | .signedDivide | .signedRemainder => [.scalar (.i32 2147483648), .scalar (.i32 4294967295)]
 
 def method (which : Case) : CIL.Method := {
-  code := (match which with | .convert => [.arg 0] | _ => [.arg 0, .arg 1]) ++ [operation which, .ret]
+  code := (match which with | .convert => [.ldarg 0] | _ => [.ldarg 0, .ldarg 1]) ++
+    [operation which, .ret]
   locals := [], returnsValue := true }
 
 def instruction : Case → Nat
@@ -73,7 +74,7 @@ theorem wrong_outcomes (which : Case) : ¬ (contract which (wrongName which)).Ho
     (by cases which <;> decide) raised
 
 def zeroDivisorMethod (remainder : Bool) : CIL.Method := {
-  code := [.arg 0, .arg 1, if remainder then .rem_un else .div_un, .ret], locals := [],
+  code := [.ldarg 0, .ldarg 1, if remainder then .rem_un else .div_un, .ret], locals := [],
   returnsValue := true }
 
 def zeroDivisorContract : OutcomeContract CIL.W32 where
