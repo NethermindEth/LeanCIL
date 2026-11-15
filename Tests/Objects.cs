@@ -85,10 +85,9 @@ foreach (var (name, proof, view, forged, marker) in new[]
         "def Value : Safety.WordField 4 := ⟨type, 0⟩", "Value.accessedBy"),
     ("element", "SampleValues", "def Values : Safety.ArrayField .signed32 := ⟨type, 0⟩",
         "def Values : Safety.ArrayField .unsigned32 := ⟨type, 0⟩", "Values.accessedBy"),
-    // A struct element's width is its layout's, so a field operation with another width fails its layout use.
+    // A struct element's width is its layout's, so a view with another width fails its own theorem.
     ("structWidth", "TilePairs", "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 16)",
-        "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 8)",
-        "Extraction.MethodLayoutsValid rawLayouts computedLayouts method0 method0LayoutUses")
+        "PublicKeyToken=null::Examples.AggregateArrays/Pair\" 8)", "Pairs.accessedBy")
 })
 {
     var extracted = File.ReadAllText(Path.Combine(root, proof, "Extracted.lean"));

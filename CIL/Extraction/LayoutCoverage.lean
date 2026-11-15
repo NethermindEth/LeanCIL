@@ -22,14 +22,10 @@ private def aggregateIndex : TypeExpr → Option Nat
 def instructionLayoutUses (layouts : List RawLayout) (pc : Nat)
     (instruction : RawInstruction) : Option (List LayoutUse) := do
   match instruction.opcode, instruction.operand with
-  -- Class fields use model offsets that `scalarEmissionMatches` checks without a layout table;
-  -- a field holding an array of structs takes its element width from the struct's layout.
-  | 0x7b, .field (.object _ _) _ type _ false | 0x7d, .field (.object _ _) _ type _ false =>
-    match type with
-    | .array (.aggregate identity index) =>
-      if typeStorage layouts (.aggregate identity index) != some (.field (.aggregate index)) then
-        none else return [.size pc index .arrayElement]
-    | _ => return []
+  -- A class field access carries no layout data: its step resolves the slot, and the size of a
+  -- struct array element, from the checked layouts.
+  | 0x7b, .field (.object _ _) _ _ _ false | 0x7c, .field (.object _ _) _ _ _ false
+  | 0x7d, .field (.object _ _) _ _ _ false => return []
   -- `ldfld`, `ldflda` and `stfld` on an instance field, whose declared type must match.
   | 0x7b, .field owner index type _ false
   | 0x7c, .field owner index type _ false

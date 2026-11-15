@@ -250,6 +250,10 @@ internal static class LeanEmitter
                     ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
                         scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
                     : Unadmitted.At(i));
+            // A class field access names the field its raw operand names, which the scalar check compares.
+            for (var pc = 0; pc < ops.Count; pc++)
+                if (ops[pc] is ClassField access)
+                    ops[pc] = access with { Reference = genericEvidence.FieldReferenceOf(m, m.Body.Instructions[pc]) };
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
             var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);

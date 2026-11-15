@@ -5,8 +5,9 @@ import CIL.Extraction.Translation
 # Methods decoded from raw definitions
 
 `Method.ofRaw?` gives the method a raw definition denotes at its type arguments: each
-instruction as `Instruction.ofRaw` decodes it, a hole where no family admits the opcode yet, and
-the frame, homes and signature from the instantiated definition. `Method.ofBody?` reads the
+instruction of the instantiated definition as `Instruction.ofRaw` decodes it, a hole where no
+family admits the opcode yet and a field access naming the instantiated field, and the frame,
+homes and signature from the same definition. `Method.ofBody?` reads the
 code and init flag from pinned body bytes instead of the definition, and `decodedProgram?`
 applies it to every evidence record.
 `Method.ofBody?_of_decodes` shows that for a definition whose body check passes, the method of
@@ -16,8 +17,8 @@ translator output.
 
 namespace CIL.Extraction
 
-/-- The method a raw definition denotes at `arguments`: each instruction of its code as
-    `Instruction.ofRaw` decodes it, frame and signature from the instantiated definition,
+/-- The method a raw definition denotes at `arguments`: each instruction of its instantiated
+    code as `Instruction.ofRaw` decodes it, frame and signature from the same definition,
     homes over every pc, and no static sites, opaque vector locals or links. Every instruction
     decodes, so `none` means the instantiation failed (an explicit receiver signature has none),
     a parameter, local or homed argument type has no storage or slot kind, or the code fails the
@@ -26,7 +27,7 @@ def _root_.CIL.Method.ofRaw? (profile : FeatureProfile) (environment : LayoutEnv
     (source : RawMethod) (arguments : List TypeExpr) : Option Method := do
   let closed ← instantiateMethod environment.rawLayouts source arguments
   let storage ← closedArguments environment.rawLayouts closed
-  let code := source.code.map Instruction.ofRaw
+  let code := closed.code.map Instruction.ofRaw
   let localKinds ← storage.locals.mapM (storageKind environment.layouts)
   let reachable := storage.code.map fun _ => true
   let parameterHomes ← expectedHomes environment.layouts storage reachable
@@ -88,15 +89,18 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
 #print axioms Method.ofBody?_of_decodes
 
 /-- Each pc of a decoded method holds what `Instruction.ofRawAt` decodes at that pc of the
-    definition's code, so the method has one instruction per raw instruction. -/
+    instantiated definition's code, so the method has one instruction per raw instruction and a
+    field access names the instantiated field. -/
 theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     {environment : LayoutEnvironment} {source : RawMethod} {arguments : List TypeExpr}
-    {method : Method} (decoded : Method.ofRaw? profile environment source arguments = some method)
-    (pc : Nat) : method.code[pc]? = Instruction.ofRawAt source.code pc := by
+    {method : Method}
+    (decoded : Method.ofRaw? profile environment source arguments = some method) :
+    ∃ closed, instantiateMethod environment.rawLayouts source arguments = some closed ∧
+      ∀ pc, method.code[pc]? = Instruction.ofRawAt closed.code pc := by
   unfold Method.ofRaw? at decoded
-  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
-    Option.some.injEq] at decoded
-  obtain ⟨_, _, _, _, _, _, _, _, built⟩ := decoded
+  simp only [Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def] at decoded
+  obtain ⟨closed, instantiated, _, _, _, _, _, _, built⟩ := decoded
+  refine ⟨closed, instantiated, fun pc => ?_⟩
   -- The argument rule either refuses the code or leaves the decoded method as it was built.
   split at built
   · cases built

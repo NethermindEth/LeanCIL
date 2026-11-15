@@ -397,61 +397,28 @@ private def sizeConstant (instruction : RawInstruction) (bits : W32) : Bool :=
     | _ => false
   | _, _ => false
 
-/-- An instance field instruction on a class, or an emitted class field operation. -/
-private def objectFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
+/-- An instance field instruction on a class, or an emitted class field instruction. -/
+private def classFieldSite (instruction : RawInstruction) (emitted : Instruction) : Bool :=
   (instruction.opcode ∈ [123, 124, 125] && match instruction.operand with
     | .field (.object _ _) _ _ _ false => true
     | _ => false) ||
   match emitted with
-  | .memory (.objectField ..) | .memory (.setObjectField ..)
-  | .memory (.objectReferenceField ..) | .memory (.setObjectReferenceField ..)
-  | .memory (.arrayField ..) | .memory (.setArrayField ..) => true
+  | .ldfld _ | .ldflda _ | .stfld _ => true
   | _ => false
 
-/-- An emitted field element is the declared one; a struct element's width is the layout's,
-    which `MethodLayoutsValid` checks at the layout use naming the field access. -/
-private def fieldElementMatches (declared emitted : ArrayElement) : Bool :=
-  match declared, emitted with
-  | .aggregate identity _, .aggregate actual _ => identity == actual
-  | declared, emitted => declared == emitted
-
-/-- `ldfld` and `stfld` of a class instance field emit the checked field operation for that
-    owner, at the field's model offset: with its width and extension for a scalar field, as a
-    reference slot for a class-typed or class-array-typed one, whose stored value must be an
-    object or null, and as an array slot for a value-array-typed one, whose stored value must
-    be an array of that element. `ldflda` never does. -/
-private def objectFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
+/-- `ldfld`, `ldflda` and `stfld` of a class instance field emit the instruction the raw one
+    decodes to, naming the field its operand names, on an object or null receiver. A stored
+    class or class array must be an object or null, and a stored value array one of the field's
+    element; the step resolves the slot and faults on a field type without one. -/
+private def classFieldMatches (instruction : RawInstruction) (stack : List ScalarKind)
     (emitted : Instruction) : Bool :=
-  match instruction.opcode, instruction.operand, stack, emitted with
-  | 123, .field (.object scope name) index type _ false, receiver :: _,
-      .memory (.objectField owner offset width signed) =>
-    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
-      offset == objectFieldOffset index && objectFieldShape type == some (width, signed)
-  | 125, .field (.object scope name) index type _ false, _ :: receiver :: _,
-      .memory (.setObjectField owner offset width) =>
-    receiver ∈ [.object, .nullObject] && owner == .object scope name &&
-      offset == objectFieldOffset index && (objectFieldShape type).map (·.1) == some width
-  | 123, .field (.object scope name) index type _ false, receiver :: _,
-      .memory (.objectReferenceField owner offset) =>
-    referenceFieldType type && receiver ∈ [.object, .nullObject] &&
-      owner == .object scope name && offset == objectFieldOffset index
-  | 125, .field (.object scope name) index type _ false, value :: receiver :: _,
-      .memory (.setObjectReferenceField owner offset) =>
-    referenceFieldType type && value ∈ [.object, .nullObject] &&
-      receiver ∈ [.object, .nullObject] && owner == .object scope name &&
-      offset == objectFieldOffset index
-  | 123, .field (.object scope name) index type _ false, receiver :: _,
-      .memory (.arrayField owner offset element) =>
-    (valueArrayFieldElement type).any (fieldElementMatches · element) &&
-      receiver ∈ [.object, .nullObject] &&
-      owner == .object scope name && offset == objectFieldOffset index
-  | 125, .field (.object scope name) index type _ false, value :: receiver :: _,
-      .memory (.setArrayField owner offset element) =>
-    (valueArrayFieldElement type).any (fun declared =>
-      fieldElementMatches declared element && value == .array declared) &&
-      receiver ∈ [.object, .nullObject] && owner == .object scope name &&
-      offset == objectFieldOffset index
-  | _, _, _, _ => false
+  valueEncodingMatches instruction emitted && match emitted, stack with
+  | .ldfld _, receiver :: _ | .ldflda _, receiver :: _ => receiver ∈ [.object, .nullObject]
+  | .stfld field, value :: receiver :: _ =>
+    receiver ∈ [.object, .nullObject] &&
+      (!referenceFieldType field.type || value ∈ [.object, .nullObject]) &&
+      (valueArrayFieldElement field.type).all (fun declared => value == .array declared)
+  | _, _ => false
 
 /-- Only `ldstr` loads a literal, and only its own text; inside a folded throw it emits nothing. -/
 private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInstruction)
@@ -512,7 +479,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     stringLiteralMatches role instruction emitted
   else if instruction.opcode == 20 && role ∈ [some .head, some .interior] then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
-  else if objectFieldSite instruction emitted then objectFieldMatches instruction stack emitted
+  else if classFieldSite instruction emitted then classFieldMatches instruction stack emitted
   else if scalarCovered instruction.opcode then scalarOpMatches instruction stack emitted
   else !scalarEmission emitted || match role, emitted with
     | _, .ldc_i4 bits => sizeConstant instruction bits ||

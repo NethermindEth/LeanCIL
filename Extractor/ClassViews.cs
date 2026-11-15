@@ -6,35 +6,17 @@ using Mono.Cecil.Cil;
 namespace Nethermind.LeanCIL;
 
 // Named fields of the admitted classes an extraction's methods access, so proofs say `Account.Balance`
-// instead of an owner and offset. Each name is checked in Lean against an emitted field operation.
+// instead of an owner and offset. Each name is checked in Lean against an emitted field access.
 internal static partial class ClassViews
 {
     /// <summary>What a class instance field holds: a word, an object reference, or the origin of a whole array of
     /// a value element.</summary>
     internal enum FieldKind { Word, Reference, Array }
 
-    /// <summary>A class instance field operation as emitted: a load or store at model offset `Offset` of an
-    /// instance of `Owner`, of a word of `Width` bytes, an object reference, or an array of `Element`.</summary>
+    /// <summary>A class instance field access: a load or store at model offset `Offset` of an instance of
+    /// `Owner`, of a word of `Width` bytes, an object reference, or an array of `Element`.</summary>
     internal sealed record FieldOperation(bool Store, string Owner, int Offset, FieldKind Kind, int? Width,
-        bool Signed, Arrays.Element? Element)
-    {
-        /// <summary>The Lean memory operation term, parenthesized as an argument.</summary>
-        internal string Lean() => Kind switch
-        {
-            FieldKind.Array
-                => $"(.{(Store ? "setArrayField" : "arrayField")} ({Owner}) {Offset} {Element!.Expression})",
-            FieldKind.Reference =>
-                $"(.{(Store ? "setObjectReferenceField" : "objectReferenceField")} ({Owner}) {Offset})",
-            _ when Store => $"(.setObjectField ({Owner}) {Offset} {Width})",
-            _ => $"(.objectField ({Owner}) {Offset} {Width} {LeanText.Bool(Signed)})"
-        };
-
-        // A store, an array or a reference ignores the sign or width its term leaves out, so two accesses are
-        // equal exactly when they render the same, as profiles merged into one template must be.
-        public bool Equals(FieldOperation? other) => other is not null && Lean() == other.Lean();
-
-        public override int GetHashCode() => Lean().GetHashCode(StringComparison.Ordinal);
-    }
+        bool Signed, Arrays.Element? Element);
 
     /// <summary>One field access: the method and pc whose emitted operation loads or stores the field.</summary>
     internal sealed record Access(FieldDefinition Field, TypeReference Owner, int Method, int Pc,
@@ -121,7 +103,8 @@ internal static partial class ClassViews
                     $"at model offset {field.Offset}. -/");
                 lean.AppendLine($"@[reducible] def {field.Lean} : {descriptor} := ⟨type, {field.Offset}⟩");
                 lean.AppendLine($"theorem {Identifier(field.Name + "_accessed")} : " +
-                    $"(method{access.Method}.code[{access.Pc}]?).any {field.Lean}.accessedBy = true := " +
+                    $"(method{access.Method}.code[{access.Pc}]?).any ({field.Lean}.accessedBy method{access.Method}) " +
+                    "= true := " +
                     LeanEmitter.Decide);
             }
             lean.AppendLine($"end {view.Path}");

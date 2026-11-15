@@ -153,10 +153,10 @@ internal static class ObjectTypes
         var offset = FieldSlot * FieldIndex(owner, resolved);
         if (valueArray is not null)
             return new ClassField(new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Array,
-                null, false, valueArray));
+                null, false, valueArray), null);
         if (holdsReference)
             return new ClassField(new(store, GenericEvidence.ObjectType(owner), offset,
-                ClassViews.FieldKind.Reference, null, false, null));
+                ClassViews.FieldKind.Reference, null, false, null), null);
         int width;
         try { width = MetadataValidation.PrimitiveWidth(type); }
         catch (InvalidDataException)
@@ -166,7 +166,7 @@ internal static class ObjectTypes
         }
         var signed = EnumTypes.Storage(type).FullName is "System.SByte" or "System.Int16";
         return new ClassField(new(store, GenericEvidence.ObjectType(owner), offset, ClassViews.FieldKind.Word, width,
-            !store && signed, null));
+            !store && signed, null), null);
     }
 
     /// <summary>The emitted list of an admitted class's base classes, nearest first.</summary>

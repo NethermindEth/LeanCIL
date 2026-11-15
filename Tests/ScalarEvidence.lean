@@ -1011,83 +1011,101 @@ example : ¬ ScalarFlowValid #[] (pushHoleRaw 35) pushHoleFeatures pushHoleState
 
 /-- A class with a field at raw index 1, read by `ldarg.0; ldfld; ret`. -/
 private def account : TypeExpr := .object "Scope" "Scope.Account"
+private def balance : FieldRef :=
+  { owner := account, index := 1, type := word, name := name!"balance" }
 private def fieldRaw : RawMethod :=
   { raw [i 2, i 123 (.field account 1 word name!"balance" false), i 42] [account] with
     maxStack := 1 }
 private def fieldFeatures : FeatureCertificate := [unknown 0, unknown 1, unknown 1]
 private def fieldStates : ScalarCertificate := [some [], some [.object], some [.word64]]
-private def fieldCode (operation : MemoryOp) : List Instruction :=
-  [.ldarg 0, .memory operation, .ret]
--- A class field load names the field's declaring class, model offset, width and extension.
-example : ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
-    (fieldCode (.objectField account 8 8 false)) := by decide
+private def fieldCode (access : Instruction) : List Instruction := [.ldarg 0, access, .ret]
+-- A class field load names the field its raw operand names: owner, index, held type and name.
+example : ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates (fieldCode (.ldfld balance)) := by
+  decide
 example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
-    (fieldCode (.objectField account 0 8 false)) := by decide
+    (fieldCode (.ldfld { balance with index := 0 })) := by decide
 example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
-    (fieldCode (.objectField (.object "Scope" "Scope.Other") 8 8 false)) := by decide
+    (fieldCode (.ldfld { balance with owner := .object "Scope" "Scope.Other" })) := by decide
 example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
-    (fieldCode (.objectField account 8 4 false)) := by decide
+    (fieldCode (.ldfld { balance with type := .atom runtime "System.Int32" })) := by decide
+example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
+    (fieldCode (.ldfld { balance with name := name!"limit" })) := by decide
+example : ¬ ScalarFlowValid #[] fieldRaw fieldFeatures fieldStates
+    (fieldCode (.stfld balance)) := by decide
 
 /-- A class-typed field at raw index 1 of `Scope.Node`, holding another node. -/
 private def node : TypeExpr := .object "Scope" "Scope.Node"
 private def nextField : RawOperand := .field node 1 node name!"next" false
+private def next : FieldRef := { owner := node, index := 1, type := node, name := name!"next" }
 /-- A scalar field at raw index 0 of `Scope.Node`. -/
 private def valueField : RawOperand := .field node 0 word name!"value" false
+private def value : FieldRef := { owner := node, index := 0, type := word, name := name!"value" }
 private def nextRaw : RawMethod :=
   { raw [i 2, i 123 nextField, i 42] [node] with returnType := node, maxStack := 1 }
 private def nextStates : ScalarCertificate := [some [], some [.object], some [.object]]
--- A class-typed field moves the reference its slot holds, at the field's model offset; it is
--- never read as bytes, and a scalar field is never read as a slot.
-example : ScalarFlowValid #[] nextRaw fieldFeatures nextStates
-    (fieldCode (.objectReferenceField node 8)) := by decide
+-- A class-typed field load names its own field; the step reads the slot the field's type gives.
+example : ScalarFlowValid #[] nextRaw fieldFeatures nextStates (fieldCode (.ldfld next)) := by
+  decide
 example : ¬ ScalarFlowValid #[] nextRaw fieldFeatures nextStates
-    (fieldCode (.objectReferenceField node 0)) := by decide
+    (fieldCode (.ldfld { next with index := 0 })) := by decide
 example : ¬ ScalarFlowValid #[] nextRaw fieldFeatures nextStates
-    (fieldCode (.objectReferenceField account 8)) := by decide
-example : scalarEmissionMatches #[] none (i 123 nextField) [.object]
-    (.memory (.objectField node 8 8 false)) = false := by decide
-example : scalarEmissionMatches #[] none (i 123 valueField) [.object]
-    (.memory (.objectReferenceField node 0)) = false := by decide
--- A store takes an object or null as its value, and only as a slot store.
+    (fieldCode (.ldfld { next with owner := account })) := by decide
+example : scalarEmissionMatches #[] none (i 123 nextField) [.object] (.ldfld value) = false := by
+  decide
+example : scalarEmissionMatches #[] none (i 123 valueField) [.object] (.ldfld next) = false := by
+  decide
+-- A store to a class-typed field takes an object or null as its value; a load is no store.
 example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
-    (.memory (.setObjectReferenceField node 8)) = true := by decide
+    (.stfld next) = true := by decide
 example : scalarEmissionMatches #[] none (i 125 nextField) [.nullObject, .object]
-    (.memory (.setObjectReferenceField node 8)) = true := by decide
+    (.stfld next) = true := by decide
 example : scalarEmissionMatches #[] none (i 125 nextField) [.word64, .object]
-    (.memory (.setObjectReferenceField node 8)) = false := by decide
+    (.stfld next) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 nextField) [.object, .object]
-    (.memory (.setObjectField node 8 8)) = false := by decide
+    (.ldfld next) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .object]
-    (.memory (.setObjectReferenceField node 0)) = false := by decide
--- A field typed as an array of a class holds the array's reference in its slot; a value array
--- field is never a reference slot.
+    (.stfld next) = false := by decide
+-- The receiver of a field access is an object or null.
+example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .object]
+    (.stfld value) = true := by decide
+example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .word64]
+    (.stfld value) = false := by decide
+-- `ldflda` of a class field is decoded; its step faults, since an object field has no address.
+example : scalarEmissionMatches #[] none (i 124 valueField) [.object] (.ldflda value) = true := by
+  decide
+-- A field typed as an array of a class holds the array's reference, stored as an object or null;
+-- a value array field stores only an array.
 private def itemsField : RawOperand := .field node 1 (.array node) name!"items" false
+private def items : FieldRef :=
+  { owner := node, index := 1, type := .array node, name := name!"items" }
 /-- A value-array field at raw index 1 of `Scope.Node`. -/
 private def samplesField : RawOperand := .field node 1 (.array word) name!"samples" false
-example : scalarEmissionMatches #[] none (i 123 itemsField) [.object]
-    (.memory (.objectReferenceField node 8)) = true := by decide
+private def samples : FieldRef :=
+  { owner := node, index := 1, type := .array word, name := name!"samples" }
+example : scalarEmissionMatches #[] none (i 123 itemsField) [.object] (.ldfld items) = true := by
+  decide
 example : scalarEmissionMatches #[] none (i 125 itemsField) [.nullObject, .object]
-    (.memory (.setObjectReferenceField node 8)) = true := by decide
+    (.stfld items) = true := by decide
 example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
-    (.memory (.objectReferenceField node 8)) = false := by decide
+    (.ldfld items) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 samplesField)
-    [.object, .object] (.memory (.setObjectReferenceField node 8)) = false := by decide
--- A value-array field is an array slot of the field's element type; it stores only an array
--- of that element, and a class-array field is never one.
+    [.object, .object] (.stfld samples) = false := by decide
+-- A value-array field names its element type; it stores only an array of that element.
 example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
-    (.memory (.arrayField node 8 .unsigned64)) = true := by decide
+    (.ldfld samples) = true := by decide
 example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
-    (.memory (.arrayField node 8 .signed64)) = false := by decide
+    (.ldfld { samples with type := .array (.atom runtime "System.Int64") }) = false := by
+  decide
 example : scalarEmissionMatches #[] none (i 123 samplesField) [.object]
-    (.memory (.arrayField node 0 .unsigned64)) = false := by decide
+    (.ldfld { samples with index := 0 }) = false := by decide
 example : scalarEmissionMatches #[] none (i 123 itemsField) [.object]
-    (.memory (.arrayField node 8 .unsigned64)) = false := by decide
+    (.ldfld samples) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .unsigned64, .object]
-    (.memory (.setArrayField node 8 .unsigned64)) = true := by decide
+    (.stfld samples) = true := by decide
 example : scalarEmissionMatches #[] none (i 125 samplesField) [.array .signed32, .object]
-    (.memory (.setArrayField node 8 .unsigned64)) = false := by decide
+    (.stfld samples) = false := by decide
 example : scalarEmissionMatches #[] none (i 125 samplesField) [.object, .object]
-    (.memory (.setArrayField node 8 .unsigned64)) = false := by decide
+    (.stfld samples) = false := by decide
 
 -- `ldstr` loads exactly its own text, nothing else loads a literal, and a folded throw's
 -- message emits nothing.

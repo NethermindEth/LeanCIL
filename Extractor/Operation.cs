@@ -372,10 +372,21 @@ internal sealed record StructField(FieldAccess Access, int Offset, int Width, bo
     public override int GetHashCode() => ToLean().GetHashCode(StringComparison.Ordinal);
 }
 
-/// <summary>A load or store of a class instance field of an admitted class.</summary>
-internal sealed record ClassField(ClassViews.FieldOperation Field) : Operation
+/// <summary>
+/// A load or store of a class instance field of an admitted class, naming the field operand
+/// <paramref name="Reference"/>, which the extraction sets from the raw operand the scalar check compares it with.
+/// </summary>
+internal sealed record ClassField(ClassViews.FieldOperation Field, FieldRef? Reference) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => ".memory " + Field.Lean();
+    internal override string Render(Func<int, string> calleeName) =>
+        $".{(Field.Store ? "stfld" : "ldfld")} ({(Reference ?? throw new InvalidOperationException(
+            "A class field access is rendered before its field operand is named.")).ToLean()})";
+
+    // The rendered term holds only the direction and the operand, so profiles merged into one template compare those.
+    public bool Equals(ClassField? other) =>
+        other is not null && Field.Store == other.Field.Store && Reference == other.Reference;
+
+    public override int GetHashCode() => HashCode.Combine(Field.Store, Reference);
 }
 
 internal enum AggregateAccess { Load, Store, Initialize, Copy }

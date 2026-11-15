@@ -927,12 +927,16 @@ end ObjectEquations
 
 open Lean Meta in
 /-- How `body` resolves `field`, reduced to a `FieldShape` constructor where it can be, with
-    its proof: from the operand's shared shape fact, or else as simp rewrites the shape with the
-    facts in scope. -/
+    its proof: from the operand's shared shape fact, by evaluation for a closed body and operand,
+    which the kernel checks again, or else as simp rewrites the shape with the facts in scope. -/
 def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
   let resolver := mkApp2 (mkConst ``CIL.Method.fieldShape) body field
   if let some (.done shared) ← ResolutionFacts.sharedShape? ``CIL.Method.fieldShape resolver then
     if let some proof := shared.proof? then return (shared.expr, proof)
+  unless resolver.hasFVar || resolver.hasMVar do
+    let evaluated ← withDefault <| reduce resolver
+    if ← isConstructorApp evaluated then
+      return (evaluated, ← mkExpectedTypeHint (← mkEqRefl evaluated) (← mkEq resolver evaluated))
   let shape ← Simp.simp resolver
   return (← whnfR (← instantiateMVars shape.expr), ← shape.getProof)
 
