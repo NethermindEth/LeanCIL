@@ -427,16 +427,13 @@ These regressions cover joint replay:
 
 ### Fold discovery
 
-Fold discovery counts decoded local references once and reads local types and receiver fold
-candidates from `FlowIndex`es built once per body. `foldRoles_eq_filter` proves exact equality to
-the specification that reads the locals list and filters the whole body at every site, including
-malformed operands and out-of-range local indexes. Methods without locals skip count
-construction.
+Fold discovery reads local types from a `FlowIndex` built once per body. Span receiver stores and
+addresses have no fold roles; their raw opcodes bind the emitted local instructions independently.
 
 Exception folds inspect at most three message loads, since admitted constructors accept at most
 two. `throwFold_eq_takeWhile` proves equality to the unrestricted prefix scan. A long rejected
-prefix does not prevent an admitted fold starting later. Span and throw evidence tests cover extra
-uses, malformed local operands, oversized prefixes and valid suffix folds.
+prefix does not prevent an admitted fold starting later. Span and throw evidence tests cover exact
+constructors, receiver instructions, oversized prefixes and valid suffix folds.
 
 ### Transitive composition replay
 

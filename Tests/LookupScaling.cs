@@ -1538,7 +1538,7 @@ Console.WriteLine(
     $"PASS checking the feature certificate of local loads, stores and addresses costs {accessesMeasured}");
 // The kernel heartbeats of a check over a body that stores each of its locals once and then loads or addresses
 // it, less those of stating the same check. Integer locals take a constant and are popped after a load or after
-// `ldloca`, which also names each as a receiver fold candidate; native-int locals take a method address and are
+// `ldloca`; native-int locals take a method address and are
 // consumed by `calli`, which makes each a pointer local. The check is the scalar certificate, or for pointer
 // locals also the closed argument storage.
 long LocalSlotCost(LocalSlots slots, int count, bool storage = false)

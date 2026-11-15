@@ -167,7 +167,7 @@ foreach (var mutation in new[] { "reset-scope", "reset-unscoped", "reset-interio
     var result = Execute(Extract("extract", path, null, method.FullName, Path.Combine(root, mutation)));
     var expected = mutation switch
     {
-        "reset-interior" => "Branch into a folded span receiver",
+        "reset-interior" => "Branch into a folded span constructor",
         "reset-unscoped" => "Type reference has no scope",
         _ => "Span default type does not match its local"
     };
