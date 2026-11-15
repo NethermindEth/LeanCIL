@@ -22,11 +22,11 @@ theorem layout_valid : layout.Valid := by decide +kernel
   returnsValue := true, locals := [.aggregate (List.replicate 8 0)], localKinds := [.aggregate 8]
   code := [.ldloca 0, .initAggregate 8, .br 14, .ldloca 0, .ldloc 0, .fieldAt 4 4,
     .call 1 1, .setFieldAt 4 4, .ldloca 0, .ldloc 0, .fieldAt 0 4, .ldc_i4 1, .add,
-    .setFieldAt 0 4, .ldloc 0, .fieldAt 0 4, .arg 0, .bne_un 3, .ldloc 0, .fieldAt 4 4, .ret] }
+    .setFieldAt 0 4, .ldloc 0, .fieldAt 0 4, .ldarg 0, .bne_un 3, .ldloc 0, .fieldAt 4 4, .ret] }
 
 /-- `return x + 2;` -/
 @[cil_code] def addTwo : CIL.Method := {
-  returnsValue := true, locals := [], code := [.arg 0, .ldc_i4 2, .add, .ret] }
+  returnsValue := true, locals := [], code := [.ldarg 0, .ldc_i4 2, .add, .ret] }
 
 /-- The program, with `tally` calling `addTwo` as method 1. -/
 @[cil_code] def program : CIL.Program := [tally, addTwo]
@@ -333,7 +333,7 @@ example (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memo
 @[cil_code] def marked : CIL.Method := {
   returnsValue := true, locals := [.aggregate (List.replicate 16 0)], localKinds := [.aggregate 16]
   code := [.ldloca 0, .initAggregate 16, .br 9, .ldloca 0, .ldloc 0, .fieldAt 4 4,
-    .ldc_i4 1, .add, .setFieldAt 4 4, .ldloc 0, .fieldAt 4 4, .arg 0, .bne_un 3, .ldloca 0,
+    .ldc_i4 1, .add, .setFieldAt 4 4, .ldloc 0, .fieldAt 4 4, .ldarg 0, .bne_un 3, .ldloca 0,
     .ldc_i4 1, .setFieldAt 0 1, .ldloc 0, .fieldAt 0 1, .ret] }
 
 /-- The program of `marked` alone. -/
@@ -430,13 +430,13 @@ open Lean in
 /-- `for (i = 0; i != n; i++) stamp(Unsafe.Add(ref p, i), i); return i;`, with `i` an int local. -/
 @[cil_code] def stamps : CIL.Method := {
   returnsValue := true, locals := [.i32 0], localKinds := [.word32]
-  code := [.ldc_i4 0, .stloc 0, .br 12, .arg 1, .ldloc 0, .memory (.add 4 true),
-    .ldloc 0, .call 1 2, .ldloc 0, .ldc_i4 1, .add, .stloc 0, .ldloc 0, .arg 0, .bne_un 3,
+  code := [.ldc_i4 0, .stloc 0, .br 12, .ldarg 1, .ldloc 0, .memory (.add 4 true),
+    .ldloc 0, .call 1 2, .ldloc 0, .ldc_i4 1, .add, .stloc 0, .ldloc 0, .ldarg 0, .bne_un 3,
     .ldloc 0, .ret] }
 
 /-- `*slot = value;` -/
 @[cil_code] def stamp : CIL.Method := {
-  returnsValue := false, locals := [], code := [.arg 0, .arg 1, .storeScalar 4, .ret] }
+  returnsValue := false, locals := [], code := [.ldarg 0, .ldarg 1, .storeScalar 4, .ret] }
 
 /-- The program, with `stamps` calling `stamp` as method 1. -/
 @[cil_code] def stampsProgram : CIL.Program := [stamps, stamp]
@@ -931,7 +931,7 @@ example (memory : Memory) (home : Reference) : True := by
 
 /-- Two operands added on the stack, then a `nop` at the state the path reaches. -/
 @[cil_code] def addPair : CIL.Method := {
-  returnsValue := true, locals := [], code := [.arg 0, .arg 1, .add, .nop] }
+  returnsValue := true, locals := [], code := [.ldarg 0, .ldarg 1, .add, .nop] }
 
 /-- The program holding only `addPair`. -/
 @[cil_code] def addPairProgram : CIL.Program := [addPair]

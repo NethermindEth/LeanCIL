@@ -277,7 +277,7 @@ open CIL.Safety
 /-- `while (remaining != 0) remaining--; return remaining;` with `remaining` in a frame home. -/
 @[cil_code] def countdown : CIL.Method := {
   locals := [.i32 0], localKinds := [.word32], returnsValue := true
-  code := [.arg 0, .stloc 0, .ldloc 0, .brtrue 6, .ldloc 0, .ret, .ldloc 0, .ldc_i4 1,
+  code := [.ldarg 0, .stloc 0, .ldloc 0, .brtrue 6, .ldloc 0, .ret, .ldloc 0, .ldc_i4 1,
     .sub, .stloc 0, .br 2] }
 
 /-- The program holding only `countdown`. -/
@@ -553,7 +553,7 @@ theorem sum_by_address_returns (memory : Memory) (view : SpanView) (values : Lis
 
 /-- `return span.Length;` read straight from the argument, with no parameter home. -/
 @[cil_code] def length : CIL.Method :=
-  { locals := [], returnsValue := true, code := [.arg 0, .memory .spanLength, .ret] }
+  { locals := [], returnsValue := true, code := [.ldarg 0, .memory .spanLength, .ret] }
 
 /-- The program holding only `length`. -/
 @[cil_code] def lengthProgram : CIL.Program := [length]

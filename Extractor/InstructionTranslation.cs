@@ -112,14 +112,13 @@ internal static class InstructionTranslation
         if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return StackOperation.Nop;
         Operation JumpTo(JumpKind kind) => new Jump(kind, instructions.Position((Instruction)i.Operand));
         int LocalIndex() => ((VariableDefinition)i.Operand).Index;
-        Narrowing? NarrowOf(TypeReference type) => LeanEmitter.Narrow(type);
         Operation LoadLocal(int index) => new Local(index);
         Operation StoreLocal(int index) => new SetLocal(index);
         Operation AddressLocal(int index) => new LocalAddress(index);
         Operation LoadArgument(int index)
         {
             var home = parameterHomes.GetValueOrDefault(index, -1);
-            return home < 0 ? new Arg(index, NarrowOf(MethodArguments.Type(m, index))) :
+            return home < 0 ? new Arg(index) :
                 new Local(m.Body.Variables.Count + home);
         }
         Operation Parameter(Func<int, Operation> operation)

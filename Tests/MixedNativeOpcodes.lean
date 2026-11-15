@@ -90,7 +90,7 @@ theorem addition_admission :
     and resume at the next instruction, whatever lies beneath the pair. -/
 def Agree (op : Instruction) (left right result : CIL.Value) : Prop :=
   (∀ (pc : Nat) (rest : List CIL.Value) (memory : CIL.Memory),
-    CIL.step op false none pc [] (right :: left :: rest) memory =
+    CIL.step op false none pc (right :: left :: rest) memory =
       some (.next (pc + 1) (result :: rest) memory)) ∧
   ∀ (body : Method) (pc : Nat) (args : List Safety.Value) (frame : Frame)
     (rest : List Safety.Value) (memory : Safety.Memory),
@@ -102,7 +102,7 @@ def Agree (op : Instruction) (left right result : CIL.Value) : Prop :=
 def Branches (op : Nat → Instruction) (left right : CIL.Value) (taken : Prop) [Decidable taken] :
     Prop :=
   (∀ (target pc : Nat) (rest : List CIL.Value) (memory : CIL.Memory),
-    CIL.step (op target) false none pc [] (right :: left :: rest) memory =
+    CIL.step (op target) false none pc (right :: left :: rest) memory =
       some (.next (if taken then target else pc + 1) rest memory)) ∧
   ∀ (body : Method) (target pc : Nat) (args : List Safety.Value) (frame : Frame)
     (rest : List Safety.Value) (memory : Safety.Memory),
@@ -242,8 +242,8 @@ theorem widened_unchanged_unless_mixed (op : Instruction) (widened : nativePureB
 /-- Unsigned branches refuse a mixed pair in both interpreters and both operand orders. -/
 theorem unsigned_branches_refused (int32 : W32) (native : W64) :
     ([Instruction.bne_un 9, .blt_un 9, .bgt_un 9, .ble_un 9, .bge_un 9].all fun op =>
-      (CIL.step op false none 0 [] [.i32 int32, .i64 native] (fun _ => none)).isNone &&
-      (CIL.step op false none 0 [] [.i64 native, .i32 int32] (fun _ => none)).isNone &&
+      (CIL.step op false none 0 [.i32 int32, .i64 native] (fun _ => none)).isNone &&
+      (CIL.step op false none 0 [.i64 native, .i32 int32] (fun _ => none)).isNone &&
       !(step body op 0 [] frame [.scalar (.i32 int32), .scalar (.i64 native)] Memory.empty).isOk &&
       !(step body op 0 [] frame [.scalar (.i64 native), .scalar (.i32 int32)] Memory.empty).isOk) =
       true := by

@@ -25,7 +25,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
         if stack.length < argc then .error .invalidState else
           let values ← CIL.Safety.scalars (stack.take argc)
           let some (.next destination result _) :=
-            CIL.step operation false none pc [] values (fun _ => none) profile |
+            CIL.step operation false none pc values (fun _ => none) profile |
               .error .invalidState
           let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
           return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -39,7 +39,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if stack.length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars (stack.take argc)
             let some (.next destination result _) :=
-              CIL.step operation false none pc [] values (fun _ => none) profile |
+              CIL.step operation false none pc values (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue source)
             return FrameAction.next destination (result ++ stack.drop argc) sourceFrame source
@@ -52,7 +52,7 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
           if (stack.map mapping.value).length < argc then .error .invalidState else
             let values ← CIL.Safety.scalars ((stack.map mapping.value).take argc)
             let some (.next destination result _) :=
-              CIL.step operation false none pc [] values (fun _ => none) profile |
+              CIL.step operation false none pc values (fun _ => none) profile |
                 .error .invalidState
             let result ← (result.map Value.scalar).mapM (CIL.Safety.checkedValue target)
             return FrameAction.next destination (result ++ (stack.map mapping.value).drop argc)
@@ -162,27 +162,10 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .brfalse _ | .brtrue _ | .beq _ | .bne_un _ => .reference
   | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
-  | .managed _ | .arg .. | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
+  | .managed _ | .ldarg _ | .call .. | .callInstance .. | .callVirtual .. | .objectTest ..
   | .tailCall ..
   | .throw _ | .ret => .boundary
   | _ => .other
-
-/-- The dispatcher rejects a narrow argument whose source value contains unspecified bits. -/
-def argumentUnspecified (operation : CIL.Instruction) (arguments : List Value) : Bool :=
-  match operation with
-  | .arg position (some _) => (arguments[position]?.map Value.hasUnspecified).getD false
-  | _ => false
-
-/-- Allocation renaming cannot change the narrow argument observation. -/
-theorem argumentUnspecified_map (mapping : AllocationRenaming)
-    (operation : CIL.Instruction) (arguments : List Value) :
-    argumentUnspecified operation (arguments.map mapping.value) =
-      argumentUnspecified operation arguments := by
-  cases operation <;> try rfl
-  rename_i position narrow
-  cases narrow <;> simp only [argumentUnspecified, List.getElem?_map, Option.map_map,
-    Function.comp_def, mapping.hasUnspecified]
-#print axioms argumentUnspecified_map
 
 /-- The finite reference-operation family exposes only the cases that can observe references. -/
 inductive ReferenceStepOperation : CIL.Instruction → Prop where
@@ -295,16 +278,13 @@ set_option hygiene false in
 /-- Compose fixed-map primitives after selecting one checked dispatcher family. -/
 macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
   unfold CIL.Safety.step at observable ⊢
-  change SuccessOrThrow (if (unspecifiedOperands (observerCount operation) stack ||
-    argumentUnspecified operation arguments) then _ else _) at observable
+  change SuccessOrThrow (if unspecifiedOperands (observerCount operation) stack then _ else _)
+    at observable
   change ResultRenamed mapping _
-    (if (unspecifiedOperands (observerCount operation) stack ||
-      argumentUnspecified operation arguments) then _ else _)
-    (if (unspecifiedOperands (observerCount operation) (stack.map mapping.value) ||
-      argumentUnspecified operation (arguments.map mapping.value)) then _ else _)
-  rw [mapping.unspecifiedOperands, argumentUnspecified_map]
-  by_cases guard : (unspecifiedOperands (observerCount operation) stack ||
-    argumentUnspecified operation arguments) = true
+    (if unspecifiedOperands (observerCount operation) stack then _ else _)
+    (if unspecifiedOperands (observerCount operation) (stack.map mapping.value) then _ else _)
+  rw [mapping.unspecifiedOperands]
+  by_cases guard : unspecifiedOperands (observerCount operation) stack = true
   · simp only [guard, ite_true] at observable
     cases observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
@@ -337,21 +317,14 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       first
       | (have boundary : fixedStepFamily operation = .boundary := family
          have noManaged : ∀ op, operation = .managed op → False := by assumption
-         have noArg : ∀ position, operation = .arg position none → False := by assumption
-         have noNarrowArg : ∀ position kind, operation = .arg position (some kind) → False :=
-           by assumption
+         have noArgument : ∀ position, operation = .ldarg position → False := by assumption
          have noCall : ∀ callee argc, operation = .call callee argc → False := by assumption
          have noTailCall : ∀ callee argc, operation = .tailCall callee argc → False := by assumption
          have noThrow : ∀ exception, operation = .throw exception → False := by assumption
          have noReturn : operation = .ret → False := by assumption
-         have noArgument : ∀ position narrow, operation = .arg position narrow → False := by
-           intro position narrow
-           cases narrow
-           · exact noArg position
-           · exact noNarrowArg position _
          cases operation <;> try cases boundary
          all_goals try exact False.elim (noManaged _ rfl)
-         all_goals try exact False.elim (noArgument _ _ rfl)
+         all_goals try exact False.elim (noArgument _ rfl)
          all_goals try exact False.elim (noCall _ _ rfl)
          all_goals try exact False.elim (noTailCall _ _ rfl)
          all_goals try exact False.elim (noThrow _ rfl)

@@ -150,7 +150,8 @@ inductive Instruction where
   | aggregateFieldAt (offset size : Nat)
   | setAggregateFieldAt (offset size : Nat)
   -- Arguments and locals.
-  | arg (index : Nat) (narrow : Option NarrowKind := none)
+  /-- Pushes argument `index`, read as `Method.argumentAccess` says. -/
+  | ldarg (index : Nat)
   | ldloc (index : Nat)
   | ldloca (index : Nat)
   | stloc (index : Nat)

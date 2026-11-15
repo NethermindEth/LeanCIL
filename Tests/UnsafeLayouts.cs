@@ -82,8 +82,8 @@ foreach (var method in owner.Methods.Where(m => m.Name.StartsWith("Add", StringC
     // Forming an address beyond the allocation fails before any dereference.
     claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [Tests.reference, .scalar (.i{stackWidth} 5)] memory).map Prod.snd = .error ⟨0, 2, .memory .invalidReference (.address ⟨0, 0⟩) 0⟩");
     claims.Add($"(CIL.Safety.invoke Extracted.program 8 0 [.reference .null, .scalar (.i{stackWidth} 0)] memory).map Prod.snd = .error ⟨0, 2, .memory .nullDereference .null 0⟩");
-    var success = "Tests.UnsafeWrappers.add_ok rfl _ _ _ _ _ _ _ rfl rfl rfl rfl";
-    var failure = "Tests.UnsafeWrappers.add_error _ _ _ _ _ _ _ rfl rfl rfl rfl";
+    var success = "Tests.UnsafeWrappers.add_ok rfl rfl rfl _ _ _ _ _ _ _ rfl rfl rfl rfl";
+    var failure = "Tests.UnsafeWrappers.add_error rfl rfl _ _ _ _ _ _ _ rfl rfl rfl rfl";
     Prove(method, claims, memory, "⟨" + string.Join(", ", Enumerable.Repeat(success, 5).Concat([failure, failure])) + "⟩");
 }
 

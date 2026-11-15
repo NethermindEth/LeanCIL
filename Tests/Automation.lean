@@ -22,7 +22,7 @@ run_cmd do
     throwError "Failed summary escaped its transaction"
 
 @[cil_code] def branchMethod : CIL.Method := {
-  code := [.arg 0, .brfalse 4, .arg 1, .ret, .arg 1, .ret]
+  code := [.ldarg 0, .brfalse 4, .ldarg 1, .ret, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 @[cil_code] def branchProgram : CIL.Program := [branchMethod]
 
@@ -48,7 +48,7 @@ example : True := by
     Lean.Core.setMessageLog earlier
 
 @[cil_code] def arithmeticMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
+  code := [.ldarg 0, .ldarg 1, .ldc_i4 1, .shl, .add, .ldc_i4 0, .cgt_un, .ret]
   locals := [], returnsValue := true }
 
 -- Symbolic values still reduce definitionally, including the final return.
@@ -63,7 +63,7 @@ theorem checked_arithmetic (memory : CIL.Safety.Memory) (left right : CIL.W32) :
 
 @[cil_code] def narrowEqualityMethod : CIL.Method := {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
-  code := [.arg 0, .arg 1, .xor, .ldc_i4 0, .ceq, .ret]
+  code := [.ldarg 0, .ldarg 1, .xor, .ldc_i4 0, .ceq, .ret]
   locals := [], returnsValue := true }
 
 def scalarDifference (left right : CIL.W32) : CIL.W32 := left ^^^ right
@@ -112,7 +112,7 @@ theorem checked_plain_return (memory : CIL.Safety.Memory) (frame : CIL.Safety.Fr
 /-! Run-to-run goals: a prefix of a method rewritten to the `run` it continues with. -/
 
 @[cil_code] def prefixMethod : CIL.Method := {
-  code := [.arg 0, .arg 1, .add, .arg 0, .add, .ret]
+  code := [.ldarg 0, .ldarg 1, .add, .ldarg 0, .add, .ret]
   locals := [], returnsValue := true }
 
 -- Symbolic remaining fuel stops the unbounded stepper at the target, which cleanup closes.
@@ -195,10 +195,10 @@ theorem run_prefix_bounded_two_goals (memory : CIL.Safety.Memory) (frame : CIL.S
   cil_checked_steps 3 []
 
 @[cil_code] def identityCallee : CIL.Method := {
-  code := [.arg 0, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .ret], locals := [], returnsValue := true }
 
 @[cil_code] def callPrefixMethod : CIL.Method := {
-  code := [.arg 0, .call 1 1, .arg 0, .add, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .call 1 1, .ldarg 0, .add, .ret], locals := [], returnsValue := true }
 
 -- A bounded step over a call runs the callee but stops before the caller's continuation.
 theorem run_call_prefix_bounded (memory : CIL.Safety.Memory) (frame : CIL.Safety.Frame) (a : CIL.W64) :
@@ -268,7 +268,8 @@ theorem checked_negative_literal_return (memory : CIL.Safety.Memory) (frame : CI
 #print axioms checked_negative_literal_return
 /-- A reusable body, bound to an extraction only through a lookup hypothesis. -/
 def wordBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := [.arg 0, .not, .arg 1, .not, .or, .not, .ret] }
+  { profile, returnsValue := true, locals := [], code := [.ldarg 0, .not, .ldarg 1, .not, .or,
+      .not, .ret] }
 
 theorem word_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (found : program[index]? = some (wordBody profile)) (memory : CIL.Safety.Memory) (a b : BitVec 64) :
@@ -278,7 +279,8 @@ theorem word_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featur
 
 /-- A profile-dependent body: its instructions are fetched only once the feature test is decided. -/
 @[cil_code] def featureBody (profile : CIL.FeatureProfile) : CIL.Method :=
-  { profile, returnsValue := true, locals := [], code := if profile.avx2 then [.arg 1, .ret] else [.arg 0, .ret] }
+  { profile, returnsValue := true, locals := [], code := if profile.avx2 then [.ldarg 1,
+      .ret] else [.ldarg 0, .ret] }
 
 theorem feature_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
     (scalar : profile.avx2 = false) (found : program[index]? = some (featureBody profile))
@@ -301,10 +303,10 @@ example (program : CIL.Program) (index : Nat) (memory : CIL.Safety.Memory) (a b 
 def leafBody (profile : CIL.FeatureProfile) : CIL.Method := {
   declared := { returnType := .atom CIL.Extraction.runtimeScope "System.Boolean" },
   profile, returnsValue := true, locals := [], code := [
-  .arg 0, .fieldAt 0 8, .arg 1, .fieldAt 0 8, .xor,
-  .arg 0, .fieldAt 8 8, .arg 1, .fieldAt 8 8, .xor, .or,
-  .arg 0, .fieldAt 16 8, .arg 1, .fieldAt 16 8, .xor, .or,
-  .arg 0, .fieldAt 24 8, .arg 1, .fieldAt 24 8, .xor, .or,
+  .ldarg 0, .fieldAt 0 8, .ldarg 1, .fieldAt 0 8, .xor,
+  .ldarg 0, .fieldAt 8 8, .ldarg 1, .fieldAt 8 8, .xor, .or,
+  .ldarg 0, .fieldAt 16 8, .ldarg 1, .fieldAt 16 8, .xor, .or,
+  .ldarg 0, .fieldAt 24 8, .ldarg 1, .fieldAt 24 8, .xor, .or,
   .ldc_i4 0, .conv_i8, .ceq, .ret] }
 
 open CIL.Safety in
@@ -321,7 +323,7 @@ theorem leaf_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featur
 
 def boundBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [],
-    code := [.arg 0, .arg 1, .blt_un 5, .arg 0, .ret, .arg 1, .ret] }
+    code := [.ldarg 0, .ldarg 1, .blt_un 5, .ldarg 0, .ret, .ldarg 1, .ret] }
 
 /-- A fact decides an unsigned i64 branch, so the run falls through to pc 3. -/
 theorem bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
@@ -333,7 +335,8 @@ theorem bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.Featu
 
 /-- A signed branch takes its fact in the interpreter's own form, so no linear-arithmetic restatement is needed. -/
 theorem signed_bound_checked (program : CIL.Program) (index : Nat) (profile : CIL.FeatureProfile)
-    (found : program[index]? = some { boundBody profile with code := [.arg 0, .arg 1, .blt 5, .arg 0, .ret, .arg 1, .ret] })
+    (found : program[index]? = some { boundBody profile with code := [.ldarg 0, .ldarg 1, .blt 5,
+        .ldarg 0, .ret, .ldarg 1, .ret] })
     (memory : CIL.Safety.Memory) (x y : CIL.W64) (above : ¬ x.toInt < y.toInt) :
     CIL.Safety.invoke program 8 index [.scalar (.i64 x), .scalar (.i64 y)] memory =
       .ok (memory, [.scalar (.i64 x)]) := by
@@ -760,7 +763,8 @@ theorem feature_step_forall_global (body : CIL.Method) (frame : CIL.Safety.Frame
 
 -- Pointer arithmetic in the run loop steps without a `referenceAt` fact.
 @[cil_code] def addBody : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.arg 0, .ldc_i4 8, .memory (.add 8 true), .pop, .ldc_i4 1, .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .ldc_i4 8, .memory (.add 8 true), .pop,
+      .ldc_i4 1, .ret] }
 
 open CIL.Safety in
 theorem add_run (memory : Memory) (source moved : Reference)
@@ -943,7 +947,7 @@ theorem step_fact_after_have (frame stored : Frame) (memory written : Memory) (v
 #guard_msgs in #print axioms step_fact_after_have
 
 @[cil_code] def nonzeroMethod : CIL.Method := {
-  code := [.arg 0, .brtrue 4, .arg 1, .ret, .arg 0, .ret]
+  code := [.ldarg 0, .brtrue 4, .ldarg 1, .ret, .ldarg 0, .ret]
   locals := [], returnsValue := true }
 
 -- A branch pc is decided from the condition's own fact, not only from a `CIL.truth` restatement.
@@ -965,7 +969,7 @@ theorem branch_from_zero (memory : CIL.Safety.Memory) (condition value : CIL.W32
 
 -- A literal condition is decided by evaluation, with no fact at all.
 @[cil_code] def literalBranchMethod : CIL.Method := {
-  code := [.ldc_i4 5, .brtrue 4, .arg 0, .ret, .arg 1, .ret]
+  code := [.ldc_i4 5, .brtrue 4, .ldarg 0, .ret, .ldarg 1, .ret]
   locals := [], returnsValue := true }
 
 theorem literal_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) :
@@ -981,12 +985,12 @@ theorem literal_branch (memory : CIL.Safety.Memory) (condition value : CIL.W32) 
 /-- A body whose instructions, not its code list, depend on a feature. -/
 def featureOpBody (profile : CIL.FeatureProfile) : CIL.Method :=
   { profile, returnsValue := true, locals := [],
-    code := [if profile.avx2 then .arg 1 else .arg 0, .fieldAt 0 8, .ret] }
+    code := [if profile.avx2 then .ldarg 1 else .ldarg 0, .fieldAt 0 8, .ret] }
 
 -- The lookup decides the feature test, so the fetched op is a constructor with a step equation.
 -- A term-mode `by`, as the contract and loop tactics call it, must still assign the op.
 example (profile : CIL.FeatureProfile) (scalar : profile.avx2 = false) :
-    ∃ op, (featureOpBody profile).code[0]? = some op ∧ op = .arg 0 :=
+    ∃ op, (featureOpBody profile).code[0]? = some op ∧ op = .ldarg 0 :=
   ⟨_, by cil_lookup [scalar], by with_reducible rfl⟩
 
 open CIL.Safety in
@@ -1068,7 +1072,7 @@ theorem intrinsic_without_facts (a b c d : CIL.W64) (destination : Reference) (m
 #guard_msgs in #print axioms intrinsic_without_facts
 
 @[cil_code] def checkedAdd64Method : CIL.Method := {
-  code := [.arg 0, .arg 1, .add_ovf_un, .ret]
+  code := [.ldarg 0, .ldarg 1, .add_ovf_un, .ret]
   locals := [], returnsValue := true }
 @[cil_code] def checkedAdd64Program : CIL.Program := [checkedAdd64Method]
 
@@ -1138,7 +1142,7 @@ theorem store_from_wrapped_fact (body : CIL.Method) (args : List Value) (frame :
 
 /-- Compare two words and reinterpret the result as a Boolean. -/
 @[cil_code] def comparedBoolean : CIL.Method := {
-  code := [.arg 0, .arg 1, .ceq, .memory .bitcastByteBool, .ret]
+  code := [.ldarg 0, .ldarg 1, .ceq, .memory .bitcastByteBool, .ret]
   locals := [], returnsValue := true }
 
 open CIL.Safety in
@@ -1176,14 +1180,15 @@ theorem widened_boolean_cast (body : CIL.Method) (frame : Frame) (field : CIL.W6
 #print axioms widened_boolean_cast
 
 open CIL.Safety in
-/-- A value known only to be numeric loads as an argument: the fact meets the checked value
-    test in the unfolded form stepping leaves it in. -/
+/-- A value known only to be numeric loads as a plain argument: the facts meet the argument
+    access and the checked value test in the unfolded form stepping leaves them in. -/
 theorem opaque_numeric_argument (body : CIL.Method) (frame : Frame) (argument : CIL.Value)
-    (memory : Memory) (numeric : numericValue argument = true) :
-    step body (.arg 0) 0 [.scalar argument] frame [] memory =
+    (memory : Memory) (plain : body.argumentAccess 0 = .value none)
+    (numeric : numericValue argument = true) :
+    step body (.ldarg 0) 0 [.scalar argument] frame [] memory =
       .ok (.next 1 [.scalar argument] frame memory) := by
-  fail_if_success cil_checked_step []
-  cil_checked_step [numeric]
+  fail_if_success cil_checked_step [numeric]
+  cil_checked_step [plain, numeric]
 
 #print axioms opaque_numeric_argument
 
@@ -1293,14 +1298,14 @@ def recordIsEmpty : TacticM Unit := do
 
 /-- Adds two arguments. -/
 @[cil_code] def recordBody : CIL.Method := {
-  code := [.arg 0, .arg 1, .add, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 0, .ldarg 1, .add, .ret], locals := [], returnsValue := true }
 
 /-- The program of `recordBody`. -/
 @[cil_code] def recordProgram : CIL.Program := [recordBody]
 
 /-- Adds the arguments in the other order, so its goals differ from those of `recordBody`. -/
 @[cil_code] def otherBody : CIL.Method := {
-  code := [.arg 1, .arg 0, .add, .ret], locals := [], returnsValue := true }
+  code := [.ldarg 1, .ldarg 0, .add, .ret], locals := [], returnsValue := true }
 
 /-- The program of `otherBody`. -/
 @[cil_code] def otherProgram : CIL.Program := [otherBody]

@@ -84,7 +84,7 @@ private def guardRaw := raw [i 2, i 45 (.target 5), i 114 (.text "zero"), i 115 
 private def guardStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none], state [], state [none]]
 private def guardCode : List Instruction :=
-  [.arg 0, .brtrue 5, .nop, .nop, .throw "System.ArgumentException", .arg 0, .ret]
+  [.ldarg 0, .brtrue 5, .nop, .nop, .throw "System.ArgumentException", .ldarg 0, .ret]
 
 example : FeatureFlowValid #[] (fun _ => none) guardRaw .scalar guardStates
     (List.replicate 7 true) guardCode := by decide
@@ -100,7 +100,8 @@ example : ¬ FeatureFlowValid #[] (fun _ => none)
 private def enteredRaw := raw [i 2, i 37, i 45 (.target 6), i 38, i 114 (.text "zero"), i 115 argument, i 122]
 example : ¬ FeatureFlowValid #[] (fun _ => none) enteredRaw .scalar
     [state [], state [none], state [none, none], state [none], state [], state [none], state [none]]
-    (List.replicate 7 true) [.arg 0, .dup, .brtrue 6, .pop, .nop, .nop, .throw "System.ArgumentException"] := by decide
+    (List.replicate 7 true) [.ldarg 0, .dup, .brtrue 6, .pop, .nop, .nop,
+        .throw "System.ArgumentException"] := by decide
 
 /-- An adjacent raw null is the only operand admitted by the null-throw fold. -/
 theorem null_throw_encoding :
