@@ -152,19 +152,19 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
   match operation, stack with
   | .tableLength, .object .null :: _
   | .tableElement _, .scalar _ :: .object .null :: _ =>
-    .error (.thrown "System.NullReferenceException")
+    .error (.thrown .nullReference)
   | .address target signature, _ =>
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
   | .tableLength, .methodTable table :: rest =>
-    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    let some targets := table.targets | .error (.thrown .nullReference)
     if targets.size >= 2^31 then .error .invalidState else pure ()
     return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 targets.size)) :: rest) frame memory
   | .tableElement signature, .scalar index :: .methodTable table :: rest =>
     if table.signature != signature then .error .invalidState else pure ()
     let some index := arrayIndex index | .error .invalidState
-    let some targets := table.targets | .error (.thrown "System.NullReferenceException")
+    let some targets := table.targets | .error (.thrown .nullReference)
     if targets.size >= 2^31 then .error .invalidState else pure ()
-    let some target := targets[index]? | .error (.thrown "System.IndexOutOfRangeException")
+    let some target := targets[index]? | .error (.thrown .indexOutOfRange)
     if let some backing := table.backing then
       let selected := { table with backing := some { backing with
         byteOffset := nativeMethodWidth * index } }
@@ -444,7 +444,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       -- The receiver is the deepest argument; anything but an object reference is ill-typed.
       match arguments with
       | .object (.address _) :: _ => return .call callee arguments (stack.drop argc) m
-      | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+      | .object .null :: _ => .error (.thrown .nullReference)
       | _ => .error .invalidState
   | .callVirtual targets argc, _ =>
     if stack.length < argc then .error .invalidState else
@@ -452,7 +452,7 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
       match arguments with
       | .object (.address receiver) :: _ =>
         return .call (← virtualTarget m targets receiver) arguments (stack.drop argc) m
-      | .object .null :: _ => .error (.thrown "System.NullReferenceException")
+      | .object .null :: _ => .error (.thrown .nullReference)
       | _ => .error .invalidState
   | .newAggregate callee argc size, _ =>
     if size = 0 || stack.length < argc then .error .invalidState else

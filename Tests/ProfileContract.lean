@@ -35,7 +35,7 @@ theorem profiles_valid : avx2Profile.Valid ∧ avx512Profile.Valid ∧ narrowPro
   [{ profile := avx2Profile, returnsValue := true, locals := [],
      code := [.feature .avx2, .ret] },
    { profile := avx2Profile, returnsValue := false, locals := [],
-     code := [.throw "System.PlatformNotSupportedException"] }]
+     code := [.throw .notSupported] }]
 
 /-- Calling with no arguments returns `1` and changes no memory. -/
 def avx2Contract : MethodContract Unit where
@@ -67,7 +67,7 @@ theorem narrow_holds : avx2Contract.Holds (reprofile program narrowProfile) 0 :=
   [{ profile := avx512Profile, returnsValue := true, locals := [],
      code := [.feature .avx2, .ret] },
    { profile := avx512Profile, returnsValue := false, locals := [],
-     code := [.throw "System.PlatformNotSupportedException"] }]
+     code := [.throw .notSupported] }]
 
 /-- A per-profile program is certified once it is shown to be the reprofiling. -/
 theorem extraction_holds : avx2Contract.Holds avx512Program 0 := by
@@ -94,7 +94,7 @@ def throwContract : OutcomeContract Unit where
   pre _ _ := True
   footprint _ := []
   post _ _ _ _ := False
-  raises _ _ := some "System.PlatformNotSupportedException"
+  raises _ _ := some .notSupported
 
 /-- Under `avx2Profile` method 1 raises the named exception. -/
 theorem throw_holds : throwContract.Holds program 1 := by

@@ -62,6 +62,10 @@ characters long and differ only in their last character, less the same statement
 than 1.05 times the 20-character case or when either costs more than 9,500 heartbeats. This
 check takes about 5 seconds.
 
+Exception decisions compare `CIL.ExceptionType` constructors. The equality, inequality,
+CLR mapping and optional outcome rows each allow 2,000 to 9,500 kernel heartbeats. Using
+`applicationException` instead of `format` may increase the cost by at most 1.05 times.
+
 The suite also measures `decide +kernel` on one `add` of an int32 offset to a native method
 table of 16, 64 and 256 entries, less the same statement closed with `sorry`. Each table and its
 static storage are definitions outside the decision, so the proof of `MethodTable.counted` is

@@ -61,7 +61,7 @@ partial class Program
                     """);
             else
             {
-                var fault = name == "ForwardThrow" ? ".thrown \"System.InvalidOperationException\"" :
+                var fault = name == "ForwardThrow" ? ".thrown .invalidOperation" :
                     ".memory .expiredLifetime (.address ⟨1, 0⟩) 0";
                 File.AppendAllText(proof, $$"""
 

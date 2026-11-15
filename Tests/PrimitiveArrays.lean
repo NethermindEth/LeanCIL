@@ -68,13 +68,13 @@ theorem empty_length :
 /-- Null is distinct from an empty array and raises the named runtime exception. -/
 theorem null_length :
     memoryInstruction .arrayLength [.array ⟨.null, 0, .signed32⟩] memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 #print axioms null_length
 
 /-- The raw null literal has the same runtime array-null behavior. -/
 theorem literal_null_length :
     memoryInstruction .arrayLength [.object .null] memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 #print axioms literal_null_length
 
 /-- A null byref, as `Unsafe.NullRef` produces, is not an array and has no length. -/
@@ -103,27 +103,27 @@ theorem native_index :
 /-- Index equal to length is outside the array even if its address could be a sentinel. -/
 theorem end_index_rejected :
     memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 4), .array words] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms end_index_rejected
 
 /-- Negative int32 indexes are out of bounds. -/
 theorem negative_index_rejected :
     memoryInstruction (.arrayLoad 4 false) [.scalar (.i32 4294967295), .array words] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms negative_index_rejected
 
 /-- A high native index cannot wrap into the array. -/
 theorem high_native_index_rejected :
     memoryInstruction (.arrayLoad 4 false)
       [.scalar (.i64 18446744073709551615), .array words] memory =
-      .error (.thrown "System.IndexOutOfRangeException") := rfl
+      .error (.thrown .indexOutOfRange) := rfl
 #print axioms high_native_index_rejected
 
 /-- Null is checked before index bounds. -/
 theorem null_before_bounds :
     memoryInstruction (.arrayLoad 4 false)
       [.scalar (.i32 4294967295), .array ⟨.null, 0, .signed32⟩] memory =
-      .error (.thrown "System.NullReferenceException") := rfl
+      .error (.thrown .nullReference) := rfl
 #print axioms null_before_bounds
 
 /-- Array shape does not grant read authority. -/
@@ -213,7 +213,7 @@ theorem allocation_identity_reuse_is_not_exception :
 /-- Native negative lengths retain the CLI overflow exception. -/
 theorem native_negative_array_length :
     (match newArray memory .signed32 (.i64 (2^63)) with
-     | .error fault => fault == .thrown "System.OverflowException"
+     | .error fault => fault == .thrown .overflow
      | .ok _ => false) = true := by decide +kernel
 #print axioms native_negative_array_length
 

@@ -35,7 +35,7 @@ theorem null_pairs (memory : Memory) (tiles : Reference)
     (readable : Tiles.Pairs.Readable memory tiles)
     (held : Tiles.Pairs.of memory tiles = .null) :
     ∃ fuel, invoke Extracted.program fuel pairCount [.object (.address tiles)] memory =
-      .error ⟨pairCount, 2, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨pairCount, 2, .thrown .nullReference⟩ := by
   cil_checked_steps [readable.load_null held rfl]
 
 #print axioms null_pairs

@@ -18,7 +18,7 @@ theorem correctness (memory : Memory) (literal : Reference) (count : CIL.W32)
     (bound : memory.literals.lookup "count" = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.scalar (.i32 count)] memory =
-      if count.toInt < 0 then .error ⟨0, 2, .thrown "System.ArgumentOutOfRangeException"⟩
+      if count.toInt < 0 then .error ⟨0, 2, .thrown .argumentOutOfRange⟩
       else .ok (memory, [.scalar (.i32 count)]) := by
   by_cases negative : count.toInt < 0
   · simp only [negative, ite_true]

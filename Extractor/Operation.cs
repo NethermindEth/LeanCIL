@@ -149,10 +149,10 @@ internal sealed record Return : Operation
     internal override string Render(Func<int, string> calleeName) => ".ret";
 }
 
-/// <summary>A fault of the named CLR exception type.</summary>
-internal sealed record Throw(string Exception) : Operation
+/// <summary>A fault of the modelled CLR exception type.</summary>
+internal sealed record Throw(ExceptionType Exception) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".throw \"{Exception}\"";
+    internal override string Render(Func<int, string> calleeName) => $".throw {Exception.ToLean()}";
 }
 
 /// <summary>The width and signedness a narrow integer is truncated to when it is read.</summary>

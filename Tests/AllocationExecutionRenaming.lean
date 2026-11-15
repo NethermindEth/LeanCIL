@@ -97,7 +97,7 @@ def allocationPrefix : List CIL.Instruction :=
 def returningCode : List CIL.Instruction := allocationPrefix ++ [.ldloc 0, .ldloc 1, .add, .ret]
 
 /-- The exceptional fixture raises after both the nested call and dynamic allocation finish. -/
-def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw "AfterNestedAllocation"]
+def throwingCode : List CIL.Instruction := allocationPrefix ++ [.throw .invalidOperation]
 
 /-- Both methods use the same declaration transformation and preserve their callable indices. -/
 def sourceProgram (code : List CIL.Instruction) : CIL.Program :=
@@ -150,7 +150,7 @@ theorem source_confined : MemoryBelow 1 initial sourceFinal := by
 /-- The actual source raises at the instruction after the nested allocation sequence. -/
 theorem source_throws :
     invoke (sourceProgram throwingCode) fuel 0 [] initial =
-      .error ⟨0, 7, .thrown "AfterNestedAllocation"⟩ := by rfl
+      .error ⟨0, 7, .thrown .invalidOperation⟩ := by rfl
 #print axioms source_throws
 
 /-- The source has consumed five fresh identities across both frames and dynamic storage. -/
@@ -175,7 +175,7 @@ theorem transferred_return : ∃ final,
 
 /-- The checked public exception transfer covers a throw after nested and dynamic allocation. -/
 theorem transferred_exception :
-    Raises (targetProgram throwingCode) 0 [] initial "AfterNestedAllocation" :=
+    Raises (targetProgram throwingCode) 0 [] initial .invalidOperation :=
   (programs_related throwingCode).raises initial_formed
     (by intro binding member; cases member) (by intro binding member; cases member)
     (by intro value member; cases member)

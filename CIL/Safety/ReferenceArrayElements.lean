@@ -75,7 +75,7 @@ theorem Live.slot_outside {memory : Memory} {array : Reference}
     {element : CIL.Extraction.TypeExpr} {length index : Nat}
     (live : Live memory array element length) (outside : length ≤ index) :
     referenceArraySlot memory (.address array) index =
-      .error (.thrown "System.IndexOutOfRangeException") := by
+      .error (.thrown .indexOutOfRange) := by
   simp only [referenceArraySlot, live.located, Nat.not_lt.mpr outside, Bind.bind, Except.bind,
     ite_false]
 #print axioms Live.slot_outside
@@ -255,7 +255,7 @@ theorem storableIn_mismatch {memory : Memory} {target : Reference}
     (elementClass : element = .object elementScope elementName)
     (outside : element ∉ type.lineage) :
     storableIn memory element (.address target) =
-      .error (.thrown "System.ArrayTypeMismatchException") := by
+      .error (.thrown .arrayTypeMismatch) := by
   subst elementClass
   simp only [storableIn, found, kind, identity, outside, checkedAt, Except.mapError, Bind.bind,
     Except.bind, ite_false]

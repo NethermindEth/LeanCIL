@@ -614,7 +614,7 @@ def featureOpMatchesAt (layouts : Array RawLayout) (raw : RawMethod)
   | some .head, .nop | some .interior, .nop => true
   | some (.result value), .ldc_i4 bits => bits == if value then 1 else 0
   | some (.typeBranch taken), _ => typeBranchMatches instruction taken emitted
-  | some (.raise name), .throw exception => name == exception
+  | some (.raise raised), .throw exception => raised == exception
   | some (.spanConstructor index constructor), .initializeSpanLocal actual operation =>
     index == actual && spanConstructorMatches constructor operation
   | some .tailCall, .tailCall target count => match instruction.operand with

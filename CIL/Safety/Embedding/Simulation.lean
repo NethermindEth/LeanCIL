@@ -137,7 +137,7 @@ theorem step_unsupported {body : CIL.Method} {description : String} {pc : Nat} {
   cases h
 
 /-- `.throw` never steps successfully. -/
-theorem step_throw {body : CIL.Method} {exception : String} {pc : Nat} {args : List Value}
+theorem step_throw {body : CIL.Method} {exception : ExceptionType} {pc : Nat} {args : List Value}
     {frame : Frame} {stack : List Value} {m : Memory} {action : FrameAction}
     (h : step body (.throw exception) pc args frame stack m = .ok action) : False := by
   cases h
@@ -464,7 +464,8 @@ theorem run_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
 /-- An expected run that throws `exception` throws it in the actual run, at the relocated pc. -/
 theorem run_raise_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
     (refines : ProgramRefines expected actual maps) {fuel method pc : Nat} {args : List Value}
-    {frame : Frame} {stack : List Value} {m : Memory} {fault : LocatedFault} {exception : String}
+    {frame : Frame} {stack : List Value} {m : Memory} {fault : LocatedFault}
+    {exception : ExceptionType}
     (h : run expected fuel method pc args frame stack m = .error fault)
     (thrown : fault.fault = .thrown exception) :
     run actual fuel method (maps method pc) args frame stack m = .error (fault.relocate maps) :=
@@ -519,7 +520,7 @@ theorem invoke_refines {expected actual : CIL.Program} {maps : Nat → Nat → N
     relocated pc. -/
 theorem invoke_raise_refines {expected actual : CIL.Program} {maps : Nat → Nat → Nat}
     (refines : ProgramRefines expected actual maps) {fuel method : Nat} {args : List Value}
-    {m : Memory} {fault : LocatedFault} {exception : String}
+    {m : Memory} {fault : LocatedFault} {exception : ExceptionType}
     (h : invoke expected fuel method args m = .error fault)
     (thrown : fault.fault = .thrown exception) :
     invoke actual fuel method args m = .error (fault.relocate maps) :=
@@ -589,7 +590,8 @@ theorem _root_.CIL.Embeds.run {program : CIL.Program} {index : Nat}
 theorem _root_.CIL.Embeds.invoke_raise {program : CIL.Program} {index : Nat}
     {expected target : CIL.Method} {map : List Nat} (found : program[index]? = some target)
     (embeds : Embeds expected target map)
-    {fuel method : Nat} {args : List Value} {m : Memory} {fault : LocatedFault} {exception : String}
+    {fuel method : Nat} {args : List Value} {m : Memory} {fault : LocatedFault}
+    {exception : ExceptionType}
     (h : CIL.Safety.invoke (program.set index expected) fuel method args m = .error fault)
     (thrown : fault.fault = .thrown exception) :
     CIL.Safety.invoke program fuel method args m =

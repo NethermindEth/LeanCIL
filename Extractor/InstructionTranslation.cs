@@ -106,7 +106,7 @@ internal static class InstructionTranslation
             if (index <= methodIndex) throw new InvalidDataException("Unresolved constrained implementation");
             return new Call(CallKind.Static, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
         }
-        if (throws.Raises.TryGetValue(i, out string? raised)) return new Throw(raised);
+        if (throws.Raises.TryGetValue(i, out ExceptionType raised)) return new Throw(raised);
         var spans = Spans.Analyze(m, profile);
         if (spans.Constructors.TryGetValue(i, out var constructor)) return constructor;
         if (throws.Operands.Contains(i) || spans.Operands.Contains(i)) return StackOperation.Nop;

@@ -61,7 +61,7 @@ theorem Memory.Renamed.stepMemory {indices : LocalIndexMap} {mapping : Allocatio
 
 /-- Stack allocation faults are resource or memory failures, never named CLR exceptions. -/
 theorem allocateStack_not_thrown (memory : Memory) (frame : Frame) (size : Nat)
-    (initLocals : Bool) (exception : String) :
+    (initLocals : Bool) (exception : ExceptionType) :
     allocateStack memory frame size initLocals ≠ .error (.thrown exception) := by
   intro raised
   unfold allocateStack allocateHome checkedAt at raised
@@ -128,7 +128,8 @@ theorem Memory.Renamed.stepStackAlloc {indices : LocalIndexMap} {mapping : Alloc
 
 /-- Heap-resource and allocator faults cannot discharge a named exception obligation. -/
 theorem allocateArray_not_thrown (memory : Memory) (element : CIL.ArrayElement) (length : Nat)
-    (exception : String) : allocateArray memory element length ≠ .error (.thrown exception) := by
+    (exception : ExceptionType) :
+    allocateArray memory element length ≠ .error (.thrown exception) := by
   intro raised
   unfold allocateArray checkedAt at raised
   repeat' first
@@ -199,7 +200,8 @@ theorem Memory.Renamed.stepNewArray {indices : LocalIndexMap} {mapping : Allocat
 
 /-- Heap-budget and allocator faults cannot discharge a named exception obligation. -/
 theorem allocateObject_not_thrown (memory : Memory) (type : RuntimeType) (size : Nat)
-    (exception : String) : allocateObject memory type size ≠ .error (.thrown exception) := by
+    (exception : ExceptionType) :
+    allocateObject memory type size ≠ .error (.thrown exception) := by
   intro raised
   unfold allocateObject checkedAt at raised
   repeat' first

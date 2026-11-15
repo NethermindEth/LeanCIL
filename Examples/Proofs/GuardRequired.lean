@@ -17,7 +17,7 @@ theorem null_raises (memory : Memory) (literal : Reference)
     (bound : memory.literals.lookup "label" = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object .null] memory =
-      .error ⟨0, 2, .thrown "System.ArgumentNullException"⟩ := by
+      .error ⟨0, 2, .thrown .argumentNull⟩ := by
   cil_checked_steps [literalObject_of_lookup bound, formed]
 
 #print axioms null_raises
@@ -40,7 +40,7 @@ theorem correctness (memory : Memory) (label : ManagedReference) (literal : Refe
     (bound : memory.literals.lookup "label" = some literal)
     (formed : formObject memory (.address literal) = .ok (.object (.address literal))) :
     ∃ fuel, invoke Extracted.program fuel 0 [.object label] memory =
-      if label = .null then .error ⟨0, 2, .thrown "System.ArgumentNullException"⟩
+      if label = .null then .error ⟨0, 2, .thrown .argumentNull⟩
       else .ok (memory, [.object label]) := by
   cases label with
   | null => simpa using null_raises memory literal bound formed

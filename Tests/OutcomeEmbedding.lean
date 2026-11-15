@@ -8,7 +8,7 @@ namespace Tests.OutcomeEmbedding
 
 open CIL CIL.Safety
 
-def outOfRange : String := "System.ArgumentOutOfRangeException"
+def outOfRange : ExceptionType := .argumentOutOfRange
 
 /-- `Outer(v) => Check(v)`: any exception comes from the helper. -/
 @[cil_code] def outer : Method :=
@@ -30,7 +30,7 @@ theorem literal_set : literal = extracted.set 1 check := rfl
 
 theorem check_embeds : MethodEmbeds extracted 1 check := by cil_embed
 
-def raisesAbove (v : W64) : Option String := if v ≤ 100 then none else some outOfRange
+def raisesAbove (v : W64) : Option ExceptionType := if v ≤ 100 then none else some outOfRange
 
 def checkContract : OutcomeContract W64 W64 where
   args v := [.scalar (.i64 v)]
@@ -140,15 +140,16 @@ example : (⟨1, 6, .thrown outOfRange⟩ : LocatedFault).relocate
 
 /-! A changed reachable throw condition or exception type neither embeds nor satisfies the contract. -/
 
-def renamedException : Method := { extractedCheck with code := extractedCheck.code.set 7 (.throw "System.ArgumentException") }
+def renamedException : Method :=
+  { extractedCheck with code := extractedCheck.code.set 7 (.throw .argument) }
 def lowerBound : Method := { extractedCheck with code := extractedCheck.code.set 1 (.ldc_i4 50) }
 
 /--
 error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 6 maps to actual pc 7
-  expected: CIL.Instruction.throw "System.ArgumentOutOfRangeException"
-  actual:   CIL.Instruction.throw "System.ArgumentException"
+  expected: CIL.Instruction.throw (CIL.ExceptionType.argumentOutOfRange)
+  actual:   CIL.Instruction.throw (CIL.ExceptionType.argument)
   the instructions differ
 -/
 #guard_msgs (substring := true) in
@@ -171,7 +172,7 @@ example : ¬ checkContract.Holds [outer, renamedException] 1 := by
   obtain ⟨_, fault, ran, named⟩ := holds.raising (input := 101) (initial := empty) (exception := outOfRange) trivial
     (by decide)
   have thrown : Safety.invoke [outer, renamedException] 10 1 (checkContract.args 101) empty =
-      .error ⟨1, 7, .thrown "System.ArgumentException"⟩ := rfl
+      .error ⟨1, 7, .thrown .argument⟩ := rfl
   cases invoke_unique (by simp [Settled, named]) (by simp [Settled]) ran thrown
   simp [outOfRange] at named
 

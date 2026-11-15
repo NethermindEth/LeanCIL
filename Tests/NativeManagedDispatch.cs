@@ -77,7 +77,7 @@ theorem native_cycle : (match nativeRun nativeTable 0 0 with
 /-- The same supplied native entry may terminate with its named modeled exception. -/
 theorem native_throw : (match nativeRun nativeTable 0 (-1) with
     | .error fault => some fault.fault | .ok _ => none) =
-      some (.thrown "System.InvalidOperationException") := by decide +kernel
+      some (.thrown .invalidOperation) := by decide +kernel
 #print axioms native_throw
 /-- A numeric local beside the authenticated target keeps its ordinary scalar representation. -/
 theorem numeric_local : Extracted.method0.localKinds[1]? = some .word64 := by decide +kernel

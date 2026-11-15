@@ -34,7 +34,7 @@ theorem null_values (memory : Memory) (samples : Reference)
     (readable : Samples.Values.Readable memory samples)
     (held : Samples.Values.of memory samples = .null) :
     ∃ fuel, invoke Extracted.program fuel count [.object (.address samples)] memory =
-      .error ⟨count, 2, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨count, 2, .thrown .nullReference⟩ := by
   cil_checked_steps [readable.load_null held rfl]
 
 #print axioms null_values

@@ -223,26 +223,26 @@ theorem stored_dead_returns (memory : Safety.Memory) (value : W32) :
 
 /-- Jumps to a throw. -/
 def thrower : Method :=
-  { code := [.br 1, .throw "Overflow"], locals := [], returnsValue := false }
+  { code := [.br 1, .throw .overflow], locals := [], returnsValue := false }
 
 /-- `thrower` with a dead block before the throw and unused reference and span locals. -/
 def throwerDead : Method := {
-  code := [.br 2, .unsupported "Unreachable under selected profile", .throw "Overflow"]
+  code := [.br 2, .unsupported "Unreachable under selected profile", .throw .overflow]
   locals := [.nullRef, .nullRef], localKinds := [.reference, .span 1 false], returnsValue := false }
 
 /-- A throw of the expected body is raised by the extraction with the dead local. -/
 theorem thrower_dead_raises (memory : Safety.Memory) :
-    Safety.Raises [throwerDead] 0 [] memory "Overflow" :=
+    Safety.Raises [throwerDead] 0 [] memory .overflow :=
   have embeds : MethodEmbedsDeadLocals [throwerDead] 0 thrower := by cil_embed
   embeds.raises ⟨2, _, rfl, rfl⟩
 
 /-- The relocated fault names the throw's pc in the extraction, past the dead block. -/
 theorem thrower_dead_fault (memory : Safety.Memory) :
-    Safety.invoke [throwerDead] 2 0 [] memory = .error ⟨0, 2, .thrown "Overflow"⟩ := by
+    Safety.invoke [throwerDead] 2 0 [] memory = .error ⟨0, 2, .thrown .overflow⟩ := by
   have embeds : EmbedsDeadLocals thrower throwerDead [0, 2] := by
     refine ⟨?_, rfl, rfl, rfl, rfl, rfl, rfl⟩
     constructor <;> rfl
-  exact embeds.invoke_raise (index := 0) rfl (fault := ⟨0, 1, .thrown "Overflow"⟩) rfl rfl
+  exact embeds.invoke_raise (index := 0) rfl (fault := ⟨0, 1, .thrown .overflow⟩) rfl rfl
 
 -- A dead numeric local allocates a home and shifts later allocation identities.
 /--

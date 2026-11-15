@@ -1,4 +1,5 @@
 import CIL.Types
+import CIL.ExceptionType
 import CIL.IntegerArithmetic
 import CIL.Features
 import CIL.SIMD.Availability
@@ -204,7 +205,7 @@ inductive Instruction where
   | memory (operation : MemoryOp)
   | ret
   /-- Raises an exception of the named type; there are no handlers. -/
-  | throw (exception : String)
+  | throw (exception : ExceptionType)
   | unsupported (description : String)
   deriving Repr
 

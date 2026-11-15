@@ -69,7 +69,7 @@ theorem correctness : ¬ percentContract.Holds Extracted.program percent := by
   intro holds
   obtain ⟨_, _, _, ran, -⟩ := holds.returning (input := 100) (initial := empty) trivial (by decide)
   have thrown : invoke Extracted.program 16 percent (percentContract.args 100) empty =
-      .error ⟨percent, 6, .thrown "System.ArgumentOutOfRangeException"⟩ := rfl
+      .error ⟨percent, 6, .thrown .argumentOutOfRange⟩ := rfl
   cases invoke_unique (by trivial) (by simp [Settled]) ran thrown
 
 """;
@@ -78,9 +78,9 @@ const string RefuteException = Empty + """
 theorem correctness : ¬ percentContract.Holds Extracted.program percent := by
   intro holds
   obtain ⟨_, fault, ran, named⟩ := holds.raising (input := 101) (initial := empty)
-    (exception := "System.ArgumentOutOfRangeException") trivial (by decide)
+    (exception := .argumentOutOfRange) trivial (by decide)
   have thrown : invoke Extracted.program 16 percent (percentContract.args 101) empty =
-      .error ⟨percent, 6, .thrown "System.ArgumentException"⟩ := rfl
+      .error ⟨percent, 6, .thrown .argument⟩ := rfl
   cases invoke_unique (by simp [Settled, named]) (by simp [Settled]) ran thrown
   simp at named
 

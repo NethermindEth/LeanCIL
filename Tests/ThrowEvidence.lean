@@ -34,10 +34,11 @@ private def state (stack : List (Option W32)) : Option FeatureState := some ⟨s
 
 -- The exact encoding folds; extra loads, a wrong arity or a non-runtime type do not.
 example : foldRoles [] [i 114 (.text "zero"), i 115 argument, i 122] =
-    [some .head, some .interior, some (.raise "System.ArgumentException")] := by decide
-example : foldRoles [] [i 115 divide, i 122] = [some .head, some (.raise "System.DivideByZeroException")] := by decide
+    [some .head, some .interior, some (.raise .argument)] := by decide
+example : foldRoles [] [i 115 divide, i 122] = [some .head, some (.raise .divideByZero)] := by
+  decide
 example : foldRoles [] [i 20, i 114 (.text "zero"), i 115 argument, i 122] =
-    [none, some .head, some .interior, some (.raise "System.ArgumentException")] := by decide
+    [none, some .head, some .interior, some (.raise .argument)] := by decide
 example : throwFold [i 115 argument, i 122] = none := by decide
 example : throwFold [i 115 (ctor owner "Fixture.Failure" 0), i 122] = none := by decide
 example : throwFold [i 115 divide, i 38, i 122] = none := by decide
@@ -47,7 +48,7 @@ theorem long_prefix_suffix :
     foldRoles [] ([i 20, i 20, i 20] ++
       [i 115 (ctor runtime "System.ArgumentException" 2), i 122]) =
       [none, some .head, some .interior, some .interior,
-        some (.raise "System.ArgumentException")] := by decide +kernel
+        some (.raise .argument)] := by decide +kernel
 #print axioms long_prefix_suffix
 
 /-- A long message-only body never invents a constructor or throw. -/
@@ -76,13 +77,13 @@ theorem rejects_wrong_signature : throwFold [i 114 (.text "a"), i 115 wrongParam
 
 theorem accepts_two_strings :
     throwFold [i 20, i 114 (.text "message"), i 115 (ctor runtime "System.ArgumentOutOfRangeException" 2), i 122] =
-      some (2, "System.ArgumentOutOfRangeException") := by decide
+      some (2, .argumentOutOfRange) := by decide
 #print axioms accepts_two_strings
 
 theorem rejects_non_exception_certificate :
-    ¬ FeatureFlowValid #[] (fun _ => none)
+    ∀ claimed ∈ ExceptionType.all, ¬ FeatureFlowValid #[] (fun _ => none)
         (raw [i 115 (ctor runtime "System.Object" 0), i 122]) .scalar
-      [state [], state [none]] [true, true] [.nop, .throw "System.Object"] := by decide
+      [state [], state [none]] [true, true] [.nop, .throw claimed] := by decide +kernel
 #print axioms rejects_non_exception_certificate
 
 -- 0: ldarg.0; 1: brtrue 5; 2: ldstr; 3: newobj ArgumentException(string); 4: throw; 5: ldarg.0; 6: ret
@@ -90,14 +91,14 @@ private def guardRaw := raw [i 2, i 45 (.target 5), i 114 (.text "zero"), i 115 
 private def guardStates : FeatureCertificate :=
   [state [], state [none], state [], state [none], state [none], state [], state [none]]
 private def guardCode : List Instruction :=
-  [.ldarg 0, .brtrue 5, .nop, .nop, .throw "System.ArgumentException", .ldarg 0, .ret]
+  [.ldarg 0, .brtrue 5, .nop, .nop, .throw .argument, .ldarg 0, .ret]
 
 example : FeatureFlowValid #[] (fun _ => none) guardRaw .scalar guardStates
     (List.replicate 7 true) guardCode := by decide
 -- The raised type is the constructed one, and the fold cannot be emitted as a hole.
-example : ¬ FeatureFlowValid #[] (fun _ => none)
+example : ∀ other ∈ ExceptionType.all, other ≠ .argument → ¬ FeatureFlowValid #[] (fun _ => none)
     guardRaw .scalar guardStates (List.replicate 7 true)
-    (guardCode.set 4 (.throw "System.InvalidOperationException")) := by decide
+    (guardCode.set 4 (.throw other)) := by decide +kernel
 example : ¬ FeatureFlowValid #[] (fun _ => none)
     guardRaw .scalar guardStates (List.replicate 7 true)
     (guardCode.set 4 (.unsupported "hidden")) := by decide
@@ -107,21 +108,21 @@ private def enteredRaw := raw [i 2, i 37, i 45 (.target 6), i 38, i 114 (.text "
 example : ¬ FeatureFlowValid #[] (fun _ => none) enteredRaw .scalar
     [state [], state [none], state [none, none], state [none], state [], state [none], state [none]]
     (List.replicate 7 true) [.ldarg 0, .dup, .brtrue 6, .pop, .nop, .nop,
-        .throw "System.ArgumentException"] := by decide
+        .throw .argument] := by decide
 
 /-- An adjacent raw null is the only operand admitted by the null-throw fold. -/
 theorem null_throw_encoding :
     foldRoles [] [i 20, i 122] =
-      [some .head, some (.raise "System.NullReferenceException")] ∧
+      [some .head, some (.raise .nullReference)] ∧
     FeatureFlowValid #[] (fun _ => none) (raw [i 20, i 122]) .scalar
-      [state [], state [none]] [true, true] [.nop, .throw "System.NullReferenceException"] ∧
+      [state [], state [none]] [true, true] [.nop, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (raw [i 22, i 122]) .scalar
-      [state [], state [some 0]] [true, true] [.nop, .throw "System.NullReferenceException"] ∧
+      [state [], state [some 0]] [true, true] [.nop, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (raw [i 20 (.text "forged"), i 122]) .scalar
-      [state [], state [none]] [true, true] [.nop, .throw "System.NullReferenceException"] ∧
+      [state [], state [none]] [true, true] [.nop, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (raw [i 20, i 0, i 122]) .scalar
       [state [], state [none], state [none]] [true, true, true]
-      [.nop, .nop, .throw "System.NullReferenceException"] := by decide +kernel
+      [.nop, .nop, .throw .nullReference] := by decide +kernel
 #print axioms null_throw_encoding
 
 /-- A branch may enter at the null load, but not skip it to reach the folded throw. -/
@@ -129,17 +130,24 @@ theorem null_throw_entry :
     FeatureFlowValid #[] (fun _ => none) (raw [i 20, i 43 (.target 2), i 20, i 122]) .scalar
       [state [], state [none], state [none], state [none, none]]
       [true, true, true, true]
-      [.memory .nullRef, .br 2, .nop, .throw "System.NullReferenceException"] ∧
+      [.memory .nullRef, .br 2, .nop, .throw .nullReference] ∧
     ¬ FeatureFlowValid #[] (fun _ => none) (raw [i 20, i 43 (.target 3), i 20, i 122]) .scalar
       [state [], state [none], none, state [none]] [true, true, false, true]
-      [.memory .nullRef, .br 3, .unsupported "dead", .throw "System.NullReferenceException"] :=
+      [.memory .nullRef, .br 3, .unsupported "dead", .throw .nullReference] :=
   by decide +kernel
 #print axioms null_throw_entry
 
 -- A null throw cannot claim another exception type.
-example : ¬ FeatureFlowValid #[] (fun _ => none)
-    (raw [i 20, i 122]) .scalar [state [], state [none]]
-    [true, true]
-    [.nop, .throw "System.Object"] := by decide
+example : ∀ other ∈ ExceptionType.all, other ≠ .nullReference → ¬ FeatureFlowValid #[]
+    (fun _ => none) (raw [i 20, i 122]) .scalar [state [], state [none]] [true, true]
+    [.nop, .throw other] := by decide +kernel
+
+/-- Types outside the constructor allowlist cannot form a throw fold. -/
+theorem rejects_unadmitted_owners :
+    foldRoles [] [i 115 (ctor runtime "System.PlatformNotSupportedException" 0), i 122] =
+      [none, none] ∧
+    foldRoles [] [i 115 (ctor runtime "System.InvalidCastException" 0), i 122] = [none, none] ∧
+    exceptionOwner? (.atom runtimeScope "System.Object") = none := by decide +kernel
+#print axioms rejects_unadmitted_owners
 
 end Tests.ThrowEvidence

@@ -31,7 +31,7 @@ theorem correctness (memory : Memory) (nodes : Reference) (length : Nat)
 /-- A null array throws `NullReferenceException` at `ldlen`, pc 1. -/
 theorem null_array (memory : Memory) :
     ∃ fuel, invoke Extracted.program fuel count [.object .null] memory =
-      .error ⟨count, 1, .thrown "System.NullReferenceException"⟩ := by
+      .error ⟨count, 1, .thrown .nullReference⟩ := by
   cil_checked_steps
 
 #print axioms null_array
