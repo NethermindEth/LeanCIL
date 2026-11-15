@@ -42,7 +42,7 @@ theorem managedStep_callee {operation : CIL.ManagedOp} {pc : Nat} {frame : Frame
     (executed : managedStep operation pc frame stack memory = .ok action)
     (enters : action.callee = some callee) :
       callee ∈ (CIL.Instruction.managed operation).callees := by
-  unfold managedStep at executed
+  unfold managedStep methodTableLength methodTableElement at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve |

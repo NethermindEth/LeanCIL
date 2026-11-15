@@ -20,7 +20,7 @@ private theorem bind_ite {α β : Type} (c : Prop) [Decidable c] (a b : Executio
 local macro "memory_step_proof" : tactic => `(tactic| (
   simp only [step, staticInstruction, memoryInstruction, spanFillInstruction, spanCopyInstruction,
     otherMemoryInstruction, wideArithmeticInstruction, referenceAddInstruction,
-    vector128UnsafeInstruction,
+    vector128UnsafeInstruction, arrayLength,
     displaceReference, observerCount,
     CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any, Value.hasUnspecified,
     Bool.or_false, Bool.false_eq_true, ite_false, ite_true, CIL.offsetValue, cil_guard, bind_ite,

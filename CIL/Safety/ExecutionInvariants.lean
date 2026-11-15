@@ -30,12 +30,15 @@ def FrameAction.frameAfter (action : FrameAction) (current : Frame) : Frame :=
   | .next _ _ frame _ | .construct _ _ _ frame _ _ _ => frame
   | .call _ _ _ _ | .tailCall _ _ _ | .returned _ _ => current
 
-/-- The runtime type of the instance an instruction creates: `newobj` records its class and
-    bases in the instruction itself, `newarr` of a class the array type of its element; no
-    other instruction creates an instance. -/
-def objectSiteType : CIL.Instruction → Option RuntimeType
+/-- The runtime type of the instance an instruction of `body` creates: `newobj` records its
+    class and bases in the instruction itself, and `newarr` of an element the body's layouts
+    give a class reference shape creates the array type of that class; no other instruction
+    creates an instance. -/
+def objectSiteType (body : CIL.Method) : CIL.Instruction → Option RuntimeType
   | .newObject _ _ owner bases _ => some ⟨owner, bases⟩
-  | .newReferenceArray element => some (referenceArrayType element)
+  | .newarr element => match body.elementShape element with
+    | .reference element => some (referenceArrayType element)
+    | _ => none
   | _ => none
 
 /-- A step's memory and frame changes, with successful primitive operations as
@@ -47,7 +50,7 @@ inductive StepEffect (body : CIL.Method) (operation : CIL.Instruction) (frame : 
   | arrayAllocation {view result} (effect : ArrayAllocationEffect m view result) :
       StepEffect body operation frame m frame result
   | objectAllocation {type object result} (effect : ObjectAllocationEffect m type object result)
-      (site : objectSiteType operation = some type) :
+      (site : objectSiteType body operation = some type) :
       StepEffect body operation frame m frame result
   | stackAllocation {reference final result}
       (effect : StackAllocationEffect m frame reference final result) :
@@ -308,20 +311,40 @@ theorem StepContract.objectAllocation {body : CIL.Method} {frame : Frame}
 
 #print axioms StepContract.objectAllocation
 
-/-- `newarr` of a class pushes a fresh array, allocated as an instance of its array type. -/
-theorem StepContract.referenceArrayAllocation {body : CIL.Method} {frame : Frame}
-    {stack : List Value} {memory result : Memory} {array : Reference}
+/-- `newarr` pushes a fresh array of the shape the body's layouts give its element: inline
+    storage, or an instance of the array type of a class element. -/
+theorem StepContract.newarr {body : CIL.Method} {frame : Frame}
+    {stack : List Value} {memory result : Memory} {array : Value}
     {element : CIL.Extraction.TypeExpr} {length : CIL.Value} {pc : Nat}
-    (success : newReferenceArray memory element length = .ok (array, result)) :
-    StepContract body (.newReferenceArray element) frame (.scalar length :: stack) memory
-      (.next pc (.object (.address array) :: stack) frame result) := by
-  obtain ⟨size, allocated⟩ := newReferenceArray_allocation success
-  have effect := allocateObject_effect allocated
-  apply StepContract.of_effect (.objectAllocation effect rfl)
-  intro _ _ retained
-  exact ValuesValid.cons effect.object_valid retained.tail
+    (success : allocateElements (body.elementShape element) length memory = .ok (array, result)) :
+    StepContract body (.newarr element) frame (.scalar length :: stack) memory
+      (.next pc (array :: stack) frame result) := by
+  cases shaped : body.elementShape element with
+  | value inline =>
+    simp only [shaped, allocateElements, Bind.bind, Except.bind, Pure.pure, Except.pure]
+      at success
+    split at success
+    · cases success
+    · rename_i allocated
+      cases success
+      exact StepContract.arrayAllocation allocated
+  | reference classElement =>
+    simp only [shaped, allocateElements, Bind.bind, Except.bind, Pure.pure, Except.pure]
+      at success
+    split at success
+    · cases success
+    · rename_i allocated
+      cases success
+      obtain ⟨size, created⟩ := newReferenceArray_allocation allocated
+      have effect := allocateObject_effect created
+      apply StepContract.of_effect (.objectAllocation effect
+        (by simp only [objectSiteType, shaped]))
+      intro _ _ retained
+      exact ValuesValid.cons effect.object_valid retained.tail
+  | method signature => simp [shaped, allocateElements] at success
+  | unsupported reason => simp [shaped, allocateElements] at success
 
-#print axioms StepContract.referenceArrayAllocation
+#print axioms StepContract.newarr
 
 /-- A successful pointer subtraction forms a valid result without changing its capability. -/
 theorem referenceSubtract_valid (memory : Memory) (reference result : ManagedReference)
@@ -358,13 +381,23 @@ theorem StepContract.initializeSpanLocal {body : CIL.Method} {operation : CIL.In
 
 #print axioms StepContract.initializeSpanLocal
 
+/-- The length a method table answers is a well-formed native integer. -/
+theorem methodTableLength_numeric {table : CIL.MethodTable} {length : CIL.Value}
+    (counted : methodTableLength table = .ok length) : numericValue length = true := by
+  unfold methodTableLength at counted
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at counted
+  repeat' first
+    | (cases counted <;> rfl)
+    | split at counted
+#print axioms methodTableLength_numeric
+
 /-- Managed identities change no memory; dispatched arguments are checked before use. -/
 theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
     (operation : CIL.ManagedOp) (pc : Nat)
     (frame : Frame) (stack : List Value) (memory : Memory) (action : FrameAction)
     (executed : managedStep operation pc frame stack memory = .ok action) :
     StepContract body dispatched frame stack memory action := by
-  unfold managedStep at executed
+  unfold managedStep methodTableElement at executed
   simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
   repeat' first
     | solve |
@@ -378,6 +411,8 @@ theorem managedStep_contract {dispatched : CIL.Instruction} (body : CIL.Method)
         | exact retained.tail.drop _
         | exact (checkedValues_valid _ _ _ (by assumption)).2
         | (apply ValuesValid.cons; first | trivial | exact retained | exact retained.tail.tail)
+        | (refine ValuesValid.cons ?_ retained.tail
+           exact methodTableLength_numeric (by assumption))
         | constructor
     | cases executed
     | split at executed
@@ -404,7 +439,7 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
         all_goals assumption
     | solve | exact .stackAllocation (by assumption)
     | solve | exact .arrayAllocation (by assumption)
-    | solve | exact .referenceArrayAllocation (by assumption)
+    | solve | exact .newarr (by assumption)
     | solve | exact .objectAllocation (by assumption) (by assumption)
     | solve |
         apply StepContract.staticInstruction

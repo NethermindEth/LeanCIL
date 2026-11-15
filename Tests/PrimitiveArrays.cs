@@ -11,6 +11,7 @@
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
 
+using System.Globalization;
 using System.Reflection;
 using Mono.Cecil;
 
@@ -243,9 +244,9 @@ foreach (var (name, element, width) in allocations)
     if (name == "Allocate")
     {
         foreach (var (mutation, replacement) in new[]
-            { ("element", ".newArray .unsigned32"), ("operation", ".nop") })
+            { ("element", ".newarr (.atom Extraction.runtimeScope \"System.UInt32\")"), ("operation", ".nop") })
         {
-            const string target = ".newArray .signed32";
+            const string target = ".newarr (.atom Extraction.runtimeScope \"System.Int32\")";
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing newarr mutation");
             var forged = Path.Combine(root, "ForgedAllocation-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
@@ -254,16 +255,20 @@ foreach (var (name, element, width) in allocations)
     }
     if (name == "AllocateSigned8")
     {
-        var target = $".newArray (.{element})";
+        // The token names the enum and its underlying type; its storage is resolved from them.
+        var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.Signed8");
+        const string underlying = ".atom Extraction.runtimeScope \"System.SByte\"";
+        var target = $".newarr (.enum {identity} ({underlying}))";
         foreach (var (mutation, replacement) in new[]
         {
             ("identity", target.Replace("Examples.Signed8", "Examples.Unsigned8", StringComparison.Ordinal)),
-            ("storage", target.Replace(".signed8)", ".unsigned8)", StringComparison.Ordinal)),
-            ("width", target.Replace(".signed8)", ".signed16)", StringComparison.Ordinal)),
-            ("primitive", ".newArray .signed8")
+            ("underlying", target.Replace("System.SByte", "System.Byte", StringComparison.Ordinal)),
+            ("width", target.Replace("System.SByte", "System.Int16", StringComparison.Ordinal)),
+            ("primitive", $".newarr ({underlying})")
         })
         {
             if (!source.Contains(target, StringComparison.Ordinal)) throw new Exception("Missing enum newarr target");
+            if (replacement == target) throw new Exception("Enum allocation mutation changes nothing: " + mutation);
             var forged = Path.Combine(root, "ForgedEnumAllocation-" + mutation + ".lean");
             File.WriteAllText(forged, source.Replace(target, replacement, StringComparison.Ordinal));
             rejected.Add(forged, "PASS forged enum allocation: " + mutation, "ScalarFlowValid");
@@ -271,26 +276,26 @@ foreach (var (name, element, width) in allocations)
     }
     if (name == "AllocatePacked")
     {
-        var target = $".newArray (.{element})";
         var identity = System.Text.Json.JsonSerializer.Serialize(runtime.Assembly.FullName + "::Examples.PackedLeaf");
         var otherIdentity = identity.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal);
+        // The token names the struct by identity and layout index; its stride is the checked layout's.
+        var prefix = $".newarr (.aggregate {identity} ";
+        var start = source.IndexOf(prefix, StringComparison.Ordinal);
+        if (start < 0) throw new Exception("Missing composite newarr token");
+        var index = int.Parse(source.AsSpan(start + prefix.Length,
+            source.IndexOf(')', start) - start - prefix.Length), CultureInfo.InvariantCulture);
+        var target = $"{prefix}{index})";
         var controls = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (mutation, before, after, obligation, diagnostic) in new[]
         {
-            ("width", target, target.Replace(" 5)", " 6)", StringComparison.Ordinal),
-                "method0_layouts_validated", "MethodLayoutsValid"),
             ("identity", target, target.Replace("PackedLeaf", "Leaf", StringComparison.Ordinal),
                 "method0_scalars_validated", "ScalarFlowValid"),
+            ("index", target, $"{prefix}{index + 1})", "method0_scalars_validated", "ScalarFlowValid"),
             ("layout-identity", $".aggregate {identity}", $".aggregate {otherIdentity}",
-                "method0_coverage_validated", "LayoutUsesComplete"),
-            ("byref-like", $"identity := {identity},", $"identity := {identity}, byRefLike := true,",
-                "method0_layouts_validated", "MethodLayoutsValid"),
-            ("zero-width", target, target.Replace(" 5)", " 0)", StringComparison.Ordinal),
-                "method0_scalars_validated", "ScalarFlowValid"),
-            ("oversized", target, target.Replace(" 5)", " 65536)", StringComparison.Ordinal),
-                "method0_scalars_validated", "ScalarFlowValid")
+                "method0_coverage_validated", "LayoutUsesComplete")
         })
         {
+            if (before == after) throw new Exception("Composite allocation mutation changes nothing: " + mutation);
             var narrowed = NarrowEvidence(source, obligation);
             if (controls.Add(obligation))
                 File.AppendAllText(proof,

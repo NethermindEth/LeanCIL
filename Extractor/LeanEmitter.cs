@@ -244,12 +244,16 @@ internal static class LeanEmitter
             HashSet<int> addressedLocals = m.Body.Instructions
                 .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
+            Operation Translated(Instruction i)
+            {
+                var operation = InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
+                    scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
+                return operation is NewArray allocation
+                    ? allocation with { Element = genericEvidence.ArrayElementOf(m, i) } : operation;
+            }
             List<Operation> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i)
-                    ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
-                    : Unadmitted.At(i));
+                ops.Add(reachable.Contains(i) ? Translated(i) : Unadmitted.At(i));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
             var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);

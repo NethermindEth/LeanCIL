@@ -144,7 +144,9 @@ internal static class VerificationSuites
             "does not grow with the table's entries; the managed-call check of a body with many call sites at " +
             "a per-site cost that does not grow with the call sites; the argument facts of " +
             "cil_resolution_facts and the reads through them at a per-argument cost that does not grow with " +
-            "the parameters; the shape facts of cil_field_shape and the reads through them at a per-field cost " +
+            "the parameters; the array element shape facts of cil_resolution_facts and the reads through them " +
+            "at a per-element-type cost that does not grow with the layouts or the sites naming each type; " +
+            "the shape facts of cil_field_shape and the reads through them at a per-field cost " +
             "that grows less than 1.35 times from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 " +
             "to 512 fields in a struct each, and the facts of cil_value_shape and their reads at a per-type " +
             "cost that grows less than 1.35 times from 8 to 32 to 128 to 512 struct types; the kernel check of " +

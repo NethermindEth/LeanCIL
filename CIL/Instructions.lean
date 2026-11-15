@@ -147,10 +147,9 @@ inductive Instruction where
   | conv_ovf (target : ConvTarget) | conv_ovf_un (target : ConvTarget)
   /-- Fresh frame storage of the popped byte count, zeroed when `declared.initLocals` is set. -/
   | localloc
-  /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
-  | newArray (element : ArrayElement)
-  /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
-  | newReferenceArray (element : Extraction.TypeExpr)
+  /-- `newarr` of the declared element type `element`: a fresh zeroed array whose storage the
+      method's layouts give that type (`CIL.Method.elementShape`). -/
+  | newarr (element : Extraction.TypeExpr)
   | nop | neg | cgt
   -- Signed and unsigned compare-and-branch; more follow `switch` below.
   | bgt (target : Nat)
