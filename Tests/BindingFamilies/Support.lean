@@ -14,14 +14,14 @@ open CIL CIL.Safety
 @[cil_code] def equalityBody (profile : FeatureProfile) (environment : LayoutEnvironment)
     (declared : DeclaredSignature) (positive : Bool) : Method := {
   profile, environment, declared, locals := [], returnsValue := true,
-  code := [.arg 0, .arg 1, .ceq] ++
+  code := [.ldarg 0, .ldarg 1, .ceq] ++
     (if positive then [] else [.ldc_i4 0, .ceq]) ++ [.ret] }
 
 /-- The fixed body of one binary bitwise method. -/
 @[cil_code] def bitwiseBody (profile : FeatureProfile) (environment : LayoutEnvironment)
     (declared : DeclaredSignature) (operation : Instruction) : Method := {
   profile, environment, declared, locals := [], returnsValue := true,
-  code := [.arg 0, .arg 1, operation, .ret] }
+  code := [.ldarg 0, .ldarg 1, operation, .ret] }
 
 /-- The equality family computes its boolean in arbitrary caller memory. -/
 theorem equal32 (program : Program) (profile : FeatureProfile)

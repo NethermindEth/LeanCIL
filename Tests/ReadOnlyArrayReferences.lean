@@ -116,7 +116,7 @@ private def states : CIL.Extraction.ScalarCertificate :=
   [some [], some [.array .signed32], some [.word32, .array .signed32],
     some [.word32, .array .signed32], some [.reference], none]
 private def code (writable : Bool) : List CIL.Instruction :=
-  [.arg 0, .arg 1, .nop, .memory (.arrayAddress .signed32 writable), .ret,
+  [.ldarg 0, .ldarg 1, .nop, .memory (.arrayAddress .signed32 writable), .ret,
     .unsupported "unreachable"]
 
 /-- A branch to the prefix itself does not bypass the restriction. -/

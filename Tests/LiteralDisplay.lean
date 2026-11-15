@@ -71,7 +71,7 @@ open CIL.Safety in
     byte; `high` and `count` are the literals a case checks. -/
 def literalBody (high count narrow : Nat) : CIL.Method :=
   { returnsValue := true, locals := [], code :=
-      [.ldc_i4 (BitVec.ofNat 32 high), .conv_i8, .arg 0, .ldc_i4 (BitVec.ofNat 32 count), .shl,
+      [.ldc_i4 (BitVec.ofNat 32 high), .conv_i8, .ldarg 0, .ldc_i4 (BitVec.ofNat 32 count), .shl,
         .ldc_i4 (BitVec.ofNat 32 narrow), .conv_u1, .ret] }
 
 section LiteralOperands
@@ -141,7 +141,7 @@ example (program : CIL.Program) (found : program[0]? = some (literalBody 0xFFFFF
 
 /-- A symbolic count keeps its masked form, which a consumer's lemma about it still matches. -/
 def symbolicShiftBody : CIL.Method :=
-  { returnsValue := true, locals := [], code := [.arg 0, .arg 1, .shl, .ret] }
+  { returnsValue := true, locals := [], code := [.ldarg 0, .ldarg 1, .shl, .ret] }
 
 example (count : W32)
     (rest : run [symbolicShiftBody] 2 0 3 [.scalar (.i64 x), .scalar (.i32 count)] frame

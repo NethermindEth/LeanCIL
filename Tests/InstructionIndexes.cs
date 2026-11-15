@@ -247,7 +247,7 @@ if (TranslateArgument(storeArgument, homePositions) != ".stloc 3" ||
     TranslateArgument(loadArgument, homePositions) != ".ldloc 3" ||
     TranslateArgument(addressArgument, homePositions) != ".ldloca 3")
     throw new Exception("Home translation lost the raw-local offset or slot index");
-if (TranslateArgument(loadArgument, []) != ".arg 1")
+if (TranslateArgument(loadArgument, []) != ".ldarg 1")
     throw new Exception("Unhomed loads no longer use the original argument");
 try
 {
@@ -276,17 +276,26 @@ Array Operations(params object[] operations)
 object Body(params object[] operations) => Activator.CreateInstance(bodyType, Declared, null,
     [Operations(operations)], null)!;
 int Loops(object body) => ((System.Collections.IList)bodyType.GetMethod("Loops", Declared)!.Invoke(body, null)!).Count;
+// An argument read is pure only when its declared type is no narrow integer: (int, byte) below.
+var mixedArguments = new MethodDefinition("Mixed", Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
+mixedArguments.Parameters.Add(new ParameterDefinition("word", Mono.Cecil.ParameterAttributes.None,
+    module.TypeSystem.Int32));
+mixedArguments.Parameters.Add(new ParameterDefinition("small", Mono.Cecil.ParameterAttributes.None,
+    module.TypeSystem.Byte));
+owner.Methods.Add(mixedArguments);
 bool Pure(object operation, bool plainReturn = true) =>
-    (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation"), typeof(bool)])!.Invoke(null,
-        [operation, plainReturn])!;
+    (bool)bodyType.GetMethod("Pure", Declared, [Model("Operation"), typeof(MethodDefinition), typeof(bool)])!
+        .Invoke(null, [operation, mixedArguments, plainReturn])!;
 var nop = Make("StackOperation", Named("StackOpcode", "Nop"));
 var backEdge = Make("Jump", Named("JumpKind", "Less"), 0);
 if (Loops(Body(nop, nop, backEdge)) != 1)
     throw new Exception("A conditional back edge is not found as a loop");
-if (!Pure(Make("Arg", 0, null)) || Pure(Make("Arg", 0, Named("Narrowing", "Unsigned8"))) ||
+if (!Pure(Make("Arg", 0)) || Pure(Make("Arg", 1)) ||
     !Pure(Make("Return")) || Pure(Make("Return"), plainReturn: false) ||
     Pure(Make("Call", Named("CallKind", "Tail"), 1, 0)))
     throw new Exception("The pure operations are no longer exactly the admitted unnarrowed ones");
+if (Lean(Make("Arg", 1)) != ".ldarg 1")
+    throw new Exception("An argument load no longer renders as the decoded ldarg");
 if (Lean(Make("LoadScalar", 4, false)) != ".loadScalar 4" ||
     Lean(Make("LoadScalar", 4, Named("LoadSign", "UnsignedSpelled"))) != ".loadScalar 4 false" ||
     Lean(Make("LoadScalar", 1, true)) != ".loadScalar 1 true" ||
@@ -318,6 +327,34 @@ foreach (var (constant, property, newValue) in new (object, string, object)[]
     }
     catch (TargetInvocationException error) when (error.InnerException is ArgumentOutOfRangeException) { }
 Console.WriteLine("PASS typed operations keep the spellings and shapes the outline generators branch on");
+
+// The extractor's narrowing table, which the outline readers refuse arguments by, states for every primitive
+// head the narrowing Lean's declaredNarrow gives it (pinned in Tests/ResolutionFacts.lean); an admitted enum
+// narrows as its underlying type on both sides.
+var narrowOf = extractor.GetType("Nethermind.LeanCIL.LeanEmitter", true)!
+    .GetMethod("Narrow", BindingFlags.Static | BindingFlags.NonPublic)!;
+string? NarrowName(TypeReference type) => narrowOf.Invoke(null, [type])?.ToString();
+var system = module.TypeSystem;
+foreach (var (head, narrowing) in new (TypeReference, string?)[]
+{
+    (system.Boolean, "Unsigned8"), (system.Char, "Unsigned16"), (system.SByte, "Signed8"), (system.Byte, "Unsigned8"),
+    (system.Int16, "Signed16"), (system.UInt16, "Unsigned16"), (system.Int32, null), (system.UInt32, null),
+    (system.Int64, null), (system.UInt64, null), (system.IntPtr, null), (system.UIntPtr, null),
+    (system.Single, null), (system.Double, null)
+})
+    if (NarrowName(head) != narrowing)
+        throw new Exception(
+            $"{head.FullName} narrows as {NarrowName(head) ?? "nothing"}, not {narrowing ?? "nothing"}");
+var enums = module.Types.Where(type => type.IsEnum).ToArray();
+if (enums.Length == 0) throw new Exception("The examples declare no enum to compare narrowing on");
+foreach (var enumeration in enums)
+{
+    var storage = enumeration.Fields.Single(field => !field.IsStatic).FieldType;
+    if (NarrowName(enumeration) != NarrowName(storage))
+        throw new Exception($"{enumeration.FullName} does not narrow as its underlying {storage.FullName}");
+}
+Console.WriteLine(
+    $"PASS argument narrowing agrees with declaredNarrow on 14 primitive heads and {enums.Length} enums");
 
 // A stage learns an instruction's category, callee and target from the typed Operation, never from the Lean text
 // that renders it. Each place that reads generated Lean text is listed here with what it reads.

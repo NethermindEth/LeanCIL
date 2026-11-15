@@ -509,8 +509,8 @@ internal static partial class ProofOutline
         var plainReturn = LeanEmitter.Narrow(spec.Method.ReturnType) is null;
         var steppable = spec.Parameters.All(parameter => parameter.Shape is ParameterShape.Scalar or
             ParameterShape.StructValue) &&
-            body.Operations.All(op => Body.Pure(op, plainReturn) || Steps(spec.Method, op));
-        var split = !steppable && SplitsOnBooleans(body.Operations, spec.Parameters, plainReturn);
+            body.Operations.All(op => Body.Pure(op, spec.Method, plainReturn) || Steps(spec.Method, op));
+        var split = !steppable && SplitsOnBooleans(body.Operations, spec.Method, spec.Parameters, plainReturn);
         var paths = steppable || split ? null : ScalarPaths(spec, body.Operations);
         // A body over words that calls helpers composes them through stub contracts, as a body over objects does.
         if (!steppable && !split && paths is null &&
@@ -584,15 +584,14 @@ internal static partial class ProofOutline
 
     /// <summary>Whether a body over words and `bool`s steps once each `bool` is a literal: every operation is
     /// pure or a jump, and every test reads a `bool` argument just loaded.</summary>
-    static bool SplitsOnBooleans(Operation[] ops, Parameter[] parameters, bool plainReturn)
+    static bool SplitsOnBooleans(Operation[] ops, MethodDefinition method, Parameter[] parameters, bool plainReturn)
     {
         var booleans = parameters.Count(parameter => parameter.Shape == ParameterShape.Boolean);
         if (booleans is 0 or > MaxBooleanSplits ||
             parameters.Any(parameter => parameter.Shape is not (ParameterShape.Scalar or ParameterShape.Boolean)))
             return false;
-        bool LoadsBoolean(Operation op) => op is Arg { Narrow: null or Narrowing.Unsigned8 } load &&
-            parameters[load.Index].Shape == ParameterShape.Boolean;
-        return ops.Select((op, pc) => Body.Pure(op, plainReturn) || LoadsBoolean(op) ||
+        bool LoadsBoolean(Operation op) => op is Arg load && parameters[load.Index].Shape == ParameterShape.Boolean;
+        return ops.Select((op, pc) => Body.Pure(op, method, plainReturn) || LoadsBoolean(op) ||
             op is Jump { Kind: JumpKind.Always } ||
                 op is Jump { Kind: JumpKind.IfZero or JumpKind.IfNonzero } && pc > 0 && LoadsBoolean(ops[pc - 1]))
             .All(stepped => stepped);
@@ -796,7 +795,9 @@ internal static partial class ProofOutline
     /// `cil_checked_steps` cannot take without facts or a case split.</summary>
     static string Unstepped(MethodDefinition method, Operation[] ops, IEnumerable<Parameter> parameters)
     {
-        if (parameters.FirstOrDefault(parameter => parameter.Shape != ParameterShape.Scalar) is { } argument)
+        // A narrow parameter is named first: its load is what refuses an otherwise outlined body.
+        if (parameters.OrderBy(parameter => parameter.Shape != ParameterShape.Narrow)
+                .FirstOrDefault(parameter => parameter.Shape != ParameterShape.Scalar) is { } argument)
             return $"the body reads `{argument.Name}`, " + argument.Shape switch
             {
                 ParameterShape.Boolean => "a `bool` that needs a case split",
@@ -810,7 +811,7 @@ internal static partial class ProofOutline
                 _ => "a span of caller memory"
             };
         var plainReturn = LeanEmitter.Narrow(method.ReturnType) is null;
-        var pc = Array.FindIndex(ops, op => !Body.Pure(op, plainReturn));
+        var pc = Array.FindIndex(ops, op => !Body.Pure(op, method, plainReturn));
         if (pc < 0) return "the body has locals";
         // A call the outline cannot compose names the contract the author must write and prove.
         return ops[pc] is Call { Kind: CallKind.Static or CallKind.Instance } call

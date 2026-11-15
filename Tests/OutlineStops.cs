@@ -93,6 +93,33 @@ foreach (var (owner, methodName, selector) in new[]
 }
 if (args is ["--return-only"]) return;
 
+// A parameter of a narrow declared type is loaded narrowed by its step, which no outline family models, so each
+// family refuses it; the unedited method is the wide control.
+foreach (var (owner, methodName, parameter, selector, narrowSelector) in new[]
+{
+    ("Arithmetic", "Larger", 0, "Arithmetic::Larger(int,int)", "Arithmetic::Larger(ushort,int)"),
+    ("PrimitiveArrays", "ReadInt32", 1, "PrimitiveArrays::ReadInt32(int[],int)",
+        "PrimitiveArrays::ReadInt32(int[],ushort)"),
+    ("Loops", "Put", 1, "Loops::Put(System.Span`1<System.UInt32>,uint)",
+        "Loops::Put(System.Span`1<System.UInt32>,ushort)"),
+    ("Objects", "SetLimit", 1, "Objects::SetLimit(Examples.Account,uint)",
+        "Objects::SetLimit(Examples.Account,ushort)"),
+    ("NarrowTotals", "WriteRead", 0, "NarrowTotals::WriteRead(uint)", "NarrowTotals::WriteRead(ushort)")
+})
+{
+    var wide = Outline("WideArgument" + owner, selector, _ => { });
+    if (wide.Code != 0 || wide.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException("Wide argument control failed: " + selector + "\n" + wide.Output);
+    var narrow = Outline("NarrowArgument" + owner, narrowSelector, module =>
+    {
+        var method = module.GetType("Examples." + owner).Methods.Single(method => method.Name == methodName);
+        method.Parameters[parameter].ParameterType = module.TypeSystem.UInt16;
+    });
+    if (narrow.Code == 0 && !narrow.Proof.Contains("-- not outlined:", StringComparison.Ordinal))
+        throw new InvalidOperationException("Narrow argument was outlined: " + narrowSelector + "\n" + narrow.Proof);
+    Console.WriteLine("PASS declared narrow argument outline rejection and wide control: " + owner);
+}
+
 // A conditional branch with mixed native/int32 operands, in a method over a class instance, is a hole that names
 // the mixed-width branch.
 var wrapped = Outline("WrappedObject",

@@ -39,7 +39,7 @@ internal static partial class ProofOutline
             for (; pc < ops.Length; pc++)
             {
                 var op = ops[pc];
-                if (op is Arg { Narrow: null } argument)
+                if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
                 {
                     var parameter = spec.Parameters[argument.Index];
                     stack = stack.Push(new(parameter.Name, 8 * parameter.Width));
@@ -93,7 +93,7 @@ internal static partial class ProofOutline
                 else if (op is Return && plainReturn)
                     return ++paths > MaxScalarPaths ? null : new ScalarReturn();
                 else if (op.IsNop) { }
-                else if (Body.Pure(op, plainReturn))
+                else if (Body.Pure(op, spec.Method, plainReturn))
                 {
                     // Conversions and bit counts compute a word the outline does not name; it may be returned.
                     if (stack.Count == 0) return null;

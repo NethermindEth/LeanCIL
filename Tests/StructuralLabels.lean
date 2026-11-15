@@ -9,12 +9,12 @@ open CIL
 def method0Signature : String := "System.UInt32 Labels.Calls::Root(System.UInt32)"
 def method1Signature : String := "System.UInt32 Labels.Calls::Step(System.UInt32)"
 def method0 : Method :=
-  { code := [.arg 0, .call 1 1, .stloc 0,
+  { code := [.ldarg 0, .call 1 1, .stloc 0,
       .ldloc 0, .brfalse 6, .br 3,
       .ldloc 0, .brtrue 6,
-      .arg 0, .call 1 1, .ret],
+      .ldarg 0, .call 1 1, .ret],
     locals := [.i32 0], returnsValue := true }
-def method1 : Method := { code := [.arg 0, .ret], locals := [], returnsValue := true }
+def method1 : Method := { code := [.ldarg 0, .ret], locals := [], returnsValue := true }
 def program : Program := [method0, method1]
 def signatures : List String := [method0Signature, method1Signature]
 
@@ -27,7 +27,7 @@ open CIL
 /-- `n` nops, a call to method 1 and a back edge to the call's argument, as one list literal. -/
 macro "long_code% " n:num : term => do
   let nops ← (List.range n.getNat).toArray.mapM fun _ => `(Instruction.nop)
-  let tail ← #[`(Instruction.arg 0), `(Instruction.call 1 1),
+  let tail ← #[`(Instruction.ldarg 0), `(Instruction.call 1 1),
       `(Instruction.br $(Lean.quote n.getNat))].mapM id
   `([$(nops ++ tail),*])
 

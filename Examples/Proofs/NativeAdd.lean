@@ -11,10 +11,10 @@ theorem correctness (x y : W64) :
       .ok [.scalar (.i64 (x + y))] := by
   let args : List CIL.Safety.Value := [.scalar (.i64 x), .scalar (.i64 y)]
   let frame : Frame := ⟨0, [], [], 0⟩
-  have first : CIL.Safety.step Extracted.method0 (.arg 0) 0 args frame [] Memory.empty =
+  have first : CIL.Safety.step Extracted.method0 (.ldarg 0) 0 args frame [] Memory.empty =
       .ok (.next 1 [.scalar (.i64 x)] frame Memory.empty) := rfl
   have second :
-      CIL.Safety.step Extracted.method0 (.arg 1) 1 args frame [.scalar (.i64 x)] Memory.empty =
+      CIL.Safety.step Extracted.method0 (.ldarg 1) 1 args frame [.scalar (.i64 x)] Memory.empty =
       .ok (.next 2 [.scalar (.i64 y), .scalar (.i64 x)] frame Memory.empty) := rfl
   have added : CIL.Safety.step Extracted.method0 .add 2 args frame
       [.scalar (.i64 y), .scalar (.i64 x)] Memory.empty =

@@ -225,7 +225,7 @@ internal static partial class ProofOutline
                     path.Stack.RemoveAt(path.Stack.Count - 1);
                     return value;
                 }
-                if (op is Arg { Narrow: null } argument)
+                if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
                     path.Stack.Add(spec.Parameters[argument.Index].Name);
                 else if (StructLiteral(op) is { } literal)
                 {

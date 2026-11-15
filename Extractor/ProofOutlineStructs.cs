@@ -79,7 +79,7 @@ internal static partial class ProofOutline
         for (var pc = 0; pc < ops.Length; pc++)
         {
             var op = ops[pc];
-            if (op is Arg { Narrow: null } argument)
+            if (op is Arg argument && MethodArguments.Plain(spec.Method, argument.Index))
             {
                 var parameter = spec.Parameters[argument.Index];
                 if (parameter.Shape == ParameterShape.StructReference) stack.Push(Receiver);

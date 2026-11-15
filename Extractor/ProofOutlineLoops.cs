@@ -25,9 +25,9 @@ internal static partial class ProofOutline
 
         /// <summary>An operation that steps without a branch, a call, a fault or memory: arithmetic, conversions
         /// and the bit counts, which are total.</summary>
-        internal static bool Pure(Operation operation, bool plainReturn) =>
-            operation is Return ? plainReturn : operation is
-            Arg { Narrow: null } or Constant { Width: 32 or 64 } or
+        internal static bool Pure(Operation operation, MethodDefinition method, bool plainReturn) =>
+            operation is Return ? plainReturn : operation is Arg load ? MethodArguments.Plain(method, load.Index) :
+            operation is Constant { Width: 32 or 64 } or
             ScalarIntrinsic { CountsBits: true, Arguments: 1, Result: 32 or 64 } or
             StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul or StackOpcode.And
                 or StackOpcode.Or or StackOpcode.Xor or StackOpcode.Nop or
@@ -300,10 +300,10 @@ internal static partial class ProofOutline
                 "whole of an array argument");
             if (stores.Length != 1 || stores[0] >= loops[0].Head) throw refused;
             var store = stores[0];
-            Parameter Argument(int pc) => ops[pc] is Arg { Narrow: null } argument
+            Parameter Argument(int pc) => ops[pc] is Arg argument && MethodArguments.Plain(spec.Method, argument.Index)
                 ? spec.Parameters[argument.Index] : throw refused;
             Parameter source;
-            if (ops[store - 1] is Arg { Narrow: null })
+            if (ops[store - 1] is Arg)
                 source = Argument(store - 1);
             else if (store >= 2 && Argument(store - 2) is { Shape: ParameterShape.WordArray } array &&
                 ops[store - 1] is Memory { Operation: ArraySpan { Range: ArrayRange.Whole } whole } &&
@@ -319,7 +319,7 @@ internal static partial class ProofOutline
                 // An array read other than through the span is indexed, which a spanned array is not destructured for.
                 var argument = Array.IndexOf(spec.Parameters, source);
                 if (Enumerable.Range(0, ops.Length).Any(pc =>
-                    ops[pc] is Arg { Narrow: null } read && read.Index == argument && pc != store - 2))
+                    ops[pc] is Arg read && read.Index == argument && pc != store - 2))
                     throw Unsupported($"array `{source.Name}` is both spanned by `{name}` and read directly");
                 spanned.Add(source);
             }
@@ -525,8 +525,8 @@ internal static partial class ProofOutline
             var ops = extraction.Emitted[index].Operations.Where(op => !op.IsNop).ToArray();
             if (callee.HasThis || callee.ReturnType.FullName != "System.Void" || ops.Length != 4 ||
                 !extraction.Emitted[index].Frame.HasNoLocals || ops[3] is not Return) return null;
-            if (ops[0] is not Arg { Narrow: null, Index: var reference } ||
-                ops[1] is not Arg { Narrow: null, Index: var word }) return null;
+            if (ops[0] is not Arg { Index: var reference } || ops[1] is not Arg { Index: var word } ||
+                !MethodArguments.Plain(callee, reference) || !MethodArguments.Plain(callee, word)) return null;
             if (callee.Parameters[reference].ParameterType is not ByReferenceType target ||
                 ElementWidth(target.ElementType) is not { } width ||
                 ElementWidth(callee.Parameters[word].ParameterType) != width) return null;
@@ -540,7 +540,7 @@ internal static partial class ProofOutline
         {
             var plainReturn = LeanEmitter.Narrow(extraction.Methods[index].ReturnType) is null;
             return extraction.Emitted[index].Frame.HasNoLocals &&
-                extraction.Emitted[index].Operations.All(op => Body.Pure(op, plainReturn));
+                extraction.Emitted[index].Operations.All(op => Body.Pure(op, extraction.Methods[index], plainReturn));
         }
 
         /// <summary>The `Holds` proof of a callee of words that `Computes` or `Branches`, its inputs bound by
@@ -574,8 +574,8 @@ internal static partial class ProofOutline
                 callee.ReturnType.FullName != "System.Void" && ElementWidth(callee.ReturnType) is not null &&
                 extraction.Emitted[index].Frame.HasNoLocals &&
                 ops.Any(op => Body.Conditional(op) || op is Throw) &&
-                ops.All(op => op is Return ? plainReturn :
-                    op is Arg { Narrow: null } or Constant { Width: 32 or 64 } or
+                ops.All(op => op is Return ? plainReturn : op is Arg load ? MethodArguments.Plain(callee, load.Index) :
+                    op is Constant { Width: 32 or 64 } or
                     Jump or Throw or StackOperation { Kind: StackOpcode.Add or StackOpcode.Sub or StackOpcode.Mul
                         or StackOpcode.And or StackOpcode.Or or
                         StackOpcode.Xor or StackOpcode.Nop });
@@ -624,7 +624,7 @@ internal static partial class ProofOutline
             while (true)
             {
                 var op = ops[pc];
-                if (op is Arg { Narrow: null, Index: var argument })
+                if (op is Arg { Index: var argument } && MethodArguments.Plain(callee, argument))
                 {
                     var bits = 8 * ElementWidth(callee.Parameters[argument].ParameterType)!.Value;
                     stack.Add(new(arguments[argument], bits));
@@ -1450,7 +1450,7 @@ internal static partial class ProofOutline
                     state.State[first] = EntrySpan(source);
                 else return Stop("a store of a value the outline cannot name");
             }
-            else if (op is Arg { Narrow: null, Index: var argument })
+            else if (op is Arg { Index: var argument } && MethodArguments.Plain(spec.Method, argument))
             {
                 var parameter = spec.Parameters[argument];
                 stack.Add(parameter.Shape switch

@@ -115,15 +115,17 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
-    "memory" => ([], [".arg 0", ".arg 1", ".store64", ".arg 0", ".load64", ".pop"], [".arg 0", ".load64", ".ret"]),
-    "reference" or "table" => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"]),
-    "accumulate" or "contract" or "hypotheses" or "lemma" or "outcome" => ([".arg 0"], [".arg 1", ".add"], [".ret"]),
-    "loop" or "loopfacts" => ([".arg 0"], [".arg 1", ".add"], [".nop"]),
-    "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".arg 0", $".stloc {slot}" })
+    "memory" => ([], [".ldarg 0", ".ldarg 1", ".store64", ".ldarg 0", ".load64", ".pop"],
+        [".ldarg 0", ".load64", ".ret"]),
+    "reference" or "table" => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"]),
+    "accumulate" or "contract" or "hypotheses" or "lemma" or "outcome" =>
+        ([".ldarg 0"], [".ldarg 1", ".add"], [".ret"]),
+    "loop" or "loopfacts" => ([".ldarg 0"], [".ldarg 1", ".add"], [".nop"]),
+    "locals" => ([], Enumerable.Range(0, LocalCount).SelectMany(slot => new[] { ".ldarg 0", $".stloc {slot}" })
         .ToArray(), [".ldloc 0", ".ret"]),
-    "faulting" => ([], [".arg 0", ".arg 1", ".div", ".pop", ".arg 0", ".arg 1", ".rem", ".pop", ".arg 0", ".arg 1",
-        ".add_ovf", ".pop", ".arg 0", ".conv_ovf .i4", ".pop"], [".arg 0", ".ret"]),
-    _ => ([], [".arg 0", ".arg 1", ".add", ".pop"], [".arg 0", ".ret"])
+    "faulting" => ([], [".ldarg 0", ".ldarg 1", ".div", ".pop", ".ldarg 0", ".ldarg 1", ".rem", ".pop",
+        ".ldarg 0", ".ldarg 1", ".add_ovf", ".pop", ".ldarg 0", ".conv_ovf .i4", ".pop"], [".ldarg 0", ".ret"]),
+    _ => ([], [".ldarg 0", ".ldarg 1", ".add", ".pop"], [".ldarg 0", ".ret"])
 };
 
 // The value a stack of `depth` copies of `right` adds up to, associated to the right as `.add` pops them.
@@ -142,10 +144,10 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
         : Math.Max(1, (requested - opening.Length - ending.Length) / cycle.Length);
     var operations = workload switch
     {
-        "depth" => Enumerable.Repeat(".arg 1", depth).Concat(Enumerable.Repeat(".add", depth - 1)).Append(".ret")
+        "depth" => Enumerable.Repeat(".ldarg 1", depth).Concat(Enumerable.Repeat(".add", depth - 1)).Append(".ret")
             .ToArray(),
-        "arguments" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".arg {index}", ".add" })
-            .Prepend(".arg 0").Append(".ret").ToArray(),
+        "arguments" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".ldarg {index}", ".add" })
+            .Prepend(".ldarg 0").Append(".ret").ToArray(),
         _ => opening.Concat(Enumerable.Range(0, cycles).SelectMany(_ => cycle)).Concat(ending).ToArray()
     };
     var parameterTypes = string.Join(", ", Enumerable.Repeat(Int32Type, parameters));

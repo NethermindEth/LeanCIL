@@ -48,7 +48,7 @@ error: method 1 has no local named "borrow"; its named locals:
 example : local_named 1 "borrow" = 0 := rfl
 
 def body (target : Nat) : Method :=
-  { code := [.arg 0, .arg 0, .brfalse target, .arg 0, .ret, .arg 0, .ret], locals := [],
+  { code := [.ldarg 0, .ldarg 0, .brfalse target, .ldarg 0, .ret, .ldarg 0, .ret], locals := [],
     returnsValue := true }
 def program : Program := [{ code := [.ret], locals := [], returnsValue := false }, body 5]
 
@@ -69,13 +69,14 @@ error: cil_embed: the expected body does not embed into the extracted method
 method index 1
 expected pc 3 maps to actual pc 3
   expected: CIL.Instruction.ldc_i4 0x00000001#32
-  actual:   CIL.Instruction.arg 0 none
+  actual:   CIL.Instruction.ldarg 0
   the instructions differ
   expected pc 2 falls through to it, so it must be actual pc 3
 source of actual pc 3: src/Math.cs:11:13
 -/
 #guard_msgs in
-example : MethodEmbeds program 1 { body 5 with code := [.arg 0, .arg 0, .brfalse 5, .ldc_i4 1, .ret, .arg 0, .ret] } := by cil_embed
+example : MethodEmbeds program 1 { body 5 with code := [.ldarg 0, .ldarg 0, .brfalse 5, .ldc_i4 1,
+    .ret, .ldarg 0, .ret] } := by cil_embed
 
 -- Methods without sequence points add nothing.
 run_meta do
