@@ -1,5 +1,15 @@
+using System.Collections;
+using System.Collections.Immutable;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Reflection.Metadata;
+using System.Reflection.Metadata.Ecma335;
+using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.RegularExpressions;
+using MethodDefinition = Mono.Cecil.MethodDefinition;
+using ModuleDefinition = Mono.Cecil.ModuleDefinition;
 
 partial class Program
 {
@@ -90,6 +100,145 @@ partial class Program
         if (run.Code != 0)
             throw new InvalidOperationException("A digest of 210 pages did not elaborate: " + run.Output);
         Console.WriteLine("PASS a digest proof of 210 pages elaborates");
+    }
+
+    /// <summary>
+    /// The slices the extractor carries for every method with a body in each selected assembly, with the operand
+    /// and local signature tokens of the body, hold the images' rows and heap entries: Lean's assembly block and
+    /// rows checks accept each slice in the image its identity pins.
+    /// </summary>
+    static void CheckExtractedSlices(string root, params (string Selected, string[] References)[] extractions)
+    {
+        const BindingFlags Internal = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+        var extractor = Assembly.LoadFrom(ExtractorPath);
+        var pinnedType = extractor.GetType("Nethermind.LeanCIL.PinnedAssemblies", throwOnError: true)!;
+        var sourceType = pinnedType.GetNestedType("Source", BindingFlags.NonPublic | BindingFlags.Public)!;
+        var slicesType = extractor.GetType("Nethermind.LeanCIL.MetadataSlices", throwOnError: true)!;
+        var package = FixturePackage();
+        Directory.CreateDirectory(root);
+        for (var index = 0; index < extractions.Length; index++)
+        {
+            var (selected, references) = extractions[index];
+            var sources = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(sourceType))!;
+            foreach (var reference in references) sources.Add(Activator.CreateInstance(sourceType, reference, null)!);
+            using var pinned = (IDisposable)Activator.CreateInstance(pinnedType, Internal, null,
+                [File.ReadAllBytes(selected), Sha(selected), sources, null], null)!;
+            var slices = Activator.CreateInstance(slicesType, pinned)!;
+            var modules = ((IEnumerable<ModuleDefinition>)pinnedType.GetProperty("Modules", Internal)!
+                .GetValue(pinned)!).ToArray();
+            var original = (ModuleDefinition)pinnedType.GetMethod("Original", Internal)!.Invoke(pinned, [modules[0]])!;
+            var collect = slicesType.GetMethod("Method", Internal)!;
+            var block = slicesType.GetMethod("AssemblyBlock", Internal)!;
+            List<string> methods = [];
+            foreach (var (token, tokens) in BodyTokens(File.ReadAllBytes(selected)))
+            {
+                var method = (MethodDefinition)original.LookupToken((int)token);
+                var (metadata, _, _) = ((string, string, int[]))collect.Invoke(slices, [method, tokens, false])!;
+                methods.Add($"(\"{method.FullName}\", {metadata})");
+            }
+            string[] paths = [selected, .. references];
+            var path = Path.Combine(root, $"Slices{index}.lean");
+            File.WriteAllText(path, SlicesModule([.. paths.Select(File.ReadAllBytes)],
+                [.. modules.Select(module => (string)block.Invoke(slices, [module])!)], methods));
+            var (code, output, stdout, _) = Execute(["lake", "env", "lean", "--run", path], cwd: package);
+            string[] lines = stdout.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            var refused = lines.Where(line => !line.StartsWith("ok ", StringComparison.Ordinal)).ToArray();
+            if (code != 0 || refused.Length != 0 || lines.Length != methods.Count)
+                throw new InvalidOperationException($"Lean refused the slices of {Path.GetFileName(selected)}: " +
+                    (refused.Length == 0 ? output : string.Join("\n", refused)));
+            var counts = lines.Select(line => line.Split(' ')).Select(words =>
+                (Slices: int.Parse(words[^2]), Rows: int.Parse(words[^1]))).ToArray();
+            if (counts.Sum(count => count.Rows) == 0)
+                throw new InvalidOperationException($"No slice of {Path.GetFileName(selected)} carries a row.");
+            Console.WriteLine($"PASS Lean matches the slices of {methods.Count} methods of " +
+                $"{Path.GetFileName(selected)} to their images: {counts.Sum(count => count.Slices)} slices, " +
+                $"{counts.Sum(count => count.Rows)} rows");
+        }
+    }
+
+    /// <summary>
+    /// The MethodDef token of every method with a body, with the tokens its instructions name and its local
+    /// signature token, read from the IL bytes as the extractor reads them.
+    /// </summary>
+    static IEnumerable<(uint Method, uint[] Tokens)> BodyTokens(byte[] file)
+    {
+        var opcodes = typeof(OpCodes).GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Select(field => (OpCode)field.GetValue(null)!).ToDictionary(code => (ushort)code.Value);
+        using PEReader pe = new(ImmutableArray.Create(file));
+        var reader = pe.GetMetadataReader();
+        foreach (var handle in reader.MethodDefinitions)
+        {
+            var rva = reader.GetMethodDefinition(handle).RelativeVirtualAddress;
+            if (rva == 0) continue;
+            var body = pe.GetMethodBody(rva);
+            var il = body.GetILBytes()!;
+            List<uint> tokens = [];
+            for (var at = 0; at < il.Length;)
+            {
+                int value = il[at++];
+                if (value == TwoByteOpcode) value = value << 8 | il[at++];
+                var operand = opcodes[(ushort)value].OperandType;
+                if (operand is OperandType.InlineField or OperandType.InlineMethod or OperandType.InlineSig or
+                    OperandType.InlineTok or OperandType.InlineType or OperandType.InlineString)
+                    tokens.Add(BitConverter.ToUInt32(il, at));
+                at += operand switch
+                {
+                    OperandType.InlineNone => 0,
+                    OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar => 1,
+                    OperandType.InlineVar => 2,
+                    OperandType.InlineI8 or OperandType.InlineR => 8,
+                    OperandType.InlineSwitch => 4 + 4 * BitConverter.ToInt32(il, at),
+                    _ => 4
+                };
+            }
+            if (!body.LocalSignature.IsNil)
+                tokens.Add((uint)MetadataTokens.GetToken(body.LocalSignature));
+            yield return ((uint)MetadataTokens.GetToken(handle), [.. tokens]);
+        }
+    }
+
+    // The first byte of a two-byte opcode.
+    const int TwoByteOpcode = 0xFE;
+
+    /// <summary>
+    /// A program that checks each method's slices against the pinned images and prints, per method, `ok`, its
+    /// name, its slice count and its row count, or its name and the audit error.
+    /// </summary>
+    static string SlicesModule(byte[][] images, string[] blocks, List<string> methods)
+    {
+        var text = new StringBuilder("import StrictBinding.Rows\n\n");
+        for (var index = 0; index < images.Length; index++)
+            text.Append($"namespace Image{index}\n\n{BindingImage.Definitions(images[index])}\nend Image{index}\n\n");
+        text.Append("open StrictBinding CIL.Extraction\n\ndef images : List PinnedImage :=\n  [");
+        text.Append(string.Join(",\n   ", images.Select((image, index) =>
+            $"{{ identity := \"{StrictBindingFacts.Identity(image)}\", image := Image{index}.image }}")));
+        text.Append("]\n\n");
+        for (var index = 0; index < blocks.Length; index++)
+            text.Append($"def assembly{index}Metadata : AssemblyMetadata := {blocks[index]}\n\n");
+        text.Append("def methods : List (String × MethodMetadata) :=\n  [");
+        text.Append(string.Join(",\n   ", methods)).Append("]\n\n");
+        text.Append("""
+            def sliceBound (prepared : List PreparedImage) (slice : MetadataSlice) : Except AuditError Unit := do
+              let image ← located prepared slice.assembly.identity
+              assemblyBound image slice.assembly
+              rowsBound image slice.rows slice.strings slice.blobs
+
+            def main : IO UInt32 := do
+              match prepare images with
+              | .error error =>
+                IO.eprintln (repr error)
+                pure 1
+              | .ok prepared =>
+                for (name, metadata) in methods do
+                  let slices := metadata.own :: metadata.others
+                  match slices.forM (sliceBound prepared) with
+                  | .ok _ =>
+                    IO.println s!"ok {name} {slices.length} {(slices.map (·.rows.length)).sum}"
+                  | .error error => IO.println s!"{name}: {repr error}"
+                pure 0
+
+            """);
+        return text.ToString();
     }
 
     /// <summary>A program that prints the description of an image the audit decodes, one fact per line.</summary>
