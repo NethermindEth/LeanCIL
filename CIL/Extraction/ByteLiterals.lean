@@ -5,10 +5,12 @@ import CIL.Identity
 
 The extractor writes a list of bytes, such as a method body, a metadata row or a UTF-8 name, as
 `fixedBytes count code`: the byte count and one hexadecimal numeral holding the bytes big-endian.
-A numeral costs the elaborator a fixed amount, where a list literal costs a numeral and a cons
-per byte. The kernel recovers the list by splitting the code in halves down to words of at most
-eight bytes, so a decode does `O(n log n)` bignum work, and `fixedBytes_eq_fixedDigits` ties
-it to the digit lists of `CIL.Identity`.
+A list longer than 256 bytes is several such literals joined by `++`, since the elaborator parses
+a numeral in time quadratic in its digits. A numeral costs the elaborator a few allocations, where
+a list literal costs a numeral and a cons per byte. The kernel recovers the list by splitting the
+code in halves down to words of at most eight bytes, so a decode takes a linear number of steps
+on numerals of at most 256 bytes, and `fixedBytes_eq_fixedDigits` ties it to the digit lists of
+`CIL.Identity`.
 -/
 
 namespace CIL.Extraction
