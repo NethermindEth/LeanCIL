@@ -1,6 +1,7 @@
 import CIL.Safety.StepTransport
 import CIL.Safety.PureStepRenaming
 import CIL.Safety.InstructionRenaming
+import CIL.Safety.NativeMethodTableRenaming
 
 /-!+# Fixed-allocation checked steps
 
@@ -88,6 +89,67 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
             (stack := checked ++ stack.drop argc) related frames)
       · exact .error .invalidState
 #print axioms Memory.Renamed.stepFallback
+
+/-- Observable execution through a native table requires a successful checked memory step. -/
+theorem checkedNative_bind {mapping : AllocationRenaming} {relation : β → γ → Prop}
+    (source target : Checked α) (sourceNext : α → ExecutionResult β)
+    (targetNext : α → ExecutionResult γ)
+    (preserved : ∀ value, source = .ok value → target = .ok value)
+    (observable : SuccessOrThrow (checkedAt .null nativeMethodWidth source >>= sourceNext))
+    (next : ∀ value, source = .ok value → SuccessOrThrow (sourceNext value) →
+      ResultRenamed mapping relation (sourceNext value) (targetNext value)) :
+    ResultRenamed mapping relation (checkedAt .null nativeMethodWidth source >>= sourceNext)
+      (checkedAt .null nativeMethodWidth target >>= targetNext) := by
+  cases checked : source with
+  | error fault =>
+    simp [checked, checkedAt, Except.mapError, Bind.bind, Except.bind, SuccessOrThrow]
+      at observable
+  | ok value =>
+    simp only [checked, checkedAt, Except.mapError, Bind.bind, Except.bind] at observable ⊢
+    rw [preserved value checked]
+    exact next value checked observable
+#print axioms checkedNative_bind
+
+/-- An observable native table addition selects the same cursor in the renamed memory: renaming
+    keeps the table's stable binding identity and resolves it to the renamed allocation. -/
+theorem Memory.Renamed.nativeTableAddition {indices : LocalIndexMap}
+    {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
+    {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
+    (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
+    (formed : source.WellFormed) (pc : Nat) (offset : CIL.Value) (table : CIL.MethodTable)
+    (rest : List Value)
+    (observable : SuccessOrThrow (do
+      let offset ← match offset with
+        | .i32 bits => .ok (bits.signExtend 64)
+        | .i64 bits => .ok bits
+        | _ => .error .invalidState
+      let selected ← checkedAt .null nativeMethodWidth (addNativeTable table source offset)
+      return FrameAction.next (pc + 1) (.methodTable selected :: rest) sourceFrame source)) :
+    ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
+      (do
+        let offset ← match offset with
+          | .i32 bits => .ok (bits.signExtend 64)
+          | .i64 bits => .ok bits
+          | _ => .error .invalidState
+        let selected ← checkedAt .null nativeMethodWidth (addNativeTable table source offset)
+        return FrameAction.next (pc + 1) (.methodTable selected :: rest) sourceFrame source)
+      (do
+        let offset ← match offset with
+          | .i32 bits => .ok (bits.signExtend 64)
+          | .i64 bits => .ok bits
+          | _ => .error .invalidState
+        let selected ← checkedAt .null nativeMethodWidth (addNativeTable table target offset)
+        return FrameAction.next (pc + 1) (.methodTable selected :: rest.map mapping.value)
+          targetFrame target) := by
+  cases offset
+  all_goals simp only [Bind.bind, Except.bind] at observable ⊢
+  all_goals try exact .error _
+  all_goals
+    apply checkedNative_bind _ _ _ _
+      (fun value proof => related.addNativeTable_success formed _ value _ proof) observable
+    intro value found observable
+    exact .ok (.next related frames)
+#print axioms Memory.Renamed.nativeTableAddition
 
 /-- Nonallocating families separate reference observations, numeric and boundary steps. -/
 inductive FixedStepFamily where
@@ -207,6 +269,18 @@ macro "fixed_fallback" : tactic => `(tactic| (
            by assumption
          exact excluded _ _ _ rfl rfl)
       | (exfalso
+         have excluded : ∀ (offset : CIL.Value) (table : CIL.MethodTable) (tail : List Value),
+             CIL.Instruction.add = CIL.Instruction.add →
+             originalStack = Value.scalar offset :: Value.methodTable table :: tail → False :=
+           by assumption
+         exact excluded _ _ _ rfl rfl)
+      | (exfalso
+         have excluded : ∀ (table : CIL.MethodTable) (offset : CIL.Value) (tail : List Value),
+             CIL.Instruction.add = CIL.Instruction.add →
+             originalStack = Value.methodTable table :: Value.scalar offset :: tail → False :=
+           by assumption
+         exact excluded _ _ _ rfl rfl)
+      | (exfalso
          have excluded : ∀ (offset : CIL.Value) (reference : ManagedReference) (tail : List Value),
              CIL.Instruction.sub = CIL.Instruction.sub →
              originalStack = Value.scalar offset :: Value.reference reference :: tail → False :=
@@ -238,11 +312,15 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     cases observable
   · simp only [guard, Bool.false_eq_true, ite_false] at observable ⊢
     split at observable
-    -- Past the faulting-arithmetic arms, the dispatcher's catch-all holds every other arm. Its
-    -- exclusions are cleared so the arms' own names stay the newest inaccessible ones.
+    -- Past the table-offset and faulting-arithmetic arms, the catch-all holds every other arm.
+    -- Its exclusions are named so the arms' own names stay the newest inaccessible ones;
+    -- `fixed_fallback` reads the table-offset ones and the faulting ones are cleared.
     all_goals try (
-      rename_i addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn
-        convOvf convOvfUn
+      rename_i offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
+        mulOvfUn div divUn rem remUn convOvf convOvfUn
+      guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
+        (rest : List Value), operation = .add →
+        stack = Value.methodTable table :: Value.scalar offset :: rest → False
       guard_hyp div : ∀ (y x : CIL.Value) (rest : List Value), operation = .div →
         stack = Value.scalar y :: Value.scalar x :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
@@ -301,6 +379,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       obtain ⟨otherMemory, otherValues⟩ := second
       obtain ⟨memories, rfl⟩ := same
       exact .ok (.next memories frames)
+    all_goals try solve | exact related.nativeTableAddition frames formed _ _ _ _ observable
     all_goals clear observable
     all_goals try simp only [List.mem_cons, forall_eq_or_imp, Value.Below] at bounds
     all_goals repeat' rcases bounds with ⟨_, bounds⟩

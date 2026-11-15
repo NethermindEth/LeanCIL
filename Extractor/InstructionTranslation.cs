@@ -25,9 +25,6 @@ internal static class InstructionTranslation
         nativeOperands ??= NativeOperands.Certify(m, reachable!, profile);
         if (nativeOperands.Incoming.TryGetValue(i, out var dispatchStack))
         {
-            if (i.OpCode.Code == Code.Add && dispatchStack.Length >= 2 &&
-                NativeOperands.NativeTableAddition(dispatchStack[^2], dispatchStack[^1]))
-                return new TableOffset();
             if (i.OpCode.Code == Code.Ldind_I && dispatchStack.LastOrDefault() is
                 { Kind: NativeOperands.Kind.NativeMethodTable, Metadata: LocalKind.NativeMethodTable nativeTable })
                 return new TableLoad(nativeTable.Signature);

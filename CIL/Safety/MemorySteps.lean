@@ -326,8 +326,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
 @[cil_step high] theorem step_add_commuted_eq (offset : CIL.Value)
     (reference : ManagedReference) (rest : List Value) :
     step body .add pc args frame (.reference reference :: .scalar offset :: rest) memory =
-      step body .add pc args frame (.scalar offset :: .reference reference :: rest) memory := by
-  rfl
+      step body .add pc args frame (.scalar offset :: .reference reference :: rest) memory :=
+  id rfl
 #print axioms step_add_commuted_eq
 
 /-- Adding a signed 32-bit byte offset preserves the reference checks and readonly capability. -/
@@ -360,9 +360,38 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     step body .add pc args frame
         (.readOnlyReference reference :: .scalar offset :: rest) memory =
       step body .add pc args frame
-        (.scalar offset :: .readOnlyReference reference :: rest) memory := by
-  rfl
+        (.scalar offset :: .readOnlyReference reference :: rest) memory :=
+  id rfl
 #print axioms step_add_readOnly_commuted_eq
+
+/-- Adding a sign-extended 32-bit byte offset moves a native table cursor through its checked
+    backing storage and keeps the table's identities. -/
+@[cil_step high] theorem step_add_table_i32_eq (offset : CIL.W32) (table : CIL.MethodTable)
+    (rest : List Value) :
+    step body .add pc args frame (.scalar (.i32 offset) :: .methodTable table :: rest) memory = do
+      let selected ← checkedAt .null nativeMethodWidth
+        (addNativeTable table memory (offset.signExtend 64))
+      return .next (pc + 1) (.methodTable selected :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_add_table_i32_eq
+
+/-- Adding a 64-bit byte offset moves a native table cursor through its checked backing storage
+    and keeps the table's identities. -/
+@[cil_step high] theorem step_add_table_i64_eq (offset : CIL.W64) (table : CIL.MethodTable)
+    (rest : List Value) :
+    step body .add pc args frame (.scalar (.i64 offset) :: .methodTable table :: rest) memory = do
+      let selected ← checkedAt .null nativeMethodWidth (addNativeTable table memory offset)
+      return .next (pc + 1) (.methodTable selected :: rest) frame memory := by
+  memory_step_proof
+#print axioms step_add_table_i64_eq
+
+/-- Commuting the scalar and the native table preserves execution for every offset value. -/
+@[cil_step high] theorem step_add_table_commuted_eq (offset : CIL.Value)
+    (table : CIL.MethodTable) (rest : List Value) :
+    step body .add pc args frame (.methodTable table :: .scalar offset :: rest) memory =
+      step body .add pc args frame (.scalar offset :: .methodTable table :: rest) memory :=
+  id rfl
+#print axioms step_add_table_commuted_eq
 
 /-- Commuted reference offsets reuse the scalar-first memory step equations. -/
 @[cil_step high] theorem step_memory_add_commuted_eq (size : Nat) (signed : Bool)
@@ -370,8 +399,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     step body (.memory (.add size signed)) pc args frame
       (.reference reference :: .scalar offset :: rest) memory =
     step body (.memory (.add size signed)) pc args frame
-      (.scalar offset :: .reference reference :: rest) memory := by
-  rfl
+      (.scalar offset :: .reference reference :: rest) memory :=
+  id rfl
 #print axioms step_memory_add_commuted_eq
 
 -- One equation per `offsetValue` shape, so the offset is a term and needs no side condition.
@@ -408,8 +437,8 @@ variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (mem
     step body (.memory (.add size signed)) pc args frame
       (.readOnlyReference reference :: .scalar offset :: rest) memory =
     step body (.memory (.add size signed)) pc args frame
-      (.scalar offset :: .readOnlyReference reference :: rest) memory := by
-  rfl
+      (.scalar offset :: .readOnlyReference reference :: rest) memory :=
+  id rfl
 #print axioms step_memory_add_readOnly_commuted_eq
 
 @[cil_step high] theorem step_memory_add_readOnly_signed_i32_eq (size : Nat) (offset : CIL.W32)
