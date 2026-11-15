@@ -133,7 +133,7 @@ string MutateState(string source, string update) => Regex.Replace(source,
 Reject("wrong-feature", baseline.Replace(".feature .avx2", ".feature .sse2"));
 Reject("wrong-branch", baseline.Replace(".brfalse 10", ".brfalse 11"));
 Reject("forged-constant", baseline.Replace("stack := [some (BitVec.ofInt 32 (0))]", "stack := [some (BitVec.ofInt 32 (1))]"));
-Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [none], locals := [none] })"));
+Reject("malformed-entry", MutateState(baseline, "set 0 (some { stack := [], locals := [(0, BitVec.ofInt 32 (0))] })"));
 Reject("false-pruned-successor", MutateState(baseline, "set 10 none"));
 Reject("omitted-states", MutateState(baseline, "take 17"));
 var unsupported = Execute(Extract("extract", assembly, "Examples", "Loops::FeatureCountdown(uint)",

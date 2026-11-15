@@ -27,7 +27,7 @@ private def raw (locals : List TypeExpr) (code : List RawInstruction) : RawMetho
   callingConvention := 0, attributes := 0, implementation := 0,
   returnType := intType, parameters := [words, intType], locals, initLocals := true, maxStack := 8,
   genericParameters := [], code }
-private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, [none]⟩
+private def state (stack : List (Option W32)) : Option FeatureState := some ⟨stack, []⟩
 
 -- Only a primitive runtime span names a span local.
 example : spanLocal words ∧ spanLocal (span runtime "System.Byte") := by decide

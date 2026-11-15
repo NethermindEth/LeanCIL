@@ -36,4 +36,36 @@ theorem all3_at {check : α → β → γ → Bool} :
 
 #print axioms all3_at
 
+/-- Mapping the middle list changes nothing when the two checks agree on each of its entries. -/
+theorem all3_map {check : α → β → γ → Bool} {mapped : α → δ → γ → Bool} (f : β → δ) :
+    ∀ (as : List α) (bs : List β) (cs : List γ),
+      (∀ a b c, b ∈ bs → check a b c = mapped a (f b) c) →
+      all3 check as bs cs = all3 mapped as (bs.map f) cs
+  | a :: as, b :: bs, c :: cs, agree => by
+    simp only [all3, List.map_cons]
+    rw [agree a b c (List.mem_cons_self ..),
+      all3_map f as bs cs fun a b c member => agree a b c (List.mem_cons_of_mem _ member)]
+  | [], [], [], _ => rfl
+  | [], _ :: _, _, _ | _ :: _, [], _, _ | [], [], _ :: _, _ => rfl
+  | _ :: _, _ :: _, [], _ => rfl
+
+#print axioms all3_map
+
+/-- A passing lockstep check holds for every entry of the middle list. -/
+theorem all3_mem {check : α → β → γ → Bool} :
+    ∀ {as : List α} {bs : List β} {cs : List γ} {b : β},
+      all3 check as bs cs = true → b ∈ bs → ∃ a c, check a b c = true
+  | a :: as, b :: bs, c :: cs, entry, valid, member => by
+    simp only [all3, Bool.and_eq_true] at valid
+    rcases List.mem_cons.mp member with same | later
+    · subst same
+      exact ⟨a, c, valid.1⟩
+    · exact all3_mem valid.2 later
+  | [], [], [], _, _, member => by simp at member
+  | [], _ :: _, _, _, valid, _ | _ :: _, [], _, _, valid, _ | [], [], _ :: _, _, valid, _ => by
+    simp [all3] at valid
+  | _ :: _, _ :: _, [], _, valid, _ => by simp [all3] at valid
+
+#print axioms all3_mem
+
 end CIL.Extraction
