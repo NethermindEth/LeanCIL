@@ -1038,6 +1038,28 @@ try
         if (!jumped.GaveUp) throw new Exception("A pass whose clock jumped past its limit did not say so");
     }
     finally { passClock = realClock; }
+    // A read that waited out the rest of the pass stops it even when the clock has not yet passed the
+    // deadline, as when a wait rounded down to whole milliseconds returns just before it.
+    var stalledRead = new ManualResetEventSlim(false);
+    var limitsBefore = (packageReader, packageReadLimit, passLimit);
+    try
+    {
+        var frozenAt = DateTime.UtcNow;
+        passClock = () => frozenAt;
+        packageReader = _ => { stalledRead.Wait(); return ""; };
+        packageReadLimit = TimeSpan.FromSeconds(30);
+        passLimit = TimeSpan.FromMilliseconds(200);
+        var cutShort = new PassReport();
+        EvictUnused(unread, KeyName(), LibraryStaging(), Days(7), null, null, null, true, cutShort);
+        RequireUnreadKept("a read that waited out the pass");
+        if (!cutShort.GaveUp) throw new Exception("A pass whose read waited out its limit did not say so");
+    }
+    finally
+    {
+        stalledRead.Set();
+        passClock = realClock;
+        (packageReader, packageReadLimit, passLimit) = limitsBefore;
+    }
     var holdsRead = new ManualResetEventSlim(false);
     var readerBefore = (packageReader, packageReadLimit);
     try
