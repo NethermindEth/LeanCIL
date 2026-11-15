@@ -331,15 +331,17 @@ example : twoParameters.argumentAccess 1 = .home 1 := twoParameters_argumentAcce
 example : twoParameters.argumentAccess 1 = .home 1 := by simp only [cil_code]
 
 /--
-info: 'Tests.ResolutionFacts.twoParameters_argumentAccess0' depends on axioms: [propext, Quot.sound]
+info: 'Tests.ResolutionFacts.twoParameters_argumentAccess0' depends on axioms:
+[propext, Quot.sound]
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 #print axioms twoParameters_argumentAccess0
 
 /--
-info: 'Tests.ResolutionFacts.twoParameters_argumentAccess1' depends on axioms: [propext, Classical.choice, Quot.sound]
+info: 'Tests.ResolutionFacts.twoParameters_argumentAccess1' depends on axioms:
+[propext, Classical.choice, Quot.sound]
 -/
-#guard_msgs in
+#guard_msgs (whitespace := lax) in
 #print axioms twoParameters_argumentAccess1
 
 /-- A value-type instance method's signature: a short and a byte-backed enum. -/
@@ -440,8 +442,11 @@ theorem unordered_declared : unordered.declared = { parameters :=
     [.atom runtimeScope "System.Int32", .atom runtimeScope "System.Int32"] } := rfl
 #print axioms unordered_declared
 
-/-- error: cil_resolution_facts: the parameter homes of Tests.ResolutionFacts.unordered do not ascend -/
-#guard_msgs in
+/--
+error: cil_resolution_facts: the parameter homes of Tests.ResolutionFacts.unordered
+do not ascend
+-/
+#guard_msgs (whitespace := lax) in
 cil_resolution_facts unordered
 
 -- The simplifier reads a literal body's argument access without generated facts.
