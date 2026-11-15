@@ -1040,8 +1040,8 @@ void IndirectTargetCosts()
             FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
         if (growth > AllowedSpellingGrowth * lengthRatio)
             throw new Exception(FormattableString.Invariant(
-                $"Selecting a calli body for an owner of {ownerLengths[step]} bytes costs {growth:F2} times as much ") +
-                FormattableString.Invariant($"as for {ownerLengths[step - 1]}; ") +
+                $"Selecting a calli body for an owner of {ownerLengths[step]} bytes costs {growth:F2} times ") +
+                FormattableString.Invariant($"as much as for {ownerLengths[step - 1]}; ") +
                 FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
     }
 }
