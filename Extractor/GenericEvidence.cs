@@ -308,13 +308,17 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             Type(InitAccessors.Return(method.ReturnType)));
     }
 
-    /// <summary>The method's DeclaredSignature: the receiver kind and types of method{n}Closed.</summary>
+    /// <summary>
+    /// The method's DeclaredSignature: the receiver kind, types and localsinit flag of method{n}Closed. Fields at
+    /// their default are omitted.
+    /// </summary>
     internal string Declared(MethodDefinition method)
     {
         var receiver = method.HasThis
             ? $"receiver := some .{(ObjectReceiver(method) ? "object" : "reference")}, " : "";
         var (parameters, returnType) = SignatureTypes(method);
-        return $"{{ {receiver}parameters := {parameters}, returnType := {returnType} }}";
+        var initLocals = method.Body.InitLocals ? "" : ", initLocals := false";
+        return $"{{ {receiver}parameters := {parameters}, returnType := {returnType}{initLocals} }}";
     }
 
     internal void EmitMethod(StringBuilder lean, MethodDefinition method, int number,

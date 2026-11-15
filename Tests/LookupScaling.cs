@@ -42,9 +42,9 @@ if (args.Contains("--return-step-only", StringComparer.Ordinal))
     ReturnResolutionCosts(stepOnly: true);
     return;
 }
-if (args.Contains("--call-name-only", StringComparer.Ordinal))
+if (args.Contains("--metadata-name-only", StringComparer.Ordinal))
 {
-    CallNameCosts();
+    MetadataNameCosts();
     return;
 }
 if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
@@ -354,9 +354,10 @@ void CallCheckCosts()
               returnType := .void, parameters := [], locals := [], initLocals := true, maxStack := 1,
               genericParameters := [], code := [] }
             def site : RawInstruction := ⟨0, 40, .call {
-              declaringType := .atom "Tests" "Scaling", target := .managed 1, typeArguments := [],
-              parameterCount := 0, hasThis := false, returnsValue := false, returnType := .void,
-              parameterTypes := [] }⟩
+              method := {
+                owner := .atom "Tests" "Scaling", name := name!"", hasThis := false, genericArity := 0,
+                returnType := .void, parameters := [] },
+              target := .managed 1, typeArguments := [], parameterCount := 0, returnsValue := false }⟩
             def raw : RawMethod := { callee with code := [{{raw}}] }
             def body : Method := { locals := [], returnsValue := false, code := [{{code}}], links := [{{links}}] }
             #call_check_cost
@@ -424,6 +425,34 @@ const string KernelCostCommand = """
       logInfo m!"{label.getString} {cost} heartbeats"
     """;
 
+// Lean definitions of a value-only body of `instructions` instructions: `raw`, its raw instructions, and `code`, the
+// instructions the translator emits for them. Raw instructions carry distinct offsets, so the kernel decodes each one
+// instead of reusing a cached decode.
+static string ValueBody(int instructions)
+{
+    const int SegmentLength = 10;
+    return $$"""
+        /-- The raw instructions of one segment: short and long constants, locals, an argument,
+            arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
+        def segment (index : Nat) : List RawInstruction :=
+          let start := {{SegmentLength}} * index
+          [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
+            ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
+            ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+            ⟨start + 7, 58, .target index⟩,
+            ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
+        /-- The instructions the translator emits for one segment. -/
+        def codeSegment (index : Nat) : List Instruction :=
+          [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
+            .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1,
+            .brtrue index, .switch [index, index + 1, index + 2, index + 3], .ret]
+        /-- A body of {{instructions}} raw instructions. -/
+        def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
+        /-- The {{instructions}} emitted instructions of the body. -/
+        def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+        """;
+}
+
 // The heartbeats `decide +kernel` adds to deciding that every instruction of a body of 500, 2000 and 8000
 // instructions is the one its raw value opcode decodes to. Decoding costs the same at every instruction and a
 // `switch` its targets, so four times the instructions may cost at most `AllowedLocalGrowth` more per instruction.
@@ -431,8 +460,6 @@ void DecodeCosts()
 {
     var decodeDirectory = At("artifacts/LookupScaling/ValueDecoding");
     Directory.CreateDirectory(decodeDirectory);
-    // Raw instructions carry distinct offsets, so the kernel decodes each one instead of reusing a cached decode.
-    const int SegmentLength = 10;
     var samples = new List<(int Instructions, long Cost, long Milliseconds)>();
     foreach (var instructions in new[] { 500, 2000, 8000 })
     {
@@ -444,24 +471,7 @@ void DecodeCosts()
             open CIL CIL.Extraction Lean Elab Command
             {{KernelCostCommand}}
             namespace ValueDecodingCost
-            /-- The raw instructions of one segment: short and long constants, locals, an argument,
-                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
-            def segment (index : Nat) : List RawInstruction :=
-              let start := {{SegmentLength}} * index
-              [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
-                ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
-                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
-                ⟨start + 7, 58, .target index⟩,
-                ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
-            /-- The instructions the translator emits for one segment. -/
-            def codeSegment (index : Nat) : List Instruction :=
-              [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
-                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1, .brtrue index,
-                .switch [index, index + 1, index + 2, index + 3], .ret]
-            /-- A body of {{instructions}} raw instructions. -/
-            def raw : List RawInstruction := (List.range {{instructions / SegmentLength}}).flatMap segment
-            /-- The {{instructions}} emitted instructions of the body. -/
-            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+            {{ValueBody(instructions)}}
             #kernel_cost "decode {{instructions}}"
               (raw.zip code).all (fun pair => valueEncodingMatches pair.1 pair.2) = true
             end ValueDecodingCost
@@ -493,7 +503,6 @@ void MethodDecodeCosts()
 {
     var decodeDirectory = At("artifacts/LookupScaling/DecodedMethod");
     Directory.CreateDirectory(decodeDirectory);
-    const int SegmentLength = 10;
     var samples = new List<(int Instructions, long Cost)>();
     foreach (var instructions in new[] { 500, 2000, 8000 })
     {
@@ -505,22 +514,7 @@ void MethodDecodeCosts()
             open CIL CIL.Extraction Lean Elab Command
             {{KernelCostCommand}}
             namespace DecodedMethodCost
-            /-- The raw instructions of one segment: short and long constants, locals, an argument,
-                arithmetic, a checked conversion, a branch, a four-target switch and a return. -/
-            def segment (index : Nat) : List RawInstruction :=
-              let start := {{SegmentLength}} * index
-              [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
-                ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
-                ⟨start + 4, 14, .argument (index % 4)⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
-                ⟨start + 7, 58, .target index⟩,
-                ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
-            /-- The instructions the translator emits for one segment. -/
-            def codeSegment (index : Nat) : List Instruction :=
-              [.ldc_i4 (BitVec.ofNat 32 (index % 100)), .ldc_i4 (BitVec.ofNat 32 (70000 + index)),
-                .ldloc (index % 4), .stloc (index % 4), .ldarg (index % 4), .add, .conv_ovf_un .i1,
-                .brtrue index, .switch [index, index + 1, index + 2, index + 3], .ret]
-            /-- The {{instructions}} emitted instructions of the body. -/
-            def code : List Instruction := (List.range {{instructions / SegmentLength}}).flatMap codeSegment
+            {{ValueBody(instructions)}}
             /-- The type of every parameter and local. -/
             def uint32 : TypeExpr := .atom runtimeScope "System.UInt32"
             /-- A static method with four parameters, four zero-initialized locals and {{instructions}} raw
@@ -529,8 +523,7 @@ void MethodDecodeCosts()
               { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
                 attributes := 0, implementation := 0, returnType := .void, parameters := List.replicate 4 uint32,
                 locals := List.replicate 4 uint32, initLocals := true,
-                maxStack := 8, genericParameters := [],
-                code := (List.range {{instructions / SegmentLength}}).flatMap segment }
+                maxStack := 8, genericParameters := [], code := raw }
             #kernel_cost "decoded method {{instructions}}"
               (Method.ofRaw? .scalar {} source []).any (fun method =>
                 method.code.length == {{instructions}} &&
@@ -694,29 +687,34 @@ foreach (var outcome in new[] { "equal", "unequal" })
             $"and {AllowedNameGrowth} times as many at 80 characters."));
     Console.WriteLine($"PASS deciding {outcome} type identities costs {measured}");
 }
-CallNameCosts();
+MetadataNameCosts();
 
-// The heartbeats `decide +kernel` adds to the call check's name clause, which tests that a call's typed method name
-// spells its row's name bytes, for names of 20 and 80 bytes that share all but their last byte. Reading the name back
-// costs about 0.8 times as much per byte at 80 bytes as at 20; encoding the bytes with `MetadataName.ofBytes?`, whose
-// kernel reduction indexes an array literal once per byte, costs about 3 times as much.
-void CallNameCosts()
+// The heartbeats `decide +kernel` adds to the two metadata name computations every call and field operand check
+// reduces: the call check's name clause, which reads a typed name back and compares its bytes with the row's, and
+// `MetadataName.ofBytes?`, which encodes a field row's bytes as a name. Names of 20, 80 and 320 bytes share all but
+// their last byte. Both read one byte per step, so the cost per byte may grow at most `AllowedGrowth` times from one
+// length to the next; an encoder that indexes an array literal reads byte i in i kernel steps and grows 3 to 4 times.
+void MetadataNameCosts()
 {
-    var nameDirectory = At("artifacts/LookupScaling/CallNames");
+    var nameDirectory = At("artifacts/LookupScaling/MetadataNames");
     Directory.CreateDirectory(nameDirectory);
     const string Prefix = "WriteLineToTheConsoleOfTheRuntimeEachValueThatTheCallerPassesAsAnIntegerOfThirtyTwoBits";
-    int[] lengths = [20, 80];
+    int[] lengths = [20, 80, 320];
+    string[] computations = ["spells", "encodes"];
     string Statement(int length)
     {
-        var name = Prefix[..(length - 1)] + "0";
+        var name = string.Concat(Enumerable.Repeat(Prefix, length / Prefix.Length + 1))[..(length - 1)] + "0";
         var bytes = string.Join(", ", Encoding.UTF8.GetBytes(name));
         return $$"""
             /-- The {{length}} bytes of a row name. -/
             def bytes{{length}} : List Nat := [{{bytes}}]
-            #kernel_cost "call name {{length}}" ((name!"{{name}}").spells bytes{{length}} = true)
+            /-- The metadata name of those bytes. -/
+            def name{{length}} : MetadataName := name!"{{name}}"
+            #kernel_cost "name spells {{length}}" (name{{length}}.spells bytes{{length}} = true)
+            #kernel_cost "name encodes {{length}}" (MetadataName.ofBytes? bytes{{length}} = some name{{length}})
             """;
     }
-    var path = Path.Combine(nameDirectory, "CallNames.lean");
+    var path = Path.Combine(nameDirectory, "MetadataNames.lean");
     File.WriteAllText(path, $$"""
         import CIL.Identity
         open CIL Lean Elab Command
@@ -724,17 +722,24 @@ void CallNameCosts()
         {{string.Join("\n", lengths.Select(Statement))}}
         """);
     var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
-    var costs = LookupPatterns.CallNameCheck().Matches(output).ToDictionary(
-        match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
-        match => long.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture));
-    if (costs.Count != lengths.Length) throw new InvalidOperationException("Missing call name costs:\n" + output);
-    double PerByte(int length) => (double)costs[length] / length;
-    var measured = string.Create(CultureInfo.InvariantCulture,
-        $"{costs[20]} heartbeats at 20 bytes and {costs[80]} at 80");
-    if (Math.Min(costs[20], costs[80]) < KernelDecisionFloor || PerByte(80) > PerByte(20) * AllowedGrowth)
-        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
-            $"The call name clause costs {measured}; per byte, the limit is {AllowedGrowth} times the cost at 20."));
-    Console.WriteLine($"PASS the call name clause costs {measured}");
+    var costs = LookupPatterns.MetadataNameCost().Matches(output).ToDictionary(
+        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
+        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != lengths.Length * computations.Length)
+        throw new InvalidOperationException("Missing metadata name costs:\n" + output);
+    foreach (var computation in computations)
+    {
+        double PerByte(int length) => (double)costs[(computation, length)] / length;
+        var measured = string.Join(", ", lengths.Select(length =>
+            string.Create(CultureInfo.InvariantCulture, $"{costs[(computation, length)]} at {length} bytes")));
+        var flat = lengths.Zip(lengths.Skip(1))
+            .All(pair => PerByte(pair.Second) <= PerByte(pair.First) * AllowedGrowth);
+        if (lengths.Min(length => costs[(computation, length)]) < KernelDecisionFloor || !flat)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"A metadata name {computation} its bytes at {measured} heartbeats; per byte, the limit is " +
+                $"{AllowedGrowth} times the cost at the shorter length."));
+        Console.WriteLine($"PASS a metadata name {computation} its bytes at {measured} heartbeats");
+    }
 }
 
 var source = Path.Combine(directory, "Assembly");
@@ -1795,8 +1800,8 @@ static partial class LookupPatterns
     [GeneratedRegex(@"\b((?:un)?equal [0-9]+) (-?[0-9]+) heartbeats")]
     internal static partial Regex TypeDecision();
 
-    [GeneratedRegex(@"\bcall name ([0-9]+) (-?[0-9]+) heartbeats")]
-    internal static partial Regex CallNameCheck();
+    [GeneratedRegex(@"\bname (spells|encodes) ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex MetadataNameCost();
 
     [GeneratedRegex(@"table step [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex NativeTableStep();

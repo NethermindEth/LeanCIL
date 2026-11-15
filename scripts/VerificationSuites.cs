@@ -30,7 +30,7 @@ internal static class VerificationSuites
         [Core] =
         [
             "Add", "AddModel", "Alias", "Calls", "CertificateReuse", "Choose", "ConsumerBatchA", "ConsumerBatchB",
-            "ConsumerSupportUnion", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
+            "ConsumerSupportUnion", "DecodedAdd", "Escape", "Hardware", "InitializedTypes", "LargeStruct", "PastEnd",
             "ProofBindingFamilies",
             "StaticData", "Struct", "StructCopy", "VerificationReuse", "WrongAdd"
         ],
@@ -57,8 +57,8 @@ internal static class VerificationSuites
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),
         new("evidence", "Tests/ExtractionEvidence.cs",
-            "independent extraction certificates, malformed evidence rejection and the metadata decoder's method " +
-            "names against Cecil's"),
+            "independent extraction certificates, malformed evidence rejection, the metadata decoder's method " +
+            "names against Cecil's and framework argument guards"),
         // Split from evidence so neither job approaches the CI timeout.
         new("dispatch", "Tests/DispatchEvidence.cs",
             "constrained and managed dispatch, constant calls, stack allocation and pinned compiler coverage"),
@@ -139,7 +139,8 @@ internal static class VerificationSuites
             "not grow with the method or with locals holding no known word and grows linearly with the known " +
             "facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with " +
             "the calls, type identity equality at a cost that does not grow with the name, the method name " +
-            "clause of the call operand check at a per-byte cost that does not grow with the name, and one native " +
+            "clause of the call operand check and the encoding of a metadata name at a per-byte cost that " +
+            "does not grow with the name, and one native " +
             "method table step and one load of its first entry at a kernel cost that does not grow with the " +
             "table's entries; the managed-call check of a body with many call sites at a per-site cost that " +
             "does not grow with the call sites; the argument facts of cil_resolution_facts and the reads " +

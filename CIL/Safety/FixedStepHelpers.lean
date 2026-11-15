@@ -154,7 +154,7 @@ inductive FixedStepFamily where
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
-  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .stackAlloc _ | .newArray _
+  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newArray _
   | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
@@ -293,9 +293,14 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- ones; `fixed_fallback` reads the table-offset ones and the others are cleared. `split`
     -- states the `ldarga` exclusion first, as its arm ignores the stack.
     all_goals try (
-      rename_i addressHome offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn
-        mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual
-        objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue objectTested storeHome
+      rename_i addressHome localAllocation offsetBeforeTable tableBeforeOffset addOvf addOvfUn
+        subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual
+        objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue
+        objectTested storeHome
+      guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
+      guard_hyp localAllocation : operation = .localloc → False
+      guard_hyp storeHome : ∀ (index : Nat) (value : Value) (rest : List Value),
+        operation = .starg index → stack = value :: rest → False
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
@@ -305,7 +310,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         operation = .ceq → stack = Value.object right :: Value.object left :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
-        objectBranchFalse objectBranchTrue objectTested storeHome addressHome
+        objectBranchFalse objectBranchTrue objectTested storeHome addressHome localAllocation
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

@@ -126,8 +126,8 @@ inductive Instruction where
   | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf | mul_ovf_un
   -- Overflow-checked conversion to `target`, reading the operand as signed or as unsigned.
   | conv_ovf (target : ConvTarget) | conv_ovf_un (target : ConvTarget)
-  /-- Dynamic frame storage; the flag is checked against the raw method's localsinit bit. -/
-  | stackAlloc (initLocals : Bool)
+  /-- Fresh frame storage of the popped byte count, zeroed when `declared.initLocals` is set. -/
+  | localloc
   /-- Fresh zero-initialized primitive heap storage, assuming runtime allocation availability. -/
   | newArray (element : ArrayElement)
   /-- `newarr` of class `element`: a fresh array of null references on the heap budget. -/
@@ -276,6 +276,8 @@ structure DeclaredSignature where
   /-- Declared parameter types in order, `this` excluded. -/
   parameters : List Extraction.TypeExpr := []
   returnType : Extraction.TypeExpr := .void
+  /-- The body's localsinit flag: `localloc` storage and locals start zeroed when set. -/
+  initLocals : Bool := true
   deriving DecidableEq, Repr
 
 /-- The declared type of argument `index`, counting `this` as argument 0; `none` for `this`. -/
