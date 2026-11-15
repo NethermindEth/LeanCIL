@@ -22,6 +22,11 @@ if (args.Contains("--return-step-only", StringComparer.Ordinal))
     ReturnResolutionCosts(stepOnly: true);
     return;
 }
+if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
+{
+    IndirectTargetCosts();
+    return;
+}
 NativeTableCosts();
 if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
 CheckNarrowedResolution();
@@ -997,6 +1002,47 @@ for (var step = 1; step < spellingLengths.Length; step++)
             FormattableString.Invariant($"{spellingLengths[step - 1]}; ") +
             FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
 }
+
+// `indirectTarget` selects the body of a `calli` by comparing the pointer's owner with each catalog entry's, and a
+// proof decides it by `cil_kernel_rfl`: the kernel's cost grows with the owner's length and no faster.
+void IndirectTargetCosts()
+{
+    var targetDirectory = At("artifacts/LookupScaling/IndirectTarget");
+    Directory.CreateDirectory(targetDirectory);
+    int[] ownerLengths = [64, 256, 1024];
+    long Selection(int length, bool proved)
+    {
+        var owner = string.Concat(Enumerable.Range(0, length).Select(index => (char)('a' + index % 26)));
+        var identity = $$"""⟨"{{owner}}", 6, []⟩""";
+        var proof = proved ? "by cil_kernel_rfl" : "sorry";
+        var text = $$"""
+            import CIL.Safety.Execution
+            import CIL.Extraction.KernelEquation
+            def signature : CIL.ManagedSignature :=
+              ⟨.atom CIL.Extraction.runtimeScope "System.Int32", [.atom CIL.Extraction.runtimeScope "System.Int32"]⟩
+            theorem selected : CIL.Safety.indirectTarget signature [⟨⟨"other", 6, []⟩, 2⟩, ⟨{{identity}}, 1⟩]
+                ⟨signature, some {{identity}}⟩ = some 1 := {{proof}}
+            """;
+        var path = Path.Combine(targetDirectory, $"Owner{length}{(proved ? "Checked" : "Open")}.lean");
+        return Heartbeats(path, text, equations: false);
+    }
+    var costs = ownerLengths.Select(length => (double)(Selection(length, true) - Selection(length, false))).ToArray();
+    for (var step = 1; step < ownerLengths.Length; step++)
+    {
+        var lengthRatio = ownerLengths[step] / (double)ownerLengths[step - 1];
+        var growth = costs[step] / costs[step - 1];
+        Console.WriteLine(FormattableString.Invariant(
+            $"PASS selecting a calli body for an owner of {ownerLengths[step - 1]} and {ownerLengths[step]} bytes: ") +
+            FormattableString.Invariant($"{costs[step - 1]:F0} and {costs[step]:F0} heartbeats, ") +
+            FormattableString.Invariant($"{growth / lengthRatio:F2} times the cost per byte"));
+        if (growth > AllowedSpellingGrowth * lengthRatio)
+            throw new Exception(FormattableString.Invariant(
+                $"Selecting a calli body for an owner of {ownerLengths[step]} bytes costs {growth:F2} times as much ") +
+                FormattableString.Invariant($"as for {ownerLengths[step - 1]}; ") +
+                FormattableString.Invariant($"the limit is {AllowedSpellingGrowth * lengthRatio:F1}."));
+    }
+}
+IndirectTargetCosts();
 
 // A method reading a field declared `depth` base classes up carries one row and one link per class of the chain, and
 // its body check walks the chain once. The cost is a fixed part plus a part linear in the depth, so the increment from

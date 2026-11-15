@@ -80,6 +80,14 @@ entries exceeds 1.15 times the cost at 16, or when the last entry's cost beyond 
 divided by its index, does. Run these rows alone with
 `dotnet run --file Tests/LookupScaling.cs -- --native-table-only`.
 
+The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
+`calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
+entry holds the same owner, less the same statement closed with `sorry`. The kernel compares
+the owners byte by byte, at about 8,400 heartbeats per byte: 562,000, 2,153,000 and 8,516,000
+heartbeats. The suite fails when the cost grows more than 1.1 times as fast as the length from one
+size to the next. Run this row alone with
+`dotnet run --file Tests/LookupScaling.cs -- --indirect-target-only`.
+
 The suite also checks the kernel heartbeats of `ScalarFlowValid` on generated bodies of 128, 256
 and 512 array element addresses, each followed by a branch, with and without a `readonly.`
 prefix, less the heartbeats of stating the same certificate. It fails when the cost per address
