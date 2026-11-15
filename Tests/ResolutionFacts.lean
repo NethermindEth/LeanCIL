@@ -19,6 +19,12 @@ requires, `this` as it arrives, and a homed argument from the slot after the dec
 which is the slot the argument check expects. `cil_resolution_facts` states the same for static
 and instance methods and across suffix blocks, refuses homes out of argument order, and the
 simplifier reads a literal body without facts and leaves a symbolic one alone.
+
+Pins the shape of array elements: a primitive, an enum, a class and a function pointer by lemma,
+a struct of the size its checked layout gives, and no shape for a by-ref-like struct or one the
+layouts do not hold. `cil_resolution_facts` declares one fact per distinct element type a raw
+method names, reads struct layouts across suffix blocks shared by an environment's methods, and
+the simplifier reads a literal body without facts.
 -/
 
 namespace Tests.ResolutionFacts
@@ -609,5 +615,238 @@ example : manyHomes.argumentAccess 16 = .home 17 := manyHomes_argumentAccess16
 example : manyHomes.argumentAccess 17 = .value none := manyHomes_argumentAccess17
 example : manyHomes.argumentAccess 19 = .value none := manyHomes_argumentAccess19
 example : manyHomes_homeSuffix16 = [(16, .word32)] := rfl
+
+/-! ## Array element shapes -/
+
+/-- The `int32` type as the extractor writes it. -/
+def int32Type : TypeExpr := .atom runtimeScope "System.Int32"
+
+/-- A function pointer type of the managed convention taking and returning an `int32`. -/
+def unaryPointer : TypeExpr :=
+  .functionPointer int32Type (.signatureParameter int32Type .void) 0 false false
+
+-- A primitive array holds the primitive's storage and a floating-point array has no shape,
+-- whatever the method's layouts, without evaluating the type name.
+example (body : Method) : body.elementShape int32Type = .value .signed32 :=
+  Method.elementShape_primitive body .int32
+example (body : Method) : body.elementShape (.atom runtimeScope "System.Double") =
+    .unsupported ElementShape.unsupportedType :=
+  Method.elementShape_primitive body .double
+
+-- An enum array holds the enum's storage over its underlying integer type, and an enum over a
+-- type no enum may have as its underlying type has no shape.
+example (body : Method) :
+    body.elementShape (.enum "Examples.Small" (.atom runtimeScope "System.Int16")) =
+      .value (.enumeration "Examples.Small" .signed16) :=
+  Method.elementShape_enum body _ .int16
+example (body : Method) :
+    body.elementShape (.enum "Examples.Truth" (.atom runtimeScope "System.Boolean")) =
+      .unsupported ElementShape.unsupportedType :=
+  Method.elementShape_enum body _ .boolean
+
+-- A class array holds references.
+example (body : Method) :
+    body.elementShape (.object "Examples" "Examples.Box") =
+      .reference (.object "Examples" "Examples.Box") :=
+  Method.elementShape_object body _ _
+
+-- A function-pointer array holds method-table entries of the pointer's managed signature.
+example (body : Method) : body.elementShape unaryPointer = .method ⟨int32Type, [int32Type]⟩ :=
+  rfl
+
+/-- A by-ref-like struct, which no heap array holds. -/
+def spanLikeLayout : RawLayout :=
+  { identity := "Examples.SpanLike", explicit := false, packing := 0, declaredSize := 0,
+    byRefLike := true, fields := [{ type := .signed64 }] }
+
+/-- The checked layout of `pointLayout`: two bytes. -/
+def pointComputed : ComputedLayout :=
+  { layout := { size := 2, fields := [{ offset := 0, width := 1 }, { offset := 1, width := 1 }] },
+    alignment := 1 }
+
+/-- The checked layout of `spanLikeLayout`: eight bytes. -/
+def spanLikeComputed : ComputedLayout :=
+  { layout := { size := 8, fields := [{ offset := 0, width := 8 }] }, alignment := 8 }
+
+/-- The layouts every array method below shares. -/
+def arraysEnvironment : LayoutEnvironment :=
+  { rawLayouts := [pointLayout, spanLikeLayout], layouts := #[pointComputed, spanLikeComputed] }
+
+/-- A method whose arrays hold the element types `arraysClosed` names. -/
+def arrays : Method :=
+  { code := [.ret], locals := [], returnsValue := false, environment := arraysEnvironment }
+
+-- A struct array holds values of the size the checked layout gives, which the same struct in
+-- a table of another size changes.
+example : arrays.elementShape (.aggregate "Examples.Point" 0) =
+    .value (.aggregate "Examples.Point" 2) :=
+  Method.elementShape_aggregate (metadata := pointLayout) (layout := pointComputed) rfl rfl rfl rfl
+example : ({ arrays with environment := { arraysEnvironment with
+      layouts := #[{ pointComputed with layout := { pointComputed.layout with size := 6 } }] } }
+      : Method).elementShape (.aggregate "Examples.Point" 0) =
+    .value (.aggregate "Examples.Point" 6) :=
+  Method.elementShape_aggregate (metadata := pointLayout)
+    (layout := { pointComputed with layout := { pointComputed.layout with size := 6 } })
+    rfl rfl rfl rfl
+
+-- A by-ref-like struct array has no shape, even with a checked layout.
+example : arrays.elementShape (.aggregate "Examples.SpanLike" 1) =
+    .unsupported ElementShape.byRefLikeElement :=
+  Method.elementShape_byRefLike (metadata := spanLikeLayout) rfl rfl rfl
+
+/-- The raw view of `arrays`: one instruction per element opcode, a repeated element type and a
+    type operand of an opcode that names no element type. -/
+def arraysClosed : RawMethod :=
+  { token := 1, owner := "Examples", hasThis := false, explicitThis := false,
+    callingConvention := 0, attributes := 0, implementation := 0, returnType := .void,
+    parameters := [], locals := [], initLocals := true, maxStack := 3, genericParameters := [],
+    code := [⟨0, 141, .type int32Type⟩, ⟨5, 163, .type int32Type⟩,
+      ⟨10, 163, .type (.enum "Examples.Small" (.atom runtimeScope "System.Int16"))⟩,
+      ⟨15, 164, .type (.aggregate "Examples.Point" 0)⟩,
+      ⟨20, 143, .type (.aggregate "Examples.SpanLike" 1)⟩,
+      ⟨25, 141, .type (.object "Examples" "Examples.Box")⟩,
+      ⟨30, 140, .type (.atom runtimeScope "System.Int64")⟩,
+      ⟨35, 163, .type unaryPointer⟩, ⟨40, 42, .none⟩] }
+
+/-- The return fact the facts command also reads. -/
+theorem arrays_returnsValue : arrays.returnsValue = false := rfl
+#print axioms arrays_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem arrays_declared : arrays.declared = {} := rfl
+#print axioms arrays_declared
+
+cil_resolution_facts arrays
+
+example : arrays.elementShape int32Type = .value .signed32 := arrays_elementShape0
+example : arrays.elementShape (.enum "Examples.Small" (.atom runtimeScope "System.Int16")) =
+    .value (.enumeration "Examples.Small" .signed16) := arrays_elementShape1
+example : arrays.elementShape (.aggregate "Examples.Point" 0) =
+    .value (.aggregate "Examples.Point" 2) := arrays_elementShape2
+example : arrays.elementShape (.aggregate "Examples.SpanLike" 1) =
+    .unsupported ElementShape.byRefLikeElement := arrays_elementShape3
+example : arrays.elementShape (.object "Examples" "Examples.Box") =
+    .reference (.object "Examples" "Examples.Box") := arrays_elementShape4
+example : arrays.elementShape unaryPointer = .method ⟨int32Type, [int32Type]⟩ :=
+  arrays_elementShape5
+example : arrays.elementShape (.aggregate "Examples.Point" 0) =
+    .value (.aggregate "Examples.Point" 2) := by simp only [cil_code]
+
+/-- info: 'Tests.ResolutionFacts.arrays_elementShape0' depends on axioms: [propext] -/
+#guard_msgs in #print axioms arrays_elementShape0
+/-- info: 'Tests.ResolutionFacts.arrays_elementShape1' depends on axioms: [propext] -/
+#guard_msgs in #print axioms arrays_elementShape1
+/-- info: 'Tests.ResolutionFacts.arrays_elementShape2' depends on axioms: [propext] -/
+#guard_msgs in #print axioms arrays_elementShape2
+/-- info: 'Tests.ResolutionFacts.arrays_elementShape3' depends on axioms: [propext] -/
+#guard_msgs in #print axioms arrays_elementShape3
+/-- info: 'Tests.ResolutionFacts.arrays_elementShape4' depends on axioms: [propext] -/
+#guard_msgs in #print axioms arrays_elementShape4
+/-- info: 'Tests.ResolutionFacts.arrays_elementShape5' depends on axioms: [propext] -/
+#guard_msgs in #print axioms arrays_elementShape5
+
+-- One fact per distinct element type, not per instruction: `int32` is named twice, and the
+-- `int64` operand of an opcode that names no element type has no fact.
+/-- error: Unknown identifier `arrays_elementShape6` -/
+#guard_msgs in #check arrays_elementShape6
+
+-- The layout suffixes belong to the shared environment constant, so a second method of the same
+-- environment reads them instead of declaring its own.
+example : arraysEnvironment_rawLayoutSuffix0 = [pointLayout, spanLikeLayout] := rfl
+
+/-- A second method of the shared layouts, named as the extractor names them. -/
+def moreArrays : Method :=
+  { code := [.nop, .ret], locals := [], returnsValue := false, environment := arraysEnvironment }
+
+/-- The raw view of `moreArrays`: one struct element. -/
+def moreArraysClosed : RawMethod :=
+  { arraysClosed with code := [⟨0, 164, .type (.aggregate "Examples.Point" 0)⟩] }
+
+/-- The return fact the facts command also reads. -/
+theorem moreArrays_returnsValue : moreArrays.returnsValue = false := rfl
+#print axioms moreArrays_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem moreArrays_declared : moreArrays.declared = {} := rfl
+#print axioms moreArrays_declared
+
+cil_resolution_facts moreArrays
+
+example : moreArrays.elementShape (.aggregate "Examples.Point" 0) =
+    .value (.aggregate "Examples.Point" 2) := moreArrays_elementShape0
+/-- error: Unknown identifier `moreArrays_rawLayoutSuffix0` -/
+#guard_msgs in #check moreArrays_rawLayoutSuffix0
+
+/-- Eighteen one-field structs, so the layout suffixes cross a 16-entry block. -/
+def manyLayoutsEnvironment : LayoutEnvironment :=
+  { rawLayouts := (List.range 18).map fun index =>
+      { identity := s!"Examples.Cell{index}", explicit := false, packing := 0,
+        declaredSize := 0, fields := [{ type := .signed32 }] }
+    layouts := ((List.range 18).map fun index =>
+      { layout := { size := 4 * (index + 1), fields := [] }, alignment := 4 }).toArray }
+
+/-- A method whose arrays hold the structs on both sides of the block boundary. -/
+def manyLayouts : Method :=
+  { code := [.ret], locals := [], returnsValue := false, environment := manyLayoutsEnvironment }
+
+/-- The raw view of `manyLayouts`. -/
+def manyLayoutsClosed : RawMethod :=
+  { arraysClosed with code := [⟨0, 141, .type (.aggregate "Examples.Cell15" 15)⟩,
+      ⟨5, 141, .type (.aggregate "Examples.Cell17" 17)⟩] }
+
+/-- The return fact the facts command also reads. -/
+theorem manyLayouts_returnsValue : manyLayouts.returnsValue = false := rfl
+#print axioms manyLayouts_returnsValue
+
+/-- The declared signature the facts command also reads. -/
+theorem manyLayouts_declared : manyLayouts.declared = {} := rfl
+#print axioms manyLayouts_declared
+
+cil_resolution_facts manyLayouts
+
+example : manyLayouts.elementShape (.aggregate "Examples.Cell15" 15) =
+    .value (.aggregate "Examples.Cell15" 64) := manyLayouts_elementShape0
+example : manyLayouts.elementShape (.aggregate "Examples.Cell17" 17) =
+    .value (.aggregate "Examples.Cell17" 72) := manyLayouts_elementShape1
+
+/-- A method of the shared layouts without a raw view, so it has no generated shape facts. -/
+def literalArrays : Method := { arrays with code := [] }
+
+-- The simplifier reads a literal body's element shapes without generated facts.
+example : literalArrays.elementShape (.aggregate "Examples.Point" 0) =
+    .value (.aggregate "Examples.Point" 2) := by simp only [cil_step]
+example : literalArrays.elementShape (.aggregate "Examples.SpanLike" 1) =
+    .unsupported ElementShape.byRefLikeElement := by simp only [cil_step]
+example : literalArrays.elementShape int32Type = .value .signed32 := by simp only [cil_step]
+example : literalArrays.elementShape unaryPointer =
+    .method ⟨.atom runtimeScope "System.Int32", [.atom runtimeScope "System.Int32"]⟩ := by
+  simp only [cil_step]
+example : literalArrays.elementShape
+    (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1") int32Type) =
+      .value (.vector "System.Runtime.Intrinsics.Vector128`1<System.Int32>" 16) := by
+  simp only [cil_step]
+
+-- A struct index the layouts do not hold, or an identity other than the one held there, has
+-- no shape.
+example : literalArrays.elementShape (.aggregate "Examples.Point" 5) =
+    .unsupported ElementShape.outsideLayouts := by simp only [cil_step]
+example : literalArrays.elementShape (.aggregate "Examples.Other" 0) =
+    .unsupported ElementShape.outsideLayouts := by simp only [cil_step]
+
+/-- A method over layouts that are not known. -/
+def symbolicLayouts (environment : LayoutEnvironment) : Method :=
+  { code := [], locals := [], returnsValue := false, environment }
+
+-- A symbolic element type or layout table leaves the shape for a caller's fact.
+example (type : TypeExpr) (shape : ElementShape)
+    (known : literalArrays.elementShape type = shape) :
+    literalArrays.elementShape type = shape := by
+  fail_if_success simp only [cil_step]
+  exact known
+example (environment : LayoutEnvironment) (shape : ElementShape)
+    (known : (symbolicLayouts environment).elementShape (.aggregate "Examples.Point" 0) = shape) :
+    (symbolicLayouts environment).elementShape (.aggregate "Examples.Point" 0) = shape := by
+  fail_if_success simp only [cil_step]
+  exact known
 
 end Tests.ResolutionFacts

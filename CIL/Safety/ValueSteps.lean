@@ -256,4 +256,14 @@ simproc [cil_step] reduceArgumentAccess (CIL.Method.argumentAccess _ _) := fun e
   let some (_, _, result) := (← inferType proof).eq? | return .continue
   return .done { expr := ← withDefault <| whnf result, proof? := some proof }
 
+open Lean Meta in
+/-- The shape of a literal type's array elements in a literal body, by the shape lemmas and
+    premises the kernel decides over the body's layout lists; a symbolic part is left for a
+    caller's fact. -/
+simproc [cil_step] reduceElementShape (CIL.Method.elementShape _ _) := fun expression => do
+  let_expr CIL.Method.elementShape method type := expression | return .continue
+  let some (shape, proof) ← ResolutionFacts.elementProof? method type
+      (ResolutionFacts.literalReads method) | return .continue
+  return .done { expr := shape, proof? := some proof }
+
 end CIL.Safety
