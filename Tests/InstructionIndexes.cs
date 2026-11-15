@@ -243,10 +243,10 @@ foreach (var instruction in new[] { Instruction.Create(OpCodes.Ldc_I4_0), storeA
 string TranslateArgument(Instruction instruction, Dictionary<int, int> positions) => Lean(translate.Invoke(null,
     [instruction, argumentMethod, new Dictionary<MethodDefinition, int> { [argumentMethod] = 0 },
         0, Index(argumentMethod), null, null, positions, null, null, null])!);
-if (TranslateArgument(storeArgument, homePositions) != ".stloc 3" ||
-    TranslateArgument(loadArgument, homePositions) != ".ldloc 3" ||
-    TranslateArgument(addressArgument, homePositions) != ".ldloca 3")
-    throw new Exception("Home translation lost the raw-local offset or slot index");
+if (TranslateArgument(storeArgument, homePositions) != ".starg 1" ||
+    TranslateArgument(loadArgument, homePositions) != ".ldarg 1" ||
+    TranslateArgument(addressArgument, homePositions) != ".ldarga 1")
+    throw new Exception("A homed argument's store, load or address no longer names the argument");
 if (TranslateArgument(loadArgument, []) != ".ldarg 1")
     throw new Exception("Unhomed loads no longer use the original argument");
 try
@@ -256,7 +256,14 @@ try
 }
 catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
     rejected.Message == "Missing parameter storage") { }
-Console.WriteLine("PASS home lookup preserves first positions, local offsets and missing-store rejection");
+try
+{
+    TranslateArgument(addressArgument, []);
+    throw new Exception("An address without a home was admitted");
+}
+catch (TargetInvocationException error) when (error.InnerException is InvalidDataException rejected &&
+    rejected.Message == "Missing parameter storage") { }
+Console.WriteLine("PASS home lookup preserves first positions, argument indexes and missing-home rejection");
 
 // The typed operation model: the cases the outline generators branch on keep the spellings they are told apart by.
 const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public |

@@ -168,8 +168,9 @@ These regressions cover the extractor's own C# indexes:
   mutation visibility, distinct x64/arm64 vector layouts and nesting rejection after warming a
   child.
 - C# argument translation indexes argument home positions once per method in validation,
-  emission and exception lint. Duplicate inputs keep their first position, missing homes stay
-  absent, and raw locals are added to the home position when emitting local-slot instructions.
+  emission and exception lint. Duplicate inputs keep their first position and missing homes stay
+  absent. A homed argument's load, store and address keep the argument index, and a store or
+  address of an argument without a home is refused.
   `Tests/InstructionIndexes.cs` exercises loads, stores, addresses, duplicate homes and
   missing-store rejection.
 - Interface-module merging detects spelling collisions ignoring ordinal case and writes its

@@ -113,7 +113,8 @@ Console.WriteLine("PASS stepping growth budgets for " +
 // length. The faulting body divides, takes a remainder, adds with an overflow check and converts
 // with one, each from the arguments, so each step reads a fact of constant size. The arguments body
 // declares half as many int32 parameters as it has instructions and adds each, read once, to the sum.
-// The homes body gives each of as many reference parameters a home and reads each home once.
+// The homes body gives each of as many reference parameters a home and loads each argument once,
+// which reads its home.
 static (string[] Opening, string[] Cycle, string[] Ending) Shape(string workload) => workload switch
 {
     "memory" => ([], [".ldarg 0", ".ldarg 1", ".store64", ".ldarg 0", ".load64", ".pop"],
@@ -149,8 +150,8 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             .ToArray(),
         "arguments" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".ldarg {index}", ".add" })
             .Prepend(".ldarg 0").Append(".ret").ToArray(),
-        "homes" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".ldloc {index}", ".pop" })
-            .Prepend(".ldloc 0").Append(".ret").ToArray(),
+        "homes" => Enumerable.Range(1, parameters - 1).SelectMany(index => new[] { $".ldarg {index}", ".pop" })
+            .Prepend(".ldarg 0").Append(".ret").ToArray(),
         _ => opening.Concat(Enumerable.Range(0, cycles).SelectMany(_ => cycle)).Concat(ending).ToArray()
     };
     var parameterType = workload == "homes" ? $".byref ({Int32Type})" : Int32Type;

@@ -397,9 +397,9 @@ open CIL (W64)
 @[cil_code] def spanSum : CIL.Method := {
   returnsValue := true, locals := [.i64 0], localKinds := [.word64],
   parameterHomes := [(0, .span 8 false)]
-  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldloc 1, .ldc_i4 0,
-    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldloc 1, .ldc_i4 1,
-    .memory (.spanSlice false), .stloc 1, .ldloc 1, .memory .spanLength, .brtrue 4,
+  code := [.ldc_i4 0, .conv_i8, .stloc 0, .br 15, .ldloc 0, .ldarg 0, .ldc_i4 0,
+    .memory (.spanItem 8), .load64, .add, .stloc 0, .ldarg 0, .ldc_i4 1,
+    .memory (.spanSlice false), .starg 0, .ldarg 0, .memory .spanLength, .brtrue 4,
     .ldloc 0, .ret] }
 
 /-- The program of `spanSum` alone. -/

@@ -304,7 +304,7 @@ private def argumentEvidence : MethodEvidence := withBody {
 private def argumentMethod : Method := {
   locals := [], parameterHomes := [(0, .word32)], returnsValue := true,
   declared := { parameters := [intType], returnType := word },
-  code := [.ldc_i4 1, .neg, .stloc 0, .ldloc 0, .conv_i8, .ret] }
+  code := [.ldc_i4 1, .neg, .starg 0, .ldarg 0, .conv_i8, .ret] }
 example : FeatureFlowValid #[] (fun _ => none) argumentRaw .scalar argumentFeatures
     (List.replicate 6 true) argumentMethod.code := by decide
 example : ¬ TranslationValid [] #[] [] [argumentEvidence] [] [argumentMethod] := by decide +kernel
@@ -448,7 +448,7 @@ private def nativeHomeEvidence : MethodEvidence := withBody {
 private def nativeHomeMethod : Method := {
   locals := [], parameterHomes := [(0, .word64)], returnsValue := true,
   declared := { parameters := [nativeType, word], returnType := word },
-  code := [.ldarg 1, .stloc 0, .ldloc 0, .conv_u8, .ret] }
+  code := [.ldarg 1, .starg 0, .ldarg 0, .conv_u8, .ret] }
 example : TranslationValid [] #[] [] [nativeHomeEvidence] [] [nativeHomeMethod] := by
   decide +kernel
 example : scalarTransfer nativeHomeRaw (i 16 (.argument 0)) [.word64] = some [] := by decide
