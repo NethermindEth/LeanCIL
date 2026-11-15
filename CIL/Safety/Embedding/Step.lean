@@ -884,6 +884,7 @@ macro "lookup_raise" : tactic => `(tactic| (
 
 -- Instructions with a dedicated case in `step`.
 
+set_option maxHeartbeats 300000 in
 /-- Division, remainder and overflow-checked arithmetic raise in lockstep with their
     relabeling. -/
 theorem step_raise_faulting (op : Instruction)

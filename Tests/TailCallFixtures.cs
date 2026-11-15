@@ -131,7 +131,7 @@ partial class Program
                 (CIL.Safety.invoke Extracted.program 32 0 [.scalar (.i32 42)]
                   { allocations := fun _ => none, cells := fun _ _ => ⟨0, false⟩,
                     views := [], nextIdentity := 0 }).map Prod.snd =
-                  .ok [.scalar (.i32 42)] := rfl
+                  .ok [.scalar (.i32 42)] := by cil_kernel_rfl
             #print axioms excluded_indirect_tail
             """);
         evidence.Add(excludedProof, "PASS profile-excluded indirect tail");
