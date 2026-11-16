@@ -161,7 +161,7 @@ example : ∃ fuel result values, invoke linked fuel 1 [] afterApp = .ok (result
 private def collision : Library :=
   { entry := { libBody with staticSites := [(0, { libField with identity := 101 })] } }
 
--- The report names both fields; the interpreter checks it, since the kernel does not reduce `repr`.
+-- The report names both fields; the interpreter checks it, as the kernel does not reduce `repr`.
 #guard match linkChecked [appBody] [collision] with
   | .error message => message == "Static identity collision 101: " ++ reprStr (tableRef "App") ++
     " and " ++ reprStr (tableRef "Lib")
