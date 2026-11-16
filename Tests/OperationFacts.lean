@@ -91,18 +91,30 @@ theorem stored_short {memory after : Memory} {destination : Reference} {bits : C
   cil_checked_steps [formed, written]
 #print axioms stored_short
 
-/-- One-byte writes of a narrowed int and of a one-byte literal, as narrow struct fields and
-    flags store them, give no int store step; the run beside them kernel-checks. -/
-theorem stored_beside_byte_writes {memory after other : Memory} {destination : Reference}
-    {bits value : CIL.W32}
+/-- A one-byte write of a one-byte literal, as an object's flag field stores it, gives no int
+    store step; the run beside it kernel-checks. -/
+theorem stored_beside_flag_write {memory after other : Memory} {destination : Reference}
+    {bits : CIL.W32}
     (formed : form memory destination = .ok destination)
     (written : write memory destination (numberBytes bits.toNat 2) 1 = .ok after)
-    (narrowed : write memory destination (numberBytes (value.setWidth 8).toNat 1) 1 = .ok other)
     (flagged : write memory destination (numberBytes (1 : BitVec (8 * 1)).toNat 1) 1 = .ok other) :
     invoke [storeShortMethod] 5 0 [.reference (.address destination), .scalar (.i32 bits)]
         memory = .ok (after, []) := by
-  cil_checked_steps [formed, written, narrowed, flagged]
-#print axioms stored_beside_byte_writes
+  cil_checked_steps [formed, written, flagged]
+#print axioms stored_beside_flag_write
+
+/-- A one-byte `stind` steps with its own write while a write of a narrowed int, as a narrow
+    struct field stores it, is supplied beside it; the step kernel-checks. -/
+theorem byte_stind_beside_narrowed_write {memory after other : Memory} {destination : Reference}
+    {bits value : CIL.W32}
+    (written : write memory destination (numberBytes bits.toNat 1) 1 = .ok after)
+    (narrowed : write memory destination (numberBytes (value.setWidth 8).toNat 1) 1 = .ok other)
+    (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (rest : List Value) :
+    step body (.stind .i1) pc args frame
+        (.scalar (.i32 bits) :: .reference (.address destination) :: rest) memory =
+      .ok (.next (pc + 1) rest frame after) := by
+  cil_checked_step [written, narrowed]
+#print axioms byte_stind_beside_narrowed_write
 
 /-- A symbolic reference with an established formation result can be skipped without a write. -/
 theorem skip_formed_reference {memory : Memory} {reference : ManagedReference}
