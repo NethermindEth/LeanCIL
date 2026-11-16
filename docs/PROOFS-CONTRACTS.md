@@ -501,6 +501,33 @@ A contract whose precondition implies well-formed memory and a valid static worl
 | `InvocationCertificate.of_invoke` | Certifies any successful `invoke` from those two premises |
 | `InvocationCertificate.of_run` | Certifies a run of the frame that checked arguments enter |
 
+### Bind a contract to a decoded method
+
+`CIL.Safety.DecodedSummary` ties a contract to the method it was proved for.
+`DecodedSummary program evidence profile environment index pin token arguments contract` holds
+when `contract.Holds program index` and record `index` of `evidence` is the method with
+metadata token `token` of the assembly pinned by `pin`, closed at type arguments `arguments`,
+whose pinned body bytes decode to `program[index]?`. `MethodContract.Certified` names only an
+index, which another extraction can fill with another body; a summary also names the metadata
+method and the bytes.
+
+| Name | Use |
+| --- | --- |
+| `BodiesDecode profile environment evidence program` | Each record's bytes, with its links, decode to the method at the same index |
+| `decodedProgram?_eq_some` | Turns `BodiesDecode` into `decodedProgram? profile environment evidence = some program` |
+| `decodedProgram?_getElem` | Reads the method at one index of a decoded program from its record |
+| `DecodedSummary.of_decoded` | Builds the summary of an index from the decoded program, the record found there, its instantiation fact and `Holds` |
+| `DecodedSummary.holds` | The contract, for `cil_contract_steps` at the call |
+| `DecodedSummary.site` | At a live `call` whose link enters `index`, under `ManagedCallsValid`, the site's managed token and type arguments are the summary's |
+
+An extraction supplies each `BodiesDecode.cons` premise from its generated facts:
+`(Method.ofBody?_of_decodes Extracted.method{n}_body_validated).trans Extracted.method{n}_decoded`
+for a method defined from its decoder. The proof of `decodedProgram?_eq_some` adds one
+constructor per record and costs about 14,000 heartbeats per record at 8, 32 and 128 records
+([scaling](performance/InstructionLookups.md)).
+A summary whose bound names another token, or whose record's bytes decode to another method, does
+not type-check, and `site` at a call that names another token proves `False` from the summary.
+
 ### Pass byref arguments with ValidCall
 
 `ValidCall memory inputs outputs` states that memory is well formed, every input buffer is
