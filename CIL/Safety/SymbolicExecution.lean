@@ -1322,7 +1322,10 @@ elab_rules : tactic
             (← inferType proof) proof).intro1P
           replaceMainGoal [goal]
           pure #[← goal.withContext (Term.exprToSyntax (mkFVar link))]
-        | none => pure #[]
+        -- Without a generated fact, a supplied one states the read, so it rewrites first too.
+        | none => facts.getElems.filterM fun fact => suppliedFactSatisfies fact fun type => do
+            let some (_, read, _) := type.consumeMData.eq? | return false
+            return read.consumeMData.isAppOfArity ``CIL.Method.linkAt 2
       else pure #[]
     let stepFacts := facts.getElems ++ linkFacts
     let strategy ← if operation == ``CIL.Instruction.intrinsic then
@@ -1344,7 +1347,7 @@ elab_rules : tactic
       -- equation rewrites past it.
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
-      else if operation == ``CIL.Instruction.newobj then
+      else if linkedOpcodes.contains operation then
         `(tactic| cil_strict
           (cil_checked_linked_step_by_equations [$[$linkFacts:term],*] [$[$stepFacts:term],*]))
       else
