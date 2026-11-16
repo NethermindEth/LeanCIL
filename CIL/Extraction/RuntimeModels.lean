@@ -36,9 +36,15 @@ theorem runtimeModel_objectConstructor {environment : LayoutEnvironment} {opcode
     {method : MethodRef} {model : RuntimeModel}
     (found : runtimeModel environment opcode method = some model) :
     model = .objectConstructor := by
-  revert found
-  simp only [runtimeModel, runtimeModels, ModelTable.find, SearchTree.find?]
-  split <;> simp [List.find?, objectConstructorEntry, ModelEntry.exact, Option.bind] <;> grind
+  simp only [runtimeModel, runtimeModels, ModelTable.find, SearchTree.find?] at found
+  split at found <;> try cases found
+  simp only [objectConstructorEntry, ModelEntry.exact, bind, Option.bind, List.find?] at found
+  split at found <;> try cases found
+  rename_i selected
+  split at selected <;> cases selected
+  dsimp only at found
+  split at found <;> cases found
+  rfl
 
 #print axioms runtimeModel_objectConstructor
 
