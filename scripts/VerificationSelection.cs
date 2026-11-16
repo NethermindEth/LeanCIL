@@ -81,10 +81,21 @@ internal static class VerificationSelection
         // The shortest job carries the libraries: it starts last and has the most room before the
         // other jobs of its round finish.
         var carrier = ordered.LastOrDefault();
-        return ordered.Select(group => new Group(Name(group), group.ToArray(),
-                group.Max(name => name == "imports" ? 90 :
-                    name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30),
+        return ordered.Select(group => new Group(Name(group), group.ToArray(), Timeout(group, Seconds(group)),
                 group.Any(VerificationSuites.ProofSuites.Contains), group == carrier)).ToArray();
+    }
+
+    const int TimeoutStepMinutes = 10;
+
+    // A job is stopped at the largest limit of its members and no sooner than twice its measured
+    // time, in whole steps: a suite that slows by half still finishes, and a hung one is stopped.
+    static int Timeout(List<string> group, double seconds)
+    {
+        var named = group.Max(name => name == "imports" ? 90 :
+            name.StartsWith("exports", StringComparison.Ordinal) ? 120 : 30);
+        if (!double.IsFinite(seconds)) return named;
+        var measured = (int)Math.Ceiling(seconds * 2 / (TimeoutStepMinutes * 60)) * TimeoutStepMinutes;
+        return Math.Max(named, measured);
     }
 
     internal static Dictionary<string, HashSet<string>> SuiteInputs(string? root = null)
