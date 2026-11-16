@@ -30,16 +30,26 @@ def runtimeModel (environment : LayoutEnvironment) (opcode : CallOpcode) (method
 def callModelled (body : Method) (method : MethodRef) : Bool :=
   (runtimeModel body.environment .call method).isSome
 
+/-- The runtime table models only the `System.Object` constructor, so proofs about calls that
+    run a model cover that one; an entry of another model must extend each of them. -/
+theorem runtimeModel_objectConstructor {environment : LayoutEnvironment} {opcode : CallOpcode}
+    {method : MethodRef} {model : RuntimeModel}
+    (found : runtimeModel environment opcode method = some model) :
+    model = .objectConstructor := by
+  revert found
+  simp only [runtimeModel, runtimeModels, ModelTable.find, SearchTree.find?]
+  split <;> simp [List.find?, objectConstructorEntry, ModelEntry.exact, Option.bind] <;> grind
+
+#print axioms runtimeModel_objectConstructor
+
 /-- No model of the runtime table consults the profile, so `Instruction.ProfileAgreement` says
     nothing of calls; an entry whose model does must extend it. -/
 theorem runtimeModel_readsProfile {environment : LayoutEnvironment} {opcode : CallOpcode}
     {method : MethodRef} {model : RuntimeModel}
     (found : runtimeModel environment opcode method = some model) :
     model.readsProfile = false := by
-  revert found
-  simp only [runtimeModel, runtimeModels, ModelTable.find, SearchTree.find?]
-  split <;> simp [List.find?, objectConstructorEntry, ModelEntry.exact, Option.bind] <;>
-    grind [RuntimeModel.readsProfile]
+  rw [runtimeModel_objectConstructor found]
+  rfl
 
 #print axioms runtimeModel_readsProfile
 
