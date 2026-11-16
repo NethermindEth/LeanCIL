@@ -30,42 +30,40 @@ def runtimeModel (environment : LayoutEnvironment) (opcode : CallOpcode) (method
 def callModelled (body : Method) (method : MethodRef) : Bool :=
   (runtimeModel body.environment .call method).isSome
 
-/-- The runtime table models only the `System.Object` constructor, so proofs about calls that
-    run a model cover that one; an entry of another model must extend each of them. -/
-theorem runtimeModel_objectConstructor {environment : LayoutEnvironment} {opcode : CallOpcode}
-    {method : MethodRef} {model : RuntimeModel}
-    (found : runtimeModel environment opcode method = some model) :
-    model = .objectConstructor := by
-  simp only [runtimeModel, runtimeModels, ModelTable.find, SearchTree.find?] at found
-  split at found <;> try cases found
-  simp only [objectConstructorEntry, ModelEntry.exact, bind, Option.bind, List.find?] at found
-  split at found <;> try cases found
-  rename_i selected
-  split at selected <;> cases selected
-  dsimp only at found
-  split at found <;> cases found
-  rfl
+/-- Every entry of the runtime table is one of `modelEntries`. -/
+theorem runtimeModels_entries : ∀ group ∈ runtimeModels.toList, ∀ entry ∈ group.2,
+    entry ∈ modelEntries := by
+  simp [runtimeModels, SearchTree.toList, modelEntries]
 
-#print axioms runtimeModel_objectConstructor
+#print axioms runtimeModels_entries
+
+/-- A model the runtime table gives has every property the models of each entry of
+    `modelEntries` have, so adding an entry adds one case to such a proof. -/
+theorem runtimeModel_yields {property : RuntimeModel → Prop}
+    (every : ∀ entry ∈ modelEntries, entry.Yields property) {environment : LayoutEnvironment}
+    {opcode : CallOpcode} {method : MethodRef} {model : RuntimeModel}
+    (found : runtimeModel environment opcode method = some model) : property model :=
+  ModelTable.find_yields (fun group listed entry member =>
+    every entry (runtimeModels_entries group listed entry member)) found
+
+#print axioms runtimeModel_yields
 
 /-- No model of the runtime table consults the profile, so `Instruction.ProfileAgreement` says
     nothing of calls; an entry whose model does must extend it. -/
 theorem runtimeModel_readsProfile {environment : LayoutEnvironment} {opcode : CallOpcode}
     {method : MethodRef} {model : RuntimeModel}
     (found : runtimeModel environment opcode method = some model) :
-    model.readsProfile = false := by
-  rw [runtimeModel_objectConstructor found]
-  rfl
+    model.readsProfile = false :=
+  runtimeModel_yields (property := fun model => model.readsProfile = false)
+    (by simp [modelEntries, objectConstructorEntry, RuntimeModel.readsProfile]) found
 
 #print axioms runtimeModel_readsProfile
 
-/-- The runtime models with the emissions they account for: `pop` does what the
-    `System.Object` constructor's model does, so it stands for no other call. -/
+/-- The runtime models with the emissions they account for: none, since a call of a modelled
+    method keeps its call. -/
 def runtimeCatalog : ModelCatalog where
   table := runtimeModels
-  lowered
-    | .pop => some .objectConstructor
-    | _ => none
+  lowered _ := none
 
 /-- Each live call site of a method keeps its call or emits the runtime model its method
     reference stands for. -/

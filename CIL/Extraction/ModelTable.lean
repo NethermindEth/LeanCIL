@@ -130,6 +130,64 @@ elab "model_table% " entries:term : term => do
     | none => groups := groups.push (key, #[cell])
   literalTree groups
 
+/-- A value `find?` gives is one of the tree's entries. -/
+theorem SearchTree.find?_mem_toList {α : Type} :
+    ∀ (tree : SearchTree α) (key : Nat) (value : α), tree.find? key = some value →
+      (key, value) ∈ tree.toList
+  | .leaf, _, _, found => by simp [SearchTree.find?] at found
+  | .node left root stored right, key, value, found => by
+    simp only [SearchTree.find?] at found
+    simp only [SearchTree.toList, List.mem_append, List.mem_cons]
+    split at found
+    · exact .inl (SearchTree.find?_mem_toList left key value found)
+    · exact .inr (.inr (SearchTree.find?_mem_toList right key value found))
+    · rename_i same
+      cases found
+      exact .inr (.inl (by rw [Nat.compare_eq_eq.mp same]))
+
+#print axioms SearchTree.find?_mem_toList
+
+/-- Every model `entry` resolves has `property`. -/
+def ModelEntry.Yields (entry : ModelEntry) (property : RuntimeModel → Prop) : Prop :=
+  ∀ environment method model, entry.resolve environment method = some model → property model
+
+/-- An exact entry resolves only its own model. -/
+@[simp] theorem ModelEntry.exact_yields {opcode : CallOpcode} {method : MethodRef}
+    {model : RuntimeModel} {property : RuntimeModel → Prop} :
+    (ModelEntry.exact opcode method model).Yields property ↔ property model := by
+  constructor
+  · intro yields
+    exact yields {} method model (by simp [ModelEntry.exact])
+  · intro holds environment reference resolved found
+    simp only [ModelEntry.exact] at found
+    split at found
+    · cases found
+      exact holds
+    · cases found
+
+#print axioms ModelEntry.exact_yields
+
+/-- A model a table gives has every property each of its entries' models has, so a proof about
+    the models of a table covers an entry added to it once that entry's models have the property. -/
+theorem ModelTable.find_yields {table : ModelTable} {property : RuntimeModel → Prop}
+    (every : ∀ group ∈ table.toList, ∀ entry ∈ group.2, entry.Yields property)
+    {environment : LayoutEnvironment} {opcode : CallOpcode} {method : MethodRef}
+    {model : RuntimeModel} (found : table.find environment opcode method = some model) :
+    property model := by
+  simp only [ModelTable.find, bind, Option.bind] at found
+  split at found
+  · cases found
+  · rename_i entries filed
+    dsimp only at found
+    split at found
+    · cases found
+    · rename_i entry selected
+      dsimp only at found
+      exact every _ (SearchTree.find?_mem_toList _ _ _ filed) entry
+        (List.mem_of_find?_eq_some selected) environment method model found
+
+#print axioms ModelTable.find_yields
+
 /-- A table with the emissions it accounts for: `lowered` gives the model an instruction emitted
     at a call stands for, for every model the table can give, and `none` for other emissions. -/
 structure ModelCatalog where

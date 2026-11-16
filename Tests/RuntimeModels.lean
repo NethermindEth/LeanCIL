@@ -343,17 +343,21 @@ example : ¬ ManagedCallsValid [] [] (callModelled body) (method ⟨0, 40, .call
       parameterCount := 0, returnsValue := false }⟩) [true]
     (emitting (.call objectConstructorMethod {}) []) := by decide +kernel
 
--- `pop` does what the constructor's model does, so no other call may emit it.
-example : ¬ RuntimeModelsAgree (method (site bigMul)) [true] (emitting .pop []) := by
-  decide +kernel
-example : ¬ RuntimeModelsAgree (method (site
-    { objectConstructorMethod with owner := .atom "Fixture" "System.Object" })) [true]
-    (emitting .pop []) := by decide +kernel
-example : ¬ RuntimeModelsAgree (method (site { objectConstructorMethod with hasThis := false }))
-    [true] (emitting .pop []) := by decide +kernel
+-- `pop` stands for no model, so a model site does not emit it, and no call site of any opcode
+-- emits it, since it would drop the call.
 example :
-    ¬ RuntimeModelsAgree (method (site { objectConstructorMethod with parameters := [word] }))
-      [true] (emitting .pop []) := by decide +kernel
+    ¬ RuntimeModelsAgree (method (site objectConstructorMethod)) [true] (emitting .pop []) := by
+  decide +kernel
+example : callEmitsNoPop (site objectConstructorMethod) .pop = false := by decide
+example : callEmitsNoPop (site bigMul) .pop = false := by decide
+example :
+    callEmitsNoPop (site { objectConstructorMethod with hasThis := false } 111) .pop = false := by
+  decide
+example : callEmitsNoPop (site bigMul 115) .pop = false := by decide
+example : callEmitsNoPop ⟨0, 38, .none⟩ .pop = true := by decide
+example :
+    callEmitsNoPop (site objectConstructorMethod) (.call objectConstructorMethod {}) = true := by
+  decide
 
 -- An external call the table does not model needs a link.
 example : ¬ ManagedCallsValid [] [] (callModelled body) (method (site bigMul)) [true]
