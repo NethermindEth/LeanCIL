@@ -140,6 +140,7 @@ deriving instance ToExpr for Feature
 deriving instance ToExpr for ManagedOp
 deriving instance ToExpr for SpanConstructor
 deriving instance ToExpr for ConvTarget
+deriving instance ToExpr for TokenOperand
 deriving instance ToExpr for Instruction
 deriving instance ToExpr for LocalKind
 deriving instance ToExpr for StaticDescriptor
