@@ -1121,8 +1121,7 @@ def stepLinkFact? (body pc : Expr) : TacticM (Option Expr) := withMainContext do
 /-- Opcodes whose step reads the body's link at the step's pc. -/
 def linkedOpcodes : List Lean.Name :=
   [``CIL.Instruction.call, ``CIL.Instruction.tailCall, ``CIL.Instruction.callInstance,
-    ``CIL.Instruction.callVirtual, ``CIL.Instruction.newAggregate, ``CIL.Instruction.newObject,
-    ``CIL.Instruction.managed]
+    ``CIL.Instruction.callVirtual, ``CIL.Instruction.newobj, ``CIL.Instruction.managed]
 
 open Lean Elab Tactic Meta in
 elab_rules : tactic
@@ -1872,15 +1871,20 @@ def cilRunStepNodes (facts : Array Term) : TacticM Unit := withMainContext do
     | none => pure false
   let (methodSyntax, instructionSyntax, operation) ←
     cilFetchedOp ``CIL.Safety.run_next (fun e => e.eq?.map (·.2.1)) 3 facts
-  -- An object construction runs its constructor as a call before continuing in the caller.
-  let constructs := operation == ``CIL.Instruction.newObject
+  -- A construction under an `.object` link runs its constructor as a call before continuing in
+  -- the caller; under an `.aggregate` link it steps on as any other instruction does.
+  let constructs := operation == ``CIL.Instruction.newobj
   -- These fault before their callee runs: a call site the link table omits, a short heap
   -- budget, a null receiver, or a receiver whose class a dispatch table omits.
   let faultsFirst := constructs || callsCallee operation
   evalTactic (← if operation == ``CIL.Instruction.ret then
       `(tactic| cil_checked_return_at $methodSyntax $instructionSyntax [$facts,*])
     else if callsCallee operation || constructs then
-      let call ← `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
+      let call ← if constructs then
+          `(tactic| first
+            | cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*]
+            | cil_checked_next_at $methodSyntax $instructionSyntax [$facts,*])
+        else `(tactic| cil_checked_call_open_at $methodSyntax $instructionSyntax [$facts,*])
       if faulting && faultsFirst then
         `(tactic| first
           | cil_checked_fault_at $methodSyntax $instructionSyntax [$facts,*]

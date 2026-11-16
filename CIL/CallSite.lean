@@ -35,6 +35,18 @@ structure MethodRef where
 def MethodRef.argumentCount (method : MethodRef) : Nat :=
   method.parameters.length + (if method.hasThis then 1 else 0)
 
+/-- A constructor reference that states only that it takes `count` parameters, for a body built in
+    Lean whose link names the constructor; its owner, name and types are left unstated. -/
+def MethodRef.arity (count : Nat) : MethodRef :=
+  { owner := .void, name := ⟨0⟩, hasThis := true, genericArity := 0, returnType := .void,
+    parameters := List.replicate count .void }
+
+/-- `MethodRef.arity count` takes `count` parameters. -/
+@[simp] theorem MethodRef.arity_parameters_length (count : Nat) :
+    (MethodRef.arity count).parameters.length = count := List.length_replicate
+
+#print axioms MethodRef.arity_parameters_length
+
 /-- The metadata of a `call` or `newobj` operand, as declared at the call site. -/
 structure CallSite where
   method : MethodRef

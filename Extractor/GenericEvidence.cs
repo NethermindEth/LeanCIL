@@ -100,6 +100,26 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     string Call(MethodReference reference, Instruction instruction, IReadOnlySet<Instruction> reachable)
     {
+        var (method, name, owners, extracted, typeArguments) = MethodOperand(reference);
+        var definition = reference is GenericInstanceMethod generic ? generic.ElementMethod : reference;
+        var target = extracted
+            ? $".managed {definition.Resolve().MetadataToken.ToUInt32()}"
+            : ".external " + externalIdentities.Reference(imports?.Identity(instruction) ??
+                (LayoutEvidence.Scope(definition.DeclaringType) + "::" + ExternalSignature(definition)),
+                reachable.Contains(instruction));
+        return $"{{ method := {method.ToLean()}, name := {Quote(name)}, target := {target}, " +
+            $"typeArguments := {typeArguments}, ownerArgumentCount := {owners}, " +
+            $"parameterCount := {reference.Parameters.Count}, " +
+            $"returnsValue := {Bool(Returned(reference).FullName != "System.Void")} }}";
+    }
+
+    /// <summary>
+    /// The typed method a call operand names, its name as text, the number of its owner's type arguments, whether its
+    /// callee is extracted, and the Lean list of its type arguments, method arguments first.
+    /// </summary>
+    (MethodRef Method, string Name, int Owners, bool Extracted, string TypeArguments) MethodOperand(
+        MethodReference reference)
+    {
         var definition = reference is GenericInstanceMethod generic ? generic.ElementMethod : reference;
         var arguments = reference is GenericInstanceMethod instance ? instance.GenericArguments.ToArray() :
             reference is MethodDefinition specialized ? MethodSpecialization.Arguments(specialized).ToArray() : [];
@@ -118,11 +138,6 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             foreach (var argument in owners) closedOwner.GenericArguments.Add(argument);
             declaringType = closedOwner;
         }
-        var target = extracted
-            ? $".managed {definition.Resolve().MetadataToken.ToUInt32()}"
-            : ".external " + externalIdentities.Reference(imports?.Identity(instruction) ??
-                (LayoutEvidence.Scope(definition.DeclaringType) + "::" + ExternalSignature(definition)),
-                reachable.Contains(instruction));
         var name = extracted
             ? ((MethodDefinition)Original(definition.Resolve().Module)
                 .LookupToken(definition.Resolve().MetadataToken)).Name : definition.Name;
@@ -132,15 +147,20 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         var ownerType = Type(declaringType, true);
         var typeArguments = List(arguments.Select(Type));
         var returnType = Type(Returned(reference));
-        var parameters = List(CallReturnType.Parameters(reference).Select(Parameter));
-        var methodArguments = List(arguments[..^owners.Length].Select(Type));
-        var method = $"{{ owner := {ownerType}, name := {MetadataName.OfText(name).ToLean()}, " +
-            $"hasThis := {Bool(reference.HasThis)}, genericArity := {genericArity}, returnType := {returnType}, " +
-            $"parameters := {parameters}, methodArguments := {methodArguments} }}";
-        return $"{{ method := {method}, name := {Quote(name)}, target := {target}, " +
-            $"typeArguments := {typeArguments}, ownerArgumentCount := {owners.Length}, " +
-            $"parameterCount := {reference.Parameters.Count}, " +
-            $"returnsValue := {Bool(Returned(reference).FullName != "System.Void")} }}";
+        ValueList<string> parameters = [.. CallReturnType.Parameters(reference).Select(Parameter)];
+        ValueList<string> methodArguments = [.. arguments[..^owners.Length].Select(Type)];
+        return (new(ownerType, MetadataName.OfText(name), reference.HasThis, genericArity, returnType, parameters,
+            methodArguments), name, owners.Length, extracted, typeArguments);
+    }
+
+    /// <summary>
+    /// The typed constructor or method the call operand at <paramref name="pc"/> in <paramref name="method"/> names, as
+    /// its raw operand states it; the executed instruction must carry the same reference.
+    /// </summary>
+    internal MethodRef MethodReferenceOf(MethodDefinition method, int pc)
+    {
+        methodParameterCount = method.GenericParameters.Count;
+        return MethodOperand((MethodReference)method.Body.Instructions[pc].Operand).Method;
     }
 
     // An open owner spells caller parameters by position, so the certificate can instantiate it;
@@ -435,8 +455,8 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
         // Indirect loads and stores of integers and native integers.
         Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
         Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
-        // Class type tests and class instance field accesses.
-        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld,
+        // Class type tests, class instance field accesses and constructions.
+        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld, Code.Newobj,
         // Branches.
         Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
         Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
@@ -457,8 +477,10 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }.ToFrozenSet();
 
     /// <summary>What keeps a method's literal at one pc: a pc the reachability certificate rules out, since a
-    /// decoded instruction there fails the feature check, or an opcode `Method.ofRaw?` writes as a hole.</summary>
-    internal enum RefusalKind { UnreachablePc, Hole }
+    /// decoded instruction there fails the feature check, an opcode `Method.ofRaw?` writes as a hole, or a
+    /// construction of a runtime method the literal emits as its model, which the decoded call has no link for.
+    /// </summary>
+    internal enum RefusalKind { UnreachablePc, Hole, RuntimeMethod }
 
     /// <summary>The part of the model that an opcode outside <see cref="DecodedOpcodes"/> needs before it
     /// decodes.</summary>
@@ -476,17 +498,23 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
 
     /// <summary>
     /// Why the extraction does not define `method` from its decoder, or null when it does: `Method.ofRaw?` writes no
-    /// hole at any pc and every pc is in the reachability certificate. A wrong null fails the build at the method's
-    /// `cil_decoded_method` definition. One pass over the body.
+    /// hole at any pc, every pc is in the reachability certificate, and every `newobj` translates to a construction
+    /// that `operations`, the translation by pc, links. A wrong null fails the build at the method's
+    /// `cil_decoded_method` definition or its call check. One pass over the body.
     /// </summary>
-    internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable)
+    internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable,
+        IReadOnlyList<Operation> operations)
     {
-        foreach (var instruction in method.Body.Instructions)
+        var instructions = method.Body.Instructions;
+        for (var pc = 0; pc < instructions.Count; pc++)
         {
+            var instruction = instructions[pc];
             if (!reachable.Contains(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.UnreachablePc);
             if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
+            if (instruction.OpCode.Code == Code.Newobj && operations[pc] is not Newobj)
+                return new(instruction.Offset, instruction.OpCode, RefusalKind.RuntimeMethod);
         }
         return null;
     }

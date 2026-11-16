@@ -9,8 +9,9 @@ import CIL.Safety.ValueSteps
 comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`),
 `isinst` and `castclass` (through `objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
 `ldstr` of a caller-bound literal (`literalObject_of_lookup`), `ldfld`/`stfld` of scalar class
-fields, and `newobj` of a class, which calls the constructor with a fresh instance that
-`allocateObject_ok` or `allocateObject_insufficient` decides, and `callvirt` of a non-virtual
+fields, and `newobj`, whose link fact selects a class construction, which calls the constructor
+with a fresh instance that `allocateObject_ok` or `allocateObject_insufficient` decides, or a
+value-type construction, and `callvirt` of a non-virtual
 method, which calls with a live receiver and throws `NullReferenceException` on a null one
 (`receiverCall`), and `callvirt` of a virtual method, which enters the body its dispatch table
 lists for the receiver's runtime class (`virtualCall`, decided by a `runtimeTypeOf` fact),
@@ -68,27 +69,41 @@ section ObjectEquations
 
 variable (body : CIL.Method) (pc : Nat) (args : List Value) (frame : Frame) (memory : Memory)
 
-/-- `newobj` of a class checks its `argc` arguments, allocates the instance and calls the
-    constructor its link names with it as the receiver; the instance waits under the rest of the
-    stack. -/
-@[cil_step] theorem step_newObject_eq (target argc : Nat) (owner : CIL.Extraction.TypeExpr)
-    (bases : List CIL.Extraction.TypeExpr) (size : Nat) (stack : List Value) :
-    step body (.newObject target argc owner bases size) pc args frame stack memory =
-      if unspecifiedOperands argc stack then
+/-- `newobj` checks its constructor's arguments for unspecified bits and then builds what the
+    link at its pc states: a zeroed value-type temporary owned by the frame and passed by address,
+    or an instance of the constructor's class with the link's bases, passed as the receiver and
+    left under the rest of the stack. Any other link faults before anything is allocated. -/
+@[cil_step] theorem step_newobj_eq (constructor : CIL.Extraction.MethodRef)
+    (stack : List Value) :
+    step body (.newobj constructor) pc args frame stack memory =
+      if unspecifiedOperands constructor.parameters.length stack then
         .error (.unsupported "Instruction observes unspecified vector bits")
       else match body.linkAt pc with
-        | some (.object callee _ _) =>
-          if stack.length < argc then .error .invalidState
+        | some (.aggregate callee size) =>
+          if size = 0 || stack.length < constructor.parameters.length then .error .invalidState
           else do
-            let arguments ← (stack.take argc).reverse.mapM (checkedValue memory)
-            let (object, allocated) ← allocateObject memory ⟨owner, bases⟩ size
+            let arguments ←
+              (stack.take constructor.parameters.length).reverse.mapM (checkedValue memory)
+            let (temporary, allocated) ← allocateHome memory frame.activation size
+            let (_, stored) ← storeLocal allocated (.bytes (.aggregate size) temporary)
+              (.scalar (.aggregate (List.replicate size 0)))
+            return FrameAction.construct callee (.reference (.address temporary) :: arguments)
+              (stack.drop constructor.parameters.length)
+              { frame with owned := temporary.allocation :: frame.owned } temporary
+              (.aggregate size) stored
+        | some (.object callee bases size) =>
+          if stack.length < constructor.parameters.length then .error .invalidState
+          else do
+            let arguments ←
+              (stack.take constructor.parameters.length).reverse.mapM (checkedValue memory)
+            let (object, allocated) ← allocateObject memory ⟨constructor.owner, bases⟩ size
             return FrameAction.call callee (.object (.address object) :: arguments)
-              (.object (.address object) :: stack.drop argc) allocated
+              (.object (.address object) :: stack.drop constructor.parameters.length) allocated
         | _ => .error unlinkedCall := by
   simp only [step, observerCount]
   rfl
 
-#print axioms step_newObject_eq
+#print axioms step_newobj_eq
 
 /-- The call a receiver-checked `callvirt` makes with checked `arguments`, receiver first: a null
     receiver throws `NullReferenceException`, and a receiver that is no object reference is

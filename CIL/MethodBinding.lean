@@ -56,7 +56,9 @@ def environmentField (left right : LayoutEnvironment) : Option String :=
 /-- What to do when a body's link table differs: a structure update copies the old table. -/
 def linksHint : String :=
   "\n  a body written as `{ method with code := ... }` keeps the links of `method`, keyed by its \
-    own pcs; build it with `Method.withCode` so its links follow its code"
+    own pcs; build it with `Method.withCode` so its links follow its code; `newobj` implies no \
+    link, so a body that constructs then states its table in pc order: \
+    `{ body with links := [(pc, link), ...] }`"
 
 /-- What to do when a body's static sites differ: `Method.withCode` resets them. -/
 def staticSitesHint : String :=

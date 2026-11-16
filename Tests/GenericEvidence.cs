@@ -319,15 +319,13 @@ RejectDeclared(14, "wrong-declared-receiver-kind", "method1", line =>
     line.Replace("receiver := some .reference", "receiver := some .object"));
 Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
     line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
-Reject(0, "dropped-link", source => ChangeDefinition(source, "method0", line =>
-    line.Replace("links := [(1, method0Link1)]", "links := []")), "method0_calls_validated",
+Reject(0, "dropped-link", source => ChangeDefinition(source, "method0Links", line =>
+    line.Replace(":= [(1, method0Link1)]", ":= []")), "method0_calls_validated", decisionFailed);
+Reject(0, "link-at-wrong-pc", source => ChangeDefinition(source, "method0Links", line =>
+    line.Replace(":= [(1, method0Link1)]", ":= [(0, method0Link1)]")), "method0_calls_validated",
     decisionFailed);
-Reject(0, "link-at-wrong-pc", source => ChangeDefinition(source, "method0", line =>
-    line.Replace("links := [(1, method0Link1)]", "links := [(0, method0Link1)]")),
-    "method0_calls_validated", decisionFailed);
-Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1", line =>
-    line.Replace("links := []", "links := [(0, method0Link1)]")), "method1_calls_validated",
-    decisionFailed);
+Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1Links", line =>
+    line.Replace(":= []", ":= [(0, method0Link1)]")), "method1_calls_validated", decisionFailed);
 Reject(0, "wrong-environment", source => ChangeDefinition(source, "environment", line =>
     line.Replace("layouts := computedLayouts", "layouts := #[⟨⟨4, []⟩, 4⟩]")), "method0_environment_validated",
     rflRefused);

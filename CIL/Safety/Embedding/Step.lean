@@ -411,24 +411,30 @@ theorem step_relabel_tailCall (callee argc : Nat) : StepRelabel (.tailCall calle
 
 #print axioms step_relabel_tailCall
 
-theorem step_relabel_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
-    StepRelabel (.newAggregate callee argc size) := by
+/-- A construction relocates no pc; both steps read the same link and allocate alike. -/
+theorem step_relabel_newobj (constructor : Extraction.MethodRef) :
+    StepRelabel (.newobj constructor) := by
   plain_cases
-  link_cases
-  by_cases short : (size = 0 || stack.length < argc) = true
-  · simp only [short, ↓reduceIte] at h; cases h
-  · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
-    lockstep
+  unfold newobjStep constructAggregate constructObject at h ⊢
+  rw [context.link]
+  rcases linked : expected.linkAt pc with _ | link
+  · simp only [linked] at h
+    first | cases h | (simp [unlinkedCall] at h)
+  simp only [linked] at h ⊢
+  cases link
+  case aggregate callee size =>
+    by_cases short : (size = 0 || stack.length < constructor.parameters.length) = true
+    · simp only [short, ↓reduceIte] at h; cases h
+    · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+      lockstep
+  case object callee bases size =>
+    by_cases short : stack.length < constructor.parameters.length
+    · simp [short] at h
+    · simp only [short, ↓reduceIte] at h ⊢
+      lockstep
+  all_goals first | cases h | (simp [unlinkedCall] at h)
 
-theorem step_relabel_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
-    (bases : List Extraction.TypeExpr) (size : Nat) :
-    StepRelabel (.newObject callee argc owner bases size) := by
-  plain_cases
-  link_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    lockstep
+#print axioms step_relabel_newobj
 
 theorem step_relabel_intrinsic (operation : Intrinsic) (argc : Nat) :
     StepRelabel (.intrinsic operation argc) := by
@@ -783,9 +789,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case callInstance method argc => exact step_relabel_callInstance method argc
   case callVirtual targets argc => exact step_relabel_callVirtual targets argc
   case tailCall method argc => exact step_relabel_tailCall method argc
-  case newAggregate constructor argc size => exact step_relabel_newAggregate constructor argc size
-  case newObject constructor argc owner bases size =>
-    exact step_relabel_newObject constructor argc owner bases size
+  case newobj constructor => exact step_relabel_newobj constructor
   case intrinsic operation argc => exact step_relabel_intrinsic operation argc
   case memory operation => exact step_relabel_memory operation
   case ldsfld field => exact step_relabel_ldsfld field
@@ -1084,24 +1088,30 @@ theorem step_raise_tailCall (callee argc : Nat) : StepRaise (.tailCall callee ar
 
 #print axioms step_raise_tailCall
 
-theorem step_raise_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
-    StepRaise (.newAggregate callee argc size) := by
+/-- A construction's faults keep their location; both steps read the same link. -/
+theorem step_raise_newobj (constructor : Extraction.MethodRef) :
+    StepRaise (.newobj constructor) := by
   plain_cases
-  link_cases
-  by_cases short : (size = 0 || stack.length < argc) = true
-  · simp only [short, ↓reduceIte] at h; cases h
-  · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
-    raise_lockstep
+  unfold newobjStep constructAggregate constructObject at h ⊢
+  rw [context.link]
+  rcases linked : expected.linkAt pc with _ | link
+  · simp only [linked] at h
+    first | cases h | (simp [unlinkedCall] at h)
+  simp only [linked] at h ⊢
+  cases link
+  case aggregate callee size =>
+    by_cases short : (size = 0 || stack.length < constructor.parameters.length) = true
+    · simp only [short, ↓reduceIte] at h; cases h
+    · simp only [short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+      raise_lockstep
+  case object callee bases size =>
+    by_cases short : stack.length < constructor.parameters.length
+    · simp [short] at h
+    · simp only [short, ↓reduceIte] at h ⊢
+      raise_lockstep
+  all_goals first | cases h | (simp [unlinkedCall] at h)
 
-theorem step_raise_newObject (callee argc : Nat) (owner : Extraction.TypeExpr)
-    (bases : List Extraction.TypeExpr) (size : Nat) :
-    StepRaise (.newObject callee argc owner bases size) := by
-  plain_cases
-  link_cases
-  by_cases short : stack.length < argc
-  · simp [short] at h
-  · simp only [short, ↓reduceIte] at h ⊢
-    raise_lockstep
+#print axioms step_raise_newobj
 
 theorem step_raise_intrinsic (operation : Intrinsic) (argc : Nat) :
     StepRaise (.intrinsic operation argc) := by
@@ -1407,9 +1417,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   case callInstance callee argc => exact step_raise_callInstance callee argc
   case callVirtual targets argc => exact step_raise_callVirtual targets argc
   case tailCall callee argc => exact step_raise_tailCall callee argc
-  case newAggregate callee argc size => exact step_raise_newAggregate callee argc size
-  case newObject callee argc owner bases size =>
-    exact step_raise_newObject callee argc owner bases size
+  case newobj constructor => exact step_raise_newobj constructor
   case intrinsic operation argc => exact step_raise_intrinsic operation argc
   case memory operation =>
     plain_cases

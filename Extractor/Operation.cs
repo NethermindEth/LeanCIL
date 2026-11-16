@@ -295,31 +295,38 @@ internal sealed record Call(CallKind Kind, int Method, int Arguments) : Operatio
     };
 }
 
-internal sealed record NewAggregate(int Method, int Arguments, int Size) : Operation
+/// <summary>What a <c>newobj</c> allocates, as its link states it.</summary>
+internal abstract record Allocation
 {
-    internal override IEnumerable<int> Methods => [Method];
+    /// <summary>A zeroed value-type temporary of the layout's <paramref name="Size"/> bytes.</summary>
+    internal sealed record Aggregate(int Size) : Allocation;
 
-    internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
-
-    internal override string? Link(Func<int, string> calleeName) => $".aggregate {calleeName(Method)} {Size}";
-
-    internal override string Render(Func<int, string> calleeName) =>
-        $".newAggregate {calleeName(Method)} {Arguments} {Size}";
+    /// <summary>A class instance with its base classes (Lean type terms), nearest first, and its field bytes.
+    /// </summary>
+    internal sealed record Instance(ValueList<string> Bases, int Size) : Allocation;
 }
 
-/// <summary>A new instance of the class <paramref name="Type"/> (a Lean type term) with its base classes.</summary>
-internal sealed record NewObject(int Method, int Arguments, string Type, ValueList<string> Bases, int Size)
-    : Operation
+/// <summary>
+/// <c>newobj</c> entering the constructor at method index <paramref name="Method"/> with a fresh
+/// <paramref name="Allocated"/>. <paramref name="Constructor"/> is the typed reference its raw operand names, which the
+/// extraction sets; rendering the instruction before it is set fails.
+/// </summary>
+internal sealed record Newobj(int Method, Allocation Allocated, MethodRef? Constructor) : Operation
 {
     internal override IEnumerable<int> Methods => [Method];
 
     internal override Operation Renumber(Func<int, int> map) => this with { Method = map(Method) };
 
-    internal override string? Link(Func<int, string> calleeName) =>
-        $".object {calleeName(Method)} {LeanText.ClassList(Bases)} {Size}";
+    internal override string? Link(Func<int, string> calleeName) => Allocated switch
+    {
+        Allocation.Aggregate aggregate => $".aggregate {calleeName(Method)} {aggregate.Size}",
+        Allocation.Instance instance =>
+            $".object {calleeName(Method)} {LeanText.ClassList(instance.Bases)} {instance.Size}",
+        _ => throw new InvalidOperationException("Unknown allocation: " + Allocated)
+    };
 
-    internal override string Render(Func<int, string> calleeName) =>
-        $".newObject {calleeName(Method)} {Arguments} ({Type}) {LeanText.ClassList(Bases)} {Size}";
+    internal override string Render(Func<int, string> calleeName) => $".newobj ({(Constructor ??
+        throw new InvalidOperationException("A construction is rendered before its constructor is named.")).ToLean()})";
 }
 
 /// <summary>A virtual call dispatched on the receiver's class to the listed (class, method) targets.</summary>

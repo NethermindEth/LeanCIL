@@ -7,7 +7,8 @@ namespace Tests.AggregateSetup
 open CIL CIL.Safety
 
 def constructor (size : Fin (2^64)) : CIL.Program := [
-  { code := [.newAggregate 1 0 size, .ret], locals := [], returnsValue := true },
+  { code := [.newobj (.arity 0), .ret], locals := [], returnsValue := true,
+    links := [(0, .aggregate 1 size)] },
   { code := [.ret], locals := [], returnsValue := false }]
 
 /-- The existing generic constructor composition API consumes aggregate setup
@@ -15,7 +16,8 @@ def constructor (size : Fin (2^64)) : CIL.Program := [
 theorem composed_constructor (size : Fin (2^64)) (positive : 0 < size.val)
     (memory : CIL.Safety.Memory) (wf : memory.WellFormed) (frame : Frame)
     (child : ∀ temporary updated,
-      step ((constructor size)[0]'(by simp [constructor])) (.newAggregate 1 0 size) 0 [] frame [] memory =
+      step ((constructor size)[0]'(by simp [constructor])) (.newobj (.arity 0)) 0 [] frame []
+        memory =
         .ok (.construct 1 [.reference (.address temporary)] []
           { frame with owned := temporary.allocation :: frame.owned } temporary (.aggregate size) updated) →
       invoke (constructor size) 4 1 [.reference (.address temporary)] updated = .ok (updated, []))
@@ -33,7 +35,7 @@ theorem composed_constructor (size : Fin (2^64)) (positive : 0 < size.val)
       MemoryBelow memory.nextIdentity memory updated := by
   obtain ⟨temporary, updated, stepped, loaded, _, preserved, _⟩ :=
     step_newAggregate (body := ((constructor size)[0]'(by simp [constructor]))) (pc := 0) (callee := 1)
-      size positive rfl [] [] [] frame memory wf rfl
+      (constructor := .arity 0) size positive rfl [] [] [] frame memory wf rfl rfl
   refine ⟨temporary, updated, ?_, preserved⟩
   exact run_construct_of_invoke (body := ((constructor size)[0]'(by simp [constructor]))) rfl rfl stepped
     (child temporary updated stepped) (load_local_aggregate_of_read loaded)

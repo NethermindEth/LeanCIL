@@ -109,8 +109,8 @@ namespace CIL.Safety
 #print axioms guard_ldarga
 @[cil_guard] theorem guard_call (callee argc : Nat) :
     observerCount (.call callee argc) = argc := rfl
-@[cil_guard] theorem guard_newAggregate (callee argc : Nat) (size : Fin (2^64)) :
-    observerCount (.newAggregate callee argc size) = argc := rfl
+@[cil_guard] theorem guard_newobj (constructor : CIL.Extraction.MethodRef) :
+    observerCount (.newobj constructor) = constructor.parameters.length := rfl
 @[cil_guard] theorem guard_memory (op : CIL.MemoryOp) :
     observerCount (.memory op) = op.argumentCount := rfl
 @[cil_guard] theorem guard_throw (exception : ExceptionType) :

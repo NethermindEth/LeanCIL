@@ -145,8 +145,14 @@ forgedViews.Check();
 // The entry's call proof simplifies with the constructor's closed body; without it the proof
 // falls back to a whole-method kernel decision.
 var constructed = File.ReadAllLines(Path.Combine(root, "FreshObject", "Extracted.lean"));
-var construction = constructed.Single(line => line.StartsWith("  .newObject ", StringComparison.Ordinal));
-var constructor = construction.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1];
+// The entry's one class-construction link names the constructor its `newobj` enters.
+const string ObjectLink = ": Link := .object ";
+var entryLink = constructed.SingleOrDefault(line =>
+    line.StartsWith("@[cil_code] def method0Link", StringComparison.Ordinal) &&
+    line.Contains(ObjectLink, StringComparison.Ordinal)) ??
+    throw new InvalidOperationException("The constructing method links no class construction");
+var constructorStart = entryLink.IndexOf(ObjectLink, StringComparison.Ordinal) + ObjectLink.Length;
+var constructor = entryLink[constructorStart..entryLink.IndexOf(' ', constructorStart)];
 var entryCalls = constructed.Single(line =>
     line.StartsWith("theorem method0_calls_validated ", StringComparison.Ordinal));
 if (!entryCalls.Contains("by cil_managed_calls [", StringComparison.Ordinal) ||

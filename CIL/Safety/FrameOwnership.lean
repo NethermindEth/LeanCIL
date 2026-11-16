@@ -5,7 +5,7 @@ import CIL.Safety.AllocationExtension
 # Frame ownership
 
 A frame owns only allocations created after it was entered, during setup or by temporaries
-that `newAggregate` allocates, so leaving it expires nothing the caller
+that a value-type `newobj` allocates, so leaving it expires nothing the caller
 already had. The headline results are `frame_entry_exit_preserves_caller` and
 `frame_entry_exit_preserves_reference`: entering and then leaving a frame keeps every older
 allocation, and every reference the caller could form, unchanged.

@@ -960,7 +960,7 @@ void MethodDecodeCosts()
                 locals := List.replicate 4 uint32, initLocals := true,
                 maxStack := 8, genericParameters := [], code := raw }
             #kernel_cost "decoded method {{instructions}}"
-              (Method.ofRaw? .scalar {} source []).any (fun method =>
+              (Method.ofRaw? .scalar {} [] source []).any (fun method =>
                 method.code.length == {{instructions}} &&
                   (method.code.zip code).all (fun pair => pair.1.sameValue pair.2) &&
                   method.locals == List.replicate 4 (.i32 0) && method.parameterHomes.isEmpty &&
@@ -1028,7 +1028,7 @@ void DecodedDefinitionCosts()
                 maxStack := 8, genericParameters := [],
                 code := (List.range {{instructions / SegmentLength}}).flatMap segment }
             #command_cost "decoded definition {{instructions}}"
-              cil_decoded_method method := Method.ofRaw? profile environment source []
+              cil_decoded_method method := Method.ofRaw? profile environment [] source []
             end DecodedDefinitionCost
             """ + "\n");
         var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());

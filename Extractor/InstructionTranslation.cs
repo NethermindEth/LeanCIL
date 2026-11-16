@@ -177,8 +177,8 @@ internal static class InstructionTranslation
                 if (i.OpCode.Code == Code.Newobj && ObjectTypes.Candidate(resolved.DeclaringType))
                     return ObjectTypes.Construction(resolved, index);
                 if (i.OpCode.Code == Code.Newobj)
-                    return new NewAggregate(index, resolved.Parameters.Count,
-                        Layout(MethodSpecialization.DeclaringType(resolved)));
+                    return new Newobj(index, new Allocation.Aggregate(
+                        Layout(MethodSpecialization.DeclaringType(resolved))), null);
                 var kind = TailCalls.IsCall(i) ? CallKind.Tail : receiverCall ? CallKind.Instance : CallKind.Static;
                 return new Call(kind, index, resolved.Parameters.Count + (resolved.HasThis ? 1 : 0));
             }

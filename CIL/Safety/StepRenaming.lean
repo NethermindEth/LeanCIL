@@ -49,9 +49,9 @@ theorem stepTransport : StepTransport := by
     case newarr.refl element =>
       exact memories.stepNewarr frames sourceFormed targetFormed staticBounds
         sourceBody targetBody metadata element pc arguments stack bounds observable
-    case newObject.refl callee argc owner bases size =>
-      exact memories.stepNewObject sourceFormed targetFormed staticBounds sourceBody targetBody
-        callee argc owner bases size pc (metadata.linkAt pc) arguments stack bounds observable
+    case newobj.refl constructor =>
+      exact memories.stepNewobj frames sourceFormed targetFormed staticBounds sourceBody
+        targetBody constructor pc (metadata.linkAt pc) arguments stack bounds observable
     case ldsfld.refl field =>
       exact ⟨mapping, .refl mapping, memories.stepLdsfld frames staticBounds sourceBody
         targetBody metadata field pc arguments stack⟩
@@ -86,8 +86,6 @@ theorem stepTransport : StepTransport := by
         bounds observable
     | exact memories.stepLocalloc frames sourceFormed targetFormed staticBounds
         sourceBody targetBody metadata.declared pc arguments stack observable
-    | exact memories.stepNewAggregate frames sourceFormed targetFormed staticBounds
-        sourceBody targetBody _ _ pc _ (metadata.linkAt pc) arguments stack bounds
     | exact ⟨mapping, .refl mapping,
         frames.stepLdloc memories sourceBody targetBody _ pc arguments stack⟩
     | exact ⟨mapping, .refl mapping,

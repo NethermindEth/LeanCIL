@@ -65,7 +65,7 @@ foreach (var name in new[] { "Add", "Minimum", "Calls", "Mutate", "Store" })
         var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
         if (name is "Calls" or "Mutate" && !extracted.Contains(".call "))
             throw new InvalidOperationException($"{name} no longer exercises compiled method calls");
-        if (name == "Mutate" && !extracted.Contains(".newAggregate "))
+        if (name == "Mutate" && !extracted.Contains(": Link := .aggregate "))
             throw new InvalidOperationException("Mutate no longer exercises struct construction");
         cases += claims.Count;
         Console.WriteLine($"PASS F# {name}: {claims.Count} runtime comparisons");

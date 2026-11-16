@@ -774,11 +774,13 @@ The lemmas of `CIL.Safety.StepFlow` give the possible successors of a successful
 unfolding it.
 `step_next_target` proves that an action that stays in the frame resumes at `pc + 1` of a
 continuing instruction or at one of `op.targets`. Given a successful action and its selected
-callee, `step_callee` proves that the body links the step's pc and that the callee is among
-`body.calleesAt pc`, the callees of that link: a singleton for a direct call or construction, the
-dispatch table's bodies for a virtual call, or all authenticated targets for an indirect call. Tail transfers enter a callee
+callee, `step_callee` proves that the step's instruction reads its link (`Instruction.readsLink`) and
+that the callee is among `body.calleesAt pc`, the callees of the link at the step's pc: a singleton
+for a direct call or construction, the dispatch table's bodies for a virtual call, or all
+authenticated targets for an indirect call. Tail transfers enter a callee
 without continuing in the current frame. `step_call_action` and
-`step_newAggregate_action` separate a call from a construction. The module imports only the step
+`step_newAggregate_action`, which takes the `.aggregate` link of a `newobj`, separate a call from a
+construction. The module imports only the step
 simulation, so a consumer reasoning about reachable pcs does not compile the import and linking
 layers.
 

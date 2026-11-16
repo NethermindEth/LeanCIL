@@ -260,19 +260,22 @@ derived instance and a field of an unrelated class on none, and a null receiver 
 `NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct
 `nullDereference` fault.
 
-`newobj` of an admitted class (`.newObject`) checks the constructor's arguments, then allocates
-a fresh live instance (`allocateObject`): an allocation of kind `.object` with the class and its
+`newobj` of an admitted class (`.newobj` of the constructor's `MethodRef`, under an `.object` link
+in the method's table) checks the constructor's arguments, then allocates a fresh live instance
+(`allocateObject`): an allocation of kind `.object` with the constructor's class and the link's
 bases as its runtime type, one zeroed 8-byte slot per instance field, inherited fields included,
 and authority over all of it. It charges the
 instance's size to `Memory.heapBudget`, the bytes the caller grants for objects, and fails with
 `allocationFailure` when the budget is short; that fault is a model resource fault and is not a
 CLR exception, so no proof of an expected exception can rest on it. The budget never grows back:
 it is a conservative bound that ignores collection. The constructor then runs with the
-instance as its receiver, and the instance is pushed once it returns. Lean rechecks that the
-call site's declaring class is the instance's class, that its bases are those the constructor's
-raw method records (`RawMethod.objectBases`), that the constructor takes an object receiver, and
-that the size is one slot per instance field of the constructor's class, inherited fields
-included. `newobj` of an abstract class is rejected by name, as the runtime rejects it. A derived
+instance as its receiver, and the instance is pushed once it returns. Lean rechecks
+(`validateConstructionWith`) that the raw instruction is `newobj` of a managed site naming exactly
+the instruction's constructor, that the linked method is the one the site names, that a class
+constructor takes an object receiver and is linked `.object` while a value-type constructor is
+linked `.aggregate`, that the link's bases are those the constructor's raw method records
+(`RawMethod.objectBases`), and that the size is one slot per instance field of the constructor's
+class, inherited fields included. `newobj` of an abstract class is rejected by name, as the runtime rejects it. A derived
 constructor's chained call to its base's constructor is an ordinary instance `call` with the new
 instance as receiver ([DerivedObject](../Examples/Proofs/DerivedObject.lean)).
 Inside an admitted constructor, `call System.Object::.ctor()` with the exact `System.Runtime`
@@ -295,9 +298,9 @@ instances of two unrelated cataloged classes.
 
 A caller states the premise once, for its entry memory, and execution keeps it
 ([execution classes](../CIL/Safety/ExecutionClasses.lean)). Only `newobj` and `newarr` of a class
-create instances: `newobj` of the class and bases it records, `newarr` an array of its element
-type. Frame homes, statics, value arrays and expiry create none. `ObjectSitesConsistent catalog
-program` checks every such site of the program text against the catalog, once per extraction by
+create instances: `newobj` of its constructor's class with the bases its `.object` link states,
+`newarr` an array of its element type. Frame homes, statics, value arrays and expiry create none. `ObjectSitesConsistent catalog
+program` checks every such site of the program text and link tables against the catalog, once per extraction by
 `decide`. Given it, `step_preserves_classes`,
 `run_preserves_classes` and `invoke_preserves_classes` keep the premise through every step,
 nested call and frame exit. Formed calls and constructions hand their continuation the same

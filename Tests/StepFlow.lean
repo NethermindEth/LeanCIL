@@ -42,11 +42,12 @@ example {r : Reference} (h : step body (.call 2 1) pc args frame stack m = .ok (
   obtain ⟨_, _, _, _, _, contradiction⟩ := step_call_action h
   cases contradiction
 
-example {argc size}
-    (h : step body (.newAggregate 2 argc size) pc args frame stack m =
+example {constructor : CIL.Extraction.MethodRef} {size}
+    (linked : body.linkAt pc = some (.aggregate 2 size))
+    (h : step body (.newobj constructor) pc args frame stack m =
       .ok (.call 2 args stack m')) :
     False := by
-  obtain ⟨_, _, _, _, _, _, _, _, _, contradiction⟩ := step_newAggregate_action h
+  obtain ⟨_, _, _, _, _, _, contradiction⟩ := step_newAggregate_action linked h
   cases contradiction
 
 /-- A call whose operand names method 1 at a pc whose link names method 2. -/
@@ -69,13 +70,20 @@ theorem unlinked_tail_call :
 /-- A construction the table gives no link faults before its size check, which size 0 would fail
     with `invalidState`. -/
 theorem unlinked_aggregate :
-    step { code := [.newAggregate 1 0 0], locals := [], returnsValue := true, links := [] }
-      (.newAggregate 1 0 0) 0 args frame [] m = .error unlinkedCall := rfl
+    step { code := [.newobj (.arity 0)], locals := [], returnsValue := true, links := [] }
+      (.newobj (.arity 0)) 0 args frame [] m = .error unlinkedCall := rfl
+
+/-- A construction under a link of a call kind faults; only a constructor link allocates. -/
+theorem miskinded_construction :
+    step { code := [.newobj (.arity 0)], locals := [], returnsValue := true,
+           links := [(0, .direct 1)] }
+      (.newobj (.arity 0)) 0 args frame [] m = .error unlinkedCall := rfl
 
 #print axioms relinked_call
 #print axioms unlinked_call
 #print axioms unlinked_tail_call
 #print axioms unlinked_aggregate
+#print axioms miskinded_construction
 #print axioms step_next_target
 #print axioms step_call_action
 #print axioms step_newAggregate_action
