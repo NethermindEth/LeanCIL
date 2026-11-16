@@ -293,10 +293,14 @@ partial class Program : IDisposable
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return false; }
     }
 
+    /// <summary>The success cache keys this process has published, so its own entries are told from others'.</summary>
+    internal readonly List<string> publishedSuccess = [];
+
     // The cache only saves work: a full disk warns instead of failing a verified result.
     void PublishSuccess(string key, string source, string? family = null)
     {
         if (!UseSuccessCache) return;
+        lock (publishedSuccess) publishedSuccess.Add(key);
         try { PublishCertified(key, source, family); }
         catch (IOException error)
         {
