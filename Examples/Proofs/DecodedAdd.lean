@@ -18,7 +18,7 @@ namespace ExampleProof
     2^64, in the specified empty initial memory. -/
 theorem correctness_decoded : ∃ program : CIL.Program,
     Extraction.decodedProgram? Extracted.profile Extracted.environment
-      Extracted.methodEvidence (fun _ => []) = some program ∧ ∀ x y : W64, ∃ result : W64,
+      Extracted.methodEvidence = some program ∧ ∀ x y : W64, ∃ result : W64,
       (CIL.Safety.invoke program 4 0 [.scalar (.i64 x), .scalar (.i64 y)]
         Safety.Memory.empty).map Prod.snd = .ok [.scalar (.i64 result)] ∧
       result.toNat = (x.toNat + y.toNat) % 2^64 := by

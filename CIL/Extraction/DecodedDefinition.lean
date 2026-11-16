@@ -186,6 +186,26 @@ def methodTerm (passed : Array Expr) (method : Method) : MetaM Expr := do
     | none, none => throwError "cil_decoded_method: no term is written for the field {field}"
   return mkAppN (mkConst ``CIL.Method.mk) fields
 
+/-- The term `written` that `literal` gives for the initial value `value` of a local, with a
+    zero-filled aggregate written as `List.replicate size 0`: the form `LocalKind.initialValue`
+    and an extraction give, which a caller's hypothesis about making the local names. -/
+def initialLocal (value : Value) (written : Expr) : MetaM Expr := do
+  let .aggregate bytes := value | return written
+  unless bytes.all (· == 0) do return written
+  let bytesType := (← inferType (mkConst ``Value.aggregate)).bindingDomain!
+  let byteType := bytesType.appArg!
+  let zeros := mkApp3 (mkConst ``List.replicate [.zero]) byteType
+    (← mkNumeral (mkConst ``Nat) bytes.length) (← mkNumeral byteType 0)
+  return mkApp (mkConst ``Value.aggregate) zeros
+
+/-- The literal list `written` of the initial values `values`, each written by `initialLocal`. -/
+def initialLocals : List Value → Expr → MetaM Expr
+  | value :: values, written => do
+    let some (type, head, tail) := written.app3? ``List.cons
+      | throwError "cil_decoded_method: the locals {written} are not a literal list"
+    return mkApp3 written.getAppFn type (← initialLocal value head) (← initialLocals values tail)
+  | [], written => return written
+
 /-- The fields an extraction states as `@[cil_code]` facts; stepping, `cil_resolution_facts`
     and the contract tactics read them by name, as `{method}_{field}`. -/
 def factFields : List Name :=
@@ -213,9 +233,10 @@ syntax decodedFields := "[" ident,* "]"
 
 /-- `cil_decoded_method name [field, ...] := decoder` defines `name` as the method the closed
     `Option CIL.Method` `decoder` evaluates to, with each field operand equal to a listed
-    `FieldRef` constant written as that constant, proves `name_decoded : decoder = some name` and
-    the `@[cil_code]` facts `name_{field}` for each of `factFields`. Fails when the decoder
-    gives `none` or does not reduce, or when a listed constant names no field operand. -/
+    `FieldRef` constant written as that constant and each zero-initialized struct local as
+    `List.replicate size 0`, proves `name_decoded : decoder = some name` and the `@[cil_code]`
+    facts `name_{field}` for each of `factFields`. Fails when the decoder gives `none` or does
+    not reduce, or when a listed constant names no field operand. -/
 syntax (name := decodedMethod)
   "cil_decoded_method " ident (decodedFields)? " := " term : command
 
@@ -252,7 +273,13 @@ elab_rules : command
       | throwError "cil_decoded_method: the decoder gives no method{indentExpr decoder}"
     let named (term : Expr) : Option Expr :=
       if passed.contains term then some term else fieldConstants.get? term
-    let value ← literal named methodType (← methodTerm passed method)
+    let written ← literal named methodType (← methodTerm passed method)
+    let fields := getStructureFields (← getEnv) ``CIL.Method
+    let some localsPosition := fields.idxOf? `locals
+      | throwError "cil_decoded_method: CIL.Method has no field locals"
+    let arguments := written.getAppArgs
+    let value := mkAppN written.getAppFn <| arguments.set! localsPosition
+      (← initialLocals method.locals arguments[localsPosition]!)
     let used := value.getUsedConstants
     for fieldName in fieldNames do
       unless used.contains fieldName do
@@ -265,7 +292,6 @@ elab_rules : command
     let method := mkConst name
     proveByReduction (name.appendAfter "_decoded") s!"`{name}` is the decoded method."
       (← mkEq decoder (mkApp2 (mkConst ``Option.some [.zero]) methodType method))
-    let fields := getStructureFields (← getEnv) ``CIL.Method
     for field in factFields do
       let some position := fields.idxOf? field
         | throwError "cil_decoded_method: CIL.Method has no field {field}"
