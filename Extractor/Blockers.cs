@@ -73,14 +73,19 @@ internal static class Blockers
         int? ReachableMethods, List<Finding> Findings)
     {
         internal string[] TypeArguments { get; init; } = [];
-        /// <summary>The extracted methods and why each is a literal, or null when its decoder defines it.</summary>
-        internal Program.MethodDefinitions? Definitions { get; init; }
+        /// <summary>The full names of the extracted methods defined from their decoder.</summary>
+        internal string[] DecodedMethods { get; init; } = [];
+        /// <summary>The full names of the extracted methods written as literals, with why.</summary>
+        internal LiteralMethod[] LiteralMethods { get; init; } = [];
     }
 
+    // Names, not definitions: a definition holds its extraction's whole module alive across every later entry.
+    sealed record LiteralMethod(string Method, GenericEvidence.DecodeRefusal Refusal);
+
     // The report's text for a refusal; the family is null at an unreachable pc.
-    static object Refusal(MethodDefinition method, GenericEvidence.DecodeRefusal refusal) => new
+    static object Refusal(string method, GenericEvidence.DecodeRefusal refusal) => new
     {
-        method = method.FullName, ilOffset = refusal.Offset, opcode = refusal.Opcode.Name,
+        method, ilOffset = refusal.Offset, opcode = refusal.Opcode.Name,
         refusal = JsonNamingPolicy.CamelCase.ConvertName(refusal.Kind.ToString()),
         family = refusal.Family is { } family ? JsonNamingPolicy.CamelCase.ConvertName(family.ToString()) : null
     };
@@ -235,15 +240,22 @@ internal static class Blockers
                     rewrites[index].Instruction.Operand = rewrites[index].Operand;
             }
             // `admitted` means exactly that `extract` succeeds, so an entry without blockers is extracted.
-            Program.MethodDefinitions? definitions = null;
+            string[] decoded = [];
+            LiteralMethod[] literals = [];
+            void Record(Program.MethodDefinitions extracted)
+            {
+                var named = extracted.Methods.Zip(extracted.Refusals).ToArray();
+                decoded = [.. named.Where(pair => pair.Second is null).Select(pair => pair.First.FullName)];
+                literals = [.. named.Where(pair => pair.Second is not null)
+                    .Select(pair => new LiteralMethod(pair.First.FullName, pair.Second!))];
+            }
             if (blocked.Count == 0 && Extract(batch, assemblyPath, signature, profileName, manifestDirectory,
-                    expectedAssembly, typeArguments, initializedTypes, references, imports,
-                    extracted => definitions = extracted) is { } rejected)
+                    expectedAssembly, typeArguments, initializedTypes, references, imports, Record) is { } rejected)
                 blocked.Add(new(methods[0], null, rejected, [methods[0]]));
             if (blocked.Count == 0)
             {
                 outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, [])
-                    { TypeArguments = typeArguments, Definitions = definitions });
+                    { TypeArguments = typeArguments, DecodedMethods = decoded, LiteralMethods = literals });
                 continue;
             }
             var entryFindings = new List<Finding>();
@@ -297,13 +309,8 @@ internal static class Blockers
                 signature = o.Signature, typeArguments = o.TypeArguments, profile = o.Profile, status = o.Status,
                 method = o.Method, reason = o.Reason,
                 reachableMethods = o.ReachableMethods,
-                decodedMethods = o.Definitions is { } defined
-                    ? defined.Methods.Where((_, index) => defined.Refusals[index] is null).Select(m => m.FullName)
-                    : [],
-                literalMethods = o.Definitions is { } literal
-                    ? literal.Methods.Zip(literal.Refusals).Where(pair => pair.Second is not null)
-                        .Select(pair => Refusal(pair.First, pair.Second!))
-                    : [],
+                decodedMethods = o.DecodedMethods,
+                literalMethods = o.LiteralMethods.Select(literal => Refusal(literal.Method, literal.Refusal)),
                 blockers = o.Findings.Select(f => f.Id)
             }),
             blockers = ordered.Select(f => new
