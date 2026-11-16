@@ -3,7 +3,7 @@ import CIL.InstructionEquations
 import CIL.Extraction.Generics
 
 /-!
-# Return, argument and array element metadata facts
+# Return, argument, static site and array element metadata facts
 
 Generated facts and value stepping share a proof-producing chooser for declared narrowing.
 Primitive and non-candidate heads use storage lemmas, without evaluating code or layout tables.
