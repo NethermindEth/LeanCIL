@@ -277,10 +277,10 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
     -- `split` states the exclusions of the arms that ignore the stack first.
     all_goals try (
       rename_i loadsField addressesField storesField addressHome localAllocation loadsStatic
-        addressesStatic tokensStatic storesStatic unadmitted offsetBeforeTable tableBeforeOffset addOvf
-        addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual
-        objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue
-        castClass isInst storeHome allocatedArray
+        addressesStatic tokensStatic storesStatic unadmitted offsetBeforeTable tableBeforeOffset
+        addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn
+        objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse
+        objectBranchTrue castClass isInst storeHome allocatedArray
       guard_hyp loadsField : ∀ (field : CIL.Extraction.FieldRef), operation = .ldfld field → False
       guard_hyp storesField : ∀ (field : CIL.Extraction.FieldRef), operation = .stfld field → False
       guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
@@ -307,8 +307,8 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
         objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray addressHome
-        localAllocation loadsField addressesField storesField loadsStatic addressesStatic tokensStatic
-        storesStatic
+        localAllocation loadsField addressesField storesField loadsStatic addressesStatic
+        tokensStatic storesStatic
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,
