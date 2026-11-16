@@ -47,9 +47,9 @@ sentences name the wrong implementations that each unchanged proof rejects.
   ([decoded summaries](PROOFS-CONTRACTS.md#bind-a-contract-to-a-decoded-method)).
 - `CountCallsSummary`: `Loops.CountCalls` returns its input for every `uint`, proved once by
   stepping `Decrement` at the call of each iteration and once from a `DecodedSummary` of
-  `Decrement` that `cil_loop_call` applies at that call. `decrement_named` shows that every
-  summary of the index the call enters is bound to `Decrement`'s token, so one bound to
-  `CountCalls`' own token is refuted (`caller_token_refused`).
+  `Decrement` that `cil_loop_call` applies at that call. The file also proves that every summary
+  of the index the call enters is bound to the token of `Decrement`, and refutes one bound to
+  the token of `CountCalls`.
 - `IntegerOperations.Negate32` / `Negate64`: checked-execution proofs that negation returns the
   modular additive inverse for every input, including the signed minimum.
 - `NarrowIntegers`: signed/unsigned casts, character values, calls and an eight-byte struct
