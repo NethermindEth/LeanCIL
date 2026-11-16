@@ -285,8 +285,9 @@ extraction, a template or a body that calls or constructs writes, the command ch
 that the keys ascend (`method{n}_links_ascend` in an extraction) and proves each fact from the
 table's entry
 (`Extraction.linkAt_of_position`), read through named suffixes of the table as the code is. At
-a `call` the table does not key, the command states `body.linkAt pc = none` by reading the table
-once, which costs the table's length per such call. The
+a `call` the table does not key, the command states `body.linkAt pc = none` from the suffix of the
+block where that pc would sit (`Extraction.linkAt_eq_readHead_suffix`), after the entry before
+that block, whose key is below the pc, so the kernel walks at most two blocks of the table. The
 `cil_code` simp set unfolds an extracted method's named link `methodNLinkPC` to its constructor.
 For a pc without a call the table is read by its listed keys, which costs the number of calls and
 never gets stuck (`Method.linkAt_of_unlisted`). A template whose table a feature flag decides

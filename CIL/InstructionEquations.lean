@@ -211,7 +211,8 @@ def explicitLinks (method : Expr) : MetaM (Option (Array Expr × Array (Nat × E
 /-- Declares `body_links_ascend`, the suffixes `body_linkSuffix{start}` of the table and, at each
     entry, `body_link{pc} : ∀ xs, (body xs).linkAt pc = some link` from the entry's position. At
     each `call` of `ops` the table gives no key it declares `body_link{pc} : ∀ xs,
-    (body xs).linkAt pc = none`, which the kernel checks by reading the table once. -/
+    (body xs).linkAt pc = none`, read from the suffix of the block where `pc` would sit, so the
+    kernel walks at most one block of the table. -/
 def declareExplicitLinks (body : Body) (simpSet : SimpExtension) (method : Expr)
     (ops : Array Expr) (entries : Array Expr) (keyed : Array (Nat × Expr)) :
     TermElabM Unit := do
@@ -239,9 +240,27 @@ def declareExplicitLinks (body : Body) (simpSet : SimpExtension) (method : Expr)
     unless (← whnfR ops[pc]).isAppOf ``CIL.Instruction.call do continue
     withCurrHeartbeats do
       let read := mkApp2 (mkConst ``CIL.Method.linkAt) method (mkNatLit pc)
+      let absent := mkApp (mkConst ``Option.none [.zero]) (mkConst ``CIL.Link)
+      -- The entries before `start` all have keys below `pc`, so the walk begins at `start`.
+      let position := (keyed.filter (·.1 < pc)).size
+      -- A pc past the last key of a full last block starts that block, as no suffix follows it.
+      let block := position - position % suffixBlock
+      let start := if block < entries.size then block else block - suffixBlock
+      let ascending := body.constant "_links_ascend"
+      let readFrom ← if start = 0 then
+          mkAppM ``CIL.Extraction.linkAt_eq_readHead #[ascending, mkNatLit pc]
+        else
+          let previous := entries[start - 1]!
+          let below ← mkDecideProof (← mkAppM ``LT.lt
+            #[← mkAppM ``Prod.fst #[previous], mkNatLit pc])
+          mkAppM ``CIL.Extraction.linkAt_eq_readHead_suffix #[ascending,
+            body.constant s!"_linkSuffix{start}_placed",
+            ← foundAt body "_linkSuffix" entryType links entries (start - 1), below]
+      let walked := (← inferType readFrom).eq?.map (·.2.2) |>.getD absent
+      let proof ← mkEqTrans readFrom
+        (← mkExpectedTypeHint (← mkEqRefl absent) (← mkEq walked absent))
       body.prove s!"_link{pc}" s!"The call at pc {pc} of `{body.name}` states no link."
-        (← mkEq read (mkApp (mkConst ``Option.none [.zero]) (mkConst ``CIL.Link)))
-        (← mkEqRefl read)
+        (← mkEq read absent) proof
       addSimpTheorem simpSet (body.name.appendAfter s!"_link{pc}") (post := false)
         (inv := false) .global (eval_prio default)
 
