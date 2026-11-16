@@ -12,7 +12,8 @@ declared as a narrow signed integer; a field whose index or held type does not m
 declaration is unsupported; a class field resolves to the model slot of its index, a struct array
 element taking its size from the layout; and a method, defined or known by a hypothesis on its
 environment, reads the shared facts through the `cil_code` simprocs. Stepping `ldflda` of a class
-field and `ldfld` of a resolved value-type field gives the faults the step states for them.
+field and `ldfld` of a resolved value-type field gives the faults the step states for them, and
+a field operand without a fact steps to the same literal shape a fact states.
 -/
 
 namespace Tests.FieldShape
@@ -241,5 +242,26 @@ theorem value_field_load_faults (frame : Safety.Frame) (memory : Safety.Memory)
   simp only [cil_step, cil_code]
   rfl
 #print axioms value_field_load_faults
+
+/-- `Node.lanes` written inline under another name, which no shape fact states. -/
+def inlineLanes : FieldRef :=
+  { owner := node, index := 1, name := name!"inline",
+    type := .array (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
+      (.atom runtimeScope "System.UInt64")) }
+
+-- A closed body steps a field without a fact by evaluating its shape to the literal a fact would
+-- state, so the stepped goal spells the vector element as a string literal.
+theorem inline_lanes_load (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    ∃ outcome, Safety.step body (.ldfld inlineLanes) 0 [] frame [.object receiver] memory =
+      outcome := by
+  simp only [cil_step]
+  guard_target =ₛ ∃ outcome, (do
+      let address ← Safety.objectFieldAddress memory receiver node 8
+      let value ← Safety.loadArraySlot memory address
+        (.vector "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" 16)
+      pure (Safety.FrameAction.next (0 + 1) [value] frame memory)) = outcome
+  exact ⟨_, rfl⟩
+#print axioms inline_lanes_load
 
 end Tests.FieldShape
