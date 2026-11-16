@@ -12,15 +12,12 @@ internal static class ReferenceArrays
         type is ArrayType { IsVector: true } array && Element(array.ElementType);
 
     /// <summary>
-    /// An admitted class, or a non-generic class outside the model other than <c>System.Object</c>, such as
-    /// <c>string</c>. An array of such a static type holds, at run time, elements of a class derived from it, so
-    /// the stored object's base classes decide covariance exactly; an interface or <c>object</c> element would
-    /// also admit interface arrays, whose check the model cannot decide.
+    /// An admitted class or <c>string</c>. An array of such a static type holds, at run time, elements of a class
+    /// derived from it, so the stored object's base classes decide covariance exactly. Lean binds an element named
+    /// as an object only to a class of a pinned assembly or <c>string</c>: an interface, <c>object</c> or other
+    /// class outside the pins may type an interface array, whose check the model cannot decide.
     /// </summary>
-    internal static bool Element(TypeReference element) => ObjectTypes.Is(element) ||
-        element is not (TypeSpecification or GenericParameter) && !element.IsValueType &&
-        element.FullName != "System.Object" && ObjectTypes.Opaque(element) &&
-        element.Resolve() is { IsInterface: false, HasGenericParameters: false, IsValueType: false };
+    internal static bool Element(TypeReference element) => ObjectTypes.Is(element) || ObjectTypes.IsString(element);
 
     /// <summary>
     /// The checked operation for an array instruction over an array of class references, or null when the

@@ -752,6 +752,13 @@ def classLike : TypeKind → Bool
   | .classType | .interfaceType | .external (some false) | .external none => true
   | _ => false
 
+/-- A named type an extractor `object` names outside a class field: a class of a carried slice,
+    whose instances record their lineage, or `System.String` of the runtime assembly. An
+    interface or external class records no lineage a type test or array store could decide. -/
+def objectNamed (named : NamedType) : Bool :=
+  named.pinned && named.kind == .classType ||
+    named.scope == runtimeScopeBytes && named.name == systemStringName
+
 /-- A value type, or an external type that may be one. -/
 def valueLike : TypeKind → Bool
   | .valueType | .external (some true) | .external none => true
@@ -796,7 +803,7 @@ def typeAdmits (frame : Frame) : Nat → ResolvedType → TypeExpr → Bool
       named.scope == bytesOf scope && named.name == bytesOf name && !named.isEnum &&
         (valueLike named.kind || !(named.scope == runtimeScopeBytes && valueAtomName named.name))
     | .named named, .object scope name =>
-      named.scope == bytesOf scope && named.name == bytesOf name && classLike named.kind
+      named.scope == bytesOf scope && named.name == bytesOf name && objectNamed named
     | .named named, .aggregate identity _ =>
       bytesOf identity == named.scope ++ [58, 58] ++ named.name && valueLike named.kind
     | .named named, .enum identity underlying =>
@@ -864,5 +871,15 @@ end
 /-- Whether the resolved type is named by the extractor's type, with the usual nesting bound. -/
 def Frame.admits (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : Bool :=
   typeAdmits frame (resolveFuel + 2) type expr
+
+/-- Whether the extractor's type names the type a class instance field holds: as `admits` does,
+    or as an object for any class or interface, since the slot keeps a reference never read
+    through. -/
+def Frame.admitsHeld (frame : Frame) (type : ResolvedType) (expr : TypeExpr) : Bool :=
+  frame.admits type expr ||
+    match type, expr with
+    | .named named, .object scope name =>
+      named.scope == bytesOf scope && named.name == bytesOf name && classLike named.kind
+    | _, _ => false
 
 end CIL.Extraction

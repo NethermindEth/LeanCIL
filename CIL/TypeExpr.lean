@@ -56,9 +56,9 @@ inductive TypeExpr where
   | signatureParameter (head tail : TypeExpr)
   | constructor (scope name : String)
   | apply (constructor argument : TypeExpr)
-  /-- A class on the checked heap, by its exact scope and name: an admitted class, or, as the
-      type a class field holds, a class outside the model whose references are never read
-      through. -/
+  /-- A class on the checked heap, by its exact scope and name: a class of a pinned assembly or
+      `System.String`, or, as the type a class instance field holds, any class or interface,
+      whose references the field never reads through. -/
   | object (scope name : String)
   deriving DecidableEq, Repr
 
