@@ -22,10 +22,18 @@ partial class Program
         foreach (var module in modules)
             if (!Regex.IsMatch(module, @"\ATests\.[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\z"))
                 throw new ArgumentException("Expected a test fixture module: " + module);
-        var dependencies = modules.ToDictionary(module => module, module => Regex.Matches(
-                File.ReadAllText(At(module.Replace('.', '/') + ".lean")), @"(?m)^import[ \t]+(Tests\.[A-Za-z0-9_.]+)")
-            .Select(match => match.Groups[1].Value).ToArray(), StringComparer.Ordinal);
-        var pending = modules.ToHashSet(StringComparer.Ordinal);
+        // A fixture's imports of other test modules are compiled and recorded with it, so no list has to name them.
+        var dependencies = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var unread = new Stack<string>(modules);
+        while (unread.TryPop(out var module))
+        {
+            if (dependencies.ContainsKey(module)) continue;
+            var text = File.ReadAllText(At(module.Replace('.', '/') + ".lean"));
+            dependencies[module] = [.. Regex.Matches(text, @"(?m)^import[ \t]+(Tests\.[A-Za-z0-9_.]+)")
+                .Select(match => match.Groups[1].Value)];
+            foreach (var dependency in dependencies[module]) unread.Push(dependency);
+        }
+        var pending = dependencies.Keys.ToHashSet(StringComparer.Ordinal);
         while (pending.Count != 0)
         {
             var ready = pending.Where(module => dependencies[module].All(dependency => !pending.Contains(dependency)))
