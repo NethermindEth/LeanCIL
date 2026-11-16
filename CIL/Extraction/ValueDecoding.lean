@@ -12,8 +12,8 @@ accepts an emitted instruction exactly when it is that decoded instruction, and
 `Instruction.valueOpcode` is the set of opcodes `ofRaw?` decodes for some operand.
 Instantiation changes a decoded instruction only in the type a type test names or through a field
 operand (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original
-with each type test at the instantiated type, except where a field access names the instantiated
-field. `Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw
+with each type test at the instantiated type, and each class field access at the same owner with
+its held type instantiated (`Instruction.ofRaw?_substitute_field`). `Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw
 opcode, exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
 -/
 
@@ -468,6 +468,39 @@ theorem Instruction.ofRaw?_substitute {raw : RawInstruction} {operand : RawOpera
         | rfl)
 
 #print axioms Instruction.ofRaw?_substitute
+
+/-- Instantiation keeps a class field operand's owner, an object type that no argument
+    replaces, and substitutes its held type; the instantiated instruction decodes to the class
+    field instruction of the same opcode over the substituted reference. -/
+theorem Instruction.ofRaw?_substitute_field {raw : RawInstruction} {operand : RawOperand}
+    {arguments : List TypeExpr} {layouts : List RawLayout} {arity : Nat}
+    {scope name : String} {index : Nat} {held : TypeExpr} {fieldName : MetadataName}
+    (substituted : substituteOperand arguments layouts arity raw.operand = some operand)
+    (named : raw.operand = .field (.object scope name) index held fieldName false) :
+    ∃ closed, substituteStorageType layouts arguments held = some closed ∧
+      operand = .field (.object scope name) index closed fieldName false ∧
+      Instruction.ofRaw? { raw with operand } =
+        Instruction.classField? raw.opcode
+          { owner := .object scope name, index, type := closed, name := fieldName } := by
+  obtain ⟨offset, opcode, original⟩ := raw
+  dsimp only at named
+  subst named
+  simp only [substituteOperand, Option.bind_eq_bind, Option.bind_eq_some_iff, pure,
+    Option.some.injEq] at substituted
+  obtain ⟨owner, closedOwner, closed, holdsClosed, rfl⟩ := substituted
+  simp only [substituteStorageType, substituteType, Option.map_eq_map, Option.map_some,
+    Option.some.injEq] at closedOwner
+  subst closedOwner
+  refine ⟨closed, holdsClosed, rfl, ?_⟩
+  show Option.filter _ (Instruction.classField? opcode _) = _
+  unfold Instruction.classField?
+  split
+  · rfl
+  · split
+    · rfl
+    · split <;> rfl
+
+#print axioms Instruction.ofRaw?_substitute_field
 
 end CIL
 
