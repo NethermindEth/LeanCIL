@@ -15,6 +15,7 @@ var fixture = At("Tests/ProgramClosures");
 Run(["dotnet", "build", Path.Combine(fixture, "Assembly/ProgramClosures.csproj"), "-c", "Release"]);
 using var verification = new Program();
 verification.Verify(Path.Combine(fixture, "Assembly/bin/ProgramClosures.dll"), "ProgramClosures",
-    "System.UInt64 Closure::Entry(System.UInt64)", Path.Combine(fixture, "Proof.lean"), At("artifacts/ProgramClosures"));
+    "System.UInt64 Closure::Entry(System.UInt64)", Path.Combine(fixture, "Proof.lean"),
+    At("artifacts/ProgramClosures"));
 Console.WriteLine("PASS a summary of AddTwo proved over its closure applies in the extraction, at other indices and " +
     "with its identical callees at one index; other bytes and differing bodies at one index are refuted");

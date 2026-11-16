@@ -330,7 +330,7 @@ theorem differing_merge_refused : ¬ RelocatesInto closure.1 mergedProgram merge
   decide +kernel
 #print axioms differing_merge_refused
 
--- A theorem whose proof fell back to `sorry` would still print its axioms; this fails instead.
+-- A theorem left unproved would still print its axioms; this check fails instead.
 open Lean in
 run_cmd do
   for name in [``addTwo_holds, ``bodies_decode, ``closure_found, ``closure_indices, ``here_first,
