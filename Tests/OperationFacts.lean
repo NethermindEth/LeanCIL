@@ -91,6 +91,19 @@ theorem stored_short {memory after : Memory} {destination : Reference} {bits : C
   cil_checked_steps [formed, written]
 #print axioms stored_short
 
+/-- One-byte writes of a narrowed int and of a one-byte literal, as narrow struct fields and
+    flags store them, give no int store step; the run beside them kernel-checks. -/
+theorem stored_beside_byte_writes {memory after other : Memory} {destination : Reference}
+    {bits value : CIL.W32}
+    (formed : form memory destination = .ok destination)
+    (written : write memory destination (numberBytes bits.toNat 2) 1 = .ok after)
+    (narrowed : write memory destination (numberBytes (value.setWidth 8).toNat 1) 1 = .ok other)
+    (flagged : write memory destination (numberBytes (1 : BitVec (8 * 1)).toNat 1) 1 = .ok other) :
+    invoke [storeShortMethod] 5 0 [.reference (.address destination), .scalar (.i32 bits)]
+        memory = .ok (after, []) := by
+  cil_checked_steps [formed, written, narrowed, flagged]
+#print axioms stored_beside_byte_writes
+
 /-- A symbolic reference with an established formation result can be skipped without a write. -/
 theorem skip_formed_reference {memory : Memory} {reference : ManagedReference}
     {value : Value} (formed : formValue memory reference = .ok value)

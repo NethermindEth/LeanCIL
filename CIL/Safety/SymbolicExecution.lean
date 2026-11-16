@@ -1397,7 +1397,11 @@ def prepareOperationFacts (facts : Array Term) : TacticM (Array Term) := withMai
               let result ← mkAppM bridge arguments
               let result ← instantiateMVars (← mkLambdaFVars variables result)
               if result.hasMVar then setMCtx before
-              else results := results.push result
+              else
+                -- Unification can match bytes of another width through a structure projection;
+                -- such a fact is ill-typed and the kernel rejects a proof that binds it.
+                check result
+                results := results.push result
             catch _ => setMCtx before
           return results
         for result in derived do
