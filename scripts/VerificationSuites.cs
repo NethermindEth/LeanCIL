@@ -54,6 +54,10 @@ internal static class VerificationSuites
             "per-method editor extractions, watch refresh and ordinary fresh certification"),
         new("imports", "Tests/ContractImports.cs",
             "implementation-bound contract imports and conditional caller verification"),
+        new("closures", "Tests/ProgramClosures.cs",
+            "summaries proved over a method's closure, applied in programs that hold the closure at other " +
+            "indices or its identical methods at one index, and refuted relocations onto other bytes or " +
+            "differing bodies"),
         new("exceptionlint", "Tests/ExceptionLint.cs", "diagnostic XML exception drift without proof claims"),
         new("contracts", "Tests/UniversalContracts.cs",
             "universal checked contracts, caller memory preservation and incorrect implementations"),

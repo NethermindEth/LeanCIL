@@ -1,5 +1,5 @@
 {
-  "source": "Verification seconds of each suite in run 43850929917 on fee86cd9 (2026-11-16), a full run in which every suite passed: the `Suite` stage of each suite in that run's stage timings artifact, excluding job setup. `core` is the duration of its verification step.",
+  "source": "Verification seconds of each suite in run 43850929917 on fee86cd9 (2026-11-16), a full run in which every suite passed: the `Suite` stage of each suite in that run's stage timings artifact, excluding job setup. `core` is the duration of its verification step. `closures` is its `Suite` stage in a local run of `dotnet run --file scripts/Test.cs -- --suite closures` on 2026-11-16.",
   "seconds": {
     "assemblies": 1478,
     "arguments": 68,
@@ -10,6 +10,7 @@
     "callers": 46,
     "checked": 47,
     "cli": 272,
+    "closures": 22,
     "construction": 40,
     "constructors": 64,
     "contracts": 25,

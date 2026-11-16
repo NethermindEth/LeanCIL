@@ -72,6 +72,11 @@ if (args.Contains("--decoded-program-only", StringComparer.Ordinal))
     DecodedProgramCosts();
     return;
 }
+if (args.Contains("--closure-only", StringComparer.Ordinal))
+{
+    ClosureCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -114,6 +119,7 @@ MethodDecodeCosts();
 StaticFactCosts();
 DecodedDefinitionCosts();
 DecodedProgramCosts();
+ClosureCosts();
 ClosedArgumentsCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -1113,6 +1119,80 @@ void DecodedProgramCosts()
             $"{AllowedLocalGrowth} times the cost per record at the size before.");
     Console.WriteLine($"PASS proving a decoded program costs {measured} heartbeats per record");
 }
+
+// A closure search reads each of its n methods by index from a program of P methods and gives each of the e callees
+// their link tables enter one packed table entry, so it costs O(n * P + e) kernel steps. Each shape grows one term:
+// a chain whose closure is the whole program grows n * P, one method calling seven others grows e, and a closure of
+// four methods at the start of a longer program grows P. A search that folded over its state instead costs time
+// quadratic in e, and one that scanned the program per callee costs n * P * e.
+void ClosureCosts()
+{
+    var closureDirectory = At("artifacts/LookupScaling/Closures");
+    Directory.CreateDirectory(closureDirectory);
+    // Four times the units of n * P + e may cost at most this much more per unit.
+    const double AllowedClosureGrowth = 1.15;
+    ClosureShape[] shapes =
+    [
+        new("chain", [8, 32, 128], size => [.. Enumerable.Range(0, size).Select(int[] (index) =>
+            index + 1 < size ? [index + 1] : [])], size => size, size => size - 1),
+        new("fan", [32, 128, 512], size => [[.. Enumerable.Range(0, size).Select(index => 1 + index % 7)],
+            .. Enumerable.Repeat(Array.Empty<int>(), 7)], _ => 8, size => size),
+        new("tail", [128, 512, 2048], size => [[1], [2], [3], .. Enumerable.Repeat(Array.Empty<int>(), size - 3)],
+            _ => 4, _ => 3)
+    ];
+    string Statement(ClosureShape shape, int size)
+    {
+        var program = shape.Program(size);
+        return $$"""
+            /-- The {{shape.Name}} program of size {{size}}. -/
+            def {{shape.Name}}{{size}} : Program :=
+              [{{string.Join(", ", program.Select(callees => $"stub [{string.Join(", ", callees)}]"))}}]
+            #kernel_cost "closure {{shape.Name}} {{size}}"
+              (({{shape.Name}}{{size}}.closure 0).map Prod.snd =
+                some [{{string.Join(", ", Enumerable.Range(0, shape.Methods(size)))}}])
+            """;
+    }
+    var path = Path.Combine(closureDirectory, "Closures.lean");
+    File.WriteAllText(path, $$"""
+        import CIL.Safety.ProgramClosure
+        set_option maxRecDepth 100000
+        set_option maxHeartbeats 0
+        open CIL Lean Elab Command
+        {{KernelCostCommand}}
+        /-- A method whose link table enters `callees` in order, one call pc each. -/
+        def stub (callees : List Nat) : Method :=
+          { code := [], locals := [], returnsValue := false,
+            links := callees.zipIdx.map fun (callee, pc) => (pc, .direct callee) }
+        {{string.Join("\n", shapes.SelectMany(shape => shape.Sizes.Select(size => Statement(shape, size))))}}
+        """ + "\n");
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    var costs = LookupPatterns.ClosureCost().Matches(output).ToDictionary(
+        match => (match.Groups[1].Value, int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture)),
+        match => long.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture));
+    if (costs.Count != shapes.Sum(shape => shape.Sizes.Length) || costs.Values.Min() < KernelDecisionFloor)
+        throw new InvalidOperationException("Missing closure costs:\n" + output);
+    foreach (var shape in shapes)
+    {
+        var units = shape.Sizes.Select(size =>
+            (double)shape.Methods(size) * shape.Program(size).Length + shape.Edges(size)).ToArray();
+        if (ClosureGrowth(units, [.. units.Select(unit => unit * unit)]) <= AllowedClosureGrowth)
+            throw new InvalidOperationException($"The {shape.Name} bound accepts a cost quadratic in n * P + e");
+        var growth = ClosureGrowth(units, [.. shape.Sizes.Select(size => (double)costs[(shape.Name, size)])]);
+        var measured = string.Join(", ", shape.Sizes.Select(size =>
+            string.Create(CultureInfo.InvariantCulture, $"{costs[(shape.Name, size)]} at {size}")));
+        if (growth > AllowedClosureGrowth)
+            throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+                $"The {shape.Name} closure costs {measured} heartbeats; its cost per unit of n * P + e grows " +
+                $"{growth:F2} times, more than {AllowedClosureGrowth}"));
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"PASS the {shape.Name} closure costs {measured} heartbeats, {growth:F2} times as much per unit of " +
+            $"n * P + e between its last sizes as between its first"));
+    }
+}
+
+// How many times as much each added unit costs between the last two sizes as between the first two.
+static double ClosureGrowth(double[] units, double[] costs) =>
+    (costs[2] - costs[1]) / (units[2] - units[1]) / ((costs[1] - costs[0]) / (units[1] - units[0]));
 
 // Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.
 void ClosedArgumentsCosts()
@@ -2577,6 +2657,13 @@ enum LocalSlots
     Pointer,
 }
 
+/// <summary>
+/// A program shape of the closure cost row: the program of each size, and the methods and link callees of the
+/// closure of its method 0.
+/// </summary>
+record ClosureShape(string Name, int[] Sizes, Func<int, int[][]> Program, Func<int, int> Methods,
+    Func<int, int> Edges);
+
 /// <summary>The patterns that read the cost reports and the link output of the fixtures above.</summary>
 static partial class LookupPatterns
 {
@@ -2645,4 +2732,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedProgram();
+
+    [GeneratedRegex(@"\bclosure (chain|fan|tail) ([0-9]+) (-?[0-9]+) heartbeats")]
+    internal static partial Regex ClosureCost();
 }

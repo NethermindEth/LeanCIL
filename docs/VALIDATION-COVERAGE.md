@@ -848,6 +848,12 @@ loop, and from a `DecodedSummary` of it. `Tests/SummaryCalls.cs` refuses that lo
 that bounds `Decrement`'s result without stating it, at the invariant, and with a summary claimed
 for the caller's own token, at the site check.
 `Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names.
+`Tests/ProgramClosures.cs` proves the contract of a method whose two callees have the same body
+once in its extraction, carries it to the method's closure and binds it there as a
+`DecodedSummary`. It carries that summary back to the extraction, to a program that holds the
+closure at other indices, and to one that holds both callees at one index, and steps a caller
+through it in each. It refutes a relocation into a program whose method at an index the closure
+links to has other bytes, and one that sends two methods with different bodies to one index.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,
 generated-evidence mutations and mandatory-certificate positive/negative checks.
