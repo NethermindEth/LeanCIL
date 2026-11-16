@@ -812,8 +812,8 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
        cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
-/-- `cil_checked_step_by_equations` for a step whose equation matches on the link at its pc:
-    `links`, the link facts, rewrite with the step equations, so only the linked arm is
+/-- `cil_checked_step_by_equations` for a call-family step, whose equation reads the link at
+    its pc: `links`, the link facts, rewrite with the step equations, so only the linked arm is
     simplified; `facts` apply after them as they do for any step. -/
 macro "cil_checked_linked_step_by_equations " "[" links:term,* "]" "[" facts:term,* "]" :
     tactic =>

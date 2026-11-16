@@ -253,8 +253,10 @@ width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and 
   arguments without unfolding the dispatcher. Its target is the body's link at the call's pc,
   which the stepper reads from the generated link fact of a named body or by evaluating the table
   of a literal body or of a named body that unfolds; only an opaque body needs the link as a
-  supplied fact. A `.newobj` step rewrites with its link fact in the same pass as its equation, so
-  only the arm of the link's kind is simplified.
+  supplied fact. Every call-family step (`.call`, `.callInstance`, `.callVirtual`, `.newobj`
+  and `.managed`) rewrites with its link fact, the generated one or else a supplied
+  `body.linkAt pc = link`, in the same pass as its equation, so only the arm of the link's kind is
+  simplified.
 
 Aggregate loads and stores use the address-shape equations in
 [AggregateMemorySteps](../CIL/Safety/AggregateMemorySteps.lean). A checked `readSnapshot` supplies
