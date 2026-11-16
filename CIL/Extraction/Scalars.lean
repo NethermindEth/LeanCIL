@@ -189,7 +189,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
 
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
 private def arrayEmission : Instruction → Bool
-  | .newArray _ | .newReferenceArray _ => true
+  | .newarr _ => true
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
   | .memory (.arrayAddress ..) => true
   | .memory (.arrayTransfer ..) => true
@@ -202,11 +202,7 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
     (emitted : Instruction) : Bool :=
   if instruction.opcode == 141 then
     match instruction.operand, stack, emitted with
-    | .type token, length :: _, .newArray element =>
-      length ∈ [.word32, .native] && element.allocationSupported &&
-        arrayElementType token == some element.metadata
-    | .type token@(.object ..), length :: _, .newReferenceArray element =>
-      length ∈ [.word32, .native] && token == element
+    | .type token, length :: _, .newarr element => length ∈ [.word32, .native] && token == element
     | _, _, _ => false
   else
   match arrayStep instruction stack, emitted with

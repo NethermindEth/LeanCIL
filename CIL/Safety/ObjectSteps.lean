@@ -267,19 +267,32 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return .next (pc + 1) (.object result :: rest) frame memory :=
   id rfl
 
-/-- `newarr` of a class with an int32 length allocates the array and pushes it. -/
-@[cil_step high] theorem step_newReferenceArray_i32_eq (element : CIL.Extraction.TypeExpr)
+/-- `newarr` with an int32 length allocates an array of its element's shape and pushes it. -/
+@[cil_step high] theorem step_newarr_i32_eq (element : CIL.Extraction.TypeExpr)
     (bits : BitVec 32) (rest : List Value) :
-    step body (.newReferenceArray element) pc args frame (.scalar (.i32 bits) :: rest) memory = do
-      let (array, allocated) ← newReferenceArray memory element (.i32 bits)
-      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := id rfl
+    step body (.newarr element) pc args frame (.scalar (.i32 bits) :: rest) memory = do
+      let (array, allocated) ← allocateElements (body.elementShape element) (.i32 bits) memory
+      return .next (pc + 1) (array :: rest) frame allocated := id rfl
 
-/-- `newarr` of a class with a native length allocates the array and pushes it. -/
-@[cil_step high] theorem step_newReferenceArray_i64_eq (element : CIL.Extraction.TypeExpr)
+/-- `newarr` with a native length allocates an array of its element's shape and pushes it. -/
+@[cil_step high] theorem step_newarr_i64_eq (element : CIL.Extraction.TypeExpr)
     (bits : BitVec 64) (rest : List Value) :
-    step body (.newReferenceArray element) pc args frame (.scalar (.i64 bits) :: rest) memory = do
-      let (array, allocated) ← newReferenceArray memory element (.i64 bits)
-      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := id rfl
+    step body (.newarr element) pc args frame (.scalar (.i64 bits) :: rest) memory = do
+      let (array, allocated) ← allocateElements (body.elementShape element) (.i64 bits) memory
+      return .next (pc + 1) (array :: rest) frame allocated := id rfl
+
+/-- An inline element shape allocates a value array. -/
+@[cil_step] theorem allocateElements_value (element : CIL.ArrayElement) (length : CIL.Value) :
+    allocateElements (.value element) length memory = do
+      let (view, allocated) ← newArray memory element length
+      return (.array view, allocated) := rfl
+
+/-- A class element shape allocates an array of null references. -/
+@[cil_step] theorem allocateElements_reference (element : CIL.Extraction.TypeExpr)
+    (length : CIL.Value) :
+    allocateElements (.reference element) length memory = do
+      let (array, allocated) ← newReferenceArray memory element length
+      return (.object (.address array), allocated) := rfl
 
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
 @[cil_step high] theorem step_ldnull_eq (stack : List Value) :
@@ -497,7 +510,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let found ← referenceArrayOf memory array
       return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 found.2.2)) :: rest) frame memory := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    objectFieldInstruction, referenceArrayLength, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take,
     List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
   cases referenceArrayOf memory array <;> rfl
@@ -511,7 +525,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let value ← loadSlot memory slot.1
       return .next (pc + 1) (value :: rest) frame memory := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    objectFieldInstruction, referenceArrayLoad, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take,
     List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
     arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
@@ -530,7 +545,8 @@ theorem step_setObjectField_i32_eq (owner : CIL.Extraction.TypeExpr)
       let after ← storeSlot memory slot.1 value
       return .next (pc + 1) rest frame after := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    objectFieldInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    objectFieldInstruction, referenceArrayStore, CIL.MemoryOp.argumentCount, unspecifiedOperands,
+    List.take,
     List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
     arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
@@ -707,8 +723,10 @@ end ObjectEquations
 #print axioms step_castclass_eq
 #print axioms step_isinst_eq
 #print axioms step_ldnull_eq
-#print axioms step_newReferenceArray_i32_eq
-#print axioms step_newReferenceArray_i64_eq
+#print axioms step_newarr_i32_eq
+#print axioms step_newarr_i64_eq
+#print axioms allocateElements_value
+#print axioms allocateElements_reference
 #print axioms step_stringLiteral_eq
 #print axioms step_objectField_eq
 #print axioms step_setObjectField_i64_eq

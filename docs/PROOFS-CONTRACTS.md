@@ -600,7 +600,12 @@ successful snapshot copy does not establish initialization.
 | --- | --- |
 | `invoke_ok_unique` | Ties a computed run to the contract's existential one |
 | `invoke_ok_observation_unique` | The same for one observation of the run, such as the returned values, so the refutation never compares memories |
-| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a semantic fault; fuel exhaustion is not a witness |
+| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a definite fault (`ExecutionFault.definite`), so neither fuel exhaustion nor an `unsupported` fault is a witness |
+
+Every refutation lemma takes a settled outcome (`Settled`): a success, or a fault other than fuel
+exhaustion and `unsupported`. An `unsupported` fault, such as a hole (`.unadmitted`), marks a
+run the model does not cover, so these lemmas refute nothing from it, and no stepping tactic steps
+past it to a return.
 
 ## Frame class instances
 
@@ -925,7 +930,7 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
 | `cil_outcome_call holds input at site [facts]` | Continues after a call the callee's contract says returns, whether the caller then returns or raises |
 | `cil_outcome_raise holds input at site [facts]` | Closes a `Raises` goal by propagating the exception the callee's contract names |
 | `MethodContract.Holds.outcomes` | Lifts a normal-only contract |
-| `invoke_unique` | Ties a computed fault to the contract's existential one |
+| `invoke_unique` | Ties a computed settled outcome to the contract's existential one; fuel exhaustion and `unsupported` faults are not settled |
 
 [CountUntil](../Examples/Proofs/CountUntil.lean) proves `bumpContract`, which raises
 `.invalidOperation` when its two arguments are equal, with `cil_raise_steps` and

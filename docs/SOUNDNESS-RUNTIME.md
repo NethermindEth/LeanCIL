@@ -73,6 +73,15 @@ from raw local uses, excluding address-taken locals. Opaque by-value helper para
 Agreement between the permitted consumers and the actual JIT remains a runtime assumption.
 See [intrinsic semantics and coverage](SIMD.md) and the [runtime-call inventory](COMPILER-COVERAGE.md).
 
+`runtimeModel` resolves the typed method reference of a `call` or `newobj` through a table of
+model entries, searched by method name; at the leaf the entry's name, opcode and owner head are
+compared and the entry resolves the whole reference. `RuntimeModelsAgree` requires each live call
+site to emit exactly the model the table gives its reference, and a site the table does not model
+to emit none of the models the table accounts for. The table is empty. The per-family
+certificates tie most model emissions to their call; `bigMul64`, `divRemOut`, `bitcastByteBool`,
+`bitcastValue`, `createSpan`, `spanReference` and the intrinsics outside the exact intrinsic
+certificate are tied to their call by stack effect only.
+
 ### Arrays, views and bulk memory
 
 Supplied arrays carry exact element identity, length and allocation-relative backing storage.
@@ -83,7 +92,11 @@ Valid null/index failures raise their named exceptions; invalid descriptors, exp
 missing authority remain model faults and cannot discharge those exceptional contracts.
 
 `newarr` allocates primitive integer/bool/char/native arrays, same-assembly integer-backed enums,
-validated reference-free aggregates and supported integer vectors. Enum payloads start at zero
+validated reference-free aggregates and supported integer vectors. The instruction carries its raw
+type token, which the extraction check compares exactly, and the step reads the element's shape
+from the body's checked layouts (`Method.elementShape`): a struct's stride is the size of its
+checked layout, and a struct the layouts do not hold, a by-ref-like struct or `System.Object` has
+no shape, so its `newarr` is unsupported. Enum payloads start at zero
 even when the enum declares no zero member. Fresh non-null
 identities survive frame return, including for empty arrays. Payloads start zeroed and writable.
 Negative lengths raise `OverflowException`; lengths above `0x7fffffc7`, invalid native extents and
@@ -386,8 +399,8 @@ proofs.
 
 ## Arrays of class references
 
-An array of a class `E` is itself a class instance: `.newReferenceArray E` allocates,
-through `allocateObject`, an allocation of kind `.object` whose runtime type is `E[]`
+An array of a class `E` is itself a class instance: `.newarr E` allocates, through
+`allocateObject`, an allocation of kind `.object` whose runtime type is `E[]`
 (`referenceArrayType`) with no bases, one 8-byte slot per element and nothing else, so its
 length is its size over the slot width. Its elements are references held in
 `Memory.slots`, as class-typed fields are, and fresh elements are null. The array is charged
@@ -448,8 +461,9 @@ elements of a class derived from it at run time, so its element type is a class,
 covariance check needs; an array typed by an interface or `object` may be an interface array and
 is rejected. An element of an array of a class outside the model is an opaque reference, which
 is loaded, stored, compared and tested for null but never read through. The extractor names the
-element class as an object in the raw array type, and Lean rechecks each
-`newarr`, `ldlen`, `ldelem.ref` and `stelem.ref` against its raw opcode and operand kinds. An
+element class as an object in the raw array type and the `newarr` token, and Lean requires each
+`newarr` to carry that token and rechecks `ldlen`, `ldelem.ref` and `stelem.ref` against their raw
+opcode and operand kinds. An
 element address (`ldelema`) or a typed `ldelem`/`stelem` on such an array is rejected by name,
 since a byref to a reference slot is outside the model, as is the address of an argument or
 local holding such an array. A class field typed as such an array holds the array's reference

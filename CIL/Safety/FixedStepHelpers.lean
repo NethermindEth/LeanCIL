@@ -134,8 +134,8 @@ inductive FixedStepFamily where
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
-  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newArray _
-  | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _ => .excluded
+  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newarr _
+  | .newAggregate .. | .newObject .. | .memory _ => .excluded
   | .ldsfld _ | .ldsflda _ | .stsfld _ | .ldtoken _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
@@ -280,7 +280,7 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         unadmitted offsetBeforeTable tableBeforeOffset addOvf addOvfUn subOvf subOvfUn mulOvf
         mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual objectsBranchEqual
         objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue castClass isInst
-        storeHome
+        storeHome allocatedArray
       guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
       guard_hyp localAllocation : operation = .localloc → False
       guard_hyp loadsStatic : ∀ field, operation = .ldsfld field → False
@@ -290,6 +290,9 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
       guard_hyp storeHome : ∀ (index : Nat) (value : Value) (rest : List Value),
         operation = .starg index → stack = value :: rest → False
+      guard_hyp allocatedArray : ∀ (element : CIL.Extraction.TypeExpr) (length : CIL.Value)
+        (rest : List Value), operation = .newarr element → stack = Value.scalar length :: rest →
+        False
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
@@ -301,8 +304,8 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         (rest : List Value), operation = .isinst type → stack = Value.object value :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
-        objectBranchFalse objectBranchTrue castClass isInst storeHome addressHome localAllocation
-        loadsStatic addressesStatic tokensStatic storesStatic
+        objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray addressHome
+        localAllocation loadsStatic addressesStatic tokensStatic storesStatic
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

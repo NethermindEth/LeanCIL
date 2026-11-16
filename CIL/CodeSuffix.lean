@@ -9,8 +9,8 @@ method would cost time quadratic in its length. The command instead names the su
 code at each block boundary, proves each named suffix from the one before it with `advance`,
 and proves each instruction from the suffix that starts its block with `lookup`. No proof
 then walks more than one block, and the equations cost time linear in the method's length.
-The lemmas hold for any list; `cil_resolution_facts` reads parameter types and parameter homes
-through named suffixes the same way.
+The lemmas hold for any list; `cil_resolution_facts` reads parameter types, parameter homes and
+layout lists through named suffixes the same way.
 -/
 
 namespace CIL.CodeSuffix

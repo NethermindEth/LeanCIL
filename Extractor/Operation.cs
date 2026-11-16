@@ -498,20 +498,18 @@ internal sealed record Divide(bool Signed, bool Remainder) : Operation
         => $".{(Remainder ? "rem" : "div")}{(Signed ? "" : "_un")}";
 }
 
-/// <summary>A new array of the element <paramref name="Element"/>.</summary>
-internal sealed record NewArray(Arrays.Element Element) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".newArray {Element.Expression}";
-}
-
 /// <summary>
-/// A new array of references to the class <paramref name="Name"/> (a full name) of the assembly
-/// <paramref name="Scope"/> (an assembly full name).
+/// A new array whose element type is <paramref name="Element"/>, the raw <c>newarr</c> operand's type expression,
+/// which the extraction check compares with the token. <paramref name="Class"/> names a class element.
 /// </summary>
-internal sealed record NewReferenceArray(string Scope, string Name) : Operation
+internal sealed record NewArray(NewArray.ClassElement? Class, string? Element = null) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) =>
-        $".newReferenceArray ({GenericEvidence.ObjectType(Scope, Name)})";
+    /// <summary>The class <paramref name="Name"/> (a full name) of the assembly <paramref name="Scope"/>.</summary>
+    internal sealed record ClassElement(string Scope, string Name);
+
+    // Translation does not see the layout table the term indexes, so the emitter attaches it.
+    internal override string Render(Func<int, string> calleeName) => $".newarr ({Element ??
+        throw new InvalidOperationException("An array allocation is rendered before its element type is attached")})";
 }
 
 /// <summary>An <c>ldnull</c>: the null object reference.</summary>

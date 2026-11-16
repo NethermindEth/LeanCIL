@@ -689,7 +689,7 @@ internal static partial class ProofOutline
                     stack.Add(new Word($"(BitVec.ofNat 64 {length})", 8));
                 }
                 // An array of a runtime class, such as `string[]`, is not stepped.
-                else if (op is NewReferenceArray allocated && allocated.Scope != TypeTests.RuntimeScope)
+                else if (op is NewArray { Class: { } allocated } && allocated.Scope != TypeTests.RuntimeScope)
                 {
                     // Facts stated of the caller's memory carry into the fresh one only across this first write.
                     if (Pop() is not Word { Width: 4, Origin: { Numeral: true, Value: > 0 } count })

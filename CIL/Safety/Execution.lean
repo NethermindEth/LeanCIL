@@ -147,6 +147,28 @@ theorem indirectTarget_mem {signature : CIL.ManagedSignature} {catalog : List CI
       exact List.mem_map.mpr ⟨entry, List.mem_of_find?_eq_some found, rfl⟩
 #print axioms indirectTarget_mem
 
+/-- `ldlen` of a method table: its entry count; a table without entries throws
+    `NullReferenceException`. -/
+def methodTableLength (table : CIL.MethodTable) : ExecutionResult CIL.Value := do
+  let some targets := table.targets | .error (.thrown .nullReference)
+  if targets.size >= 2^31 then .error .invalidState else pure ()
+  return .i64 (BitVec.ofNat 64 targets.size)
+
+/-- `ldelem` of a method table: the pointer at `index`, read from the native backing when the
+    table has one; a table without entries throws before an index outside them. -/
+def methodTableElement (table : CIL.MethodTable) (index : CIL.Value) (memory : Memory) :
+    ExecutionResult CIL.MethodPointer := do
+  let some index := arrayIndex index | .error .invalidState
+  let some targets := table.targets | .error (.thrown .nullReference)
+  if targets.size >= 2^31 then .error .invalidState else pure ()
+  let some target := targets[index]? | .error (.thrown .indexOutOfRange)
+  match table.backing with
+  | some backing =>
+    let selected := { table with backing := some { backing with
+      byteOffset := nativeMethodWidth * index } }
+    checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
+  | none => return ⟨table.signature, some target⟩
+
 /-- Managed dispatch checks stable pointer identity and signature before selecting a body.
     Tail calls use the same retirement action as direct tail calls. -/
 def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
@@ -158,21 +180,11 @@ def managedStep (operation : CIL.ManagedOp) (pc : Nat) (frame : Frame)
   | .address target signature, _ =>
     return .next (pc + 1) (.methodPointer ⟨signature, some target.identity⟩ :: stack) frame memory
   | .tableLength, .methodTable table :: rest =>
-    let some targets := table.targets | .error (.thrown .nullReference)
-    if targets.size >= 2^31 then .error .invalidState else pure ()
-    return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 targets.size)) :: rest) frame memory
+    return .next (pc + 1) (.scalar (← methodTableLength table) :: rest) frame memory
   | .tableElement signature, .scalar index :: .methodTable table :: rest =>
     if table.signature != signature then .error .invalidState else pure ()
-    let some index := arrayIndex index | .error .invalidState
-    let some targets := table.targets | .error (.thrown .nullReference)
-    if targets.size >= 2^31 then .error .invalidState else pure ()
-    let some target := targets[index]? | .error (.thrown .indexOutOfRange)
-    if let some backing := table.backing then
-      let selected := { table with backing := some { backing with
-        byteOffset := nativeMethodWidth * index } }
-      let pointer ← checkedAt .null nativeMethodWidth (loadNativeTable selected memory)
-      return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
-    return .next (pc + 1) (.methodPointer ⟨signature, some target⟩ :: rest) frame memory
+    let pointer ← methodTableElement table index memory
+    return .next (pc + 1) (.methodPointer pointer :: rest) frame memory
   | .call signature catalog tail, .methodPointer pointer :: values =>
     let some method := indirectTarget signature catalog pointer | .error .invalidState
     let count := signature.parameters.length
@@ -367,14 +379,29 @@ def localAllocation (initLocals : Bool) (pc : Nat) (frame : Frame) (stack : List
   let (reference, owner, memory) ← allocateStack memory frame bytes initLocals
   return .next (pc + 1) [.reference reference] owner memory
 
+/-- `newarr` of `length` elements of `shape`: an inline value array or an array of null class
+    references; a method-table or unsupported shape allocates nothing. -/
+def allocateElements (shape : ElementShape) (length : CIL.Value) (memory : Memory) :
+    ExecutionResult (Value × Memory) := do
+  match shape with
+  | .value element =>
+    let (view, memory) ← newArray memory element length
+    return (.array view, memory)
+  | .reference element =>
+    let (array, memory) ← newReferenceArray memory element length
+    return (.object (.address array), memory)
+  | .method _ => .error (.unsupported ElementShape.methodAllocation)
+  | .unsupported reason => .error (.unsupported reason)
+
 /-- Executes one instruction of `body`. Instructions that would observe unspecified vector
     bits are rejected before dispatch. -/
 def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Value)
     (frame : Frame) (stack : List Value) (m : Memory) : ExecutionResult FrameAction := do
   if unspecifiedOperands (observerCount op) stack then
     .error (.unsupported "Instruction observes unspecified vector bits") else
-  -- Native table offsets, faulting arithmetic, object identity, type tests, argument homes and
-  -- `localloc` are matched apart, so neither match exceeds the 79 alternatives `split` handles.
+  -- Native table offsets, faulting arithmetic, object identity, type tests, argument homes,
+  -- `localloc` and `newarr` are matched apart, so neither match exceeds the 79 alternatives
+  -- `split` handles.
   match op, stack with
   -- A native table offset is a byte count; the cursor keeps the table's identities.
   | .add, .scalar offset :: .methodTable table :: rest
@@ -469,6 +496,10 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     let (memory, value) ← staticAddress body pc m
     return .next (pc + 1) (value :: stack) frame memory
   | .stsfld _, _ => .error (.unsupported "Static field store")
+  -- A fresh array of the storage the layouts give its declared element type.
+  | .newarr element, .scalar length :: rest =>
+    let (array, memory) ← allocateElements (body.elementShape element) length m
+    return .next (pc + 1) (array :: rest) frame memory
   -- A hole faults on every stack.
   | .unadmitted _, _ => .error (.unsupported "Opcode not admitted")
   | _, _ =>
@@ -610,12 +641,6 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
     return .next (pc + 1) values frame memory
   | .throw exception, _ => .error (.thrown exception)
   | .ret, _ => returnFrom body.returnNarrow body.returnsValue stack m
-  | .newArray element, .scalar length :: rest =>
-    let (view, memory) ← newArray m element length
-    return .next (pc + 1) (.array view :: rest) frame memory
-  | .newReferenceArray element, .scalar length :: rest =>
-    let (array, memory) ← newReferenceArray m element length
-    return .next (pc + 1) (.object (.address array) :: rest) frame memory
   | _, _ =>
     match pureArity op with
     | some argc =>

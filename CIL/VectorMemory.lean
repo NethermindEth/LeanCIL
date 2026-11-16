@@ -207,7 +207,7 @@ inductive MemoryOp where
   | arrayField (owner : CIL.Extraction.TypeExpr) (offset : Nat) (element : ArrayElement)
   /-- `stfld` of a field of a class instance of type `owner` holding an array of `element`. -/
   | setArrayField (owner : CIL.Extraction.TypeExpr) (offset : Nat) (element : ArrayElement)
-  deriving Repr
+  deriving DecidableEq, Repr
 
 /-- Bytes the model reserves for each class instance field, in declaration order. The layout is
     sound only while code cannot observe field offsets, so `ldflda` on a class is rejected. -/

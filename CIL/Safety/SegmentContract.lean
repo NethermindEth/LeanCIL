@@ -6,20 +6,20 @@ import CIL.Safety.RegionRun
 
 namespace CIL.Safety
 
-/-- Settled outcomes agree across a prefix, which consumes at least `cost` fuel. -/
+/-- Stable outcomes agree across a prefix, which consumes at least `cost` fuel. -/
 structure ReachesRun (program : CIL.Program) (method start finish cost : Nat)
     (arguments : List Value) (before after : SegmentState) : Prop where
-  spends : forall fuel outcome, Settled outcome ->
+  spends : forall fuel outcome, Stable outcome ->
     run program fuel method start arguments before.frame before.stack before.memory = outcome ->
       And (cost <= fuel)
         (run program (fuel - cost) method finish arguments after.frame after.stack after.memory =
           outcome)
-  continues : forall fuel outcome, Settled outcome ->
+  continues : forall fuel outcome, Stable outcome ->
     run program fuel method finish arguments after.frame after.stack after.memory = outcome ->
       Exists fun more =>
         run program more method start arguments before.frame before.stack before.memory = outcome
 
-/-- Every exact segment preserves settled outcomes with its exact fuel lower bound. -/
+/-- Every exact segment preserves stable outcomes with its exact fuel lower bound. -/
 theorem SegmentRun.reaches {program : CIL.Program} {method start finish cost : Nat}
     {arguments : List Value} {before after : SegmentState}
     (exactRun : SegmentRun program method start finish cost arguments before after) :
@@ -122,7 +122,7 @@ theorem ReachesRun.call {program : CIL.Program} {method pc callee : Nat}
       cases childRun : run program fuel callee 0 values childFrame [] entered with
       | error fault =>
         simp only [childRun] at ran
-        have childSettled : Settled (.error fault : Except LocatedFault
+        have childSettled : Stable (.error fault : Except LocatedFault
             (Prod Memory (List Value))) := by simpa [ran] using settled
         have failed := run_mono program fuel calleeFuel callee 0 values childFrame [] entered
           (.error fault) childSettled childRun
@@ -190,7 +190,8 @@ inductive SegmentExit where
 def SegmentExit.Raises (exit : SegmentExit) (exception : CIL.ExceptionType) : Prop :=
   Exists fun fault => And (exit = .faults fault) (fault.fault.clrException = some exception)
 
-/-- An exit has interpreter evidence; reaching also requires a positive fuel lower bound. -/
+/-- An exit has interpreter evidence. A fault exit is definite, so an `unsupported` fault is no
+    exit; reaching also requires a positive fuel lower bound. -/
 def SegmentExit.Exhibited (program : CIL.Program) (method start : Nat)
     (arguments : List Value) (before : SegmentState) : SegmentExit -> Prop
   | .reaches pc after => Exists fun cost => And (0 < cost)
@@ -198,7 +199,7 @@ def SegmentExit.Exhibited (program : CIL.Program) (method start : Nat)
   | .returns memory values => Exists fun fuel =>
       run program fuel method start arguments before.frame before.stack before.memory =
         .ok (memory, values)
-  | .faults fault => And (Not (fault.fault = .fuelExhausted)) (Exists fun fuel =>
+  | .faults fault => And (fault.fault.definite ≠ false) (Exists fun fuel =>
       run program fuel method start arguments before.frame before.stack before.memory =
         .error fault)
   | .diverges => forall fuel, Exists fun fault => And (fault.fault = .fuelExhausted)
@@ -382,7 +383,7 @@ theorem SegmentContract.Holds.raises {contract : SegmentContract} {program : CIL
     rename_i fault failureName
     cases failureName
     rename_i failed named
-    cases reached.continues fuel (.error fault) (settled_of_clrException named) failed
+    cases reached.continues fuel (.error fault) (settled_of_clrException named).stable failed
     rename_i more failed
     exact Exists.intro more (Exists.intro fault (And.intro failed named))
 
@@ -410,7 +411,8 @@ theorem ReachesRun.exhibited {program : CIL.Program} {method start finish cost :
     rename_i settled failure
     cases failure
     rename_i fuel failed
-    exact And.intro settled (reached.continues fuel (.error fault) settled failed)
+    exact And.intro settled (reached.continues fuel (.error fault)
+      (Settled.stable (α := Prod Memory (List Value)) (outcome := .error fault) settled) failed)
   | diverges =>
     intro fuel
     cases actual : run program fuel method start arguments

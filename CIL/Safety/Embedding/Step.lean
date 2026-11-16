@@ -700,7 +700,7 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
   case managed operation =>
     cases operation
     all_goals plain_cases
-    all_goals simp only [managedStep] at h ⊢
+    all_goals simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
     all_goals repeat' first
       | contradiction
       | solve | simp only [FrameAction.relabel, context.next rfl]
@@ -715,17 +715,16 @@ theorem step_relabel (op : CIL.Instruction) : StepRelabel op := by
     split at h
     · split at h <;> first | lockstep | cases h
     · cases h
-  case newArray | newReferenceArray =>
+  case newarr =>
     stack_cases =>
       first
       | fallback_vacuous
-      | (cases ‹CIL.Value›
-         all_goals dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
-         all_goals try cases h
-         all_goals repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
-         all_goals cases h
-         all_goals simp only [FrameAction.relabel]
-         all_goals rw [context.next rfl])
+      | (simp only [CIL.Method.elementShape, context.environment] at h ⊢
+         dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+         repeat (obtain ⟨_, found, h⟩ := except_bind_ok h; simp only [found])
+         cases h
+         simp only [FrameAction.relabel]
+         rw [context.next rfl])
   case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
     | mul_ovf_un => exact step_relabel_faulting _ rfl
   case conv_ovf target => exact step_relabel_conv_ovf target
@@ -1263,7 +1262,7 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
   cases op
   case managed operation =>
     plain_cases
-    simp only [managedStep] at h ⊢
+    simp only [managedStep, methodTableLength, methodTableElement] at h ⊢
     repeat' first
       | solve | raise_lockstep
       | cases h
@@ -1276,13 +1275,13 @@ theorem step_raise (op : CIL.Instruction) : StepRaise op := by
     split at h
     · split at h <;> first | raise_lockstep | cases h
     · cases h
-  case newArray | newReferenceArray =>
+  case newarr =>
     stack_cases =>
       first
         | fallback_raise_vacuous
-        | (cases ‹CIL.Value› <;>
-            dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢ <;>
-            first | cases h | raise_lockstep)
+        | (simp only [CIL.Method.elementShape, context.environment] at h ⊢
+           dsimp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h ⊢
+           first | cases h | raise_lockstep)
   case div | div_un | rem | rem_un | add_ovf | add_ovf_un | sub_ovf | sub_ovf_un | mul_ovf
     | mul_ovf_un => exact step_raise_faulting _ rfl
   case conv_ovf target => exact step_raise_conv_ovf target

@@ -362,18 +362,19 @@ def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
       (fun (final, values) =>
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
 
-/-- A located semantic fault on an input meeting the precondition refutes the contract at
-    every fuel budget. Exhaustion alone does not refute termination. -/
+/-- A located definite fault on an input meeting the precondition refutes the contract at
+    every fuel budget. Exhaustion does not refute termination, and an `unsupported` fault,
+    where the model stops covering the run, is not accepted. -/
 theorem MethodContract.not_holds_of_fault {Input Output : Type}
     (contract : MethodContract Input Output) {program : CIL.Program} {method observed : Nat}
     {input : Input} {initial : Memory} {fault : LocatedFault}
-    (permitted : contract.pre input initial) (semantic : fault.fault ≠ .fuelExhausted)
+    (permitted : contract.pre input initial) (definite : fault.fault.definite ≠ false)
     (failed : invoke program observed method (contract.args input) initial = .error fault) :
     ¬ contract.Holds program method := by
   intro holds
   obtain ⟨fuel, ⟨final, values⟩, invoked, _⟩ := holds input initial permitted
   exact invoke_fault_refutes_success program observed method (contract.args input) initial
-    fault semantic failed fuel (final, values) invoked
+    fault definite failed fuel (final, values) invoked
 
 #print axioms MethodContract.not_holds_of_fault
 
