@@ -353,8 +353,22 @@ if (fullComposition)
         FullTransitiveStatic();
         return;
     }
+    // A private library cache meets the first forced run empty and, once the ordinary runs below have
+    // filled it, the last one warm; each must build and replay the library rather than open the entry.
+    static bool Flag(string name) =>
+        string.Equals(Environment.GetEnvironmentVariable(name), "true", StringComparison.OrdinalIgnoreCase);
+    var cacheReachable = string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LEANCIL_CERTIFIED_LIBRARY")) &&
+        !Flag("CI") && !Flag("GITHUB_ACTIONS");
+    var libraryCache = Path.Combine(root, "library-cache");
+    Environment.SetEnvironmentVariable("LEANCIL_CACHE_DIR", libraryCache);
+    bool CacheHoldsEntry() => Directory.Exists(libraryCache) && Directory.EnumerateDirectories(libraryCache)
+        .Any(entry => File.Exists(Path.Combine(entry, "cache-receipt.hmac")));
+    if (!cacheReachable)
+        Console.WriteLine("NOTE a supplied certified library or CI keeps the local library cache unread, so the " +
+            "cold and warm cache runs below both open the supplied library");
     FullVerify(appArtifact, callerProof, package: true, slots: 1);
-    Console.WriteLine("PASS the separate caller returns the RVA-table value under full verification");
+    Console.WriteLine("PASS the separate caller returns the RVA-table value under full verification with a cold " +
+        "library cache");
 
     // A cooperating publisher's bundle whose extraction record drops the table fails before any build.
     try
@@ -428,9 +442,11 @@ if (fullComposition)
         stages.Any(stage => stage.StartsWith("Checking Proof:", StringComparison.Ordinal));
     if (!ChecksProof(OrdinaryStages("trace-cold")) || ChecksProof(OrdinaryStages("trace-warm")))
         throw new InvalidOperationException("Precondition: the repeated ordinary verification restored no receipt.");
+    if (cacheReachable && !CacheHoldsEntry())
+        throw new InvalidOperationException("Precondition: the ordinary verification cached no certified library.");
     FullVerify(mixedArtifact, mixedProof, package: false, slots: 2);
     Console.WriteLine("PASS distinct same-index app and library tables and one shared table across two " +
-        "imported slots, with a warm receipt present");
+        "imported slots, with a warm receipt and a warm library cache present");
     FullTransitiveStatic();
     return;
 }

@@ -2515,7 +2515,8 @@ unsafe def replayConsumerModules (args : List String) (profile : Bool) : IO Unit
         fullLibraryKey = libraryKey;
         static bool Set(string variable) => string.Equals(Environment.GetEnvironmentVariable(variable), "true",
             StringComparison.OrdinalIgnoreCase);
-        var fresh = freshLibrary || !editorLibrary && (Set("CI") || Set("GITHUB_ACTIONS"));
+        // A forced full verification replays the library it builds, so it never opens a cached entry.
+        var fresh = freshLibrary || forceFullVerification || !editorLibrary && (Set("CI") || Set("GITHUB_ACTIONS"));
         var cacheRoot = LibraryCacheRoot;
         var cached = Path.Combine(cacheRoot, libraryKey);
         var publishedEntry = false;

@@ -24,7 +24,8 @@ The assurance levels are:
 | Published certification | The caller also records the publisher's implementation/contract assertion. |
 | Independent verification | Current library DLLs are re-extracted, author proofs are freshly checked, and actual theorem terms discharge the caller imports in a concrete linked CIL program. |
 
-Full mode uses no proof receipts, portable support or successful proof caches.
+Full mode uses no proof receipts, portable support, successful proof caches or locally cached
+library builds: it builds and replays the framework library unless a certified library is supplied.
 It validates source inventory and framework/toolchain bytes, rebases proof
 paths into a fresh package and ignores original absolute filesystem locations.
 Library exports may depend only on the `leancil` source package. Extra source
