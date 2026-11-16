@@ -177,6 +177,9 @@ structure BodyEvidence where
   /-- The type arguments of a generic instance, method arguments first, as the types its
       signature names; empty for a method that is not an instance. -/
   instantiation : List ResolvedType := []
+  /-- The instruction index and token of each static field access and field `ldtoken` whose
+      field a carried `Field` row defines, in code order; the decoder records the same list. -/
+  statics : List (Nat × Nat) := []
   deriving DecidableEq, Repr
 
 /-- What a body's bytes say about its method: the fields `RawMethod` takes from the body, and
@@ -186,6 +189,9 @@ structure DecodedBody where
   initLocals : Bool
   localSignature : Nat
   code : List RawInstruction
+  /-- The instruction index and token of each static field access whose field a carried row
+      defines, as `BodyEvidence.statics` lists them. -/
+  statics : List (Nat × Nat)
   deriving DecidableEq, Repr
 
 /-- Why a body does not decode. Offsets are byte offsets of the instruction within the code. -/
@@ -322,20 +328,35 @@ private def readOpcode (offset : Nat) : List Nat → Except BodyError (Nat × Na
   | [0xFE] => .error (.truncatedOpcode offset)
   | first :: rest => .ok (first, 1, rest)
 
-/-- Decode the instruction stream starting at byte `offset`. `fuel` is the byte count, which
+/-- The token of a static field operand whose binding found the carried `Field` row defining
+    it, read again from the operand bytes; `none` for any other operand. -/
+private def boundStaticToken (tokens : Std.TreeMap Nat (RawOperand × TokenFacts)) (offset : Nat)
+    (operand : RawOperand) (bytes : List Nat) : Option Nat :=
+  match operand with
+  | .field _ _ _ _ true => do
+    let (token, _) ← (readUnsigned offset 4 bytes).toOption
+    let (_, facts) ← tokens[token]?
+    if facts.staticField == some true then some token else none
+  | _ => none
+
+/-- Decode the instruction stream starting at byte `offset`, the instruction numbered `index`,
+    with the index and token of each bound static field operand. `fuel` is the byte count, which
     bounds the instruction count since each instruction takes at least one byte. Branch operands
     carry absolute byte offsets. -/
 private def decodeInstructions (tokens : Std.TreeMap Nat (RawOperand × TokenFacts)) :
-    Nat → Nat → List Nat → Except BodyError (List RawInstruction)
-  | _, _, [] => .ok []
-  | 0, offset, _ => .error (.truncatedOperand offset)
-  | fuel + 1, offset, bytes => do
+    Nat → Nat → Nat → List Nat → Except BodyError (List RawInstruction × List (Nat × Nat))
+  | _, _, _, [] => .ok ([], [])
+  | 0, offset, _, _ => .error (.truncatedOperand offset)
+  | fuel + 1, offset, index, bytes => do
     let (opcode, width, afterOpcode) ← readOpcode offset bytes
     let some kind := operandKind opcode | throw (.unknownOpcode offset opcode)
     let (operand, following, remaining) ←
       decodeOperand tokens offset (offset + width) opcode kind afterOpcode
-    let rest ← decodeInstructions tokens fuel following remaining
-    .ok ({ offset := offset, opcode := opcode, operand := operand } :: rest)
+    let (rest, statics) ← decodeInstructions tokens fuel following (index + 1) remaining
+    let instruction : RawInstruction := { offset := offset, opcode := opcode, operand := operand }
+    match boundStaticToken tokens offset operand afterOpcode with
+    | some token => .ok (instruction :: rest, (index, token) :: statics)
+    | none => .ok (instruction :: rest, statics)
 
 /-- The opcodes that prefix the instruction after them: `unaligned.`, `volatile.`, `tail.`,
     `constrained.`, `no.` and `readonly.`. -/
@@ -448,11 +469,11 @@ def decodeBody (env : MetadataEnv) (arity ownerArity : Nat) (body : BodyEvidence
     throw (.codeSizeMismatch header.codeSize code.length)
   let frame ← (env.frame arity ownerArity).mapError BodyError.metadata
   let tokens ← checkTable env frame body.tokens.operands ∅
-  let raw ← decodeInstructions tokens code.length 0 code
+  let (raw, statics) ← decodeInstructions tokens code.length 0 0 code
   let starts := indexStarts raw 0 false ∅
   let instructions ← raw.mapM (resolveBranches starts code.length)
   .ok { maxStack := header.maxStack, initLocals := header.initLocals,
-        localSignature := header.localSignature, code := instructions }
+        localSignature := header.localSignature, code := instructions, statics := statics }
 
 /-- The method's definition, its locals and its body, each checked against the metadata the
     body carries: the decoded body, when everything agrees with the method instantiated at
@@ -481,7 +502,8 @@ def checkBody (body : BodyEvidence) (method : RawMethod) (arguments : List TypeE
     (arguments : List TypeExpr) : Bool :=
   match checkBody body method arguments with
   | .ok decoded => decoded.maxStack == method.maxStack &&
-      decoded.initLocals == method.initLocals && decoded.code == method.code
+      decoded.initLocals == method.initLocals && decoded.code == method.code &&
+      decoded.statics == body.statics
   | .error _ => false
 
 /-- The body's tables are what its metadata bytes give, and the method's definition, locals,

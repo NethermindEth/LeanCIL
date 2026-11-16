@@ -235,7 +235,7 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             "  { owner := .atom \"Fixture\" \"Holder\", index := 0, type := .atom \"Fixture\" \"System.Int32\",\n" +
             "    name := name!\"Value\" }\n" +
             "def staticValue : CIL.StaticDescriptor :=\n" +
-            "  { identity := 0, fieldName := \"Fixture::Value\", bytes := [7, 0, 0, 0],\n" +
+            "  { identity := 0, field := staticField, bytes := [7, 0, 0, 0],\n" +
             "    initializer := some { method := 1, arguments := [] }, scalar := some true }\n"
         : "";
     // One site per load, so every step resolves its own pc among all the body's sites.
@@ -675,10 +675,14 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
     var samples = Enumerable.Range(0, full ? Repetitions : 1)
         .Select(index => Compile(module, path, "proof" + index)).ToArray();
     var commands = samples.Select(sample => sample.Commands.Single(command => command.Label == "checked")).ToArray();
+    // The message carries every sample, so a run that differs says which count moved and by how much.
     if (commands.Select(command => command.Heartbeats).Distinct().Count() != 1 ||
         commands.Select(command => command.KernelHeartbeats).Distinct().Count() != 1 ||
         samples.Select(sample => sample.Bytes).Distinct().Count() != 1)
-        throw new InvalidOperationException("Stepping work did not repeat exactly for " + module);
+        throw new InvalidOperationException($"Stepping work did not repeat exactly for {module}: heartbeats " +
+            $"{string.Join(", ", commands.Select(command => command.Heartbeats))}; kernel heartbeats " +
+            $"{string.Join(", ", commands.Select(command => command.KernelHeartbeats))}; bytes " +
+            $"{string.Join(", ", samples.Select(sample => sample.Bytes))}");
     var proofBytes = baseline is null ? 0 : samples[0].Bytes - baseline.Bytes;
     if (full && proofBytes <= 0) throw new InvalidOperationException("Missing compiled proof bytes for " + module);
     var row = new SteppingMeasurement(workload, operations.Length, cycles, memory ? 2 * cycles + 1 : 0,

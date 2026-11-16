@@ -193,8 +193,12 @@ runtime implementations.
 ### Static storage
 
 RVA storage is immutable and extraction-bound. Static keys hash full assembly/field identities;
-hash injectivity is not assumed: extraction/import checks reject collisions, and composed full
-verification proves `linkChecked`. Raw `link` alone supplies no collision guarantee.
+hash injectivity is not assumed. Within one extraction, `TranslationValid` requires each identity
+to name exactly one field and each field to have one identity, by the metadata row its token
+resolves to (`StaticIdentitiesValid`). Across imports, extraction/import checks reject
+collisions, and composed full verification proves `linkChecked`, which compares the linked
+descriptors and fails with the first `StaticCollision`. Raw `link` alone supplies no collision
+guarantee.
 
 An RVA field's descriptor alignment is its packing. The extractor checks the RVA, and that its
 section's virtual address and file offset agree modulo 8; the runtime premise is that CoreCLR

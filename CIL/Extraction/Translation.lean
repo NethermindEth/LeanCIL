@@ -5,6 +5,7 @@ import CIL.Extraction.ExactIntrinsics
 import CIL.Extraction.RuntimeModels
 import CIL.Extraction.VectorInitialization
 import CIL.Extraction.StaticValues
+import CIL.Extraction.StaticIdentities
 import CIL.Extraction.ImportLayouts
 import CIL.Extraction.Constrained
 import CIL.Extraction.Assemblies
@@ -20,7 +21,8 @@ import CIL.Resolution
 
 The top of the extraction checks. `TranslationValid` conjoins the kernel-checked validators
 for one extraction: layouts recompute, every emitted method passes the per-method validators
-against its evidence record, static values are reproduced by their initializers, import
+against its evidence record, static values are reproduced by their initializers, each static
+identity stands for exactly one field, import
 layouts agree, every body is owned by the pinned assembly its evidence names, and every decoded
 method definition is what its body bytes and carried metadata say. It is not a simulation proof for
 every raw opcode; general instruction translation, that the carried metadata rows are the image's,
@@ -122,28 +124,31 @@ private def stsfldOpcode : Nat := 128
 /-- Raw opcode of `ldtoken`. -/
 private def ldtokenOpcode : Nat := 208
 
-/-- The raw instruction has `opcode` and names `field` as a static field. -/
+/-- The raw instruction has `opcode` and names `field` as a static field, and the site at its pc,
+    if any, carries the descriptor of `field`. -/
 private def staticFieldMatches (opcode : Nat) (field : FieldRef)
-    (instruction : Option RawInstruction) : Bool :=
+    (instruction : Option RawInstruction) (descriptor : Option StaticDescriptor) : Bool :=
   match instruction with
   | some instruction => instruction.opcode == opcode &&
-      instruction.operand == .field field.owner field.index field.type field.name true
+      instruction.operand == .field field.owner field.index field.type field.name true &&
+      descriptor.all (·.field == field)
   | none => false
 
-/-- Every static field instruction names the field of the raw instruction at its pc, and every
-    static load fits the descriptor bound there, using precomputed instruction and site indexes. -/
+/-- Every static field instruction names the field of the raw instruction at its pc, whose
+    descriptor the site there carries, and every static load fits that descriptor, using
+    precomputed instruction and site indexes. -/
 def methodShapeInstructions (closed : RawMethod)
     (method : Method) : Bool :=
   let raw := FlowIndex.ofList closed.code
   let sites := firstEntryIndex method.staticSites
   method.code.zipIdx.all fun (op, pc) => match op with
-    | .ldsfld field => staticFieldMatches ldsfldOpcode field (raw.get? pc) &&
+    | .ldsfld field => staticFieldMatches ldsfldOpcode field (raw.get? pc) sites[pc]? &&
         staticLoadMatches ldsfldOpcode (raw.get? pc) sites[pc]?
-    | .ldsflda field => staticFieldMatches ldsfldaOpcode field (raw.get? pc) &&
+    | .ldsflda field => staticFieldMatches ldsfldaOpcode field (raw.get? pc) sites[pc]? &&
         if (sites[pc]?.bind (·.initializer)).isSome then
           staticLoadMatches ldsfldaOpcode (raw.get? pc) sites[pc]? else true
-    | .stsfld field => staticFieldMatches stsfldOpcode field (raw.get? pc)
-    | .ldtoken (.field field) => staticFieldMatches ldtokenOpcode field (raw.get? pc)
+    | .stsfld field => staticFieldMatches stsfldOpcode field (raw.get? pc) sites[pc]?
+    | .ldtoken (.field field) => staticFieldMatches ldtokenOpcode field (raw.get? pc) sites[pc]?
     | _ => true
 
 /-- Indexed instruction-shape checks agree with direct list lookups at every emitted pc. -/
@@ -151,13 +156,17 @@ theorem methodShapeInstructions_eq_scan (closed : RawMethod)
     (method : Method) :
     methodShapeInstructions closed method = method.code.zipIdx.all (fun (op, pc) =>
       match op with
-      | .ldsfld field => staticFieldMatches ldsfldOpcode field closed.code[pc]? &&
+      | .ldsfld field =>
+          staticFieldMatches ldsfldOpcode field closed.code[pc]? (method.staticAt pc) &&
           staticLoadMatches ldsfldOpcode closed.code[pc]? (method.staticAt pc)
-      | .ldsflda field => staticFieldMatches ldsfldaOpcode field closed.code[pc]? &&
+      | .ldsflda field =>
+          staticFieldMatches ldsfldaOpcode field closed.code[pc]? (method.staticAt pc) &&
           if ((method.staticAt pc).bind (·.initializer)).isSome then
             staticLoadMatches ldsfldaOpcode closed.code[pc]? (method.staticAt pc) else true
-      | .stsfld field => staticFieldMatches stsfldOpcode field closed.code[pc]?
-      | .ldtoken (.field field) => staticFieldMatches ldtokenOpcode field closed.code[pc]?
+      | .stsfld field =>
+          staticFieldMatches stsfldOpcode field closed.code[pc]? (method.staticAt pc)
+      | .ldtoken (.field field) =>
+          staticFieldMatches ldtokenOpcode field closed.code[pc]? (method.staticAt pc)
       | _ => true) := by
   simp only [methodShapeInstructions, FlowIndex.get?_ofList, firstEntryIndex_get]
   rfl
@@ -387,6 +396,7 @@ def TranslationValid (rawLayouts : List RawLayout) (layouts : Array ComputedLayo
     MethodAtValid rawLayouts layouts pins evidence imports evidence[index]
       program[index.val]?) ∧
   StaticValuesValid program ∧
+  StaticIdentitiesValid program (evidence.map (·.body)) ∧
   ImportedLayoutsValid imports (programArchitecture program) ∧
   ImportedLocalLayoutsBound rawLayouts layouts imports ∧
   AttributionValid (bodyOwners evidence) = true
@@ -395,7 +405,7 @@ instance (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
     (pins : List AssemblyPin) (evidence : List MethodEvidence) (imports : List ImportSlot)
     (program : Program) :
     Decidable (TranslationValid rawLayouts layouts pins evidence imports program) :=
-  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
+  inferInstanceAs (Decidable (_ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _ ∧ _))
 
 /-- Compose independently checked methods without reducing their validators again. -/
 inductive MethodsChecked (rawLayouts : List RawLayout) (layouts : Array ComputedLayout)
@@ -413,6 +423,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
     {program : Program}
     (layout : LayoutsValid rawLayouts layouts (programArchitecture program))
     (statics : StaticValuesValid program)
+    (identities : StaticIdentitiesValid program (evidence.map (·.body)))
     (importLayouts : ImportedLayoutsValid imports (programArchitecture program))
     (importedLocals : ImportedLocalLayoutsBound rawLayouts layouts imports)
     (attribution : AttributionValid (bodyOwners evidence) = true)
@@ -431,7 +442,7 @@ theorem translation_of_methods {rawLayouts : List RawLayout} {layouts : Array Co
       cases index with
       | zero => exact valid
       | succ index => exact ih.2 ⟨index, Nat.lt_of_succ_lt_succ bound⟩
-  exact ⟨layout, (compose methods).1, (compose methods).2, statics, importLayouts,
+  exact ⟨layout, (compose methods).1, (compose methods).2, statics, identities, importLayouts,
     importedLocals, attribution⟩
 
 /-- Each method of a valid translation passes every per-method validator. -/

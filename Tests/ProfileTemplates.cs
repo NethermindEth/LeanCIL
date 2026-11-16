@@ -300,7 +300,7 @@ for (var index = 0; index < staticOutputs.Length; index++)
 var staticShared = Path.Combine(directory, "StaticShared");
 Run(["dotnet", ExtractorPath, "templates", staticShared, .. staticOutputs]);
 var staticTemplate = File.ReadAllText(Path.Combine(staticShared, "Templates.lean"));
-if (!staticTemplate.Contains("fieldName := \"System.UInt32 StaticDispatch::Bias\"", StringComparison.Ordinal))
+if (!staticTemplate.Contains("name := name!\"Bias\" }", StringComparison.Ordinal))
     throw new InvalidOperationException("Static template omitted its field identity.");
 var staticFiles = Directory.GetFiles(staticShared).ToDictionary(path => Path.GetFileName(path)!, File.ReadAllText);
 Run(["dotnet", ExtractorPath, "templates", staticShared, .. staticOutputs]);
@@ -321,7 +321,8 @@ var staticPath = staticOutputs[0] + Path.PathSeparator + library;
 var changedStatic = Path.Combine(directory, "ChangedStatic");
 Directory.CreateDirectory(changedStatic);
 File.WriteAllText(Path.Combine(changedStatic, "Templates.lean"),
-    staticTemplate.Replace("StaticDispatch::Bias", "StaticDispatch::Changed", StringComparison.Ordinal));
+    staticTemplate.Replace("name := name!\"Bias\" }, bytes", "name := name!\"Changed\" }, bytes",
+        StringComparison.Ordinal));
 Compile(changedStatic, "Templates", changedStatic + Path.PathSeparator + library);
 RejectLean("ChangedStaticIdentity", staticBinding, changedStatic + Path.PathSeparator + staticPath);
 var siteStart = staticTemplate.IndexOf("staticSites := [", StringComparison.Ordinal);
