@@ -447,13 +447,17 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     (action : FrameAction) (h : step body operation pc args frame stack m = .ok action) :
     StepContract body pc operation frame stack m action := by
   unfold step intrinsicCall referenceCompareCall referenceSubtractCall newobjStep
-    constructAggregate constructObject at h
+    constructAggregate constructObject modelStep observedCall runModel featureCall
+    typedTransferCall skipInitCall at h
   split at h <;> try simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
   all_goals repeat' first
     | solve | apply managedStep_contract; assumption
     | solve | exact StepContract.storeArgument (by assumption)
     | unfold returnFrom at h
     | unfold localAllocation at h
+    | unfold intrinsicCall at h
+    | unfold referenceCompareCall at h
+    | unfold referenceSubtractCall at h
     | simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at h
     | solve |
         apply StepContract.initializeSpanLocal
@@ -474,6 +478,10 @@ theorem step_contract (body : CIL.Method) (operation : CIL.Instruction) (pc : Na
     | solve |
         apply StepContract.instruction
         apply instruction_contract
+        assumption
+    | solve |
+        apply StepContract.instruction
+        apply memoryInstruction_contract
         assumption
     | solve |
         apply StepContract.instruction

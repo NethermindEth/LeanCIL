@@ -25,6 +25,9 @@ a struct of the size its checked layout gives, and no shape for a by-ref-like st
 layouts do not hold. `cil_resolution_facts` declares one fact per distinct element type a raw
 method names, reads struct layouts across suffix blocks shared by an environment's methods, and
 the simplifier reads a literal body without facts.
+
+Pins the runtime model facts: `cil_runtime_models` declares none for a call no model stands for,
+and the simplifier reads a literal body's model lookup without a fact.
 -/
 
 namespace Tests.ResolutionFacts
@@ -1035,5 +1038,23 @@ example (environment : LayoutEnvironment) (shape : ElementShape)
     (symbolicLayouts environment).elementShape (.aggregate "Examples.Point" 0) = shape := by
   fail_if_success simp only [cil_step]
   exact known
+
+-- A call the runtime table does not model gets no model fact, and the simplifier reads a literal
+-- body's lookup without one.
+/-- A static method of no parameters that no runtime model stands for. -/
+private def unmodelledMethod : MethodRef :=
+  { owner := .atom "Tests" "Models", name := name!"Unmodelled", hasThis := false,
+    genericArity := 0, returnType := .void, parameters := [] }
+/-- A body whose only call is unmodelled. -/
+def unmodelledCaller : CIL.Method :=
+  { locals := [], returnsValue := false, code := [.call unmodelledMethod {}, .ret] }
+cil_instruction_equations unmodelledCaller
+cil_runtime_models unmodelledCaller
+/-- error: Unknown identifier `unmodelledCaller_model0` -/
+#guard_msgs in #check unmodelledCaller_model0
+example :
+    runtimeModel ({ locals := [], returnsValue := false, code := [] } : CIL.Method).environment
+      .call unmodelledMethod = none := by
+  simp only [CIL.Safety.reduceRuntimeModel]
 
 end Tests.ResolutionFacts

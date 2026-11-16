@@ -1,31 +1,33 @@
-import CIL.Extraction.Generics
+import CIL.Extraction.ModelTable
 
 /-!
-# The `System.Object` constructor call
+# The `System.Object` constructor
 
 An admitted class derives directly from `System.Object`, so its constructor calls
-`System.Object::.ctor()` on its receiver. That constructor has no effect on an instance, and the
-extractor translates the call to `pop`. `objectConstructorCall` recognizes the exact call from raw
-metadata alone: `CIL/Extraction/Scalars.lean` types its receiver as an object reference, and
-`CIL/Extraction/UnsafeCalls.lean` requires it, and only it among calls, to emit `pop`.
+`System.Object::.ctor()` on its receiver. That constructor has no effect on an instance, and its
+runtime model consumes the receiver. The model entry stands for exactly that method reference
+under `call`, so a constructor of another owner, scope or signature has no model. The call keeps
+its call, and `callEmitsNoPop`, which `CIL/Extraction/UnsafeCalls.lean` requires, refuses `pop`
+at every call site.
 -/
 
 namespace CIL.Extraction
 
-/-- Exactly `call instance void [System.Runtime]System.Object::.ctor()`. -/
-def objectConstructorCall (instruction : RawInstruction) : Bool :=
-  match instruction.opcode, instruction.operand with
-  | 40, .call site =>
-    site.name == ".ctor" && site.hasThis && !site.returnsValue && site.returnType == .void &&
-      site.parameterCount == 0 && site.parameterTypes.isEmpty && site.typeArguments.isEmpty &&
-      site.declaringType == .atom runtimeScope "System.Object" &&
-      site.target == .external (runtimeScope ++ "::System.Void System.Object::.ctor()")
-  | _, _ => false
+/-- `instance void [System.Runtime]System.Object::.ctor()`. -/
+def objectConstructorMethod : MethodRef :=
+  { owner := .atom runtimeScope "System.Object", name := name!".ctor", hasThis := true,
+    genericArity := 0, returnType := .void, parameters := [] }
 
-/-- The `System.Object` constructor call emits `pop`, and no other `call` does. -/
-def objectConstructorMatches (instruction : RawInstruction) (emitted : Instruction) : Bool :=
-  match emitted with
-  | .pop => instruction.opcode != 40 || objectConstructorCall instruction
-  | _ => !objectConstructorCall instruction
+/-- A `call` of the `System.Object` constructor only consumes its receiver. -/
+def objectConstructorEntry : ModelEntry :=
+  .exact .call objectConstructorMethod .objectConstructor
+
+/-- The raw opcodes of `call`, `calli`, `callvirt` and `newobj`. -/
+def callFamilyOpcodes : List Nat := [40, 41, 111, 115]
+
+/-- No call site emits `pop`: the `System.Object` constructor call keeps its call and runs its
+    model, and `pop` in place of any other call would drop that call's effects. -/
+def callEmitsNoPop (instruction : RawInstruction) (emitted : Instruction) : Bool :=
+  !(emitted matches .pop) || !callFamilyOpcodes.contains instruction.opcode
 
 end CIL.Extraction
