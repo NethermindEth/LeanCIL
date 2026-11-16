@@ -146,7 +146,7 @@ included.
 
 `program` compares the method bodies of the variant's `Extracted.lean` with those of production's
 extraction, or of the `programOf` variant's, for the same gate and profile: `same` when the bodies
-and the method signatures are equal, `renamed` when only the signatures differ, `different`
+(for a method defined from its decoder, its raw definition) and the method signatures are equal, `renamed` when only the signatures differ, `different`
 otherwise. Assembly identities, digests, paths and metadata tokens are ignored. A comparison that
 does not hold fails the variant at stage `program comparison`, and its proof is not checked.
 

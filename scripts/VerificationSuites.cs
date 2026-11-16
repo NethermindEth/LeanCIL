@@ -156,9 +156,10 @@ internal static class VerificationSuites
             "times from 8 to 32 to 128 to 512 struct types; the kernel check of one body at a cost independent " +
             "of the methods and metadata rows of its extraction; the kernel's selection of a calli body at a " +
             "cost linear in the length of the pointer's owner; raw value opcode decoding and the method " +
-            "decoded from a raw body at a per-instruction kernel cost that does not grow with the body; and " +
-            "the certificate index, feature getter, layout accumulation and projection, and extraction home " +
-            "index libraries"),
+            "decoded from a raw body at a per-instruction kernel cost that does not grow with the body, and " +
+            "the method cil_decoded_method defines from that body at a per-instruction cost that does not " +
+            "grow with the body; and the certificate index, feature getter, layout accumulation and " +
+            "projection, and extraction home index libraries"),
         new("gates", "Tests/ProofGates.cs",
             "manifest project builds, extraction, named profiles, per-variant and templated proofs, " +
             "witness refutations, kernel statement comparison, binding catalogs, planned groups, " +
@@ -174,7 +175,8 @@ internal static class VerificationSuites
             "object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations " +
             "they reject"),
         new("blockers", "Tests/Blockers.cs", "admission reports with deduplicated blockers, call chains, " +
-            "profile-excluded branches, runtime-async refusal, self-admission and the admitted hole corpus"),
+            "profile-excluded branches, runtime-async refusal, self-admission, the admitted hole corpus and the " +
+            "self-admitted, example and fixture methods defined from their decoder"),
         new("audit", "Tests/OleanAudit.cs",
             "theorem audits of replayed oleans that proof elaborators, initializers and substituted artifacts " +
             "cannot forge"),

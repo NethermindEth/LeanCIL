@@ -78,14 +78,15 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
         }
         il.Emit(OpCodes.Ret);
     }
+    // A pc the reachability certificate rules out keeps the literal that the forged additions below edit.
     foreach (var (name, native, pointer) in additions)
         AddOffset(name, native ? module.TypeSystem.IntPtr : module.TypeSystem.Int32,
-            pointer, OpCodes.Add);
+            pointer, OpCodes.Add, deadTail: name == "Offset32Reference");
     AddOffset("InvalidInt64Offset", module.TypeSystem.Int64, true, OpCodes.Add);
     AddOffset("InvalidReferenceSum", new ByReferenceType(module.TypeSystem.Int64), false, OpCodes.Add);
     AddOffset("InvalidReversedSubtract", module.TypeSystem.Int32, true, OpCodes.Sub);
 
-    void AddOffset(string name, TypeReference offset, bool pointer, OpCode operation)
+    void AddOffset(string name, TypeReference offset, bool pointer, OpCode operation, bool deadTail = false)
     {
         var method = new MethodDefinition(name,
             Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.Static, module.TypeSystem.Int32);
@@ -98,6 +99,9 @@ using (var module = ModuleDefinition.ReadModule(At("Examples/Assembly/bin/Exampl
         body.Emit(OpCodes.Ldarg_1);
         body.Emit(operation);
         body.Emit(OpCodes.Ldind_U1);
+        body.Emit(OpCodes.Ret);
+        if (!deadTail) return;
+        body.Emit(OpCodes.Ldc_I4_0);
         body.Emit(OpCodes.Ret);
     }
 
@@ -147,10 +151,13 @@ foreach (var (name, count, expected) in cases)
     {
         var narrowed = NarrowEvidence(source, "method0_scalars_validated");
         File.AppendAllText(proof, "\n" + CheckedEvidenceControl(source, narrowed, ["method0_scalars_validated"], 0));
-        if (!narrowed.Contains(".ceq", StringComparison.Ordinal))
+        // The method is defined from its decoder, so the forgery changes the raw ceq (0xFE01) to clt (0xFE04).
+        const string rawEquality = "opcode := 65025,";
+        if (!narrowed.Contains("cil_decoded_method method0 := ", StringComparison.Ordinal) ||
+            !narrowed.Contains(rawEquality, StringComparison.Ordinal))
             throw new Exception("Missing equality mutation target");
         var forged = Path.Combine(root, "ForgedEquality.lean");
-        File.WriteAllText(forged, narrowed.Replace(".ceq", ".clt", StringComparison.Ordinal));
+        File.WriteAllText(forged, narrowed.Replace(rawEquality, "opcode := 65028,", StringComparison.Ordinal));
         rejected.Add(forged, "PASS independent forged reference equality rejection", "ScalarFlowValid");
     }
     evidence.Add(proof, "PASS runtime, certificate and reference execution: " + name);

@@ -375,6 +375,7 @@ Require(sites.Count == 2 && reaches.Count == 2 && chains.Count == 2 &&
 // LeanCIL's own assembly against its checked-in baseline, then the gate's decisions on altered baselines.
 const string selfAdmission = "Tests/SelfAdmission.cs";
 Run(["dotnet", "run", "--file", selfAdmission], streamOutput: true, progress: "Self-admission");
+Run(["dotnet", "run", "--file", "Tests/CanonicalMethods.cs"], streamOutput: true, progress: "Canonical methods");
 Run(["dotnet", "run", "--file", "Tests/HoleCorpus.cs", "--", "--admission-report",
     At("artifacts/SelfAdmission/blockers.json")], streamOutput: true, progress: "Hole corpus");
 var selfReport = JsonSerializer.Deserialize<JsonElement>(File.ReadAllText(At("artifacts/SelfAdmission/blockers.json")))

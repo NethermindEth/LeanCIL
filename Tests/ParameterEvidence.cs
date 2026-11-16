@@ -63,22 +63,34 @@ using (var module = ModuleDefinition.ReadModule(assembly))
 }
 
 evidence.Check();
-var baseline = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
-void Reject(string name, string mutated)
+// Overwrite decodes in full, so its code and homes come from its decoder. Counter::Parameter calls a method and
+// writes a field, which the decoder leaves holes, so its extraction writes the literal the code mutations edit.
+var decoded = File.ReadAllText(Path.Combine(output, "0", "Extracted.lean"));
+var baseline = File.ReadAllText(Path.Combine(output, "7", "Extracted.lean"));
+if (!decoded.Contains("\ncil_decoded_method method0 := ", StringComparison.Ordinal) ||
+    !baseline.Contains("\ndef method0 : Method := ", StringComparison.Ordinal))
+    throw new InvalidOperationException(
+        "Overwrite must be defined from its decoder and Counter::Parameter by its literal");
+void Reject(string name, string mutated, string? source = null)
 {
-    if (mutated == baseline) throw new InvalidOperationException("Mutation did not change generated source: " + name);
+    if (mutated == (source ?? baseline))
+        throw new InvalidOperationException("Mutation did not change generated source: " + name);
     var path = Path.Combine(output, name + ".lean");
     File.WriteAllText(path, mutated);
     rejected.Add(path, "PASS parameter evidence rejects " + name, "decide");
 }
 
-// Mutate lookup lemmas along with code so their rfl proofs cannot cause the rejection.
-Reject("omitted-home", baseline.Replace("[(0, .word32)]", "[]"));
-Reject("wrong-argument", baseline.Replace(".starg 0", ".starg 1"));
+// Argument 1 is the homed byte and argument 0 the receiver. Mutate lookup lemmas along with code so their rfl
+// proofs cannot cause the rejection.
+const string home = "[(1, .narrow .unsigned8)]";
+Reject("omitted-home", baseline.Replace(home, "[]"));
+Reject("wrong-argument", baseline.Replace(".starg 1", ".starg 0"));
 // The home slot follows the declared locals, so naming it as a local is refused for a store and a load.
-Reject("home-slot-store", baseline.Replace(".starg 0", ".stloc 0"));
-Reject("home-slot-load", baseline.Replace(".ldarg 0", ".ldloc 0"));
-Reject("wrong-home-type", baseline.Replace("[(0, .word32)]", "[(0, .word64)]"));
-Reject("omitted-raw-site", baseline.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"));
+Reject("home-slot-store", baseline.Replace(".starg 1", ".stloc 0"));
+Reject("home-slot-load", baseline.Replace(".ldarg 1", ".ldloc 0"));
+Reject("wrong-home-type", baseline.Replace(home, "[(1, .word32)]"));
+// The homes the decoder computes are checked against the raw argument sites as a literal's are.
+Reject("omitted-raw-site",
+    decoded.Replace(".load 1, .store 0, .load 0, .other", ".load 1, .other, .load 0, .other"), decoded);
 rejected.Check();
 Console.WriteLine("PASS complete parameter-home mapping, argument types, instance indices and long/short encodings");

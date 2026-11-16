@@ -62,6 +62,11 @@ if (args.Contains("--static-facts-only", StringComparer.Ordinal))
     StaticFactCosts();
     return;
 }
+if (args.Contains("--decoded-definition-only", StringComparer.Ordinal))
+{
+    DecodedDefinitionCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -96,6 +101,7 @@ CallCheckCosts();
 DecodeCosts();
 MethodDecodeCosts();
 StaticFactCosts();
+DecodedDefinitionCosts();
 ClosedArgumentsCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -897,6 +903,70 @@ void MethodDecodeCosts()
     Console.WriteLine($"PASS decoding a method costs {measured} heartbeats per instruction");
 }
 
+// The heartbeats `cil_decoded_method` spends defining a value-only method of 500, 2000 and 8000 instructions with
+// four locals from its raw definition, its kernel checks included. Its literal and its checks are linear in the
+// instructions, so four times the instructions may cost at most `AllowedLocalGrowth` more per instruction.
+void DecodedDefinitionCosts()
+{
+    var definitionDirectory = At("artifacts/LookupScaling/DecodedDefinition");
+    Directory.CreateDirectory(definitionDirectory);
+    const int SegmentLength = 10;
+    var samples = new List<(int Instructions, long Cost)>();
+    foreach (var instructions in new[] { 500, 2000, 8000 })
+    {
+        var path = Path.Combine(definitionDirectory, $"Instructions{instructions}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Extraction.DecodedDefinition
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction Lean Elab Command
+            /-- Logs the heartbeats elaborating `body` costs, its kernel checks included. -/
+            elab "#command_cost " label:str body:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand body
+              let after <- IO.getNumHeartbeats
+              logInfo m!"{label.getString} {after - before} heartbeats"
+            namespace DecodedDefinitionCost
+            /-- The raw instructions of one segment: short and long constants, locals, arithmetic, a checked
+                conversion, a branch, a four-target switch and a return. -/
+            def segment (index : Nat) : List RawInstruction :=
+              let start := {{SegmentLength}} * index
+              [⟨start, 31, .integer (index % 100)⟩, ⟨start + 1, 32, .integer (70000 + index)⟩,
+                ⟨start + 2, 17, .local (index % 4)⟩, ⟨start + 3, 19, .local (index % 4)⟩,
+                ⟨start + 4, 6, .none⟩, ⟨start + 5, 88, .none⟩, ⟨start + 6, 130, .none⟩,
+                ⟨start + 7, 58, .target index⟩,
+                ⟨start + 8, 69, .targets [index, index + 1, index + 2, index + 3]⟩, ⟨start + 9, 42, .none⟩]
+            /-- The profile the method is decoded under, named as an extraction names it. -/
+            def profile : FeatureProfile := .scalar
+            /-- The layouts the method is decoded under, named as an extraction names them. -/
+            def environment : LayoutEnvironment := {}
+            /-- A static method with four zero-initialized `uint32` locals and {{instructions}} raw instructions. -/
+            def source : RawMethod :=
+              { token := 0, owner := "", hasThis := false, explicitThis := false, callingConvention := 0,
+                attributes := 0, implementation := 0, returnType := .void, parameters := [],
+                locals := List.replicate 4 (.atom runtimeScope "System.UInt32"), initLocals := true,
+                maxStack := 8, genericParameters := [],
+                code := (List.range {{instructions / SegmentLength}}).flatMap segment }
+            #command_cost "decoded definition {{instructions}}"
+              cil_decoded_method method := Method.ofRaw? profile environment source []
+            end DecodedDefinitionCost
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var cost = LookupPatterns.DecodedDefinition().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the decoded definition cost:\n{output}");
+        samples.Add((instructions, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perInstruction = samples.Select(sample => (double)sample.Cost / sample.Instructions).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Instructions:F1} at {sample.Instructions}")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perInstruction.Skip(1).Zip(perInstruction).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+        throw new InvalidOperationException(
+            $"Defining a decoded method costs {measured} heartbeats per instruction; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
+    Console.WriteLine($"PASS defining a decoded method costs {measured} heartbeats per instruction");
+}
+
 // Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.
 void ClosedArgumentsCosts()
 {
@@ -1292,12 +1362,19 @@ long Checked(string path, string text, string binder, string method, string equa
     var output = Path.Combine(directory, name);
     Run(Extract("extract", assembly, "Lookups", $"Lookups::{name}(ulong,ulong)", output));
     var extracted = File.ReadAllText(Path.Combine(output, "Extracted.lean"));
-    const string Header = "def method0 : Method := { profile := profile,";
-    // The definition lists one instruction per line after its header.
-    var definition = Regex.Match(extracted, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
+    var shared = Path.Combine(output, "Shared");
+    Run(["dotnet", ExtractorPath, "templates", shared, output]);
+    var templates = File.ReadAllText(Path.Combine(shared, "Templates.lean"));
+    // The body decodes in full, so the extraction defines it from its decoder; the template still lists one
+    // instruction per line after its header, and the hand-written body copies that code.
+    const string Header =
+        "@[cil_code] def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := ";
+    var definition = Regex.Match(templates, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
     var depth = Regex.Match(extracted, @"(?m)^set_option maxRecDepth [0-9]+");
     if (!definition.Success || !depth.Success ||
-        !Regex.IsMatch(extracted, @"(?m)^cil_instruction_equations method0\r?$"))
+        !Regex.IsMatch(extracted, @"(?m)^cil_decoded_method method0 := Method\.ofRaw\? ") ||
+        !Regex.IsMatch(extracted, @"(?m)^cil_instruction_equations method0\r?$") ||
+        !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
         throw new InvalidOperationException($"Missing the definition, equations or recursion depth of {name}.");
     var instructions = definition.Groups[1].Captures.Count;
     var last = instructions - 1;
@@ -1305,8 +1382,7 @@ long Checked(string path, string text, string binder, string method, string equa
         extracted + $"\n#print axioms Extracted.method0_instruction{last}\n",
         "", "Extracted.method0", $"Extracted.method0_instruction{last}", last);
     const string Binder = "(profile : CIL.FeatureProfile) (environment : CIL.LayoutEnvironment) ";
-    var body = "def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method :=" +
-        " { profile := profile," +
+    var body = "def method0 (profile : FeatureProfile) (environment : LayoutEnvironment) : Method := " +
         definition.Value[Header.Length..];
     var command = Checked(Path.Combine(output, "Body.lean"), $"""
         import CIL.InstructionEquations
@@ -1320,12 +1396,6 @@ long Checked(string path, string text, string binder, string method, string equa
         end Body
         """, Binder, "(Body.method0 profile environment)",
         $"Body.method0_instruction{last} profile environment", last);
-
-    var shared = Path.Combine(output, "Shared");
-    Run(["dotnet", ExtractorPath, "templates", shared, output]);
-    var templates = File.ReadAllText(Path.Combine(shared, "Templates.lean"));
-    if (!templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
-        throw new InvalidOperationException($"The template of {name} has no instruction equations.");
     var template = Checked(Path.Combine(shared, "Measured.lean"), templates,
         Binder, "(Templates.method0 profile environment)",
         $"Templates.method0_instruction{last} profile environment", last);
@@ -2147,7 +2217,7 @@ long FeatureLocalCost(int count)
             some ⟨[some 0], unknown⟩]).flatten ++ [some ⟨[], unknown⟩]
         def codeSegment (index : Nat) : List Instruction :=
           [.ldloc (index % localCount), .stloc ((index + 1) % localCount),
-            .ldloca ((index + 2) % localCount), .pop, .ldloca localCount, .pop, .ldc_i4 0, .stloc localCount]
+            .ldloca ((index + 2) % localCount), .pop, .ldarga 0, .pop, .ldc_i4 0, .starg 0]
         def code (segments : Nat) : List Instruction := (List.range segments).flatMap codeSegment ++ [.ret]
         """ + "\n";
     var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
@@ -2320,4 +2390,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"decoded method [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedMethod();
+
+    [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex DecodedDefinition();
 }

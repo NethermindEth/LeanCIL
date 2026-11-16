@@ -73,7 +73,22 @@ internal static class Blockers
         int? ReachableMethods, List<Finding> Findings)
     {
         internal string[] TypeArguments { get; init; } = [];
+        /// <summary>The full names of the extracted methods defined from their decoder.</summary>
+        internal string[] DecodedMethods { get; init; } = [];
+        /// <summary>The full names of the extracted methods written as literals, with why.</summary>
+        internal LiteralMethod[] LiteralMethods { get; init; } = [];
     }
+
+    // Names, not definitions: a definition holds its extraction's whole module alive across every later entry.
+    sealed record LiteralMethod(string Method, GenericEvidence.DecodeRefusal Refusal);
+
+    // The report's text for a refusal; the family is null at an unreachable pc.
+    static object Refusal(string method, GenericEvidence.DecodeRefusal refusal) => new
+    {
+        method, ilOffset = refusal.Offset, opcode = refusal.Opcode.Name,
+        refusal = JsonNamingPolicy.CamelCase.ConvertName(refusal.Kind.ToString()),
+        family = refusal.Family is { } family ? JsonNamingPolicy.CamelCase.ConvertName(family.ToString()) : null
+    };
 
     static string Option(string[] args, ref int index)
     {
@@ -225,13 +240,19 @@ internal static class Blockers
                     rewrites[index].Instruction.Operand = rewrites[index].Operand;
             }
             // `admitted` means exactly that `extract` succeeds, so an entry without blockers is extracted.
+            Program.MethodDefinitions? definitions = null;
             if (blocked.Count == 0 && Extract(batch, assemblyPath, signature, profileName, manifestDirectory,
-                    expectedAssembly, typeArguments, initializedTypes, references, imports) is { } rejected)
+                    expectedAssembly, typeArguments, initializedTypes, references, imports,
+                    extracted => definitions = extracted) is { } rejected)
                 blocked.Add(new(methods[0], null, rejected, [methods[0]]));
             if (blocked.Count == 0)
             {
+                var named = definitions!.Methods.Zip(definitions.Refusals).ToArray();
+                string[] decoded = [.. named.Where(pair => pair.Second is null).Select(pair => pair.First.FullName)];
+                LiteralMethod[] literals = [.. named.Where(pair => pair.Second is not null)
+                    .Select(pair => new LiteralMethod(pair.First.FullName, pair.Second!))];
                 outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, [])
-                    { TypeArguments = typeArguments });
+                    { TypeArguments = typeArguments, DecodedMethods = decoded, LiteralMethods = literals });
                 continue;
             }
             var entryFindings = new List<Finding>();
@@ -284,7 +305,10 @@ internal static class Blockers
             {
                 signature = o.Signature, typeArguments = o.TypeArguments, profile = o.Profile, status = o.Status,
                 method = o.Method, reason = o.Reason,
-                reachableMethods = o.ReachableMethods, blockers = o.Findings.Select(f => f.Id)
+                reachableMethods = o.ReachableMethods,
+                decodedMethods = o.DecodedMethods,
+                literalMethods = o.LiteralMethods.Select(literal => Refusal(literal.Method, literal.Refusal)),
+                blockers = o.Findings.Select(f => f.Id)
             }),
             blockers = ordered.Select(f => new
             {
@@ -299,10 +323,12 @@ internal static class Blockers
         return 0;
     }
 
-    // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any.
+    // Runs `extract` with the entry's settings into a scratch directory; returns its failure, if any, and passes
+    // the extracted methods with their decode refusals to `definitions`.
     static Exception? Extract(Program.ExtractionBatch batch, string assemblyPath, string signature, string profileName,
         string manifestDirectory, string? expectedAssembly, string[] typeArguments,
-        IEnumerable<string> initializedTypes, IEnumerable<string> references, ImportOptions imports)
+        IEnumerable<string> initializedTypes, IEnumerable<string> references, ImportOptions imports,
+        Action<Program.MethodDefinitions> definitions)
     {
         var output = Path.Combine(Path.GetTempPath(), "leancil-blockers-" + Guid.NewGuid().ToString("N"));
         string profile = profileName.StartsWith('@') ? "@" + Path.GetFullPath(profileName[1..], manifestDirectory) :
@@ -313,7 +339,8 @@ internal static class Blockers
                 .. expectedAssembly is null ? Array.Empty<string>() : ["--assembly", expectedAssembly],
                 .. typeArguments.SelectMany(argument => new[] { "--type-argument", argument }),
                 .. initializedTypes.SelectMany(type => new[] { "--assume-initialized", type }),
-                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()], batch);
+                .. references.SelectMany(path => new[] { "--reference", path }), .. imports.Arguments()], batch,
+                definitions);
             return null;
         }
         catch (Exception error) { return error; }

@@ -114,7 +114,7 @@ The output directory holds:
 
 | File | Content |
 | --- | --- |
-| `Extracted.lean` | The program: here `arg 0`, `arg 1`, `add`, `ret`, with the exact method signature, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees follow in dependency order. |
+| `Extracted.lean` | The program: here `arg 0`, `arg 1`, `add`, `ret`, with the exact method signature, metadata, profile and kernel-checked fetch equations. The entry is method zero; reachable managed callees follow in dependency order. A method the Lean decoder reads in full, Add included, is defined from its raw definition by [`cil_decoded_method`](PROOFS-BINDING.md#methods-defined-from-their-decoder); every other method is written as a literal. |
 | `identity.json` | The manifest: assembly path, identity and SHA-256, entry, profile, assumptions, references, imports and extractor hash. |
 | `Symbols.lean` | PDB names and source locations, written only when the assembly has a matching portable PDB. |
 
@@ -252,6 +252,12 @@ whatever the entries' status. Each entry has one status:
 | `admitted` | `extract` succeeds: an entry with no blockers is extracted into a scratch directory to confirm it. |
 | `blocked` | At least one blocker is listed. An entry the selector resolves but `extract` rejects by its shape, such as an `init` setter or a member of an open generic type, is `blocked`, and its definition is analysed as an entry. |
 | `notChecked` | Nothing was analysed, for the reason given: a selector that matches no method or several, a malformed type argument, an unknown profile, or an assembly, import or assumption that fails before any method is checked. |
+
+An admitted entry lists its extracted methods in `decodedMethods`, those the extraction defines
+from their decoder, and in `literalMethods`, those it writes as literals. Each literal method
+gives the IL offset and opcode of its first pc that keeps the literal, the refusal (`hole` for an
+opcode the decoder does not decode, `unreachablePc` for a pc the reachability certificate rules
+out) and, for a hole, the opcode's family.
 
 Each blocker is one unsupported construct (instruction, call, type, layout, method metadata or
 static constructor). It lists every site, with method, IL offset, instruction and the PDB source

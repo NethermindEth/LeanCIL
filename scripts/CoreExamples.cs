@@ -42,5 +42,11 @@ partial class Program
                 theorem: request.Theorem, check: true);
             passed(name + " kernel proof and artifact identity");
         }
+        // Add decodes in full, so its extraction defines the method from its decoder and writes no literal for it.
+        var add = File.ReadAllText(Path.Combine(outputRoot, "Add", "Extracted.lean"));
+        if (!add.Contains("\ncil_decoded_method method0 := ", StringComparison.Ordinal) ||
+            add.Contains("\ndef method0 : Method", StringComparison.Ordinal))
+            throw new InvalidOperationException("The extraction of Add writes a method literal.");
+        passed("Add defined from its decoder with no method literal");
     }
 }

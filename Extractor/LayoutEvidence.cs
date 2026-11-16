@@ -240,6 +240,5 @@ internal sealed class LayoutEvidence
             if (MetadataValidation.IsAggregate(type, method.Module)) uses.Add($".parameter {home} {Index(type)}");
         }
         lean.AppendLine($"def method{number}LayoutUses : List Extraction.LayoutUse := [{string.Join(", ", uses)}]");
-        lean.AppendLine($"theorem method{number}_layouts_validated : Extraction.MethodLayoutsValid rawLayouts computedLayouts method{number} method{number}LayoutUses := {LeanEmitter.Decide}");
     }
 }

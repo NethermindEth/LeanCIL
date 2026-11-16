@@ -99,6 +99,7 @@ These commands name parts of an extraction:
 | A checked frame entry and a loop cutpoint | `bind_entry`, `bind_cutpoint` | [Loop scaffolding](PROOFS-BINDING.md#generate-loop-entry-and-cutpoint-scaffolding) |
 | A local by its C# name | `local_named sum "carry"` | [PDB names](PROOFS-BINDING.md#pdb-local-names-and-source-locations) |
 | Per-pc instruction equations of a parametric body | `cil_instruction_equations` | [Instruction equations](PROOFS-BINDING.md#instruction-equations-for-parametric-bodies) |
+| A method defined from its decoder, with kernel-checked facts | `cil_decoded_method` | [Decoded methods](PROOFS-BINDING.md#methods-defined-from-their-decoder) |
 | How every method resolves a field or type operand | `cil_field_shape`, `cil_value_shape` | [Field and value shapes](PROOFS-BINDING.md#field-and-value-shapes) |
 
 ## Public proof surface

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -390,6 +391,110 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
             $" ⟨{body.Identified}, {body.TablesValid}, by cil_kernel_rfl, pinned_identities_spelled," +
             " by cil_kernel_rfl, by cil_kernel_rfl, by cil_body_decodes⟩");
     }
+
+    /// <summary>
+    /// The opcodes Lean's `Instruction.ofRaw?` decodes for some operand, the set `Instruction.valueOpcode` holds;
+    /// `Instruction.ofRaw` writes a hole for every other one. Tests/DecodedOpcodes.cs compares the two.
+    /// </summary>
+    internal static readonly FrozenSet<Code> DecodedOpcodes = new[]
+    {
+        // Stack shuffling, return, arguments and locals.
+        Code.Nop, Code.Dup, Code.Pop, Code.Ret,
+        Code.Ldarg_0, Code.Ldarg_1, Code.Ldarg_2, Code.Ldarg_3, Code.Ldarg_S, Code.Ldarg,
+        Code.Ldarga_S, Code.Ldarga, Code.Starg_S, Code.Starg,
+        Code.Ldloc_0, Code.Ldloc_1, Code.Ldloc_2, Code.Ldloc_3, Code.Ldloc_S, Code.Ldloc,
+        Code.Stloc_0, Code.Stloc_1, Code.Stloc_2, Code.Stloc_3, Code.Stloc_S, Code.Stloc,
+        Code.Ldloca_S, Code.Ldloca, Code.Localloc,
+        // Constants.
+        Code.Ldc_I4_M1, Code.Ldc_I4_0, Code.Ldc_I4_1, Code.Ldc_I4_2, Code.Ldc_I4_3, Code.Ldc_I4_4, Code.Ldc_I4_5,
+        Code.Ldc_I4_6, Code.Ldc_I4_7, Code.Ldc_I4_8, Code.Ldc_I4_S, Code.Ldc_I4, Code.Ldc_I8, Code.Ldnull,
+        // Indirect loads and stores of integers and native integers.
+        Code.Ldind_I1, Code.Ldind_U1, Code.Ldind_I2, Code.Ldind_U2, Code.Ldind_I4, Code.Ldind_U4, Code.Ldind_I8,
+        Code.Ldind_I, Code.Stind_I1, Code.Stind_I2, Code.Stind_I4, Code.Stind_I8, Code.Stind_I,
+        // Class type tests and class instance field accesses.
+        Code.Castclass, Code.Isinst, Code.Ldfld, Code.Ldflda, Code.Stfld,
+        // Branches.
+        Code.Br_S, Code.Brfalse_S, Code.Brtrue_S, Code.Beq_S, Code.Bge_S, Code.Bgt_S, Code.Ble_S, Code.Blt_S,
+        Code.Bne_Un_S, Code.Bge_Un_S, Code.Bgt_Un_S, Code.Ble_Un_S, Code.Blt_Un_S,
+        Code.Br, Code.Brfalse, Code.Brtrue, Code.Beq, Code.Bge, Code.Bgt, Code.Ble, Code.Blt,
+        Code.Bne_Un, Code.Bge_Un, Code.Bgt_Un, Code.Ble_Un, Code.Blt_Un, Code.Switch,
+        // Integer arithmetic, bitwise operations and comparisons.
+        Code.Add, Code.Sub, Code.Mul, Code.Div, Code.Div_Un, Code.Rem, Code.Rem_Un, Code.And, Code.Or, Code.Xor,
+        Code.Shl, Code.Shr, Code.Shr_Un, Code.Neg, Code.Not,
+        Code.Add_Ovf, Code.Add_Ovf_Un, Code.Mul_Ovf, Code.Mul_Ovf_Un, Code.Sub_Ovf, Code.Sub_Ovf_Un,
+        Code.Ceq, Code.Cgt, Code.Cgt_Un, Code.Clt, Code.Clt_Un,
+        // Conversions.
+        Code.Conv_I1, Code.Conv_I2, Code.Conv_I4, Code.Conv_I8, Code.Conv_I,
+        Code.Conv_U1, Code.Conv_U2, Code.Conv_U4, Code.Conv_U8, Code.Conv_U,
+        Code.Conv_Ovf_I1, Code.Conv_Ovf_I2, Code.Conv_Ovf_I4, Code.Conv_Ovf_I8, Code.Conv_Ovf_I,
+        Code.Conv_Ovf_U1, Code.Conv_Ovf_U2, Code.Conv_Ovf_U4, Code.Conv_Ovf_U8, Code.Conv_Ovf_U,
+        Code.Conv_Ovf_I1_Un, Code.Conv_Ovf_I2_Un, Code.Conv_Ovf_I4_Un, Code.Conv_Ovf_I8_Un, Code.Conv_Ovf_I_Un,
+        Code.Conv_Ovf_U1_Un, Code.Conv_Ovf_U2_Un, Code.Conv_Ovf_U4_Un, Code.Conv_Ovf_U8_Un, Code.Conv_Ovf_U_Un
+    }.ToFrozenSet();
+
+    /// <summary>What keeps a method's literal at one pc: a pc the reachability certificate rules out, since a
+    /// decoded instruction there fails the feature check, or an opcode `Method.ofRaw?` writes as a hole.</summary>
+    internal enum RefusalKind { UnreachablePc, Hole }
+
+    /// <summary>The part of the model that an opcode outside <see cref="DecodedOpcodes"/> needs before it
+    /// decodes.</summary>
+    internal enum HoleFamily
+    {
+        Calls, Fields, Arrays, Objects, Tokens, FloatingPoint, ReferenceIndirection, Exceptions, Prefixes, Other
+    }
+
+    /// <summary>The first pc, in body order, that keeps a method's literal definition, with its opcode.</summary>
+    internal sealed record DecodeRefusal(int Offset, OpCode Opcode, RefusalKind Kind)
+    {
+        /// <summary>The family of a hole's opcode; an unreachable pc has none.</summary>
+        internal HoleFamily? Family => Kind == RefusalKind.Hole ? FamilyOf(Opcode.Code) : null;
+    }
+
+    /// <summary>
+    /// Why the extraction does not define `method` from its decoder, or null when it does: `Method.ofRaw?` writes no
+    /// hole at any pc and every pc is in the reachability certificate. A wrong null fails the build at the method's
+    /// `cil_decoded_method` definition. One pass over the body.
+    /// </summary>
+    internal static DecodeRefusal? FirstDecodeRefusal(MethodDefinition method, IReadOnlySet<Instruction> reachable)
+    {
+        foreach (var instruction in method.Body.Instructions)
+        {
+            if (!reachable.Contains(instruction))
+                return new(instruction.Offset, instruction.OpCode, RefusalKind.UnreachablePc);
+            if (!DecodedOpcodes.Contains(instruction.OpCode.Code) || UndecodedFieldAccess(instruction))
+                return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
+        }
+        return null;
+    }
+
+    // The decoder reads a field instruction only on a class instance field, whose raw owner `Type` writes as
+    // `.object`: a reference type that is not a generic instance. A wrong answer fails at `cil_decoded_method`.
+    static bool UndecodedFieldAccess(Instruction instruction) =>
+        instruction.OpCode.Code is Code.Ldfld or Code.Ldflda or Code.Stfld &&
+        ((FieldReference)instruction.Operand).DeclaringType is var owner &&
+        (owner is GenericInstanceType || !ObjectTypes.Reference(owner));
+
+    static HoleFamily FamilyOf(Code opcode) => opcode switch
+    {
+        Code.Call or Code.Callvirt or Code.Calli or Code.Newobj or Code.Jmp or Code.Ldftn or Code.Ldvirtftn
+            or Code.Constrained or Code.Tail => HoleFamily.Calls,
+        Code.Ldfld or Code.Ldflda or Code.Stfld or Code.Ldsfld or Code.Ldsflda or Code.Stsfld => HoleFamily.Fields,
+        Code.Newarr or Code.Ldlen or Code.Ldelema or Code.Readonly or Code.Ldelem_Any or Code.Stelem_Any
+            or Code.Ldelem_I1 or Code.Ldelem_U1 or Code.Ldelem_I2 or Code.Ldelem_U2 or Code.Ldelem_I4
+            or Code.Ldelem_U4 or Code.Ldelem_I8 or Code.Ldelem_I or Code.Ldelem_R4 or Code.Ldelem_R8
+            or Code.Ldelem_Ref or Code.Stelem_I or Code.Stelem_I1 or Code.Stelem_I2 or Code.Stelem_I4
+            or Code.Stelem_I8 or Code.Stelem_R4 or Code.Stelem_R8 or Code.Stelem_Ref => HoleFamily.Arrays,
+        Code.Box or Code.Unbox or Code.Unbox_Any or Code.Ldobj or Code.Stobj or Code.Cpobj or Code.Initobj
+            or Code.Sizeof or Code.Mkrefany or Code.Refanyval or Code.Refanytype => HoleFamily.Objects,
+        Code.Ldstr or Code.Ldtoken => HoleFamily.Tokens,
+        Code.Ldc_R4 or Code.Ldc_R8 or Code.Conv_R4 or Code.Conv_R8 or Code.Conv_R_Un or Code.Ckfinite
+            or Code.Ldind_R4 or Code.Ldind_R8 or Code.Stind_R4 or Code.Stind_R8 => HoleFamily.FloatingPoint,
+        Code.Ldind_Ref or Code.Stind_Ref => HoleFamily.ReferenceIndirection,
+        Code.Throw or Code.Rethrow or Code.Leave or Code.Leave_S or Code.Endfinally or Code.Endfilter =>
+            HoleFamily.Exceptions,
+        Code.Volatile or Code.Unaligned or Code.No => HoleFamily.Prefixes,
+        _ => HoleFamily.Other
+    };
 
     static readonly HashSet<Instruction> EmptySet = [];
 

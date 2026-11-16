@@ -695,3 +695,37 @@ class field holding an array of a struct and a struct type operand are then chec
 layout entries alone, read from the suffix that starts the entry's block, so the facts of an
 extraction cost time linear in its layouts and distinct operands. The compiled resolver proposes
 each shape and the kernel checks it; a fact that misstates a shape fails to elaborate.
+
+### Methods defined from their decoder
+
+`cil_decoded_method name := decoder` (from `CIL.Extraction.DecodedDefinition`) defines `name` as the
+method that `decoder`, a closed `Option Method` term such as `Method.ofRaw? profile environment
+original typeArguments`, gives. Compiled code evaluates the decoder, and the command writes the
+result as constructors over numerals, except that a field whose type is that of a constant passed
+to the decoder, such as the profile and the environment, is written as that constant. The kernel
+then checks by reduction the theorem, named with the suffix `_decoded`, that
+`decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
+`_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
+`_opaqueVectorLocals` and `_parameterHomes`; for an extraction's first method they are
+`Extracted.method0_decoded`, `Extracted.method0_profile` and so on. A decoder with a hole, a
+decoder that gives `none`, and a value the kernel does not reduce to the evaluated method are
+errors, so a file builds only when the kernel confirms what compiled code computed. The form
+`cil_decoded_method name [field, ...] := decoder` also writes each field operand equal to a listed
+`FieldRef` constant as that constant, so the facts `cil_field_shape` states about the constant
+apply to the method; a listed constant that names no field operand is an error.
+
+The extractor defines a method this way when `Method.ofRaw?` writes no hole at any of its pcs and
+every pc is reachable under the profile; a method with a pc the reachability certificate rules out
+keeps its literal, whose `.unadmitted` hole at that pc the feature check requires. Its
+`Extracted.lean` then states the method as
+
+```text
+cil_decoded_method method0 := Method.ofRaw? profile environment method0Original method0TypeArgumentsRaw
+```
+
+in place of a `def method0 : Method` literal, with the list `[fieldRef0, ...]` before `:=` when
+the method accesses class instance fields, naming the operand definitions the literal would name,
+followed by
+`cil_instruction_equations method0` and `cil_resolution_facts method0`. Every other method keeps
+its literal. Stepping reads both forms through the same `cil_code` facts and `Extracted.lookup{n}`
+equations.

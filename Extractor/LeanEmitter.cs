@@ -7,8 +7,11 @@ namespace Nethermind.LeanCIL;
 
 internal static class LeanEmitter
 {
+    /// <summary>An extraction's Lean source and what it is built from; `Refusals` holds, per method, why it is
+    /// written as a literal, or null for a method defined from its decoder.</summary>
     internal readonly record struct Emission(string Source, string[] LayoutIdentities,
-        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts);
+        TemplateEmitter.Method[] Templates, ClassViews.View[] Views, ComputedLayout[] Layouts,
+        GenericEvidence.DecodeRefusal?[] Refusals);
 
     internal static Narrowing? Narrow(TypeReference type) => EnumTypes.Storage(type).FullName switch
     {
@@ -158,8 +161,10 @@ internal static class LeanEmitter
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var templates = new List<TemplateEmitter.Method>();
         var callDefinitions = new string?[methods.Length];
+        var refusals = new GenericEvidence.DecodeRefusal?[methods.Length];
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
+            import CIL.Extraction.DecodedDefinition
             import CIL.SymbolicExecution
             import CIL.InstructionEquations
             import CIL.Safety.Execution
@@ -270,23 +275,45 @@ internal static class LeanEmitter
                 lean.AppendLine($"@[cil_code] def {LinkName(n, pc)} : Link := {link}");
             var linkTable = "[" + string.Join(", ", linkEntries.Select(entry =>
                 $"({entry.Pc}, {LinkName(n, entry.Pc)})")) + "]";
-            // Links stay out of the frame: templates share it across profiles, but call indices differ.
-            lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
-                $"links := {linkTable}, code := [");
-            // A class field access names its operand's definition, so stepping reads that operand's shape fact.
-            operandShapes.Add(m, reachable, genericEvidence);
-            lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
-                (op is ClassField { Reference: { } field } access
-                    ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
             layoutEvidence.EmitMethod(lean, m, n, reachable, parameterIndices);
             ParameterEvidence.Emit(lean, m, n, reachable, layoutEvidence);
             genericEvidence.EmitMethod(lean, m, n, reachable);
+            // A class field access names its operand's definition, so stepping reads that operand's shape fact.
+            operandShapes.Add(m, reachable, genericEvidence);
+            refusals[n] = GenericEvidence.FirstDecodeRefusal(m, reachable);
+            var decoded = refusals[n] is null;
+            if (decoded)
+            {
+                // The decoder's raw definition is the method's only source; the command states its field facts and
+                // writes each field operand as the definition the literal form names.
+                var naming = string.Join(", ", ops.OfType<ClassField>().Select(access =>
+                    operandShapes.FieldName(access.Reference ?? throw new InvalidOperationException(
+                        "A class field access has no field operand."))).Distinct());
+                lean.AppendLine($"cil_decoded_method method{n} {(naming.Length == 0 ? "" : $"[{naming}] ")}:= " +
+                    $"Method.ofRaw? profile {FrameMetadata.EnvironmentLean} method{n}Original " +
+                    $"method{n}TypeArgumentsRaw");
+            }
+            else
+            {
+                // Links stay out of the frame: templates share it across profiles, but call indices differ.
+                lean.AppendLine($"def method{n} : Method := {{ profile := profile, {frame.ToLean()}, " +
+                    $"links := {linkTable}, code := [");
+                lean.AppendLine(string.Join(",\n", ops.Select(op => "  " +
+                    (op is ClassField { Reference: { } field } access
+                        ? access.Naming(operandShapes.FieldName(field)) : op.ToLean()))) + "] }");
+            }
+            lean.AppendLine($"theorem method{n}_layouts_validated : Extraction.MethodLayoutsValid rawLayouts " +
+                $"computedLayouts method{n} method{n}LayoutUses := {Decide}");
+            lean.AppendLine($"theorem method{n}_parameters_validated : Extraction.ParameterHomesValid " +
+                $"computedLayouts method{n}RawArguments method{n}Reachable method{n} := {Decide}");
             FeatureEvidence.Emit(lean, m, n, featureCertificate);
-            lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
-                $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
+            if (!decoded)
+                lean.AppendLine($"@[cil_code] theorem method{n}_opaqueVectorLocals : " +
+                    $"method{n}.opaqueVectorLocals = [{frame.OpaqueVectorLocalsLean}] := rfl");
             ScalarEvidence.Emit(lean, m, n, scalarCertificate);
-            lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
-                $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
+            if (!decoded)
+                lean.AppendLine($"@[cil_code] theorem method{n}_parameterHomes : " +
+                    $"method{n}.parameterHomes = [{frame.ParameterHomesLean}] := rfl");
             // The command states `method{n}_instruction{pc}` for each pc and `method{n}_link{pc}` for each call site,
             // in time linear in the body, so a stepping proof reads a link without evaluating the table lookup.
             lean.AppendLine($"cil_instruction_equations method{n}");
@@ -297,8 +324,9 @@ internal static class LeanEmitter
                 ("staticSites", $"[{frame.StaticSitesLean}]"), ("declared", frame.Declared),
                 ("environment", FrameMetadata.EnvironmentLean), ("links", linkTable)
             ];
-            foreach (var (field, value) in facts)
-                lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
+            if (!decoded)
+                foreach (var (field, value) in facts)
+                    lean.AppendLine($"@[cil_code] theorem method{n}_{field} : method{n}.{field} = ({value}) := rfl");
             lean.AppendLine($"cil_resolution_facts method{n}");
         }
         lean.Insert(shapeFactsAt, operandShapes.Lean());
@@ -385,7 +413,7 @@ internal static class LeanEmitter
                 StringComparison.Ordinal) + imported.Length);
         }
         lean.AppendLine("end Extracted");
-        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts);
+        return new(lean.ToString(), layoutEvidence.Identities, templates.ToArray(), classViews, layouts, refusals);
     }
 
     /// <summary>
