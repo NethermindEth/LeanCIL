@@ -173,33 +173,33 @@ theorem generic_cast_tests_its_argument :
   cil_kernel_rfl
 #print axioms generic_cast_tests_its_argument
 
-/-- `ldc.i4.1; newarr object; pop; ret`, with the type token of the world's `System.Object`. -/
-private def newarrBytes : List Nat :=
-  [0x22, 0x17, 0x8D] ++ littleEndian 4 tokens.objectRef ++ [0x26, 0x2A]
+/-- `ldnull; unbox.any object; pop; ret`, with the type token of the world's `System.Object`. -/
+private def unboxBytes : List Nat :=
+  [0x22, 0x14, 0xA5] ++ littleEndian 4 tokens.objectRef ++ [0x26, 0x2A]
 
-/-- The definition `newarrBytes` decode to. -/
-private def newarrRaw : RawMethod :=
-  method 8 false [] [instr 0 0x17, instr 1 0x8D (.type objectType), instr 6 0x26, instr 7 0x2A]
+/-- The definition `unboxBytes` decode to. -/
+private def unboxRaw : RawMethod :=
+  method 8 false [] [instr 0 0x14, instr 1 0xA5 (.type objectType), instr 6 0x26, instr 7 0x2A]
 
-/-- `newarrBytes` with its token table and the world's metadata. -/
-private def newarrBody : BodyEvidence :=
-  evidenceOf newarrBytes [(tokens.objectRef, .type objectType)] { own := own.1, others := [lib] }
-    newarrRaw
+/-- `unboxBytes` with its token table and the world's metadata. -/
+private def unboxBody : BodyEvidence :=
+  evidenceOf unboxBytes [(tokens.objectRef, .type objectType)] { own := own.1, others := [lib] }
+    unboxRaw
 
-/-- The newarr body passes the body check and decodes with a hole at pc 1 carrying `newarr`'s
-    opcode 0x8D, since no family admits a type operand yet. -/
-theorem newarr_decodes_to_a_hole :
-    (checkBody newarrBody newarrRaw []).toBool = true ∧
-      (Method.ofBody? .scalar {} [] newarrBody newarrRaw []).map (·.code) =
-        some [.ldc_i4 1, .unadmitted 0x8D, .pop, .ret] := by
+/-- The unbox body passes the body check and decodes with a hole at pc 1 carrying `unbox.any`'s
+    opcode 0xA5, since no family admits `unbox.any`. -/
+theorem unbox_decodes_to_a_hole :
+    (checkBody unboxBody unboxRaw []).toBool = true ∧
+      (Method.ofBody? .scalar {} [] unboxBody unboxRaw []).map (·.code) =
+        some [.ldnull, .unadmitted 0xA5, .pop, .ret] := by
   constructor
   · decide +kernel
   · cil_kernel_rfl
-#print axioms newarr_decodes_to_a_hole
+#print axioms unbox_decodes_to_a_hole
 
-/-- The method decoded from the newarr bytes loads its constant and faults at the hole's pc. -/
+/-- The method decoded from the unbox bytes pushes its null and faults at the hole's pc. -/
 theorem decoded_hole_faults :
-    (Method.ofBody? .scalar {} [] newarrBody newarrRaw []).map (fun method =>
+    (Method.ofBody? .scalar {} [] unboxBody unboxRaw []).map (fun method =>
       Safety.invoke [method] 4 0 [] Safety.Memory.empty) =
         some (.error ⟨0, 1, .unsupported "Opcode not admitted"⟩) := by
   cil_kernel_rfl
@@ -212,11 +212,11 @@ private def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :
     parameterInput := ⟨[], [], []⟩, reachable := [], featureStates := [], scalarStates := [],
     layoutUses := [] }
 
-/-- A body with a hole still gives its method, so the add and newarr program decodes in full,
+/-- A body with a hole still gives its method, so the add and unbox program decodes in full,
     while one refused body leaves the program without one. -/
 theorem program_needs_every_body :
     ((encodeBody pin addRaw).bind fun addBody =>
-      (decodedProgram? .scalar {} [item addRaw addBody, item newarrRaw newarrBody]).map
+      (decodedProgram? .scalar {} [item addRaw addBody, item unboxRaw unboxBody]).map
         List.length) = some 2 ∧
       ((encodeBody pin addRaw).bind fun addBody =>
         decodedProgram? .scalar {}
@@ -269,12 +269,12 @@ example : sumMethod =
 #guard_msgs in #check sumMethod_profile
 
 -- An instruction outside the value family is defined as the hole carrying its opcode.
-cil_decoded_method newarrMethod := Method.ofRaw? testProfile testEnvironment [] newarrRaw []
-cil_instruction_equations newarrMethod
+cil_decoded_method unboxMethod := Method.ofRaw? testProfile testEnvironment [] unboxRaw []
+cil_instruction_equations unboxMethod
 
-/-- info: Tests.DecodedMethod.newarrMethod_instruction1 :
-  newarrMethod.code[1]? = some (Instruction.unadmitted 141) -/
-#guard_msgs (whitespace := lax) in #check newarrMethod_instruction1
+/-- info: Tests.DecodedMethod.unboxMethod_instruction1 :
+  unboxMethod.code[1]? = some (Instruction.unadmitted 165) -/
+#guard_msgs (whitespace := lax) in #check unboxMethod_instruction1
 
 /-- The `uint32` field of `Dog` the decoded definition below names. -/
 def ageField : FieldRef := { owner := dogClass, index := 0, type := uint32, name := name!"Age" }
