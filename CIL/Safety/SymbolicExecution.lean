@@ -812,6 +812,15 @@ macro "cil_checked_step_by_equations " "[" facts:term,* "]" : tactic =>
        cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
        all_goals ((repeat constructor) <;> rfl)))
 
+/-- `cil_checked_step_by_equations` for a step whose equation matches on the link at its pc:
+    `facts`, which hold that link, rewrite in the first pass, so only the linked arm is simplified. -/
+macro "cil_checked_linked_step_by_equations " "[" facts:term,* "]" : tactic =>
+  `(tactic| (
+       cil_simp_only [cil_instruction_step, cil_step, cil_guard, CIL.Safety.instructionStep,
+         $[$facts:term],*]
+       cil_try_simp_only [cil_guard, cil_checked, cil_side, $[$facts:term],*]
+       all_goals ((repeat constructor) <;> rfl)))
+
 /-- A matching instruction fact closes a step through its generic `@[cil_step]` equation.
     Keeping the step at `instruction` lets the supplied fact apply before a per-shape equation
     rewrites past it; the opcode need not have a per-shape `@[cil_instruction_step]` equation. -/
@@ -1332,6 +1341,8 @@ elab_rules : tactic
       -- equation rewrites past it.
       else if !(← dispatchFacts lhs ``CIL.Safety.instruction facts.getElems).isEmpty then
         `(tactic| cil_strict (cil_checked_instruction_from_fact [$facts:term,*]))
+      else if operation == ``CIL.Instruction.newobj then
+        `(tactic| cil_strict (cil_checked_linked_step_by_equations [$[$stepFacts:term],*]))
       else
         `(tactic| cil_checked_step_equations [$[$stepFacts:term],*])
     evalTactic strategy
