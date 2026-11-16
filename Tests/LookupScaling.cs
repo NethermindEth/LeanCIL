@@ -87,6 +87,11 @@ if (args.Contains("--indirect-target-only", StringComparer.Ordinal))
     IndirectTargetCosts();
     return;
 }
+if (args.Contains("--lineage-only", StringComparer.Ordinal))
+{
+    LineageCosts();
+    return;
+}
 NativeTableCosts();
 if (args.Contains("--native-table-only", StringComparer.Ordinal)) return;
 ExceptionDecisionCosts();
@@ -96,6 +101,7 @@ ReturnResolutionCosts();
 ArgumentResolutionCosts();
 ElementShapeCosts();
 ShapeResolutionCosts();
+LineageCosts();
 if (args.Contains("--return-resolution-only", StringComparer.Ordinal)) return;
 CallCheckCosts();
 DecodeCosts();
@@ -572,6 +578,80 @@ void ShapeResolutionCosts()
         }
     }
     if (failures.Count > 0) throw new InvalidOperationException(string.Join("\n", failures));
+}
+
+// Fails when locating a class field on an instance, or rejecting one whose owner is outside the instance's lineage,
+// costs over 1.35 times more per base than at the size before, for 2, 8 and 32 bases. The check walks the lineage
+// once, so its cost per base falls toward a constant; a walk per base would grow with the bases.
+void LineageCosts()
+{
+    const double AllowedLineageGrowth = 1.35;
+    var lineageDirectory = At("artifacts/LookupScaling/Lineage");
+    Directory.CreateDirectory(lineageDirectory);
+    var samples = new List<(int Bases, long Rejected, long Located)>();
+    foreach (var bases in new[] { 2, 8, 32 })
+    {
+        var output = RunLineageFixture(lineageDirectory, bases);
+        var costs = LookupPatterns.Lineage().Matches(output).Cast<Match>().ToArray();
+        if (costs.Length != 2) throw new InvalidOperationException("Missing lineage costs: " + output);
+        long Cost(string label) => long.Parse(costs.Single(match => match.Groups[1].Value == label).Groups[2].Value,
+            CultureInfo.InvariantCulture);
+        samples.Add((bases, Cost("rejected"), Cost("located")));
+    }
+    var failures = new List<string>();
+    foreach (var (name, cost) in new (string, Func<(int Bases, long Rejected, long Located), long>)[]
+        { ("rejecting an unrelated owner", sample => sample.Rejected), ("locating the furthest base's field",
+            sample => sample.Located) })
+    {
+        var perBase = samples.Select(sample => (double)cost(sample) / sample.Bases).ToArray();
+        var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+            $"{sample.Bases} = {(double)cost(sample) / sample.Bases:F0}")));
+        if (perBase.Skip(1).Zip(perBase).Any(pair => pair.First > pair.Second * AllowedLineageGrowth))
+        {
+            failures.Add($"Lineage check {name} cost {measured} heartbeats per base; the limit is " +
+                $"{AllowedLineageGrowth} times the cost per base at the size before.");
+            Console.WriteLine($"FAIL lineage check {name}: {measured} heartbeats per base");
+        }
+        else Console.WriteLine($"PASS lineage check {name}: {measured} heartbeats per base");
+    }
+    if (failures.Count > 0) throw new InvalidOperationException(string.Join("\n", failures));
+}
+
+// Locates a field of the furthest of `bases` base classes on a fresh instance and rejects one of an unrelated class.
+string RunLineageFixture(string directory, int bases)
+{
+    var lineage = string.Join(", ", Enumerable.Range(0, bases).Reverse().Select(index =>
+        $".object \"T\" \"T.Base{index}\""));
+    var source = $$"""
+        import CIL.Safety.HeapObjectFacts
+        open CIL CIL.Extraction CIL.Safety Lean Elab Command
+        /-- Elaboration and kernel checking of one command, excluding fixture construction. -/
+        elab "#lineage_cost " label:str " in " command:command : command => do
+          let before <- IO.getNumHeartbeats
+          elabCommand command
+          let after <- IO.getNumHeartbeats
+          logInfo m!"lineage {label.getString} {after - before} heartbeats"
+        def lineageType : RuntimeType := { identity := .object "T" "T.Derived", bases := [{{lineage}}] }
+        #lineage_cost "rejected" in
+        theorem rejected (memory : Safety.Memory) :
+            objectFieldAddress (objectMemory memory lineageType 64) (.address ⟨memory.nextIdentity, 0⟩)
+              (.object "T" "T.Unrelated") 8 =
+                .error (.unsupported "Field owner is not the object's class or a base of it") :=
+          objectMemory_field_unrelated memory lineageType 64 8 _ (by decide)
+        #lineage_cost "located" in
+        theorem located (memory : Safety.Memory) :
+            objectFieldAddress (objectMemory memory lineageType 64) (.address ⟨memory.nextIdentity, 0⟩)
+              (.object "T" "T.Base0") 8 = .ok ⟨memory.nextIdentity, 8⟩ :=
+          objectMemory_field memory lineageType (by decide) (by decide) (by decide)
+        #print axioms rejected
+        #print axioms located
+        """ + "\n";
+    var path = Path.Combine(directory, $"Lineage{bases}.lean");
+    File.WriteAllText(path, source);
+    var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+    if (output.Contains("sorryAx", StringComparison.Ordinal))
+        throw new InvalidOperationException("The lineage fixture introduced an unproved theorem.");
+    return output;
 }
 
 // Declares one shape fact per operand over size structs, or over one struct of size fields, and reads every fact.
@@ -2354,6 +2434,9 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"call check ([0-9]+) heartbeats")]
     internal static partial Regex CallCheck();
+
+    [GeneratedRegex(@"lineage (rejected|located) ([0-9]+) heartbeats")]
+    internal static partial Regex Lineage();
 
     [GeneratedRegex(@"([0-9]+) lemmas rechecked, ([0-9]+) kernel heartbeats")]
     internal static partial Regex EmbeddingRecheck();

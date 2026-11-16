@@ -235,6 +235,23 @@ info: 'CIL.Instruction.ofRaw?_substitute' depends on axioms:
 #guard_msgs (whitespace := lax) in
 #print axioms Instruction.ofRaw?_substitute
 
+/-- `classOperand` holding the first generic argument instead of `int32`. -/
+private def genericOperand : RawOperand :=
+  .field (.object "T" "T.Account") 1 (.parameter 0) name!"balance" false
+
+-- Instantiating a class field with `int32` decodes to the access of `classField`.
+example : ((substituteOperand [.atom runtimeScope "System.Int32"] [] 0 genericOperand).bind
+    (fun operand => Instruction.ofRaw? ⟨0, 123, operand⟩)).any
+      (·.sameValue (.ldfld classField)) = true := by
+  decide +kernel
+
+/--
+info: 'CIL.Instruction.ofRaw?_substitute_field' depends on axioms:
+  [propext, Classical.choice, Quot.sound]
+-/
+#guard_msgs (whitespace := lax) in
+#print axioms Instruction.ofRaw?_substitute_field
+
 /-- The constructor at the head of each decoded named opcode, failing on any `none`. -/
 private def decodedHeads : MetaM (List Name) := do
   let mut list ← whnf (mkConst ``decodedNamed)

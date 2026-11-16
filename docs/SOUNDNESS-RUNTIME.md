@@ -252,8 +252,9 @@ field keeps its offset in every derived instance. Each `ldfld` and `stfld` carri
 reference its raw operand names, and its step resolves the slot from the field's index and type
 (`Method.fieldShape`); that the raw index counts the fields of the declaring class's bases first
 is metadata the extractor decodes. The model's layout needs no correspondence with CoreCLR's
-layout because code cannot observe it: `ldflda` on a class faults when stepped, and object
-references have no integer form. Each access checks that the field's
+layout because code cannot observe it: the extractor refuses a method with `ldflda` on a class
+field at admission, a hand-written body holding one faults as `unsupported` when stepped, and
+object references have no integer form. Each access checks that the field's
 declaring class is in the allocation's lineage, so a field of a base class is reached on every
 derived instance and a field of an unrelated class on none, and a null receiver throws
 `NullReferenceException`, as `ldfld` and `stfld` do; a null byref keeps its distinct

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.Frozen;
 using System.Globalization;
+using System.Reflection.Metadata.Ecma335;
 using System.Text;
 using System.Text.Json;
 using Mono.Cecil;
@@ -203,15 +204,35 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
     }
 
     /// <summary>
-    /// The typed reference of the field operand of <paramref name="instruction"/> in <paramref name="method"/>, the
-    /// owner, index and held type its raw operand states and its name.
+    /// The typed reference of the field operand at <paramref name="pc"/> in <paramref name="method"/>, the owner,
+    /// index and held type its raw operand states and the name of the row the original body's token names.
     /// </summary>
-    internal FieldRef FieldReferenceOf(MethodDefinition method, Instruction instruction)
+    internal FieldRef FieldReferenceOf(MethodDefinition method, int pc)
     {
         methodParameterCount = method.GenericParameters.Count;
-        var field = (FieldReference)instruction.Operand;
-        var (owner, index, held, _) = FieldOperand(instruction, field);
-        return new(owner, index, held, MetadataName.OfText(field.Name));
+        var instruction = method.Body.Instructions[pc];
+        var (owner, index, held, _) = FieldOperand(instruction, (FieldReference)instruction.Operand);
+        // A specialization's operands are references without a token; its definition's body holds the token.
+        var original = (MethodDefinition)Original(method.Module).LookupToken(method.MetadataToken);
+        return new(owner, index, held, FieldName(original, (FieldReference)original.Body.Instructions[pc].Operand));
+    }
+
+    /// <summary>
+    /// The name of the Field or MemberRef row the field operand's token names in the image of
+    /// <paramref name="method"/>, an original body; the metadata check spells the operand's name against it.
+    /// </summary>
+    MetadataName FieldName(MethodDefinition method, FieldReference field)
+    {
+        var image = Pinned.Metadata(method.Module);
+        var token = field.MetadataToken;
+        return token.TokenType switch
+        {
+            TokenType.Field => IdentityRows.Name(image,
+                image.Reader.GetFieldDefinition(MetadataTokens.FieldDefinitionHandle((int)token.RID)).Name),
+            TokenType.MemberRef => IdentityRows.Name(image,
+                image.Reader.GetMemberReference(MetadataTokens.MemberReferenceHandle((int)token.RID)).Name),
+            _ => throw new InvalidDataException("Field operand without a Field or MemberRef row: " + field.FullName)
+        };
     }
 
     /// <summary>The type operand of <paramref name="instruction"/> in <paramref name="method"/>, as its raw operand
@@ -258,7 +279,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                     $"{Bool(site.HasThis)} {Bool(site.ExplicitThis)} {(int)site.CallingConvention}";
             case FieldReference field:
                 var (owner, index, held, isStatic) = FieldOperand(instruction, field);
-                var name = MetadataName.OfText(field.Name).ToLean();
+                var name = FieldName(method, field).ToLean();
                 return $".field ({owner}) {index} ({held}) {name} {Bool(isStatic)}";
             case string text: return $".text {Quote(text)}";
             case float number: return $".text {Quote("float:" + BitConverter.SingleToInt32Bits(number).ToString(CultureInfo.InvariantCulture))}";

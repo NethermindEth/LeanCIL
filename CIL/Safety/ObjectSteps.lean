@@ -756,17 +756,30 @@ theorem step_stfld_word_i32_4_eq (field : CIL.Extraction.FieldRef) (offset : Nat
 
 end ObjectEquations
 
+/-- When set, a closed body's class field steps only by the operand's shape fact, and evaluating
+    the shape instead is an error, so a test can require that stepping reads the fact. -/
+register_option cil.requireFieldShapeFacts : Bool := {
+  defValue := false
+  descr := "step a closed body's class field only by the operand's shape fact"
+}
+
 open Lean Meta in
 /-- How `body` resolves `field`, reduced to a `FieldShape` constructor where it can be, with
-    its proof: from the operand's shared shape fact, by evaluation for a closed body and operand,
-    which the kernel checks again, or else as simp rewrites the shape with the facts in scope. -/
+    its proof: from the operand's shared shape fact, by compiled evaluation for a closed body and
+    operand, which the kernel checks again, or else as simp rewrites the shape with the facts in
+    scope. An evaluated shape is the literal a shape fact states, so both paths give one term. -/
 def fieldShapeIn (body field : Expr) : SimpM (Expr × Expr) := do
   let resolver := mkApp2 (mkConst ``CIL.Method.fieldShape) body field
   if let some (.done shared) ← ResolutionFacts.sharedShape? ``CIL.Method.fieldShape resolver then
     if let some proof := shared.proof? then return (shared.expr, proof)
   unless resolver.hasFVar || resolver.hasMVar do
-    let evaluated ← withDefault <| reduce resolver
-    if ← isConstructorApp evaluated then
+    if cil.requireFieldShapeFacts.get (← getOptions) then
+      throwError "class field {field} of a closed body has no shape fact"
+    -- A body the compiler cannot run, such as one over an axiom, is left to simp.
+    let evaluated? ← try
+        pure (some (toExpr (← unsafe evalExpr CIL.FieldShape (mkConst ``CIL.FieldShape) resolver)))
+      catch _ => pure none
+    if let some evaluated := evaluated? then
       return (evaluated, ← mkExpectedTypeHint (← mkEqRefl evaluated) (← mkEq resolver evaluated))
   let shape ← Simp.simp resolver
   return (← whnfR (← instantiateMVars shape.expr), ← shape.getProof)

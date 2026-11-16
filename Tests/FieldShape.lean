@@ -1,4 +1,6 @@
 import CIL.Safety.ResolutionFacts
+import CIL.Safety.ObjectSteps
+import CIL.Safety.FuelLemmas
 
 /-!
 # Field and value shapes
@@ -9,7 +11,9 @@ resolves to the offset and width of its checked layout entry, sign-extended only
 declared as a narrow signed integer; a field whose index or held type does not match the
 declaration is unsupported; a class field resolves to the model slot of its index, a struct array
 element taking its size from the layout; and a method, defined or known by a hypothesis on its
-environment, reads the shared facts through the `cil_code` simprocs.
+environment, reads the shared facts through the `cil_code` simprocs. Stepping `ldflda` of a class
+field and `ldfld` of a resolved value-type field gives the faults the step states for them, and
+a field operand without a fact steps to the same literal shape a fact states.
 -/
 
 namespace Tests.FieldShape
@@ -214,5 +218,70 @@ run_cmd Command.liftTermElabM do
   unless refused do throwError "the kernel did not refuse a misstated shape fact"
   if (← getEnv).contains `Tests.FieldShape.misstatedField_shape then
     throwError "a refused shape fact stayed in the environment"
+
+/-- `Node.count`, an `int32` class field at raw index 0. -/
+def countField : FieldRef :=
+  { owner := node, index := 0, type := .atom runtimeScope "System.Int32", name := name!"count" }
+
+-- `ldflda` of a class field faults as unsupported, since the model forms no address into an
+-- object; the fault is not definite, so no refutation lemma takes it as evidence about the method.
+theorem class_field_address_faults (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    Safety.step body (.ldflda countField) 0 [] frame [.object receiver] memory =
+      .error (.unsupported "Class field address") ∧
+    (Safety.ExecutionFault.unsupported "Class field address").definite = false := by
+  refine ⟨?_, rfl⟩
+  simp only [cil_step]
+#print axioms class_field_address_faults
+
+-- A value-type field that the layouts resolve is never reached through `ldfld` of an object.
+theorem value_field_load_faults (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    Safety.step body (.ldfld highField) 0 [] frame [.object receiver] memory =
+      .error (.unsupported "Value-type field instruction") := by
+  simp only [cil_step, cil_code]
+  rfl
+#print axioms value_field_load_faults
+
+/-- `Node.lanes` written inline under another name, which no shape fact states. -/
+def inlineLanes : FieldRef :=
+  { owner := node, index := 1, name := name!"inline",
+    type := .array (.apply (.constructor intrinsicsScope "System.Runtime.Intrinsics.Vector128`1")
+      (.atom runtimeScope "System.UInt64")) }
+
+-- A closed body steps a field without a fact by evaluating its shape to the literal a fact would
+-- state, so the stepped goal spells the vector element as a string literal.
+theorem inline_lanes_load (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    ∃ outcome, Safety.step body (.ldfld inlineLanes) 0 [] frame [.object receiver] memory =
+      outcome := by
+  simp only [cil_step]
+  guard_target =ₛ ∃ outcome, (do
+      let address ← Safety.objectFieldAddress memory receiver node 8
+      let value ← Safety.loadArraySlot memory address
+        (.vector "System.Runtime.Intrinsics.Vector128`1<System.UInt64>" 16)
+      pure (Safety.FrameAction.next (0 + 1) [value] frame memory)) = outcome
+  exact ⟨_, rfl⟩
+#print axioms inline_lanes_load
+
+-- With shape facts required, the operand that has none is refused instead of evaluated.
+/-- error: class field inlineLanes of a closed body has no shape fact -/
+#guard_msgs in
+set_option cil.requireFieldShapeFacts true in
+example (frame : Safety.Frame) (memory : Safety.Memory) (receiver : Safety.ManagedReference) :
+    ∃ outcome, Safety.step body (.ldfld inlineLanes) 0 [] frame [.object receiver] memory =
+      outcome := by
+  simp only [cil_step]
+  exact ⟨_, rfl⟩
+
+-- The operand with a fact still steps by it.
+set_option cil.requireFieldShapeFacts true in
+theorem fact_lanes_load (frame : Safety.Frame) (memory : Safety.Memory)
+    (receiver : Safety.ManagedReference) :
+    ∃ outcome, Safety.step body (.ldfld lanesField) 0 [] frame [.object receiver] memory =
+      outcome := by
+  simp only [cil_step]
+  exact ⟨_, rfl⟩
+#print axioms fact_lanes_load
 
 end Tests.FieldShape

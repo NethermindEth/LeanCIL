@@ -144,20 +144,21 @@ internal static class VerificationSuites
             "does not grow with the table's entries; the managed-call check of a body with many call sites at " +
             "a per-site cost that does not grow with the call sites; the argument facts of " +
             "cil_resolution_facts and the reads through them at a per-argument cost that does not grow with " +
-            "the parameters, and its static site facts and the reads through them at a per-site cost that " +
-            "does not grow with the sites; the array element shape facts of cil_resolution_facts and the reads " +
-            "through them " +
-            "at a per-element-type cost that does not grow with the layouts or the sites naming each type; a " +
-            "runtime model lookup at a kernel cost that does not grow with the model table, and the runtime " +
-            "model agreement check at a per-site cost that does not grow with the call sites; the shape facts " +
-            "of cil_field_shape and the reads through them at a per-field cost that grows less than 1.35 times " +
-            "from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 to 512 fields in a struct each, " +
-            "and the facts of cil_value_shape and their reads at a per-type cost that grows less than 1.35 " +
-            "times from 8 to 32 to 128 to 512 struct types; the kernel check of one body at a cost independent " +
-            "of the methods and metadata rows of its extraction; the kernel's selection of a calli body at a " +
-            "cost linear in the length of the pointer's owner; raw value opcode decoding and the method " +
-            "decoded from a raw body at a per-instruction kernel cost that does not grow with the body, and " +
-            "the method cil_decoded_method defines from that body at a per-instruction cost that does not " +
+            "the parameters, and its static site facts and the reads through them at a per-site cost that does " +
+            "not grow with the sites; the array element shape facts of cil_resolution_facts and the reads " +
+            "through them at a per-element-type cost that does not grow with the layouts or the sites naming " +
+            "each type; a runtime model lookup at a kernel cost that does not grow with the model table, and " +
+            "the runtime model agreement check at a per-site cost that does not grow with the call sites; the " +
+            "shape facts of cil_field_shape and the reads through them at a per-field cost that grows less " +
+            "than 1.35 times from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 to 512 fields in " +
+            "a struct each, and the facts of cil_value_shape and their reads at a per-type cost that grows " +
+            "less than 1.35 times from 8 to 32 to 128 to 512 struct types; locating a class field on an " +
+            "instance, and rejecting a field whose owner is outside the instance's lineage, at a per-base cost " +
+            "that grows less than 1.35 times from 2 to 8 to 32 bases; the kernel check of one body at a cost " +
+            "independent of the methods and metadata rows of its extraction; the kernel's selection of a calli " +
+            "body at a cost linear in the length of the pointer's owner; raw value opcode decoding and the " +
+            "method decoded from a raw body at a per-instruction kernel cost that does not grow with the body, " +
+            "and the method cil_decoded_method defines from that body at a per-instruction cost that does not " +
             "grow with the body; and the certificate index, feature getter, layout accumulation and " +
             "projection, and extraction home index libraries"),
         new("gates", "Tests/ProofGates.cs",

@@ -239,13 +239,15 @@ SteppingMeasurement Measure(string workload, int requested, bool full)
             "import CIL.Safety.ObjectSteps\nimport CIL.Safety.ResolutionFacts\nimport CIL.Safety.SymbolicExecution\n",
         _ => ""
     };
-    // The objects body reads field 1 of a class, an int64 in the slot at model offset 8.
+    // The objects body reads field 1 of a class, an int64 in the slot at model offset 8; a step that
+    // evaluates the shape instead of reading the fact fails the row.
     var fieldDefinitions = workload == "objects" ? $$"""
         @[cil_code] def environment : CIL.LayoutEnvironment := {}
         /-- The `int64` field 1 of a class. -/
         def counter : CIL.Extraction.FieldRef :=
           { owner := {{NodeType}}, index := 1, type := {{Int64Type}}, name := name!"count" }
         cil_field_shape environment counter
+        set_option cil.requireFieldShapeFacts true
         """ + "\n" : "";
     var localKinds = string.Join(", ", Enumerable.Repeat(".word64", SnapshotLocalCount));
     var localValues = string.Join(", ", Enumerable.Repeat(".i64 0", SnapshotLocalCount));
