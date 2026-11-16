@@ -85,17 +85,12 @@ foreach (var (name, signature, arguments, budget, predicate) in new[]
     }
 
     if (name != "uninitialized") continue;
-    // The method is defined from its decoder, which reads the flag localloc uses from the raw definition; a closed
-    // definition that claims localsinit no longer matches the decoded declared signature.
-    const string flag = "initLocals := false,";
-    var closed = source.Split('\n')
-        .SingleOrDefault(line => line.StartsWith("def method0Closed ", StringComparison.Ordinal));
-    if (!source.Contains("\ncil_decoded_method method0 := ", StringComparison.Ordinal) ||
-        closed is null || !closed.Contains(flag, StringComparison.Ordinal))
+    // The method is defined from its decoder, so a method that claims localsinit is a forged decoder's value, which
+    // no longer matches the closed definition's declared signature.
+    if (!DecodedOriginal(source, 0).Contains("initLocals := false,", StringComparison.Ordinal))
         throw new Exception("Missing uninitialized allocation");
     var forged = Path.Combine(root, "forged-initialization.lean");
-    File.WriteAllText(forged, source.Replace(closed, closed.Replace(flag, "initLocals := true,",
-        StringComparison.Ordinal), StringComparison.Ordinal));
+    File.WriteAllText(forged, ForgeDecodedMethod(source, 0, "declared := { method.declared with initLocals := true }"));
     var rejected = Execute(["lake", "env", "lean", forged], cwd: FixturePackage());
     if (rejected.Code == 0 || !rejected.Output.Contains("DeclaredValid", StringComparison.Ordinal))
         throw new Exception("Forged localsinit was not rejected by the Lean certificate: " + rejected.Output);

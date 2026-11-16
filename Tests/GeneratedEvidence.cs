@@ -50,6 +50,75 @@ partial class Program
         return instructions;
     }
 
+    // An extraction's definition of method `method` from its decoder, with the field operand definitions it names.
+    static Match DecodedDefinition(string source, int method) => new Regex(
+        $@"(?m)^cil_decoded_method method{method}( \[[^\]\r\n]*\])? := Method\.ofRaw\? profile environment " +
+        $@"method{method}Original method{method}TypeArgumentsRaw(?=\r?$)").Match(source);
+
+    /// <summary>Whether an extraction defines method `method` from its decoder rather than by a literal.</summary>
+    static bool IsDecodedMethod(string source, int method) => DecodedDefinition(source, method).Success;
+
+    /// <summary>The numbers of the methods an extraction defines, by a literal or from the decoder, in order.</summary>
+    static int[] DefinedMethods(string source) => [.. Regex.Matches(source,
+            @"(?m)^(?:def method(?<number>\d+) : Method|cil_decoded_method method(?<number>\d+)(?: \[[^\]\r\n]*\])?) :=")
+        .Select(match => int.Parse(match.Groups["number"].Value, System.Globalization.CultureInfo.InvariantCulture))];
+
+    /// <summary>
+    /// The line defining the raw method a decoded method is decoded from, the decoder's input. A method kept as a
+    /// literal fails, so a reader never takes an absent body for an empty one.
+    /// </summary>
+    static string DecodedOriginal(string source, int method)
+    {
+        if (!IsDecodedMethod(source, method))
+            throw new InvalidOperationException($"method{method} is not defined from its decoder");
+        return Regex.Match(source, $@"(?m)^def method{method}Original : Extraction\.RawMethod := [^\r\n]*").Value;
+    }
+
+    /// <summary>
+    /// `source` with `before` changed to `after` in the raw definition decoded method `method` is decoded from:
+    /// the method the kernel recomputes changes, while its closed definition and certificates keep their values.
+    /// </summary>
+    static string ForgeDecodedOriginal(string source, int method, string before, string after)
+    {
+        var original = DecodedOriginal(source, method);
+        if (!original.Contains(before, StringComparison.Ordinal))
+            throw new InvalidOperationException($"method{method}Original has no {before}");
+        return source.Replace(original, original.Replace(before, after, StringComparison.Ordinal),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// `source` with decoded method `method` defined by a forged decoder: the extraction's decoder call with
+    /// `update`, a structure update of the decoded `method`, applied to the method it gives.
+    /// </summary>
+    static string ForgeDecodedMethod(string source, int method, string update)
+    {
+        var call = DecodedDefinition(source, method);
+        if (!call.Success) throw new InvalidOperationException($"method{method} is not defined from its decoder");
+        var forged = $"method{method}Forged";
+        return source[..call.Index] +
+            $"def {forged} (profile : FeatureProfile) (environment : LayoutEnvironment) " +
+            "(original : Extraction.RawMethod) (arguments : List Extraction.TypeExpr) : Option Method := " +
+            $"(Method.ofRaw? profile environment original arguments).map fun method => {{ method with {update} }}\n" +
+            $"cil_decoded_method method{method}{call.Groups[1].Value} := {forged} profile environment " +
+            $"method{method}Original method{method}TypeArgumentsRaw" + source[(call.Index + call.Length)..];
+    }
+
+    /// <summary>
+    /// `source` with decoded method `method` declaring its closed definition's return type with `atom` replaced by
+    /// `replacement`, through a forged decoder.
+    /// </summary>
+    static string ForgeDecodedReturnType(string source, int method, string atom, string replacement)
+    {
+        var closed = Regex.Match(source,
+            $@"(?m)^def method{method}Closed : [^\r\n]*?returnType := (?<type>[^\r\n]*?), parameters := ");
+        var returnType = closed.Groups["type"].Value;
+        if (!returnType.Contains(atom, StringComparison.Ordinal))
+            throw new InvalidOperationException($"method{method}Closed returns no {atom}");
+        return ForgeDecodedMethod(source, method, "declared := { method.declared with returnType := " +
+            returnType.Replace(atom, replacement, StringComparison.Ordinal) + " }");
+    }
+
     // Keep emitted definitions intact and select one independent validator obligation.
     // Its unchanged form must also be compiled as a positive control by the caller.
     static string NarrowEvidence(string source, string theorem)
