@@ -16,7 +16,8 @@ the constructor a construction names, or through a field operand
 type test at the instantiated type, each construction of the instantiated constructor, and each
 class field access at the same owner with its held type instantiated
 (`Instruction.ofRaw?_substitute_field`). `Instruction.ofRaw` is the total decoding: it writes a
-hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
+hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?` admits nothing
+(`Instruction.ofRaw_eq_unadmitted_iff`).
 -/
 
 namespace CIL.Extraction
