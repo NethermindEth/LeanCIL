@@ -1452,7 +1452,7 @@ long Checked(string path, string text, string binder, string method, string equa
     var definition = Regex.Match(templates, @"(?m)^" + Regex.Escape(Header) + @"[^\r\n]*(\r?\n  [^\r\n]*)+");
     var depth = Regex.Match(extracted, @"(?m)^set_option maxRecDepth [0-9]+");
     if (!definition.Success || !depth.Success ||
-        !Regex.IsMatch(extracted, @"(?m)^cil_decoded_method method0 := Method\.ofRaw\? ") ||
+        !IsDecodedMethod(extracted, 0) ||
         !Regex.IsMatch(extracted, @"(?m)^cil_instruction_equations method0\r?$") ||
         !templates.Contains("cil_instruction_equations method0", StringComparison.Ordinal))
         throw new InvalidOperationException($"Missing the definition, equations or recursion depth of {name}.");
