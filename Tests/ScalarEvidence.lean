@@ -1084,25 +1084,28 @@ example : scalarEmissionMatches #[] none (i 125 valueField) [.word64, .word64]
 -- `ldflda` of a class field is decoded; its step faults, since an object field has no address.
 example : scalarEmissionMatches #[] none (i 124 valueField) [.object] (.ldflda value) = true := by
   decide
-/-- A field of `Scope.Node` at raw index 0 holding the runtime integer type `name`. -/
-private def sizedField (name : String) : RawOperand :=
-  .field node 0 (.atom runtime name) name!"value" false
-/-- The field reference `sizedField name` names. -/
-private def sized (name : String) : FieldRef :=
-  { owner := node, index := 0, type := .atom runtime name, name := name!"value" }
--- A stored integer has the field's stack kind: `int32` up to 4 bytes, `int64` or native for 8.
-example : scalarEmissionMatches #[] none (i 125 (sizedField "System.SByte")) [.word64, .object]
-    (.stfld (sized "System.SByte")) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int16")) [.word64, .object]
-    (.stfld (sized "System.Int16")) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int32")) [.word64, .object]
-    (.stfld (sized "System.Int32")) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int64")) [.word32, .object]
-    (.stfld (sized "System.Int64")) = false := by decide
-example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int32")) [.word32, .object]
-    (.stfld (sized "System.Int32")) = true := by decide
-example : scalarEmissionMatches #[] none (i 125 (sizedField "System.Int64")) [.native, .object]
-    (.stfld (sized "System.Int64")) = true := by decide
+/-- Whether a `stfld` of a `Scope.Node` field at raw index 0 holding `type` admits a stored
+    `value` of that kind. -/
+private def storesInto (type : TypeExpr) (value : ScalarKind) : Bool :=
+  scalarEmissionMatches #[] none (i 125 (.field node 0 type name!"value" false)) [value, .object]
+    (.stfld { owner := node, index := 0, type, name := name!"value" })
+/-- The runtime primitive type `name`. -/
+private def primitive (name : String) : TypeExpr := .atom runtime name
+-- A stored integer has the field's stack kind, `int32` up to 4 bytes and `int64` or native for
+-- 8, since the step reads an `int32` only into a narrow slot and an `int64` only into a wide one.
+example : storesInto (primitive "System.SByte") .word64 = false := by decide
+example : storesInto (primitive "System.Int16") .word64 = false := by decide
+example : storesInto (primitive "System.Int32") .word64 = false := by decide
+example : storesInto (primitive "System.Int32") .native = false := by decide
+example : storesInto (primitive "System.Int64") .word32 = false := by decide
+example : storesInto (primitive "System.IntPtr") .word32 = false := by decide
+example : storesInto (.enum "E" (primitive "System.Int64")) .word32 = false := by decide
+example : storesInto (primitive "System.Int32") .word32 = true := by decide
+example : storesInto (primitive "System.Boolean") .word32 = true := by decide
+example : storesInto (primitive "System.Char") .word32 = true := by decide
+example : storesInto (.enum "E" (primitive "System.Int16")) .word32 = true := by decide
+example : storesInto (primitive "System.Int64") .native = true := by decide
+example : storesInto (primitive "System.IntPtr") .word64 = true := by decide
 -- A field typed as an array of a class holds the array's reference, stored as an object or null;
 -- a value array field stores only an array.
 private def itemsField : RawOperand := .field node 1 (.array node) name!"items" false
