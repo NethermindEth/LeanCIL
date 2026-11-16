@@ -445,7 +445,7 @@ private def lazyOfMethodParameter : TypeExpr :=
 
 /-- A field typed `!0` holds the declaring instance's first argument, here the method's own type
     parameter `!!0`, not the reading method's owner parameter: for a static field of a pinned
-    generic class and for a field of an external generic class. -/
+    generic class and for a static field of an external generic class. -/
 theorem reads_a_field_parameter_against_the_declaring_instance :
     passes own.1 lib tokens.holderValueRef
       (.field holderOfMethodParameter 0 (.parameter 0) name!"Value" true) (arity := 1) = true ∧
@@ -453,19 +453,26 @@ theorem reads_a_field_parameter_against_the_declaring_instance :
       (.field holderOfMethodParameter 0 (.parameter 1) name!"Value" true)
       (.operandMismatch tokens.holderValueRef) (arity := 1) = true ∧
     passes own.1 lib tokens.lazyValueRef
-      (.field lazyOfMethodParameter 0 (.parameter 0) name!"Value" false) (arity := 1) = true ∧
+      (.field lazyOfMethodParameter 0 (.parameter 0) name!"Value" true) (arity := 1) = true ∧
     rejects own.1 lib tokens.lazyValueRef
-      (.field lazyOfMethodParameter 0 (.parameter 1) name!"Value" false)
+      (.field lazyOfMethodParameter 0 (.parameter 1) name!"Value" true)
       (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
 #print axioms reads_a_field_parameter_against_the_declaring_instance
 
-/-- A member reference into an unpinned type gives every field index 0, so the operand's name is
-    what tells `System.Lazy<!!0>.Value` from another field of the type: another name is refused. -/
-theorem rejects_an_unpinned_field_reference_with_another_name :
+/-- No carried field list gives the position of an instance field of an unpinned type, so
+    `System.Lazy<!!0>.Value` read as an instance field is refused at every index, and an operand
+    named for another member is refused by its name first. -/
+theorem rejects_an_unpinned_instance_field :
+    rejects own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 0 (.parameter 0) name!"Value" false)
+      (.unboundInstanceField tokens.lazyValueRef) (arity := 1) = true ∧
+    rejects own.1 lib tokens.lazyValueRef
+      (.field lazyOfMethodParameter 1 (.parameter 0) name!"Value" false)
+      (.unboundInstanceField tokens.lazyValueRef) (arity := 1) = true ∧
     rejects own.1 lib tokens.lazyValueRef
       (.field lazyOfMethodParameter 0 (.parameter 0) name!"Other" false)
       (.operandMismatch tokens.lazyValueRef) (arity := 1) = true := by decide +kernel
-#print axioms rejects_an_unpinned_field_reference_with_another_name
+#print axioms rejects_an_unpinned_instance_field
 
 /-- The own slice without the row of the static field between the first and the second instance
     field of `Program`: the carried rows of the type leave a gap. -/

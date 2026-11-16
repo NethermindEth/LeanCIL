@@ -75,8 +75,12 @@ Test("short groups preserve selection, isolation and bounded duration", () =>
     // The longest suite alone bounds the run; no packed job may outlast it or approach its timeout.
     Require(groups[0].Suites is [var alone] && alone == longest.Key, "The longest suite shares its job");
     foreach (var group in groups.Where(group => group.Suites.Length > 1))
-        Require(group.Suites.Length <= VerificationSelection.GroupMembers && Seconds(group) <= target &&
-            Seconds(group) <= group.Timeout * 60 / 2, "Unbounded group: " + group.Suite);
+        Require(group.Suites.Length <= VerificationSelection.GroupMembers && Seconds(group) <= target,
+            "Unbounded group: " + group.Suite);
+    // A suite alone in its job is bounded like a packed one: a job stopped before twice its measured time
+    // would fail a suite that only slowed down.
+    foreach (var group in groups)
+        Require(Seconds(group) <= group.Timeout * 60 / 2, "A job's limit is under twice its time: " + group.Suite);
     // A short job at the tail would queue behind the runner cap and finish last for no reason.
     Require(groups.Zip(groups.Skip(1)).All(pair => Seconds(pair.First) >= Seconds(pair.Second)),
         "Jobs do not start longest first");
