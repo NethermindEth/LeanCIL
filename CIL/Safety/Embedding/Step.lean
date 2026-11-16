@@ -24,6 +24,55 @@ def FrameAction.relabel (r : Nat → Nat) : FrameAction → FrameAction
   | .next target stack frame memory => .next (r target) stack frame memory
   | action => action
 
+/-- A call's runtime model reads its pc only to continue at the next one. -/
+theorem modelStep_at (model : Option CIL.RuntimeModel) (body : CIL.Method) (pc : Nat)
+    (frame : Frame) (stack : List Value) (memory : Memory) :
+    modelStep model body pc frame stack memory =
+      FrameAction.relabel (fun _ => pc + 1) <$> modelStep model body 0 frame stack memory := by
+  unfold modelStep observedCall runModel intrinsicCall featureCall referenceCompareCall
+    referenceSubtractCall typedTransferCall skipInitCall
+  repeat' first
+    | rfl
+    | (simp only [map_bind, map_pure, FrameAction.relabel]; done)
+    | (apply bind_congr; intro)
+    | split
+    | simp only [map_bind, map_pure, FrameAction.relabel]
+
+#print axioms modelStep_at
+
+/-- A runtime model that continues at one pc continues alike at another, in a body of the same
+    profile. -/
+theorem modelStep_move {model : Option CIL.RuntimeModel} {moved body : CIL.Method} {pc q : Nat}
+    {frame : Frame} {stack values : List Value} {memory final : Memory}
+    (profile : moved.profile = body.profile)
+    (executed : modelStep model body pc frame stack memory =
+      .ok (.next (pc + 1) values frame final)) :
+    modelStep model moved q frame stack memory = .ok (.next (q + 1) values frame final) := by
+  rw [modelStep_profile_congr profile, modelStep_at (pc := q)]
+  rw [modelStep_at (pc := pc)] at executed
+  cases zero : modelStep model body 0 frame stack memory with
+  | error fault => simp [zero, Functor.map, Except.map] at executed
+  | ok action =>
+    simp only [zero, Functor.map, Except.map, Except.ok.injEq] at executed ⊢
+    cases action <;> simp_all [FrameAction.relabel]
+
+#print axioms modelStep_move
+
+/-- A runtime model that faults at one pc faults alike at another, in a body of the same
+    profile. -/
+theorem modelStep_move_error {model : Option CIL.RuntimeModel} {moved body : CIL.Method}
+    {pc q : Nat} {frame : Frame} {stack : List Value} {memory : Memory} {fault : ExecutionFault}
+    (profile : moved.profile = body.profile)
+    (executed : modelStep model body pc frame stack memory = .error fault) :
+    modelStep model moved q frame stack memory = .error fault := by
+  rw [modelStep_profile_congr profile, modelStep_at (pc := q)]
+  rw [modelStep_at (pc := pc)] at executed
+  cases zero : modelStep model body 0 frame stack memory with
+  | error other => simp_all [Functor.map, Except.map]
+  | ok action => simp [zero, Functor.map, Except.map] at executed
+
+#print axioms modelStep_move_error
+
 /-- What one expected step at `pc` and its actual counterpart at `q` must share. -/
 structure StepContext (expected actual : CIL.Method) (r : Nat → Nat) (op : CIL.Instruction)
     (pc q : Nat) :
@@ -363,16 +412,30 @@ theorem step_relabel_initializeSpanLocal (index : Nat) (constructor : SpanConstr
 theorem step_relabel_call (method : CIL.Extraction.MethodRef) (prefixes : CallPrefixes) :
     StepRelabel (.call method prefixes) := by
   plain_cases
-  link_cases
-  by_cases tail : prefixes.tail = true
-  · by_cases short : (stack.length != method.argumentCount) = true
-    · simp [tail, short] at h
-    · simp only [tail, short, ↓reduceIte] at h ⊢
-      lockstep
-  · by_cases short : stack.length < method.argumentCount
-    · simp [tail, short] at h
-    · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
-      lockstep
+  rw [context.link]
+  split at h
+  · rename_i linked
+    try simp only [linked]
+    by_cases tail : prefixes.tail = true
+    · by_cases short : (stack.length != method.argumentCount) = true
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte] at h ⊢
+        lockstep
+    · by_cases short : stack.length < method.argumentCount
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+        lockstep
+  · rename_i unlinked
+    try simp only [unlinked]
+    by_cases tail : prefixes.tail = true
+    · simp [tail] at h
+    · simp only [tail, Bool.false_eq_true, ↓reduceIte] at h ⊢
+      rw [context.environment]
+      obtain ⟨values, final, rfl⟩ := modelStep_next h
+      simp only [FrameAction.relabel]
+      rw [context.next (by simp [CIL.Instruction.continues, tail])]
+      exact modelStep_move context.profile h
+  · cases h
 
 #print axioms step_relabel_call
 
@@ -1085,14 +1148,25 @@ theorem step_raise_conv_ovf_un (target : ConvTarget) : StepRaise (.conv_ovf_un t
 theorem step_raise_call (method : CIL.Extraction.MethodRef) (prefixes : CallPrefixes) :
     StepRaise (.call method prefixes) := by
   plain_cases
-  link_cases
-  by_cases tail : prefixes.tail = true
-  · simp only [tail, ↓reduceIte] at h ⊢
-    exact h
-  · by_cases short : stack.length < method.argumentCount
-    · simp [tail, short] at h
-    · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
-      raise_lockstep
+  rw [context.link]
+  split at h
+  · rename_i linked
+    try simp only [linked]
+    by_cases tail : prefixes.tail = true
+    · simp only [tail, ↓reduceIte] at h ⊢
+      exact h
+    · by_cases short : stack.length < method.argumentCount
+      · simp [tail, short] at h
+      · simp only [tail, short, ↓reduceIte, Bool.false_eq_true] at h ⊢
+        raise_lockstep
+  · rename_i unlinked
+    try simp only [unlinked]
+    by_cases tail : prefixes.tail = true
+    · simp [tail, unlinkedCall] at h
+    · simp only [tail, Bool.false_eq_true, ↓reduceIte] at h ⊢
+      rw [context.environment]
+      exact modelStep_move_error context.profile h
+  · simp [unlinkedCall] at h
 
 #print axioms step_raise_call
 

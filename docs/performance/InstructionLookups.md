@@ -248,6 +248,20 @@ command. It fails when the heartbeats per record grow more than 1.25 times from 
 next. The proof costs about 14,300, 13,000 and 14,200 heartbeats per record. Run this row alone
 with `dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
 
+The suite decides with `decide +kernel` the closure of method 0 in three shapes of program: a chain
+of 8, 32 and 128 methods each calling the next, whose closure is the whole program; one method
+whose link table enters seven others 32, 128 and 512 times; and a closure of four methods at the
+start of a program of 128, 512 and 2,048 methods. A search over n methods with e link callees in
+a program of P methods reads each method by its index in the list and gives each callee one packed
+table entry, so it costs O(n * P + e). The suite fails when, in any shape, the heartbeats each
+added unit of n * P + e costs grow more than 1.15 times from the first two sizes to the last two.
+The chain costs about 90,400, 437,300 and 3,533,900 heartbeats, so each added unit of n * P costs
+0.57 times as much at the larger sizes; the fan costs about 2,400 heartbeats per added callee and
+the long program about 255 per added method at every size. The chain grows with the square of
+its methods because its closure is the whole program. A search that folded over its state instead
+cost 2.33 times as much per callee from 128 to 512 callees as from 32 to 128. Run this row alone
+with `dotnet run --file Tests/LookupScaling.cs -- --closure-only`.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the

@@ -102,8 +102,8 @@ theorem decoded_summary : DecodedSummary [addMethod] [addItem] testProfile testE
 
 /-- The caller's call check, against the records' method table. -/
 theorem caller_calls_valid :
-    ManagedCallsValid (specializationTable evidence) [] callerRaw [true, true, true, true]
-      callerMethod := by
+    ManagedCallsValid (specializationTable evidence) [] (callModelled callerMethod) callerRaw
+      [true, true, true, true] callerMethod := by
   decide +kernel
 #print axioms caller_calls_valid
 

@@ -7,6 +7,7 @@ import CIL.Safety.HeapObjects
 import CIL.Safety.NativeMethodTables
 import CIL.Resolution
 import CIL.RuntimeModel
+import CIL.Extraction.RuntimeModels
 
 /-!
 # Checked interpreter
@@ -342,6 +343,37 @@ def runModel (body : CIL.Method) (model : CIL.RuntimeModel) (pc : Nat) (frame : 
     | _ :: rest => .ok (.next (pc + 1) rest frame memory)
     | [] => .error (.unsupported "Not a memory instruction")
 
+/-- A call whose pc states no link runs `model`, the runtime model its method stands for, after
+    checking the operands the model observes; without one it faults with `unlinkedCall`. -/
+def modelStep (model : Option CIL.RuntimeModel) (body : CIL.Method) (pc : Nat) (frame : Frame)
+    (stack : List Value) (memory : Memory) : ExecutionResult FrameAction :=
+  match model with
+  | some model =>
+    observedCall model.observerCount stack fun _ => runModel body model pc frame stack memory
+  | none => .error unlinkedCall
+
+/-- A call's runtime model only ever continues at the next pc in the same frame. -/
+theorem modelStep_next {model : Option CIL.RuntimeModel} {body : CIL.Method} {pc : Nat}
+    {frame : Frame} {stack : List Value} {memory : Memory} {action : FrameAction}
+    (executed : modelStep model body pc frame stack memory = .ok action) :
+    ∃ values final, action = .next (pc + 1) values frame final := by
+  unfold modelStep observedCall runModel intrinsicCall featureCall referenceCompareCall
+    referenceSubtractCall typedTransferCall skipInitCall at executed
+  simp only [Bind.bind, Except.bind, Pure.pure, Except.pure] at executed
+  repeat' first
+    | exact ⟨_, _, (Except.ok.inj executed).symm⟩
+    | cases executed
+    | split at executed
+
+/-- A call's runtime model reads its body only through the profile. -/
+theorem modelStep_profile_congr {moved body : CIL.Method} (profile : moved.profile = body.profile)
+    (model : Option CIL.RuntimeModel) (pc : Nat) (frame : Frame) (stack : List Value)
+    (memory : Memory) :
+    modelStep model moved pc frame stack memory = modelStep model body pc frame stack memory := by
+  simp only [modelStep, runModel, profile]
+
+#print axioms modelStep_profile_congr
+
 /-- `ldfld` of `field` as `body` resolves it: a class slot through the receiver. A field outside
     the checked layouts and class slots faults with its reason, and a value-type field is not
     reached through this instruction. -/
@@ -553,15 +585,21 @@ def step (body : CIL.Method) (op : CIL.Instruction) (pc : Nat) (args : List Valu
   | .stelem_any element, _ =>
     let (memory, values) ← typedElementInstruction (body.elementShape element) true stack m
     return .next (pc + 1) values frame memory
-  -- A call enters the body its pc links to; its operand gives only the argument count.
+  -- A call enters the body its pc links to; a pc with no link runs the runtime model its
+  -- operand names, which leaves no frame for a `tail.` call to retire.
   | .call method prefixes, _ =>
-    let some (.direct callee) := body.linkAt pc | .error unlinkedCall
-    if prefixes.tail then
-      if stack.length != method.argumentCount then .error .invalidState else
-        return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
-    else if stack.length < method.argumentCount then .error .invalidState else
-      let arguments ← (stack.take method.argumentCount).reverse.mapM (checkedValue m)
-      return .call callee arguments (stack.drop method.argumentCount) m
+    match body.linkAt pc with
+    | some (.direct callee) =>
+      if prefixes.tail then
+        if stack.length != method.argumentCount then .error .invalidState else
+          return .tailCall callee (← stack.reverse.mapM (checkedValue m)) m
+      else if stack.length < method.argumentCount then .error .invalidState else
+        let arguments ← (stack.take method.argumentCount).reverse.mapM (checkedValue m)
+        return .call callee arguments (stack.drop method.argumentCount) m
+    | none =>
+      if prefixes.tail then .error unlinkedCall else
+        modelStep (CIL.Extraction.runtimeModel body.environment .call method) body pc frame stack m
+    | some _ => .error unlinkedCall
   -- A construction allocates what the link at its pc states and enters the constructor it names.
   | .newobj constructor, _ =>
     newobjStep (body.linkAt pc) constructor.owner constructor.parameters.length frame stack m

@@ -214,6 +214,63 @@ info: 'Tests.InstructionEquations.constructor_link_faults' depends on axioms: [p
 
 end ExtractedLinks
 
+/-- Thirty-two linked calls in two full blocks of the table, with calls the table omits before,
+    inside and after them. -/
+def sparseBody : CIL.Method :=
+  { returnsValue := true, locals := [],
+    links := [(1, .direct 0), (4, .direct 0), (7, .direct 0), (10, .direct 0), (13, .direct 0),
+      (19, .direct 0), (22, .direct 0), (25, .direct 0), (28, .direct 0), (31, .direct 0),
+      (34, .direct 0), (37, .direct 0), (40, .direct 0), (43, .direct 0), (46, .direct 0),
+      (49, .direct 0), (52, .direct 0), (55, .direct 0), (58, .direct 0), (64, .direct 0),
+      (67, .direct 0), (70, .direct 0), (73, .direct 0), (76, .direct 0), (79, .direct 0),
+      (82, .direct 0), (85, .direct 0), (88, .direct 0), (91, .direct 0), (94, .direct 0),
+      (97, .direct 0), (100, .direct 0)],
+    code := [.ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldarg 0, .call (Tests.callee 1) {}, .pop,
+      .ldc_i4 0, .ret] }
+
+cil_instruction_equations sparseBody
+
+-- An omitted call reads its `none` from the block where its pc would sit, before the first block,
+-- between keys of the second block, and after the last key of a full last block.
+example : sparseBody.linkAt 16 = none := sparseBody_link16
+example : sparseBody.linkAt 61 = none := sparseBody_link61
+example : sparseBody.linkAt 103 = none := sparseBody_link103
+example : sparseBody.linkAt 4 = some (.direct 0) := sparseBody_link4
+
 /-- A call site its table omits. -/
 def unlinkedBody : CIL.Method :=
   { returnsValue := true, locals := [], code := [.ldarg 0, .call (Tests.callee 1) {}, .ret],

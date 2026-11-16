@@ -550,7 +550,7 @@ internal sealed class GenericEvidence(PinnedAssemblies? pinned, LayoutEvidence l
                 return new(instruction.Offset, instruction.OpCode, RefusalKind.Hole);
             var translated = instruction.OpCode.Code switch
             {
-                Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false },
+                Code.Call => operations[pc] is Call { Kind: CallKind.Static, Constrained: false } or ModelCall,
                 Code.Newobj => operations[pc] is Newobj,
                 _ => true
             };
