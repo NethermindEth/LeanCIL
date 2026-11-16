@@ -240,20 +240,17 @@ internal static class Blockers
                     rewrites[index].Instruction.Operand = rewrites[index].Operand;
             }
             // `admitted` means exactly that `extract` succeeds, so an entry without blockers is extracted.
-            string[] decoded = [];
-            LiteralMethod[] literals = [];
-            void Record(Program.MethodDefinitions extracted)
-            {
-                var named = extracted.Methods.Zip(extracted.Refusals).ToArray();
-                decoded = [.. named.Where(pair => pair.Second is null).Select(pair => pair.First.FullName)];
-                literals = [.. named.Where(pair => pair.Second is not null)
-                    .Select(pair => new LiteralMethod(pair.First.FullName, pair.Second!))];
-            }
+            Program.MethodDefinitions? definitions = null;
             if (blocked.Count == 0 && Extract(batch, assemblyPath, signature, profileName, manifestDirectory,
-                    expectedAssembly, typeArguments, initializedTypes, references, imports, Record) is { } rejected)
+                    expectedAssembly, typeArguments, initializedTypes, references, imports,
+                    extracted => definitions = extracted) is { } rejected)
                 blocked.Add(new(methods[0], null, rejected, [methods[0]]));
             if (blocked.Count == 0)
             {
+                var named = definitions!.Methods.Zip(definitions.Refusals).ToArray();
+                string[] decoded = [.. named.Where(pair => pair.Second is null).Select(pair => pair.First.FullName)];
+                LiteralMethod[] literals = [.. named.Where(pair => pair.Second is not null)
+                    .Select(pair => new LiteralMethod(pair.First.FullName, pair.Second!))];
                 outcomes.Add(new(signature, profileName, "admitted", methods[0].FullName, null, methods.Length, [])
                     { TypeArguments = typeArguments, DecodedMethods = decoded, LiteralMethods = literals });
                 continue;
