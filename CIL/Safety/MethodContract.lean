@@ -769,30 +769,59 @@ def cilInvocationEvidence (type : Expr) : Bool :=
       | _ => false)
 
 open Lean Elab Tactic Meta in
-/-- Use supplied or local successful invocation evidence at the fetched call. -/
+/-- Use supplied or local successful invocation evidence at the fetched call. The call is stepped
+    once, and only after some candidate is invocation evidence, so each earlier call's result in
+    scope costs one unification rather than another step. -/
 def cilContractChild (methodFound instructionFound : Term) (facts : Array Term) : TacticM Unit := do
   let mut candidates := facts
   for declaration in ← getLCtx do
     unless declaration.isImplementationDetail do
       if cilInvocationEvidence declaration.type then
         candidates := candidates.push (← Term.exprToSyntax declaration.toExpr)
+  let mut children := #[]
   for candidate in candidates do
-    let saved ← saveState
+    let attempt ← saveState
     try
       let proof ← Term.withoutErrToSorry <| Term.withSynthesize <| Term.elabTerm candidate none
       let type ← instantiateMVars (← inferType proof)
-      unless cilInvocationEvidence type do throwError "Not a successful invocation fact"
-      let child ← if type.isAppOf `CIL.Safety.InvocationCertificate then
-        `(⟨_, ($candidate).1⟩)
-        else if type.isAppOf ``CIL.Safety.CallResult then `(($candidate).invoked)
-        else if type.isAppOfArity ``Exists 2 then pure candidate
-        else `(⟨_, $candidate⟩)
-      evalTactic (← `(tactic| (
-        cil_strict refine CIL.Safety.run_call_post $methodFound $instructionFound
-          (by cil_checked_step_normalized [$facts,*]) $child ?_
-        cil_stack_cleanup)))
+      if cilInvocationEvidence type then
+        children := children.push (← if type.isAppOf `CIL.Safety.InvocationCertificate then
+          `(⟨_, ($candidate).1⟩)
+          else if type.isAppOf ``CIL.Safety.CallResult then `(($candidate).invoked)
+          else if type.isAppOfArity ``Exists 2 then pure candidate
+          else `(⟨_, $candidate⟩))
+    catch _ => pure ()
+    attempt.restore
+  if children.isEmpty then
+    throwError "Call requires a proved contract or matching child invocation"
+  let saved ← saveState
+  let siblings := (← getGoals).tail
+  let continuationTag ← (← getMainGoal).getTag
+  try
+    evalTactic (← `(tactic| cil_strict cil_refine_by CIL.Safety.run_call_post
+      (final := ?cilChildFinal) (values := ?cilChildValues) $methodFound $instructionFound
+      (by cil_checked_step_normalized [$facts,*]) ?cilChild ?cilContinuation))
+  catch _ =>
+    saved.restore
+    throwError "Call requires a proved contract or matching child invocation"
+  let stepped ← getGoals
+  let tagged := fun (name : Name) => stepped.findM? fun goal => return (← goal.getTag) == name
+  let (some child, some continuation) := (← tagged `cilChild, ← tagged `cilContinuation)
+    | throwError "The composed call left no child invocation goal"
+  let results := stepped.filter fun goal => goal != child && goal != continuation
+  for childTerm in children do
+    let attempt ← saveState
+    try
+      setGoals [child]
+      evalTactic (← `(tactic| cil_strict exact $childTerm))
+      for result in results do
+        unless ← result.isAssigned do throwError "The child invocation left its result open"
+      continuation.setTag continuationTag
+      setGoals (continuation :: siblings)
+      evalTactic (← `(tactic| cil_stack_cleanup))
       return
-    catch _ => saved.restore
+    catch _ => attempt.restore
+  saved.restore
   throwError "Call requires a proved contract or matching child invocation"
 
 open Lean Meta in

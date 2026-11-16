@@ -164,6 +164,8 @@ Read `firstCall.post` (the postcondition), `firstCall.framed` (`Confined` to the
 `firstCall.invoked` by field name. A proof that steps to its return with `cil_contract_steps`
 closes the remaining footprint and result goal with `MethodContract.Holds.returns framed post`
 ([contract stepping](https://github.com/NethermindEth/LeanCIL/blob/main/docs/PROOFS-CONTRACTS.md#step-a-caller-through-its-callees)).
+A proof that composes calls with `WP.local_call` clears each call's `LoopFrame` once the next
+call's frame is introduced, or every later step pays for reading it.
 
 ### Loops
 
