@@ -2191,7 +2191,7 @@ void IndirectAccessCosts()
             def code (prefixed : Bool) (sites : Nat) : List Instruction :=
               (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
             """ + "\n";
-        var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {flag} {sites}) .scalar " +
+        var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {flag} {sites}) .scalar " +
             $"(features {flag} {sites}) ((features {flag} {sites}).map Option.isSome) (code {flag} {sites}) ∧ " +
             $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
             $"(code {flag} {sites})";
@@ -2252,8 +2252,8 @@ long LocalAccessCost(int accesses)
             .ldloca ((index + 2) % localCount), .pop]
         def code (cycles : Nat) : List Instruction := (List.range cycles).flatMap codeSegment ++ [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {cycles}) .scalar (features {cycles}) " +
-        $"(List.replicate {accesses + 1} true) (code {cycles})";
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {cycles}) .scalar " +
+        $"(features {cycles}) (List.replicate {accesses + 1} true) (code {cycles})";
     var path = Path.Combine(directory, $"LocalAccesses{accesses}.lean");
     var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend LocalAccesses\n", equations: false);
     var decided = Heartbeats(path, header + $"""
@@ -2389,7 +2389,7 @@ long FeatureLocalCost(int count)
             .ldloca ((index + 2) % localCount), .pop, .ldarga 0, .pop, .ldc_i4 0, .starg 0]
         def code (segments : Nat) : List Instruction := (List.range segments).flatMap codeSegment ++ [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
         $"(features {FeatureLocalSegments}) (List.replicate {FeatureLocalInstructions} true) " +
         $"(code {FeatureLocalSegments})";
     var path = Path.Combine(directory, $"FeatureLocals{count}.lean");
@@ -2471,7 +2471,7 @@ long KnownFactCost(int facts, int rounds)
               [.ldc_i4 (BitVec.ofNat 32 (round + 1)), .stloc (round % facts), .ldloc (round % facts), .pop]) ++
             [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) raw .scalar features " +
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) raw .scalar features " +
         $"(List.replicate {2 * facts + 4 * rounds + 1} true) code";
     var path = Path.Combine(directory, $"KnownFacts{facts}-{rounds}.lean");
     var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend KnownFacts\n", equations: false);
