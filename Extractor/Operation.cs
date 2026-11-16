@@ -377,8 +377,11 @@ internal sealed record StructField(FieldAccess Access, int Offset, int Width, bo
 internal sealed record ClassField(ClassViews.FieldOperation Field, FieldRef? Reference) : Operation
 {
     internal override string Render(Func<int, string> calleeName) =>
-        $".{(Field.Store ? "stfld" : "ldfld")} ({(Reference ?? throw new InvalidOperationException(
-            "A class field access is rendered before its field operand is named.")).ToLean()})";
+        Naming($"({(Reference ?? throw new InvalidOperationException(
+            "A class field access is rendered before its field operand is named.")).ToLean()})");
+
+    /// <summary>The instruction with its field operand written as the Lean term <paramref name="operand"/>.</summary>
+    internal string Naming(string operand) => $".{(Field.Store ? "stfld" : "ldfld")} {operand}";
 
     // The rendered term holds only the direction and the operand, so profiles merged into one template compare those.
     public bool Equals(ClassField? other) =>
