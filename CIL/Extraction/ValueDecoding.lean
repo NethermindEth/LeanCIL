@@ -13,8 +13,9 @@ accepts an emitted instruction exactly when it is that decoded instruction, and
 Instantiation changes a decoded instruction only in the type a type test names or through a field
 operand (`Instruction.ofRaw?_substitute`), so a closed generic body decodes like its original
 with each type test at the instantiated type, and each class field access at the same owner with
-its held type instantiated (`Instruction.ofRaw?_substitute_field`). `Instruction.ofRaw` is the total decoding: it writes a hole, `.unadmitted` of the raw
-opcode, exactly where `ofRaw?` admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
+its held type instantiated (`Instruction.ofRaw?_substitute_field`). `Instruction.ofRaw` is
+the total decoding: it writes a hole, `.unadmitted` of the raw opcode, exactly where `ofRaw?`
+admits nothing (`Instruction.ofRaw_eq_unadmitted_iff`).
 -/
 
 namespace CIL.Extraction
