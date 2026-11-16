@@ -728,7 +728,9 @@ links original typeArguments`, gives. The decoder takes the link table as given:
 construction the allocation, each enters, which `Extraction.ManagedCallsValid` checks against the
 raw site. Compiled code evaluates the decoder, and the command writes the result as constructors
 over numerals, except that a field whose type is that of a constant passed to the decoder, such as
-the profile, the environment and the link table, is written as that constant. The kernel
+the profile, the environment and the link table, is written as that constant, and a
+zero-initialized struct local is written as `.aggregate (List.replicate size 0)`, the term an
+extraction's literal and `make_fitting_local` hypotheses name. The kernel
 then checks by reduction the theorem, named with the suffix `_decoded`, that
 `decoder = some name`, and the `@[cil_code]` facts named with the suffixes `_profile`, `_locals`,
 `_localKinds`, `_returnsValue`, `_staticSites`, `_declared`, `_environment`, `_links`,
