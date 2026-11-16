@@ -183,7 +183,8 @@ theorem struct_access_of_y_at_offset_of_x_rejected :
     ¬ TranslationValid rawLayouts layouts [] [evidence point ldfld 0] [] [structMethod ldfld 0] ∧
     ¬ TranslationValid rawLayouts layouts [] [evidence point ldflda 0] []
       [structMethod ldflda 0] ∧
-    ¬ TranslationValid rawLayouts layouts [] [evidence point stfld 0] [] [structMethod stfld 0] := by
+    ¬ TranslationValid rawLayouts layouts [] [evidence point stfld 0] []
+      [structMethod stfld 0] := by
   decide +kernel
 #print axioms struct_access_of_y_at_offset_of_x_rejected
 
