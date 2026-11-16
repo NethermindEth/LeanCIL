@@ -94,11 +94,13 @@ string[] requiredExamples =
 [
     "System.UInt64 Examples.Arithmetic::Add(System.UInt64,System.UInt64)",
     "System.UInt64 Examples.Arithmetic::Choose(System.Boolean,System.UInt64,System.UInt64)",
-    "System.UInt32 Examples.Loops::Countdown(System.UInt32)"
+    "System.UInt32 Examples.Loops::Countdown(System.UInt32)",
+    // Calls decodes through its two direct calls, whose targets are the links of their pcs.
+    "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)"
 ];
-// Calls keeps its literal for the call after its first instruction; its callee Mutate decodes through an integer
-// indirect load and store.
-const string literalExample = "System.UInt64 Examples.Arithmetic::Calls(System.UInt64)";
+// SameText keeps its literal for the string literal it loads first; Mutate, a callee of Calls, decodes through an
+// integer indirect load and store.
+const string literalExample = "System.Boolean Examples.Strings::SameText()";
 const string indirectCallee = "System.Void Examples.Arithmetic::Mutate(System.UInt64&)";
 File.WriteAllText(requiredManifest, JsonSerializer.Serialize(new
 {
@@ -133,9 +135,9 @@ using (var examples = JsonDocument.Parse(File.ReadAllText(examplesReport)))
     var stated = refusal.ValueKind != JsonValueKind.Object ? "no refusal" :
         $"{refusal.GetProperty("ilOffset").GetInt32()} {refusal.GetProperty("opcode").GetString()} " +
         $"{Reason(refusal)}";
-    if (stated != "1 call hole: calls")
-        throw new InvalidOperationException($"{literalExample} must keep its literal for the call at IL_0001, " +
-            $"found: {stated}.");
+    if (stated != "0 ldstr hole: tokens")
+        throw new InvalidOperationException($"{literalExample} must keep its literal for the string load at " +
+            $"IL_0000, found: {stated}.");
 }
 Console.WriteLine("PASS the example kept as a literal reports its first hole");
 if (update)
