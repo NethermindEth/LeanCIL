@@ -19,6 +19,7 @@
 #:include CertifiedFingerprints.cs
 #:include ConsumerPackagePaths.cs
 #:include DirectoryLinks.cs
+#:include GeneratedEvidence.cs
 
 using System.Text.Json;
 using System.Text.Json.Nodes;

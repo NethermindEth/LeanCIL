@@ -72,13 +72,9 @@ foreach (var name in new[]
         """ + "\n" + control);
     evidence.Add(proof, "PASS runtime, certificate and checked pointer execution: " + name);
     if (name != "Difference") continue;
-    // The method is defined from its decoder, so the forgery changes its raw sub (89) to add (88).
-    const string rawSubtraction = "opcode := 89,";
-    if (!source.Contains("cil_decoded_method method0 := ", StringComparison.Ordinal) ||
-        !source.Contains(rawSubtraction, StringComparison.Ordinal))
-        throw new Exception("Missing difference mutation target");
+    // The method is defined from its decoder, so the forgery changes the sub (89) the decoder reads to add (88).
     var forged = Path.Combine(root, "ForgedDifference.lean");
-    File.WriteAllText(forged, differenceEvidence!.Replace(rawSubtraction, "opcode := 88,", StringComparison.Ordinal));
+    File.WriteAllText(forged, ForgeDecodedOriginal(differenceEvidence!, 0, "opcode := 89,", "opcode := 88,"));
     rejected.Add(forged, "PASS independent forged pointer difference rejection", "ScalarFlowValid");
 }
 
@@ -156,25 +152,15 @@ foreach (var (name, parameters) in new[]
             ["method0_declared_validated"], 1));
         foreach (var replacement in new[] { "System.Int32", "System.UInt16" })
         {
-            const string target = "System.Int16";
-            var lines = returnEvidence.Split('\n');
-            // The method is defined from its decoder, so the closed definition DeclaredValid reads is forged.
-            var definition = Array.FindIndex(lines, line =>
-                line.StartsWith("def method0Closed ", StringComparison.Ordinal));
-            if (definition < 0 || !lines[definition].Contains(target, StringComparison.Ordinal))
-                throw new InvalidOperationException("Missing enum return declaration");
-            var returned = lines[definition].IndexOf("returnType :=", StringComparison.Ordinal);
-            var atom = returned < 0 ? -1 : lines[definition].IndexOf(target, returned, StringComparison.Ordinal);
-            if (atom < 0) throw new InvalidOperationException("Missing declared enum return storage");
-            lines[definition] = lines[definition][..atom] + replacement +
-                lines[definition][(atom + target.Length)..];
+            // The method is defined from its decoder, so the forged declared return is a forged decoder's value.
+            var forgedSource = ForgeDecodedReturnType(returnEvidence, 0, "\"System.Int16\"", $"\"{replacement}\"");
             var widthChanged = replacement == "System.Int32";
             var forged = Path.Combine(output, "ForgedReturn" + widthChanged + ".lean");
-            File.WriteAllText(forged, string.Join('\n', lines));
+            File.WriteAllText(forged, forgedSource);
             rejected.Add(forged, "PASS independent enum return width/signedness rejection", "DeclaredValid");
             // The `rfl` rejection is a failed elaboration; the kernel must also prove the obligation false.
             var refuted = Path.Combine(output, "RefutedReturn" + widthChanged + ".lean");
-            File.WriteAllText(refuted, KernelRefutation(string.Join('\n', lines), "method0_declared_validated",
+            File.WriteAllText(refuted, KernelRefutation(forgedSource, "method0_declared_validated",
                 "method0_declared_refuted"));
             evidence.Add(refuted, "PASS the kernel proves the forged enum return declaration false",
                 "method0_declared_refuted");

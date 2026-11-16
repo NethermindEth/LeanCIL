@@ -88,13 +88,8 @@ partial class Program
         if (changedProfile.Sources.Keys.Intersect(first.Sources.Keys).Any())
             throw new Exception("A changed header retained dependent component identities.");
         // The helper is defined from its decoder, so its add is the raw opcode the decoder reads.
-        const string rawAdd = "opcode := 88,";
-        var helperStart = original.IndexOf("def method1Signature", StringComparison.Ordinal);
-        if (!original.Contains("cil_decoded_method method1 := ", StringComparison.Ordinal) ||
-            !original[helperStart..].Contains(rawAdd, StringComparison.Ordinal))
-            throw new Exception("The helper must be defined from its decoder and read a raw add.");
-        var changedHelper = SplitExtractionComponents(original[..helperStart] + original[helperStart..]
-            .Replace(rawAdd, "opcode := 89,", StringComparison.Ordinal));
+        var changedHelper = SplitExtractionComponents(ForgeDecodedOriginal(original, 1, "opcode := 88,",
+            "opcode := 89,"));
         if (changedHelper.Sources.Keys.Intersect(first.Sources.Keys).Count() != 2)
             throw new Exception("A changed helper did not invalidate exactly its checked component.");
         var changedCall = SplitExtractionComponents(original.Replace(".call 1 1", ".call 0 1", StringComparison.Ordinal));

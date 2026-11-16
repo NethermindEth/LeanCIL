@@ -194,25 +194,24 @@ const string bodyDecisionFailed = "the decoded method does not match its body by
 void RejectBody(int sample, string name, string theorem, string definition, Func<string, string> change)
 {
     Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, bodyDecisionFailed);
-    RefuteMutation(sample, name, theorem, definition, change);
+    RefuteMutation(sample, name, theorem, source => ChangeDefinition(source, definition, change));
 }
 // A file that keeps the mutated definitions and states the obligation's negation, which the kernel must prove.
-void RefuteMutation(int sample, string name, string theorem, string definition, Func<string, string> change)
+void RefuteMutation(int sample, string name, string theorem, Func<string, string> mutate)
 {
-    var mutated = ChangeDefinition(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")),
-        definition, change);
+    var mutated = mutate(File.ReadAllText(Path.Combine(output, sample.ToString(), "Extracted.lean")));
     var refutation = theorem[..^"_validated".Length] + "_refuted";
     var refuted = KernelRefutation(mutated, theorem, refutation);
     var path = Path.Combine(output, "Refuted-" + name + ".lean");
     File.WriteAllText(path, NarrowEvidence(refuted, refutation));
     evidence.Add(path, "PASS the kernel proves the mutated obligation false: " + name, refutation);
 }
-// A changed declared signature of `definition` fails its `rfl` obligation, which the kernel proves false.
-void RejectDeclared(int sample, string name, string definition, Func<string, string> change)
+// A changed declared signature of method `method` fails its `rfl` obligation, which the kernel proves false.
+void RejectDeclared(int sample, string name, int method, Func<string, string> mutate)
 {
-    var theorem = definition + "_declared_validated";
-    Reject(sample, name, source => ChangeDefinition(source, definition, change), theorem, rflRefused);
-    RefuteMutation(sample, name, theorem, definition, change);
+    var theorem = $"method{method}_declared_validated";
+    Reject(sample, name, mutate, theorem, rflRefused);
+    RefuteMutation(sample, name, theorem, mutate);
 }
 // The metadata rows of a body shift with the assembly, so each byte is found by its position in the emitted list.
 string ChangeByte(string line, string pattern, int change) => Regex.Replace(line, pattern,
@@ -284,9 +283,9 @@ string SwapSignatures(string source)
 const string equationRefused = "cil_kernel_rfl: the kernel does not accept the two sides as equal";
 Reject(0, "swapped-signature-of-a-method", SwapSignatures, bodyTheorem, equationRefused);
 Reject(0, "swapped-signature-of-an-instance", SwapSignatures, "method1_body_validated", equationRefused);
-Reject(0, "wrong-emitted-return", source => ChangeDefinition(source, "method1",
-    line => line.Replace("returnsValue := true", "returnsValue := false"))
-        .Replace("method1.returnsValue = (true)", "method1.returnsValue = (false)"), "method1_shape_validated");
+// The callee is defined from its decoder, so the forged return flag is the value of a forged decoder.
+Reject(0, "wrong-emitted-return", source => ForgeDecodedMethod(source, 1, "returnsValue := false"),
+    "method1_shape_validated");
 Reject(7, "wrong-local-initializer", source => source.Replace("[.i32 0]", "[.i32 1]"), "method1_shape_validated");
 Reject(7, "wrong-initlocals-flag", source => source.Replace("initLocals := true", "initLocals := false"), "method1_shape_validated");
 ReturnMutations();
@@ -295,28 +294,26 @@ void ReturnMutations()
 {
     foreach (var (name, replacement) in new[]
         { ("missing-return-narrowing", "System.Int32"), ("wrong-return-signedness", "System.Byte") })
-        RejectDeclared(9, name, "method1", line =>
-        {
-            var returned = line.IndexOf("returnType :=", StringComparison.Ordinal);
-            var atom = returned < 0 ? -1 : line.IndexOf("System.SByte", returned, StringComparison.Ordinal);
-            if (atom < 0) throw new InvalidOperationException("Missing declared SByte return");
-            return line[..atom] + replacement + line[(atom + "System.SByte".Length)..];
-        });
+        // The callee is defined from its decoder, so the forged declared return is a forged decoder's value.
+        RejectDeclared(9, name, 1, source => ForgeDecodedReturnType(source, 1, "\"System.SByte\"",
+            JsonSerializer.Serialize(replacement)));
 }
 
 // The declared signature, call links and layout environment are each checked against their own evidence.
 const string word = "Extraction.runtimeScope \"System.UInt64\"";
-RejectDeclared(0, "wrong-declared-parameter", "method0", line =>
-    line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]"));
+RejectDeclared(0, "wrong-declared-parameter", 0, source => ChangeDefinition(source, "method0", line =>
+    line.Replace($"parameters := [.atom {word}]", $"parameters := [.atom {word.Replace("UInt64", "UInt32")}]")));
 // The declared signature's own return type, whatever fields follow it.
-RejectDeclared(0, "wrong-declared-return", "method0", line => Regex.Replace(line,
+RejectDeclared(0, "wrong-declared-return", 0, source => ChangeDefinition(source, "method0", line => Regex.Replace(line,
     $$"""(declared := {[^}]*returnType := .atom ){{Regex.Escape(word)}}""",
-    match => match.Groups[1].Value + word.Replace("UInt64", "UInt32"), RegexOptions.None));
-RejectDeclared(0, "wrong-declared-init-flag", "method0", line => line.Replace(", initLocals := false }", " }"));
-RejectDeclared(14, "missing-declared-receiver", "method1", line =>
-    line.Replace("receiver := some .reference, ", ""));
-RejectDeclared(14, "wrong-declared-receiver-kind", "method1", line =>
-    line.Replace("receiver := some .reference", "receiver := some .object"));
+    match => match.Groups[1].Value + word.Replace("UInt64", "UInt32"), RegexOptions.None)));
+RejectDeclared(0, "wrong-declared-init-flag", 0, source => ChangeDefinition(source, "method0",
+    line => line.Replace(", initLocals := false }", " }")));
+// The instance method is defined from its decoder, so its forged receiver is the value of a forged decoder.
+RejectDeclared(14, "missing-declared-receiver", 1,
+    source => ForgeDecodedMethod(source, 1, "declared := { method.declared with receiver := none }"));
+RejectDeclared(14, "wrong-declared-receiver-kind", 1,
+    source => ForgeDecodedMethod(source, 1, "declared := { method.declared with receiver := some .object }"));
 Reject(0, "wrong-link-callee", source => ChangeDefinition(source, "method0Link1", line =>
     line.Replace(".direct 1", ".direct 0")), "method0_calls_validated", decisionFailed);
 Reject(0, "dropped-link", source => ChangeDefinition(source, "method0", line =>
@@ -325,9 +322,8 @@ Reject(0, "dropped-link", source => ChangeDefinition(source, "method0", line =>
 Reject(0, "link-at-wrong-pc", source => ChangeDefinition(source, "method0", line =>
     line.Replace("links := [(1, method0Link1)]", "links := [(0, method0Link1)]")),
     "method0_calls_validated", decisionFailed);
-Reject(0, "link-at-non-call", source => ChangeDefinition(source, "method1", line =>
-    line.Replace("links := []", "links := [(0, method0Link1)]")), "method1_calls_validated",
-    decisionFailed);
+Reject(0, "link-at-non-call", source => ForgeDecodedMethod(source, 1, "links := [(0, method0Link1)]"),
+    "method1_calls_validated", decisionFailed);
 Reject(0, "wrong-environment", source => ChangeDefinition(source, "environment", line =>
     line.Replace("layouts := computedLayouts", "layouts := #[⟨⟨4, []⟩, 4⟩]")), "method0_environment_validated",
     rflRefused);
