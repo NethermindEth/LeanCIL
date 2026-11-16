@@ -169,7 +169,8 @@ workflow.
   refusal and kernel decision for a whole certificate, and reduces the fixture encoder in the
   elaborator at two method sizes.
   Tests/LookupScaling.cs also compares the metadata check's cost per token for 125 and 500 user
-  string and field tokens and for 25 and 100 call tokens.
+  string and field tokens and for 25 and 100 call tokens, for the whole extraction and for
+  `Extracted.method0_calls_validated` alone, within 1.15 times.
 - Runtime bit tests narrow each source pattern to the parameter type before removing duplicates,
   so each distinct typed input runs once; every rotation count runs as supplied, including
   negative and out-of-width counts. Replay fallback tests check rejection and attribution in one

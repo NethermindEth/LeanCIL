@@ -124,24 +124,6 @@ internal static class LeanEmitter
 
     static string LinkName(int method, int pc) => $"method{method}Link{pc}";
 
-    // These definitions guide proof simplification; the full validator still checks every call.
-    static string? CallDefinitions(int caller, IReadOnlyList<Operation> operations, int methodCount)
-    {
-        var targets = new SortedSet<int> { caller };
-        var hasCall = false;
-        foreach (var operation in operations)
-        {
-            // A tail call lists no callee: a method that only tail-calls is proved by `decide`, which unfolds none.
-            if (operation is not (Call { Kind: not CallKind.Tail } or Newobj)) continue;
-            hasCall = true;
-            var target = operation.Methods.Single();
-            if (target >= 0 && target < methodCount) targets.Add(target);
-        }
-        if (!hasCall) return null;
-        return string.Join(", ", targets.SelectMany(target =>
-            new[] { $"method{target}Closed", $"method{target}TypeArgumentsRaw" }));
-    }
-
     /// <summary>The recursion depth every generated declaration fits in, whatever the method length.</summary>
     const int BaseRecursionDepth = 4096;
 
@@ -160,7 +142,6 @@ internal static class LeanEmitter
             .ToDictionary(pair => pair.method, pair => pair.index);
         var constrainedTargets = new ConstrainedCalls.TargetIndex(methods);
         var templates = new List<TemplateEmitter.Method>();
-        var callDefinitions = new string?[methods.Length];
         var refusals = new GenericEvidence.DecodeRefusal?[methods.Length];
         StringBuilder lean = new($"""
             import CIL.Extraction.Translation
@@ -269,7 +250,6 @@ internal static class LeanEmitter
                 lean.AppendLine($"def method{n}GenericDefinition : String := {JsonSerializer.Serialize(origin.Definition)}");
                 lean.AppendLine($"def method{n}TypeArguments : List String := [{string.Join(", ", origin.TypeArguments.Select(t => JsonSerializer.Serialize(t)))}]");
             }
-            callDefinitions[n] = CallDefinitions(n, ops, methods.Length);
             // Each link's text is written once, as a definition the table, the index and its facts name.
             // The cil_code tag lets a simp-driven step unfold a fact's link to its constructor form.
             foreach (var (pc, link) in linkEntries)
@@ -363,12 +343,9 @@ internal static class LeanEmitter
         for (var n = 0; n < methods.Length; n++)
         {
             FeatureEvidence.EmitTheorem(lean, n);
-            var facts = $"specializedMethods, imports, Extraction.lowerConstrainedRaw, {callDefinitions[n]}, " +
-                $"method{n}, method{n}Reachable, method{n}DispatchTypes";
-            var proof = callDefinitions[n] is null ? Decide : $"by cil_managed_calls [{facts}]";
             lean.AppendLine($"theorem method{n}_calls_validated : Extraction.ManagedCallsValid " +
                 $"specializedMethods imports (Extraction.lowerConstrainedRaw method{n}DispatchTypes " +
-                $"method{n}Closed) method{n}Reachable method{n} := {proof}");
+                $"method{n}Closed) method{n}Reachable method{n} := {Decide}");
         }
         lean.AppendLine("def program : Program := [" + string.Join(", ", Enumerable.Range(0, methods.Length).Select(n => $"method{n}")) + "]");
         // Proofs resolve methods by signature (CIL.MethodIdentity), so inserted helpers do not renumber them. Each

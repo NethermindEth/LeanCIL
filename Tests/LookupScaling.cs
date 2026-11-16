@@ -1805,7 +1805,9 @@ File.WriteAllText(Path.Combine(tokenSource, "Tokens.cs"),
     CallMethod(FewCalledMethods, "CallsFew") + CallMethod(ManyCalledMethods, "CallsMany") + "}");
 Run(["dotnet", "build", Path.Combine(tokenSource, "Tokens.csproj"), "-c", "Release"]);
 var tokenAssembly = Path.Combine(tokenSource, "bin/Tokens.dll");
-double TokenCost(string name, string selector, int count, string distinctPattern)
+// The heartbeats per token of the whole extraction, less the imports, and of its call check alone. A call check that
+// reads each pc's link by a scan of the link table grows with the tokens that each carry a link.
+(double Total, double Calls) TokenCost(string name, string selector, int count, string distinctPattern)
 {
     var output = Path.Combine(directory, "Tokens" + name);
     Run(Extract("extract", tokenAssembly, "Tokens", selector, output));
@@ -1813,7 +1815,8 @@ double TokenCost(string name, string selector, int count, string distinctPattern
     var distinct = Regex.Matches(extracted, distinctPattern).Count;
     if (distinct < count)
         throw new InvalidOperationException($"Expected {count} distinct tokens in {name}; found {distinct}.");
-    return (double)(Heartbeats(Path.Combine(output, "Measured.lean"), extracted, equations: false) - floor) / count;
+    var report = Reported(Path.Combine(output, "Measured.lean"), WithEvidenceCosts(extracted), equations: false);
+    return ((double)(report.Count - floor) / count, (double)EvidenceCosts(report.Output).Calls / count);
 }
 foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
 {
@@ -1825,15 +1828,18 @@ foreach (var (kind, few, many, pattern, fewCount, manyCount) in new[]
         ManyCalledMethods)
 })
 {
-    var tokenGrowth = TokenCost(kind + "Many", many, manyCount, pattern) /
-        TokenCost(kind + "Few", few, fewCount, pattern);
-    Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
-        $"PASS metadata check of {fewCount} and {manyCount} distinct {kind.ToLowerInvariant()} tokens: " +
-        $"{tokenGrowth:F2} times the cost per token"));
-    if (tokenGrowth > AllowedGrowth)
+    var manyTokens = TokenCost(kind + "Many", many, manyCount, pattern);
+    var fewTokens = TokenCost(kind + "Few", few, fewCount, pattern);
+    var tokenGrowth = manyTokens.Total / fewTokens.Total;
+    var callCheckGrowth = manyTokens.Calls / fewTokens.Calls;
+    var tokensMeasured = string.Create(CultureInfo.InvariantCulture,
+        $"{tokenGrowth:F2} times as much per token as {fewCount}, and {callCheckGrowth:F2} times for the call check");
+    if (tokenGrowth > AllowedGrowth || callCheckGrowth > AllowedGrowth)
         throw new Exception(string.Create(CultureInfo.InvariantCulture,
-            $"Checking {manyCount} {kind.ToLowerInvariant()} tokens costs {tokenGrowth:F2} times as much per token " +
-            $"as {fewCount}; the limit is {AllowedGrowth}."));
+            $"Checking {manyCount} {kind.ToLowerInvariant()} tokens costs {tokensMeasured}; the limit is " +
+            $"{AllowedGrowth}."));
+    Console.WriteLine(
+        $"PASS metadata check of {manyCount} distinct {kind.ToLowerInvariant()} tokens costs {tokensMeasured}");
 }
 
 // One method's body check reads the literal lookup tables of its own metadata slice by name, so its kernel cost is its
@@ -2185,7 +2191,7 @@ void IndirectAccessCosts()
             def code (prefixed : Bool) (sites : Nat) : List Instruction :=
               (List.range sites).flatMap (codeSegment prefixed) ++ [.ret]
             """ + "\n";
-        var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {flag} {sites}) .scalar " +
+        var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {flag} {sites}) .scalar " +
             $"(features {flag} {sites}) ((features {flag} {sites}).map Option.isSome) (code {flag} {sites}) ∧ " +
             $"ScalarFlowValid #[] (raw {flag} {sites}) (features {flag} {sites}) (states {flag} {sites}) " +
             $"(code {flag} {sites})";
@@ -2246,8 +2252,8 @@ long LocalAccessCost(int accesses)
             .ldloca ((index + 2) % localCount), .pop]
         def code (cycles : Nat) : List Instruction := (List.range cycles).flatMap codeSegment ++ [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {cycles}) .scalar (features {cycles}) " +
-        $"(List.replicate {accesses + 1} true) (code {cycles})";
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {cycles}) .scalar " +
+        $"(features {cycles}) (List.replicate {accesses + 1} true) (code {cycles})";
     var path = Path.Combine(directory, $"LocalAccesses{accesses}.lean");
     var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend LocalAccesses\n", equations: false);
     var decided = Heartbeats(path, header + $"""
@@ -2383,7 +2389,7 @@ long FeatureLocalCost(int count)
             .ldloca ((index + 2) % localCount), .pop, .ldarga 0, .pop, .ldc_i4 0, .starg 0]
         def code (segments : Nat) : List Instruction := (List.range segments).flatMap codeSegment ++ [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) (raw {FeatureLocalSegments}) .scalar " +
         $"(features {FeatureLocalSegments}) (List.replicate {FeatureLocalInstructions} true) " +
         $"(code {FeatureLocalSegments})";
     var path = Path.Combine(directory, $"FeatureLocals{count}.lean");
@@ -2465,7 +2471,7 @@ long KnownFactCost(int facts, int rounds)
               [.ldc_i4 (BitVec.ofNat 32 (round + 1)), .stloc (round % facts), .ldloc (round % facts), .pop]) ++
             [.ret]
         """ + "\n";
-    var statement = $"FeatureFlowValid #[] (fun _ => none) raw .scalar features " +
+    var statement = $"FeatureFlowValid #[] (fun _ => none) (fun _ => none) raw .scalar features " +
         $"(List.replicate {2 * facts + 4 * rounds + 1} true) code";
     var path = Path.Combine(directory, $"KnownFacts{facts}-{rounds}.lean");
     var stated = Heartbeats(path, header + $"example : Prop := {statement}\nend KnownFacts\n", equations: false);
