@@ -838,7 +838,8 @@ GenericIdentity for one and two calls twice: by stepping `Identity<ulong>`, and 
 CallsSummary does the same for `Calls`, whose second callee writes through a reference, and
 `Tests/SummaryCalls.cs` for callers that pass one local to that callee 1, 4 and 16 times. It
 refuses a contract of the callee without its write, a caller that leaves the callee's
-precondition unproved, and the record and contract of a callee whose original is forged.
+precondition unproved, and, for a callee whose original is forged, its record, its contract and
+the summary built on them.
 `Tests/DecodedSummary.lean` refutes a summary bound to another token than the call names.
 
 Extraction evidence validation covers Lean regressions, compiled certificate fixtures,

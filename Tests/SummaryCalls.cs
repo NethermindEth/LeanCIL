@@ -41,12 +41,12 @@ foreach (var calls in sizes)
 // with an error in the declaration that needs them.
 var mutate1 = File.ReadAllText(Path.Combine(proofs, "Mutate1.lean"));
 RejectedProof("Footprint", Changed(mutate1, "  footprint := fun (place, _) => [(place, 8)]", "  footprint _ := []"),
-    "mutate_holds");
+    "mutate_holds", "unsolved goals");
 RejectedProof("Precondition", Changed(mutate1, "frame0.snapshots.read_word64 (index := 0) rfl rfl⟩", "?_⟩"),
-    "correctness");
+    "correctness", "unsolved goals");
 
-// With the original of Mutate forged to subtract, the body check refuses the record and Mutate's contract no
-// longer holds, so no summary of it type-checks.
+// With the original of Mutate forged to subtract, the body check refuses the record and Mutate's contract fails,
+// so its decoded summary rests on sorryAx.
 var summary = mutate1[mutate1.IndexOf("/-- `Mutate` adds two", StringComparison.Ordinal)..
     mutate1.IndexOf("/-- The caller returns `x` plus two per call and keeps all memory below its entry, applying",
         StringComparison.Ordinal)];
@@ -54,17 +54,23 @@ var forged = Path.Combine(proofs, "ForgedMutate.lean");
 File.WriteAllText(forged, ForgeDecodedOriginal(File.ReadAllText(Path.Combine(directory, "Mutate1", "Extracted.lean")),
     1, "opcode := 88,", "opcode := 89,") + $$"""
 
+    import Lean
     import CIL
     import CIL.MethodIdentity
     namespace ForgedSummary
     open CIL CIL.Safety CIL.Extraction
     bind_method mutate mutateBody := "System.Void Calls::Mutate(System.UInt64&)"
     {{summary}}
+    open Lean in
+    run_cmd do
+      if (← collectAxioms ``mutate_summary).contains ``sorryAx then
+        throwError "mutate_summary depends on sorryAx"
     end ForgedSummary
     """);
 var rejected = new RejectedEvidence(Path.Combine(directory, "Rejected"));
-rejected.Add(forged, "PASS a forged original of Mutate refuses its record and its decoded summary",
-    "the decoded method does not match its body bytes or metadata", "unsolved goals");
+rejected.Add(forged, "PASS a forged original of Mutate fails its body check, its contract and its decoded summary",
+    "the decoded method does not match its body bytes or metadata", "unsolved goals",
+    "mutate_summary depends on sorryAx");
 rejected.Check();
 
 // `text` with `before`, which must occur once, replaced by `after`.
@@ -74,8 +80,9 @@ static string Changed(string text, string before, string after) =>
         ? text.Replace(before, after, StringComparison.Ordinal)
         : throw new InvalidOperationException("Expected one occurrence of: " + before);
 
-// Verifies `text` as the proof of Mutate1 and requires the verification to fail with an error inside `theorem`.
-void RejectedProof(string name, string text, string theorem)
+// Verifies `text` as the proof of Mutate1 and requires it to fail with an error inside `theorem` whose message
+// contains `diagnostic`, so an unrelated failure cannot pass as the rejection.
+void RejectedProof(string name, string text, string theorem, string diagnostic)
 {
     var proof = Path.Combine(proofs, $"Mutate1{name}.lean");
     File.WriteAllText(proof, text);
@@ -90,10 +97,13 @@ void RejectedProof(string name, string text, string theorem)
     catch (InvalidOperationException error)
     {
         // The session checks a copy of the proof, with the same lines, as Proof.lean.
-        var located = Regex.Matches(error.Message, @"Proof\.lean:(\d+):\d+: error")
-            .Select(match => int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture)).ToArray();
-        if (start == 0 || end == 0 || !located.Any(line => line >= start && line <= end))
-            throw new InvalidOperationException($"Expected an error in {theorem} ({start}-{end}):\n{error.Message}");
+        var located = Regex.Matches(error.Message, @"Proof\.lean:(\d+):\d+: error(?:\([^)\r\n]*\))?: ([^\r\n]*)")
+            .Select(match => (Line: int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture),
+                Message: match.Groups[2].Value)).ToArray();
+        if (start == 0 || end == 0 || !located.Any(found => found.Line >= start && found.Line <= end &&
+                found.Message.Contains(diagnostic, StringComparison.Ordinal)))
+            throw new InvalidOperationException(
+                $"Expected {diagnostic} in {theorem} ({start}-{end}):\n{error.Message}");
         Console.WriteLine($"PASS {name.ToLowerInvariant()} mutation refused in {theorem}");
         return;
     }
