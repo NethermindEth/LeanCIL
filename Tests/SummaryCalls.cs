@@ -8,6 +8,11 @@
 #:include ../scripts/DeepCheckInputs.cs
 #:include GeneratedEvidence.cs
 #:include RejectedEvidence.cs
+#:include ../scripts/ProofCostReport.cs
+#:include ../scripts/CertifiedLibraryDonor.cs
+#:include ../scripts/ExportVerificationSuites.cs
+#:include ../scripts/VerificationGroupRunner.cs
+#:include ../scripts/VerificationSuites.cs
 
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -15,6 +20,8 @@ using System.Text.RegularExpressions;
 // Calls::Mutate{n} stores its argument in a local and passes the local by reference to Mutate n times. The proof of
 // each size states the result twice: by stepping every call, and from Mutate's decoded summary at each call.
 int[] sizes = [1, 4, 16];
+// Most times as much as a call costs through the summary from 1 to 4 calls that it may cost from 4 to 16.
+const double AllowedCallGrowth = 1.6;
 var directory = At("artifacts/SummaryCalls");
 var source = Path.Combine(directory, "Assembly");
 var proofs = Path.Combine(directory, "Proofs");
@@ -35,6 +42,35 @@ foreach (var calls in sizes)
     verification.Verify(assembly, "Fixture", $"System.UInt64 Calls::Mutate{calls}(System.UInt64)", proof,
         Path.Combine(directory, $"Mutate{calls}"));
     Console.WriteLine($"PASS Mutate{calls} by stepping every call and through the decoded summary of Mutate");
+}
+
+// Mutate's summary exists so that a caller pays for Mutate's body once: through it, the caller's proof costs about
+// the same per call at any number of calls, and less than stepping every call. Counted heartbeats decide.
+verification.Library(CommonInputs());
+var measurement = ProofCostReport.Measure(At("."), verification.library, Path.Combine(directory, "Cost"),
+    false, [directory], [], 2, "SummaryCalls", output => sizes.Any(calls => output == $"Mutate{calls}"));
+if (measurement.Unmeasured.Count != 0)
+    throw new InvalidOperationException("Unmeasured: " + string.Join("; ", measurement.Unmeasured));
+long Cost(int calls, string theorem, string measure) => measurement.Rows.Single(row =>
+    row.Group == $"Mutate{calls}/Proof" && row.Name == "ExampleProof." + theorem).Measures[measure];
+if (SummaryCallGrowth(sizes, [.. sizes.Select(calls => (long)calls * calls)]) <= AllowedCallGrowth)
+    throw new InvalidOperationException("The growth bound accepts a caller whose cost is quadratic in its calls");
+foreach (var measure in new[] { "heartbeats", "kernelHeartbeats" })
+{
+    var growth = SummaryCallGrowth(sizes, [.. sizes.Select(calls => Cost(calls, "correctness", measure))]);
+    if (growth > AllowedCallGrowth)
+        throw new InvalidOperationException(string.Create(CultureInfo.InvariantCulture,
+            $"Through the summary, a call costs {growth:F2} times as many {measure} from 4 to 16 calls as from 1 to " +
+            $"4; the limit is {AllowedCallGrowth}"));
+    var summarized = new[] { "correctness", "mutate_holds", "mutate_summary", "bodies_decode" }
+        .Sum(theorem => Cost(sizes[^1], theorem, measure));
+    var stepped = Cost(sizes[^1], "correctness_stepped", measure);
+    if (summarized >= stepped)
+        throw new InvalidOperationException(
+            $"At {sizes[^1]} calls the proof through the summary costs {summarized} {measure}, stepping {stepped}");
+    Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+        $"PASS through the summary a call costs {growth:F2} times as many {measure} from 4 to 16 calls as from 1 " +
+        $"to 4, and {sizes[^1]} calls cost {summarized} against {stepped} stepped"));
 }
 
 // The contract of Mutate without its write, and a caller that leaves Mutate's precondition unproved, are refused
@@ -72,6 +108,11 @@ rejected.Add(forged, "PASS a forged original of Mutate fails its body check, its
     "the decoded method does not match its body bytes or metadata", "unsolved goals",
     "mutate_summary depends on sorryAx");
 rejected.Check();
+
+// How many times as much the caller costs per call between its last two sizes as between its first two. At 1, 4 and
+// 16 calls a cost a n^2 + b n grows (20a + b) / (5a + b) times, more than the limit once a > b / 20.
+static double SummaryCallGrowth(int[] calls, long[] costs) =>
+    (double)(costs[2] - costs[1]) / (calls[2] - calls[1]) / ((double)(costs[1] - costs[0]) / (calls[1] - calls[0]));
 
 // `text` with `before`, which must occur once, replaced by `after`.
 static string Changed(string text, string before, string after) =>
@@ -214,8 +255,7 @@ static string SummaryProof(int calls)
         lines.Add(call == 1 ? "    (fun _ _ post => post)"
             : $"    (fun _ _ post => by rw [← show {Value(call - 1)} + 2 = {Value(call)} by bv_omega]; exact post)");
         lines.Add($"  intro final{call} values{call} mutated{call} frame{call}");
-        lines.Add(call == 1 ? "  clear frame0 firstStore permitted1"
-            : $"  clear {frame} mutated{call - 1} permitted{call}");
+        lines.Add($"  clear {frame}");
     }
     lines.Add($"  have loaded := frame{calls}.snapshots.load (index := 0) (.i64 ({Value(calls)})) rfl");
     lines.Add($"    (body := Extracted.method0) (pc := {2 * calls + 2}) (args := [.scalar (.i64 x)]) (stack := [])");
