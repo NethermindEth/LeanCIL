@@ -156,7 +156,7 @@ def elsewhereEvidence : List MethodEvidence :=
     (record 2 (by decide)).relocateLinks elsewhere,
     addTwoRecord.relocateLinks elsewhere]
 
-/-- The second program: `Nudge`, `Entry` calling index 3, `Bump`, and `AddTwo` calling indices
+/-- The second program: `Bump`, `Entry` calling index 3, `Nudge`, and `AddTwo` calling indices
     0 and 2. -/
 def elsewhereProgram : Program :=
   [Extracted.method3, { Extracted.method0 with links := [(1, .direct 3)] }, Extracted.method2,
@@ -218,7 +218,7 @@ def collapsedEvidence : List MethodEvidence :=
     (Extracted.methodEvidence[0]'(by decide)).relocateLinks fun index => [1, 2, 0, 0].getD index 0,
     addTwoRecord.relocateLinks collapse]
 
-/-- The third program: `Nudge`, `Entry` calling index 2, and `AddTwo` calling index 0 twice. -/
+/-- The third program: `Bump`, `Entry` calling index 2, and `AddTwo` calling index 0 twice. -/
 def collapsedProgram : Program :=
   [Extracted.method3, { Extracted.method0 with links := [(1, .direct 2)] },
     { Extracted.method1 with links := [(1, .direct 0), (2, .direct 0)] }]

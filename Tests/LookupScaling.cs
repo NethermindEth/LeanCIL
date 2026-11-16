@@ -1184,7 +1184,7 @@ void DecodedProgramCosts()
 // their link tables enter one packed table entry, so it costs O(n * P + e) kernel steps. Each shape grows one term:
 // a chain whose closure is the whole program grows n * P, one method calling seven others grows e, and a closure of
 // four methods at the start of a longer program grows P. A search that folded over its state instead costs time
-// quadratic in e, and one that scanned the program per callee costs n * P * e.
+// quadratic in e.
 void ClosureCosts()
 {
     var closureDirectory = At("artifacts/LookupScaling/Closures");
