@@ -189,7 +189,7 @@ private def arrayStep (instruction : RawInstruction) (stack : List ScalarKind) :
 
 /-- Array operations cannot be introduced through an unrelated stack-effect-only encoding. -/
 private def arrayEmission : Instruction → Bool
-  | .newArray _ | .newReferenceArray _ => true
+  | .newarr _ => true
   | .memory .arrayLength | .memory (.arrayLoad ..) | .memory (.arrayStore _)
   | .memory (.arrayAddress ..) => true
   | .memory (.arrayTransfer ..) => true
@@ -202,11 +202,7 @@ private def arrayMatches (instruction : RawInstruction) (stack : List ScalarKind
     (emitted : Instruction) : Bool :=
   if instruction.opcode == 141 then
     match instruction.operand, stack, emitted with
-    | .type token, length :: _, .newArray element =>
-      length ∈ [.word32, .native] && element.allocationSupported &&
-        arrayElementType token == some element.metadata
-    | .type token@(.object ..), length :: _, .newReferenceArray element =>
-      length ∈ [.word32, .native] && token == element
+    | .type token, length :: _, .newarr element => length ∈ [.word32, .native] && token == element
     | _, _, _ => false
   else
   match arrayStep instruction stack, emitted with
@@ -309,7 +305,7 @@ def scalarOpMatches (instruction : RawInstruction) (stack : List ScalarKind)
   else if instruction.opcode == 65054 then
     instruction.operand == .none && match emitted with | .nop => true | _ => false
   else if instruction.opcode == 20 then
-    instruction.operand == .none && match emitted with | .memory .nullObject => true | _ => false
+    instruction.operand == .none && match emitted with | .ldnull => true | _ => false
   else if instruction.opcode ∈ [44, 45, 57, 58] then
     match instruction.operand, stack, emitted with
     | .target target, value :: _, .brfalse actual =>
@@ -428,20 +424,19 @@ private def stringLiteralMatches (role : Option FoldRole) (instruction : RawInst
   | 114, .text text, .memory (.stringLiteral actual) => role == none && text == actual
   | _, _, _ => false
 
-/-- Covered opcodes emit exactly their encoding, and a class type test only from `castclass`
-    (throwing) or `isinst` on an object. Elsewhere only a decided type test's word,
-    a size constant or an exact runtime query may emit a scalar operation. -/
+/-- Covered opcodes emit exactly their encoding, and a class type test only from the raw
+    `castclass` or `isinst` of the same class on an object. Elsewhere only a decided type test's
+    word, a size constant or an exact runtime query may emit a scalar operation. -/
 def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
     (instruction : RawInstruction)
     (stack : List ScalarKind) (emitted : Instruction) : Bool :=
   if let some (.typeBranch taken) := role then typeBranchMatches instruction taken emitted
   else if let some (.result value) := role then
     match emitted with | .ldc_i4 bits => bits == if value then 1 else 0 | _ => false
-  else if let .objectTest type throwing := emitted then
+  else if let some (opcode, type) := typeTestSource emitted then
     match instruction.operand, stack with
     | .type target, value :: _ =>
-      instruction.opcode ∈ [116, 117] && throwing == (instruction.opcode == 116) &&
-        type == target && value ∈ [.object, .nullObject]
+      instruction.opcode == opcode && type == target && value ∈ [.object, .nullObject]
     | _, _ => false
   else if (match instruction.operand with
     | .call site => referenceContentQuery site | _ => false) then
@@ -452,7 +447,7 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if instruction.opcode == 77 && (stack.head?).any
       (fun kind => match kind with | .nativeMethodTable _ => true | _ => false) then
     match stack, emitted with
-    | .nativeMethodTable signature :: _, .managed (.tableLoad actual) => signature == actual
+    | .nativeMethodTable _ :: _, .ldind .i => true
     | _, _ => false
   else if instruction.opcode == 88 && (match stack with
       | .nativeMethodTable _ :: _ | _ :: .nativeMethodTable _ :: _ => true | _ => false) then
@@ -463,8 +458,6 @@ def scalarEmissionMatches (layouts : Array RawLayout) (role : Option FoldRole)
   else if let .managed operation := emitted then match operation, stack with
     | .address .., _ => instruction.opcode == 65030
     | .call .., _ => instruction.opcode == 41
-    | .tableLoad signature, .nativeMethodTable actual :: _ =>
-      instruction.opcode == 77 && signature == actual
     | .tableLength, .methodTable _ :: _ => instruction.opcode == 142
     | .tableElement signature, index :: .methodTable actual :: _ =>
       index ∈ [.word32, .native] && signature == actual &&

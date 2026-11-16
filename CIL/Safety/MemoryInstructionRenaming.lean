@@ -694,6 +694,9 @@ private theorem Memory.Renamed.referenceArrayInstructionResult {mapping : Alloca
       (referenceArrayInstruction operation (stack.map mapping.value) target) := by
   unfold referenceArrayInstruction at observable ⊢
   split at observable
+  all_goals try (unfold referenceArrayLength at observable ⊢; split at observable)
+  all_goals try (unfold referenceArrayLoad at observable ⊢; split at observable)
+  all_goals try (unfold referenceArrayStore at observable ⊢; split at observable)
   all_goals try simp only [List.map_cons, AllocationRenaming.value]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
@@ -737,6 +740,9 @@ theorem Memory.Renamed.classFieldLoadResult {mapping : AllocationRenaming}
       (classFieldLoad owner offset slot (stack.map mapping.value) target) := by
   unfold classFieldLoad at observable ⊢
   split at observable
+  all_goals try (unfold referenceArrayLength at observable ⊢; split at observable)
+  all_goals try (unfold referenceArrayLoad at observable ⊢; split at observable)
+  all_goals try (unfold referenceArrayStore at observable ⊢; split at observable)
   all_goals try simp only [List.map_cons, AllocationRenaming.value]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable
   all_goals clear observable
@@ -975,6 +981,10 @@ private theorem Memory.Renamed.otherMemoryInstructionResult {mapping : Allocatio
       (otherMemoryInstruction operation (stack.map mapping.value) target) := by
   unfold otherMemoryInstruction at observable ⊢
   split at observable
+  all_goals try (unfold arrayAddress at observable ⊢; split at observable)
+  all_goals try (unfold arrayLength at observable ⊢; split at observable)
+  all_goals try (unfold arrayLoad at observable ⊢; split at observable)
+  all_goals try (unfold arrayStore at observable ⊢; split at observable)
   all_goals try simp only [List.map_cons, AllocationRenaming.value]
   all_goals try dsimp +instances only [AllocationRenaming.arrayView, AllocationRenaming.spanView]
   all_goals try solve | repeat first | contradiction | cases observable | split at observable

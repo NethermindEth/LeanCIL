@@ -222,7 +222,8 @@ internal static class ObjectTypes
             throw new InvalidDataException(
                 site + error.Message.Replace("\n", "\n  ", StringComparison.Ordinal), error);
         }
-        return new ObjectTest(GenericEvidence.ObjectType(target), instruction.OpCode.Code == Code.Castclass);
+        var type = GenericEvidence.ObjectType(target);
+        return instruction.OpCode.Code == Code.Castclass ? new CastClass(type) : new IsInstance(type);
     }
 
     // Matches `CIL.objectFieldSlot`, which Lean uses to recheck every emitted offset.

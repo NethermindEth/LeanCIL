@@ -132,37 +132,137 @@ macro "cil_caller_grows" : tactic => `(tactic| first
   | (apply CIL.Safety.Confined.grows; apply CIL.Safety.LoopFrame.confined
      with_reducible assumption))
 
+/-- Whether `left` and `right` can be the same memory. Two different local variables never are,
+    and deciding that by unification unfolds the reads and writes that mention them, which costs
+    more with every memory a walk has passed, so they are told apart syntactically. -/
+def memoryMatches (left right : Expr) : MetaM Bool := do
+  if left == right then return true
+  if left.isFVar && right.isFVar then
+    let leftDeclaration ← left.fvarId!.getDecl
+    let rightDeclaration ← right.fvarId!.getDecl
+    if !leftDeclaration.isLet && !rightDeclaration.isLet then return false
+  withNewMCtxDepth (isDefEq left right)
+
+/-- The variables stepping walks introduced: the memory each store or call produced and the
+    home each snapshot store found. It lives in the environment, so a backtracked step forgets
+    the variables it introduced. -/
+initialize walkVariablesExtension : EnvExtension (PersistentHashSet FVarId) ←
+  registerEnvExtension (pure {}) (asyncMode := .local)
+
+/-- Record `introduced` as a variable a stepping walk introduced. -/
+def recordWalkVariable (introduced : FVarId) : CoreM Unit :=
+  modifyEnv fun env => walkVariablesExtension.modifyState env (·.insert introduced)
+
+/-- Whether `term` is a variable a stepping walk introduced, such as the memory a store
+    produced. A fact at any other memory belongs to the caller, whatever its name. -/
+def producedByWalk (term : Expr) : CoreM Bool := do
+  let .fvar introduced := term | return false
+  return (walkVariablesExtension.getState (← getEnv)).contains introduced
+
+/-- Where the facts about `memory` can start in the context: at the variable itself when it has
+    no value, since every fact that mentions it follows it, and at the start otherwise, since a
+    fact may state a let variable's value or another term equal to `memory`. A store that reads
+    only the facts from there reads a number that does not grow with the walk. -/
+def memoryWindowStart (memory : Expr) : MetaM Nat := do
+  let .fvar memoryVariable := memory | return 0
+  let declaration ← memoryVariable.getDecl
+  return if declaration.isLet then 0 else declaration.index
+
+/-- The declarations of `context` from position `start` on, without the implementation details. -/
+def declarationsFrom (context : LocalContext) (start : Nat) : Array LocalDecl := Id.run do
+  let mut found := #[]
+  for position in [start:context.numIndices] do
+    if let some declaration := context.decls[position]! then
+      unless declaration.isImplementationDetail do found := found.push declaration
+  return found
+
+/-- The declarations of `context` from position `start` that a user name reaches: the last
+    declaration of each name, in context order, found in one pass. -/
+def accessibleDeclarations (context : LocalContext) (start : Nat := 0) : Array LocalDecl :=
+  Id.run do
+  let declarations := declarationsFrom context start
+  let mut latest : Std.HashMap Name FVarId := {}
+  for declaration in declarations do
+    latest := latest.insert declaration.userName declaration.fvarId
+  return declarations.filter fun declaration =>
+    latest[declaration.userName]? == some declaration.fvarId
+
+/-- Clear from the main goal each hypothesis of `superseded` that neither the goal nor a remaining
+    hypothesis mentions, by its type or its value. Only a hypothesis after the earliest of them can
+    mention one, so the pass reads the context from there and not the whole walk's. -/
+def clearSuperseded (superseded : Array FVarId) : TacticM Unit := withMainContext do
+  let context ← getLCtx
+  let mut doomed : Std.HashSet FVarId := {}
+  let mut earliest := context.numIndices
+  for free in superseded do
+    if let some declaration := context.find? free then
+      doomed := doomed.insert free
+      earliest := min earliest declaration.index
+  if doomed.isEmpty then return
+  let goal ← getMainGoal
+  let target ← instantiateMVars (← goal.getType)
+  let mentions (expression : Expr) : Array FVarId := (CollectFVars.main expression {}).fvarIds
+  for free in mentions target do doomed := doomed.erase free
+  -- Latest first, so a hypothesis that stays keeps what it mentions, which may itself be doomed.
+  for step in [:context.numIndices - earliest] do
+    let some declaration := context.decls[context.numIndices - 1 - step]! | continue
+    if declaration.isImplementationDetail || doomed.contains declaration.fvarId then continue
+    -- Looking for a doomed variable allocates nothing; the variables are collected only on a hit.
+    let type ← instantiateMVars declaration.type
+    if type.hasAnyFVar doomed.contains then
+      for free in mentions type do doomed := doomed.erase free
+    if let some value := declaration.value? then
+      let value ← instantiateMVars value
+      if value.hasAnyFVar doomed.contains then
+        for free in mentions value do doomed := doomed.erase free
+  if doomed.isEmpty then return
+  let declaration ← goal.getDecl
+  let replacement ← mkFreshExprMVarAt (doomed.fold (·.erase ·) declaration.lctx)
+    declaration.localInstances target MetavarKind.syntheticOpaque declaration.userName
+  goal.assign replacement
+  replaceMainGoal [replacement.mvarId!]
+
 /-- Re-state each named hypothesis about a caller buffer or class instance at `memory` through
     `carry`, a term from its predicate and name, under the same name; a fact `carry` gives nothing
-    for, or whose term does not elaborate, stays as it is. -/
-def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (Option Term)) :
-    TacticM Unit := do
+    for, or whose term does not elaborate, stays as it is. A restated fact at a memory the walk
+    introduced supersedes the earlier one, which is added to `superseded` for the caller to clear,
+    or cleared here when no list is given. -/
+def loopCarryFacts (memory : Expr) (carry : LoopCarried → Ident → TacticM (Option Term))
+    (superseded : Option (IO.Ref (Array FVarId)) := none) : TacticM Unit := do
   let carried ← withMainContext do
-    let context ← getLCtx
-    let mut found : Array (LoopCarried × Name) := #[]
-    for declaration in context do
-      if declaration.isImplementationDetail || declaration.userName.hasMacroScopes then continue
-      unless (context.findFromUserName? declaration.userName).any
-        (·.fvarId == declaration.fvarId) do continue
+    let mut found : Array (LoopCarried × LocalDecl) := #[]
+    for declaration in accessibleDeclarations (← getLCtx) (← memoryWindowStart memory) do
+      if declaration.userName.hasMacroScopes then continue
       let type := (← instantiateMVars declaration.type).consumeMData
       let some head := type.getAppFn.constName? | continue
       let some carried := loopCarriedHeads.find? fun carried =>
         carried.head == head && carried.arity == type.getAppNumArgs | continue
       let some carriedMemory := argument? type carried.memory | continue
-      unless ← withNewMCtxDepth (isDefEq carriedMemory memory) do continue
-      found := found.push (carried, declaration.userName)
+      unless ← memoryMatches carriedMemory memory do continue
+      found := found.push (carried, declaration)
     return found
-  for (head, name) in carried do
-    let some term ← carry head (mkIdent name) | continue
+  let produced ← producedByWalk memory
+  let pending ← match superseded with
+    | some pending => pure pending
+    | none => IO.mkRef #[]
+  for (head, earlier) in carried do
+    let some term ← carry head (mkIdent earlier.userName) | continue
     let saved ← saveState
     -- A failed side proof inside `term` is logged, not thrown; `cil_strict` makes it fail here.
-    try evalTactic (← `(tactic| cil_strict have $(mkIdent name):ident := $term))
+    try
+      evalTactic (← `(tactic| cil_strict cil_have_by $(mkIdent earlier.userName):ident := $term))
+      -- A fact at a memory the walk made is out of reach once restated, and clearing it keeps the
+      -- context from growing with each store. A fact at the caller's memory stays, since the
+      -- restatement does not give it back.
+      if produced then pending.modify (·.push earlier.fvarId)
     catch _ => saved.restore
+  if superseded.isNone then clearSuperseded (← pending.get)
 
 /-- Carry the caller-buffer facts at `memory` across `below`, a store that keeps everything below
     the caller's watermark. -/
-def loopCarryBelow (memory : Expr) (below : Ident) : TacticM Unit :=
-  loopCarryFacts memory fun carried fact => do
+def loopCarryBelow (memory : Expr) (below : Ident)
+    (superseded : Option (IO.Ref (Array FVarId)) := none) : TacticM Unit :=
+  loopCarryFacts memory (superseded := superseded) fun carried fact => do
     if carried.grows then
       return some (← `(($fact).after_below $below (by cil_caller_allocation)
         (by cil_caller_grows)))
@@ -268,6 +368,9 @@ def loopFrameStore (facts : Array Term) (layouts : Array Expr) (footprint : Expr
   catch _ =>
     saved.restore
     return false
+  withMainContext do
+    if let some produced := (← getLCtx).findFromUserName? after.getId then
+      recordWalkVariable produced.fvarId
   -- The slots stay literal, as the next step's frame states them, so the next gathering finds it.
   evalTactic (← `(tactic| try dsimp only at $framed:ident))
   loopCarryBelow memory below
@@ -535,6 +638,9 @@ def loopCallContinue (contract : Expr) (memory : Expr) (facts : Array Term)
     have $confined:ident := CIL.Safety.CallResult.framed call
     have $returned:ident := CIL.Safety.CallResult.post call
     clear call)))
+  withMainContext do
+    if let some produced := (← getLCtx).findFromUserName? called.getId then
+      recordWalkVariable produced.fvarId
   let unfold : Array Ident := match contract.getAppFn.constName? with
     | some name => #[mkIdent (`_root_ ++ name)]
     | none => #[]

@@ -30,20 +30,22 @@ def Memory.ClassesConsistent (catalog : List RuntimeType) (memory : Memory) : Pr
   ∀ id allocation type, memory.allocations id = some allocation →
     allocation.kind = .object type → type.ConsistentWith catalog
 
-/-- An instruction creates no instance, or creates one whose type agrees with the catalog. -/
-def SiteConsistent (catalog : List RuntimeType) (operation : CIL.Instruction) : Prop :=
-  match objectSiteType operation with
+/-- An instruction of `body` creates no instance, or creates one whose type agrees with the
+    catalog. -/
+def SiteConsistent (catalog : List RuntimeType) (body : CIL.Method) (operation : CIL.Instruction) :
+    Prop :=
+  match objectSiteType body operation with
   | some type => type.ConsistentWith catalog
   | none => True
 
-instance (catalog : List RuntimeType) (operation : CIL.Instruction) :
-    Decidable (SiteConsistent catalog operation) := by
+instance (catalog : List RuntimeType) (body : CIL.Method) (operation : CIL.Instruction) :
+    Decidable (SiteConsistent catalog body operation) := by
   unfold SiteConsistent
   split <;> infer_instance
 
 /-- Every allocating site of `program` records a runtime type that agrees with the catalog. -/
 def ObjectSitesConsistent (catalog : List RuntimeType) (program : CIL.Program) : Prop :=
-  ∀ body ∈ program, ∀ operation ∈ body.code, SiteConsistent catalog operation
+  ∀ body ∈ program, ∀ operation ∈ body.code, SiteConsistent catalog body operation
 
 instance (catalog : List RuntimeType) (program : CIL.Program) :
     Decidable (ObjectSitesConsistent catalog program) :=
@@ -140,7 +142,8 @@ theorem ObjectAllocationEffect.classesConsistent {catalog : List RuntimeType}
 theorem StepEffect.classesConsistent {catalog : List RuntimeType} {body : CIL.Method}
     {operation : CIL.Instruction} {frame final : Frame} {before after : Memory}
     (effect : StepEffect body operation frame before final after)
-    (site : SiteConsistent catalog operation) (consistent : before.ClassesConsistent catalog) :
+    (site : SiteConsistent catalog body operation)
+    (consistent : before.ClassesConsistent catalog) :
     after.ClassesConsistent catalog := by
   cases effect with
   | arrayAllocation effect => exact consistent.kept effect.objectsKept
@@ -163,7 +166,7 @@ theorem StepEffect.classesConsistent {catalog : List RuntimeType} {body : CIL.Me
 theorem step_preserves_classes {catalog : List RuntimeType} (body : CIL.Method)
     (operation : CIL.Instruction) (pc : Nat) (args : List Value) (frame : Frame)
     (stack : List Value)
-    (m : Memory) (action : FrameAction) (site : SiteConsistent catalog operation)
+    (m : Memory) (action : FrameAction) (site : SiteConsistent catalog body operation)
     (consistent : m.ClassesConsistent catalog)
     (h : step body operation pc args frame stack m = .ok action) :
     action.memory.ClassesConsistent catalog :=

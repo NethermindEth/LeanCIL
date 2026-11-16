@@ -246,6 +246,18 @@ the memory written to at the new memory, each under the name it already has:
 
 A fact whose condition is not shown stays at the old memory.
 
+A restated fact replaces the fact it restates when that one is stated at a memory the walk
+introduced, the `storedLocal` of an earlier store: the hypothesis the new one shadows is cleared, so
+a walk adds the names of each store and nothing that grows with the stores before it. The walk
+records the variables it introduces, so a fact stated at the memory the walk entered with, such as
+`valid`, `homes` or `preserved`, stays in scope next to its restatement whatever that memory is
+named. A `MemoryBelow` or `AccessBelow` fact that starts at a `storedLocal` memory is restated only
+when homes are stated at that memory, as after a step that changes memory without a store; the ones
+that start at the memory the walk entered with, such as `MemoryBelow boundary memory`, follow every
+store, and the `localBelow` and `localAccess` of a store state the step from the memory before it.
+The access a store finds for its own home is read by that store only, and the walk clears it with
+the other facts the store alone uses.
+
 The contract form then prepares its step facts again at `storedLocal`. The carried `ValidCall`
 forms the by-reference arguments and reads their fields there, and the restated reads supply their loads, so
 `.ldarg`, `.fieldAt` and memory loads of caller data continue in the same call. After a store, a
@@ -518,7 +530,7 @@ contents separately.
 
 For a word store through a named output, `cil_contract_steps` first uses supplied checked
 operation facts. If none establishes the store, it derives a successful write from the current
-`ValidCall` and the output bounds. This covers `store64`, eight-byte `storeScalar` and eight-byte
+`ValidCall` and the output bounds. This covers `stind.i8`, `stind.i`, eight-byte `storeScalar` and eight-byte
 `setFieldAt`. The continuation names:
 
 | Name | Holds |
@@ -588,7 +600,12 @@ successful snapshot copy does not establish initialization.
 | --- | --- |
 | `invoke_ok_unique` | Ties a computed run to the contract's existential one |
 | `invoke_ok_observation_unique` | The same for one observation of the run, such as the returned values, so the refutation never compares memories |
-| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a semantic fault; fuel exhaustion is not a witness |
+| `MethodContract.not_holds_of_fault` | Refutes a contract from a checked located fault on an input meeting its precondition. It uses fuel monotonicity to rule out success at every budget; the witness must be a definite fault (`ExecutionFault.definite`), so neither fuel exhaustion nor an `unsupported` fault is a witness |
+
+Every refutation lemma takes a settled outcome (`Settled`): a success, or a fault other than fuel
+exhaustion and `unsupported`. An `unsupported` fault, such as a hole (`.unadmitted`), marks a
+run the model does not cover, so these lemmas refute nothing from it, and no stepping tactic steps
+past it to a return.
 
 ## Frame class instances
 
@@ -715,7 +732,7 @@ scope; stepping looks the class up in the call's table (`step_callVirtual_eq`,
 fact is `objectMemory_runtimeTypeOf` ([FreshDogLegs](../Examples/Proofs/FreshDogLegs.lean)).
 A class the table omits steps to the model fault `outsideDispatchTable` (`virtualCall_outside`).
 
-`castclass` and `isinst` step on the same fact (`step_objectTest_eq`): with
+`castclass` and `isinst` step on the same fact (`step_castclass_eq`, `step_isinst_eq`): with
 `RuntimeType.lineage` and the definitions of the type, its bases and their scope, stepping
 decides whether the tested class is in the lineage, so the reference passes, becomes null or
 throws `InvalidCastException` ([DogTest](../Examples/Proofs/DogTest.lean),
@@ -913,7 +930,7 @@ def percentContract : OutcomeContract CIL.W64 CIL.W64 where
 | `cil_outcome_call holds input at site [facts]` | Continues after a call the callee's contract says returns, whether the caller then returns or raises |
 | `cil_outcome_raise holds input at site [facts]` | Closes a `Raises` goal by propagating the exception the callee's contract names |
 | `MethodContract.Holds.outcomes` | Lifts a normal-only contract |
-| `invoke_unique` | Ties a computed fault to the contract's existential one |
+| `invoke_unique` | Ties a computed settled outcome to the contract's existential one; fuel exhaustion and `unsupported` faults are not settled |
 
 [CountUntil](../Examples/Proofs/CountUntil.lean) proves `bumpContract`, which raises
 `.invalidOperation` when its two arguments are equal, with `cil_raise_steps` and

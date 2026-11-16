@@ -223,7 +223,7 @@ static void CheckExceptionTypes()
         example : CIL.ExceptionType.all = [{{enumeration}}] := rfl
         {{displays}}
         """);
-    Run(["lake", "env", "lean", path], cwd: At("."));
+    Run(["lake", "env", "lean", path], cwd: FixturePackage());
     using var module = ModuleDefinition.CreateModule("ExceptionConstructors", ModuleKind.Dll);
     var scope = new AssemblyNameReference("System.Runtime", new Version(11, 0, 0, 0))
     {

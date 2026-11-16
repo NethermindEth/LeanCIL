@@ -362,18 +362,19 @@ def MethodContract.Holds {Input Output : Type} (c : MethodContract Input Output)
       (fun (final, values) =>
         Confined (c.footprint input) initial final ∧ c.Returns input initial final values)
 
-/-- A located semantic fault on an input meeting the precondition refutes the contract at
-    every fuel budget. Exhaustion alone does not refute termination. -/
+/-- A located definite fault on an input meeting the precondition refutes the contract at
+    every fuel budget. Exhaustion does not refute termination, and an `unsupported` fault,
+    where the model stops covering the run, is not accepted. -/
 theorem MethodContract.not_holds_of_fault {Input Output : Type}
     (contract : MethodContract Input Output) {program : CIL.Program} {method observed : Nat}
     {input : Input} {initial : Memory} {fault : LocatedFault}
-    (permitted : contract.pre input initial) (semantic : fault.fault ≠ .fuelExhausted)
+    (permitted : contract.pre input initial) (definite : fault.fault.definite ≠ false)
     (failed : invoke program observed method (contract.args input) initial = .error fault) :
     ¬ contract.Holds program method := by
   intro holds
   obtain ⟨fuel, ⟨final, values⟩, invoked, _⟩ := holds input initial permitted
   exact invoke_fault_refutes_success program observed method (contract.args input) initial
-    fault semantic failed fuel (final, values) invoked
+    fault definite failed fuel (final, values) invoked
 
 #print axioms MethodContract.not_holds_of_fault
 
@@ -867,7 +868,7 @@ def cilContractApply (methodFound instructionFound : Term) (facts : Array Term) 
         let siblings := (← getGoals).tail
         let tag ← (← getMainGoal).getTag
         evalTactic (← `(tactic| (
-          cil_strict refine CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
+          cil_strict cil_refine_by CIL.Safety.run_call_of_contract $proofSyntax $inputSyntax
             $methodFound $instructionFound
             (by cil_checked_step_normalized [$facts,*]) (by rfl) ?_ ?_)))
         for parameter in parameters do
@@ -925,7 +926,7 @@ elab_rules : tactic
         cilContractChild methodFound instructionFound facts
       return
     if operation == ``CIL.Instruction.ret then
-      evalTactic (← `(tactic| cil_strict refine CIL.Safety.run_return_exists
+      evalTactic (← `(tactic| cil_strict cil_refine_by CIL.Safety.run_return_exists
         $methodFound $instructionFound
         (by cil_checked_step_normalized [$[$facts:term],*])
         (by cil_checked_side [$[$facts:term],*]) ?_))
@@ -936,11 +937,11 @@ elab_rules : tactic
       return
     let advance (facts : Array Term) := do
       evalTactic (← `(tactic| (
-        cil_strict refine CIL.Safety.run_next_exists (post := _)
+        cil_strict cil_refine_by CIL.Safety.run_next_exists (post := _)
           $methodFound $instructionFound
           (by cil_checked_step_normalized [$[$facts:term],*]) ?_
         cil_stack_cleanup)))
-    unless [``CIL.Instruction.store64, ``CIL.Instruction.storeScalar,
+    unless [``CIL.Instruction.stind, ``CIL.Instruction.storeScalar,
         ``CIL.Instruction.setFieldAt].contains operation do
       advance facts
       return

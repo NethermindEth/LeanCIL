@@ -108,9 +108,9 @@ come from [VerificationSuites.cs](../scripts/VerificationSuites.cs) and
 | `outcomes` | outcome contracts that name exactly when each exception is thrown |
 | `scaling` | compositional certificate for a six-method call graph and its consumer replay, declared signature checks at flat per-method cost over 1, 4 and 16 parameters, header and per-method struct layout checks at a per-layout cost that does not grow with the table, and the generic owner index library |
 | `excluded` | hundreds of excluded and live sites at the default heartbeat budget |
-| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, the method name clause of the call operand check and the encoding of a metadata name at a per-byte cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the managed-call check of a body with many call sites at a per-site cost that does not grow with the call sites; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters; the shape facts of `cil_field_shape` and the reads through them at a per-field cost that grows less than 1.35 times from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 to 512 fields in a struct each, and the facts of `cil_value_shape` and their reads at a per-type cost that grows less than 1.35 times from 8 to 32 to 128 to 512 struct types; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction; the kernel's selection of a calli body at a cost linear in the length of the pointer's owner; raw value opcode decoding and the method decoded from a raw body at a per-instruction kernel cost that does not grow with the body; and the certificate index, feature getter, layout accumulation and projection, and extraction home index libraries |
+| `lookups` | lookup equations of extracted methods, hand-written bodies and templates, and the scalar certificate of array element addresses, loaded and addressed integer locals and native-int locals consumed by calli, the closed argument storage of those native-int locals, and the feature certificate of local loads, stores and addresses, at a per-instruction cost that does not grow with the method or with locals holding no known word and grows linearly with the known facts, embeddings of bodies with many calls at a per-call kernel cost that does not grow with the calls, type identity equality at a cost that does not grow with the name, the method name clause of the call operand check and the encoding of a metadata name at a per-byte cost that does not grow with the name, and one native method table step and one load of its first entry at a kernel cost that does not grow with the table's entries; the managed-call check of a body with many call sites at a per-site cost that does not grow with the call sites; the argument facts of `cil_resolution_facts` and the reads through them at a per-argument cost that does not grow with the parameters; the array element shape facts of `cil_resolution_facts` and the reads through them at a per-element-type cost that does not grow with the layouts or the sites naming each type; a runtime model lookup at a kernel cost that does not grow with the model table, and the runtime model agreement check at a per-site cost that does not grow with the call sites; the shape facts of `cil_field_shape` and the reads through them at a per-field cost that grows less than 1.35 times from 8 to 32 to 128 fields in one struct and from 8 to 32 to 128 to 512 fields in a struct each, and the facts of `cil_value_shape` and their reads at a per-type cost that grows less than 1.35 times from 8 to 32 to 128 to 512 struct types; the kernel check of one body at a cost independent of the methods and metadata rows of its extraction; the kernel's selection of a calli body at a cost linear in the length of the pointer's owner; raw value opcode decoding and the method decoded from a raw body at a per-instruction kernel cost that does not grow with the body; and the certificate index, feature getter, layout accumulation and projection, and extraction home index libraries |
 | `gates` | manifest project builds, extraction, named profiles, per-variant and templated proofs, witness refutations, kernel statement comparison, binding catalogs, planned groups, changed-source selection and mutation expectations |
-| `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting, arguments and homes bodies with per-instruction heartbeat, proof-size and latency budgets |
+| `stepping` | full scalar, checked-memory, reference-offset, native-table-offset, running-sum, locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, snapshot, faulting, arguments, homes and array-allocation bodies with per-instruction heartbeat and proof-size budgets and a per-hypothesis heartbeat limit |
 | `assemblies` | bodies, layouts and generic instantiations from pinned referenced assemblies, attribution and substitution rejection, the strict binding library and audit, and the checked-in strict binding fixture module |
 | `pool` | object pool reuse, creation, exhaustion, null-pool and free-list search proofs and the mutations they reject |
 | `blockers` | admission reports with deduplicated blockers, call chains, profile-excluded branches, runtime-async refusal, self-admission and the admitted hole corpus |
@@ -144,6 +144,10 @@ The [export page](VALIDATION-EXPORTS.md#export-suite-selection) lists the cases 
 partition.
 
 ## Proof cost
+
+The `lookups` closed-argument row checks primitive storage at 1, 4 and 16 parameters with
+8, 32 and 128 unrelated layouts. It bounds the cost per parameter and rejects growth with
+unrelated layouts. The row accepts `--closed-arguments-only` for isolated measurement.
 
 For a change to shared tactics or the library, also compare what each proof costs with the base.
 Measure both checkouts on one machine:
@@ -180,38 +184,57 @@ dotnet run --file scripts/Test.cs -- --suite stepping
 ```
 
 The `stepping` suite generates explicit scalar, checked-memory, reference, table, accumulate,
-locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, faulting, arguments and homes
-bodies and proves each end to end. The scalar, memory, reference, table, accumulate and locals bodies have 16, 64 and
-256 instructions, and the accumulate body also 1,024. The memory bodies repeat an idempotent checked
-store and reload, so the operation facts stay constant as the instruction count grows. The
-reference and table bodies repeatedly `add` a symbolic int32 byte offset to a reference argument
-or a native method table argument and pop the result, each step reading one supplied fact that
-the offset succeeds. The accumulate, contract, loop,
-loop-facts, outcome and lemma bodies keep a running sum on the stack, so the symbolic value a step
-reads grows with the program counter. The contract body is proved by `cil_contract_steps`, the
-loop body by `cil_loop_steps` along a path, the loop-facts body by the same with a case fact in
-the context that every instruction reads, the outcome body by `cil_loop_outcome_advance`, and the
-lemma body by `cil_checked_steps` with a universe-polymorphic lemma among its facts. The locals
-bodies store a
+locals, contract, loop, loop-facts, outcome, lemma, depth, hypotheses, snapshot, faulting, arguments,
+homes and allocation bodies and proves each end to end. The scalar, memory, reference, table, accumulate and
+locals bodies have 16, 64 and 256 instructions, and the accumulate body also 1,024. The memory
+bodies repeat an idempotent checked store and reload, so the operation facts stay constant as the
+instruction count grows. The reference and table bodies repeatedly `add` a symbolic int32 byte
+offset to a reference argument or a native method table argument and pop the result, each step
+reading one supplied fact that the offset succeeds. The accumulate, contract, loop, loop-facts,
+outcome and lemma bodies keep a running sum on the stack, so the symbolic value a step reads grows
+with the program counter. The contract body is proved by `cil_contract_steps`, the loop body by
+`cil_loop_steps` along a path, the loop-facts body by the same with a case fact in the context that
+every instruction reads, the outcome body by `cil_loop_outcome_advance`, and the lemma body by
+`cil_checked_steps` with a universe-polymorphic lemma among its facts. The locals bodies store a
 reference into each of eight locals of a literal frame per cycle. The depth bodies push 8, 32 and
-128 values and add them all. The hypotheses body is a 62-instruction accumulate body proved with 16,
-64 and 256 equations in scope. The faulting bodies have 17 and 62 instructions and repeat `div`,
-`rem`, `add.ovf` and `conv.ovf.i4` over the arguments, each advanced by a supplied fact that the
-operation does not fault. The arguments bodies have 16, 64 and 256 instructions and add 8, 32 and
-128 `int32` arguments of a declared signature, each read once, with the method's
-`cil_resolution_facts` in scope. The homes bodies have 16, 64 and 256 instructions and read each of 8,
-32 and 128 reference parameters once from its home in a literal frame. The suite uses the proof-cost measuring frontend, with three
-sequential proof compilations and a header-only baseline per scalar, memory, reference, table,
-accumulate and locals body up to 256 instructions, and one compilation for every other body.
+128 values and add them all. The hypotheses bodies are 62-instruction accumulate, contract and loop
+bodies proved with 16, 64 and 256 hypotheses in scope, a contract body with as many
+instruction-lookup equations in scope, and the lookups of every instruction of the accumulate body
+made by `cil_lookup` outside a stepping run, with 16 and 256 equations in scope. The faulting bodies
+have 17 and 62 instructions and repeat `div`, `rem`, `add.ovf` and `conv.ovf.i4` over the arguments,
+each advanced by a supplied fact that the operation does not fault. The snapshot bodies store into
+eight numeric locals and then update one local per store from its remembered value, with 10, 20, 40
+and 80 stores, proved by `cil_contract_steps (snapshots := ..)` with caller memory facts in the
+context. Each store clears the facts it supersedes, so the hypotheses in scope stay level, while the
+value a store writes grows with the number of updates to its local; the cost per instruction rises
+slowly with the stores. The arguments bodies have 16, 64 and 256 instructions and add 8, 32 and 128
+`int32` arguments of a declared signature, each read once, with the method's `cil_resolution_facts`
+in scope. The homes bodies have 16, 64 and 256 instructions and read each of 8, 32 and 128 reference
+parameters once from its home in a literal frame. The allocation bodies have 16, 64 and 256
+instructions and allocate and pop an array of two class references per cycle, each `newarr`
+resolving its element shape and reading one supplied allocation fact. The suite uses the
+proof-cost measuring frontend, with three sequential proof compilations and a header-only baseline
+per scalar, memory, reference, table, accumulate and locals body up to 256 instructions, and one
+compilation for every other body.
 
 - For each successive size, frontend and kernel heartbeats per instruction may grow by at most
   1.35 times. The arguments and homes bodies read one of a list of arguments or home slots that
   grows with the body, so their heartbeats per instruction may grow at most by the ratio of the
-  sizes, linearly in the number of arguments. For the bodies with three compilations, compiled proof bytes per instruction may
-  also grow by at most 1.35 times. Frontend milliseconds are recorded for comparison between runs.
-- The heartbeats a hypothesis adds may not grow by more than 1.35 times from the step between
-  16 and 64 hypotheses to the step between 64 and 256, which a step that compares each hypothesis
-  with every other would exceed.
+  sizes, linearly in the number of arguments. For the bodies with three compilations, compiled
+  proof bytes per instruction may also grow by at most 1.35 times. Frontend milliseconds are
+  recorded for comparison between runs.
+- For the hypotheses bodies the sizes are the numbers of hypotheses: in the accumulate, contract
+  and loop bodies half of them are equations headed by an operator and half by a local variable,
+  in the lookup body each is an instruction lookup like those stepping makes,
+  `([.ldc_i4 i] : List CIL.Instruction)[0]? = some (.ldc_i4 i)`, and in the direct lookups
+  each is an equation headed by an operator. The heartbeats and frontend milliseconds counted are
+  those of the proof less those of the same statement closed by `sorry`, so that elaborating the
+  hypotheses does not count as stepping. The same ratio limit applies, except to the direct
+  lookups, which read every hypothesis in scope once each. One more hypothesis in scope may add
+  at most 100 heartbeats to an instruction, which costs about 120,000, or to a direct lookup,
+  between the smallest and the largest size. A lookup that tries to unify with every equation
+  hypothesis adds 600 to 1,950 and fails that limit, as does a direct lookup that builds an index
+  of the hypotheses, which adds about 410; reading each hypothesis once adds about 25.
 - Heartbeats and bytes must repeat exactly across the three runs.
 - Frontend heartbeats include the initial kernel check; the kernel columns measure a separate
   recheck. Compiled proof bytes subtract the same module containing only the body and its lookup

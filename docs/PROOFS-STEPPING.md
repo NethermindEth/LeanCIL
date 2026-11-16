@@ -163,6 +163,7 @@ monadic binds. The tactics accept these fact forms:
 | A branch on a symbolic condition | `v = 0` or `Not (v = 0)` on the condition value; no `CIL.truth` restatement is needed. A literal condition, such as the `1` a decided feature test pushes, decides itself and continues at a numeral program counter |
 | An opcode index stated as closed arithmetic, such as `.ldloc (↑(6 : Fin 10) + 1)` | Fact preparation also states it at the numeral, `.ldloc 7`, the form a fetched opcode has |
 | A read stated at a closed width, such as `read memory home (localWidth (.aggregate 32)) 1` | Fact preparation derives its load at the numeral width an opcode carries |
+| A successful write, such as `write memory target (numberBytes word.toNat 8) 1 = .ok after` | Fact preparation derives the step of each store that writes those bytes: `stind.i8` for eight bytes, plus `stind.i` when a body the goal or a hypothesis reaches may hold one; the narrow `stind` and `storeScalar` for one, two or four |
 | A value known only as `argument : CIL.Value`, loaded as an argument or passed to a call | `numericValue argument = true`; preparation also states it over the unfolded definition, the form the checked value test has when the step reaches it |
 | `bitcastByteBool`, whose operand must be `0` or `1` | None for a comparison result `if c then 1 else 0`; for any other int32, `bits.toNat ≤ 1`. The fact may bound a value inside width changes, as `field.toNat ≤ 1` does for the operand `(field.setWidth 8).setWidth 32` |
 | A symbolic reference | Its formation equation; the equation stays usable without splitting the reference |
@@ -235,8 +236,8 @@ directly or `simp only [cil_step, facts]`.
 
 Reference and field instructions have one `@[cil_instruction_step]` equation per operand shape in
 [InstructionSteps](../CIL/Safety/InstructionSteps.lean), which rewrites a step to checked memory
-and formation operations. They cover the `instruction` arms of `load64`, `store64` and
-`storeScalar` through a reference, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
+and formation operations. They cover the `instruction` arms of `ldind`, `stind` and
+`storeScalar` through a reference, `ldind.i` on a native method table cursor, `fieldAt` and `fieldAddress` on an address, `setFieldAt` of
 width 1, 2, 4 or 8, `fieldAt` of width 4 or 8 on a struct value, `skipInit` and `initobj`.
 
 - Supply successful encoded byte reads and writes directly: the stepper derives the scalar or
@@ -386,12 +387,13 @@ See [segment contracts](../CIL/Safety/SegmentContract.lean).
 
 `SegmentExit` distinguishes a continuing boundary, a return, a located fault and divergence.
 `SegmentExit.Raises` names CLR exceptions through `ExecutionFault.clrException`, retaining
-the distinction between thrown and arithmetic faults. Fault exits exclude fuel exhaustion;
-divergence requires exhaustion at every fuel budget. Returns compare the memory after frame
+the distinction between thrown and arithmetic faults. Fault exits are definite faults, so they
+exclude fuel exhaustion and `unsupported` faults; divergence requires exhaustion at every fuel budget. Returns compare the memory after frame
 release. `SegmentState.localFootprint body code` names the byte homes and widths of the slots that
 `segmentStores body code` lists.
 
-`ReachesRun` relates settled outcomes before and after a prefix, including prefixes with calls.
+`ReachesRun` relates stable outcomes (`Stable`: any outcome but fuel exhaustion) before and after
+a prefix, including prefixes with calls.
 `ReachesRun.call` takes the caller stack and the callee arguments separately. Its checked step
 premise establishes argument order and the retained stack, including a constructor's receiver.
 A reaching exit supplies continuation equivalence and a positive fuel lower bound. Its boundary
@@ -535,7 +537,9 @@ All gather facts as the other loop tactics do, so their lists are optional:
 Each store names its memory, step and frame (`stored`, `storing`, `storedFrame`, `storedBelow`),
 and the tactic restates each `Contents`, `Filled` and `Writable` hypothesis about the stored-over
 memory, or about the caller's, at the new one under the same name, so an invariant reads them at
-the memory it is stated at.
+the memory it is stated at. The restated fact replaces the earlier one when the stored-over memory
+is one the walk introduced; a fact about a memory the theorem or the author introduced stays in
+scope, whatever that memory is named.
 
 [CountCalls](../Examples/Proofs/CountCalls.lean) proves a counted loop this way without unfolding
 the helper or naming its fuel.
@@ -627,7 +631,7 @@ invariant state of smaller measure.
 | Exit at the loop's own `throw` | `loop_outcome_throw` |
 | Compose paths in either outcome | `loop_outcome_next`, `loop_reaches_outcome` |
 | Lift the head outcome through frame setup | `ensures_outcome_of_loop`, to `EnsuresOutcome pre post raises`, which names the outcome of every permitted input; with `raises` constantly `none` it is `Ensures` (`ensures_outcome_none`) |
-| Refute an expected exception | `loop_outcome_some_refuted`, from any settled run that does not throw it |
+| Refute an expected exception | `loop_outcome_some_refuted`, from any settled run that does not throw it; a run that ends in fuel exhaustion or an `unsupported` fault is not settled |
 
 The normal-only rules are the `none` instances of the outcome rules. Unsupported execution,
 invalid state and fuel exhaustion never satisfy an expected loop exception.
@@ -784,18 +788,47 @@ simplification leaves. `set_option cil.stepping.record false` turns the record o
 simplifications then still run through `cil_simp_only`, so their messages and info trees differ
 from those of `simp only`. A run starts to use the record after `cil.stepping.warmup` steps (12
 by default), since the goal of a short run is small; a step is one stepping call, and a loop
-instruction takes up to three.
+instruction takes up to four.
 
 The record holds one set of terms for each list of supplied facts the run steps with, so a loop
 walk whose instructions read different groups of facts keeps them all. Each set is keyed by the
 facts as elaborated, a lemma with implicit arguments or universe parameters included, and by the
-hypotheses in scope. It is dropped when either changes, when a step fails, and when the tactic
-ends. A fact that does not elaborate makes its step run without the record, which
-`trace.CIL.record` reports. A step run outside these tactics, such as a single
-`cil_checked_step`, keeps none. A run also builds its simplification contexts and the list of
-equation hypotheses that `cil_lookup` tries once. Each step still unifies the step lemma with the
-whole state, so on a body whose values grow, the cost per instruction rises slowly with the
-program counter.
+hypotheses in scope when it was made. A step that only adds hypotheses, as a call does, keeps the
+set; a step that rewrites, renames or clears a hypothesis, which a snapshot or loop-frame store
+does when it supersedes a fact, a step that fails and the end of the tactic drop it. A fact that
+does not elaborate makes its step run without the record, which `trace.CIL.record` reports. A
+step run outside these tactics, such as a single `cil_checked_step`, keeps none.
+
+The simplifications of a step prove an equation theorem's side conditions from the simp set and
+never from a hypothesis, so a simplification gives the same result whatever else is in scope. A
+run builds its simplification contexts once, indexes the equation hypotheses that `cil_lookup`
+tries in a discrimination tree over their left sides as each is added, and runs the tactics of a
+step on goals of their own instead of inside `by` blocks of a term, which Lean would rebuild the
+whole local context for. A lookup in a step tries only the hypotheses whose left side may unify
+with it at reducible transparency. The tree reads a term after the reducible unfolding of local
+and reducible definitions that unification applies. A left side or lookup that unification may
+equate with a term the tree keys apart is not read by the tree: natural-number arithmetic that
+unification evaluates, a structure constructor it matches against projections, and a value of a
+type with one value. Such a hypothesis, or every hypothesis for such a lookup, is tried when the
+head of its left side may meet the lookup's, so a lookup in a step finds every hypothesis that a
+lookup outside a run finds. A lookup outside a run, or with `cil.stepping.record` off, reads each
+hypothesis in scope once and tries those whose left side has the lookup's head, a head that is not
+a constant, or a head that reducible unfolding replaces; it builds no index, which would cost more
+than one lookup. Each read of the record checks that the goal's local context is the one
+the record was made for; a goal that keeps that context object, as the goals within a step do,
+passes without reading a hypothesis. A step that adds or clears hypotheses, as a store or a call
+does, compares the whole context a few times, so the work of a step is at most linear in the
+hypotheses in scope with a small constant. The `stepping` suite bounds that constant at 100
+heartbeats per hypothesis per instruction and the cost per instruction between sizes at 1.35
+times, and bounds a lookup outside a run at 100 heartbeats per hypothesis in scope. Comparing contexts costs time but no heartbeats, so the automation tests also count the
+context positions a walk compares and allow at most one whole context per instruction.
+
+A snapshot or loop-frame walk adds the same hypotheses at every store: the store's own seven
+named hypotheses, or its memory, step and frame facts, and the memory variable, with a number of
+restated facts that does not depend on the stores before it. Each restated fact replaces the one
+at a memory the walk made, which the walk clears; a fact at the caller's memory stays. On a body
+whose values grow, each step also unifies the step lemma with the whole state, so the cost per
+instruction rises slowly with the program counter.
 
 To compare the cost of two versions of a proof, measure each with fresh Lean processes and
 prebuilt dependencies, alternating the runs serially on the same machine. Record elapsed time, CPU

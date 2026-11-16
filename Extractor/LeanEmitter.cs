@@ -244,16 +244,21 @@ internal static class LeanEmitter
             HashSet<int> addressedLocals = m.Body.Instructions
                 .Where(instruction => instruction.OpCode.Code is Code.Ldloca or Code.Ldloca_S)
                 .Select(instruction => ((VariableDefinition)instruction.Operand).Index).ToHashSet();
+            Operation Translated(Instruction i)
+            {
+                var operation = InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
+                    scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets);
+                // An allocation and a class field access name the element or field their raw operand names.
+                return operation switch
+                {
+                    NewArray allocation => allocation with { Element = genericEvidence.ArrayElementOf(m, i) },
+                    ClassField access => access with { Reference = genericEvidence.FieldReferenceOf(m, i) },
+                    _ => operation
+                };
+            }
             List<Operation> ops = [];
             foreach (Instruction i in m.Body.Instructions)
-                ops.Add(reachable.Contains(i)
-                    ? InstructionTranslation.Translate(i, m, methodIndices, n, instructions, profile,
-                        scalarCertificate, parameterHomes, importResolution, layoutContext, constrainedTargets)
-                    : Unadmitted.At(i));
-            // A class field access names the field its raw operand names, which the scalar check compares.
-            for (var pc = 0; pc < ops.Count; pc++)
-                if (ops[pc] is ClassField access)
-                    ops[pc] = access with { Reference = genericEvidence.FieldReferenceOf(m, m.Body.Instructions[pc]) };
+                ops.Add(reachable.Contains(i) ? Translated(i) : Unadmitted.At(i));
             fieldAccesses.AddRange(m.Body.Instructions.Select((instruction, pc) =>
                 ClassViews.Of(instruction, n, pc, ops[pc])).OfType<ClassViews.Access>());
             var needsOpaqueLocals = ops.Any(op => op is VectorCreateScalarUnsafe64);
@@ -370,6 +375,8 @@ internal static class LeanEmitter
                 $"Extraction.MethodShapeValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_unsafe_validated : Extraction.UnsafeCallsValid rawLayouts method{n}Closed method{n}Reachable method{n}.code := {Decide}");
             lean.AppendLine($"theorem method{n}_intrinsics_validated : Extraction.ExactIntrinsicsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
+            lean.AppendLine($"theorem method{n}_models_validated : " +
+                $"Extraction.RuntimeModelsAgree method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_opaque_validated : Extraction.OpaqueLocalsValid method{n}Closed method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_vector_initializations_validated : Extraction.VectorInitializationsValid method{n}Closed method{n}Reachable method{n} := {Decide}");
             lean.AppendLine($"theorem method{n}_environment_validated : " +
@@ -381,7 +388,7 @@ internal static class LeanEmitter
             lean.AppendLine($"  ⟨method{n}_specialization_validated, method{n}_parameters_validated, " +
                 $"method{n}_layouts_validated, method{n}_features_validated, method{n}_calls_validated, " +
                 $"method{n}_coverage_validated, method{n}_shape_validated, method{n}_unsafe_validated, " +
-                $"method{n}_intrinsics_validated, method{n}_opaque_validated, " +
+                $"method{n}_intrinsics_validated, method{n}_models_validated, method{n}_opaque_validated, " +
                 $"method{n}_vector_initializations_validated, method{n}_scalars_validated, " +
                 $"method{n}_constrained_validated, method{n}_body_validated,");
             lean.AppendLine($"    method{n}_environment_validated, method{n}_declared_validated⟩");

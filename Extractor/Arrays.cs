@@ -72,7 +72,7 @@ internal static class Arrays
         instruction.OpCode.Code switch
     {
         Code.Newarr when Storage((TypeReference)instruction.Operand, architecture) is
-            { Width: > 0 and <= ushort.MaxValue } element => new NewArray(element),
+            { Width: > 0 and <= ushort.MaxValue } => new NewArray(null),
         Code.Ldlen => MemoryOperation.Of(new ArrayLength()),
         Code.Ldelema => MemoryOperation.Of(new ArrayAddress(
             Storage((TypeReference)instruction.Operand, architecture) ??

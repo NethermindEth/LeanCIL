@@ -7,7 +7,7 @@ import CIL.Safety.ValueSteps
 
 `cil_step` equations for the instructions that observe class instance references: identity
 comparison (`ceq`, `beq`, `bne.un`), presence (`cgt.un` against null, `brtrue`, `brfalse`),
-`isinst` and `castclass` (`objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
+`isinst` and `castclass` (through `objectTest`, decided by a `runtimeTypeOf` fact), `ldnull`,
 `ldstr` of a caller-bound literal (`literalObject_of_lookup`), `ldfld`/`stfld` of scalar class
 fields, and `newobj` of a class, which calls the constructor with a fresh instance that
 `allocateObject_ok` or `allocateObject_insufficient` decides, and `callvirt` of a non-virtual
@@ -250,36 +250,55 @@ theorem virtualCall_outside (targets : List (CIL.Extraction.TypeExpr × Nat))
       return .next (if present then target else pc + 1) rest frame memory :=
   id rfl
 
-/-- `isinst` and `castclass` replace an object reference by its tested form: itself when its
-    runtime lineage holds the class, else null or `InvalidCastException`. -/
-@[cil_step high] theorem step_objectTest_eq (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+/-- `castclass` keeps an object reference whose runtime lineage holds the class, and null;
+    any other object throws `InvalidCastException`. -/
+@[cil_step high] theorem step_castclass_eq (type : CIL.Extraction.TypeExpr)
     (value : ManagedReference) (rest : List Value) :
-    step body (.objectTest type throwing) pc args frame (.object value :: rest) memory = do
-      let result ← objectTest memory type throwing value
+    step body (.castclass type) pc args frame (.object value :: rest) memory = do
+      let result ← objectTest memory type true value
       return .next (pc + 1) (.object result :: rest) frame memory :=
   id rfl
 
-/-- `newarr` of a class with an int32 length allocates the array and pushes it. -/
-@[cil_step high] theorem step_newReferenceArray_i32_eq (element : CIL.Extraction.TypeExpr)
-    (bits : BitVec 32) (rest : List Value) :
-    step body (.newReferenceArray element) pc args frame (.scalar (.i32 bits) :: rest) memory = do
-      let (array, allocated) ← newReferenceArray memory element (.i32 bits)
-      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := id rfl
+/-- `isinst` keeps an object reference whose runtime lineage holds the class, and null; any
+    other object becomes null. -/
+@[cil_step high] theorem step_isinst_eq (type : CIL.Extraction.TypeExpr)
+    (value : ManagedReference) (rest : List Value) :
+    step body (.isinst type) pc args frame (.object value :: rest) memory = do
+      let result ← objectTest memory type false value
+      return .next (pc + 1) (.object result :: rest) frame memory :=
+  id rfl
 
-/-- `newarr` of a class with a native length allocates the array and pushes it. -/
-@[cil_step high] theorem step_newReferenceArray_i64_eq (element : CIL.Extraction.TypeExpr)
+/-- `newarr` with an int32 length allocates an array of its element's shape and pushes it. -/
+@[cil_step high] theorem step_newarr_i32_eq (element : CIL.Extraction.TypeExpr)
+    (bits : BitVec 32) (rest : List Value) :
+    step body (.newarr element) pc args frame (.scalar (.i32 bits) :: rest) memory = do
+      let (array, allocated) ← allocateElements (body.elementShape element) (.i32 bits) memory
+      return .next (pc + 1) (array :: rest) frame allocated := id rfl
+
+/-- `newarr` with a native length allocates an array of its element's shape and pushes it. -/
+@[cil_step high] theorem step_newarr_i64_eq (element : CIL.Extraction.TypeExpr)
     (bits : BitVec 64) (rest : List Value) :
-    step body (.newReferenceArray element) pc args frame (.scalar (.i64 bits) :: rest) memory = do
-      let (array, allocated) ← newReferenceArray memory element (.i64 bits)
-      return .next (pc + 1) (.object (.address array) :: rest) frame allocated := id rfl
+    step body (.newarr element) pc args frame (.scalar (.i64 bits) :: rest) memory = do
+      let (array, allocated) ← allocateElements (body.elementShape element) (.i64 bits) memory
+      return .next (pc + 1) (array :: rest) frame allocated := id rfl
+
+/-- An inline element shape allocates a value array. -/
+@[cil_step] theorem allocateElements_value (element : CIL.ArrayElement) (length : CIL.Value) :
+    allocateElements (.value element) length memory = do
+      let (view, allocated) ← newArray memory element length
+      return (.array view, allocated) := rfl
+
+/-- A class element shape allocates an array of null references. -/
+@[cil_step] theorem allocateElements_reference (element : CIL.Extraction.TypeExpr)
+    (length : CIL.Value) :
+    allocateElements (.reference element) length memory = do
+      let (array, allocated) ← newReferenceArray memory element length
+      return (.object (.address array), allocated) := rfl
 
 /-- `ldnull` pushes the null object reference and leaves memory unchanged. -/
-@[cil_step high] theorem step_nullObject_eq (stack : List Value) :
-    step body (.memory .nullObject) pc args frame stack memory =
-      .ok (.next (pc + 1) (.object .null :: stack) frame memory) := by
-  simp only [step, observerCount, staticInstruction, memoryInstruction,
-    CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take, List.any]
-  rfl
+@[cil_step high] theorem step_ldnull_eq (stack : List Value) :
+    step body .ldnull pc args frame stack memory =
+      .ok (.next (pc + 1) (.object .null :: stack) frame memory) := id rfl
 
 /-- `ldstr` pushes the object bound to its text and leaves memory unchanged. -/
 @[cil_step high] theorem step_stringLiteral_eq (text : String) (stack : List Value) :
@@ -397,7 +416,8 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
       let found ← referenceArrayOf memory array
       return .next (pc + 1) (.scalar (.i64 (BitVec.ofNat 64 found.2.2)) :: rest) frame memory := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    referenceArrayInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    referenceArrayInstruction, referenceArrayLength, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take,
     List.any, Value.hasUnspecified, Bool.false_eq_true, ite_false, Bind.bind, Except.bind,
     Pure.pure, Except.pure]
   cases referenceArrayOf memory array <;> rfl
@@ -411,7 +431,8 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
       let value ← loadSlot memory slot.1
       return .next (pc + 1) (value :: rest) frame memory := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    referenceArrayInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    referenceArrayInstruction, referenceArrayLoad, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take,
     List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
     arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
@@ -430,7 +451,8 @@ def comparisonGuardOutcome (guard : ComparisonGuard) (width : Nat) (signed : Boo
       let after ← storeSlot memory slot.1 value
       return .next (pc + 1) rest frame after := by
   simp only [step, observerCount, Bool.or_false, staticInstruction, memoryInstruction,
-    referenceArrayInstruction, CIL.MemoryOp.argumentCount, unspecifiedOperands, List.take,
+    referenceArrayInstruction, referenceArrayStore, CIL.MemoryOp.argumentCount,
+    unspecifiedOperands, List.take,
     List.any, Value.hasUnspecified, CIL.Value.hasUnspecified, Bool.false_eq_true, ite_false,
     arrayIndex, Bind.bind, Except.bind, Pure.pure, Except.pure]
   cases referenceArraySlot memory array index.toNat <;> try rfl
@@ -842,10 +864,13 @@ simproc [cil_step] reduceFieldAddress (step _ (.ldflda _) _ _ _ _ _) := fun expr
 #print axioms step_cgt_un_object_eq
 #print axioms step_brfalse_object_eq
 #print axioms step_brtrue_object_eq
-#print axioms step_objectTest_eq
-#print axioms step_nullObject_eq
-#print axioms step_newReferenceArray_i32_eq
-#print axioms step_newReferenceArray_i64_eq
+#print axioms step_castclass_eq
+#print axioms step_isinst_eq
+#print axioms step_ldnull_eq
+#print axioms step_newarr_i32_eq
+#print axioms step_newarr_i64_eq
+#print axioms allocateElements_value
+#print axioms allocateElements_reference
 #print axioms step_stringLiteral_eq
 #print axioms step_referenceArrayLength_eq
 #print axioms step_referenceArrayLoad_eq

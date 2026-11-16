@@ -91,6 +91,19 @@ the same statements closed with `sorry`. The clause reads the name's code back i
 the cost per byte grows more than 1.15 times from one length to the next. Run this row alone with
 `dotnet run --file Tests/LookupScaling.cs -- --metadata-name-only`.
 
+The suite also measures `decide +kernel` on runtime model lookups of the first, middle and last
+entry of a table of 16 and of 256 entries, less the same statements closed with `sorry`.
+`model_table%` writes the table as a literal balanced tree keyed by method name code, so a lookup
+walks at most four more levels in the larger table and compares one method reference at the leaf:
+about 67,100 and 69,000 heartbeats for the first entry, 65,400 at both sizes for the middle entry,
+which is the root, and 67,000 and 69,200 for the last. A scan of the entries would make the last
+entry cost more. The suite fails when any position costs more than 1.05 times as much at 256
+entries as at 16. The same file measures `ModelsAgree` over methods of 8, 32 and 128 live call
+sites, each calling a distinct modelled method: about 212,000, 687,100 and 2,593,900 heartbeats, or
+26,500, 21,500 and 20,300 per site. The suite fails when the cost per site grows more than 1.15
+times from one count to the next. Run these rows alone with
+`dotnet run --file Tests/LookupScaling.cs -- --model-table-only`.
+
 The suite also measures `cil_kernel_rfl` on `CIL.Safety.indirectTarget`, the selection of a
 `calli` body, for a pointer whose owner is 64, 256 or 1,024 bytes long and a catalog whose second
 entry holds the same owner, less the same statement closed with `sorry`. The kernel compares
@@ -164,6 +177,20 @@ one size to the next. The facts cost about 7,400, 8,400 and 8,400 heartbeats per
 homes and 8,300, 10,500 and 10,800 with homes; a size below one block walks fewer entries, which
 accounts for the lower cost at 8. The reads cost 11,200 to 12,500 heartbeats per argument at every
 size.
+
+The suite also declares `cil_resolution_facts` for a method whose raw method names one struct
+element type per layout, at 8, 32 and 128 layouts, and reads every element's
+`Method.elementShape` through the facts with `simp only [cil_code]`. Each struct fact reads its
+raw and computed layout entries from named 16-entry suffixes of the layout lists, declared once
+for the environment constant. The suite fails when the heartbeats per element type of the facts,
+or of the reads, grow more than 1.35 times from one size to the next. The facts cost about 8,700,
+11,300 and 11,400 heartbeats per element type, and the reads 14,200, 13,100 and 14,000; a size
+below one block walks fewer entries, which accounts for the lower cost of the facts at 8.
+The suite also names 8 element types from 8, 32 and 128 sites, so that most sites repeat a type,
+and fails when the total heartbeats of the facts, or of the reads, grow more than 1.35 times from
+one site count to the next. The facts cost about 69,700, 71,200 and 77,200 heartbeats and the
+reads 113,700 at every site count, since the facts state one shape per element type.
+Run this row alone with `dotnet run --file Tests/LookupScaling.cs -- --element-shape-only`.
 
 The suite declares `cil_field_shape` for 8, 32 and 128 `int32` fields of one struct and for 8,
 32, 128 and 512 fields each in a struct of its own, and `cil_value_shape` for 8, 32, 128 and 512

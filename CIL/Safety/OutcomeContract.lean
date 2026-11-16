@@ -88,15 +88,17 @@ theorem OutcomeContract.Holds.normal {Input Output : Type} {c : OutcomeContract 
   fun input initial permitted =>
     WP.adequate.mpr (holds.returning permitted (never input initial permitted))
 
-/-- Successful or raised invocations agree at every fuel, so a computed run refutes a contract. -/
+/-- Settled invocations agree at every fuel, so a computed settled run refutes a contract; a run
+    that ends in fuel exhaustion or an `unsupported` fault is not settled, so this lemma takes
+    none. -/
 theorem invoke_unique {program : CIL.Program} {method left right : Nat} {args : List Value}
     {memory : Memory} {first second : Except LocatedFault (Memory × List Value)}
     (firstSettled : Settled first) (secondSettled : Settled second)
     (one : invoke program left method args memory = first)
     (other : invoke program right method args memory = second) :
     first = second := by
-  have up := invoke_mono program left right method args memory first firstSettled one
-  have down := invoke_mono program right left method args memory second secondSettled other
+  have up := invoke_mono program left right method args memory first firstSettled.stable one
+  have down := invoke_mono program right left method args memory second secondSettled.stable other
   rw [Nat.add_comm] at down
   exact up.symm.trans down
 
@@ -239,7 +241,7 @@ theorem run_call_raises_after_outcome {Input Output : Type} {c : OutcomeContract
     (.ok (final, c.results output)) trivial invoked
   have parent :=
     run_mono program parentFuel childFuel method (pc + 1) args frame _ final (.error fault)
-      (by simp [Settled, thrown]) resumed
+      (by simp [Stable, thrown]) resumed
   rw [Nat.add_comm parentFuel childFuel] at parent
   exact ⟨childFuel + parentFuel + 1, fault,
     run_call_of_invoke methodFound instructionFound stepped child parent, thrown⟩
@@ -403,7 +405,7 @@ elab_rules : tactic
           cil_strict exact CIL.Safety.run_throw_raises $methodSyntax $instructionSyntax rfl)
       else
         `(tactic| (
-          cil_strict refine CIL.Safety.run_next_raises $methodSyntax $instructionSyntax
+          cil_strict cil_refine_by CIL.Safety.run_next_raises $methodSyntax $instructionSyntax
             (by cil_checked_step_normalized [$facts,*]) ?_
           cil_stack_cleanup)))
 

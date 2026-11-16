@@ -43,7 +43,9 @@ see [stage progress](CLI.md#stage-progress).
 Checked execution tracks allocation identity, lifetime, bounds, permissions, initialization and
 alignment. Its successful executions satisfy the proved preservation properties. Named runtime
 exceptions are distinct from unsupported instructions, invalid states and fuel exhaustion.
-An expected-exception proof cannot use these model failures as its witness.
+An expected-exception proof cannot use these model failures as its witness. An `unsupported`
+fault, such as a hole, marks a run the model does not cover, so the library's refutation lemmas
+do not take it as a counterexample either.
 
 A virtual call dispatches over a closed world: its table lists every class of the extraction's
 assemblies that derives from the slot's class, each with the body the CLR would select. Lean

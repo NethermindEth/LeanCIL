@@ -40,7 +40,7 @@ internal abstract record Operation
 internal enum StackOpcode
 {
     Nop, Pop, Dup, Add, Sub, Mul, And, Or, Xor, Not, Neg, Shl, Shr, ShrUn, Ceq, Clt, Cgt, CltUn, CgtUn,
-    ConvI1, ConvI2, ConvU2, ConvI4, ConvI8, ConvI, ConvU, ConvU1, ConvU4, ConvU8, Load64, Store64, SkipInit
+    ConvI1, ConvI2, ConvU2, ConvI4, ConvI8, ConvI, ConvU, ConvU1, ConvU4, ConvU8, SkipInit
 }
 
 internal sealed record StackOperation(StackOpcode Kind) : Operation
@@ -88,8 +88,6 @@ internal sealed record StackOperation(StackOpcode Kind) : Operation
         StackOpcode.ConvU1 => ".conv_u1",
         StackOpcode.ConvU4 => ".conv_u4",
         StackOpcode.ConvU8 => ".conv_u8",
-        StackOpcode.Load64 => ".load64",
-        StackOpcode.Store64 => ".store64",
         StackOpcode.SkipInit => ".skipInit",
         _ => throw new ArgumentOutOfRangeException(nameof(Kind))
     };
@@ -432,6 +430,30 @@ internal sealed record StoreScalar(int Width) : Operation
     internal override string Render(Func<int, string> calleeName) => $".storeScalar {Width}";
 }
 
+/// <summary>The integer element an <c>ldind</c> or <c>stind</c> opcode names; <c>I</c> is native-sized.</summary>
+internal enum NumericKind { I1, U1, I2, U2, I4, U4, I8, I }
+
+/// <summary>An <c>ldind</c> or <c>stind</c> of <paramref name="Kind"/>, rendered as its constructor.</summary>
+internal sealed record IndirectAccess(NumericKind Kind, bool Store) : Operation
+{
+    /// <summary>Bytes the access moves; native int is eight bytes on every admitted profile.</summary>
+    internal int Width => Kind switch
+    {
+        NumericKind.I1 or NumericKind.U1 => 1,
+        NumericKind.I2 or NumericKind.U2 => 2,
+        NumericKind.I4 or NumericKind.U4 => 4,
+        _ => 8
+    };
+
+    /// <summary>A load sign-extends: only the one- and two-byte signed kinds.</summary>
+    internal bool Signed => Kind is NumericKind.I1 or NumericKind.I2;
+
+    /// <summary>The Lean term of the kind, such as <c>.i4</c>.</summary>
+    internal string KindTerm => "." + Kind.ToString().ToLowerInvariant();
+
+    internal override string Render(Func<int, string> calleeName) => $".{(Store ? "stind" : "ldind")} {KindTerm}";
+}
+
 /// <summary>Frame storage of the popped byte count, zeroed as the method's declared localsinit flag says.</summary>
 internal sealed record Localloc : Operation
 {
@@ -467,26 +489,36 @@ internal sealed record Divide(bool Signed, bool Remainder) : Operation
         => $".{(Remainder ? "rem" : "div")}{(Signed ? "" : "_un")}";
 }
 
-/// <summary>A new array of the element <paramref name="Element"/>.</summary>
-internal sealed record NewArray(Arrays.Element Element) : Operation
-{
-    internal override string Render(Func<int, string> calleeName) => $".newArray {Element.Expression}";
-}
-
 /// <summary>
-/// A new array of references to the class <paramref name="Name"/> (a full name) of the assembly
-/// <paramref name="Scope"/> (an assembly full name).
+/// A new array whose element type is <paramref name="Element"/>, the raw <c>newarr</c> operand's type expression,
+/// which the extraction check compares with the token. <paramref name="Class"/> names a class element.
 /// </summary>
-internal sealed record NewReferenceArray(string Scope, string Name) : Operation
+internal sealed record NewArray(NewArray.ClassElement? Class, string? Element = null) : Operation
 {
-    internal override string Render(Func<int, string> calleeName) =>
-        $".newReferenceArray ({GenericEvidence.ObjectType(Scope, Name)})";
+    /// <summary>The class <paramref name="Name"/> (a full name) of the assembly <paramref name="Scope"/>.</summary>
+    internal sealed record ClassElement(string Scope, string Name);
+
+    // Translation does not see the layout table the term indexes, so the emitter attaches it.
+    internal override string Render(Func<int, string> calleeName) => $".newarr ({Element ??
+        throw new InvalidOperationException("An array allocation is rendered before its element type is attached")})";
 }
 
-/// <summary>A cast or test of the top reference against the class <paramref name="Type"/>.</summary>
-internal sealed record ObjectTest(string Type, bool Throwing) : Operation
+/// <summary>An <c>ldnull</c>: the null object reference.</summary>
+internal sealed record LoadNull : Operation
 {
-    internal override string Render(Func<int, string> calleeName) => $".objectTest ({Type}) {LeanText.Bool(Throwing)}";
+    internal override string Render(Func<int, string> calleeName) => ".ldnull";
+}
+
+/// <summary>A <c>castclass</c> of the top reference to the class <paramref name="Type"/>.</summary>
+internal sealed record CastClass(string Type) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".castclass ({Type})";
+}
+
+/// <summary>An <c>isinst</c> test of the top reference against the class <paramref name="Type"/>.</summary>
+internal sealed record IsInstance(string Type) : Operation
+{
+    internal override string Render(Func<int, string> calleeName) => $".isinst ({Type})";
 }
 
 /// <summary>An initialisation of a span local from the span operation that constructs it.</summary>
@@ -509,12 +541,6 @@ internal abstract record ManagedPointer : Operation
 internal sealed record TableLength : ManagedPointer
 {
     protected override string Body(Func<int, string> calleeName) => ".tableLength";
-}
-
-/// <summary>A load of the callable pointer in a native method table of the given signature.</summary>
-internal sealed record TableLoad(string Signature) : ManagedPointer
-{
-    protected override string Body(Func<int, string> calleeName) => $"(.tableLoad {Signature})";
 }
 
 /// <summary>A load of the element of a method table of the given signature.</summary>

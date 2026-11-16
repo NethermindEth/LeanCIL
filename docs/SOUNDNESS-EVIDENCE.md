@@ -33,9 +33,10 @@ pass by stack effect alone. Non-covered raw opcodes cannot emit these scalar ope
 feature-bound type-test words and size constants bound to exact primitive/vector widths or
 validated layouts.
 
-Indirect accesses are matched exactly too. Each integer `ldind` and `stind`, each `ldobj` and
-`stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit the
-one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
+Indirect accesses are matched exactly too. Each integer `ldind` and `stind` must emit the
+`ldind` or `stind` of the kind its opcode names, which `Instruction.ofRaw?` decodes. Each `ldobj`
+and `stobj` of an integer, enum or integer-vector type, and each `cpblk` and `initblk` must emit
+the one load, store or block operation that its opcode, operand type and `unaligned.` prefix give;
 without a prefix a block operation assumes an alignment of eight. An aggregate `ldobj` or `stobj`
 emits its aggregate transfer, whose width its layout use binds. A span `ldobj` emits nothing, and
 `ldobj` or `stobj` of any other type, such as a floating-point or pointer type, is rejected. No
@@ -246,8 +247,9 @@ Direct Lean mutations exercise validators independently of hashes/regeneration: 
 stack kinds/joins, layouts, homes, generic substitution, pruning, call slots and folds. Positive
 controls establish that fixtures reach the intended obligation. See
 [validation](VALIDATION-COVERAGE.md). Wrong-addition has an execution witness and an
-all-successful-fuel refutation; bounds/lifetime examples use `invoke_fault_refutes_success`. A
-failed positive proof or resource exhaustion alone is not a semantic counterexample.
+all-successful-fuel refutation; bounds/lifetime examples use `invoke_fault_refutes_success`, which
+takes only a definite fault. A failed positive proof, fuel exhaustion or an `unsupported` fault
+alone is not a semantic counterexample.
 
 ## Caller proofs and published library contracts
 

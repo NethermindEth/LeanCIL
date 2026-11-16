@@ -44,7 +44,8 @@ modified output files.
   reuse it within that phase, so no analysis is cached across method mutation or profile changes.
   Feature evidence uses the same incoming states as instruction selection.
   `Tests/ExtractionBatch.cs` compares direct and batch output across assemblies, scalar and SIMD
-  profiles, feature queries and a loop backedge, and checks source/assembly tampering. It also extracts
+  profiles, feature queries and a loop backedge, and checks source/assembly tampering. Two outputs
+  that name one directory, also through a directory link, reject the batch. It also extracts
   scalar, generic-layout and static-initialization methods twice into separate directories, in separate
   processes and in reversed batch and `--assume-initialized` order, and requires every file to match byte
   for byte. `Tests/MultiAssembly.cs` does the same with pinned references, where only the same
@@ -281,6 +282,7 @@ processes, each with its private process and worker checks. Run one with
 | `--check` name | Fixture | Checks |
 | --- | --- | --- |
 | `source-resolution` | `Tests/ConsumerSourceResolution.cs` | Consumer source resolution |
+| `package-paths` | `Tests/ConsumerPackagePaths.cs` | Package containment decided with links followed on both sides: a package reached through a directory link holds its own directories in either spelling, an audited module reported with links followed is the checked file and a shadow elsewhere is not, containment, identity and compiled module names decide on the location rather than the spelling, a case variant of a directory is the same location exactly where the file system finds it, each name is matched under the case rule of the directory holding it, which the operating system reports where it can (the volume on macOS, the case-sensitive flag on Windows, the case-folding flag on Linux) and the directory's entries show otherwise, an unknown rule never admits a name in another case into a package while it keeps two outputs apart, an answer is kept only for a directory that existed when asked, a sibling whose name differs only in case lies outside the package on a case-sensitive volume (a disk image on macOS, a directory with the case-sensitive flag on Windows, the temporary directory on Linux), a path with `..` after a link is kept only where reading the `..` after following the link, as POSIX does, and as spelled, as Windows does, name one location inside the package, and a path that leaves it through `..`, an absolute path, a link (also a dangling one) or a cycle of links is rejected. On Windows the link cases print SKIP where no symbolic link or junction can be made; the case-sensitive volume check prints SKIP where fsutil cannot set the flag on Windows or where the Linux temporary directory ignores case. |
 | `compile-check` | `Tests/ConsumerComponents.cs` | The components fixture run with `--compile-check` |
 | `support-union` | `Tests/ConsumerSupportUnion.cs` | A fixed three-extraction consumer batch in two orders. Support imported only by later groups must build and replay once; direct and indirect extraction-dependent modules must replay in every consuming group, including repeated import commands on one line. Compiled import headers are authoritative when scheduling misses an import. |
 | `certificate-reuse` | `Tests/ConsumerCertificateReuse.cs` | Four independent verifier processes with distinct proof sources. Unchanged generated certificates keep their authenticated build outputs and run no certificate `lake build`. Reuse requires the complete certificate module parts and traces, unchanged authenticated restored artifacts, and the source/import closure binding. Changed extraction text and self-rehashed corrupt artifacts force rebuilding `Extracted`. Every successful request independently replays `Extracted` and the proof and audits the certificate. Expected rejection groups keep the separate `ExtractionAudit` module. Generated-source tampering is rejected before receipt reuse, and proof code cannot replace restored or freshly built certificate artifacts; both rejection paths remove a stale report. |
@@ -556,8 +558,10 @@ These tests cover preparation:
   the CLI document, a package whose lakefile names the entry keeps it however old its pin and
   however the cache directory is spelled, and no pass raises. A lakefile that never answers, and
   an injected reader that blocks, delay a pass by a bounded time; the named-pipe check prints SKIP
-  on Windows. Opening an entry evicts nothing, and a publication reports its removal as a stage
-  with the number removed and nothing else on stderr. Malformed settings keep the defaults and
+  on Windows. The pass limit is checked on an injected clock, so a read under way when the limit
+  comes is cut off there and the pass gives up whatever the machine's load. Opening an entry
+  evicts nothing, and a publication reports its removal as a stage with the number removed and
+  nothing else on stderr. Malformed settings keep the defaults and
   huge ones clamp. The link checks print SKIP when no symbolic link or junction can be made. The
   `workspace` suite checks that both package kinds pin the entry they require.
 - The `workspace` suite checks that a full audit, contract imports and a package import are never

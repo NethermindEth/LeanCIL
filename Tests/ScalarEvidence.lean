@@ -493,7 +493,7 @@ private def nativeReturnEvidence : MethodEvidence := withBody {
 private def nativeReturnMethod : Method := {
   locals := [], returnsValue := true,
   declared := { parameters := [.byref word], returnType := word },
-  code := [.ldarg 0, .load64, .ret] }
+  code := [.ldarg 0, .ldind .i, .ret] }
 example : TranslationValid [] #[] [] [nativeReturnEvidence] [] [nativeReturnMethod] := by
   decide +kernel
 example : scalarTransfer nativeReturnRaw (i 42) [.native] = some [] := by decide
@@ -538,7 +538,7 @@ theorem local_slot_sites :
     ¬ ScalarFlowValid #[] (slotRaw (i 22) 1) slotFeatures (slotStates .word32)
       (slotCode (.ldc_i4 0) 1) ∧
     ¬ ScalarFlowValid #[] (slotRaw (i 20) 0) slotFeatures (slotStates .nullObject)
-      (slotCode (.memory .nullObject) 0) := by
+      (slotCode .ldnull 0) := by
   decide +kernel
 #print axioms local_slot_sites
 
@@ -904,16 +904,16 @@ private def storeSite : CallSite :=
 
 /-- The emissions extraction gives these accesses, none of which carries a metadata token. -/
 private def indirectEmitted : List IndirectCase := [
-  load 70 (.loadScalar 1 true), load 71 (.loadScalar 1 false), load 72 (.loadScalar 2 true),
-  load 73 (.loadScalar 2 false), load 74 (.loadScalar 4 false), load 75 (.loadScalar 4 false),
-  load 76 .load64 .word64, load 77 .load64 .native, store 82 (.storeScalar 1),
-  store 83 (.storeScalar 2), store 84 (.storeScalar 4), store 85 .store64, store 223 .store64,
+  load 70 (.ldind .i1), load 71 (.ldind .u1), load 72 (.ldind .i2), load 73 (.ldind .u2),
+  load 74 (.ldind .i4), load 75 (.ldind .u4), load 76 (.ldind .i8) .word64,
+  load 77 (.ldind .i) .native, store 82 (.stind .i1), store 83 (.stind .i2),
+  store 84 (.stind .i4), store 85 (.stind .i8), store 223 (.stind .i),
   block 65047 (.memory (.copyBlock 8)), block 65048 (.memory (.initBlock 8)),
   block 65047 (.memory (.copyBlock 1)) [unaligned 1],
   block 65048 (.memory (.initBlock 2)) [unaligned 2],
   block 65047 (.memory (.copyBlock 4)) [unaligned 4],
-  load 74 (.loadScalar 4 false) (prefixes := [unaligned 1]),
-  store 85 .store64 [unaligned 2]]
+  load 74 (.ldind .i4) (prefixes := [unaligned 1]),
+  store 85 (.stind .i8) [unaligned 2]]
 
 /-- `ldobj` and `stobj` of primitive, aggregate, enum and vector types, whose type tokens the
     test encoder cannot write. -/
@@ -926,17 +926,19 @@ private def objectEmitted : List IndirectCase := [
   typed 113 aggregateType (.loadAggregate 8), typed 129 aggregateType (.storeAggregate 8),
   typed 113 enumType (.loadScalar 2 true), typed 113 vectorType (.memory .load128)]
 
-/-- Each accepted before the indirect access rule: a wrong width, sign, alignment or operation,
-    a kind or prefix extraction refuses, and an access form at an unrelated opcode. -/
+/-- Each emits other than the decoded instruction: a wrong width, sign, alignment or operation,
+    a runtime-model load or store, a kind or prefix extraction refuses, and an access form at an
+    unrelated opcode. -/
 private def indirectForged : List IndirectCase := [
   -- Width.
-  load 70 (.loadScalar 4 true), load 73 (.loadScalar 1 false), load 74 (.loadScalar 8 false),
-  load 74 .load64, load 76 (.loadScalar 4 false) .word64, load 77 (.loadScalar 8 false) .native,
-  load 70 (.memory .load128), store 82 (.storeScalar 4), store 84 .store64,
-  store 85 (.storeScalar 4), store 223 (.storeScalar 2),
+  load 70 (.ldind .i4), load 73 (.ldind .u1), load 74 (.ldind .i8),
+  load 76 (.ldind .i4) .word64, load 77 (.ldind .i8) .native,
+  load 70 (.memory .load128), store 82 (.stind .i4), store 84 (.stind .i8),
+  store 85 (.stind .i4), store 223 (.stind .i2),
   -- Sign.
-  load 70 (.loadScalar 1 false), load 71 (.loadScalar 1 true), load 72 (.loadScalar 2 false),
-  load 73 (.loadScalar 2 true), load 74 (.loadScalar 4 true), load 75 (.loadScalar 4 true),
+  load 70 (.ldind .u1), load 71 (.ldind .i1), load 72 (.ldind .u2), load 73 (.ldind .i2),
+  -- Runtime-model transfers of the right width, which no raw `ldind` or `stind` decodes to.
+  load 74 (.loadScalar 4 false), load 70 (.loadScalar 1 true), store 84 (.storeScalar 4),
   -- Alignment and operation.
   block 65047 (.memory (.copyBlock 1)), block 65048 (.memory (.initBlock 4)),
   block 65047 (.memory (.copyBlock 8)) [unaligned 1],
@@ -944,21 +946,22 @@ private def indirectForged : List IndirectCase := [
   block 65047 (.memory (.initBlock 8)), block 65048 (.memory (.copyBlock 8)),
   -- Kinds and prefixes extraction refuses.
   block 65047 (.memory (.copyBlock 3)) [unaligned 3],
-  load 74 (.loadScalar 4 false) (prefixes := [i 65043]),
-  load 78 (.loadScalar 4 false) .other, load 79 (.loadScalar 8 false) .other,
-  load 80 .load64 .other, store 81 .store64, store 86 (.storeScalar 4),
-  store 87 (.storeScalar 8),
+  load 74 (.ldind .i4) (prefixes := [i 65043]),
+  load 78 (.ldind .i4) .other, load 79 (.ldind .i8) .other,
+  load 80 (.ldind .i) .other, store 81 (.stind .i8), store 86 (.stind .i4),
+  store 87 (.stind .i8),
   -- Access forms at other opcodes.
-  load 108 (.loadScalar 8 false) .other, load 107 (.loadAggregate 4) .other]
+  load 108 (.loadScalar 8 false) .other, load 108 (.ldind .i8) .other,
+  load 107 (.loadAggregate 4) .other]
 
 /-- Forged emissions at operands the test encoder cannot write: wrong widths and signs of `ldobj`
-    and `stobj`, field accesses at operand types extraction refuses, and calls emitting 64-bit
-    accesses. -/
+    and `stobj`, field accesses at operand types extraction refuses, and calls emitting an
+    `ldind` or `stind`. -/
 private def objectForged : List IndirectCase := [
   load 113 (.loadScalar 2 false) (operand := .type intType),
   load 113 (.loadScalar 4 true) (operand := .type intType),
   load 113 (.loadScalar 1 false) (operand := .type sbyteType),
-  load 113 .load64 .word64 (operand := .type word),
+  load 113 (.ldind .i8) .word64 (operand := .type word),
   store 129 (.storeScalar 1) (operand := .type intType),
   store 129 (.storeScalar 8) (operand := .type sbyteType),
   typed 113 aggregateType (.loadScalar 4 false), typed 129 aggregateType (.loadAggregate 8),
@@ -967,8 +970,8 @@ private def objectForged : List IndirectCase := [
   typed 113 (.atom runtime "System.Double") (.fieldAt 0 4 false),
   typed 129 (.atom runtime "System.Single") (.setFieldAt 0 8),
   typed 113 (.pointer intType) (.fieldAt 0 1 true),
-  load 40 .load64 .word64 (operand := .call loadSite),
-  store 40 .store64 (operand := .call storeSite)]
+  load 40 (.ldind .i8) .word64 (operand := .call loadSite),
+  store 40 (.stind .i8) (operand := .call storeSite)]
 
 /-- Every emission extraction gives passes the indirect access rule, both flow checks and, where
     the body has no token, every check of the method's evidence. -/
@@ -1001,7 +1004,7 @@ private def pushHoleStates : ScalarCertificate := [some [], some [.other], some 
 private def pushHoleCode (emitted : Instruction) : List Instruction :=
   [emitted, .pop, .ldarg 0, .ret]
 example : ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures
-    (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullObject)) := by decide
+    (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode .ldnull) := by decide
 -- `ldnull` has one canonical null; the byref null of `Unsafe.NullRef` is a different value.
 example : ¬ ScalarFlowValid #[] (pushHoleRaw 20) pushHoleFeatures
     (pushHoleStates.set 1 (some [.nullObject])) (pushHoleCode (.memory .nullRef)) := by decide

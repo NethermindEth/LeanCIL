@@ -233,7 +233,7 @@ theorem aliased_homes_rejected (memory : Memory) (boundary : Nat) (home : Refere
 
 /-- A region with no direct stores cannot certify a hidden memory mutation. -/
 theorem no_hidden_write {body : CIL.Method} {slots : List LocalSlot} {before after : Memory}
-    (effects : SegmentLocalEffects body [.store64] slots before after) : before = after := by
+    (effects : SegmentLocalEffects body [.stind .i8] slots before after) : before = after := by
   induction effects with
   | refl => rfl
   | store index kind home bytes alignment destination => simp [segmentStores] at destination

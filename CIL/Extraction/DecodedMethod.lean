@@ -6,10 +6,10 @@ import CIL.Extraction.Translation
 
 `Method.ofRaw?` gives the method a raw definition denotes at its type arguments: each
 instruction of the instantiated definition as `Instruction.ofRaw` decodes it, a hole where no
-family admits the opcode yet and a field access naming the instantiated field, and the frame,
-homes and signature from the same definition. `Method.ofBody?` reads the
-code and init flag from pinned body bytes instead of the definition, and `decodedProgram?`
-applies it to every evidence record.
+family admits the opcode yet, a type test naming the type argument and a field access naming the
+instantiated field, and the frame, homes and signature from the same definition.
+`Method.ofBody?` reads the code and init flag from pinned body bytes instead of the definition,
+and `decodedProgram?` applies it to every evidence record.
 `Method.ofBody?_of_decodes` shows that for a definition whose body check passes, the method of
 the bytes is the method of the definition, so a proof about the decoded program needs no
 translator output.
@@ -90,7 +90,7 @@ theorem _root_.CIL.Method.ofBody?_of_decodes {pins : List AssemblyPin} {pin : As
 
 /-- Each pc of a decoded method holds what `Instruction.ofRawAt` decodes at that pc of the
     instantiated definition's code, so the method has one instruction per raw instruction and a
-    field access names the instantiated field. -/
+    type test names the type argument and a field access the instantiated field. -/
 theorem _root_.CIL.Method.ofRaw?_code {profile : FeatureProfile}
     {environment : LayoutEnvironment} {source : RawMethod} {arguments : List TypeExpr}
     {method : Method}

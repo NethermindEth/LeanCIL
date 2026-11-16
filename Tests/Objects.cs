@@ -122,13 +122,13 @@ foreach (var (name, forged) in new[]
 // Lean binds a type test to its raw opcode and class, so an emitted test of another class or with
 // the other outcome for a failed cast fails the scalar flow check.
 var cast = File.ReadAllText(Path.Combine(root, "DogCast", "Extracted.lean"));
-var castTest = $".objectTest ({dogEntry.TrimStart('(').TrimEnd(',', ' ')}) true";
+var castTest = $".castclass ({dogEntry.TrimStart('(').TrimEnd(',', ' ')})";
 if (!cast.Contains(castTest, StringComparison.Ordinal))
     throw new InvalidOperationException("The extraction does not test the cast against Dog: " + castTest);
 foreach (var (name, forged) in new[]
 {
     ("class", castTest.Replace("Examples.Dog", "Examples.Bird", StringComparison.Ordinal)),
-    ("outcome", castTest[..^" true".Length] + " false")
+    ("outcome", castTest.Replace(".castclass", ".isinst", StringComparison.Ordinal))
 })
 {
     var path = Path.Combine(root, $"ForgedCast-{name}.lean");

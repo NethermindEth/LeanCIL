@@ -87,26 +87,6 @@ theorem Memory.Renamed.stepFallback {indices : LocalIndexMap} {mapping : Allocat
       · exact .error .invalidState
 #print axioms Memory.Renamed.stepFallback
 
-/-- Observable execution through a native table requires a successful checked memory step. -/
-theorem checkedNative_bind {mapping : AllocationRenaming} {relation : β → γ → Prop}
-    (source target : Checked α) (sourceNext : α → ExecutionResult β)
-    (targetNext : α → ExecutionResult γ)
-    (preserved : ∀ value, source = .ok value → target = .ok value)
-    (observable : SuccessOrThrow (checkedAt .null nativeMethodWidth source >>= sourceNext))
-    (next : ∀ value, source = .ok value → SuccessOrThrow (sourceNext value) →
-      ResultRenamed mapping relation (sourceNext value) (targetNext value)) :
-    ResultRenamed mapping relation (checkedAt .null nativeMethodWidth source >>= sourceNext)
-      (checkedAt .null nativeMethodWidth target >>= targetNext) := by
-  cases checked : source with
-  | error fault =>
-    simp [checked, checkedAt, Except.mapError, Bind.bind, Except.bind, SuccessOrThrow]
-      at observable
-  | ok value =>
-    simp only [checked, checkedAt, Except.mapError, Bind.bind, Except.bind] at observable ⊢
-    rw [preserved value checked]
-    exact next value checked observable
-#print axioms checkedNative_bind
-
 /-- An observable native table addition selects the same cursor in the renamed memory: renaming
     keeps the table's stable binding identity and resolves it to the renamed allocation. -/
 theorem Memory.Renamed.nativeTableAddition {indices : LocalIndexMap}
@@ -154,9 +134,8 @@ inductive FixedStepFamily where
 
 /-- Allocating and relocated-local operations have separate concrete step proofs. -/
 def fixedStepFamily : CIL.Instruction → FixedStepFamily
-  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newArray _
-  | .newAggregate .. | .newObject .. | .newReferenceArray _ | .memory _
-  | .ldfld _ | .ldflda _ | .stfld _ => .excluded
+  | .ldloc .. | .ldloca _ | .stloc .. | .initializeSpanLocal .. | .localloc | .newarr _
+  | .newAggregate .. | .newObject .. | .memory _ | .ldfld _ | .ldflda _ | .stfld _ => .excluded
   | .add | .sub => .reference
   | .clt_un | .cgt_un | .ceq => .reference
   | .blt_un _ | .bge_un _ | .bgt_un _ | .ble_un _ => .reference
@@ -164,7 +143,7 @@ def fixedStepFamily : CIL.Instruction → FixedStepFamily
   | .intrinsic .. | .conv_ovf _ | .conv_ovf_un _ | .div | .div_un | .rem
   | .rem_un | .add_ovf | .add_ovf_un | .sub_ovf | .sub_ovf_un | .mul_ovf | .mul_ovf_un => .numeric
   | .managed _ | .ldarg _ | .starg _ | .ldarga _ | .call .. | .callInstance .. | .callVirtual ..
-  | .objectTest .. | .tailCall ..
+  | .castclass _ | .isinst _ | .tailCall ..
   | .throw _ | .ret => .boundary
   | _ => .other
 
@@ -299,12 +278,15 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
       rename_i addressHome localAllocation unadmitted offsetBeforeTable tableBeforeOffset addOvf
         addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf convOvfUn objectsEqual
         objectsBranchEqual objectsBranchUnequal objectAbove objectBranchFalse objectBranchTrue
-        objectTested storeHome
+        castClass isInst storeHome allocatedArray
       guard_hyp addressHome : ∀ (index : Nat), operation = .ldarga index → False
       guard_hyp localAllocation : operation = .localloc → False
       guard_hyp unadmitted : ∀ (opcode : Nat), operation = .unadmitted opcode → False
       guard_hyp storeHome : ∀ (index : Nat) (value : Value) (rest : List Value),
         operation = .starg index → stack = value :: rest → False
+      guard_hyp allocatedArray : ∀ (element : CIL.Extraction.TypeExpr) (length : CIL.Value)
+        (rest : List Value), operation = .newarr element → stack = Value.scalar length :: rest →
+        False
       guard_hyp tableBeforeOffset : ∀ (table : CIL.MethodTable) (offset : CIL.Value)
         (rest : List Value), operation = .add →
         stack = Value.methodTable table :: Value.scalar offset :: rest → False
@@ -312,9 +294,12 @@ macro "allocation_fixed_step" following:tactic : tactic => `(tactic| (
         stack = Value.scalar y :: Value.scalar x :: rest → False
       guard_hyp objectsEqual : ∀ (right left : ManagedReference) (rest : List Value),
         operation = .ceq → stack = Value.object right :: Value.object left :: rest → False
+      guard_hyp isInst : ∀ (type : CIL.Extraction.TypeExpr) (value : ManagedReference)
+        (rest : List Value), operation = .isinst type → stack = Value.object value :: rest → False
       clear addOvf addOvfUn subOvf subOvfUn mulOvf mulOvfUn div divUn rem remUn convOvf
         convOvfUn objectsEqual objectsBranchEqual objectsBranchUnequal objectAbove
-        objectBranchFalse objectBranchTrue objectTested storeHome addressHome localAllocation
+        objectBranchFalse objectBranchTrue castClass isInst storeHome allocatedArray addressHome
+        localAllocation
       split at observable)
     all_goals try solve | cases family
     all_goals try simp only [List.map_cons, AllocationRenaming.value, metadata.profile,

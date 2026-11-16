@@ -207,7 +207,7 @@ internal sealed class LayoutEvidence
                 {
                     Code.Ldobj => "load", Code.Stobj => "store", Code.Initobj => "initialize",
                     Code.Cpobj => "copy", Code.Sizeof => "sizeOf",
-                    Code.Newarr or Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any => "arrayElement", _ => null
+                    Code.Ldelema or Code.Ldelem_Any or Code.Stelem_Any => "arrayElement", _ => null
                 };
                 if (access is not null) uses.Add($".size {pc} {Index(type)} .{access}");
             }

@@ -316,13 +316,13 @@ theorem missing_authority_rejected : ¬ unguardedContract.Holds Extracted.progra
   have faulted : invoke Extracted.program 8 pair (unguardedContract.args ⟨⟨0, 0⟩, 0, 0⟩) readOnly =
       .error ⟨2, 2, .memory .unwritable (.address ⟨0, 0⟩) 8⟩ := rfl
   have up := invoke_mono _ _ 8 _ _ _ (.ok (final, values)) trivial ran
-  have down := invoke_mono _ _ fuel _ _ _ _ (by simp [Settled]) faulted
+  have down := invoke_mono _ _ fuel _ _ _ _ (by simp [Stable]) faulted
   rw [Nat.add_comm] at down
   cases up.symm.trans down
 
 /-- `Logged(ref ulong log, ulong value) { log = 1; Value = value; }` -/
 @[cil_code] def logged : CIL.Method := { returnsValue := false, locals := [], code :=
-  [.ldarg 1, .ldc_i8 1, .store64, .ldarg 0, .ldarg 2, .setFieldAt 0 8, .ret] }
+  [.ldarg 1, .ldc_i8 1, .stind .i8, .ldarg 0, .ldarg 2, .setFieldAt 0 8, .ret] }
 @[cil_code] def loggedProgram : CIL.Program := [logged]
 
 structure LoggedInput where

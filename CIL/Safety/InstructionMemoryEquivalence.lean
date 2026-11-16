@@ -1,4 +1,5 @@
 import CIL.Safety.FrameEquivalence
+import CIL.Safety.NativeMethodTableEquivalence
 
 /-!
 # Equivalent memories run instructions alike
@@ -236,7 +237,8 @@ private theorem Memory.Equivalent.otherMemoryInstruction {m n : Memory} (same : 
     (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (otherMemoryInstruction operation stack m)
       (otherMemoryInstruction operation stack n) := by
-  unfold CIL.Safety.otherMemoryInstruction
+  unfold CIL.Safety.otherMemoryInstruction CIL.Safety.arrayAddress CIL.Safety.arrayLength
+    CIL.Safety.arrayLoad CIL.Safety.arrayStore
   split <;> try simp only [same.read, same.access, same.loadValue, same.formValue, same.add,
     same.referenceDifference, same.spanValidate, same.spanSlice, same.spanElement,
     same.arrayValidate, same.arrayElement, same.loadTransfer]
@@ -288,7 +290,8 @@ private theorem Memory.Equivalent.referenceArrayInstruction {m n : Memory}
     (same : m.Equivalent n) (operation : CIL.MemoryOp) (stack : List Value) :
     ResultEquivalent MemoryFirstEquivalent (referenceArrayInstruction operation stack m)
       (referenceArrayInstruction operation stack n) := by
-  unfold CIL.Safety.referenceArrayInstruction
+  unfold CIL.Safety.referenceArrayInstruction CIL.Safety.referenceArrayLength
+    CIL.Safety.referenceArrayLoad CIL.Safety.referenceArrayStore
   split <;> try simp only [same.loadSlot, same.referenceArrayOf, same.referenceArraySlot,
     same.storableIn]
   all_goals repeat first
@@ -539,7 +542,7 @@ theorem Memory.Equivalent.instruction {m n : Memory} (same : m.Equivalent n)
       (instruction operation stack n) := by
   unfold CIL.Safety.instruction
   split <;> try simp only [same.read, same.dereference, same.loadValue, same.loadSnapshot,
-    same.formValue, same.add]
+    same.formValue, same.add, same.loadNativeTable]
   all_goals repeat first
     | exact same.memoryInstruction _ _
     | exact .error _

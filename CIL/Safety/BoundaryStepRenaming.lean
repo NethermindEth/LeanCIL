@@ -12,6 +12,58 @@ private theorem managedReference_null_iff (mapping : AllocationRenaming)
   cases reference <;> simp [AllocationRenaming.managedReference]
 #print axioms managedReference_null_iff
 
+/-- A method table's length reads no memory, so renaming leaves it and its faults unchanged. -/
+private theorem methodTableLength_renamed (mapping : AllocationRenaming)
+    (table : CIL.MethodTable) :
+    ResultRenamed mapping Eq (methodTableLength table) (methodTableLength table) := by
+  unfold methodTableLength
+  cases table.targets with
+  | none => exact .error _
+  | some targets =>
+    by_cases large : targets.size ≥ 2 ^ 31
+    · simp only [large, ite_true, Bind.bind, Except.bind]; exact .error _
+    · simp only [large, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]; exact .ok rfl
+#print axioms methodTableLength_renamed
+
+/-- An observable method table element read selects the same pointer in renamed memory: a
+    native backing resolves its stable binding to the renamed allocation. -/
+private theorem Memory.Renamed.methodTableElement_bind {mapping : AllocationRenaming}
+    {scopes : Nat → Nat → Prop} {source target : Memory} {relation : β → γ → Prop}
+    (related : Memory.Renamed mapping scopes source target) (formed : source.WellFormed)
+    (table : CIL.MethodTable) (index : CIL.Value)
+    (sourceNext : CIL.MethodPointer → ExecutionResult β)
+    (targetNext : CIL.MethodPointer → ExecutionResult γ)
+    (observable : SuccessOrThrow (methodTableElement table index source >>= sourceNext))
+    (next : ∀ pointer, SuccessOrThrow (sourceNext pointer) →
+      ResultRenamed mapping relation (sourceNext pointer) (targetNext pointer)) :
+    ResultRenamed mapping relation (methodTableElement table index source >>= sourceNext)
+      (methodTableElement table index target >>= targetNext) := by
+  unfold methodTableElement at observable ⊢
+  obtain ⟨signature, targets, backing, entryCount, counted⟩ := table
+  cases selected : arrayIndex index with
+  | none => simp only [Bind.bind, Except.bind]; exact .error _
+  | some position =>
+    simp only [selected] at observable ⊢
+    cases targets with
+    | none => exact .error _
+    | some targets =>
+      by_cases large : targets.size ≥ 2 ^ 31
+      · simp only [large, ite_true, Bind.bind, Except.bind]; exact .error _
+      · simp only [large, ite_false, Bind.bind, Except.bind, Pure.pure, Except.pure]
+          at observable ⊢
+        cases found : targets[position]? with
+        | none => simp only; exact .error _
+        | some entry =>
+          simp only [found] at observable ⊢
+          cases backing with
+          | none => simp only at observable ⊢; exact next _ observable
+          | some backing =>
+            simp only at observable ⊢
+            exact checkedNative_bind _ _ _ _
+              (fun value proof => related.loadNativeTable_success formed _ value proof) observable
+              (fun value _ observed => next value observed)
+#print axioms Memory.Renamed.methodTableElement_bind
+
 /-- Managed metadata identities are stable while checked argument references are renamed. -/
 theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : AllocationRenaming}
     {scopes : Nat → Nat → Prop} {source target : Memory} {sourceFrame targetFrame : Frame}
@@ -37,6 +89,11 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
     | exact .ok (.tailCall related)
     | (simp only [Bool.false_eq_true, Bool.true_eq, ite_false, ite_true] at observable ⊢)
     | contradiction
+    | (apply (methodTableLength_renamed mapping _).bind
+       intro first second same
+       subst second)
+    | (apply related.methodTableElement_bind formed _ _ _ _ observable
+       intro pointer observable)
     | (apply checkedNative_bind _ _ _ _
         (fun value proof => related.loadNativeTable_success formed _ value proof) observable
        intro value found observable)
@@ -45,9 +102,8 @@ theorem Memory.Renamed.managedStep {indices : LocalIndexMap} {mapping : Allocati
         exact bounds value (List.mem_of_mem_take (List.mem_reverse.mp member)))).bind
        intro first second same
        subst second)
-    | (split <;> try simp only [*, Bool.false_eq_true, Bool.true_eq, ite_false, ite_true,
-        List.map_cons, AllocationRenaming.value, Bind.bind, Except.bind, Pure.pure,
-        Except.pure] at observable ⊢)
+    | (split <;> try simp only [*, Bool.false_eq_true, ite_false, ite_true, Bind.bind,
+        Except.bind, Pure.pure, Except.pure] at observable ⊢)
   all_goals try simp_all only [reduceCtorEq, forall_const, forall_eq', false_implies, true_implies]
   all_goals cases stack with
   | nil => simp_all [AllocationRenaming.value, managedReference_null_iff]
@@ -192,40 +248,44 @@ private theorem Memory.Renamed.objectTest {mapping : AllocationRenaming}
       · exact .ok rfl
 #print axioms Memory.Renamed.objectTest
 
-/-- A type test transports as a step to the next pc: renaming keeps null, the tested runtime
-    class and the cast's exception. -/
-private theorem Memory.Renamed.stepObjectTest {indices : LocalIndexMap}
+/-- A `castclass` (`throwing`) or `isinst` transports as a step to the next pc: renaming keeps
+    null, the tested runtime class and the cast's exception. -/
+private theorem Memory.Renamed.stepTypeTest {indices : LocalIndexMap}
     {mapping : AllocationRenaming} {scopes : Nat → Nat → Prop} {source target : Memory}
     {sourceFrame targetFrame : Frame} (related : Memory.Renamed mapping scopes source target)
     (frames : Frame.Renamed indices mapping scopes sourceFrame targetFrame)
-    (sourceBody targetBody : CIL.Method) (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+    (sourceBody targetBody : CIL.Method) (operation : CIL.Instruction)
+    (type : CIL.Extraction.TypeExpr) (throwing : Bool)
+    (tests : operation = .castclass type ∧ throwing = true ∨
+      operation = .isinst type ∧ throwing = false)
     (pc : Nat) (arguments stack : List Value)
     (bounds : ∀ value ∈ stack, value.Below mapping.sourceLimit) :
     ResultRenamed mapping (FrameAction.Renamed indices mapping scopes)
-      (step sourceBody (.objectTest type throwing) pc arguments sourceFrame stack source)
-      (step targetBody (.objectTest type throwing) pc (arguments.map mapping.value)
+      (step sourceBody operation pc arguments sourceFrame stack source)
+      (step targetBody operation pc (arguments.map mapping.value)
         targetFrame (stack.map mapping.value) target) := by
-  simp only [step, mapping.unspecifiedOperands]
-  by_cases guard : unspecifiedOperands (observerCount (.objectTest type throwing)) stack = true
-  · simp only [guard, ite_true]
-    exact .error _
-  · simp only [guard, Bool.false_eq_true, ite_false]
-    match stack, bounds with
-    | .object reference :: rest, bounds =>
-      have below : reference.Below mapping.sourceLimit := bounds _ List.mem_cons_self
-      simp only [List.map_cons, AllocationRenaming.value]
-      refine (related.objectTest reference below type throwing).bind _ _ ?_
-      intro left right same
-      subst same
-      exact .ok (.next related frames)
-    | [], _ => exact .error _
-    | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
-    | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
-    | .bufferSpan _ :: _, _ | .array _ :: _, _ =>
-      dsimp only [pureArity, CIL.Safety.instruction]
-      simp only [mapping.unspecifiedOperands]
-      split <;> exact .error _
-#print axioms Memory.Renamed.stepObjectTest
+  rcases tests with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ <;> (
+    simp only [step, observerCount, mapping.unspecifiedOperands]
+    by_cases guard : unspecifiedOperands 1 stack = true
+    · simp only [guard, ite_true]
+      exact .error _
+    · simp only [guard, Bool.false_eq_true, ite_false]
+      match stack, bounds with
+      | .object reference :: rest, bounds =>
+        have below : reference.Below mapping.sourceLimit := bounds _ List.mem_cons_self
+        simp only [List.map_cons, AllocationRenaming.value]
+        refine (related.objectTest reference below type _).bind _ _ ?_
+        intro left right same
+        subst same
+        exact .ok (.next related frames)
+      | [], _ => exact .error _
+      | .scalar _ :: _, _ | .methodPointer _ :: _, _ | .methodTable _ :: _, _
+      | .reference _ :: _, _ | .readOnlyReference _ :: _, _ | .span .. :: _, _
+      | .bufferSpan _ :: _, _ | .array _ :: _, _ =>
+        dsimp only [pureArity, CIL.Safety.instruction]
+        simp only [mapping.unspecifiedOperands]
+        split <;> exact .error _)
+#print axioms Memory.Renamed.stepTypeTest
 
 /-- A virtual call transports as a call: renaming keeps a receiver null exactly when it was and
     keeps a live receiver's class, so both runs throw, fault alike or enter the same body. -/
@@ -387,17 +447,22 @@ theorem Memory.Renamed.stepBoundary {indices : LocalIndexMap} {mapping : Allocat
   by_cases dispatched : ∃ targets argc, operation = .callVirtual targets argc
   · rcases dispatched with ⟨targets, argc, rfl⟩
     exact related.stepCallVirtual sourceBody targetBody targets argc pc arguments stack bounds
-  by_cases tested : ∃ type throwing, operation = .objectTest type throwing
-  · rcases tested with ⟨type, throwing, rfl⟩
-    exact related.stepObjectTest frames sourceBody targetBody type throwing pc arguments stack
-      bounds
+  by_cases casting : ∃ type, operation = .castclass type
+  · rcases casting with ⟨type, rfl⟩
+    exact related.stepTypeTest frames sourceBody targetBody _ type true (.inl ⟨rfl, rfl⟩) pc
+      arguments stack bounds
+  by_cases testing : ∃ type, operation = .isinst type
+  · rcases testing with ⟨type, rfl⟩
+    exact related.stepTypeTest frames sourceBody targetBody _ type false (.inr ⟨rfl, rfl⟩) pc
+      arguments stack bounds
   ·
     allocation_fixed_step (
       first
       | exact False.elim (isManaged ⟨_, rfl⟩)
       | exact False.elim (receiverChecked ⟨_, _, rfl⟩)
       | exact False.elim (dispatched ⟨_, _, rfl⟩)
-      | exact False.elim (tested ⟨_, _, rfl⟩)
+      | exact False.elim (casting ⟨_, rfl⟩)
+      | exact False.elim (testing ⟨_, rfl⟩)
       -- Both bodies read every argument without a home, so a store or an address faults alike.
       | (simp only [metadata.storeArgument_source, metadata.storeArgument_target,
            metadata.addressArgument_source, metadata.addressArgument_target, Bind.bind,
