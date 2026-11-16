@@ -315,7 +315,8 @@ if (Lean(Make("AddOffset", ulong.MaxValue - 7, true)) != "(.add 1844674407370955
 var tail = Make("Call", Named("CallKind", "Tail"), 3, 0, false);
 var renumbered = tail.GetType().GetMethod("Renumber", Declared)!.Invoke(tail, [(Func<int, int>)(_ => 1)])!;
 // The call's operand is the typed method its raw operand names; its rendering is the call's operand term.
-object NoTypes() => Activator.CreateInstance(Model("ValueList`1").MakeGenericType(typeof(string)), [Array.Empty<string>()])!;
+object NoTypes() =>
+    Activator.CreateInstance(Model("ValueList`1").MakeGenericType(typeof(string)), [Array.Empty<string>()])!;
 var siteName = Model("MetadataName").GetMethod("OfText", Declared)!.Invoke(null, ["Site"])!;
 var site = Make("MethodRef", ".void", siteName, false, 0, ".void", NoTypes(), NoTypes());
 Assign(renumbered, "Site", site);
