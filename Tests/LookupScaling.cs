@@ -67,6 +67,11 @@ if (args.Contains("--decoded-definition-only", StringComparer.Ordinal))
     DecodedDefinitionCosts();
     return;
 }
+if (args.Contains("--decoded-program-only", StringComparer.Ordinal))
+{
+    DecodedProgramCosts();
+    return;
+}
 if (args.Contains("--return-step-only", StringComparer.Ordinal))
 {
     ReturnResolutionCosts(stepOnly: true);
@@ -108,6 +113,7 @@ DecodeCosts();
 MethodDecodeCosts();
 StaticFactCosts();
 DecodedDefinitionCosts();
+DecodedProgramCosts();
 ClosedArgumentsCosts();
 
 Run(["dotnet", "run", "--file", At("Tests/MetadataFieldPrefixes.cs"), "-c", "Release"]);
@@ -1047,6 +1053,65 @@ void DecodedDefinitionCosts()
             $"Defining a decoded method costs {measured} heartbeats per instruction; the limit is " +
             $"{AllowedLocalGrowth} times the cost per instruction at the size before.");
     Console.WriteLine($"PASS defining a decoded method costs {measured} heartbeats per instruction");
+}
+
+// The heartbeats `decodedProgram?_eq_some` costs to state and prove that 8, 32 and 128 records decode to their
+// methods, given one decoding fact per record. Each record adds one constructor, so four times the records may cost
+// at most `AllowedLocalGrowth` more per record.
+void DecodedProgramCosts()
+{
+    var programDirectory = At("artifacts/LookupScaling/DecodedProgram");
+    Directory.CreateDirectory(programDirectory);
+    var samples = new List<(int Records, long Cost)>();
+    foreach (var records in new[] { 8, 32, 128 })
+    {
+        var indexes = Enumerable.Range(0, records).ToArray();
+        var items = string.Join(" ", indexes.Select(index => $"item{index}"));
+        var methods = string.Join(" ", indexes.Select(index => $"method{index}"));
+        var facts = string.Join("\n", indexes.Select(index =>
+            $"    (decodes{index} : Decodes profile environment item{index} method{index})"));
+        var bodies = string.Concat(indexes.Select(index => $"(.cons decodes{index} ")) + ".nil" +
+            new string(')', records);
+        var path = Path.Combine(programDirectory, $"Records{records}.lean");
+        File.WriteAllText(path, $$"""
+            import CIL.Safety.DecodedSummary
+            set_option maxRecDepth 100000
+            set_option maxHeartbeats 0
+            open CIL CIL.Extraction CIL.Safety Lean Elab Command
+            /-- Logs the heartbeats elaborating `body` costs, its kernel checks included. -/
+            elab "#command_cost " label:str body:command : command => do
+              let before <- IO.getNumHeartbeats
+              elabCommand body
+              let after <- IO.getNumHeartbeats
+              logInfo m!"{label.getString} {after - before} heartbeats"
+            namespace DecodedProgramCost
+            variable (profile : FeatureProfile) (environment : LayoutEnvironment)
+            /-- The pinned body bytes of `item` decode to `method`. -/
+            abbrev Decodes (item : MethodEvidence) (method : CIL.Method) : Prop :=
+              Method.ofBody? profile environment item.links item.body item.original item.arguments =
+                some method
+            #command_cost "decoded program {{records}}"
+              theorem decoded ({{items}} : MethodEvidence) ({{methods}} : CIL.Method)
+            {{facts}} :
+                  decodedProgram? profile environment [{{items.Replace(" ", ", ")}}] =
+                    some [{{methods.Replace(" ", ", ")}}] :=
+                decodedProgram?_eq_some {{bodies}}
+            end DecodedProgramCost
+            """ + "\n");
+        var output = Run(["lake", "env", "lean", "-DElab.async=false", path], cwd: FixturePackage());
+        var cost = LookupPatterns.DecodedProgram().Match(output);
+        if (!cost.Success) throw new InvalidOperationException($"Missing the decoded program cost:\n{output}");
+        samples.Add((records, long.Parse(cost.Groups[1].Value, CultureInfo.InvariantCulture)));
+    }
+    var perRecord = samples.Select(sample => (double)sample.Cost / sample.Records).ToArray();
+    var measured = string.Join("; ", samples.Select(sample => string.Create(CultureInfo.InvariantCulture,
+        $"{(double)sample.Cost / sample.Records:F0} at {sample.Records}")));
+    if (samples.Any(sample => sample.Cost < KernelDecisionFloor) ||
+        perRecord.Skip(1).Zip(perRecord).Any(pair => pair.First > pair.Second * AllowedLocalGrowth))
+        throw new InvalidOperationException(
+            $"Proving a decoded program costs {measured} heartbeats per record; the limit is " +
+            $"{AllowedLocalGrowth} times the cost per record at the size before.");
+    Console.WriteLine($"PASS proving a decoded program costs {measured} heartbeats per record");
 }
 
 // Primitive argument storage costs at most 150,000 heartbeats per parameter, independently of unused layouts.
@@ -2577,4 +2642,7 @@ static partial class LookupPatterns
 
     [GeneratedRegex(@"decoded definition [0-9]+ (-?[0-9]+) heartbeats")]
     internal static partial Regex DecodedDefinition();
+
+    [GeneratedRegex(@"decoded program [0-9]+ (-?[0-9]+) heartbeats")]
+    internal static partial Regex DecodedProgram();
 }

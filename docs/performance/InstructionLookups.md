@@ -237,6 +237,12 @@ next. The check reads each pc's link by one walk beside the code and costs about
 256 sites and exhausts a 16 GB memory limit at 1,024. Run this row alone with
 `dotnet run --file Tests/LookupScaling.cs -- --call-check-only`.
 
+The suite states and proves with `decodedProgram?_eq_some` that 8, 32 and 128 evidence records
+decode to their methods, given one decoding fact per record, and reads the heartbeats of that one
+command. It fails when the heartbeats per record grow more than 1.25 times from one size to the
+next. The proof costs about 14,300, 13,000 and 14,200 heartbeats per record. Run this row alone
+with `dotnet run --file Tests/LookupScaling.cs -- --decoded-program-only`.
+
 ## Reference figures
 
 The figures were measured on Windows with 32 cores and Lean 4.35.0, on the suite's method at the

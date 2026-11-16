@@ -70,7 +70,7 @@ theorem code_read_from_bytes :
 #print axioms code_read_from_bytes
 
 /-- `ldarg.0; ldarg.1; add; ret` over two `uint64` parameters, returning `uint64`. -/
-private def addArgumentsRaw : RawMethod :=
+def addArgumentsRaw : RawMethod :=
   { method 8 false [] [instr 0 0x02, instr 1 0x03, instr 2 0x58, instr 3 0x2A] with
     parameters := [uint64, uint64], returnType := uint64 }
 
@@ -209,7 +209,7 @@ theorem decoded_hole_faults :
 
 /-- An evidence record whose only fields `decodedProgram?` reads are `original`, `body` and
     `arguments`. -/
-private def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
+def item (original : RawMethod) (body : BodyEvidence) : MethodEvidence :=
   { original := original, body := body, arguments := [], closed := original,
     parameterInput := ⟨[], [], []⟩, reachable := [], featureStates := [], scalarStates := [],
     layoutUses := [] }
@@ -463,5 +463,11 @@ theorem aggregate_local_frame_entry (memory entered : Safety.Memory) (slot : Ref
     makeLocals, made, aggregateLocalMethod_parameterHomes, makeParameterHomes, List.map_nil,
     Bind.bind, Except.bind, Pure.pure, Except.pure, List.append_nil]
 #print axioms aggregate_local_frame_entry
+
+/-- `simp` unfolds a decoded method in the module that defines it, as a batch that inlines an
+    extraction beside its proof does. -/
+theorem aggregate_local_unfolds : aggregateLocalMethod.code = [CIL.Instruction.ret] := by
+  simp only [aggregateLocalMethod]
+#print axioms aggregate_local_unfolds
 
 end Tests.DecodedMethod
