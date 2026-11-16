@@ -667,11 +667,43 @@ def validateLinkedCallWith (modelled : MethodRef → Bool) (methodCount : Nat)
   match emitted.constructor? with
   | some constructor => validateConstructionWith methods raw live link constructor
   | none =>
-    emitted.linkFits modelled link &&
-      match emitted, link with
-      | .call .., none => validateModelCall raw live emitted
-      | _, _ => (!live || !modelledCallSite modelled raw) &&
-        validateManagedCallWith methodCount methods imports raw live link emitted
+    -- The arms decide `Instruction.linkFits` in the same match, since a second match on the
+    -- instruction costs the kernel about 700 heartbeats at every pc.
+    match emitted, link with
+    | .call method _, none => modelled method && validateModelCall raw live emitted
+    | .call method _, some (.direct _) => !modelled method &&
+        ((!live || !modelledCallSite modelled raw) &&
+          validateManagedCallWith methodCount methods imports raw live link emitted)
+    | .call .., some _ => false
+    | _, _ => link == emitted.link? &&
+        ((!live || !modelledCallSite modelled raw) &&
+          validateManagedCallWith methodCount methods imports raw live link emitted)
+
+/-- A pc other than a construction that passes the linked call rule fits its link. -/
+theorem validateLinkedCallWith_linkFits {modelled : MethodRef → Bool} {methodCount : Nat}
+    {methods : Nat → Option SpecializedMethod} {imports : Nat → Option ImportSlot}
+    {raw : RawInstruction} {live : Bool} {link : Option Link} {emitted : Instruction}
+    (unnamed : emitted.constructor? = none)
+    (checked : validateLinkedCallWith modelled methodCount methods imports raw live link emitted =
+      true) :
+    emitted.linkFits modelled link = true := by
+  simp only [validateLinkedCallWith, unnamed] at checked
+  split at checked
+  · simp only [Bool.and_eq_true] at checked
+    simp [Instruction.linkFits, checked.1]
+  · simp only [Bool.and_eq_true] at checked
+    simp [Instruction.linkFits, checked.1]
+  · simp at checked
+  · rename_i noModel _ noOther
+    simp only [Bool.and_eq_true] at checked
+    unfold Instruction.linkFits
+    split
+    · cases link with
+      | none => exact (noModel _ _ rfl rfl).elim
+      | some _ => exact (noOther _ _ _ rfl rfl).elim
+    · exact checked.1
+
+#print axioms validateLinkedCallWith_linkFits
 
 /-- The external-call rule stated against the original lists, including bounds and offset. -/
 def validateImportCall (methods : List SpecializedMethod) (imports : List ImportSlot)
@@ -767,8 +799,7 @@ theorem ManagedCallsValid.linkFits {methods : List SpecializedMethod}
   have checked := all3_at checks rawFound paired found
   have unnamed : op.constructor? = none := by
     simpa [Instruction.constructs] using implied
-  simp only [validateLinkedCallWith, unnamed, Bool.and_eq_true] at checked
-  exact checked.1
+  exact validateLinkedCallWith_linkFits unnamed checked
 
 #print axioms ManagedCallsValid.linkFits
 
