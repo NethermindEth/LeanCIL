@@ -1459,8 +1459,10 @@ string WithEvidenceCosts(string extracted)
     if (namespaces != 1 || calls != 1 || evidence != 1)
         throw new InvalidOperationException("Missing the namespace, call check or evidence theorem of method0.");
     var labelled = LookupPatterns.ExtractedNamespace().Replace(extracted, match => Command + match.Value);
-    labelled = LookupPatterns.CallsTheorem().Replace(labelled, match => "#evidence_cost \"calls\" in\n" + match.Value);
-    return LookupPatterns.EvidenceTheorem().Replace(labelled, match => "#evidence_cost \"assembly\" in\n" + match.Value);
+    labelled = LookupPatterns.CallsTheorem().Replace(labelled,
+        match => "#evidence_cost \"calls\" in\n" + match.Value);
+    return LookupPatterns.EvidenceTheorem().Replace(labelled,
+        match => "#evidence_cost \"assembly\" in\n" + match.Value);
 }
 
 // The heartbeats of the call check and of the evidence theorem that `WithEvidenceCosts` reports.
